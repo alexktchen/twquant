@@ -11,10 +11,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | ID | 任務 | 規格 | 依賴 | 模型 | 狀態 |
 |---|---|---|---|---|---|
 | T-001 | 專案骨架：pyproject(uv)、src 佈局、`check` 閘門指令（含 IO 邊界靜態測試）、ruff/mypy/pytest、CI | CLAUDE.md §2/§4 | — | B | done |
-| T-002 | conventions 模組：TZ、assert_tw_timestamp、例外樹、pydantic 配置載入器（全 config 清單見 SPEC-000） | SPEC-000 | T-001 | B | todo |
-| T-004 | 資料合約：schemas.py 全表 pandera 定義（含 inst_holding、limit_up/down_price、structural_breaks） | SPEC-001 §1 | T-002 | B | todo |
-| T-006 | http 基礎設施：session、滑動窗限流器、重試、raw 版本化落地 | SPEC-001 §2/§7 | T-002 | B | todo |
-| T-007 | 來源轉接器：twse_rwd（prices/T86/MI_MARGN） | SPEC-001 | T-006 | B | todo |
+| T-002 | conventions 模組：TZ、assert_tw_timestamp、例外樹、pydantic 配置載入器（全 config 清單見 SPEC-000） | SPEC-000 | T-001 | B | done |
+| T-004 | 資料合約：schemas.py 全表 pandera 定義（含 inst_holding、limit_up/down_price、structural_breaks） | SPEC-001 §1 | T-002 | B | done |
+| T-006 | http 基礎設施：session、滑動窗限流器、重試、raw 版本化落地 | SPEC-001 §2/§7 | T-002 | B | done |
+| T-007 | 來源轉接器：twse_rwd（prices/T86/MI_MARGN） | SPEC-001 | T-006 | B | done |
 | T-008 | 來源轉接器：tpex（同三表，anti-bot headers） | SPEC-001 | T-006 | B | todo |
 | T-009 | 來源轉接器：tdcc、mops 月營收、taifex | SPEC-001 | T-006 | B | todo |
 | T-010 | 來源轉接器：finmind broker_trades、inst_holding | SPEC-001 | T-006 | B | todo |
@@ -47,6 +47,16 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-007**（2026-07-05）TWSE rwd 轉接器完成。實盤抓取 2026-06-30 三張表成功
+  （prices 1369 檔、法人 1330 檔、融資券 1279 檔）；台積電收盤 2410、投信買賣超
+  -89,595 股等真實資料已驗。fixture 錄自實盤精簡（tests/fixtures/http/twse_rwd/），
+  8 個離線測試驗解析/去重/異常（stat/空/不支援）。閘門全綠（35 passed）。
+- **T-006**（2026-07-05）HTTP 基礎設施完成。滑動窗限流（AC-4）、指數退避重試、
+  raw 版本化原子落地；clock/transport 可注入離線測試。閘門全綠（27 passed）。
+- **T-004**（2026-07-05）資料合約完成。14 表 pandera schema，available_at 型別
+  強制 tz-aware；AC-3 單位、strict、tz、負值測試。閘門全綠（22 passed）。
+- **T-002**（2026-07-05）conventions 完成。TZ/assert_tw_timestamp/as_of_cutoff、
+  例外樹、配置載入器（AC-1/AC-2）。tzdata 依賴。閘門全綠（14 passed）。
 - **T-001**（2026-07-05）專案骨架完成。`uv sync --dev` 建 venv；
   `python -m twquant check` 跑 ruff check + ruff format --check + mypy(strict)
   + pytest 四項全綠（4 tests passed）；`--fast` 跑 ruff + pytest -x。

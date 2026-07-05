@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-05 資料路徑 T-002→T-004→T-006→T-007：conventions（時區/例外/配置）、
+  資料合約（14 表 pandera）、HTTP 基礎設施（滑動窗限流/重試/raw 落地）、TWSE rwd
+  轉接器。**第一次實盤抓到台股資料**：2026-06-30 的日K/三大法人/融資券三張表，
+  台積電收盤 2410、投信買賣超 -89,595 股等真實值已驗。全程閘門綠（35 tests）。
+
 - 2026-07-05 T-001 專案骨架：pyproject(uv/hatchling)、src/twquant 佈局、
   `python -m twquant check` 開發閘門（ruff + format + mypy strict + pytest）、
   IO 邊界靜態測試、GitHub Actions CI。閘門正反雙向驗證通過。第一份程式碼。
