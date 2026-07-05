@@ -15,6 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Sync deps
-        run: uv sync --dev
+        # 含 dashboard 群組：mypy 需 streamlit 型別（否則 @st.cache_data 判為 untyped decorator）
+        run: uv sync --dev --group dashboard
       - name: Gate (ruff + mypy + pytest)
         run: uv run python -m twquant check
