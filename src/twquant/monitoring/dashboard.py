@@ -214,11 +214,11 @@ def _ic_report(name: str, horizons: tuple[int, ...], as_of_iso: str) -> IcReport
 
 def _ingestion_status(wh: Warehouse) -> None:
     """擷取涵蓋/缺口/最近失敗——讓人（非 LLM）一眼看資料抓取狀態。"""
-    import datetime as dt
-
+    from twquant.data import calendar as cal
     from twquant.reporting.ingest_log import last_run, read_ingest_log, recent_failures
 
     st.subheader("擷取狀態")
+    calendar = cal.load(wh)  # 交易日曆：缺口以開市日為準（假日不算缺口）
     plan = [
         ("prices_daily", "twse", "上市行情"),
         ("prices_daily", "tpex", "上櫃行情"),
@@ -229,17 +229,15 @@ def _ingestion_status(wh: Warehouse) -> None:
     for table, source, label in plan:
         dates = wh.source_dates(table, source)
         if not dates:
-            rows.append({"資料": label, "區間": "—", "交易日": 0, "平日缺口": "—"})
+            rows.append({"資料": label, "區間": "—", "交易日": 0, "缺口": "—"})
             continue
-        stored = set(dates)
-        span = [dates[0] + dt.timedelta(days=i) for i in range((dates[-1] - dates[0]).days + 1)]
-        gaps = [d for d in span if d.weekday() < 5 and d not in stored]
+        gaps = calendar.missing(dates, dates[0], dates[-1])
         rows.append(
             {
                 "資料": label,
                 "區間": f"{dates[0]} ~ {dates[-1]}",
                 "交易日": len(dates),
-                "平日缺口": f"{len(gaps)} 日" if gaps else "無",
+                "缺口": f"{len(gaps)} 交易日" if gaps else "無",
             }
         )
     st.dataframe(rows, width="stretch", hide_index=True)

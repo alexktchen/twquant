@@ -304,11 +304,13 @@ def status() -> None:
     """顯示資料擷取狀態：各來源涵蓋範圍、平日缺口、最近失敗、最後執行時點。"""
     import polars as pl
 
+    from twquant.data import calendar as cal
     from twquant.data.warehouse import Warehouse
     from twquant.reporting.ingest_log import last_run, read_ingest_log, recent_failures
 
     cfg = _load_system()
     wh = Warehouse(cfg.data_dir)
+    calendar = cal.load(wh)  # 交易日曆（推導自 prices_daily），缺口以開市日為準、非 weekday
 
     typer.secho("=== 資料擷取狀態 ===", fg=typer.colors.CYAN, bold=True)
     daily_plan = [
@@ -322,11 +324,8 @@ def status() -> None:
             if not dates:
                 typer.secho(f"  {source}/{table}：無資料", fg=typer.colors.YELLOW)
                 continue
-            stored = set(dates)
-            gaps = [
-                d for d in _daterange(dates[0], dates[-1]) if d.weekday() < 5 and d not in stored
-            ]
-            gap_note = f"，平日缺 {len(gaps)} 日" if gaps else "，無缺口"
+            gaps = calendar.missing(dates, dates[0], dates[-1])
+            gap_note = f"，缺 {len(gaps)} 交易日" if gaps else "，無缺口"
             color = typer.colors.YELLOW if gaps else typer.colors.GREEN
             typer.secho(
                 f"  {source}/{table}：{dates[0]} ~ {dates[-1]}　{len(dates)} 交易日{gap_note}",
@@ -358,6 +357,43 @@ def status() -> None:
                 f"  [{r['attempt_ts'][:19]}] {r['source']}/{r['table']} @ {r['date']}",
                 fg=typer.colors.YELLOW,
             )
+
+
+@app.command()
+def calendar() -> None:
+    """由 prices_daily 推導交易日曆、核對來源缺口、持久化至 clean/trading_calendar。"""
+    from twquant.data import calendar as cal
+    from twquant.data.warehouse import Warehouse
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    try:
+        tc = cal.derive_from_prices(wh)
+    except Exception as exc:  # 無行情時給清楚訊息而非 traceback（已 re-raise）
+        typer.secho(f"無法推導日曆（先 backfill 行情）：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    if not tc.sessions:
+        typer.secho("prices_daily 無資料，先 backfill。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    cal.persist(wh, tc)
+    typer.secho(
+        f"交易日曆：{tc.sessions[0]} ~ {tc.sessions[-1]}　{len(tc)} 個開市日，已存入 "
+        f"clean/trading_calendar",
+        fg=typer.colors.GREEN,
+        bold=True,
+    )
+    checks = cal.cross_check(wh, tc)
+    for source, gaps in checks.items():
+        if gaps:
+            head = ", ".join(str(g) for g in gaps[:3])
+            more = f" …等 {len(gaps)} 日" if len(gaps) > 3 else ""
+            typer.secho(
+                f"  {source}：於自身涵蓋區間內缺 {len(gaps)} 個開市日（{head}{more}）",
+                fg=typer.colors.YELLOW,
+            )
+        else:
+            typer.secho(f"  {source}：涵蓋區間內無缺口", fg=typer.colors.GREEN)
 
 
 @app.command(name="ic-report")

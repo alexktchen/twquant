@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-06 T-003 交易日曆：data/calendar.py（TradingCalendar + 由 prices_daily
+  聯集推導 + 單檔持久化 + 來源核對）、CLI calendar。缺口偵測改以「開市日」為準、
+  禁用 weekday()：TPEX 缺口 18→0（假日不再誤判）、TWSE 顯示 101 個真實 ban 缺口。
+  閘門全綠（86 tests）。
+
 - 2026-07-06 T-015 P0 籌碼 + 基本面因子：chip（投信/外資買超占量比、投信連買、
   融資變化散戶代理）、fundamental（月營收 YoY/加速，公布日 as-of 映射日頻 PEAD）、
   factors/builtins.py 一次註冊全因子。真實 IC + 對抗驗證（連續期 vs 全期）：

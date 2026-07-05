@@ -18,7 +18,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-008 | 來源轉接器：tpex 上櫃行情（anti-bot headers）；法人/融資券改走 FinMind（D-014） | SPEC-001 | T-006 | B | done |
 | T-009 | 來源轉接器：mops 月營收（done）；tdcc 股權分散、taifex 期貨（待補） | SPEC-001 | T-006 | B | 部分完成 |
 | T-010 | 來源轉接器：finmind broker_trades、inst_holding | SPEC-001 | T-006 | B | todo |
-| T-003 | 交易日曆：以人工核對靜態日曆檔為第一版（有 prices_daily 後改推導核對） | SPEC-000 AC-3 | T-002 | B | todo |
+| T-003 | 交易日曆：以人工核對靜態日曆檔為第一版（有 prices_daily 後改推導核對） | SPEC-000 AC-3 | T-002 | B | done |
 | T-005 | golden fixtures：以 T-007~T-010 抓真實切片（30 檔 × 2 年，含除息/減資/漲停/處置/月營收/當沖案例）+ 一次性下載腳本（附來源 URL 與 hash）+ 凍結輸入層 | CLAUDE.md §4 | T-004, T-007, T-009 | B | todo |
 | T-011 | 倉儲核心：Warehouse/PitView（20:00 截點）、寫入協定、DuckDB SQL、清洗管線；還原價/品質閘門/backfill 待補 | SPEC-001 §4/§7 | T-004 | A | 部分完成 |
 | T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | done |
@@ -47,6 +47,14 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-003**（2026-07-06）交易日曆（SPEC-000 AC-3）。data/calendar.py：
+  TradingCalendar（is_session/between/missing/next_session/prev_session）、
+  derive_from_prices（由 prices_daily 各來源日期聯集推導——TPEX 完整即還原真實
+  開市日）、persist/load（單檔 clean/trading_calendar/calendar.parquet）、
+  cross_check（各來源自身區間內缺口）。CLI calendar 指令。**禁用 weekday()**：
+  status CLI 與儀表板缺口偵測改以開市日為準。**實測**：243 開市日、TPEX 無缺口
+  （原誤報 18 假日缺口→歸零）、TWSE 正確顯示 101 個開市日 ban 缺口。閘門全綠
+  （86 tests）。
 - **T-015**（2026-07-06）P0 籌碼 + 基本面因子。factors/chip.py（trust_net_10d、
   foreign_net_10d、trust_streak、margin_velocity_5d）、factors/fundamental.py
   （revenue_yoy、revenue_accel，以公布日 available_at as-of 映射到日頻，PEAD）、

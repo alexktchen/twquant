@@ -45,6 +45,11 @@ class Warehouse:
     def __init__(self, data_dir: str | Path) -> None:
         self._root = Path(data_dir)
 
+    @property
+    def root(self) -> Path:
+        """資料湖根目錄（供參考表如交易日曆自管單檔持久化）。"""
+        return self._root
+
     def _partition_dir(self, layer: str, table: str, date: dt.date) -> Path:
         return self._root / layer / table / f"date={date.isoformat()}"
 
