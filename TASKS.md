@@ -10,7 +10,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 | ID | 任務 | 規格 | 依賴 | 模型 | 狀態 |
 |---|---|---|---|---|---|
-| T-001 | 專案骨架：pyproject(uv)、src 佈局、`check` 閘門指令（含 IO 邊界靜態測試）、ruff/mypy/pytest、CI | CLAUDE.md §2/§4 | — | B | todo |
+| T-001 | 專案骨架：pyproject(uv)、src 佈局、`check` 閘門指令（含 IO 邊界靜態測試）、ruff/mypy/pytest、CI | CLAUDE.md §2/§4 | — | B | done |
 | T-002 | conventions 模組：TZ、assert_tw_timestamp、例外樹、pydantic 配置載入器（全 config 清單見 SPEC-000） | SPEC-000 | T-001 | B | todo |
 | T-004 | 資料合約：schemas.py 全表 pandera 定義（含 inst_holding、limit_up/down_price、structural_breaks） | SPEC-001 §1 | T-002 | B | todo |
 | T-006 | http 基礎設施：session、滑動窗限流器、重試、raw 版本化落地 | SPEC-001 §2/§7 | T-002 | B | todo |
@@ -47,4 +47,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
-（完成任務時把該列移到這裡並附證據摘要）
+- **T-001**（2026-07-05）專案骨架完成。`uv sync --dev` 建 venv；
+  `python -m twquant check` 跑 ruff check + ruff format --check + mypy(strict)
+  + pytest 四項全綠（4 tests passed）；`--fast` 跑 ruff + pytest -x。
+  IO 邊界靜態測試（tests/test_io_boundary.py）以 AST 掃描純運算層禁止的網路
+  import 與寫檔呼叫，含反向測試防恆真。正反雙向驗證：注入 `import requests`
+  到 factors/ → 閘門退出碼 1、IO 測試抓到違規；移除後退出碼 0。CI（.github/
+  workflows/ci.yml）於 push/PR 跑同一閘門。完成定義各項已核。

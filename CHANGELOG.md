@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-07-05 T-001 專案骨架：pyproject(uv/hatchling)、src/twquant 佈局、
+  `python -m twquant check` 開發閘門（ruff + format + mypy strict + pytest）、
+  IO 邊界靜態測試、GitHub Actions CI。閘門正反雙向驗證通過。第一份程式碼。
+
 - 2026-07-05 補跑完成（v1.2 規格修訂）：
   - 文獻驗證 76/76 全數完成（65 確認、11 細節修正、0 查無）。兩篇作者/年份
     張冠李戴已修正：「Momentum in Taiwan: seasonality matters!」為 Fu & Wood
