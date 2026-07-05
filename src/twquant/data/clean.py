@@ -108,6 +108,42 @@ def clean_tpex_prices(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     return schemas.validate("prices_daily", out)
 
 
+def _month_end(year: int, month: int) -> dt.date:
+    """該月最後一個日曆日。"""
+    nxt = dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)
+    return nxt - dt.timedelta(days=1)
+
+
+def clean_monthly_revenue(raw: pl.DataFrame, roc_year: int, month: int) -> pl.DataFrame:
+    """MOPS t21sc03 原始 → monthly_revenue。營收千元→元；yoy 取去年同月增減%/100。
+
+    available_at 用「次月 10 日 22:00」估算並標 estimated=True（順延規則待交易日曆
+    T-003，見 SPEC-001 §1 / REVIEW M25）。
+    """
+    year = roc_year + 1911
+    period_end = _month_end(year, month)
+    pub_year, pub_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    available_at = dt.datetime(pub_year, pub_month, 10, 22, 0, tzinfo=TZ)
+
+    out = raw.select(
+        pl.lit(period_end, dtype=pl.Date).alias("date"),
+        pl.lit(f"{year}-{month:02d}").alias("year_month"),
+        pl.col("公司代號").str.strip_chars().alias("stock_id"),
+        pl.lit(period_end, dtype=pl.Date).alias("period_end"),
+        (_float("當月營收") * 1000.0).alias("revenue"),  # 千元 → 元
+        # yoy 自算（當月/去年當月−1）：來源「去年同月增減」欄在 HTML 有錯位風險，
+        # 而當月營收與去年當月營收兩欄穩定，自算更可靠。
+        pl.when(_float("去年當月營收") > 0)
+        .then(_float("當月營收") / _float("去年當月營收") - 1.0)
+        .otherwise(None)
+        .alias("yoy"),
+        pl.lit(available_at, dtype=schemas.TW_DT).alias("available_at"),
+        pl.lit(True).alias("available_at_estimated"),
+    )
+    out = out.drop_nulls(["revenue"])
+    return schemas.validate("monthly_revenue", out)
+
+
 # 表名 → (clean 函數) 註冊表（TWSE）
 CLEANERS = {
     "prices_daily": clean_prices,

@@ -206,6 +206,36 @@ def scheduler(
             typer.secho(f"[排程錯誤] {exc}", fg=typer.colors.RED)
 
 
+@app.command(name="ingest-revenue")
+def ingest_revenue(
+    month: str = typer.Option(..., help="營收月份 YYYY-MM（例如 2026-05）"),
+) -> None:
+    """抓某月 MOPS 月營收（上市+上櫃）、清洗、存入 clean 資料湖。"""
+    from twquant.data.clean import clean_monthly_revenue
+    from twquant.data.http import HttpClient
+    from twquant.data.sources.mops import MopsSource
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+
+    year, mon = (int(x) for x in month.split("-"))
+    roc = year - 1911
+    cfg = _load_system()
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0 Safari/537.36"
+    src = MopsSource(client=HttpClient(source="mops", rate=cfg.source_rates["mops"], user_agent=ua))
+    wh = Warehouse(cfg.data_dir)
+
+    for market in ["sii", "otc"]:
+        typer.secho(f">> [{market}] 月營收 {month}", fg=typer.colors.CYAN)
+        try:
+            raw = src.fetch_month(roc, mon, market)
+            clean = clean_monthly_revenue(raw, roc, mon)
+            wh.write("clean", "monthly_revenue", clean, source=f"mops_{market}")
+        except DataError as exc:
+            typer.secho(f"[SKIP] {market}：{exc}", fg=typer.colors.YELLOW)
+            continue
+        typer.secho(f"[OK] {market} {month}：{clean.height} 家已存入", fg=typer.colors.GREEN)
+
+
 @app.command()
 def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL")) -> None:
     """對資料湖跑 SQL 分析（各 clean 表為同名視圖）。"""

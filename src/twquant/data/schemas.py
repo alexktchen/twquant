@@ -124,11 +124,12 @@ MONTHLY_REVENUE = _schema(
     "monthly_revenue",
     1,
     {
+        "date": _col(pl.Date),  # 分區鍵 = 所屬月最後日曆日（= period_end）
         "year_month": _col(pl.String),  # "YYYY-MM"
         "stock_id": _col(pl.String),
         "period_end": _col(pl.Date),  # 所屬月最後日曆日
-        "revenue": _nonneg(pl.Float64),  # 千元或元，見清洗；此處元
-        "yoy": _col(pl.Float64, nullable=True),  # 小數
+        "revenue": _col(pl.Float64),  # 元（清洗層由千元 ×1000）；金融/券商可為負，不設 nonneg
+        "yoy": _col(pl.Float64, nullable=True),  # 小數（去年同月增減）
         "available_at": _col(TW_DT),
         "available_at_estimated": _col(pl.Boolean),
     },

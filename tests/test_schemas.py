@@ -78,6 +78,7 @@ def test_all_tables_registered_with_version() -> None:
 def test_monthly_revenue_valid() -> None:
     df = pl.DataFrame(
         {
+            "date": [dt.date(2026, 6, 30)],
             "year_month": ["2026-06"],
             "stock_id": ["2330"],
             "period_end": [dt.date(2026, 6, 30)],

@@ -16,7 +16,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-006 | http 基礎設施：session、滑動窗限流器、重試、raw 版本化落地 | SPEC-001 §2/§7 | T-002 | B | done |
 | T-007 | 來源轉接器：twse_rwd（prices/T86/MI_MARGN） | SPEC-001 | T-006 | B | done |
 | T-008 | 來源轉接器：tpex 上櫃行情（anti-bot headers）；法人/融資券改走 FinMind（D-014） | SPEC-001 | T-006 | B | done |
-| T-009 | 來源轉接器：tdcc、mops 月營收、taifex | SPEC-001 | T-006 | B | todo |
+| T-009 | 來源轉接器：mops 月營收（done）；tdcc 股權分散、taifex 期貨（待補） | SPEC-001 | T-006 | B | 部分完成 |
 | T-010 | 來源轉接器：finmind broker_trades、inst_holding | SPEC-001 | T-006 | B | todo |
 | T-003 | 交易日曆：以人工核對靜態日曆檔為第一版（有 prices_daily 後改推導核對） | SPEC-000 AC-3 | T-002 | B | todo |
 | T-005 | golden fixtures：以 T-007~T-010 抓真實切片（30 檔 × 2 年，含除息/減資/漲停/處置/月營收/當沖案例）+ 一次性下載腳本（附來源 URL 與 hash）+ 凍結輸入層 | CLAUDE.md §4 | T-004, T-007, T-009 | B | todo |
@@ -47,6 +47,12 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-009（部分）**（2026-07-05）MOPS 月營收轉接器（P0 因子）。t21sc03 Big5
+  HTML 逐月抓（上市 sii + 上櫃 otc），yoy 自算（當月/去年當月−1，避開來源
+  「去年同月增減」欄的 HTML 錯位）；營收千元→元、金融股可為負（放寬 nonneg）。
+  monthly_revenue 加 date 分區鍵（月底）。CLI ingest-revenue。實測 2026-05：
+  1848 家（上市 987 + 上櫃 861），YoY 因子可查。TDCC 股權分散、TAIFEX 期貨待補。
+  閘門全綠（55 passed）。
 - **T-008**（2026-07-05）TPEX 上櫃行情轉接器（D-014）。dailyQuotes（瀏覽器
   headers 繞 anti-bot、歷史日期、附次日漲跌停）；HttpClient 加 headers 支援；
   倉儲 write 加 source 參數（上市/上櫃按來源分檔共存於 prices_daily，不覆蓋）。
