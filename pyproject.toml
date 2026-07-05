@@ -62,4 +62,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-filterwarnings = ["error"]  # 警告即失敗，呼應「失敗要大聲」
+# 警告即失敗（呼應「失敗要大聲」）；但第三方庫的已知棄用另行放行，避免噪音掩蓋我方警告。
+filterwarnings = [
+    "error",
+    # pandera 1.x 在 polars 1.42+ 用了已棄用的 concat(how='horizontal')
+    "ignore:the default behavior of:DeprecationWarning",
+]
