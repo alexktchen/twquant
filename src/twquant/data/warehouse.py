@@ -86,6 +86,14 @@ class Warehouse:
         # missing_columns="insert"：跨分區 schema 演進時，舊分區缺的新欄補 null（§7）
         return pl.scan_parquet(files, missing_columns="insert")
 
+    def partition_exists(
+        self, layer: str, table: str, date: dt.date, source: str | None = None
+    ) -> bool:
+        """該 (table, date[, source]) 分區是否已有資料（供 backfill 續傳跳過）。"""
+        part = self._partition_dir(layer, table, date)
+        fname = f"part-{source}.parquet" if source else "part.parquet"
+        return (part / fname).exists()
+
     def latest_date(self, table: str, layer: str = "clean") -> dt.date | None:
         """該表最新一個有資料的日期分區。"""
         base = self._root / layer / table

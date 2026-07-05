@@ -177,6 +177,59 @@ def daily(
     typer.secho(f"每日擷取完成：{n} 張表 @ {day}", fg=typer.colors.GREEN, bold=True)
 
 
+def _daterange(start: dt.date, end: dt.date) -> list[dt.date]:
+    """start..end（含端點）的所有日曆日。"""
+    return [start + dt.timedelta(days=i) for i in range((end - start).days + 1)]
+
+
+@app.command()
+def backfill(
+    from_: str = typer.Option(..., "--from", help="起始日 YYYY-MM-DD"),
+    to: str = typer.Option(..., "--to", help="結束日 YYYY-MM-DD"),
+    skip_existing: bool = typer.Option(True, help="跳過已抓過的日期（續傳）"),
+) -> None:
+    """回補一段期間的免費來源日資料（TWSE+TPEX）。跳週末、跳假日、可續傳。"""
+    from twquant.data.warehouse import Warehouse
+
+    start = dt.date.fromisoformat(from_)
+    end = dt.date.fromisoformat(to)
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+
+    days = [d for d in _daterange(start, end) if d.weekday() < 5]  # 跳週末
+    typer.secho(f"回補 {start}~{end}：{len(days)} 個平日", fg=typer.colors.CYAN, bold=True)
+    done = skipped = 0
+    for i, day in enumerate(days, 1):
+        if skip_existing and wh.partition_exists("clean", "prices_daily", day, "twse"):
+            skipped += 1
+            continue
+        n = _ingest_date(day, None, tolerant=True)
+        if n:
+            done += 1
+        typer.secho(f"  [{i}/{len(days)}] {day}：{n} 表", fg=typer.colors.CYAN)
+    typer.secho(
+        f"回補完成：{done} 交易日新增、{skipped} 已存在跳過", fg=typer.colors.GREEN, bold=True
+    )
+
+
+@app.command(name="backfill-revenue")
+def backfill_revenue(
+    from_: str = typer.Option(..., "--from", help="起始月 YYYY-MM"),
+    to: str = typer.Option(..., "--to", help="結束月 YYYY-MM"),
+) -> None:
+    """回補一段期間的月營收（逐月 ingest-revenue）。"""
+    fy, fm = (int(x) for x in from_.split("-"))
+    ty, tm = (int(x) for x in to.split("-"))
+    months: list[str] = []
+    y, m = fy, fm
+    while (y, m) <= (ty, tm):
+        months.append(f"{y}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    typer.secho(f"回補月營收 {from_}~{to}：{len(months)} 個月", fg=typer.colors.CYAN, bold=True)
+    for month in months:
+        ingest_revenue(month=month)
+
+
 def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
     """距離下一個 hh:mm（同時區）的秒數；已過今日該時刻則算明日。"""
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)

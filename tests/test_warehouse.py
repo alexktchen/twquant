@@ -117,6 +117,15 @@ def test_multi_source_coexist(tmp_path: Path) -> None:
     assert got2.filter(pl.col("stock_id") == "2330")["close"][0] == 2500.0
 
 
+def test_partition_exists(tmp_path: Path) -> None:
+    wh = Warehouse(tmp_path)
+    d = dt.date(2026, 6, 30)
+    assert not wh.partition_exists("clean", "prices_daily", d, "twse")
+    wh.write("clean", "prices_daily", _prices(d, 18), source="twse")
+    assert wh.partition_exists("clean", "prices_daily", d, "twse")
+    assert not wh.partition_exists("clean", "prices_daily", d, "tpex")
+
+
 def test_scan_missing_raises(tmp_path: Path) -> None:
     with pytest.raises(DataError, match="無資料"):
         Warehouse(tmp_path).scan("prices_daily").collect()
