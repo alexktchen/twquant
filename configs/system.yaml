@@ -1,0 +1,29 @@
+# 系統配置（權威欄位定義見 SPEC-001）。第一版最小集，後續任務擴充。
+
+data_dir: data
+
+# 各來源限流（滑動窗：per_seconds 內最多 max_requests 次，SPEC-001 §7）
+source_rates:
+  twse_rwd:
+    max_requests: 3
+    per_seconds: 5.0
+  tpex:
+    max_requests: 3
+    per_seconds: 5.0
+  tdcc:
+    max_requests: 3
+    per_seconds: 5.0
+  mops:
+    max_requests: 3
+    per_seconds: 5.0
+  taifex:
+    max_requests: 3
+    per_seconds: 5.0
+  finmind:
+    max_requests: 6
+    per_seconds: 1.0
+
+quality_gate:
+  min_rows_ratio: 0.8
+  inst_cross_check_tol: 0.005
+  disk_min_gb: 50.0

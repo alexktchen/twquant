@@ -1,0 +1,67 @@
+"""配置載入與驗證（SPEC-000 §配置）。
+
+全部 YAML，載入即用 pydantic 驗證；未知欄位 = 錯誤（extra="forbid"）。各 config
+的權威欄位定義在對應 SPEC（清單見 SPEC-000）。本模組提供載入機制與 system.yaml
+的最小模型；其餘配置模型在各自任務加入。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from twquant.errors import ConfigError
+
+
+class BaseConfig(BaseModel):
+    """所有配置模型的基底：禁止未知欄位，強制顯式 schema。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class SourceRate(BaseConfig):
+    """單一來源的限流設定（滑動窗語意，SPEC-001 §7）。"""
+
+    max_requests: int
+    per_seconds: float
+
+
+class QualityGateConfig(BaseConfig):
+    """品質閘門閾值（SPEC-001 §5）。"""
+
+    min_rows_ratio: float = 0.8
+    inst_cross_check_tol: float = 0.005
+    disk_min_gb: float = 50.0
+
+
+class SystemConfig(BaseConfig):
+    """system.yaml 的最小模型（SPEC-001 為權威來源，後續任務擴充）。"""
+
+    data_dir: str
+    source_rates: dict[str, SourceRate]
+    quality_gate: QualityGateConfig = QualityGateConfig()
+
+
+def load_config[T: BaseConfig](path: str | Path, model: type[T]) -> T:
+    """讀 YAML → 用 model 驗證 → 回傳實例。缺欄位/多欄位/型別錯 → ConfigError（含欄位名）。"""
+    p = Path(path)
+    if not p.exists():
+        raise ConfigError(f"配置檔不存在：{p}")
+    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    try:
+        return model.model_validate(raw)
+    except ValidationError as exc:
+        fields = "; ".join(
+            f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in exc.errors()
+        )
+        raise ConfigError(f"配置 {p.name} 驗證失敗：{fields}") from exc
+
+
+def config_hash(model: BaseConfig) -> str:
+    """配置內容的決定性 hash（供 artifact metadata，SPEC-000 §可重現性）。"""
+    payload = json.dumps(model.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
