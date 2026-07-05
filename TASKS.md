@@ -24,7 +24,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | done |
 | T-013 | IC 報告（純函數，落地在 reporting/）+ research_log schema；本地因子中性化待市值資料 | SPEC-002 §4 | T-012 | B | done |
 | T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | todo |
-| T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | todo |
+| T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | done |
 | T-016 | 主力分點因子：清洗管線（總公司排除、隔日沖標籤、鉅額剔除）+ 集中度系列 | STRATEGY §3 | T-010, T-012 | B | todo |
 | T-017 | 策略框架：配置、宇宙、combine、overlays（三態 regime 狀態機；**不做波動縮放**，D-004） | SPEC-003 + STRATEGY §2 | T-012 | B | todo |
 | T-018 | 回測引擎：執行模型、價格相依成本、漲跌停旗標判定、會計恆等、指標 | SPEC-004 | T-017 | A | todo |
@@ -47,6 +47,20 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-015**（2026-07-06）P0 籌碼 + 基本面因子。factors/chip.py（trust_net_10d、
+  foreign_net_10d、trust_streak、margin_velocity_5d）、factors/fundamental.py
+  （revenue_yoy、revenue_accel，以公布日 available_at as-of 映射到日頻，PEAD）、
+  factors/builtins.py（一次匯入註冊全因子，CLI/儀表板共用）。月營收因子 PIT
+  as-of 測試 + 反前視護欄全綠（81 passed）。**真實資料 IC + 對抗驗證**（as_of
+  2026-06-30，四碼普通股）：
+  - `fundamental.revenue_yoy`：10/20 日 t=+7.3/+8.4，缺口前連續期仍 t≈+3.9→
+    **最穩健**（月營收 PEAD 屬實，§1-4）。
+  - `chip.trust_net_10d`：10 日 t=-10.2，**連續期仍 t=-11.6→真實反向**（非缺口
+    假象），與 +1 先驗衝突，呼應 §1-2 投信擁擠反轉；符號待 T-019 定奪。
+  - `chip.foreign_net_10d`：t≈-5 穩健負（外資買超偏反向，§1-3）。
+  - `chip.trust_streak`：全期 t=+3.5 但連續期崩至 +1.4（缺口灌水，勿高估）。
+  - `chip.margin_velocity_5d`：|t|<2，弱。散戶密集度真身（TDCC 集保）待接。
+  未做：投信主動/被動拆分（需 ETF 持股）、chip.concentration_*（分點，T-016）。
 - **T-013**（2026-07-05）IC 檢驗 + research_log。factors/ic.py（純函數）：前向報酬、
   逐日 RankIC（Spearman）、均值/t-stat/IR、五分位多空價差。reporting/research_log.py
   （IO 層，append-only 分片，trials 計數供 deflated Sharpe）。CLI ic-report。

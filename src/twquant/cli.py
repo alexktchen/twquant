@@ -373,7 +373,7 @@ def ic_report(
 
     import polars as pl
 
-    import twquant.factors.price  # noqa: F401  # 觸發因子註冊
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.data.warehouse import Warehouse
     from twquant.factors.compute import compute
     from twquant.factors.ic import compute_ic_report

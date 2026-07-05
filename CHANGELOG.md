@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-06 T-015 P0 籌碼 + 基本面因子：chip（投信/外資買超占量比、投信連買、
+  融資變化散戶代理）、fundamental（月營收 YoY/加速，公布日 as-of 映射日頻 PEAD）、
+  factors/builtins.py 一次註冊全因子。真實 IC + 對抗驗證（連續期 vs 全期）：
+  revenue_yoy 最穩健（t≈+8），trust_net_10d 真實反向（t=-11，非缺口假象），
+  trust_streak 全期數字有缺口灌水。閘門全綠（81 tests）。
+
 - 2026-07-05 抓資料狀態介面：ingest_log（記錄每次擷取的成功/失敗/列數/細節，
   append-only 分片）；ingest/daily/backfill/ingest-revenue 全數記錄；`twquant status`
   CLI 顯示各來源涵蓋、平日缺口、最近失敗、最後執行；儀表板加「擷取狀態」面板。

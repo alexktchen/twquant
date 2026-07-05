@@ -125,7 +125,7 @@ def main() -> None:
 
 def _factor_health(wh: Warehouse) -> None:
     """因子健檢：RankIC t 值與多空價差，判斷因子在台股是否有預測力（純量化，不需 LLM）。"""
-    import twquant.factors.price  # noqa: F401  # 觸發因子註冊
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.errors import TwquantError
     from twquant.factors.registry import list_factors
 
@@ -195,7 +195,7 @@ def _ic_report(name: str, horizons: tuple[int, ...], as_of_iso: str) -> IcReport
     """對單一因子在最新 as_of 上跑多視窗 IC（與 CLI ic-report 同一路徑）。快取避免重掃。"""
     import datetime as dt
 
-    import twquant.factors.price  # noqa: F401  # 觸發因子註冊
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.factors.compute import compute
     from twquant.factors.ic import compute_ic_report
 
