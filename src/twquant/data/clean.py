@@ -60,9 +60,9 @@ def clean_institutional(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     out = raw.select(
         pl.lit(date, dtype=pl.Date).alias("date"),
         pl.col("證券代號").str.strip_chars().alias("stock_id"),
-        (
-            _int("外陸資買賣超股數(不含外資自營商)") + _int("外資自營商買賣超股數")
-        ).alias("foreign_net"),
+        (_int("外陸資買賣超股數(不含外資自營商)") + _int("外資自營商買賣超股數")).alias(
+            "foreign_net"
+        ),
         _int("投信買賣超股數").alias("trust_net"),
         _int("自營商買賣超股數").alias("dealer_net"),
         pl.lit(at, dtype=schemas.TW_DT).alias("available_at"),

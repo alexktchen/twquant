@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import warnings
 
-import polars as pl
 import pandera.polars as pa
+import polars as pl
 
 from twquant.errors import QualityGateError
 

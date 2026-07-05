@@ -40,6 +40,9 @@ packages = ["src/twquant"]
 src = ["src", "tests"]
 line-length = 100
 target-version = "py312"
+# 不因 .gitignore 而跳過檔案：閘門必須檢查 src/tests 全部原始碼（防「被 ignore 的
+# 原始碼靜默逃過 lint」——曾因 data/ 未錨定導致整個資料層漏檢）。
+respect-gitignore = false
 
 [tool.ruff.lint]
 # 黃金規則的機器化：E/F 基本、I import 排序、B bugbear、UP 現代語法、

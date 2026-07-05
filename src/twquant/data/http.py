@@ -128,7 +128,7 @@ class HttpClient:
             self._limiter.acquire()
             try:
                 resp = transport("GET", url, params=params, timeout=self.timeout)
-            except Exception as exc:  # 連線層錯誤：可重試
+            except Exception as exc:  # noqa: BLE001  # 重試邊界：任何連線層錯誤都記錄後重試，非靜默（耗盡才 raise DataError）
                 last_detail = f"transport error: {exc}"
             else:
                 if resp.status_code not in _RETRYABLE_STATUS:
