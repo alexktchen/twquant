@@ -112,32 +112,47 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
 
     回傳成功存入的表數。
     """
-    from twquant.data.clean import CLEANERS
+    from collections.abc import Mapping
+    from typing import Any
+
+    from twquant.data.clean import CLEANERS, TPEX_CLEANERS
     from twquant.data.http import HttpClient
+    from twquant.data.sources import Source
+    from twquant.data.sources.tpex import TpexSource, browser_client
     from twquant.data.sources.twse_rwd import TwseRwdSource
     from twquant.data.warehouse import Warehouse
     from twquant.errors import DataError
 
     cfg = _load_system()
-    client = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
-    src = TwseRwdSource(client=client)
     wh = Warehouse(cfg.data_dir)
-    todo = tables or src.tables
+
+    twse = TwseRwdSource(client=HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"]))
+    tpex = TpexSource(client=browser_client(cfg.source_rates["tpex"]))
+    # (來源標籤, 來源物件, clean 函數表)
+    plans: list[tuple[str, Source, Mapping[str, Any]]] = [
+        ("twse", twse, CLEANERS),
+        ("tpex", tpex, TPEX_CLEANERS),
+    ]
 
     ok = 0
-    for table in todo:
-        typer.secho(f">> 抓取 {table} @ {day}", fg=typer.colors.CYAN)
-        try:
-            raw = src.fetch(table, day)
-            clean = CLEANERS[table](raw, day)
-            wh.write("clean", table, clean)
-        except DataError as exc:
-            if not tolerant:
-                raise
-            typer.secho(f"[SKIP] {table}：{exc}", fg=typer.colors.YELLOW)
-            continue
-        typer.secho(f"[OK] {table}：{clean.height} 列已存入 clean 層", fg=typer.colors.GREEN)
-        ok += 1
+    for source_tag, src, cleaners in plans:
+        for table in tables or src.tables:
+            if table not in cleaners:
+                continue
+            typer.secho(f">> [{source_tag}] 抓取 {table} @ {day}", fg=typer.colors.CYAN)
+            try:
+                raw = src.fetch(table, day)
+                clean = cleaners[table](raw, day)
+                wh.write("clean", table, clean, source=source_tag)
+            except DataError as exc:
+                if not tolerant:
+                    raise
+                typer.secho(f"[SKIP] {source_tag}/{table}：{exc}", fg=typer.colors.YELLOW)
+                continue
+            typer.secho(
+                f"[OK] {source_tag}/{table}：{clean.height} 列已存入", fg=typer.colors.GREEN
+            )
+            ok += 1
     return ok
 
 

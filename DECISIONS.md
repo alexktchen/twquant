@@ -73,6 +73,16 @@
   版本化與選版、log 類 append-only 分片、跨分區 union_by_name、Windows 檔鎖、
   schema 演進、磁碟治理。
 
+### D-014（2026-07-05，已裁決）TPEX 上櫃資料來源分工
+- 問題：TPEX 有 anti-bot；法人/融資券的歷史端點難尋（OpenAPI 僅回最新日，
+  帶 date 的 afterTrading 端點名不易找）。
+- 裁決：T-008 聚焦 **TPEX 行情**（afterTrading/dailyQuotes，帶瀏覽器 headers，
+  支援歷史日期、附次日漲跌停價），與 TWSE 上市共同寫入 prices_daily（按來源
+  分檔 part-<source>.parquet 共存）。TPEX **法人/融資券的歷史資料改由 FinMind**
+  （T-010，統一 TWSE+TPEX）提供，避免與 TPEX latest-only OpenAPI 的日期不符前視。
+- 倉儲改動：Warehouse.write 加 source 參數，同表同分區各來源寫各自 part 檔、
+  掃描時全讀，解決多來源覆蓋問題。
+
 ### D-013（2026-07-05，已裁決）Docker infra 與資料庫選型
 - 問題：infra 服務容器化；資料庫要 DuckDB/Parquet 還是 DB 伺服器？
 - 裁決：**維持 DuckDB + Parquet**（嵌入式、單機、零維運，符合原架構），資料湖

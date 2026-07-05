@@ -101,6 +101,22 @@ def test_sql_analysis(tmp_path: Path) -> None:
     assert out["mx"][0] == 2410.0
 
 
+def test_multi_source_coexist(tmp_path: Path) -> None:
+    # 上市(twse) 與上櫃(tpex) 寫進同表同分區，各自 part 檔不互相覆蓋（T-008）
+    wh = Warehouse(tmp_path)
+    d = dt.date(2026, 6, 30)
+    wh.write("clean", "prices_daily", _prices(d, 18, stock="2330"), source="twse")
+    wh.write("clean", "prices_daily", _prices(d, 18, stock="5483", close=180.0), source="tpex")
+    got = wh.scan("prices_daily").collect()
+    assert got.height == 2
+    assert set(got["stock_id"]) == {"2330", "5483"}
+    # 同來源重寫仍為替換（不累加）
+    wh.write("clean", "prices_daily", _prices(d, 18, stock="2330", close=2500.0), source="twse")
+    got2 = wh.scan("prices_daily").collect()
+    assert got2.height == 2
+    assert got2.filter(pl.col("stock_id") == "2330")["close"][0] == 2500.0
+
+
 def test_scan_missing_raises(tmp_path: Path) -> None:
     with pytest.raises(DataError, match="無資料"):
         Warehouse(tmp_path).scan("prices_daily").collect()

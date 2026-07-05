@@ -48,27 +48,32 @@ class Warehouse:
     def _partition_dir(self, layer: str, table: str, date: dt.date) -> Path:
         return self._root / layer / table / f"date={date.isoformat()}"
 
-    def write(self, layer: str, table: str, df: pl.DataFrame) -> None:
-        """寫入資料湖。clean 層先跑 schema 驗證；按 date 分區、原子、分區級替換。"""
+    def write(self, layer: str, table: str, df: pl.DataFrame, source: str | None = None) -> None:
+        """寫入資料湖。clean 層先跑 schema 驗證；按 date 分區、原子、分區級替換。
+
+        source 給定時，同一分區內各來源寫各自的 part-<source>.parquet（上市/上櫃共存
+        於同表同分區而不互相覆蓋）；未給定則寫 part.parquet 替換整個分區。
+        """
         if layer not in _LAYERS:
             raise DataError(table, None, f"未知資料層：{layer}")
         if layer == "clean":
             df = schemas.validate(table, df)
         if df.is_empty():
             return
+        fname = f"part-{source}.parquet" if source else "part.parquet"
         if "date" not in df.columns:  # 緩變表（stock_meta 等）：單一分區
-            self._write_partition(self._root / layer / table / "date=_all", df)
+            self._write_partition(self._root / layer / table / "date=_all", df, fname)
             return
         for (day,), sub in df.group_by(["date"], maintain_order=True):
             assert isinstance(day, dt.date)
-            self._write_partition(self._partition_dir(layer, table, day), sub)
+            self._write_partition(self._partition_dir(layer, table, day), sub, fname)
 
-    def _write_partition(self, part: Path, df: pl.DataFrame) -> None:
+    def _write_partition(self, part: Path, df: pl.DataFrame, fname: str) -> None:
         part.mkdir(parents=True, exist_ok=True)
-        final = part / "part.parquet"
-        tmp = part / "part.parquet.tmp"
+        final = part / fname
+        tmp = part / f"{fname}.tmp"
         df.write_parquet(tmp)
-        tmp.replace(final)  # 原子替換整個分區檔
+        tmp.replace(final)  # 原子替換該來源的分區檔
 
     def _glob(self, table: str, layer: str) -> str:
         return (self._root / layer / table / "**" / "*.parquet").as_posix()

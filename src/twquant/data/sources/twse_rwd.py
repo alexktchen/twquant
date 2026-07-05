@@ -15,6 +15,7 @@ from typing import Any
 import polars as pl
 
 from twquant.data.http import HttpClient
+from twquant.data.sources import raw_frame
 from twquant.errors import DataError
 
 _BASE = "https://www.twse.com.tw/rwd/zh"
@@ -38,16 +39,6 @@ _ENDPOINTS: dict[str, _Endpoint] = {
         "marginTrading/MI_MARGN", {"selectType": "ALL", "response": "json"}, "代號"
     ),
 }
-
-
-def _dedupe(fields: list[str]) -> list[str]:
-    """欄名去重：重複者附 _2、_3…（polars 不允許重複欄名）。"""
-    seen: dict[str, int] = {}
-    out: list[str] = []
-    for f in fields:
-        seen[f] = seen.get(f, 0) + 1
-        out.append(f if seen[f] == 1 else f"{f}_{seen[f]}")
-    return out
 
 
 def _extract(
@@ -92,11 +83,4 @@ class TwseRwdSource:
         fields, rows = _extract(payload, ep.id_field, table, date)
         if not rows:
             raise DataError(table, date, "資料表為空（非交易日或當日尚未公布）")
-
-        cols = _dedupe(fields)
-        # 全部以字串讀入（原始值，不轉型）；逐列補齊/截斷到欄數以防畸形列
-        data: dict[str, list[str | None]] = {c: [] for c in cols}
-        for row in rows:
-            for i, c in enumerate(cols):
-                data[c].append(str(row[i]) if i < len(row) else None)
-        return pl.DataFrame(data, schema={c: pl.String for c in cols})
+        return raw_frame(fields, rows)

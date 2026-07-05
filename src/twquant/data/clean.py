@@ -87,9 +87,35 @@ def clean_margin(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     return schemas.validate("margin_daily", out)
 
 
-# 表名 → (clean 函數) 註冊表
+def clean_tpex_prices(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
+    """TPEX dailyQuotes 原始 → prices_daily（上櫃）。含權證等，過濾為正規股票代號。"""
+    at = _at(date, 18)
+    out = raw.select(
+        pl.lit(date, dtype=pl.Date).alias("date"),
+        pl.col("代號").str.strip_chars().alias("stock_id"),
+        _float("開盤").alias("open"),
+        _float("最高").alias("high"),
+        _float("最低").alias("low"),
+        _float("收盤").alias("close"),
+        _int("成交股數").alias("volume"),
+        _float("成交金額(元)").alias("amount"),
+        pl.lit(None, dtype=pl.Float64).alias("limit_up_price"),
+        pl.lit(None, dtype=pl.Float64).alias("limit_down_price"),
+        pl.lit(at, dtype=schemas.TW_DT).alias("available_at"),
+    )
+    out = out.filter(pl.col("stock_id").str.contains(r"^[0-9]{4,6}[A-Z]?$"))
+    out = out.drop_nulls(["open", "high", "low", "close", "volume", "amount"])
+    return schemas.validate("prices_daily", out)
+
+
+# 表名 → (clean 函數) 註冊表（TWSE）
 CLEANERS = {
     "prices_daily": clean_prices,
     "institutional_daily": clean_institutional,
     "margin_daily": clean_margin,
+}
+
+# TPEX 專用清洗（上櫃）
+TPEX_CLEANERS = {
+    "prices_daily": clean_tpex_prices,
 }

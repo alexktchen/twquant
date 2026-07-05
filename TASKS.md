@@ -15,7 +15,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-004 | 資料合約：schemas.py 全表 pandera 定義（含 inst_holding、limit_up/down_price、structural_breaks） | SPEC-001 §1 | T-002 | B | done |
 | T-006 | http 基礎設施：session、滑動窗限流器、重試、raw 版本化落地 | SPEC-001 §2/§7 | T-002 | B | done |
 | T-007 | 來源轉接器：twse_rwd（prices/T86/MI_MARGN） | SPEC-001 | T-006 | B | done |
-| T-008 | 來源轉接器：tpex（同三表，anti-bot headers） | SPEC-001 | T-006 | B | todo |
+| T-008 | 來源轉接器：tpex 上櫃行情（anti-bot headers）；法人/融資券改走 FinMind（D-014） | SPEC-001 | T-006 | B | done |
 | T-009 | 來源轉接器：tdcc、mops 月營收、taifex | SPEC-001 | T-006 | B | todo |
 | T-010 | 來源轉接器：finmind broker_trades、inst_holding | SPEC-001 | T-006 | B | todo |
 | T-003 | 交易日曆：以人工核對靜態日曆檔為第一版（有 prices_daily 後改推導核對） | SPEC-000 AC-3 | T-002 | B | todo |
@@ -47,6 +47,11 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-008**（2026-07-05）TPEX 上櫃行情轉接器（D-014）。dailyQuotes（瀏覽器
+  headers 繞 anti-bot、歷史日期、附次日漲跌停）；HttpClient 加 headers 支援；
+  倉儲 write 加 source 參數（上市/上櫃按來源分檔共存於 prices_daily，不覆蓋）。
+  實測 2026-06-30：全市場 6747 檔（上市 1361 + 上櫃 5386）。法人/融資券歷史
+  走 FinMind（T-010）。閘門全綠（52 passed）。
 - **T-011（部分）**（2026-07-05）倉儲核心 + 清洗管線 + DuckDB 分析。
   clean.py：三張 TWSE 表 raw→typed（單位張→股、去逗號、佔位符轉 null、加
   available_at 與 date）。warehouse.py：Parquet 分區資料湖、原子寫、分區級替換、

@@ -95,6 +95,7 @@ class HttpClient:
     clock: Clock = field(default_factory=SystemClock)
     transport: Transport | None = None
     user_agent: str = _DEFAULT_UA
+    headers: dict[str, str] | None = None  # 額外 headers（如 TPEX 需 Referer/Accept）
     max_retries: int = 3
     base_delay: float = 1.0
     timeout: float = 20.0
@@ -111,6 +112,8 @@ class HttpClient:
 
         session = requests.Session()
         session.headers["User-Agent"] = self.user_agent
+        if self.headers:
+            session.headers.update(self.headers)
 
         def _send(
             method: str, url: str, *, params: dict[str, str] | None, timeout: float
