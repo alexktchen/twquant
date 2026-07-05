@@ -21,7 +21,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-003 | 交易日曆：以人工核對靜態日曆檔為第一版（有 prices_daily 後改推導核對） | SPEC-000 AC-3 | T-002 | B | todo |
 | T-005 | golden fixtures：以 T-007~T-010 抓真實切片（30 檔 × 2 年，含除息/減資/漲停/處置/月營收/當沖案例）+ 一次性下載腳本（附來源 URL 與 hash）+ 凍結輸入層 | CLAUDE.md §4 | T-004, T-007, T-009 | B | todo |
 | T-011 | 倉儲核心：Warehouse/PitView（20:00 截點）、寫入協定、DuckDB SQL、清洗管線；還原價/品質閘門/backfill 待補 | SPEC-001 §4/§7 | T-004 | A | 部分完成 |
-| T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | todo |
+| T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | done |
 | T-013 | IC 報告（純函數，落地在 reporting/）+ research_log schema + 本地因子模型基準 | SPEC-002 §4 | T-012 | B | todo |
 | T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | todo |
 | T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | todo |
@@ -47,6 +47,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-012**（2026-07-05）因子框架（SPEC-002）。@factor 註冊表（名稱格式驗證、
+  重複/類別檢查）、compute 引擎（long format）、標準化管線（MAD 去極值→z-score，
+  AC-4）、assert_no_lookahead 反前視護欄（AC-3，含壞因子反向測試）、price.mom_20d
+  基準因子。因子為純函數（IO 邊界靜態測試涵蓋）。閘門全綠（67 passed）。
 - **T-011 backfill**（2026-07-05）歷史回補 CLI。`backfill --from --to`（TWSE+TPEX
   日資料，跳週末、跳假日、依分區存在續傳）、`backfill-revenue --from --to`（逐月）。
   實測回補 2026-06-16~30：9 交易日新增、端午節(06-19)自動略過、06-30 續傳跳過；
