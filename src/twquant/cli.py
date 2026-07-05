@@ -289,6 +289,79 @@ def ingest_revenue(
         typer.secho(f"[OK] {market} {month}：{clean.height} 家已存入", fg=typer.colors.GREEN)
 
 
+@app.command(name="ic-report")
+def ic_report(
+    factor: str = typer.Option("price.mom_20d", help="因子名"),
+    horizons: str = typer.Option("5,10,20", help="前向報酬視窗（逗號分隔）"),
+    universe: str = typer.Option(r"^[1-9][0-9]{3}$", help="股票代號過濾（預設四碼、排除權證）"),
+    start: str = typer.Option("", help="IC 期間起（YYYY-MM-DD，空=全部）"),
+    end: str = typer.Option("", help="as_of 截點（YYYY-MM-DD，空=最新）"),
+) -> None:
+    """對因子跑 IC 檢驗（RankIC t-stat、多空價差），印出並記入 research_log。"""
+    import hashlib
+
+    import polars as pl
+
+    import twquant.factors.price  # noqa: F401  # 觸發因子註冊
+    from twquant.data.warehouse import Warehouse
+    from twquant.factors.compute import compute
+    from twquant.factors.ic import compute_ic_report
+    from twquant.reporting.research_log import append_research_log, trials_count
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    as_of = dt.date.fromisoformat(end) if end else wh.latest_date("prices_daily")
+    if as_of is None:
+        typer.secho("資料湖無行情，先 ingest/backfill。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    view = wh.view(as_of)
+    hz = [int(x) for x in horizons.split(",")]
+    factor_df = compute([factor], view).filter(pl.col("stock_id").str.contains(universe))
+    prices = (
+        view.table("prices_daily")
+        .select("date", "stock_id", "close")
+        .filter(pl.col("stock_id").str.contains(universe))
+        .collect()
+    )
+    if start:
+        s = dt.date.fromisoformat(start)
+        factor_df = factor_df.filter(pl.col("date") >= s)
+
+    report = compute_ic_report(factor, factor_df, prices, hz)
+
+    typer.secho(
+        f"IC 檢驗 · {factor} · as_of {as_of} · 宇宙 {universe}", fg=typer.colors.CYAN, bold=True
+    )
+    for h in report.horizons:
+        typer.echo(
+            f"  {h.horizon:>2}日：RankIC 均值 {h.ic_mean:+.4f}　t={h.t_stat:+.2f}　"
+            f"IR={h.ic_ir:+.3f}　多空價差 {h.ls_spread:+.4f}（{h.n_days} 日）"
+        )
+
+    phash = hashlib.sha256(f"{factor}|{universe}|{horizons}".encode()).hexdigest()[:12]
+    entries: list[dict[str, object]] = []
+    for h in report.horizons:
+        for name, val in [("ic_mean", h.ic_mean), ("t_stat", h.t_stat), ("ls_spread", h.ls_spread)]:
+            entries.append(
+                {
+                    "entry_type": "ic_test",
+                    "strategy": "",
+                    "factor": factor,
+                    "params_hash": phash,
+                    "date": as_of.isoformat(),
+                    "metric_name": f"{name}_{h.horizon}d",
+                    "metric_value": float(val),
+                    "trial_scope": f"ic:{factor}",
+                }
+            )
+    append_research_log(cfg.data_dir, entries)
+    n = trials_count(cfg.data_dir, f"ic:{factor}")
+    typer.secho(
+        f"已記入 research_log（trial_scope ic:{factor} 累計 {n} 組參數）", fg=typer.colors.GREEN
+    )
+
+
 @app.command()
 def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL")) -> None:
     """對資料湖跑 SQL 分析（各 clean 表為同名視圖）。"""

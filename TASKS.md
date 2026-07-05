@@ -22,7 +22,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-005 | golden fixtures：以 T-007~T-010 抓真實切片（30 檔 × 2 年，含除息/減資/漲停/處置/月營收/當沖案例）+ 一次性下載腳本（附來源 URL 與 hash）+ 凍結輸入層 | CLAUDE.md §4 | T-004, T-007, T-009 | B | todo |
 | T-011 | 倉儲核心：Warehouse/PitView（20:00 截點）、寫入協定、DuckDB SQL、清洗管線；還原價/品質閘門/backfill 待補 | SPEC-001 §4/§7 | T-004 | A | 部分完成 |
 | T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | done |
-| T-013 | IC 報告（純函數，落地在 reporting/）+ research_log schema + 本地因子模型基準 | SPEC-002 §4 | T-012 | B | todo |
+| T-013 | IC 報告（純函數，落地在 reporting/）+ research_log schema；本地因子中性化待市值資料 | SPEC-002 §4 | T-012 | B | done |
 | T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | todo |
 | T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | todo |
 | T-016 | 主力分點因子：清洗管線（總公司排除、隔日沖標籤、鉅額剔除）+ 集中度系列 | STRATEGY §3 | T-010, T-012 | B | todo |
@@ -47,6 +47,12 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-013**（2026-07-05）IC 檢驗 + research_log。factors/ic.py（純函數）：前向報酬、
+  逐日 RankIC（Spearman）、均值/t-stat/IR、五分位多空價差。reporting/research_log.py
+  （IO 層，append-only 分片，trials 計數供 deflated Sharpe）。CLI ic-report。
+  **真實資料驗證**：price.mom_20d 在 2025-H2 上，5 日 RankIC t=-2.32（顯著反轉）、
+  20 日 t=-0.14（動能無效）——精準重現 STRATEGY.md 台股實證。本地因子中性化待
+  市值資料。閘門全綠（72 passed）。
 - **T-012**（2026-07-05）因子框架（SPEC-002）。@factor 註冊表（名稱格式驗證、
   重複/類別檢查）、compute 引擎（long format）、標準化管線（MAD 去極值→z-score，
   AC-4）、assert_no_lookahead 反前視護欄（AC-3，含壞因子反向測試）、price.mom_20d
