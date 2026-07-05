@@ -28,6 +28,7 @@ def zscore_weighted(factor_df: pl.DataFrame, signed_weights: dict[str, float]) -
         std.join(_weights_frame(signed_weights), on="factor", how="inner")
         .group_by(["date", "stock_id"])
         .agg((pl.col("value") * pl.col("_w")).sum().alias("score"))
+        .sort(["date", "stock_id"])  # group_by 順序不定 → 明確排序確保跨程序決定性
     )
 
 
@@ -42,6 +43,7 @@ def rank_avg(factor_df: pl.DataFrame, signed_weights: dict[str, float]) -> pl.Da
         ranked.join(_weights_frame(signed_weights), on="factor", how="inner")
         .group_by(["date", "stock_id"])
         .agg((pl.col("_pct") * pl.col("_w")).sum().alias("score"))
+        .sort(["date", "stock_id"])  # 跨程序決定性
     )
 
 

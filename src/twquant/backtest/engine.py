@@ -133,7 +133,7 @@ def _execute(
 ) -> None:
     """在 day 開盤把持倉調到 targets（先賣後買、買單受現金約束）。"""
     pv = _portfolio_value(state, day_px)
-    names = set(state.holdings) | set(targets)
+    names = sorted(set(state.holdings) | set(targets))  # set 順序不定 → 排序確保決定性
     deltas: dict[str, int] = {}
     for sid in names:
         row = day_px.get(sid)
@@ -146,9 +146,10 @@ def _execute(
         if desired != cur:
             deltas[sid] = desired - cur
 
-    sells = sorted((s for s in deltas if deltas[s] < 0), key=lambda s: deltas[s])
+    # 次序鍵 sid：同 delta/同金額時決定性排序（現金約束下先後影響成交結果）
+    sells = sorted((s for s in deltas if deltas[s] < 0), key=lambda s: (deltas[s], s))
     buys = sorted(
-        (s for s in deltas if deltas[s] > 0), key=lambda s: -deltas[s] * day_px[s]["open"]
+        (s for s in deltas if deltas[s] > 0), key=lambda s: (-deltas[s] * day_px[s]["open"], s)
     )
     for sid in sells:
         _fill(state, sid, deltas[sid], day, day_px[sid], cost_cfg, max_participation)

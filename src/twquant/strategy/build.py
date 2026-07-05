@@ -99,7 +99,8 @@ def _select(score: pl.DataFrame, cfg: StrategyConfig) -> pl.DataFrame:
     sel = cfg.selection
     if sel.method == "top_n":
         n = sel.top_n or 40
-        return score.sort("score", descending=True).head(n)
+        # 次序鍵 stock_id：分數同分時決定性挑選（避免跨程序 group_by 順序影響選股）
+        return score.sort(["score", "stock_id"], descending=[True, False]).head(n)
     if sel.method == "threshold":
         thr = sel.threshold if sel.threshold is not None else 0.0
         return score.filter(pl.col("score") >= thr)

@@ -153,6 +153,43 @@ def test_backtest_accounting_and_determinism(tmp_path: Path) -> None:
         assert e.cash >= -1e-6
         assert e.equity == pytest.approx(e.cash + e.positions_value, abs=1e-6)
     assert res.ledger  # 有成交
-    # AC-8：決定性
+    # AC-8：決定性（同程序）
     res2 = run_backtest(_cfg(), _CC, dt.date(2026, 5, 25), dt.date(2026, 6, 9), wh, 1_000_000.0)
     assert [e.equity for e in res.equity] == [e.equity for e in res2.equity]
+
+
+_SUBPROC = (
+    "import datetime as dt, sys;"
+    "import twquant.factors.builtins;"
+    "from twquant.backtest.engine import run_backtest;"
+    "from twquant.backtest.costs import CostConfig;"
+    "from twquant.strategy.config import StrategyConfig;"
+    "from twquant.data.warehouse import Warehouse;"
+    "cfg=StrategyConfig.model_validate({'name':'d','signals':[{'factor':'price.mom_20d','weight':1.0}],"
+    "'selection':{'method':'top_n','top_n':2},'weighting':'equal','max_weight_per_stock':0.6,"
+    "'universe':{'min_adv_twd':None,'min_price':None},'rebalance':{'schedule':'daily'},'overlays':[]});"
+    "r=run_backtest(cfg,CostConfig(),dt.date(2026,5,25),dt.date(2026,6,9),Warehouse(sys.argv[1]),1_000_000.0);"
+    "print(round(r.final_equity,6))"
+)
+
+
+def test_backtest_deterministic_across_processes(tmp_path: Path) -> None:
+    """AC-8 強化：不同 PYTHONHASHSEED 的獨立程序須得相同結果（防 set/group_by 順序漏洞）。"""
+    import os
+    import subprocess
+    import sys
+
+    _synthetic_wh(tmp_path)
+
+    def _run(seed: str) -> str:
+        out = subprocess.run(
+            [sys.executable, "-c", _SUBPROC, str(tmp_path)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            check=True,
+        )
+        return out.stdout.strip()
+
+    a, b = _run("0"), _run("1")
+    assert a == b and a != ""

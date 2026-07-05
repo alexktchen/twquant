@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import polars as pl
 import streamlit as st
@@ -120,7 +120,81 @@ def main() -> None:
     st.divider()
     _factor_health(wh)
 
+    # ── 策略回測（成本後績效）──────────────────────────────────────
+    st.divider()
+    _backtest_panel()
+
     st.caption(f"最新行情日：{latest}｜資料來源：TWSE 上市 · TPEX 上櫃 · MOPS 月營收")
+
+
+def _backtest_panel() -> None:
+    """策略回測：權益曲線 + 成本後績效指標（純量化，不需 LLM）。"""
+    import datetime as dt
+
+    st.subheader("策略回測")
+    strat_path = _CONFIG.parent / "strategies" / "sample_revenue_trust.yaml"
+    if not strat_path.exists():
+        st.info("無範例策略配置。")
+        return
+    c1, c2 = st.columns(2)
+    start = c1.date_input("起", dt.date(2025, 8, 1))
+    end = c2.date_input("迄", dt.date(2025, 12, 31))
+    if not isinstance(start, dt.date) or not isinstance(end, dt.date):
+        return
+    try:
+        res = _bt_cached(str(strat_path), start.isoformat(), end.isoformat())
+    except Exception as exc:  # noqa: BLE001  # 顯示訊息而非讓儀表板崩潰
+        st.warning(f"回測失敗：{exc}")
+        return
+
+    m = cast("dict[str, float]", res["metrics"])
+    equity = cast("list[tuple[dt.date, float]]", res["equity"])
+    total_ret = cast("float", res["total_ret"])
+    n_trades = cast("int", res["n_trades"])
+    cols = st.columns(5)
+    cols[0].metric("Sharpe", f"{m['sharpe']:.2f}")
+    cols[1].metric("CAGR", f"{m['cagr'] * 100:.1f}%")
+    cols[2].metric("最大回撤", f"{m['mdd'] * 100:.1f}%")
+    cols[3].metric("勝率", f"{m['win_rate'] * 100:.0f}%")
+    cols[4].metric("年化周轉", f"{m['turnover'] * 100:.0f}%")
+
+    eq = pl.DataFrame({"date": [d for d, _ in equity], "權益": [v for _, v in equity]}).to_pandas()
+    st.markdown(f"**權益曲線**（總報酬 {total_ret * 100:+.2f}%　成交 {n_trades} 筆）")
+    st.line_chart(eq.set_index("date")["權益"])
+    st.caption(
+        "成本後淨值（含手續費/證交稅/滑價）· sample 策略（月營收 YoY + 投信連買）· "
+        "預設連續期避開 TWSE 缺口"
+    )
+
+
+@st.cache_data(ttl=1800, show_spinner="跑回測…")
+def _bt_cached(strat_path: str, start_iso: str, end_iso: str) -> dict[str, object]:
+    import datetime as dt
+
+    from twquant.backtest.costs import CostConfig
+    from twquant.backtest.engine import run_backtest
+    from twquant.config import load_config
+    from twquant.strategy.config import load_strategy
+
+    wh = _warehouse()
+    strat = load_strategy(strat_path)
+    cost = load_config(_CONFIG.parent / "costs.yaml", CostConfig)
+    res = run_backtest(
+        strat, cost, dt.date.fromisoformat(start_iso), dt.date.fromisoformat(end_iso), wh
+    )
+    return {
+        "equity": [(e.date, e.equity) for e in res.equity],
+        "metrics": {
+            "sharpe": res.metrics.sharpe,
+            "cagr": res.metrics.cagr,
+            "mdd": res.metrics.mdd,
+            "win_rate": res.metrics.win_rate,
+            "turnover": res.metrics.turnover,
+        },
+        "n_trades": len(res.ledger),
+        "n_unfilled": len(res.unfilled),
+        "total_ret": res.final_equity / res.initial_capital - 1.0,
+    }
 
 
 def _factor_health(wh: Warehouse) -> None:

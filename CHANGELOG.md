@@ -1,5 +1,12 @@
 # CHANGELOG
 
+- 2026-07-06 修回測跨程序非決定性（重要）：combine group_by/選股 top_n/引擎成交
+  排序原本依賴 Python set 與 polars group_by 順序，不同程序（PYTHONHASHSEED）結果
+  不同（Sharpe 曾 0.68~1.43 亂跳）。全數加明確 sort（次序鍵 stock_id）→ 真值
+  Sharpe 1.03、3 程序一致。新增跨 PYTHONHASHSEED 子程序決定性測試。
+- 2026-07-06 儀表板加「策略回測」面板：權益曲線 + 成本後 Sharpe/CAGR/MDD/勝率/
+  周轉，日期可選、快取。閘門全綠（124 tests）。
+
 - 2026-07-06 T-020（部分完成）投組層：portfolio/（config/core）+ twquant/state.py。
   sleeve 組合+歸因、個股/周轉限額、條件式波動目標、四態 kill-switch、狀態原子寫+
   fail-safe（缺失/損毀→HALTED）。configs/portfolio.yaml、risk.yaml。閘門全綠（123 tests）。
