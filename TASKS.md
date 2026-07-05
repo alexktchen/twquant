@@ -28,7 +28,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-016 | 主力分點因子：清洗管線（總公司排除、隔日沖標籤、鉅額剔除）+ 集中度系列 | STRATEGY §3 | T-010, T-012 | B | todo |
 | T-017 | 策略框架：配置、宇宙、combine、overlays（三態 regime 狀態機；**不做波動縮放**，D-004） | SPEC-003 + STRATEGY §2 | T-012 | B | 部分完成 |
 | T-018 | 回測引擎：執行模型、價格相依成本、漲跌停旗標判定、會計恆等、指標 | SPEC-004 | T-017 | A | 部分完成 |
-| T-019 | 驗證工具：walk-forward、deflated_sharpe(trial_sharpes)、plateau、bootstrap | SPEC-004 §5 | T-018 | B | todo |
+| T-019 | 驗證工具：walk-forward、deflated_sharpe(trial_sharpes)、plateau、bootstrap | SPEC-004 §5 | T-018 | B | done |
 | T-020 | 投組層：sleeve 組合、**條件式波動目標**、限額、四態 kill-switch、data/state 持久化 | SPEC-005 | T-018 | A | todo |
 | T-021 | PaperBroker（共用回測成交模組）+ 每日執行流程 + 對帳 | SPEC-006 | T-020 | A | todo |
 | T-022 | ShioajiBroker（dry_run 預設、雙開關） | SPEC-006 | T-021 | B | todo |
@@ -47,6 +47,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-019**（2026-07-06）驗證工具（SPEC-004 §5）。backtest/validation.py：
+  walk_forward（連續互斥無縫測試窗，AC-9）、deflated_sharpe（DSR，用試驗 SR 變異數
+  估期望最大 SR，REVIEW M11）+ deannualize_sharpe、bootstrap_sharpe_ci（決定性 seed）、
+  param_plateau（因子 window 掃描找高原）。閘門全綠（114 tests）。
 - **T-014（部分完成）**（2026-07-06）價量因子。price.high_52w（52週高接近度）、
   price.reversal_5d（5日反轉，dir=-1）、volume.vol_ratio_5d（量比）、
   volume.turnover_z_20d（量能 z）。反前視全綠（109 tests）。真實 IC（連續期）：
