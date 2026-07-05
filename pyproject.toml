@@ -49,6 +49,10 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "BLE"]
 # 對中文為主的程式庫是純噪音（全形括號、逗號本來就該用），關閉。
 ignore = ["E501", "RUF001", "RUF002", "RUF003"]
 
+[tool.ruff.lint.flake8-bugbear]
+# typer 的慣用法：Option/Argument 就是要放在參數預設值，B008 對此為誤報
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

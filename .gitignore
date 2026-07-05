@@ -1,5 +1,5 @@
-# 資料湖與敏感資訊永不進版控
-data/
+# 資料湖與敏感資訊永不進版控（/data/ 根錨定，避免誤傷 src/twquant/data/ 原始碼）
+/data/
 .env
 *.env
 

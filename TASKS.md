@@ -20,7 +20,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-010 | 來源轉接器：finmind broker_trades、inst_holding | SPEC-001 | T-006 | B | todo |
 | T-003 | 交易日曆：以人工核對靜態日曆檔為第一版（有 prices_daily 後改推導核對） | SPEC-000 AC-3 | T-002 | B | todo |
 | T-005 | golden fixtures：以 T-007~T-010 抓真實切片（30 檔 × 2 年，含除息/減資/漲停/處置/月營收/當沖案例）+ 一次性下載腳本（附來源 URL 與 hash）+ 凍結輸入層 | CLAUDE.md §4 | T-004, T-007, T-009 | B | todo |
-| T-011 | 倉儲核心：Warehouse/PitView（20:00 截點）、還原價（逐日換錨）、寫入協定、品質閘門、backfill 斷點續傳 | SPEC-001 §4/§5/§6/§7 | T-004, T-005 | A | todo |
+| T-011 | 倉儲核心：Warehouse/PitView（20:00 截點）、寫入協定、DuckDB SQL、清洗管線；還原價/品質閘門/backfill 待補 | SPEC-001 §4/§7 | T-004 | A | 部分完成 |
 | T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | todo |
 | T-013 | IC 報告（純函數，落地在 reporting/）+ research_log schema + 本地因子模型基準 | SPEC-002 §4 | T-012 | B | todo |
 | T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | todo |
@@ -47,6 +47,14 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-011（部分）**（2026-07-05）倉儲核心 + 清洗管線 + DuckDB 分析。
+  clean.py：三張 TWSE 表 raw→typed（單位張→股、去逗號、佔位符轉 null、加
+  available_at 與 date）。warehouse.py：Parquet 分區資料湖、原子寫、分區級替換、
+  PitView（D-008 的 20:00 截點，AC-9）、DuckDB SQL 查詢。CLI 加 ingest / sql。
+  **實際運作驗證**：ingest 2026-06-30 存入 prices 1361 / 法人 1330 / 融資券 1279 列；
+  SQL join 查投信買超前 10 名，重現「投信季底作帳、外資對作金融股」現象。
+  閘門全綠（44 passed）。**待補**：還原價（需 T-009 corporate_events）、
+  完整品質閘門、backfill CLI、raw 層落地整合。
 - **T-007**（2026-07-05）TWSE rwd 轉接器完成。實盤抓取 2026-06-30 三張表成功
   （prices 1369 檔、法人 1330 檔、融資券 1279 檔）；台積電收盤 2410、投信買賣超
   -89,595 股等真實資料已驗。fixture 錄自實盤精簡（tests/fixtures/http/twse_rwd/），

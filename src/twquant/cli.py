@@ -5,14 +5,24 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
+if TYPE_CHECKING:
+    import polars as pl
+
+    from twquant.config import SystemConfig
+
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
+
+_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
 
 def _force_utf8_output() -> None:
@@ -89,6 +99,55 @@ def check(
         typer.secho(f"閘門未過：{', '.join(failed)}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(code=1)
     typer.secho("閘門全綠。", fg=typer.colors.GREEN, bold=True)
+
+
+def _load_system() -> SystemConfig:
+    from twquant.config import SystemConfig, load_config
+
+    return load_config(_CONFIG_DIR / "system.yaml", SystemConfig)
+
+
+@app.command()
+def ingest(
+    date: str = typer.Option(..., help="交易日 YYYY-MM-DD"),
+    tables: list[str] | None = typer.Option(None, help="要抓的表，預設全部 TWSE 表"),
+) -> None:
+    """抓 TWSE 當日資料、清洗、存入 clean 資料湖。"""
+    from twquant.data.clean import CLEANERS
+    from twquant.data.http import HttpClient
+    from twquant.data.sources.twse_rwd import TwseRwdSource
+    from twquant.data.warehouse import Warehouse
+
+    day = dt.date.fromisoformat(date)
+    cfg = _load_system()
+    client = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
+    src = TwseRwdSource(client=client)
+    wh = Warehouse(cfg.data_dir)
+    todo = tables or src.tables
+
+    for table in todo:
+        typer.secho(f">> 抓取 {table} @ {day}", fg=typer.colors.CYAN)
+        raw = src.fetch(table, day)
+        clean = CLEANERS[table](raw, day)
+        wh.write("clean", table, clean)
+        typer.secho(f"[OK] {table}：{clean.height} 列已存入 clean 層", fg=typer.colors.GREEN)
+
+
+@app.command()
+def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL")) -> None:
+    """對資料湖跑 SQL 分析（各 clean 表為同名視圖）。"""
+    from twquant.data.warehouse import Warehouse
+
+    cfg = _load_system()
+    result = Warehouse(cfg.data_dir).sql(query)
+    with pl_config():
+        typer.echo(str(result))
+
+
+def pl_config() -> pl.Config:
+    import polars as pl
+
+    return pl.Config(tbl_rows=30, tbl_cols=20, fmt_str_lengths=40)
 
 
 if __name__ == "__main__":
