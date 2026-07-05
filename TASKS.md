@@ -23,7 +23,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-011 | 倉儲核心：Warehouse/PitView（20:00 截點）、寫入協定、DuckDB SQL、清洗管線；還原價/品質閘門/backfill 待補 | SPEC-001 §4/§7 | T-004 | A | 部分完成 |
 | T-012 | 因子框架：@factor 註冊表（名稱格式驗證）、price.mom_20d、compute、standardize、assert_no_lookahead | SPEC-002 | T-011 | A | done |
 | T-013 | IC 報告（純函數，落地在 reporting/）+ research_log schema；本地因子中性化待市值資料 | SPEC-002 §4 | T-012 | B | done |
-| T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | todo |
+| T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | 部分完成 |
 | T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | done |
 | T-016 | 主力分點因子：清洗管線（總公司排除、隔日沖標籤、鉅額剔除）+ 集中度系列 | STRATEGY §3 | T-010, T-012 | B | todo |
 | T-017 | 策略框架：配置、宇宙、combine、overlays（三態 regime 狀態機；**不做波動縮放**，D-004） | SPEC-003 + STRATEGY §2 | T-012 | B | 部分完成 |
@@ -47,6 +47,11 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-014（部分完成）**（2026-07-06）價量因子。price.high_52w（52週高接近度）、
+  price.reversal_5d（5日反轉，dir=-1）、volume.vol_ratio_5d（量比）、
+  volume.turnover_z_20d（量能 z）。反前視全綠（109 tests）。真實 IC（連續期）：
+  reversal_5d 5日 t=-6.0 確認反轉（dir=-1 正確）；量能因子 5日偏負（放量後短期
+  反轉）。**待接**：本地 SMB/HML/市場因子（需市值/在外股數），故中性化基準未齊。
 - **T-018（部分完成）**（2026-07-06）回測引擎（SPEC-004）。backtest/：costs
   （台股檔位表、價格相依半價差 REVIEW M1、漲跌停 proxy、手續費含最低/證交稅/
   adv_impact 滑價）、engine（next_open 執行、整數張、先賣後買現金約束、漲跌停與

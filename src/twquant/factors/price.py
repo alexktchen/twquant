@@ -40,3 +40,53 @@ def mom_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="price.high_52w",
+    category="price",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=260,
+    params={"window": 252},
+    anchor_invariant=True,
+)
+def high_52w(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """52 週高點接近度 = close / 期間最高（≤1，越接近 1 越貼近高點，STRATEGY §1-1）。"""
+    raw = params.get("window", 252)
+    window = int(raw) if isinstance(raw, int | float | str) else 252
+    prices = (
+        view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    )
+    hi = pl.col("close").rolling_max(window).over("stock_id")
+    return (
+        prices.with_columns((pl.col("close") / hi).alias("value"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="price.reversal_5d",
+    category="price",
+    direction=-1,
+    tables=["prices_daily"],
+    lookback_days=8,
+    params={"window": 5},
+    anchor_invariant=True,
+)
+def reversal_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """5 日短期反轉：近 5 日報酬（direction=-1，高者傾向反轉，STRATEGY §1-2）。"""
+    raw = params.get("window", 5)
+    window = int(raw) if isinstance(raw, int | float | str) else 5
+    prices = (
+        view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    )
+    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
+    return (
+        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )

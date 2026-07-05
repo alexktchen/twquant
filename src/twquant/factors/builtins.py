@@ -7,6 +7,6 @@
 
 from __future__ import annotations
 
-from twquant.factors import chip, fundamental, price  # 匯入觸發 @factor 註冊
+from twquant.factors import chip, fundamental, price, volume  # 匯入觸發 @factor 註冊
 
-__all__ = ["chip", "fundamental", "price"]
+__all__ = ["chip", "fundamental", "price", "volume"]
