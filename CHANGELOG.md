@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-06 T-018（部分完成）回測引擎：backtest/（costs/engine/metrics）+ CLI
+  backtest + costs.yaml。next_open 執行、整數張、價格相依成本、漲跌停/參與率
+  unfilled、會計恆等。真實回測 sample 策略連續期成本後 Sharpe 1.12、CAGR +8.6%、
+  MDD -4.2%。閘門全綠（104 tests）。
+
 - 2026-07-06 T-017（部分完成）策略框架：strategy/（config/universe/combine/
   overlays/build）+ CLI targets + sample_revenue_trust.yaml。因子→宇宙過濾→zscore
   組合→top_n→等權→寬度 overlay→單股上限，用 T-003 日曆排週頻。真實資料：sample

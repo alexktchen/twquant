@@ -27,7 +27,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | done |
 | T-016 | 主力分點因子：清洗管線（總公司排除、隔日沖標籤、鉅額剔除）+ 集中度系列 | STRATEGY §3 | T-010, T-012 | B | todo |
 | T-017 | 策略框架：配置、宇宙、combine、overlays（三態 regime 狀態機；**不做波動縮放**，D-004） | SPEC-003 + STRATEGY §2 | T-012 | B | 部分完成 |
-| T-018 | 回測引擎：執行模型、價格相依成本、漲跌停旗標判定、會計恆等、指標 | SPEC-004 | T-017 | A | todo |
+| T-018 | 回測引擎：執行模型、價格相依成本、漲跌停旗標判定、會計恆等、指標 | SPEC-004 | T-017 | A | 部分完成 |
 | T-019 | 驗證工具：walk-forward、deflated_sharpe(trial_sharpes)、plateau、bootstrap | SPEC-004 §5 | T-018 | B | todo |
 | T-020 | 投組層：sleeve 組合、**條件式波動目標**、限額、四態 kill-switch、data/state 持久化 | SPEC-005 | T-018 | A | todo |
 | T-021 | PaperBroker（共用回測成交模組）+ 每日執行流程 + 對帳 | SPEC-006 | T-020 | A | todo |
@@ -47,6 +47,15 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-018（部分完成）**（2026-07-06）回測引擎（SPEC-004）。backtest/：costs
+  （台股檔位表、價格相依半價差 REVIEW M1、漲跌停 proxy、手續費含最低/證交稅/
+  adv_impact 滑價）、engine（next_open 執行、整數張、先賣後買現金約束、漲跌停與
+  參與率 unfilled、會計恆等 AC-6）、metrics（CAGR/Sharpe/Sortino/MDD/Calmar/
+  周轉/勝率）。CLI backtest + configs/costs.yaml。ACs 2/3/4/5/6/8 通過（104 tests）。
+  **真實回測**：sample 策略在連續期 2025-08~2025-12（104 交易日）成本後
+  Sharpe 1.12、CAGR +8.57%、MDD -4.17%、勝率 56.3%、0 未成交。**待接**：AC-1
+  golden 凍結（需複審）、AC-7 處置強制出場（無 disposition 資料）、AC-9
+  walk-forward（T-019）。
 - **T-017（部分完成）**（2026-07-06）策略框架（SPEC-003）。strategy/：config
   （pydantic，AC-1 因子存在+最相近提示、權重加總=1）、universe（20 日 ADV 中位數 +
   最低價 + 四碼普通股）、combine（zscore_weighted、rank_avg；方向併入權重）、

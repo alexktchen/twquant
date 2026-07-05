@@ -508,6 +508,62 @@ def targets(
 
 
 @app.command()
+def backtest(
+    strategy: str = typer.Option(..., help="策略 YAML 路徑"),
+    start: str = typer.Option(..., help="回測起 YYYY-MM-DD"),
+    end: str = typer.Option(..., help="回測迄 YYYY-MM-DD"),
+    capital: float = typer.Option(10_000_000.0, help="初始資金"),
+) -> None:
+    """跑回測，印績效指標並記入 research_log（純量化，不需 LLM）。"""
+    import hashlib
+
+    from twquant.backtest.costs import CostConfig
+    from twquant.backtest.engine import run_backtest
+    from twquant.config import load_config
+    from twquant.data.warehouse import Warehouse
+    from twquant.reporting.research_log import append_research_log
+    from twquant.strategy.config import load_strategy
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    strat = load_strategy(strategy)
+    cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+
+    res = run_backtest(strat, cost, s, e, wh, initial_capital=capital)
+    m = res.metrics
+    total_ret = res.final_equity / res.initial_capital - 1.0
+    typer.secho(
+        f"回測 {strat.name} · {s} ~ {e} · {m.n_days} 交易日", fg=typer.colors.CYAN, bold=True
+    )
+    typer.echo(f"  總報酬 {total_ret * 100:+.2f}%　CAGR {m.cagr * 100:+.2f}%")
+    typer.echo(f"  Sharpe {m.sharpe:+.2f}　Sortino {m.sortino:+.2f}　Calmar {m.calmar:+.2f}")
+    typer.echo(f"  最大回撤 {m.mdd * 100:.2f}%　勝率 {m.win_rate * 100:.1f}%")
+    typer.echo(
+        f"  年化周轉 {m.turnover * 100:.0f}%　成交 {len(res.ledger)} 筆　未成交 {len(res.unfilled)} 筆"
+    )
+
+    phash = hashlib.sha256(f"{strat.name}|{start}|{end}".encode()).hexdigest()[:12]
+    append_research_log(
+        cfg.data_dir,
+        [
+            {
+                "entry_type": "backtest",
+                "strategy": strat.name,
+                "factor": "",
+                "params_hash": phash,
+                "date": e.isoformat(),
+                "metric_name": name,
+                "metric_value": float(val),
+                "trial_scope": f"bt:{strat.name}",
+            }
+            for name, val in [("sharpe", m.sharpe), ("cagr", m.cagr), ("mdd", m.mdd)]
+        ],
+    )
+    typer.secho("已記入 research_log。", fg=typer.colors.GREEN)
+
+
+@app.command()
 def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL")) -> None:
     """對資料湖跑 SQL 分析（各 clean 表為同名視圖）。"""
     from twquant.data.warehouse import Warehouse
