@@ -107,30 +107,88 @@ def _load_system() -> SystemConfig:
     return load_config(_CONFIG_DIR / "system.yaml", SystemConfig)
 
 
-@app.command()
-def ingest(
-    date: str = typer.Option(..., help="交易日 YYYY-MM-DD"),
-    tables: list[str] | None = typer.Option(None, help="要抓的表，預設全部 TWSE 表"),
-) -> None:
-    """抓 TWSE 當日資料、清洗、存入 clean 資料湖。"""
+def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> int:
+    """抓→清洗→存單日 TWSE 資料。tolerant=True 時，非交易日/單表失敗只警告不中斷。
+
+    回傳成功存入的表數。
+    """
     from twquant.data.clean import CLEANERS
     from twquant.data.http import HttpClient
     from twquant.data.sources.twse_rwd import TwseRwdSource
     from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
 
-    day = dt.date.fromisoformat(date)
     cfg = _load_system()
     client = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
     src = TwseRwdSource(client=client)
     wh = Warehouse(cfg.data_dir)
     todo = tables or src.tables
 
+    ok = 0
     for table in todo:
         typer.secho(f">> 抓取 {table} @ {day}", fg=typer.colors.CYAN)
-        raw = src.fetch(table, day)
-        clean = CLEANERS[table](raw, day)
-        wh.write("clean", table, clean)
+        try:
+            raw = src.fetch(table, day)
+            clean = CLEANERS[table](raw, day)
+            wh.write("clean", table, clean)
+        except DataError as exc:
+            if not tolerant:
+                raise
+            typer.secho(f"[SKIP] {table}：{exc}", fg=typer.colors.YELLOW)
+            continue
         typer.secho(f"[OK] {table}：{clean.height} 列已存入 clean 層", fg=typer.colors.GREEN)
+        ok += 1
+    return ok
+
+
+@app.command()
+def ingest(
+    date: str = typer.Option(..., help="交易日 YYYY-MM-DD"),
+    tables: list[str] | None = typer.Option(None, help="要抓的表，預設全部 TWSE 表"),
+) -> None:
+    """抓 TWSE 當日資料、清洗、存入 clean 資料湖。"""
+    _ingest_date(dt.date.fromisoformat(date), tables, tolerant=False)
+
+
+@app.command()
+def daily(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """每日排程用：抓當日 TWSE 資料，非交易日自動略過（不中斷排程）。"""
+    from twquant.conventions import now_tw
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    n = _ingest_date(day, None, tolerant=True)
+    typer.secho(f"每日擷取完成：{n} 張表 @ {day}", fg=typer.colors.GREEN, bold=True)
+
+
+def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
+    """距離下一個 hh:mm（同時區）的秒數；已過今日該時刻則算明日。"""
+    target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if target <= now:
+        target += dt.timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+@app.command()
+def scheduler(
+    at: str = typer.Option("16:40", help="每日觸發時刻 HH:MM（台北）"),
+) -> None:
+    """常駐排程（v1）：每日於 at 時刻跑 daily 擷取。完整 pipeline 見 T-023。"""
+    import time
+
+    from twquant.conventions import now_tw
+
+    hh, mm = (int(x) for x in at.split(":"))
+    typer.secho(f"排程啟動：每日 {at} (Asia/Taipei) 觸發擷取", fg=typer.colors.CYAN, bold=True)
+    while True:
+        delay = _seconds_until(now_tw(), hh, mm)
+        typer.secho(f"下次觸發：{delay / 3600:.1f} 小時後", fg=typer.colors.CYAN)
+        time.sleep(delay)
+        try:
+            _ingest_date(now_tw().date(), None, tolerant=True)
+        except Exception as exc:  # noqa: BLE001  # 排程不因單日失敗而死；記錄後續跑
+            typer.secho(f"[排程錯誤] {exc}", fg=typer.colors.RED)
 
 
 @app.command()

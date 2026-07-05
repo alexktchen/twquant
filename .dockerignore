@@ -1,0 +1,14 @@
+# 資料湖與本地產物（映像不含資料，資料走 volume）
+data/
+.venv/
+.git/
+.github/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+tests/
+docs/
+*.log
+.env

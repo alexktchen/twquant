@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-05 Docker infra（D-013）：Dockerfile（python-slim + uv）、docker-compose
+  三服務（app / scheduler / dashboard）共用映像，DuckDB/Parquet 掛 volume。
+  CLI 加 daily（容忍非交易日）與 scheduler（每日觸發）。Streamlit 儀表板 v1
+  （讀倉儲顯示資料狀態與法人流向）。實測：容器讀共用 volume 資料、儀表板
+  8501 服務、排程器正常。scheduler/dashboard 完整版見 T-023/T-024。
+
 - 2026-07-05 T-011（部分）倉儲核心：清洗管線（TWSE raw→typed）、Parquet 分區
   資料湖（原子寫/分區級替換/PIT 20:00 截點）、DuckDB SQL 查詢引擎、CLI ingest/sql。
   **資料已可分析**：ingest 2026-06-30 存入三表共 3970 列，SQL 重現投信季底作帳。

@@ -1,0 +1,37 @@
+name: twquant
+
+# 三服務共用同一映像（DECISIONS D-013）。資料湖 DuckDB/Parquet 掛在 ./data volume。
+# 手動擷取：  docker compose run --rm app ingest --date 2026-06-30
+# 起排程+儀表板： docker compose up -d scheduler dashboard
+# 儀表板網址：  http://localhost:8501
+
+services:
+  app:
+    build: .
+    image: twquant:latest
+    volumes:
+      - ./data:/app/data
+    profiles: ["cli"] # 不隨 up 自動啟動；供 `docker compose run` 臨時執行 CLI
+
+  scheduler:
+    build: .
+    image: twquant:latest
+    volumes:
+      - ./data:/app/data
+    command: ["scheduler", "--at", "16:40"]
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    image: twquant:latest
+    volumes:
+      - ./data:/app/data
+    entrypoint:
+      - streamlit
+      - run
+      - src/twquant/monitoring/dashboard.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    ports:
+      - "8501:8501"
+    restart: unless-stopped

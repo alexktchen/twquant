@@ -73,6 +73,15 @@
   版本化與選版、log 類 append-only 分片、跨分區 union_by_name、Windows 檔鎖、
   schema 演進、磁碟治理。
 
+### D-013（2026-07-05，已裁決）Docker infra 與資料庫選型
+- 問題：infra 服務容器化；資料庫要 DuckDB/Parquet 還是 DB 伺服器？
+- 裁決：**維持 DuckDB + Parquet**（嵌入式、單機、零維運，符合原架構），資料湖
+  掛在 Docker volume。docker-compose 三服務共用同一映像：app（執行 CLI）、
+  scheduler（每日排程跑 ingest→pipeline）、dashboard（Streamlit，SPEC-007）。
+  不引入 Postgres/Timescale（多人/服務化才考慮，屆時走 DECISIONS）。
+- scheduler 與 dashboard 為 v1 骨架：scheduler 目前跑 `twquant daily`（單日 ingest，
+  容忍非交易日），dashboard 讀倉儲顯示資料狀態與法人流向；完整版分別在 T-023、T-024。
+
 ### D-012（已裁決）會計恆等式修正（REVIEW H7/M5）
 - 問題：SPEC-004 AC-6「現金＋持倉市值−累計成本 == 權益」重複扣成本（成本成交
   時已從現金扣除），照字面寫會把錯誤會計凍進 golden。
