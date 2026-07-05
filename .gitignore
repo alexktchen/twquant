@@ -1,0 +1,17 @@
+# 資料湖與敏感資訊永不進版控
+data/
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+
+# 本地產物
+*.log
+.DS_Store
