@@ -1,8 +1,18 @@
 # CHANGELOG
 
-- 2026-07-05 文獻驗證完成 68/76（61 確認、7 修正、0 查無）：新增
-  docs/research/PAPERS.md 總表；STRATEGY.md 引用表升級（Du/Huang/Liao 2009
-  出處修正）。剩 8 篇與完整性檢查待額度重置後補跑。
+- 2026-07-05 補跑完成（v1.2 規格修訂）：
+  - 文獻驗證 76/76 全數完成（65 確認、11 細節修正、0 查無）。兩篇作者/年份
+    張冠李戴已修正：「Momentum in Taiwan: seasonality matters!」為 Fu & Wood
+    2010（非 Du/Huang/Liao）、Faber TAA 統計出自 2013 修訂版。
+  - 規格對抗審查完成（3 視角 × 全文件）：23 high + 34 medium + 15 low 發現，
+    經作者逐條核對後屬實。本輪修正 47 項（連動 DECISIONS D-004~D-012），
+    11 項留待實作時設計選擇。完整記錄見 docs/research/REVIEW.md。
+  - 主要修正：波動目標唯一歸屬（投組層條件式）、四態 kill-switch、PIT 20:00
+    截點與多波次擷取、資料湖寫入協定（原子寫/版本化/並行）、漲跌停檔位精算、
+    會計恆等式、投信持股比資料表、參與率分母統一、IC 兩階段門檻、文件優先權、
+    portfolio_state 移出可重建層、build_targets 簽名統一、TASKS 依賴修正。
+  - 完整性檢查 16 缺口納入 STRATEGY §5a：投信訊號 ETF 污染、結構斷點、
+    Sleeve C 成本存活性、本地因子基準、待評估策略族（T-029/T-030）。
 
 - 2026-07-05 新增 SPEC-008 洞悉層、MODEL-POLICY.md（模型分工）、docs/STRATEGY.md
  （策略設計書，整合 6 組研究代理 / 76 篇文獻）；LOOP.md 增為四閉環；

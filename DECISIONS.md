@@ -22,3 +22,60 @@
 ### D-003（2026-07-04，已裁決）第一版範圍
 - 裁決：現股多頭、日頻、盤後制。不做：做空、信用、當沖、日內、零股。
   介面（權重正負、Order.side）預留擴充。
+
+---
+
+以下（D-004~D-011）為 2026-07-05 規格對抗審查後的裁決，逐項回應
+[docs/research/REVIEW.md](docs/research/REVIEW.md)。
+
+### D-004（已裁決）波動目標的唯一歸屬（REVIEW H5/M3）
+- 問題：STRATEGY §2 Overlay-2（條件式）與 SPEC-005 vol_target（無條件）語義矛盾，
+  且 T-017 與 T-020 會各實作一次造成雙重縮放，兩邊測試各自通過、check 攔不住。
+- 裁決：波動縮放**只存在於 SPEC-005 投組層（T-020）**，採**條件式**版本
+  （僅波動落在 252 日 >90 百分位才降曝險）。T-017 overlay 不做波動縮放。
+  新增跨模組 AC：全 pipeline 波動縮放係數只被套用一次（golden 端到端驗證）。
+
+### D-005（已裁決）參與率分母的唯一定義（REVIEW H12）
+- 裁決：回測與實盤都用「過去 20 交易日成交金額中位數（ADV）」作參與率分母；
+  回測另以當日實際成交金額做事後上限截斷並記入 unfilled。ADV 統一為 SPEC-003
+  的「20 日成交金額中位數」，LOOP/SPEC-004/STRATEGY 全引用此定義。
+
+### D-006（已裁決）IC 門檻兩階段（REVIEW M2/M15）
+- 裁決：單因子初篩 RankIC t-stat ≥ 2 進候選；正式上線 ≥ 3。兩數字放
+  configs（`ic_tstat_screen`、`ic_tstat_promote`），LOOP §1 與 STRATEGY §1-8
+  引用同一鍵，不再各寫一個值。
+
+### D-007（已裁決）文件優先權順序（REVIEW H11）
+- 裁決：衝突時權威順序 `data/schemas.py > 模組 SPEC > ARCHITECTURE（示意）
+  > 其他`。ARCHITECTURE §3 簽名視為示意，以各 SPEC 為準。寫入 SPEC-000。
+
+### D-008（已裁決）訊號生成 PIT 截點（REVIEW H3/H6/H17/H18/M25/M30）
+- 問題：回測 view(as_of=date) 取 23:59、生產 18:00 產訊號，兩軌可見資料集不同
+  （融資 21:00、月營收 22:00、TDCC 週六），是內建漂移來源，反前視測試不會攔。
+- 裁決：定義訊號生成截點。每交易日訊號的 as_of = 當日 20:00（含 18:00 盤後，
+  **不含** 21:00 融資 → 融資以 T-1 進當日訊號）。回測 date 型 as_of 一律 coerce
+  到 20:00 而非 23:59。資料擷取改多波次（LOOP §3）。新增 AC：回測與生產對
+  同一 as_of 的 PitView 可見列集合 bit-identical。
+
+### D-009（已裁決）kill-switch 四態狀態機（REVIEW H10/H34）
+- 裁決：擴為 `NORMAL → NO_NEW_ENTRY → REDUCED(50%) → HALTED`。單日虧損 >3%
+  → NO_NEW_ENTRY（持倉不動、禁止任一權重上升）；回撤 >15% → REDUCED；
+  回撤 >20% 或品質閘門連 3 日不過 → HALTED。回撤高點基準 = 上線以來權益高
+  水位。HALTED 僅人工恢復。SPEC-005 §2 逐條列觸發器→狀態→恢復→持久化＋AC。
+
+### D-010（已裁決）portfolio_state 移出可重建層（REVIEW H20）
+- 裁決：狀態與凍結旗標移出 `data/signal/`，改放新增的 `data/state/` 專層
+  （SPEC-000 標記不可重建、須備份）。單一 state manager 序列化＋原子寫；
+  狀態檔缺失/損毀 → fail-safe HALTED＋CRIT，禁止靜默回 NORMAL。
+
+### D-011（已裁決）資料湖寫入協定（REVIEW H19/H21/H22/M31/M32/M33）
+- 裁決：新增 SPEC-001 §7「寫入協定」，統一規範原子寫入（temp+rename）、raw
+  版本化與選版、log 類 append-only 分片、跨分區 union_by_name、Windows 檔鎖、
+  schema 演進、磁碟治理。
+
+### D-012（已裁決）會計恆等式修正（REVIEW H7/M5）
+- 問題：SPEC-004 AC-6「現金＋持倉市值−累計成本 == 權益」重複扣成本（成本成交
+  時已從現金扣除），照字面寫會把錯誤會計凍進 golden。
+- 裁決：AC-6 改為「權益(t)=現金(t)+持倉市值(t)；且 權益(t)−權益(t-1)==當日持倉
+  損益−當日成本（誤差<1e-6）」。equity curve 定義為含成本淨值、成本於成交時
+  自現金扣除。

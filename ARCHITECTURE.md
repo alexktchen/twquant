@@ -90,9 +90,10 @@ def run_backtest(strategy_cfg: StrategyConfig, cost_cfg: CostConfig,
 ```
 
 ### portfolio/（SPEC-005）
+本節簽名為示意；權威定義以 SPEC-005 §3 為準（文件優先權見 SPEC-000 / D-007）。
 ```python
-def build_targets(sleeves: list[SleeveSignal], risk_cfg: RiskConfig,
-                  state: PortfolioState) -> list[TargetPosition]
+def build_targets(sleeve_signals: list[SleeveSignal], view: PitView,
+                  state: PortfolioState, cfg: PortfolioConfig) -> TargetBook
 ```
 
 ### execution/（SPEC-006）

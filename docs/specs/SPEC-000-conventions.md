@@ -40,14 +40,41 @@
 | clean | 正規化、通過 schema 驗證 | 允許重建（從 raw 重跑） |
 | feature | 因子值（原始與標準化後） | 允許重建 |
 | signal | 策略目標權重 | 允許重建；生產當日版本另存快照不可變 |
+| state | kill-switch 狀態、凍結旗標（D-010） | **不可重建、須備份**；非資料湖 |
 
-分區：`data/{layer}/{table}/date=YYYY-MM-DD/*.parquet`。
-低頻表（月營收、股權分散）用 `date=` 該資料所屬期間的最後一日。
+- 分區：`data/{layer}/{table}/date=YYYY-MM-DD/*.parquet`。寫入協定（原子寫、
+  版本化、並行、檔鎖）見 SPEC-001 §7。
+- **低頻表 date 慣例（REVIEW M26）**：`date=` 為該資料的「基準交易日」——
+  shareholding_dispersion 用該週最後一個交易日（通常週五）、monthly_revenue
+  另加實體欄 `period_end`（所屬月最後日曆日）但分區 date 用公布日所屬交易日。
+  低頻表與日頻表 join 一律用 `backward asof join on available_at`，禁止等值 date join。
+- `data/state/` 不走上述分層規則，是單檔持久化（見 SPEC-005 §2、D-010）。
+
+## 文件優先權（衝突裁決順序，D-007）
+
+文件互相矛盾時，以此順序為準：
+`data/schemas.py（資料 schema）> 模組 SPEC（介面簽名與 AC）> ARCHITECTURE
+（示意）> 其他文件`。ARCHITECTURE §3 的介面簽名一律視為示意，實作以各 SPEC
+為準。遇到本順序無法裁決的矛盾 → 走 DECISIONS.md。
 
 ## 配置
 
 - 全部 YAML，載入即用 pydantic 模型驗證（`src/twquant/config.py`）
 - 配置模型欄位全部要有型別與預設值說明；未知欄位 = 驗證錯誤（`extra="forbid"`）
+- **完整配置檔清單與權威來源**（REVIEW M23；此清單為白名單）：
+
+| 檔案 | 欄位定義權威 |
+|---|---|
+| `configs/system.yaml` | SPEC-001（來源速率、品質閘門閾值、磁碟閾值） |
+| `configs/strategies/<name>.yaml` | SPEC-003 |
+| `configs/portfolio.yaml` | SPEC-005 |
+| `configs/overlays.yaml` | SPEC-003 §4 |
+| `configs/costs.yaml` | SPEC-004 §2 |
+| `configs/risk.yaml` | SPEC-005 §2（kill-switch 數字）、IC 門檻 `ic_tstat_screen/promote` |
+| `configs/llm.yaml` | MODEL-POLICY §3、SPEC-008（含 pricing 與 usd_twd） |
+
+  各 config 的 pydantic 模型必填欄位清單直接列在對應 SPEC，使 AC-2 可寫成
+  確定性測試。
 - 環境變數只放秘密與環境路徑（`.env`）：`FINMIND_TOKEN`、`SHIOAJI_API_KEY`、
   `SHIOAJI_SECRET`、`TWQUANT_DATA_DIR`
 

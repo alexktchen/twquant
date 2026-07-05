@@ -76,9 +76,17 @@ python -m twquant check --fast   # 只跑受影響模組的測試（開發中用
     測試檔必須呼叫它。
   - 冪等性質：同一輸入跑兩次，輸出 bit-identical（決定性；隨機需固定 seed）。
   - 不變量：權重和 ≤ 1 + 1e-9、個股權重 ≤ 上限、成交量參與率 ≤ 配置值。
-- **golden fixtures**：`tests/golden/` 放小型真實切片資料（約 30 檔股票 × 2 年）
-  與預期輸出。由 T-005 一次性生成後凍結。
+- **golden fixtures 分兩類（REVIEW H14）**：
+  （1）**輸入資料切片**（約 30 檔 × 2 年，含除息/漲停/處置/月營收/減資案例）：
+  由 T-005 一次性生成後凍結，黃金規則 6 禁止修改。
+  （2）**引擎預期輸出**（IC 報告的 RankIC、回測指標）：其生成需要對應引擎
+  （T-013、T-018）才存在，故在該引擎任務**首次通過複審後才凍結**。追加預期輸出
+  不算違反「不可改」，但必須在任務完成註記留下生成指令與複審紀錄。
 - 測試不得連網。來源轉接器的測試用錄好的 HTTP fixture（`tests/fixtures/http/`）。
+- **IO 邊界靜態閘門（REVIEW H8）**：`check` 套件含一條靜態測試，驗證
+  `factors/ strategy/ backtest/ portfolio/ insight/` 內無 `open(`、`write_parquet`、
+  `import requests`、`import anthropic`（洞悉層例外，見 SPEC-008）。落地由
+  `reporting/`、資料層或 CLI 負責。這把黃金規則 10 從「靠審查」升級為「機器可攔」。
 
 ## 5. 程式風格
 

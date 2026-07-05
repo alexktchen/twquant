@@ -26,7 +26,22 @@ def concentration_10d(view: PitView, params: dict) -> pl.DataFrame:
   無值就不回傳該列（不准填 0）
 - 註冊表（`factors/registry.py`）：`get(name)`、`list(category=...)`、
   重複註冊同名 → raise
+- **名稱格式驗證（REVIEW M14）**：註冊名須匹配
+  `^(price|volume|chip|fundamental|market)\.[a-z0-9_]+(_\d+d)?$`，不符即 raise。
+  視窗後綴用 `_Nd`（時間），非時間參數（如 top_n）放 params 不進名稱。
 - params 的預設值寫在裝飾器；策略 YAML 可覆寫；實際使用值進 artifact metadata
+
+### 1a. 基準因子 `price.mom_20d`（AC-1/AC-5 與 SPEC-004 golden 引用，REVIEW H9）
+
+供端到端 golden 測試的最小因子，必須明確定義並列為 T-012 交付項：
+```python
+@factor(name="price.mom_20d", category="price", direction=1,
+        tables=["prices_daily"], lookback_days=25, anchor_invariant=True)
+def mom_20d(view, params):
+    """adj_close(t) / adj_close(t-20) - 1，使用還原價、不含任何未來日。
+    回傳 (date, stock_id, value)；不足 21 個交易日的股票不回傳該列。"""
+```
+比率型、`anchor_invariant=True`（還原價換錨不影響值，故可走向量化捷徑）。
 
 ## 2. 計算引擎
 
@@ -52,15 +67,25 @@ def compute(names: list[str], view: PitView, dates: list[dt.date],
 
 輸出與原始值分開落地：`feature/factor_raw`、`feature/factor_std`。
 
-## 4. IC 檢驗報告（`factors/ic_report.py`）
+## 4. IC 檢驗報告
 
-輸入：因子名、期間、前向報酬天數（預設 5, 10, 20）。輸出（HTML + parquet）：
+**IO 邊界（REVIEW H8）**：計算與落地分離。`factors/ic_report.py` 的
+`compute_ic_report(...)` 是純函數，回傳資料結構；落地（HTML + parquet + append
+research_log）由 `reporting/`（IO 層）負責。factors/ 內禁止寫檔（黃金規則 10，
+且 T-001 的 check 有靜態測試驗證 factors/strategy/backtest/portfolio 內無
+`open(`/`write_parquet`/`import requests`）。
+
+`compute_ic_report` 輸入：因子名、期間、前向報酬天數（預設 5, 10, 20）。回傳含：
 - RankIC 時序、均值、t-stat（Newey-West 修正，lag = 前向天數）
 - 分 5 組（quintile）等權組合的累積報酬與多空價差
 - 因子自相關（衰退曲線）、換手率含義
 - 與既有因子庫全成員的橫斷面相關矩陣（|ρ| > 0.7 高亮）
 
-每次產出自動 append 到 `research_log.parquet`（見 LOOP.md 嘗試次數登記）。
+reporting 層負責 append 到 `research_log/`（分片 append-only，SPEC-001 §7）。
+research_log schema（唯一定義，供 deflated Sharpe 的 trials，REVIEW M17）：
+`entry_type`（ic_test|backtest）、`strategy`、`factor`、`params_hash`、`date`、
+`metric_name`、`metric_value`、`trial_scope`。deflated Sharpe 的 trials =
+同一 trial_scope 下 distinct params_hash 數。
 
 ## 5. 反前視護欄（`factors/testing.py`）
 

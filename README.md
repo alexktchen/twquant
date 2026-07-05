@@ -11,6 +11,8 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 系統架構：模組邊界、資料合約、擴充點 | 實作前必讀 |
 | [docs/LOOP.md](docs/LOOP.md) | 四大閉環：研究、開發、營運、洞悉 | 理解系統如何自我修正 |
 | [docs/STRATEGY.md](docs/STRATEGY.md) | 策略設計書：台股實證結論、sleeve 設計、主力分點因子規格 | 實作因子/策略時讀 |
+| [docs/research/PAPERS.md](docs/research/PAPERS.md) | 76 篇文獻驗證總表（逐篇網路查證） | 覆核引用時讀 |
+| [docs/research/REVIEW.md](docs/research/REVIEW.md) | 規格對抗審查與完整性檢查記錄（72 發現 + 16 缺口） | 了解已知限制與待辦時讀 |
 | [docs/specs/](docs/specs/) | 各模組規格書（含逐條驗收條件） | 實作該模組時讀 |
 | [TASKS.md](TASKS.md) | 實作任務佇列（含依賴順序與模型分級） | 挑任務時讀 |
 | [DECISIONS.md](DECISIONS.md) | 決策紀錄：規格模糊處的提問與裁決 | 遇到規格衝突時讀寫 |
