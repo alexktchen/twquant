@@ -470,6 +470,44 @@ def ic_report(
 
 
 @app.command()
+def targets(
+    strategy: str = typer.Option(..., help="策略 YAML 路徑"),
+    date: str = typer.Option("", help="訊號日 YYYY-MM-DD，空=最新交易日"),
+) -> None:
+    """依策略配置產生某訊號日的目標權重（不需 LLM；純量化）。"""
+    from twquant.data.warehouse import Warehouse
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.config import load_strategy
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    strat = load_strategy(strategy)
+
+    day = dt.date.fromisoformat(date) if date else wh.latest_date("prices_daily")
+    if day is None:
+        typer.secho("資料湖無行情，先 backfill。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    out = build_targets(strat, wh, day)
+    typer.secho(
+        f"策略 {strat.name} · 訊號日 {day} · {out.height} 檔目標部位",
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
+    if out.is_empty():
+        typer.secho("空手日（無合格標的或曝險為 0）。", fg=typer.colors.YELLOW)
+        return
+    ranked = out.sort("target_weight", descending=True)
+    for r in ranked.head(20).to_dicts():
+        typer.echo(f"  {r['stock_id']}　權重 {r['target_weight'] * 100:.2f}%")
+    typer.secho(
+        f"合計曝險 {out['target_weight'].sum() * 100:.1f}%（上限單股 "
+        f"{strat.max_weight_per_stock * 100:.0f}%）",
+        fg=typer.colors.GREEN,
+    )
+
+
+@app.command()
 def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL")) -> None:
     """對資料湖跑 SQL 分析（各 clean 表為同名視圖）。"""
     from twquant.data.warehouse import Warehouse

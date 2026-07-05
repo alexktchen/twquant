@@ -26,7 +26,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-014 | P0/P1 價量因子 + 最小本地因子組（市場/SMB/HML/52週高/短反轉，作中性化基準） | STRATEGY §4/§5a | T-012 | B | todo |
 | T-015 | P0 籌碼因子：投信買超（分主動/被動重驗 IC）、月營收動能（PEAD）、散戶密集度 | STRATEGY §4/§5a | T-012 | B | done |
 | T-016 | 主力分點因子：清洗管線（總公司排除、隔日沖標籤、鉅額剔除）+ 集中度系列 | STRATEGY §3 | T-010, T-012 | B | todo |
-| T-017 | 策略框架：配置、宇宙、combine、overlays（三態 regime 狀態機；**不做波動縮放**，D-004） | SPEC-003 + STRATEGY §2 | T-012 | B | todo |
+| T-017 | 策略框架：配置、宇宙、combine、overlays（三態 regime 狀態機；**不做波動縮放**，D-004） | SPEC-003 + STRATEGY §2 | T-012 | B | 部分完成 |
 | T-018 | 回測引擎：執行模型、價格相依成本、漲跌停旗標判定、會計恆等、指標 | SPEC-004 | T-017 | A | todo |
 | T-019 | 驗證工具：walk-forward、deflated_sharpe(trial_sharpes)、plateau、bootstrap | SPEC-004 §5 | T-018 | B | todo |
 | T-020 | 投組層：sleeve 組合、**條件式波動目標**、限額、四態 kill-switch、data/state 持久化 | SPEC-005 | T-018 | A | todo |
@@ -47,6 +47,16 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-017（部分完成）**（2026-07-06）策略框架（SPEC-003）。strategy/：config
+  （pydantic，AC-1 因子存在+最相近提示、權重加總=1）、universe（20 日 ADV 中位數 +
+  最低價 + 四碼普通股）、combine（zscore_weighted、rank_avg；方向併入權重）、
+  overlays（breadth_regime_filter，市場寬度由 prices 計算）、build（build_targets +
+  signal_dates 用 T-003 日曆排週/月頻，AC-3）。CLI `targets`；configs/strategies/
+  sample_revenue_trust.yaml。**真實資料端到端**：sample 策略在 2026-06-30 產出 40 檔
+  等權目標（月營收 YoY 0.6 + 投信連買 0.4，zscore 組合、top40、寬度 overlay 後總曝險
+  82%）。ACs：1/3/5/6/7 通過（95 tests）。**待接**：AC-2 處置/全額交割排除、上市日、
+  市場別（無 disposition/stock_meta 資料）；AC-4 ic_weighted 組合（需 PIT IC 重估）；
+  score_prop/inv_vol 權重；index_trend_filter（需加權指數）。
 - **T-003**（2026-07-06）交易日曆（SPEC-000 AC-3）。data/calendar.py：
   TradingCalendar（is_session/between/missing/next_session/prev_session）、
   derive_from_prices（由 prices_daily 各來源日期聯集推導——TPEX 完整即還原真實

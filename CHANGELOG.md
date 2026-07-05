@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-06 T-017（部分完成）策略框架：strategy/（config/universe/combine/
+  overlays/build）+ CLI targets + sample_revenue_trust.yaml。因子→宇宙過濾→zscore
+  組合→top_n→等權→寬度 overlay→單股上限，用 T-003 日曆排週頻。真實資料：sample
+  策略 2026-06-30 產出 40 檔等權目標（總曝險 82%）。待接：ic_weighted、處置股排除、
+  index overlay。閘門全綠（95 tests）。
+
 - 2026-07-06 T-003 交易日曆：data/calendar.py（TradingCalendar + 由 prices_daily
   聯集推導 + 單檔持久化 + 來源核對）、CLI calendar。缺口偵測改以「開市日」為準、
   禁用 weekday()：TPEX 缺口 18→0（假日不再誤判）、TWSE 顯示 101 個真實 ban 缺口。

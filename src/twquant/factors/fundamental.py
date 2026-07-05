@@ -24,12 +24,19 @@ def _daily_spine(view: PitView) -> pl.LazyFrame:
 
 def _asof_map(spine: pl.LazyFrame, rev: pl.LazyFrame, value_col: str) -> pl.DataFrame:
     """把每檔的月營收欄位以公布日 as-of（backward）映射到每個交易日。"""
-    return (
-        spine.join_asof(rev, left_on="date", right_on="_avail", by="stock_id", strategy="backward")
-        .select("date", "stock_id", pl.col(value_col).alias("value"))
-        .drop_nulls("value")
-        .collect()
+    import warnings
+
+    joined = spine.join_asof(
+        rev, left_on="date", right_on="_avail", by="stock_id", strategy="backward"
     )
+    with warnings.catch_warnings():
+        # 附 by 群組時 polars 無法驗證排序旗標；我們已明確 sort（屬 polars 限制，非資料問題）
+        warnings.filterwarnings("ignore", message="Sortedness of columns cannot be checked")
+        return (
+            joined.select("date", "stock_id", pl.col(value_col).alias("value"))
+            .drop_nulls("value")
+            .collect()
+        )
 
 
 @factor(

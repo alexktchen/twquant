@@ -77,4 +77,6 @@ filterwarnings = [
     "error",
     # pandera 1.x 在 polars 1.42+ 用了已棄用的 concat(how='horizontal')
     "ignore:the default behavior of:DeprecationWarning",
+    # join_asof 附 by 群組時 polars 無法驗證排序旗標（我們已明確 sort，屬 polars 限制）
+    "ignore:Sortedness of columns cannot be checked:UserWarning",
 ]

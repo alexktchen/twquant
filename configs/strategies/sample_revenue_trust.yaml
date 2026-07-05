@@ -1,0 +1,27 @@
+# 範例策略：月營收動能 + 投信連買（籌碼確認），週頻、市場寬度 overlay。
+# 說明用途——展示 T-017 策略框架端到端；因子權重非最終 alpha（見 TASKS T-015 IC 備註）。
+name: sample_revenue_trust
+description: 月營收 YoY 動能為主、投信連買為輔的週頻選股
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000          # 20 日成交金額中位數下限
+  min_price: 10.0
+
+signals:
+  - factor: fundamental.revenue_yoy   # 最穩健因子（IC t≈+8）
+    weight: 0.6
+  - factor: chip.trust_streak          # 投信連買天數（籌碼確認）
+    weight: 0.4
+
+combine: zscore_weighted
+selection:
+  method: top_n
+  top_n: 40
+weighting: equal
+rebalance:
+  schedule: weekly
+  day: MON
+  execution: next_open
+overlays: [breadth_regime_filter]
+max_weight_per_stock: 0.05
