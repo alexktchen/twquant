@@ -104,6 +104,17 @@ class Warehouse:
         ]
         return max(dates) if dates else None
 
+    def source_dates(self, table: str, source: str, layer: str = "clean") -> list[dt.date]:
+        """某來源在該表已存資料的所有日期（排序）。供擷取狀態/缺口檢視。"""
+        base = self._root / layer / table
+        fname = f"part-{source}.parquet"
+        out = [
+            dt.date.fromisoformat(p.name[len("date=") :])
+            for p in base.glob("date=*")
+            if p.name != "date=_all" and (p / fname).exists()
+        ]
+        return sorted(out)
+
     def view(self, as_of: dt.date | dt.datetime) -> PitView:
         """建立某 as_of 截點的 PIT 視圖（date 型 as_of coerce 到 20:00，D-008）。"""
         return PitView(self, as_of_cutoff(as_of))

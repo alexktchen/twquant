@@ -1,5 +1,12 @@
 # CHANGELOG
 
+- 2026-07-05 抓資料狀態介面：ingest_log（記錄每次擷取的成功/失敗/列數/細節，
+  append-only 分片）；ingest/daily/backfill/ingest-revenue 全數記錄；`twquant status`
+  CLI 顯示各來源涵蓋、平日缺口、最近失敗、最後執行；儀表板加「擷取狀態」面板。
+  完全靠 CLI+排程器+儀表板運作，不需 LLM。實測 status 清楚顯示 TWSE 缺口 119 日。
+- 2026-07-05 T-013 IC 檢驗 + research_log：factors/ic.py（RankIC/t-stat/多空價差）、
+  reporting/research_log.py。真實驗證動能在台股 5 日顯著反轉、20 日無效。
+
 - 2026-07-05 Docker infra（D-013）：Dockerfile（python-slim + uv）、docker-compose
   三服務（app / scheduler / dashboard）共用映像，DuckDB/Parquet 掛 volume。
   CLI 加 daily（容忍非交易日）與 scheduler（每日觸發）。Streamlit 儀表板 v1

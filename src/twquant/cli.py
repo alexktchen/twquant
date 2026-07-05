@@ -122,6 +122,7 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
     from twquant.data.sources.twse_rwd import TwseRwdSource
     from twquant.data.warehouse import Warehouse
     from twquant.errors import DataError
+    from twquant.reporting.ingest_log import record
 
     cfg = _load_system()
     wh = Warehouse(cfg.data_dir)
@@ -145,10 +146,12 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
                 clean = cleaners[table](raw, day)
                 wh.write("clean", table, clean, source=source_tag)
             except DataError as exc:
+                record(cfg.data_dir, source_tag, table, day, "failed", detail=str(exc))
                 if not tolerant:
                     raise
                 typer.secho(f"[SKIP] {source_tag}/{table}：{exc}", fg=typer.colors.YELLOW)
                 continue
+            record(cfg.data_dir, source_tag, table, day, "success", rows=clean.height)
             typer.secho(
                 f"[OK] {source_tag}/{table}：{clean.height} 列已存入", fg=typer.colors.GREEN
             )
@@ -269,6 +272,7 @@ def ingest_revenue(
     from twquant.data.sources.mops import MopsSource
     from twquant.data.warehouse import Warehouse
     from twquant.errors import DataError
+    from twquant.reporting.ingest_log import record
 
     year, mon = (int(x) for x in month.split("-"))
     roc = year - 1911
@@ -284,9 +288,76 @@ def ingest_revenue(
             clean = clean_monthly_revenue(raw, roc, mon)
             wh.write("clean", "monthly_revenue", clean, source=f"mops_{market}")
         except DataError as exc:
+            record(
+                cfg.data_dir, f"mops_{market}", "monthly_revenue", month, "failed", detail=str(exc)
+            )
             typer.secho(f"[SKIP] {market}：{exc}", fg=typer.colors.YELLOW)
             continue
+        record(
+            cfg.data_dir, f"mops_{market}", "monthly_revenue", month, "success", rows=clean.height
+        )
         typer.secho(f"[OK] {market} {month}：{clean.height} 家已存入", fg=typer.colors.GREEN)
+
+
+@app.command()
+def status() -> None:
+    """顯示資料擷取狀態：各來源涵蓋範圍、平日缺口、最近失敗、最後執行時點。"""
+    import polars as pl
+
+    from twquant.data.warehouse import Warehouse
+    from twquant.reporting.ingest_log import last_run, read_ingest_log, recent_failures
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+
+    typer.secho("=== 資料擷取狀態 ===", fg=typer.colors.CYAN, bold=True)
+    daily_plan = [
+        ("prices_daily", ["twse", "tpex"]),
+        ("institutional_daily", ["twse"]),
+        ("margin_daily", ["twse"]),
+    ]
+    for table, sources in daily_plan:
+        for source in sources:
+            dates = wh.source_dates(table, source)
+            if not dates:
+                typer.secho(f"  {source}/{table}：無資料", fg=typer.colors.YELLOW)
+                continue
+            stored = set(dates)
+            gaps = [
+                d for d in _daterange(dates[0], dates[-1]) if d.weekday() < 5 and d not in stored
+            ]
+            gap_note = f"，平日缺 {len(gaps)} 日" if gaps else "，無缺口"
+            color = typer.colors.YELLOW if gaps else typer.colors.GREEN
+            typer.secho(
+                f"  {source}/{table}：{dates[0]} ~ {dates[-1]}　{len(dates)} 交易日{gap_note}",
+                fg=color,
+            )
+            if gaps:
+                head = ", ".join(str(g) for g in gaps[:3])
+                more = f" …等 {len(gaps)} 日" if len(gaps) > 3 else ""
+                typer.secho(f"      缺口起於：{head}{more}", fg=typer.colors.YELLOW)
+
+    rev_dates = wh.source_dates("monthly_revenue", "mops_sii")
+    if rev_dates:
+        typer.secho(
+            f"  mops/monthly_revenue：{rev_dates[0]} ~ {rev_dates[-1]}　{len(rev_dates)} 個月",
+            fg=typer.colors.GREEN,
+        )
+
+    lr = last_run(cfg.data_dir)
+    typer.secho(f"\n最後擷取時點：{lr or '（無紀錄）'}", fg=typer.colors.CYAN)
+    log = read_ingest_log(cfg.data_dir)
+    if not log.is_empty():
+        nfail = log.filter(pl.col("status") == "failed").height
+        typer.secho(f"擷取紀錄：{log.height} 筆，其中失敗 {nfail} 筆", fg=typer.colors.CYAN)
+    fails = recent_failures(cfg.data_dir, limit=5)
+    if not fails.is_empty():
+        typer.secho("最近失敗：", fg=typer.colors.YELLOW)
+        for r in fails.to_dicts():
+            typer.secho(
+                f"  [{r['attempt_ts'][:19]}] {r['source']}/{r['table']} @ {r['date']}",
+                fg=typer.colors.YELLOW,
+            )
 
 
 @app.command(name="ic-report")

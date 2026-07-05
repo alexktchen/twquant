@@ -57,6 +57,9 @@ def main() -> None:
             label=label, value=(d.isoformat() if d else "—"), delta=f"{_rows(wh, table):,} 列"
         )
 
+    # ── 擷取狀態（涵蓋/缺口/失敗）─────────────────────────────────
+    _ingestion_status(wh)
+
     price_dates = _price_dates(wh)
     if not price_dates:
         st.info("資料湖尚無行情。先執行：`twquant backfill --from ... --to ...`")
@@ -105,6 +108,62 @@ def main() -> None:
         right.dataframe(rev.to_pandas(), width="stretch", height=420)
 
     st.caption(f"最新行情日：{latest}｜資料來源：TWSE 上市 · TPEX 上櫃 · MOPS 月營收")
+
+
+def _ingestion_status(wh: Warehouse) -> None:
+    """擷取涵蓋/缺口/最近失敗——讓人（非 LLM）一眼看資料抓取狀態。"""
+    import datetime as dt
+
+    from twquant.reporting.ingest_log import last_run, read_ingest_log, recent_failures
+
+    st.subheader("擷取狀態")
+    plan = [
+        ("prices_daily", "twse", "上市行情"),
+        ("prices_daily", "tpex", "上櫃行情"),
+        ("institutional_daily", "twse", "三大法人"),
+        ("margin_daily", "twse", "融資融券"),
+    ]
+    rows = []
+    for table, source, label in plan:
+        dates = wh.source_dates(table, source)
+        if not dates:
+            rows.append({"資料": label, "區間": "—", "交易日": 0, "平日缺口": "—"})
+            continue
+        stored = set(dates)
+        span = [dates[0] + dt.timedelta(days=i) for i in range((dates[-1] - dates[0]).days + 1)]
+        gaps = [d for d in span if d.weekday() < 5 and d not in stored]
+        rows.append(
+            {
+                "資料": label,
+                "區間": f"{dates[0]} ~ {dates[-1]}",
+                "交易日": len(dates),
+                "平日缺口": f"{len(gaps)} 日" if gaps else "無",
+            }
+        )
+    st.dataframe(rows, width="stretch", hide_index=True)
+
+    cols = st.columns(2)
+    cols[0].caption(f"最後擷取時點：{last_run(_warehouse_dir()) or '（無紀錄）'}")
+    fails = recent_failures(_warehouse_dir(), limit=8)
+    log = read_ingest_log(_warehouse_dir())
+    if not log.is_empty():
+        nfail = log.filter(log["status"] == "failed").height
+        cols[1].caption(f"擷取紀錄 {log.height} 筆 · 失敗 {nfail} 筆")
+    if not fails.is_empty():
+        with st.expander(f"最近失敗 {fails.height} 筆"):
+            st.dataframe(
+                fails.select("attempt_ts", "source", "table", "date", "detail").to_pandas(),
+                width="stretch",
+                hide_index=True,
+            )
+
+
+def _warehouse_dir() -> str:
+    cfg = load_config(_CONFIG, SystemConfig)
+    p = Path(cfg.data_dir)
+    if not p.is_absolute():
+        p = _CONFIG.parents[1] / p
+    return str(p)
 
 
 def _price_dates(wh: Warehouse) -> list[str]:
