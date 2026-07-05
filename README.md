@@ -49,6 +49,12 @@ python -m twquant ingest --date 2026-07-03   # 拉一天資料
 python -m twquant backtest configs/strategies/momentum_52wh.yaml
 ```
 
+## 完整文件索引
+
+- 根目錄：[CLAUDE.md](CLAUDE.md)（AI 實作規則）· [MODEL-POLICY.md](MODEL-POLICY.md)（模型分工）· [ARCHITECTURE.md](ARCHITECTURE.md)（架構書）· [TASKS.md](TASKS.md)（任務佇列）· [DECISIONS.md](DECISIONS.md)（決策紀錄）· [CHANGELOG.md](CHANGELOG.md)
+- 設計文件：[docs/LOOP.md](docs/LOOP.md)（四大閉環）· [docs/STRATEGY.md](docs/STRATEGY.md)（策略設計書）· [docs/research/PAPERS.md](docs/research/PAPERS.md)（76 篇文獻驗證總表）
+- 模組規格：[SPEC-000 全域慣例](docs/specs/SPEC-000-conventions.md) · [SPEC-001 資料層](docs/specs/SPEC-001-data.md) · [SPEC-002 因子註冊表](docs/specs/SPEC-002-factors.md) · [SPEC-003 策略框架](docs/specs/SPEC-003-strategy.md) · [SPEC-004 回測引擎](docs/specs/SPEC-004-backtest.md) · [SPEC-005 投組與風控](docs/specs/SPEC-005-portfolio.md) · [SPEC-006 執行層](docs/specs/SPEC-006-execution.md) · [SPEC-007 監控](docs/specs/SPEC-007-monitoring.md) · [SPEC-008 LLM 洞悉層](docs/specs/SPEC-008-insight.md)
+
 ## 狀態
 
 目前為規格階段。實作依 [TASKS.md](TASKS.md) 順序進行，每個任務對應規格書中的驗收條件。
