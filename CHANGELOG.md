@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-06 T-020（部分完成）投組層：portfolio/（config/core）+ twquant/state.py。
+  sleeve 組合+歸因、個股/周轉限額、條件式波動目標、四態 kill-switch、狀態原子寫+
+  fail-safe（缺失/損毀→HALTED）。configs/portfolio.yaml、risk.yaml。閘門全綠（123 tests）。
+- 2026-07-06 T-019 驗證工具：walk-forward/DSR/bootstrap/param-plateau。
+
 - 2026-07-06 T-018（部分完成）回測引擎：backtest/（costs/engine/metrics）+ CLI
   backtest + costs.yaml。next_open 執行、整數張、價格相依成本、漲跌停/參與率
   unfilled、會計恆等。真實回測 sample 策略連續期成本後 Sharpe 1.12、CAGR +8.6%、

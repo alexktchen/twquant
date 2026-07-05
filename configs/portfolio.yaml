@@ -1,0 +1,16 @@
+# 投組配置（SPEC-005 §1）。sleeve 內權重 × risk_budget → 帳戶層級。
+sleeves:
+  - strategy: sample_revenue_trust
+    risk_budget: 1.0
+
+vol_target:
+  enabled: true
+  annual_vol: 0.15
+  estimator: {window_days: 60, method: ewma, halflife: 20}
+  conditional: {percentile_window_days: 252, reduce_above_pct: 90.0}
+  max_leverage: 1.0
+
+limits:
+  max_weight_per_stock: 0.05
+  max_weight_per_industry: 0.25
+  max_daily_turnover: 0.30

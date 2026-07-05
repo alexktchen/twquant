@@ -1,0 +1,6 @@
+# kill-switch 觸發閾值（SPEC-005 §2，D-009 初始值）。
+daily_loss_pct: 0.03              # 單日虧損 > 3% → NO_NEW_ENTRY（次日自動回）
+drawdown_reduce_pct: 0.15         # 回撤 > 15% → REDUCED(50%)
+drawdown_reduce_recover_pct: 0.10 # 回撤收斂 < 10% → 回 NORMAL（遲滯）
+drawdown_halt_pct: 0.20           # 回撤 > 20% → HALTED（人工恢復）
+reduced_scale: 0.5
