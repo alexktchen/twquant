@@ -1,15 +1,16 @@
-"""Streamlit 監控儀表板（SPEC-007 的 v1）。
+"""Streamlit 監控儀表板（SPEC-007）。
 
-唯讀：讀 clean 資料湖顯示資料狀態、市場趨勢、法人流向、月營收成長。完整版
-（權益曲線、漂移、因子健康度）在 T-024。
-以 `streamlit run src/twquant/monitoring/dashboard.py` 啟動。
+側邊選單分頁：總覽（資料/擷取狀態）、市場 K線（等權指數）、個股 K線、法人流向、
+月營收、因子健檢、策略回測（權益曲線）。唯讀讀 clean 資料湖；重讀均 @st.cache_data
+快取（Windows bind-mount IO 慢）。以 `streamlit run src/twquant/monitoring/dashboard.py` 啟動。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import altair as alt
 import polars as pl
 import streamlit as st
 
@@ -52,79 +53,154 @@ def _rows(table: str) -> int:
         return 0
 
 
+_PAGES = ["總覽", "市場 K線", "個股 K線", "法人流向", "月營收", "因子健檢", "策略回測"]
+
+
 def main() -> None:
     st.set_page_config(page_title="twquant 監控", page_icon="📈", layout="wide")
-    st.title("📈 twquant 台股量化平台")
-    st.caption("資料監控儀表板 · DuckDB + Parquet 資料湖 · 唯讀")
+    st.sidebar.title("📈 twquant")
+    st.sidebar.caption("台股量化平台 · 唯讀")
+    page = st.sidebar.radio("選單", _PAGES, label_visibility="collapsed")
 
     wh = _warehouse()
+    latest = wh.latest_date("prices_daily")
+    st.sidebar.divider()
+    st.sidebar.caption(f"最新行情日：{latest or '—'}")
+    st.sidebar.caption("來源：TWSE 上市 · TPEX 上櫃 · MOPS 月營收")
 
-    # ── 資料狀態 KPI ────────────────────────────────────────────
+    if page == "總覽":
+        _page_overview(wh)
+        return
+    if not _price_dates():
+        st.info("資料湖尚無行情。先執行：`twquant backfill --from ... --to ...`")
+        return
+
+    if page == "市場 K線":
+        _page_market()
+    elif page == "個股 K線":
+        _page_stock()
+    elif page == "法人流向":
+        _page_institutional(wh)
+    elif page == "月營收":
+        _page_revenue()
+    elif page == "因子健檢":
+        _factor_health(wh)
+    elif page == "策略回測":
+        _backtest_panel()
+
+
+def _page_overview(wh: Warehouse) -> None:
+    st.header("總覽")
     st.subheader("資料狀態")
     cols = st.columns(len(_TABLES))
     for col, (table, label) in zip(cols, _TABLES.items(), strict=True):
         d = wh.latest_date(table)
         col.metric(label=label, value=(d.isoformat() if d else "—"), delta=f"{_rows(table):,} 列")
-
-    # ── 擷取狀態（涵蓋/缺口/失敗）─────────────────────────────────
     _ingestion_status(wh)
 
-    price_dates = _price_dates()
-    if not price_dates:
-        st.info("資料湖尚無行情。先執行：`twquant backfill --from ... --to ...`")
+
+def _candlestick(pdf: Any, title: str) -> Any:
+    """由含 date/open/high/low/close 的 pandas DataFrame 畫 Altair K 線（漲綠跌紅）。"""
+    up = "datum.open <= datum.close"
+    color = alt.condition(up, alt.value("#26a69a"), alt.value("#ef5350"))
+    base = alt.Chart(pdf).encode(x=alt.X("date:T", title=None), color=color)
+    wick = base.mark_rule().encode(
+        y=alt.Y("low:Q", title="價", scale=alt.Scale(zero=False)), y2="high:Q"
+    )
+    body = base.mark_bar().encode(y="open:Q", y2="close:Q")
+    return (wick + body).properties(title=title, height=400)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _market_index() -> pl.DataFrame:
+    """等權價格指數（基期 1000，四碼普通股）的日 OHLC + 成交金額。"""
+    return _warehouse().sql(
+        "WITH base AS (SELECT stock_id, arg_min(close, date) b FROM prices_daily "
+        "WHERE regexp_matches(stock_id, '^[1-9][0-9]{3}$') AND close > 0 GROUP BY stock_id) "
+        'SELECT p.date, round(1000*avg(p.open/b.b),2) "open", round(1000*avg(p.high/b.b),2) "high", '
+        'round(1000*avg(p.low/b.b),2) "low", round(1000*avg(p.close/b.b),2) "close", '
+        'round(sum(p.amount)/1e8,0) "amount" FROM prices_daily p JOIN base b USING (stock_id) '
+        "WHERE regexp_matches(p.stock_id, '^[1-9][0-9]{3}$') GROUP BY p.date ORDER BY p.date"
+    )
+
+
+def _page_market() -> None:
+    st.header("市場 K線")
+    idx = _market_index().to_pandas()
+    if idx.empty:
+        st.info("無行情資料。")
         return
+    st.caption(f"等權價格指數（基期 1000，四碼普通股）· {idx['date'].min()} ~ {idx['date'].max()}")
+    st.altair_chart(_candlestick(idx, "等權市場指數"), width="stretch")
+    st.markdown("**每日成交金額（億元）**")
+    st.bar_chart(idx.set_index("date")["amount"])
 
-    # ── 市場趨勢（多日）──────────────────────────────────────────
-    st.subheader(f"市場趨勢 · {price_dates[0]} ~ {price_dates[-1]}（{len(price_dates)} 交易日）")
-    trend = _sql(
-        "SELECT date, count(*) AS 檔數, round(avg(close),1) AS 平均收盤, "
-        "round(sum(amount)/1e8,0) AS 成交金額_億 FROM prices_daily GROUP BY date ORDER BY date"
-    ).to_pandas()
-    c1, c2 = st.columns(2)
-    c1.markdown("**每日成交金額（億元）**")
-    c1.bar_chart(trend.set_index("date")["成交金額_億"])
-    c2.markdown("**每日平均收盤價**")
-    c2.line_chart(trend.set_index("date")["平均收盤"])
 
-    latest = price_dates[-1]
+@st.cache_data(ttl=300, show_spinner=False)
+def _liquid_stocks() -> list[str]:
+    df = _warehouse().sql(
+        "SELECT stock_id FROM prices_daily WHERE regexp_matches(stock_id, '^[1-9][0-9]{3}$') "
+        "GROUP BY stock_id ORDER BY avg(amount) DESC LIMIT 150"
+    )
+    return [str(x) for x in df["stock_id"].to_list()]
 
-    # ── 法人流向 ────────────────────────────────────────────────
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _stock_ohlc(sid: str) -> pl.DataFrame:
+    return _warehouse().sql(
+        "SELECT date, open, high, low, close, volume FROM prices_daily "
+        f"WHERE stock_id = '{sid}' ORDER BY date"
+    )
+
+
+def _page_stock() -> None:
+    st.header("個股 K線")
+    stocks = _liquid_stocks()
+    if not stocks:
+        st.info("無行情資料。")
+        return
+    sid = st.selectbox("股票代號（成交值前 150）", stocks)
+    df = _stock_ohlc(str(sid)).to_pandas()
+    if df.empty:
+        st.info("此股票無資料。")
+        return
+    st.altair_chart(_candlestick(df, f"{sid} 日K"), width="stretch")
+    st.markdown("**成交量（股）**")
+    st.bar_chart(df.set_index("date")["volume"])
+
+
+def _page_institutional(wh: Warehouse) -> None:
+    st.header("法人流向")
     inst_date = wh.latest_date("institutional_daily")
-    if inst_date is not None:
-        st.subheader(f"投信買超前 15 · {inst_date}")
-        flows = _sql(
-            f"SELECT i.stock_id, i.trust_net, i.foreign_net, p.close "
-            f"FROM institutional_daily i LEFT JOIN prices_daily p USING (date, stock_id) "
-            f"WHERE i.date = DATE '{inst_date}' ORDER BY i.trust_net DESC LIMIT 15"
-        )
-        left, right = st.columns([2, 3])
-        pdf = flows.to_pandas().set_index("stock_id")
-        left.bar_chart(pdf["trust_net"])
-        right.dataframe(flows.to_pandas(), width="stretch", height=420)
+    if inst_date is None:
+        st.info("無三大法人資料。")
+        return
+    st.subheader(f"投信買超前 15 · {inst_date}")
+    flows = _sql(
+        "SELECT i.stock_id, i.trust_net, i.foreign_net, p.close "
+        "FROM institutional_daily i LEFT JOIN prices_daily p USING (date, stock_id) "
+        f"WHERE i.date = DATE '{inst_date}' ORDER BY i.trust_net DESC LIMIT 15"
+    )
+    left, right = st.columns([2, 3])
+    left.bar_chart(flows.to_pandas().set_index("stock_id")["trust_net"])
+    right.dataframe(flows.to_pandas(), width="stretch", height=420)
 
-    # ── 月營收成長榜 ────────────────────────────────────────────
+
+def _page_revenue() -> None:
+    st.header("月營收")
     rev_ym = _latest_revenue_month()
-    if rev_ym is not None:
-        st.subheader(f"月營收 YoY 成長前 15（營收 > 5 億）· {rev_ym}")
-        rev = _sql(
-            f"SELECT stock_id AS 股票, round(revenue/1e8,1) AS 營收_億, "
-            f"round(yoy*100,1) AS YoY_pct FROM monthly_revenue "
-            f"WHERE year_month = '{rev_ym}' AND revenue > 5e8 AND yoy IS NOT NULL "
-            f"ORDER BY yoy DESC LIMIT 15"
-        )
-        left, right = st.columns([2, 3])
-        left.bar_chart(rev.to_pandas().set_index("股票")["YoY_pct"])
-        right.dataframe(rev.to_pandas(), width="stretch", height=420)
-
-    # ── 因子健檢（策略層）──────────────────────────────────────────
-    st.divider()
-    _factor_health(wh)
-
-    # ── 策略回測（成本後績效）──────────────────────────────────────
-    st.divider()
-    _backtest_panel()
-
-    st.caption(f"最新行情日：{latest}｜資料來源：TWSE 上市 · TPEX 上櫃 · MOPS 月營收")
+    if rev_ym is None:
+        st.info("無月營收資料。")
+        return
+    st.subheader(f"月營收 YoY 成長前 15（營收 > 5 億）· {rev_ym}")
+    rev = _sql(
+        "SELECT stock_id AS 股票, round(revenue/1e8,1) AS 營收_億, round(yoy*100,1) AS YoY_pct "
+        f"FROM monthly_revenue WHERE year_month = '{rev_ym}' AND revenue > 5e8 AND yoy IS NOT NULL "
+        "ORDER BY yoy DESC LIMIT 15"
+    )
+    left, right = st.columns([2, 3])
+    left.bar_chart(rev.to_pandas().set_index("股票")["YoY_pct"])
+    right.dataframe(rev.to_pandas(), width="stretch", height=420)
 
 
 def _backtest_panel() -> None:

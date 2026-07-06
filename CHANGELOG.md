@@ -1,5 +1,8 @@
 # CHANGELOG
 
+- 2026-07-06 儀表板改版：側邊選單分頁（總覽/市場K線/個股K線/法人/月營收/因子健檢/
+  策略回測），價格圖改 Altair K 線（等權市場指數 + 個股 OHLC，漲綠跌紅）。閘門全綠。
+
 - 2026-07-06 修回測跨程序非決定性（重要）：combine group_by/選股 top_n/引擎成交
   排序原本依賴 Python set 與 polars group_by 順序，不同程序（PYTHONHASHSEED）結果
   不同（Sharpe 曾 0.68~1.43 亂跳）。全數加明確 sort（次序鍵 stock_id）→ 真值

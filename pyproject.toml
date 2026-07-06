@@ -66,7 +66,7 @@ files = ["src", "tests"]
 warn_unused_configs = true
 # 第三方庫缺型別 stub 時不擋（polars/duckdb/pandera 自帶或部分缺）
 [[tool.mypy.overrides]]
-module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "streamlit.*"]
+module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "streamlit.*", "altair.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
