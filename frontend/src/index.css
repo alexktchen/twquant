@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* shadcn tokens mapped to a dark trading-terminal palette */
+    --background: 216 24% 7%;
+    --foreground: 213 30% 92%;
+    --card: 215 21% 11%;
+    --card-foreground: 213 30% 92%;
+    --popover: 215 21% 11%;
+    --popover-foreground: 213 30% 92%;
+    --primary: 41 72% 55%;
+    --primary-foreground: 216 24% 8%;
+    --secondary: 214 16% 16%;
+    --secondary-foreground: 213 30% 92%;
+    --muted: 214 16% 16%;
+    --muted-foreground: 210 11% 62%;
+    --accent: 214 16% 18%;
+    --accent-foreground: 213 30% 92%;
+    --destructive: 2 78% 56%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 18% 18%;
+    --input: 214 18% 18%;
+    --ring: 41 72% 55%;
+    --radius: 0.375rem;
+
+    /* raw palette for charts / bespoke UI */
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1b212a;
+    --line: #232a33;
+    --fg: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #e0a83b;
+    --up: #e5484d;   /* 台股慣例：紅漲 */
+    --down: #2ea36b; /* 綠跌 */
+    --good: #2ea36b;
+    --warn: #e0a83b;
+    --crit: #e5484d;
+  }
+
+  * {
+    @apply border-border;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, "Segoe UI", "Noto Sans TC", -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", monospace;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: #2b333d; border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
