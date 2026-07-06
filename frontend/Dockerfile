@@ -10,3 +10,9 @@ RUN npx vite build
 # 產物放到極小的最終層，方便 docker cp 取出
 FROM scratch AS artifact
 COPY --from=build /app/dist/index.html /twquant_dashboard.html
+
+# 可跑的服務：nginx 靜態伺服自包含單檔（預設 target）
+FROM nginx:alpine AS serve
+COPY --from=build /app/dist/index.html /usr/share/nginx/html/index.html
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1

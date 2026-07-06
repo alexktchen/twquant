@@ -1,9 +1,10 @@
 name: twquant
 
-# 三服務共用同一映像（DECISIONS D-013）。資料湖 DuckDB/Parquet 掛在 ./data volume。
+# app/scheduler/dashboard 三服務共用同一映像（DECISIONS D-013）。資料湖掛 ./data volume。
 # 手動擷取：  docker compose run --rm app ingest --date 2026-06-30
-# 起排程+儀表板： docker compose up -d scheduler dashboard
-# 儀表板網址：  http://localhost:8501
+# 起排程+儀表板： docker compose up -d scheduler dashboard frontend
+# Streamlit 監控（即時）： http://localhost:8501
+# React 前端（快照儀表板，lightweight-charts）： http://localhost:8899
 
 services:
   app:
@@ -34,4 +35,13 @@ services:
       - --server.port=8501
     ports:
       - "8501:8501"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      target: serve
+    image: twquant-dash:latest
+    ports:
+      - "8899:80"
     restart: unless-stopped
