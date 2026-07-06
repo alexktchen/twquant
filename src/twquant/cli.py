@@ -633,6 +633,43 @@ def backtest(
     typer.secho("已記入 research_log。", fg=typer.colors.GREEN)
 
 
+@app.command()
+def capacity(
+    strategy: str = typer.Option("configs/strategies/sample_revenue_trust.yaml", help="策略 YAML"),
+    date: str = typer.Option("", help="訊號日 YYYY-MM-DD，空=最新"),
+    participation: float = typer.Option(0.05, help="單股參與率上限"),
+) -> None:
+    """估策略資金容量上限（目標權重 × 20 日 ADV × 參與率上限）。"""
+    from twquant.backtest.capacity import estimate_capacity
+    from twquant.data.warehouse import Warehouse
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.config import load_strategy
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    strat = load_strategy(strategy)
+    day = dt.date.fromisoformat(date) if date else wh.latest_date("prices_daily")
+    if day is None:
+        typer.secho("無行情。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    tdf = build_targets(strat, wh, day)
+    weights = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
+    if not weights:
+        typer.secho("空手日，無容量可估。", fg=typer.colors.YELLOW)
+        return
+    adv_df = wh.sql(
+        "SELECT stock_id, median(amount) AS adv FROM prices_daily WHERE date IN "
+        f"(SELECT DISTINCT date FROM prices_daily WHERE date <= DATE '{day}' "
+        "ORDER BY date DESC LIMIT 20) GROUP BY stock_id"
+    )
+    adv = {r["stock_id"]: float(r["adv"]) for r in adv_df.to_dicts()}
+    res = estimate_capacity(weights, adv, max_participation=participation)
+    typer.secho(f"=== 容量分析 · {strat.name} · {day} ===", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  資金容量上限：{res.capacity_twd / 1e8:.1f} 億元")
+    typer.echo(f"  瓶頸標的：{res.binding_stock}（參與率上限 {participation:.0%}）")
+
+
 def _insight_client() -> tuple[InsightClient, SystemConfig]:
     from twquant.insight.client import InsightClient
     from twquant.insight.config import load_llm_config

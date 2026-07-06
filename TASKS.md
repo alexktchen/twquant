@@ -33,12 +33,12 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-021 | PaperBroker（共用回測成交模組）+ 每日執行流程 + 對帳 | SPEC-006 | T-020 | A | done |
 | T-022 | ShioajiBroker（dry_run 預設、雙開關） | SPEC-006 | T-021 | B | todo |
 | T-023 | 每日 pipeline 多波次編排（ingest→gate→factor→signal）+ heartbeat/watchdog + 排程 | LOOP.md §3 | T-021 | A | 部分完成 |
-| T-024 | 監控：日報、漂移偵測（tracking error）、告警、唯讀儀表板 | SPEC-007 | T-023 | B | todo |
+| T-024 | 監控：日報、漂移偵測（tracking error）、告警、唯讀儀表板 | SPEC-007 | T-023 | 部分完成 |
 | T-025 | Sleeve A（籌碼×營收動能）完整策略上模擬倉 | STRATEGY §2 + LOOP §1 | T-015, T-016, T-024 | B | todo |
 | T-026 | 洞悉層基座：LLM client 封裝、configs/llm.yaml（含 pricing/匯率）、用量記錄與預算閘、prompt 回歸測試框架 | SPEC-008 §3 + MODEL-POLICY §4 | T-002 | B | done |
 | T-027 | daily_brief + explainer（含離線降級） | SPEC-008 §2.1/2.3 | T-024, T-026 | done |
 | T-028 | advisor + 提案生命週期（proposals/、validate/approve CLI、回饋迴路） | SPEC-008 §2.2/§4 | T-019, T-026 | 部分完成 |
-| T-029 | 容量分析：各 sleeve 周轉 × ADV 分布 + 衝擊函數 → 容量上限，寫回 STRATEGY §2 | STRATEGY §5a | T-018 | B | todo |
+| T-029 | 容量分析：各 sleeve 周轉 × ADV 分布 + 衝擊函數 → 容量上限，寫回 STRATEGY §2 | STRATEGY §5a | T-018 | 部分完成 |
 | T-030 | 待評估策略族回測 + DECISIONS 決策：配對/統計套利、指數 ETF 換股、除權息、融券軋空 | STRATEGY §5a | T-018 | B | todo |
 
 > 依賴修正（REVIEW H15）：T-003 改以靜態日曆檔起步（不再假依賴 prices_daily）；
@@ -47,6 +47,13 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-029 / T-024（部分完成）**（2026-07-06）容量分析 + 漂移偵測。
+  backtest/capacity.py：estimate_capacity（目標權重 × 20 日 ADV × 參與率上限 →
+  容量上限 + 瓶頸標的）；CLI capacity 實測 sample 策略 ~0.8 億元（瓶頸小型股）。
+  monitoring/drift.py：tracking_error（影子 vs 實盤日報酬差的滾動年化標準差）、
+  drift_check（> 3% 門檻→breached，供 SPEC-005 狀態機轉 REDUCED）。閘門全綠
+  （152 tests）。**待接**：日報組裝+推播、告警通道、連 5 日→HALTED 的計數落地、
+  衝擊函數精算、儀表板容量/漂移面板。
 - **T-027 / T-028（部分完成）**（2026-07-06）洞悉層功能 + 提案生命週期（SPEC-008
   §2/§4）。insight/prompts.py（凍結 system 模板 + PROMPT_VERSION，資料進 user turn）、
   daily_brief.py / explainer.py / advisor.py（純運算：組 payload→client→結構化輸出，

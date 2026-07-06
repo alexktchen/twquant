@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-06 T-029/T-024（部分）容量分析 + 漂移偵測：backtest/capacity.py
+  （estimate_capacity + CLI capacity）、monitoring/drift.py（tracking_error/drift_check）。
+- 2026-07-06 T-027/T-028 洞悉層功能：daily_brief/explainer/advisor + proposals 生命
+  週期（CLI insight-brief/proposal validate·approve；LLM 只提案不執行）。
+
 - 2026-07-06 T-021 執行層：backtest/fill.decide_fill（回測與 PaperBroker 共用成交
   原語）、execution/（PaperBroker idempotency/HALTED、preflight/reconcile/run_session）。
 - 2026-07-06 T-023（部分）每日 pipeline：run_pipeline（步驟編排+degraded）、
