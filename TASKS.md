@@ -36,8 +36,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-024 | 監控：日報、漂移偵測（tracking error）、告警、唯讀儀表板 | SPEC-007 | T-023 | B | todo |
 | T-025 | Sleeve A（籌碼×營收動能）完整策略上模擬倉 | STRATEGY §2 + LOOP §1 | T-015, T-016, T-024 | B | todo |
 | T-026 | 洞悉層基座：LLM client 封裝、configs/llm.yaml（含 pricing/匯率）、用量記錄與預算閘、prompt 回歸測試框架 | SPEC-008 §3 + MODEL-POLICY §4 | T-002 | B | done |
-| T-027 | daily_brief + explainer（含離線降級） | SPEC-008 §2.1/2.3 | T-024, T-026 | B | todo |
-| T-028 | advisor + 提案生命週期（proposals/、validate/approve CLI、回饋迴路） | SPEC-008 §2.2/§4 | T-019, T-026 | A | todo |
+| T-027 | daily_brief + explainer（含離線降級） | SPEC-008 §2.1/2.3 | T-024, T-026 | done |
+| T-028 | advisor + 提案生命週期（proposals/、validate/approve CLI、回饋迴路） | SPEC-008 §2.2/§4 | T-019, T-026 | 部分完成 |
 | T-029 | 容量分析：各 sleeve 周轉 × ADV 分布 + 衝擊函數 → 容量上限，寫回 STRATEGY §2 | STRATEGY §5a | T-018 | B | todo |
 | T-030 | 待評估策略族回測 + DECISIONS 決策：配對/統計套利、指數 ETF 換股、除權息、融券軋空 | STRATEGY §5a | T-018 | B | todo |
 
@@ -47,6 +47,15 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-027 / T-028（部分完成）**（2026-07-06）洞悉層功能 + 提案生命週期（SPEC-008
+  §2/§4）。insight/prompts.py（凍結 system 模板 + PROMPT_VERSION，資料進 user turn）、
+  daily_brief.py / explainer.py / advisor.py（純運算：組 payload→client→結構化輸出，
+  離線→None AC-6）。reporting/proposals.py（save/load/list/update + apply_changes
+  套 yaml_path 變更；no_action 不落地 AC-7；狀態機驗證）。CLI insight-brief（離線
+  自動降級不報錯）、proposal list/validate/approve——validate 套提案參數跑回測、
+  Sharpe 不劣於基準才 validated 否則 rejected_by_gate（機器閘門 AC-3），approve 人工
+  核准。閘門全綠（147 tests）。**待接**：advisor 真實輸入組裝（歸因/regime）、
+  rejected 回饋進下次輸入、paper 觀察期狀態轉移。
 - **T-026**（2026-07-06）洞悉層 LLM 基座（SPEC-008 §3）。insight/config.py
   （LlmConfig：模型路由 + token→TWD 成本，模型字串只在 configs/llm.yaml）、
   insight/schemas.py（Proposal/DailyBrief/Explanation pydantic 輸出模型）、

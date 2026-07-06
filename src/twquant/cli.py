@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     import polars as pl
 
     from twquant.config import SystemConfig
+    from twquant.insight.client import InsightClient
 
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
 
@@ -630,6 +631,132 @@ def backtest(
         ],
     )
     typer.secho("已記入 research_log。", fg=typer.colors.GREEN)
+
+
+def _insight_client() -> tuple[InsightClient, SystemConfig]:
+    from twquant.insight.client import InsightClient
+    from twquant.insight.config import load_llm_config
+
+    cfg = _load_system()
+    llm = load_llm_config(_CONFIG_DIR / "llm.yaml")
+    return InsightClient(llm, cfg.data_dir), cfg
+
+
+@app.command(name="insight-brief")
+def insight_brief(date: str = typer.Option("", help="訊號日 YYYY-MM-DD，空=最新")) -> None:
+    """產生每日洞悉摘要（無 API key 時自動降級、不報錯）。"""
+    from twquant.conventions import now_tw
+    from twquant.data.warehouse import Warehouse
+    from twquant.insight.daily_brief import build_daily_brief
+
+    client, cfg = _insight_client()
+    wh = Warehouse(cfg.data_dir)
+    day = dt.date.fromisoformat(date) if date else wh.latest_date("prices_daily")
+    if day is None:
+        typer.secho("無行情。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    report = wh.sql(
+        "SELECT count(*) AS 檔數, round(avg(close),1) AS 平均收盤 "
+        f"FROM prices_daily WHERE date = DATE '{day}'"
+    ).to_dicts()[0]
+    report["date"] = day.isoformat()
+    brief = build_daily_brief(client, report, now_tw())
+    if brief is None:
+        typer.secho(
+            "洞悉層離線（未設 ANTHROPIC_API_KEY）或降級——系統其餘功能不受影響。",
+            fg=typer.colors.YELLOW,
+        )
+        return
+    typer.secho(f"=== 每日洞悉 · {day} ===", fg=typer.colors.CYAN, bold=True)
+    typer.echo(brief.summary)
+
+
+proposal_app = typer.Typer(help="策略調整提案生命週期（SPEC-008 §4）。")
+app.add_typer(proposal_app, name="proposal")
+
+
+def _proposals_dir() -> Path:
+    return _CONFIG_DIR.parent / "proposals"
+
+
+@proposal_app.command("list")
+def proposal_list() -> None:
+    """列出所有提案與狀態。"""
+    from twquant.reporting.proposals import list_proposals, load_proposal
+
+    ids = list_proposals(_proposals_dir())
+    if not ids:
+        typer.secho("無提案。", fg=typer.colors.YELLOW)
+        return
+    for pid in ids:
+        d = load_proposal(_proposals_dir(), pid)
+        typer.echo(
+            f"  {pid}　[{d['status']}]　{d['proposal']['action']}　{d['proposal']['target_strategy']}"
+        )
+
+
+@proposal_app.command("validate")
+def proposal_validate(
+    pid: str = typer.Argument(..., help="提案 id"),
+    start: str = typer.Option("2025-08-01"),
+    end: str = typer.Option("2025-12-31"),
+) -> None:
+    """以提案參數跑回測（機器閘門）：Sharpe 不劣於基準→validated，否則 rejected_by_gate。"""
+    import yaml
+
+    from twquant.backtest.costs import CostConfig
+    from twquant.backtest.engine import run_backtest
+    from twquant.config import load_config as _lc
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import ConfigError
+    from twquant.reporting.proposals import apply_changes, load_proposal, update_proposal
+    from twquant.strategy.config import StrategyConfig
+
+    pdir = _proposals_dir()
+    data = load_proposal(pdir, pid)
+    prop = data["proposal"]
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    cost = _lc(_CONFIG_DIR / "costs.yaml", CostConfig)
+    s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+
+    base_yaml = yaml.safe_load(
+        (_CONFIG_DIR / "strategies" / f"{prop['target_strategy']}.yaml").read_text(encoding="utf-8")
+    )
+    update_proposal(pdir, pid, status="backtesting")
+    try:
+        proposed = apply_changes(base_yaml, prop["changes"])
+        base_cfg = StrategyConfig.model_validate(base_yaml)
+        new_cfg = StrategyConfig.model_validate(proposed)  # 權重加總等驗證即閘門
+    except (ConfigError, ValueError) as exc:
+        update_proposal(pdir, pid, status="rejected_by_gate", backtest={"error": str(exc)})
+        typer.secho(f"[REJECT] 配置驗證失敗：{exc}", fg=typer.colors.RED)
+        return
+
+    base_sr = run_backtest(base_cfg, cost, s, e, wh).metrics.sharpe
+    new_sr = run_backtest(new_cfg, cost, s, e, wh).metrics.sharpe
+    ok = new_sr >= base_sr - 1e-9
+    status = "validated" if ok else "rejected_by_gate"
+    update_proposal(
+        pdir, pid, status=status, backtest={"sharpe_base": base_sr, "sharpe_new": new_sr}
+    )
+    color = typer.colors.GREEN if ok else typer.colors.RED
+    typer.secho(
+        f"[{status.upper()}] Sharpe 基準 {base_sr:+.2f} → 提案 {new_sr:+.2f}", fg=color, bold=True
+    )
+
+
+@proposal_app.command("approve")
+def proposal_approve(pid: str = typer.Argument(..., help="提案 id")) -> None:
+    """人工核准 validated 提案 → approved（進模擬倉觀察期）。"""
+    from twquant.reporting.proposals import load_proposal, update_proposal
+
+    d = load_proposal(_proposals_dir(), pid)
+    if d["status"] != "validated":
+        typer.secho(f"僅能核准 validated 提案（目前 {d['status']}）。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    update_proposal(_proposals_dir(), pid, status="approved")
+    typer.secho(f"提案 {pid} 已核准 → approved。", fg=typer.colors.GREEN)
 
 
 @app.command()
