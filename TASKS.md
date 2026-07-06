@@ -35,7 +35,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-023 | 每日 pipeline 多波次編排（ingest→gate→factor→signal）+ heartbeat/watchdog + 排程 | LOOP.md §3 | T-021 | A | 部分完成 |
 | T-024 | 監控：日報、漂移偵測（tracking error）、告警、唯讀儀表板 | SPEC-007 | T-023 | B | todo |
 | T-025 | Sleeve A（籌碼×營收動能）完整策略上模擬倉 | STRATEGY §2 + LOOP §1 | T-015, T-016, T-024 | B | todo |
-| T-026 | 洞悉層基座：LLM client 封裝、configs/llm.yaml（含 pricing/匯率）、用量記錄與預算閘、prompt 回歸測試框架 | SPEC-008 §3 + MODEL-POLICY §4 | T-002 | B | todo |
+| T-026 | 洞悉層基座：LLM client 封裝、configs/llm.yaml（含 pricing/匯率）、用量記錄與預算閘、prompt 回歸測試框架 | SPEC-008 §3 + MODEL-POLICY §4 | T-002 | B | done |
 | T-027 | daily_brief + explainer（含離線降級） | SPEC-008 §2.1/2.3 | T-024, T-026 | B | todo |
 | T-028 | advisor + 提案生命週期（proposals/、validate/approve CLI、回饋迴路） | SPEC-008 §2.2/§4 | T-019, T-026 | A | todo |
 | T-029 | 容量分析：各 sleeve 周轉 × ADV 分布 + 衝擊函數 → 容量上限，寫回 STRATEGY §2 | STRATEGY §5a | T-018 | B | todo |
@@ -47,6 +47,14 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-026**（2026-07-06）洞悉層 LLM 基座（SPEC-008 §3）。insight/config.py
+  （LlmConfig：模型路由 + token→TWD 成本，模型字串只在 configs/llm.yaml）、
+  insight/schemas.py（Proposal/DailyBrief/Explanation pydantic 輸出模型）、
+  insight/client.py（InsightClient：路由、離線降級 AC-6、日預算閘 AC-4、schema/呼叫
+  連 2 次失敗→None AC-1、backend 可注入使測試不打網路；真實 anthropic backend 用
+  messages.parse + adaptive thinking + prompt cache 依 claude-api skill）。
+  reporting/llm_log.py（用量記錄，IO 層——insight 屬純運算層不得寫檔，IO 邊界測試
+  已驗）。configs/llm.yaml、insight 選用依賴群組（anthropic）。閘門全綠（141 tests）。
 - **T-023（部分完成）**（2026-07-06）每日 pipeline + heartbeat/watchdog（LOOP §3）。
   pipeline.py：run_pipeline（步驟編排、關鍵步驟失敗→degraded 不產生新訊號、
   skip_if_degraded）、write/read_heartbeat（日期+git hash 原子寫）、watchdog_check
