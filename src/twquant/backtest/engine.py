@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
+from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy
+from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 
 if TYPE_CHECKING:
@@ -105,15 +106,6 @@ def _limit_down(row: _Row) -> float | None:
     return limit_down_proxy(float(prev)) if prev is not None else None
 
 
-def _participation_cap_shares(row: _Row, price: float, max_participation: float) -> int | None:
-    """依 20 日 ADV 的參與率上限換算最大可成交張數（股）。ADV 缺 → 不設限（None）。"""
-    adv = row.get("_adv")
-    if adv is None or adv <= 0:
-        return None
-    max_notional = max_participation * float(adv)
-    return int(max_notional // (price * _LOT)) * _LOT
-
-
 def _portfolio_value(state: _State, day_px: dict[str, _Row]) -> float:
     mv = 0.0
     for sid, sh in state.holdings.items():
@@ -168,46 +160,28 @@ def _fill(
 ) -> None:
     side = "buy" if delta > 0 else "sell"
     price = float(row["open"])
-    qty = abs(delta)
-
-    # 漲跌停：買在漲停/賣在跌停不成交
-    if side == "buy":
-        lu = _limit_up(row)
-        if lu is not None and price >= lu:
-            _unfill(state, sid, side, qty, day, "limit_up")
-            return
-    else:
-        ld = _limit_down(row)
-        if ld is not None and price <= ld:
-            _unfill(state, sid, side, qty, day, "limit_down")
-            return
-
-    # 參與率上限
-    cap = _participation_cap_shares(row, price, max_participation)
-    if cap is not None and qty > cap:
-        _unfill(state, sid, side, qty - cap, day, "participation")
-        qty = cap
-    if qty <= 0:
+    adv = row.get("_adv")
+    d = decide_fill(
+        side=side,
+        price=price,
+        shares=abs(delta),
+        limit_up=_limit_up(row),
+        limit_down=_limit_down(row),
+        adv=float(adv) if adv else None,
+        max_participation=max_participation,
+        available_cash=state.cash,
+        cost_cfg=cost_cfg,
+    )
+    for sh, reason in d.unfilled:
+        _unfill(state, sid, side, sh, day, reason)
+    if d.filled_shares <= 0 or d.cost is None:
         return
 
-    adv = row.get("_adv")
-    part = (price * qty) / float(adv) if adv else 0.0
-
+    qty, c = d.filled_shares, d.cost
     if side == "buy":
-        # 現金約束：逐張縮減直到 現金 ≥ 成交額 + 成本
-        while qty > 0:
-            c = trade_cost(side="buy", price=price, shares=qty, participation=part, cfg=cost_cfg)
-            if price * qty + c.total <= state.cash + 1e-6:
-                break
-            qty -= _LOT
-        if qty <= 0:
-            _unfill(state, sid, side, abs(delta), day, "cash")
-            return
-        c = trade_cost(side="buy", price=price, shares=qty, participation=part, cfg=cost_cfg)
         state.cash -= price * qty + c.total
         state.holdings[sid] = state.holdings.get(sid, 0) + qty
     else:
-        c = trade_cost(side="sell", price=price, shares=qty, participation=part, cfg=cost_cfg)
         state.cash += price * qty - c.total
         new = state.holdings.get(sid, 0) - qty
         if new <= 0:

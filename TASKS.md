@@ -30,7 +30,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-018 | 回測引擎：執行模型、價格相依成本、漲跌停旗標判定、會計恆等、指標 | SPEC-004 | T-017 | A | 部分完成 |
 | T-019 | 驗證工具：walk-forward、deflated_sharpe(trial_sharpes)、plateau、bootstrap | SPEC-004 §5 | T-018 | B | done |
 | T-020 | 投組層：sleeve 組合、**條件式波動目標**、限額、四態 kill-switch、data/state 持久化 | SPEC-005 | T-018 | A | 部分完成 |
-| T-021 | PaperBroker（共用回測成交模組）+ 每日執行流程 + 對帳 | SPEC-006 | T-020 | A | todo |
+| T-021 | PaperBroker（共用回測成交模組）+ 每日執行流程 + 對帳 | SPEC-006 | T-020 | A | done |
 | T-022 | ShioajiBroker（dry_run 預設、雙開關） | SPEC-006 | T-021 | B | todo |
 | T-023 | 每日 pipeline 多波次編排（ingest→gate→factor→signal）+ heartbeat/watchdog + 排程 | LOOP.md §3 | T-021 | A | todo |
 | T-024 | 監控：日報、漂移偵測（tracking error）、告警、唯讀儀表板 | SPEC-007 | T-023 | B | todo |
@@ -47,6 +47,13 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-021**（2026-07-06）執行層（SPEC-006）。backtest/fill.py：抽出成交原語
+  decide_fill，回測引擎與 PaperBroker 共用（AC-1 兩邊不分家；回測 132 tests 全綠
+  證明重構無行為改變）。execution/broker.py：Order/OrderAck/Position/Fill、Broker
+  Protocol、PaperBroker（decide_fill 成交、idempotency AC-2、HALTED→raise AC-6）。
+  execution/daily.py：preflight_check（部位/現金不符→中止 AC-3）、build_orders、
+  reconcile（券商多出成交→凍結 AC-5）、run_session 編排。閘門全綠（132 tests）。
+  **待接**：ShioajiBroker（T-022，實單雙開關）、分批下單、盤中限價保護。
 - **T-020（部分完成）**（2026-07-06）投組層（SPEC-005）。portfolio/：config
   （PortfolioConfig/RiskConfig）、core（combine_sleeves+歸因 AC-1、per_stock_cap、
   turnover_cap AC-4、條件式 vol_scale AC-2、四態 kill-switch evaluate/apply
