@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ColorType, CrosshairMode, createChart } from 'lightweight-charts'
 import raw from './data.json'
 
 /* ---------- types ---------- */
@@ -16,41 +17,155 @@ type Data = {
 }
 const D = raw as unknown as Data
 
+const UP = '#e5484d' // 台股：紅漲
+const DOWN = '#2ea36b' // 綠跌
+const ACC = '#e0a83b'
+const MUT = '#8b98a5'
+const LINE = '#232a33'
+
 /* ---------- format helpers ---------- */
 const pct = (x: number, d = 1) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(d)}%`
 const sign = (x: number) => (x >= 0 ? 'var(--up)' : 'var(--down)')
 const num = (x: number, d = 0) => x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
 const oku = (x: number) => `${(x / 1e8).toFixed(1)} 億`
 
-/* ---------- candlestick with hover + range ---------- */
-function Candles({ data, height = 300 }: { data: Candle[]; height?: number }) {
-  const [range, setRange] = useState<number>(0) // 0 = all
-  const [hover, setHover] = useState<number | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-  const W = 940
-  const H = height
-  const padL = 44, padR = 10, padT = 12, padB = 20
-  const shown = range > 0 ? data.slice(-range) : data
-  const n = shown.length
-  const lo = Math.min(...shown.map((k) => k.l))
-  const hi = Math.max(...shown.map((k) => k.h))
-  const iw = (W - padL - padR) / n
-  const x = (i: number) => padL + i * iw + iw / 2
-  const y = (p: number) => padT + (1 - (p - lo) / (hi - lo || 1)) * (H - padT - padB)
-  const bw = Math.max(1, Math.min(iw * 0.62, 9))
-  const ticks = 4
-  const gy = Array.from({ length: ticks + 1 }, (_, i) => lo + ((hi - lo) * i) / ticks)
+const baseChart = (el: HTMLDivElement, height: number) =>
+  createChart(el, {
+    width: el.clientWidth,
+    height,
+    layout: {
+      background: { type: ColorType.Solid, color: 'transparent' },
+      textColor: MUT,
+      fontFamily: 'ui-monospace, "Cascadia Code", Consolas, monospace',
+      fontSize: 11,
+    },
+    grid: { vertLines: { color: 'rgba(35,42,51,0.45)' }, horzLines: { color: LINE } },
+    rightPriceScale: { borderColor: LINE },
+    timeScale: { borderColor: LINE, rightOffset: 2, fixLeftEdge: true, fixRightEdge: true },
+    crosshair: {
+      mode: CrosshairMode.Normal,
+      vertLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#1b212a' },
+      horzLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#1b212a' },
+    },
+    handleScale: { axisPressedMouseMove: { time: true, price: false } },
+  })
 
-  const onMove = (e: React.MouseEvent) => {
-    const r = svgRef.current!.getBoundingClientRect()
-    const vx = ((e.clientX - r.left) / r.width) * W
-    const i = Math.round((vx - padL - iw / 2) / iw)
-    setHover(i >= 0 && i < n ? i : null)
-  }
-  const hc = hover != null ? shown[hover] : null
-
+/* ---------- candlestick (lightweight-charts) ---------- */
+function CandleChart({ data, height = 320, volume = false }: { data: Candle[]; height?: number; volume?: boolean }) {
+  const box = useRef<HTMLDivElement>(null)
+  const legend = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const chart = baseChart(el, height)
+    const candle = chart.addCandlestickSeries({
+      upColor: UP,
+      downColor: DOWN,
+      borderUpColor: UP,
+      borderDownColor: DOWN,
+      wickUpColor: UP,
+      wickDownColor: DOWN,
+    })
+    candle.setData(data.map((k) => ({ time: k.d, open: k.o, high: k.h, low: k.l, close: k.c })))
+    if (volume) {
+      candle.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } })
+      const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' })
+      vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
+      vol.setData(
+        data.map((k) => ({
+          time: k.d,
+          value: k.v ?? k.amt ?? 0,
+          color: k.c >= k.o ? 'rgba(229,72,77,0.4)' : 'rgba(46,163,107,0.4)',
+        })),
+      )
+    }
+    chart.timeScale().fitContent()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    chart.subscribeCrosshairMove((param: any) => {
+      const lg = legend.current
+      if (!lg) return
+      const d = param?.time ? param.seriesData?.get(candle) : null
+      if (!d) {
+        lg.style.opacity = '0'
+        return
+      }
+      const up = d.close >= d.open
+      lg.style.opacity = '1'
+      lg.innerHTML = `<span style="color:${MUT}">${param.time}</span>　開 ${d.open}　高 ${d.high}　低 ${d.low}　收 <b style="color:${up ? UP : DOWN}">${d.close}</b>`
+    })
+    const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      chart.remove()
+    }
+  }, [data, height, volume])
   return (
-    <div className="relative">
+    <div style={{ position: 'relative' }}>
+      <div
+        ref={legend}
+        className="mono tnum"
+        style={{ position: 'absolute', top: 4, left: 8, zIndex: 3, fontSize: 11, pointerEvents: 'none', opacity: 0 }}
+      />
+      <div ref={box} style={{ width: '100%' }} />
+    </div>
+  )
+}
+
+/* ---------- equity area (lightweight-charts) ---------- */
+function EquityChart({ data, height = 260 }: { data: { d: string; e: number }[]; height?: number }) {
+  const box = useRef<HTMLDivElement>(null)
+  const legend = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const chart = baseChart(el, height)
+    const area = chart.addAreaSeries({
+      lineColor: ACC,
+      topColor: 'rgba(224,168,59,0.26)',
+      bottomColor: 'rgba(224,168,59,0.02)',
+      lineWidth: 2,
+      priceLineVisible: false,
+    })
+    area.setData(data.map((p) => ({ time: p.d, value: p.e })))
+    chart.timeScale().fitContent()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    chart.subscribeCrosshairMove((param: any) => {
+      const lg = legend.current
+      if (!lg) return
+      const d = param?.time ? param.seriesData?.get(area) : null
+      if (!d) {
+        lg.style.opacity = '0'
+        return
+      }
+      lg.style.opacity = '1'
+      lg.innerHTML = `<span style="color:${MUT}">${param.time}</span>　權益 ${num(d.value)}`
+    })
+    const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      chart.remove()
+    }
+  }, [data, height])
+  return (
+    <div style={{ position: 'relative' }}>
+      <div
+        ref={legend}
+        className="mono tnum"
+        style={{ position: 'absolute', top: 4, left: 8, zIndex: 3, fontSize: 11, pointerEvents: 'none', opacity: 0 }}
+      />
+      <div ref={box} style={{ width: '100%' }} />
+    </div>
+  )
+}
+
+/* ---------- range chips (slice history) ---------- */
+function RangeCandle({ data, height, volume }: { data: Candle[]; height?: number; volume?: boolean }) {
+  const [range, setRange] = useState(0)
+  const shown = range > 0 ? data.slice(-range) : data
+  return (
+    <div>
       <div className="flex gap-1 justify-end mb-1">
         {([[0, '全部'], [120, '120日'], [60, '60日']] as [number, string][]).map(([r, label]) => (
           <button
@@ -64,104 +179,12 @@ function Candles({ data, height = 300 }: { data: Candle[]; height?: number }) {
           </button>
         ))}
       </div>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ height: 'auto' }}
-        onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
-      >
-        {gy.map((g, i) => (
-          <g key={i}>
-            <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="var(--line)" strokeWidth={1} />
-            <text x={padL - 6} y={y(g) + 3} textAnchor="end" fontSize={10} className="mono" fill="var(--muted)">
-              {g.toFixed(0)}
-            </text>
-          </g>
-        ))}
-        {shown.map((k, i) => {
-          const up = k.c >= k.o
-          const col = up ? 'var(--up)' : 'var(--down)'
-          return (
-            <g key={i}>
-              <line x1={x(i)} x2={x(i)} y1={y(k.h)} y2={y(k.l)} stroke={col} strokeWidth={1} />
-              <rect x={x(i) - bw / 2} y={y(Math.max(k.o, k.c))} width={bw} height={Math.max(1, Math.abs(y(k.o) - y(k.c)))} fill={col} />
-            </g>
-          )
-        })}
-        {hover != null && hc && (
-          <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="var(--muted)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
-        )}
-      </svg>
-      {hc && (
-        <div className="absolute top-8 left-12 pointer-events-none bg-[var(--panel-2)] border border-[var(--line)] rounded px-2 py-1 text-[11px] mono tnum shadow-lg">
-          <span className="text-[var(--muted)]">{hc.d}</span>{'  '}開 {hc.o} 高 {hc.h} 低 {hc.l} 收{' '}
-          <span style={{ color: sign(hc.c - hc.o) }}>{hc.c}</span>
-        </div>
-      )}
+      <CandleChart data={shown} height={height} volume={volume} />
     </div>
   )
 }
 
-/* ---------- equity area chart with hover ---------- */
-function Area({ data, height = 220 }: { data: { d: string; e: number }[]; height?: number }) {
-  const [hover, setHover] = useState<number | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-  const W = 940, H = height, padL = 56, padR = 10, padT = 12, padB = 20
-  const n = data.length
-  const lo = Math.min(...data.map((p) => p.e))
-  const hi = Math.max(...data.map((p) => p.e))
-  const x = (i: number) => padL + (i / (n - 1)) * (W - padL - padR)
-  const y = (v: number) => padT + (1 - (v - lo) / (hi - lo || 1)) * (H - padT - padB)
-  const line = data.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.e).toFixed(1)}`).join(' ')
-  const area = `${line} L${x(n - 1)},${H - padB} L${x(0)},${H - padB} Z`
-  const up = data[n - 1].e >= data[0].e
-  const col = up ? 'var(--up)' : 'var(--down)'
-  const gy = Array.from({ length: 4 }, (_, i) => lo + ((hi - lo) * i) / 3)
-  const onMove = (e: React.MouseEvent) => {
-    const r = svgRef.current!.getBoundingClientRect()
-    const i = Math.round((((e.clientX - r.left) / r.width) * W - padL) / ((W - padL - padR) / (n - 1)))
-    setHover(i >= 0 && i < n ? i : null)
-  }
-  const hp = hover != null ? data[hover] : null
-  return (
-    <div className="relative">
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 'auto' }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-        <defs>
-          <linearGradient id="eq" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={col} stopOpacity={0.28} />
-            <stop offset="100%" stopColor={col} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        {gy.map((g, i) => (
-          <g key={i}>
-            <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="var(--line)" strokeWidth={1} />
-            <text x={padL - 6} y={y(g) + 3} textAnchor="end" fontSize={10} className="mono" fill="var(--muted)">
-              {(g / 1e6).toFixed(2)}M
-            </text>
-          </g>
-        ))}
-        <path d={area} fill="url(#eq)" />
-        <path d={line} fill="none" stroke={col} strokeWidth={1.6} />
-        <circle cx={x(n - 1)} cy={y(data[n - 1].e)} r={3} fill={col} />
-        {hover != null && hp && (
-          <>
-            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="var(--muted)" strokeDasharray="3 3" opacity={0.5} />
-            <circle cx={x(hover)} cy={y(hp.e)} r={3} fill="var(--fg)" />
-          </>
-        )}
-      </svg>
-      {hp && (
-        <div className="absolute top-2 left-14 pointer-events-none bg-[var(--panel-2)] border border-[var(--line)] rounded px-2 py-1 text-[11px] mono tnum">
-          <span className="text-[var(--muted)]">{hp.d}</span>　權益 {num(hp.e)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ---------- horizontal bars ---------- */
+/* ---------- horizontal bars (svg; non-timeseries) ---------- */
 function HBars({ rows, height = 220 }: { rows: { label: string; value: number; sub?: string; color?: string }[]; height?: number }) {
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1e-9)
   const rh = Math.min(26, (height - 8) / rows.length)
@@ -170,22 +193,15 @@ function HBars({ rows, height = 220 }: { rows: { label: string; value: number; s
     <svg viewBox={`0 0 ${W} ${rows.length * rh + 8}`} className="w-full" style={{ height: 'auto' }}>
       {rows.map((r, i) => {
         const w = (Math.abs(r.value) / max) * (W - mid - 90)
-        const col = r.color ?? (r.value >= 0 ? 'var(--up)' : 'var(--down)')
+        const col = r.color ?? (r.value >= 0 ? UP : DOWN)
         const yy = i * rh + 4
         return (
           <g key={i}>
-            <text x={0} y={yy + rh / 2 + 3} fontSize={12} className="mono" fill="var(--fg)">
-              {r.label}
-            </text>
-            {r.sub && (
-              <text x={150} y={yy + rh / 2 + 3} fontSize={11} className="mono" fill="var(--muted)">
-                {r.sub}
-              </text>
-            )}
+            <text x={0} y={yy + rh / 2 + 3} fontSize={12} className="mono" fill="var(--fg)">{r.label}</text>
+            {r.sub && <text x={150} y={yy + rh / 2 + 3} fontSize={11} className="mono" fill={MUT}>{r.sub}</text>}
             <rect x={mid} y={yy + 3} width={Math.max(2, w)} height={rh - 8} rx={2} fill={col} opacity={0.85} />
             <text x={mid + Math.max(2, w) + 6} y={yy + rh / 2 + 3} fontSize={11} className="mono tnum" fill={col}>
-              {r.value >= 0 ? '+' : ''}
-              {r.value.toFixed(2)}
+              {r.value >= 0 ? '+' : ''}{r.value.toFixed(2)}
             </text>
           </g>
         )
@@ -212,9 +228,7 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: stri
   return (
     <div className="bg-[var(--panel)] border border-[var(--line)] rounded-lg px-4 py-3">
       <div className="eyebrow">{label}</div>
-      <div className="text-[22px] font-semibold mono tnum mt-1" style={{ color: tone }}>
-        {value}
-      </div>
+      <div className="text-[22px] font-semibold mono tnum mt-1" style={{ color: tone }}>{value}</div>
     </div>
   )
 }
@@ -245,7 +259,7 @@ function Overview() {
           </table>
         </Panel>
         <Panel title="等權市場指數" sub={`${D.market.length} 交易日`}>
-          <Candles data={D.market} height={230} />
+          <CandleChart data={D.market} height={230} />
         </Panel>
       </div>
     </div>
@@ -256,8 +270,8 @@ function Market() {
   const [sid, setSid] = useState<string>(D.meta.top_stocks[0])
   return (
     <div className="flex flex-col gap-4">
-      <Panel title="等權市場指數 K 線" sub="基期 1000 · 四碼普通股 · 紅漲綠跌">
-        <Candles data={D.market} height={320} />
+      <Panel title="等權市場指數 K 線" sub="基期 1000 · 四碼普通股 · 紅漲綠跌 · 可拖曳縮放">
+        <RangeCandle data={D.market} height={340} volume />
       </Panel>
       <Panel title="個股 K 線" sub="成交值前 8 檔">
         <div className="flex flex-wrap gap-1.5 mb-3">
@@ -273,7 +287,7 @@ function Market() {
             </button>
           ))}
         </div>
-        <Candles key={sid} data={D.stocks[sid]} height={320} />
+        <RangeCandle key={sid} data={D.stocks[sid]} height={340} volume />
       </Panel>
     </div>
   )
@@ -316,14 +330,11 @@ function Factors() {
                       const t = f.horizons.find((x) => x.h === hh)!.t
                       return (
                         <td key={hh} className="py-2 px-2 text-right" style={{ color: Math.abs(t) > 2 ? sign(t) : 'var(--muted)' }}>
-                          {t >= 0 ? '+' : ''}
-                          {t.toFixed(2)}
+                          {t >= 0 ? '+' : ''}{t.toFixed(2)}
                         </td>
                       )
                     })}
-                    <td className="py-2 pl-3" style={{ color: v.c }}>
-                      {v.txt}
-                    </td>
+                    <td className="py-2 pl-3" style={{ color: v.c }}>{v.txt}</td>
                   </tr>
                 )
               })}
@@ -331,7 +342,7 @@ function Factors() {
           </table>
         </div>
         <p className="text-[11px] text-[var(--muted)] mt-3 leading-relaxed">
-          月營收 YoY（revenue_yoy）最穩健；投信/外資買超占量比在近期呈反向（追高反轉），方向先驗保留、待更長樣本 walk-forward 定奪。
+          月營收 YoY（revenue_yoy）最穩健；投信/外資買超占量比近期呈反向（追高反轉），方向先驗保留、待更長樣本 walk-forward 定奪。
         </p>
       </Panel>
     </div>
@@ -357,13 +368,11 @@ function Backtest() {
           {kpis.map(([l, v, t]) => (
             <div key={l} className="bg-[var(--panel-2)] border border-[var(--line)] rounded px-3 py-2">
               <div className="eyebrow">{l}</div>
-              <div className="text-[17px] font-semibold mono tnum mt-0.5" style={{ color: t }}>
-                {v}
-              </div>
+              <div className="text-[17px] font-semibold mono tnum mt-0.5" style={{ color: t }}>{v}</div>
             </div>
           ))}
         </div>
-        <Area data={D.backtest.equity} height={260} />
+        <EquityChart data={D.backtest.equity} height={280} />
       </Panel>
       <p className="text-[11px] text-[var(--muted)] px-1 leading-relaxed">
         成交假設與 PaperBroker 同源；含手續費/證交稅/價格相依滑價；跨程序決定性。此為範例策略（月營收 YoY 0.6 + 投信連買 0.4），非最終 alpha。
@@ -381,7 +390,7 @@ function Flows() {
           <p className="text-[10px] text-[var(--muted)] mt-2">單位：張（千股）</p>
         </Panel>
         <Panel title="月營收 YoY 成長前 15" sub={D.meta.rev_month}>
-          <HBars height={D.revenue.length * 22} rows={D.revenue.map((r) => ({ label: r.sid, value: r.yoy, sub: `${r.rev}億`, color: 'var(--accent)' }))} />
+          <HBars height={D.revenue.length * 22} rows={D.revenue.map((r) => ({ label: r.sid, value: r.yoy, sub: `${r.rev}億`, color: ACC }))} />
           <p className="text-[10px] text-[var(--muted)] mt-2">單位：YoY %</p>
         </Panel>
       </div>
@@ -389,9 +398,7 @@ function Flows() {
         <div className="flex flex-wrap gap-6 items-end">
           <div>
             <div className="eyebrow">資金容量上限</div>
-            <div className="text-[26px] font-semibold mono tnum" style={{ color: 'var(--accent)' }}>
-              {oku(D.capacity.twd)}
-            </div>
+            <div className="text-[26px] font-semibold mono tnum" style={{ color: 'var(--accent)' }}>{oku(D.capacity.twd)}</div>
           </div>
           <div>
             <div className="eyebrow">瓶頸標的</div>
@@ -456,7 +463,7 @@ export default function App() {
       <main className="flex-1 min-w-0">
         <header className="px-6 py-4 border-b border-[var(--line)] flex items-baseline justify-between">
           <h1 className="text-[17px] font-semibold tracking-wide">{cur.label}</h1>
-          <span className="text-[12px] mono text-[var(--muted)]">唯讀快照 · 非即時報價</span>
+          <span className="text-[12px] mono text-[var(--muted)]">唯讀快照 · 非即時報價 · lightweight-charts</span>
         </header>
         <div className="p-6 max-w-[1180px]">{cur.el}</div>
       </main>

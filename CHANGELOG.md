@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- 2026-07-06 前端圖表換 TradingView lightweight-charts：K線+成交量+十字游標legend+拖曳縮放（台股紅漲綠跌），權益改區域圖；水平長條維持 SVG。Docker 重打包驗證瀏覽器渲染正常。
+
 - 2026-07-06 前端儀表板（frontend/）：React 18 + Vite 5 + Tailwind，交易終端風格、台股紅漲綠跌、自繪 K線/權益/長條圖（hover+範圍切換+個股選擇）。用 Docker 打包成自包含單檔（繞開 Windows toolchain）；scripts/export_snapshot.py 由資料湖產快照。
 
 - 2026-07-06 T-029/T-024（部分）容量分析 + 漂移偵測：backtest/capacity.py

@@ -3,8 +3,9 @@
 台股量化平台的監控儀表板：市場 K 線、因子健檢、策略回測、法人/營收/容量。
 交易終端風格（深色 + 等寬數字），**台股慣例紅漲綠跌**。資料為快照（不連即時資料湖）。
 
-技術：React 18 + TypeScript + Vite 5 + Tailwind + 自繪 SVG 圖表（K 線含 hover 十字游標與
-全部/120/60 日切換、權益曲線、水平長條）。
+技術：React 19 + TypeScript + Vite 5 + Tailwind + **TradingView lightweight-charts**
+（K 線 + 成交量 + 十字游標 legend + 拖曳縮放、權益曲線區域圖）；因子/法人/營收的
+水平長條為自繪 SVG（非時間序列）。
 
 ## 用 Docker 打包（推薦）
 
