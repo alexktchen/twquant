@@ -299,6 +299,75 @@ def ingest_revenue(
         typer.secho(f"[OK] {market} {month}：{clean.height} 家已存入", fg=typer.colors.GREEN)
 
 
+def _git_hash() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+        )
+        return out.stdout.strip()
+    except Exception:  # noqa: BLE001  # 無 git 時給占位，不影響 pipeline
+        return "unknown"
+
+
+@app.command()
+def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today")) -> None:
+    """每日營運 pipeline：擷取→品質閘門→訊號生成，寫 heartbeat（LOOP §3）。"""
+    from twquant.conventions import now_tw
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+    from twquant.pipeline import PipelineStep, run_pipeline
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.config import load_strategy
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+
+    def _ingest_step() -> str:
+        return f"{_ingest_date(day, None, tolerant=True)} 表"
+
+    def _gate_step() -> str:
+        latest = wh.latest_date("prices_daily")
+        if latest != day:  # 訊號前硬性斷言：最新行情日 == 今日（D-008）
+            raise DataError("prices_daily", day, f"最新行情日 {latest} ≠ 今日 {day}")
+        return f"latest={latest}"
+
+    def _signal_step() -> str:
+        strat = load_strategy(_CONFIG_DIR / "strategies" / "sample_revenue_trust.yaml")
+        return f"{build_targets(strat, wh, day).height} 檔目標"
+
+    steps = [
+        PipelineStep("擷取", _ingest_step),
+        PipelineStep("品質閘門", _gate_step, critical=True),
+        PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
+    ]
+    res = run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
+    typer.secho(f"=== 每日 pipeline @ {day} ===", fg=typer.colors.CYAN, bold=True)
+    for s in res.steps:
+        color = {"ok": typer.colors.GREEN, "failed": typer.colors.RED}.get(
+            s.status, typer.colors.YELLOW
+        )
+        typer.secho(f"  [{s.status.upper()}] {s.name}：{s.detail}", fg=color)
+    tag = "降級（沿用前日權重）" if res.degraded else "正常"
+    typer.secho(f"結果：{tag}，訊號{'已' if res.signals_produced else '未'}產出", bold=True)
+
+
+@app.command()
+def watchdog(date: str = typer.Option("today", help="預期交易日 YYYY-MM-DD 或 today")) -> None:
+    """dead-man switch：檢查 heartbeat 是否為預期交易日；缺失/過期 → 非零退出。"""
+    from twquant.conventions import now_tw
+    from twquant.pipeline import watchdog_check
+
+    cfg = _load_system()
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    r = watchdog_check(cfg.data_dir, day)
+    if r.ok:
+        typer.secho("heartbeat 正常。", fg=typer.colors.GREEN)
+    else:
+        typer.secho(f"[CRIT] watchdog：{r.reason}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1)
+
+
 @app.command()
 def status() -> None:
     """顯示資料擷取狀態：各來源涵蓋範圍、平日缺口、最近失敗、最後執行時點。"""

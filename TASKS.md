@@ -32,7 +32,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-020 | 投組層：sleeve 組合、**條件式波動目標**、限額、四態 kill-switch、data/state 持久化 | SPEC-005 | T-018 | A | 部分完成 |
 | T-021 | PaperBroker（共用回測成交模組）+ 每日執行流程 + 對帳 | SPEC-006 | T-020 | A | done |
 | T-022 | ShioajiBroker（dry_run 預設、雙開關） | SPEC-006 | T-021 | B | todo |
-| T-023 | 每日 pipeline 多波次編排（ingest→gate→factor→signal）+ heartbeat/watchdog + 排程 | LOOP.md §3 | T-021 | A | todo |
+| T-023 | 每日 pipeline 多波次編排（ingest→gate→factor→signal）+ heartbeat/watchdog + 排程 | LOOP.md §3 | T-021 | A | 部分完成 |
 | T-024 | 監控：日報、漂移偵測（tracking error）、告警、唯讀儀表板 | SPEC-007 | T-023 | B | todo |
 | T-025 | Sleeve A（籌碼×營收動能）完整策略上模擬倉 | STRATEGY §2 + LOOP §1 | T-015, T-016, T-024 | B | todo |
 | T-026 | 洞悉層基座：LLM client 封裝、configs/llm.yaml（含 pricing/匯率）、用量記錄與預算閘、prompt 回歸測試框架 | SPEC-008 §3 + MODEL-POLICY §4 | T-002 | B | todo |
@@ -47,6 +47,13 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-023（部分完成）**（2026-07-06）每日 pipeline + heartbeat/watchdog（LOOP §3）。
+  pipeline.py：run_pipeline（步驟編排、關鍵步驟失敗→degraded 不產生新訊號、
+  skip_if_degraded）、write/read_heartbeat（日期+git hash 原子寫）、watchdog_check
+  （缺失/過期→非 ok，dead-man switch）。CLI pipeline（擷取→品質閘門含訊號前
+  latest==今日斷言→訊號生成）、watchdog。實測 2026-06-30：4 表→gate→40 檔目標→
+  heartbeat。閘門全綠（135 tests）。**待接**：多波次時點細分、PSI 因子分布告警、
+  catch-up 補跑、排程器接 pipeline。
 - **T-021**（2026-07-06）執行層（SPEC-006）。backtest/fill.py：抽出成交原語
   decide_fill，回測引擎與 PaperBroker 共用（AC-1 兩邊不分家；回測 132 tests 全綠
   證明重構無行為改變）。execution/broker.py：Order/OrderAck/Position/Fill、Broker

@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-06 T-021 執行層：backtest/fill.decide_fill（回測與 PaperBroker 共用成交
+  原語）、execution/（PaperBroker idempotency/HALTED、preflight/reconcile/run_session）。
+- 2026-07-06 T-023（部分）每日 pipeline：run_pipeline（步驟編排+degraded）、
+  heartbeat/watchdog（dead-man switch）+ CLI pipeline/watchdog。
+
 - 2026-07-06 儀表板改版：側邊選單分頁（總覽/市場K線/個股K線/法人/月營收/因子健檢/
   策略回測），價格圖改 Altair K 線（等權市場指數 + 個股 OHLC，漲綠跌紅）。閘門全綠。
 
