@@ -9,6 +9,56 @@
 
 ## 已裁決
 
+### D-017（2026-07-07，已裁決）擷取層 SOURCE 與 STORAGE 雙插件化 + TDCC 股權分散
+- 問題：來源與儲存後端寫死在 `cli._ingest_date`（`plans=[('twse',...),('tpex',...)]`
+  字面量 + 直接呼叫具體 `Warehouse`）。未來換來源（官方/FinMind/TDCC）或換儲存
+  （Parquet+DuckDB→Postgres）需散改多處。使用者要求「盡量規劃成 adapter，未來可任意
+  換掉來源與儲存」。
+- 裁決：於 CLI 編排邊界導入兩個 minimal seam（`data/ingest/ports.py`），**分析讀取側
+  完全不動**：
+  1. **IngestSink**（儲存，唯寫）：`write / partition_exists / source_dates /
+     latest_date`，方法名與簽名**逐字對齊 `Warehouse`**，故 `Warehouse` 以結構型別
+     **零改動**即滿足（`runtime_checkable`，有測試 `isinstance` 驗證）。`source` 為
+     不透明 disjoint-writer 標籤；part-<source>.parquet vs DB 交易 DELETE+INSERT 屬
+     adapter 細節。
+  2. **SourcePort**（來源，自足）：`name/tables/load()`（=抓取+清洗+驗證）。既有
+     twse/tpex 以 `FetchCleanSource` 包裝現行 `Source`+cleaner **零改寫**。
+  3. **註冊表**（`data/ingest/registry.py`，比照 `factors/registry`）：`register/get/
+     list_specs(cadence)/_clear`；`SourceSpec(source_tag, build, cadence)`；副作用匯入
+     `builtins.py`。新增來源 = 一檔 + 一筆 register，不改編排核心。
+  4. **編排器**（`orchestrator.run_ingest`）：只依賴埠，用假 sink/假來源可單元測試
+     （同時驗證來源與儲存皆可換）。`cli._ingest_date` 每日迴圈改由 `list_specs('daily')`
+     驅動。
+- 刻意界線：分析讀取側 `scan/sql/connect/view/PitView`（backtest/calendar/monitoring/
+  strategy/factors 廣泛使用，且為 D-008 PIT 憲法邊界）維持具體 `Warehouse`、不抽象化
+  ——抽象化將觸及約 8 模組與所有 PIT 測試、逾 CLAUDE.md §7 400 LOC 上限且無正當性；
+  未來採 Postgres 時另開 `ReadPort` 條目。
+- 首個落地：`TdccDispersionSource` + `clean_shareholding_dispersion` 寫
+  `shareholding_dispersion`（`ingest-dispersion` 指令，cadence=weekly；基準日取自 CSV
+  資料日期欄；available_at=公布週六12:00 依 SPEC-001 §1；16=差異數/17=合計 剔除）。
+  **實作發現（重要）**：opendata `getOD.ashx?id=1-5` 目前僅含 6 碼證券（ETF/受益證券/
+  債券，實測 3350 檔），**不含四碼普通股**（2330 等）。四碼普通股的集保戶股權分散表
+  僅 TDCC 互動查詢站（表單 POST）提供，屬未來另一個 SourcePort——正是本可插拔設計要
+  讓其「一檔+一筆註冊」即可加入的情境。散戶密集度因子（T-015/T-016）若需普通股集保
+  分散，待該來源接上。承接並形式化 D-014/D-011 的多來源分片替換語義為 (table,date,source)。
+
+### D-016（2026-07-07，已裁決）監控前端改即時 API、退役 Streamlit
+- 問題：監控有兩套重疊儀表板——Streamlit（`monitoring/dashboard.py`，即時讀資料湖，
+  埠 8501）與 React 前端（`frontend/`，靜態 data.json 快照，埠 8899）。維護雙份、
+  且「即時」與「快照」語義分裂。
+- 選項：A. 整併到 React、退役 Streamlit，另建唯讀 JSON API 供前端即時 fetch；
+  B. 只補 React 到功能對等、兩者並存；C. React 走靜態快照、退役 Streamlit（喪失即時）。
+- 裁決：A。新增 `monitoring/api.py`（FastAPI，唯讀 GET）＋ `monitoring/snapshot.py`
+  （API 與 `export_snapshot.py` 共用的建構函數＝單一真相源）；React 改即時 fetch `/api`，
+  API 不可達時退回內嵌 data.json（離線單檔仍可用）。刪 `monitoring/dashboard.py`；
+  pyproject 的 `dashboard`(streamlit) 群組換成 `api`(fastapi/uvicorn)。docker-compose
+  的 `dashboard` 服務換成 `api`（:8000），`frontend` 的 nginx 反代 `/api`。個股選單
+  （前 150 檔）、擷取失敗明細、回測期間選擇等 Streamlit 專屬互動一併移入前端。以
+  `twquant serve` 啟動 API。
+- 理由：單一 UI、單一資料路徑；FastAPI 全型別（mypy strict 免 override，不像
+  streamlit 需忽略）；API 每次查詢開/關 DuckDB 連線、不長期持有生產分區檔 handle
+  （順帶緩解 REVIEW H22 的 Windows 檔鎖疑慮）。取代 D-013 中 `dashboard`(Streamlit) 服務。
+
 ### D-001（2026-07-04，已裁決）分點資料來源
 - 問題：官方 bsr/TPEX 分點查詢有驗證碼與 anti-bot，如何取得 broker_trades？
 - 選項：A. FinMind 付費 API；B. 驗證碼自動破解；C. 半自動人工輸入

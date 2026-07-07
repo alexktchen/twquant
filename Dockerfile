@@ -10,12 +10,12 @@ ENV UV_LINK_MODE=copy \
 
 # 先裝相依（Docker 層快取：pyproject/lock 不變則不重裝）
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --group dashboard --no-install-project
+RUN uv sync --frozen --no-dev --group api --no-install-project
 
 # 再裝專案本體
 COPY src ./src
 COPY configs ./configs
-RUN uv sync --frozen --no-dev --group dashboard
+RUN uv sync --frozen --no-dev --group api
 
 # 資料湖掛在 volume（見 docker-compose）
 VOLUME ["/app/data"]

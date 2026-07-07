@@ -138,3 +138,82 @@ def margin_velocity_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="chip.foreign_streak",
+    category="chip",
+    direction=1,
+    tables=["institutional_daily"],
+    lookback_days=30,
+    params={},
+)
+def foreign_streak(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """外資連續買超天數（截至 t 日；連買越久訊號越強，對照 chip.trust_streak）。"""
+    inst = view.table("institutional_daily").select("date", "stock_id", "foreign_net")
+    return (
+        inst.sort(["stock_id", "date"])
+        .with_columns(_buy=(pl.col("foreign_net") > 0))
+        .with_columns(_blk=(~pl.col("_buy")).cast(pl.Int32).cum_sum().over("stock_id"))
+        .with_columns(value=pl.col("_buy").cast(pl.Float64).cum_sum().over(["stock_id", "_blk"]))
+        .select("date", "stock_id", "value")
+        .collect()
+    )
+
+
+@factor(
+    name="chip.inst_net_10d",
+    category="chip",
+    direction=1,
+    tables=["institutional_daily", "prices_daily"],
+    lookback_days=15,
+    params={"window": 10},
+)
+def inst_net_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """三大法人合計 10 日買超占成交量比（外資+投信+自營；正向：法人同買偏多）。"""
+    raw = params.get("window", 10)
+    window = int(raw) if isinstance(raw, int | float | str) else 10
+    inst = view.table("institutional_daily").select(
+        "date", "stock_id", "foreign_net", "trust_net", "dealer_net"
+    )
+    px = view.table("prices_daily").select("date", "stock_id", "volume")
+    return (
+        inst.join(px, on=["date", "stock_id"], how="inner")
+        .sort(["stock_id", "date"])
+        .with_columns(_net=pl.col("foreign_net") + pl.col("trust_net") + pl.col("dealer_net"))
+        .with_columns(
+            _netsum=pl.col("_net").rolling_sum(window).over("stock_id"),
+            _vol=pl.col("volume").rolling_sum(window).over("stock_id"),
+        )
+        .with_columns(
+            value=pl.when(pl.col("_vol") > 0)
+            .then(pl.col("_netsum") / pl.col("_vol"))
+            .otherwise(None)
+        )
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="chip.short_margin_ratio",
+    category="chip",
+    direction=1,
+    tables=["margin_daily"],
+    lookback_days=3,
+    params={},
+)
+def short_margin_ratio(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """券資比 = 融券餘額 / 融資餘額（當日）。先驗 +1（高券資比＝軋空燃料），實際符號待 IC。"""
+    m = view.table("margin_daily").select("date", "stock_id", "margin_balance", "short_balance")
+    return (
+        m.with_columns(
+            value=pl.when(pl.col("margin_balance") > 0)
+            .then(pl.col("short_balance") / pl.col("margin_balance"))
+            .otherwise(None)
+        )
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )

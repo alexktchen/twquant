@@ -185,6 +185,20 @@ STOCK_META = _schema(
     },
 )
 
+INDEX_DAILY = _schema(
+    "index_daily",
+    1,
+    {
+        "date": _col(pl.Date),
+        "index_id": _col(pl.String),  # TAIEX（加權）/ TPEX（櫃買）
+        "open": _col(pl.Float64, nullable=True),  # 櫃買僅收盤，OHLC 留 null
+        "high": _col(pl.Float64, nullable=True),
+        "low": _col(pl.Float64, nullable=True),
+        "close": _nonneg(pl.Float64),  # 指數點數
+        "available_at": _col(TW_DT),
+    },
+)
+
 TRADING_CALENDAR = _schema(
     "trading_calendar",
     1,
@@ -225,6 +239,7 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "broker_trades": BROKER_TRADES,
     "shareholding_dispersion": SHAREHOLDING_DISPERSION,
     "monthly_revenue": MONTHLY_REVENUE,
+    "index_daily": INDEX_DAILY,
     "corporate_events": CORPORATE_EVENTS,
     "disposition_stocks": DISPOSITION_STOCKS,
     "taifex_institutional": TAIFEX_INSTITUTIONAL,

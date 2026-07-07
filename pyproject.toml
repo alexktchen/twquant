@@ -26,8 +26,9 @@ dev = [
     "pytest>=8.0",
     "hypothesis>=6.100",
 ]
-dashboard = [
-    "streamlit>=1.40",
+api = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 insight = [
     "anthropic>=0.40",
@@ -69,7 +70,7 @@ files = ["src", "tests"]
 warn_unused_configs = true
 # 第三方庫缺型別 stub 時不擋（polars/duckdb/pandera 自帶或部分缺）
 [[tool.mypy.overrides]]
-module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "streamlit.*", "altair.*", "anthropic.*"]
+module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

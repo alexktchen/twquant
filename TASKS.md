@@ -47,6 +47,31 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-010（擷取層可插拔化）/ D-017**（2026-07-07）SOURCE 與 STORAGE 雙插件化 + TDCC
+  股權分散。`data/ingest/`：ports（唯寫 `IngestSink`＝Warehouse 零改動結構滿足；自足
+  `SourcePort`；`FetchCleanSource` 包裝既有來源零改寫）、registry（`SourceSpec`/register/
+  `list_specs(cadence)`，比照 factors）、orchestrator（`run_ingest` 只依賴埠、假 sink/來源
+  可測）。`cli._ingest_date` 改註冊表驅動；新增 `ingest-dispersion`（週頻）。首個來源
+  `TdccDispersionSource`+`clean_shareholding_dispersion`：available_at=公布週六12:00（含
+  PIT 前視測試）、16/17 剔除。**發現**：opendata id=1-5 覆蓋 6 碼證券（ETF/債券，實測
+  50250 列/3350 檔），四碼普通股集保分散需 TDCC 互動站（未來一檔+一筆註冊即可加，正是
+  可插拔設計目的）。讀取/PitView 側不動。閘門全綠（194 tests）＋真實資料湖驗證落地。
+- **T-024（擷取後台）**（2026-07-07）資料擷取監控後台（唯讀）：`monitoring/snapshot.py`
+  加 `ingest_matrix`（dataset×交易日 → present/missing/failed/none）、`ingest_gaps`（缺口
+  歸併連續區段＋建議補抓 CLI 指令＋D-015 ban 警示）；`monitoring/api.py` 加 GET
+  `ingest-matrix`/`ingest-gaps`/`heartbeat`（即時不快取，ops 新鮮度）。前端 App.tsx 加
+  「資料後台」頁（涵蓋熱力圖＋漏抓清單＋複製指令，運維色盤 green/amber/red、30 秒輪詢）。
+  補抓仍走 CLI（D-016 唯讀原則不變）。閘門全綠（179 tests、ruff/mypy、frontend oxlint）＋
+  對真實資料湖手驗（正確標出 TWSE 2026-01~06 缺口與 backfill ban 警示）。tests/test_ingest_admin.py。
+- **T-024（監控儀表板部分）/ D-016**（2026-07-07）監控整併：退役 Streamlit
+  `monitoring/dashboard.py`，改「React 前端 + 唯讀 FastAPI」。`monitoring/snapshot.py`
+  （API 與 export_snapshot 共用的快照建構單一真相源）、`monitoring/api.py`（GET
+  health/snapshot/stocks/stocks·{sid}/backtest/ingest-status；重運算以最新行情日快取；
+  個股代號白名單防 SQL 注入）、CLI `serve`。前端即時 fetch `/api`、不可達退回內嵌
+  data.json；補回 Streamlit 專屬互動（前 150 檔個股選單、擷取失敗明細、回測期間重跑）。
+  docker-compose `dashboard`→`api`、frontend nginx 反代 `/api`；pyproject
+  `dashboard`(streamlit)→`api`(fastapi/uvicorn)。閘門全綠（168 tests）＋對真實資料湖
+  跑 `twquant serve` 手驗全端點與前端即時渲染/離線 fallback。
 - **T-029 / T-024（部分完成）**（2026-07-06）容量分析 + 漂移偵測。
   backtest/capacity.py：estimate_capacity（目標權重 × 20 日 ADV × 參與率上限 →
   容量上限 + 瓶頸標的）；CLI capacity 實測 sample 策略 ~0.8 億元（瓶頸小型股）。

@@ -11,8 +11,11 @@ RUN npx vite build
 FROM scratch AS artifact
 COPY --from=build /app/dist/index.html /twquant_dashboard.html
 
-# 可跑的服務：nginx 靜態伺服自包含單檔（預設 target）
+# 可跑的服務：nginx 靜態伺服 SPA + 反代 /api 到後端（預設 target）
 FROM nginx:alpine AS serve
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist/index.html /usr/share/nginx/html/index.html
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1
+# 用 127.0.0.1 而非 localhost：容器內 localhost 會先解到 IPv6 ::1，但 nginx 只聽 IPv4，
+# 會 connection refused 導致誤判 unhealthy。
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1

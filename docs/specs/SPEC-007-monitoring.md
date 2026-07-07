@@ -34,10 +34,16 @@
 - CRIT 必須包含：發生什麼、系統已自動做了什麼、需要人做什麼
 - 告警去重：同一 (等級, 事件鍵) 24 小時內只發一次，但 CRIT 每次都發
 
-## 5. 儀表板（Streamlit 單頁，`monitoring/dashboard.py`）
+## 5. 儀表板（React 前端 + 唯讀 JSON API，D-016）
 
-唯讀。權益曲線、sleeve 歸因、漂移時序、因子健康度矩陣、最近告警。
-不放任何操作按鈕（操作走 CLI + DECISIONS.md，避免誤觸）。
+唯讀。前端為 React + Vite + lightweight-charts（`frontend/`，台股紅漲綠跌），
+即時 fetch 後端 API（`monitoring/api.py`，FastAPI）；API 與離線快照
+（`frontend/scripts/export_snapshot.py`）共用同一組建構函數（`monitoring/snapshot.py`）。
+內容：等權市場指數 K 線、個股 K 線（即時選單）、因子健康度（RankIC）、策略回測
+（權益曲線＋成本後指標，可選期間）、法人流向、月營收、容量、擷取狀態（涵蓋/缺口/失敗）。
+不放任何操作按鈕（操作走 CLI + DECISIONS.md，避免誤觸）。以 `twquant serve` 啟動 API；
+docker-compose 的 `api` + `frontend` 兩服務常駐（`frontend` 的 nginx 反代 `/api`）。
+（原 Streamlit 單頁 `monitoring/dashboard.py` 已於 D-016 退役。）
 
 ## 驗收條件
 
@@ -48,7 +54,8 @@
 - AC-4：告警去重：同一 WARN 事件 2 次只發 1 次；CRIT 2 次發 2 次（mock 通道驗證）
 - AC-5：pipeline 任一步驟 raise → CRIT 告警內含步驟名與例外訊息，且當日
   訊號回退（沿用前日權重）路徑被觸發
-- AC-6：儀表板可用 fixture 資料離線啟動（無網路、無券商連線）
+- AC-6：API/前端可用 fixture 資料離線啟動（無網路、無券商連線）——API 對 tmp 資料湖
+  回傳快照；前端於 API 不可達時以內嵌 data.json fallback 渲染
 
 ## 範圍外
 

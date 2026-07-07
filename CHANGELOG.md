@@ -1,5 +1,21 @@
 # CHANGELOG
 
+- 2026-07-07 擷取層可插拔化（D-017 / T-010）：新增 `data/ingest/`（ports：唯寫 IngestSink +
+  自足 SourcePort；registry：SourceSpec/register/list_specs，比照 factors；orchestrator：
+  run_ingest 只依賴埠、可用假 sink/來源測試）。`cli._ingest_date` 每日迴圈改由註冊表驅動；
+  既有 twse/tpex 以 FetchCleanSource 零改寫、Warehouse 零改動即滿足 IngestSink。首個新來源
+  `TdccDispersionSource` + `clean_shareholding_dispersion`（`ingest-dispersion`，週頻，
+  available_at=公布週六12:00、16/17 剔除）——實測 opendata id=1-5 覆蓋 6 碼證券（ETF/債券，
+  50250 列/3350 檔），四碼普通股集保分散待接互動站來源。讀取/PitView 側不動。閘門全綠（194 tests）。
+
+- 2026-07-07 監控整併（D-016）：退役 Streamlit `monitoring/dashboard.py`，改「React 前端 +
+  唯讀 FastAPI」。新增 `monitoring/snapshot.py`（快照建構單一真相源，API 與 export_snapshot
+  共用）、`monitoring/api.py`（GET /api/health·snapshot·stocks·stocks/{sid}·backtest·
+  ingest-status，重運算以最新行情日快取，個股代號白名單防 SQL 注入）、CLI `serve`。前端改
+  即時 fetch `/api`、API 不可達退回內嵌 data.json；補回 Streamlit 專屬互動（前 150 檔個股
+  選單、擷取失敗明細、回測期間選擇）。docker-compose `dashboard`→`api`（:8000），frontend
+  nginx 反代 `/api`。pyproject `dashboard`(streamlit)→`api`(fastapi/uvicorn)。閘門全綠（168 tests）。
+
 - 2026-07-06 前端圖表換 TradingView lightweight-charts：K線+成交量+十字游標legend+拖曳縮放（台股紅漲綠跌），權益改區域圖；水平長條維持 SVG。Docker 重打包驗證瀏覽器渲染正常。
 
 - 2026-07-06 前端儀表板（frontend/）：React 18 + Vite 5 + Tailwind，交易終端風格、台股紅漲綠跌、自繪 K線/權益/長條圖（hover+範圍切換+個股選擇）。用 Docker 打包成自包含單檔（繞開 Windows toolchain）；scripts/export_snapshot.py 由資料湖產快照。

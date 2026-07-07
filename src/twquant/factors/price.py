@@ -90,3 +90,90 @@ def reversal_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="price.mom_60d",
+    category="price",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=65,
+    params={"window": 60},
+    anchor_invariant=True,
+)
+def mom_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """60 日中期動能：close(t)/close(t-60) − 1（正向：中期強勢延續）。"""
+    raw = params.get("window", 60)
+    window = int(raw) if isinstance(raw, int | float | str) else 60
+    prices = (
+        view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    )
+    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
+    return (
+        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="price.vol_20d",
+    category="price",
+    direction=-1,
+    tables=["prices_daily"],
+    lookback_days=25,
+    params={"window": 20},
+    anchor_invariant=True,
+)
+def vol_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """20 日已實現波動率：日報酬的 20 日滾動標準差（direction=-1，低波動異象）。"""
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    prices = (
+        view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    )
+    ret = pl.col("close") / pl.col("close").shift(1).over("stock_id", order_by="date") - 1.0
+    return (
+        prices.with_columns(_r=ret)
+        .with_columns(value=pl.col("_r").rolling_std(window).over("stock_id"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="price.rs_market_20d",
+    category="price",
+    direction=1,
+    tables=["prices_daily", "index_daily"],
+    lookback_days=25,
+    params={"window": 20},
+)
+def rs_market_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """相對大盤強弱：個股 20 日報酬 − 加權指數 20 日報酬（正向：相對強者續強）。
+
+    需 index_daily（TAIEX）；未 backfill-index 時 view.table 讀無資料 raise，此因子自動略過。
+    """
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    px = view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    sret = pl.col("close") / pl.col("close").shift(window).over("stock_id", order_by="date") - 1.0
+    idx = (
+        view.table("index_daily")
+        .filter(pl.col("index_id") == "TAIEX")
+        .select("date", "close")
+        .sort("date")
+    )
+    idx = idx.with_columns(_mret=pl.col("close") / pl.col("close").shift(window) - 1.0).select(
+        "date", "_mret"
+    )
+    return (
+        px.with_columns(_sret=sret)
+        .join(idx, on="date", how="inner")
+        .with_columns(value=pl.col("_sret") - pl.col("_mret"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
