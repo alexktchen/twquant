@@ -16,9 +16,12 @@ from typing import TYPE_CHECKING
 import typer
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import polars as pl
 
     from twquant.config import SystemConfig
+    from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
 
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
@@ -109,55 +112,38 @@ def _load_system() -> SystemConfig:
 
 
 def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> int:
-    """抓→清洗→存單日 TWSE 資料。tolerant=True 時，非交易日/單表失敗只警告不中斷。
+    """抓→清洗→存單日每日來源（TWSE+TPEX）。tolerant=True 時單表失敗只警告不中斷。
 
-    回傳成功存入的表數。
+    來源由註冊表驅動（D-017）：新增每日來源 = data/ingest/builtins.py 一筆 register，
+    不改本函數；Warehouse 於寫入站以 IngestSink 埠使用（儲存亦可換）。回傳成功表數。
     """
-    from collections.abc import Mapping
-    from typing import Any
-
-    from twquant.data.clean import CLEANERS, TPEX_CLEANERS
-    from twquant.data.http import HttpClient
-    from twquant.data.sources import Source
-    from twquant.data.sources.tpex import TpexSource, browser_client
-    from twquant.data.sources.twse_rwd import TwseRwdSource
+    import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
+    from twquant.data.ingest.orchestrator import run_ingest
+    from twquant.data.ingest.registry import list_specs
     from twquant.data.warehouse import Warehouse
-    from twquant.errors import DataError
-    from twquant.reporting.ingest_log import record
 
     cfg = _load_system()
     wh = Warehouse(cfg.data_dir)
 
-    twse = TwseRwdSource(client=HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"]))
-    tpex = TpexSource(client=browser_client(cfg.source_rates["tpex"]))
-    # (來源標籤, 來源物件, clean 函數表)
-    plans: list[tuple[str, Source, Mapping[str, Any]]] = [
-        ("twse", twse, CLEANERS),
-        ("tpex", tpex, TPEX_CLEANERS),
-    ]
+    def _announce(tag: str, table: str) -> None:
+        typer.secho(f">> [{tag}] 抓取 {table} @ {day}", fg=typer.colors.CYAN)
 
-    ok = 0
-    for source_tag, src, cleaners in plans:
-        for table in tables or src.tables:
-            if table not in cleaners:
-                continue
-            typer.secho(f">> [{source_tag}] 抓取 {table} @ {day}", fg=typer.colors.CYAN)
-            try:
-                raw = src.fetch(table, day)
-                clean = cleaners[table](raw, day)
-                wh.write("clean", table, clean, source=source_tag)
-            except DataError as exc:
-                record(cfg.data_dir, source_tag, table, day, "failed", detail=str(exc))
-                if not tolerant:
-                    raise
-                typer.secho(f"[SKIP] {source_tag}/{table}：{exc}", fg=typer.colors.YELLOW)
-                continue
-            record(cfg.data_dir, source_tag, table, day, "success", rows=clean.height)
-            typer.secho(
-                f"[OK] {source_tag}/{table}：{clean.height} 列已存入", fg=typer.colors.GREEN
-            )
-            ok += 1
-    return ok
+    outcomes = run_ingest(
+        list_specs(cadence="daily"),
+        cfg,
+        wh,
+        day,
+        data_dir=cfg.data_dir,
+        tables=tables,
+        tolerant=tolerant,
+        on_start=_announce,
+    )
+    for o in outcomes:
+        if o.status == "success":
+            typer.secho(f"[OK] {o.source_tag}/{o.table}：{o.rows} 列已存入", fg=typer.colors.GREEN)
+        else:
+            typer.secho(f"[SKIP] {o.source_tag}/{o.table}：{o.detail}", fg=typer.colors.YELLOW)
+    return sum(1 for o in outcomes if o.status == "success")
 
 
 @app.command()
@@ -181,6 +167,32 @@ def daily(
     typer.secho(f"每日擷取完成：{n} 張表 @ {day}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="ingest-dispersion")
+def ingest_dispersion() -> None:
+    """抓 TDCC 集保戶股權分散表（週頻全市場快照）、清洗、存入 clean 資料湖。
+
+    基準日取自 CSV 的資料日期欄（非參數，opendata 只給最新週快照）。目前 id=1-5 覆蓋
+    6 碼證券（ETF/受益證券/債券）；四碼普通股集保分散另循 TDCC 互動站（未來另一來源，
+    D-017 的可插拔設計即為此準備）。走與每日相同的來源註冊表 + 編排器（cadence=weekly）。
+    """
+    import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
+    from twquant.conventions import now_tw
+    from twquant.data.ingest.orchestrator import run_ingest
+    from twquant.data.ingest.registry import get
+    from twquant.data.warehouse import Warehouse
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    typer.secho(">> [tdcc] 抓取集保戶股權分散表", fg=typer.colors.CYAN, bold=True)
+    outcomes = run_ingest(
+        [get("tdcc")], cfg, wh, now_tw().date(), data_dir=cfg.data_dir, tolerant=False
+    )
+    for o in outcomes:
+        typer.secho(
+            f"[OK] {o.source_tag}/{o.table}：{o.rows} 列已存入", fg=typer.colors.GREEN, bold=True
+        )
+
+
 def _daterange(start: dt.date, end: dt.date) -> list[dt.date]:
     """start..end（含端點）的所有日曆日。"""
     return [start + dt.timedelta(days=i) for i in range((end - start).days + 1)]
@@ -191,8 +203,15 @@ def backfill(
     from_: str = typer.Option(..., "--from", help="起始日 YYYY-MM-DD"),
     to: str = typer.Option(..., "--to", help="結束日 YYYY-MM-DD"),
     skip_existing: bool = typer.Option(True, help="跳過已抓過的日期（續傳）"),
+    tables: list[str] | None = typer.Option(
+        None, "--tables", help="只回補指定表（如 prices_daily）；預設全部日表"
+    ),
 ) -> None:
-    """回補一段期間的免費來源日資料（TWSE+TPEX）。跳週末、跳假日、可續傳。"""
+    """回補一段期間的免費來源日資料（TWSE+TPEX）。跳週末、跳假日、可續傳。
+
+    `--tables prices_daily` 只補行情，可避開總請求量觸發 TWSE 封鎖、或繞過個別表的
+    來源格式問題，單獨補齊個股 K 線。
+    """
     from twquant.data.warehouse import Warehouse
 
     start = dt.date.fromisoformat(from_)
@@ -207,7 +226,7 @@ def backfill(
         if skip_existing and wh.partition_exists("clean", "prices_daily", day, "twse"):
             skipped += 1
             continue
-        n = _ingest_date(day, None, tolerant=True)
+        n = _ingest_date(day, tables, tolerant=True)
         if n:
             done += 1
         typer.secho(f"  [{i}/{len(days)}] {day}：{n} 表", fg=typer.colors.CYAN)
@@ -298,6 +317,92 @@ def ingest_revenue(
             cfg.data_dir, f"mops_{market}", "monthly_revenue", month, "success", rows=clean.height
         )
         typer.secho(f"[OK] {market} {month}：{clean.height} 家已存入", fg=typer.colors.GREEN)
+
+
+@app.command(name="ingest-index")
+def ingest_index(
+    month: str = typer.Option(..., help="指數月份 YYYY-MM（例如 2026-07）"),
+) -> None:
+    """抓某月加權指數（TWSE）+ 櫃買指數（TPEx），清洗、存入 index_daily。"""
+    from twquant.data.clean import clean_index_tpex, clean_index_twse
+    from twquant.data.http import HttpClient
+    from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
+    from twquant.data.sources.tpex import browser_client
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+    from twquant.reporting.ingest_log import record
+
+    year, mon = (int(x) for x in month.split("-"))
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    twse = TwseIndexSource(HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"]))
+    tpex = TpexIndexSource(browser_client(cfg.source_rates["tpex"]))
+    plans: list[
+        tuple[str, TwseIndexSource | TpexIndexSource, Callable[[pl.DataFrame], pl.DataFrame]]
+    ] = [
+        ("twse", twse, clean_index_twse),
+        ("tpex", tpex, clean_index_tpex),
+    ]
+
+    for tag, src, cleaner in plans:
+        typer.secho(f">> [{tag}] 指數 {month}", fg=typer.colors.CYAN)
+        try:
+            raw = src.fetch_month(year, mon)
+            clean = cleaner(raw)
+            wh.write("clean", "index_daily", clean, source=tag)
+        except DataError as exc:
+            record(cfg.data_dir, tag, "index_daily", month, "failed", detail=str(exc))
+            typer.secho(f"[SKIP] {tag}：{exc}", fg=typer.colors.YELLOW)
+            continue
+        record(cfg.data_dir, tag, "index_daily", month, "success", rows=clean.height)
+        typer.secho(f"[OK] {tag} {month}：{clean.height} 日已存入", fg=typer.colors.GREEN)
+
+
+@app.command(name="backfill-index")
+def backfill_index(
+    from_: str = typer.Option(..., "--from", help="起始月 YYYY-MM"),
+    to: str = typer.Option(..., "--to", help="結束月 YYYY-MM"),
+) -> None:
+    """回補一段期間的加權/櫃買指數（逐月 ingest-index）。指數端點不受 D-015 封鎖。"""
+    fy, fm = (int(x) for x in from_.split("-"))
+    ty, tm = (int(x) for x in to.split("-"))
+    months: list[str] = []
+    y, m = fy, fm
+    while (y, m) <= (ty, tm):
+        months.append(f"{y}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    typer.secho(f"回補指數 {from_}~{to}：{len(months)} 個月", fg=typer.colors.CYAN, bold=True)
+    for month in months:
+        ingest_index(month=month)
+
+
+@app.command(name="ingest-meta")
+def ingest_meta() -> None:
+    """抓上市+上櫃個股基本資料（中文名、產業別/族群），存入 stock_meta（緩變維度表）。"""
+    from twquant.data.clean import clean_stock_meta
+    from twquant.data.http import HttpClient
+    from twquant.data.sources.twse_isin import StockMetaSource
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+    from twquant.reporting.ingest_log import record
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    src = StockMetaSource(HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"]))
+    # (來源標籤, strMode, 市場別)
+    plans = [("twse", 2, "TWSE"), ("tpex", 4, "TPEX")]
+    for tag, mode, market in plans:
+        typer.secho(f">> [{tag}] 個股基本資料 strMode={mode}", fg=typer.colors.CYAN)
+        try:
+            raw = src.fetch(mode)
+            clean = clean_stock_meta(raw, market)
+            wh.write("clean", "stock_meta", clean, source=tag)
+        except DataError as exc:
+            record(cfg.data_dir, tag, "stock_meta", "_all", "failed", detail=str(exc))
+            typer.secho(f"[SKIP] {tag}：{exc}", fg=typer.colors.YELLOW)
+            continue
+        record(cfg.data_dir, tag, "stock_meta", "_all", "success", rows=clean.height)
+        typer.secho(f"[OK] {tag}：{clean.height} 檔已存入", fg=typer.colors.GREEN)
 
 
 def _git_hash() -> str:
@@ -427,6 +532,24 @@ def status() -> None:
                 f"  [{r['attempt_ts'][:19]}] {r['source']}/{r['table']} @ {r['date']}",
                 fg=typer.colors.YELLOW,
             )
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="綁定位址（容器內用 0.0.0.0）"),
+    port: int = typer.Option(8000, help="埠號"),
+) -> None:
+    """啟動唯讀監控 API（FastAPI/uvicorn），供 React 前端即時讀資料湖。"""
+    import uvicorn
+
+    from twquant.monitoring.api import app as api_app
+
+    typer.secho(
+        f"監控 API：http://{host}:{port}/api（互動文件：/api/docs）",
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
+    uvicorn.run(api_app, host=host, port=port)
 
 
 @app.command()

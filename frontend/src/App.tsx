@@ -1,21 +1,45 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ColorType, CrosshairMode, createChart } from 'lightweight-charts'
-import raw from './data.json'
+import fallbackRaw from './data.json'
+import {
+  fetchBacktest,
+  fetchCapacity,
+  fetchFactors,
+  fetchHeartbeat,
+  fetchIndices,
+  fetchIngestGaps,
+  fetchIngestMatrix,
+  fetchIngestStatus,
+  fetchInstitutional,
+  fetchMarket,
+  fetchMeta,
+  fetchRevenue,
+  fetchSectorFlows,
+  fetchStockFactors,
+  fetchStockList,
+  fetchStockMeta,
+  fetchStockOhlc,
+  type Backtest as BacktestT,
+  type Candle,
+  type CellState,
+  type Data,
+  type Fac,
+  type Heartbeat,
+  type IndexPoint,
+  type Indices,
+  type IngestGap,
+  type IngestGaps,
+  type IngestMatrix,
+  type IngestStatus,
+  type Inst,
+  type Meta,
+  type Rev,
+  type Scorecard,
+  type SectorFlows,
+  type StockMetaMap,
+} from './api'
 
-/* ---------- types ---------- */
-type Candle = { d: string; o: number; h: number; l: number; c: number; amt?: number; v?: number }
-type Fac = { name: string; direction: number; horizons: { h: number; ic: number; t: number; ir: number; ls: number; n: number }[] }
-type Data = {
-  meta: { as_of: string; window: string; rev_month: string; top_stocks: string[]; coverage: { label: string; days: number; span: string }[] }
-  market: Candle[]
-  stocks: Record<string, Candle[]>
-  factors: Fac[]
-  backtest: { name: string; equity: { d: string; e: number }[]; metrics: Record<string, number> }
-  institutional: { sid: string; trust: number; frgn: number; px: number }[]
-  revenue: { sid: string; rev: number; yoy: number }[]
-  capacity: { twd: number; binding: string; n_positions: number }
-}
-const D = raw as unknown as Data
+const FALLBACK = fallbackRaw as unknown as Data
 
 const UP = '#e5484d' // 台股：紅漲
 const DOWN = '#2ea36b' // 綠跌
@@ -160,6 +184,54 @@ function EquityChart({ data, height = 260 }: { data: { d: string; e: number }[];
   )
 }
 
+/* ---------- index line (close-only, e.g. 櫃買指數) ---------- */
+function IndexLine({ data, height = 300 }: { data: IndexPoint[]; height?: number }) {
+  const box = useRef<HTMLDivElement>(null)
+  const legend = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const chart = baseChart(el, height)
+    const area = chart.addAreaSeries({
+      lineColor: ACC,
+      topColor: 'rgba(224,168,59,0.22)',
+      bottomColor: 'rgba(224,168,59,0.02)',
+      lineWidth: 2,
+      priceLineVisible: false,
+    })
+    area.setData(data.map((p) => ({ time: p.d, value: p.c })))
+    chart.timeScale().fitContent()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    chart.subscribeCrosshairMove((param: any) => {
+      const lg = legend.current
+      if (!lg) return
+      const d = param?.time ? param.seriesData?.get(area) : null
+      if (!d) {
+        lg.style.opacity = '0'
+        return
+      }
+      lg.style.opacity = '1'
+      lg.innerHTML = `<span style="color:${MUT}">${param.time}</span>　指數 ${num(d.value, 2)}`
+    })
+    const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      chart.remove()
+    }
+  }, [data, height])
+  return (
+    <div style={{ position: 'relative' }}>
+      <div
+        ref={legend}
+        className="mono tnum"
+        style={{ position: 'absolute', top: 4, left: 8, zIndex: 3, fontSize: 11, pointerEvents: 'none', opacity: 0 }}
+      />
+      <div ref={box} style={{ width: '100%' }} />
+    </div>
+  )
+}
+
 /* ---------- range chips (slice history) ---------- */
 function RangeCandle({ data, height, volume }: { data: Candle[]; height?: number; volume?: boolean }) {
   const [range, setRange] = useState(0)
@@ -233,49 +305,286 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: stri
   )
 }
 
+/* ---------- meta context (輕量，app 啟動載一次；shell 與各頁預設用) ---------- */
+type MetaCtxT = { meta: Meta; live: boolean }
+const MetaCtx = createContext<MetaCtxT | null>(null)
+function useMeta(): MetaCtxT {
+  const c = useContext(MetaCtx)
+  if (!c) throw new Error('MetaCtx 未提供')
+  return c
+}
+
+/* ---------- 逐頁懶載入 resource ----------
+   切到某頁才 fetch 該段（重運算的因子/回測/容量只在對應頁開啟時才算）；module 級快取
+   → 換頁再回來不重打；API 不可達則退回內嵌 data.json 對應段（保留離線可用）。
+   同鍵並發去重（含 StrictMode 開發雙呼）。*/
+type Res<T> = { data: T | null; loading: boolean; live: boolean }
+const resCache = new Map<string, { data: unknown; live: boolean }>()
+const resInflight = new Map<string, Promise<void>>()
+function useResource<T>(key: string, fetcher: () => Promise<T>, fallback: () => T): Res<T> {
+  const [, bump] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => {
+    if (resCache.has(key)) return
+    let alive = true
+    let p = resInflight.get(key)
+    if (!p) {
+      p = fetcher()
+        .then((d) => {
+          resCache.set(key, { data: d, live: true })
+        })
+        .catch(() => {
+          resCache.set(key, { data: fallback(), live: false })
+        })
+        .finally(() => {
+          resInflight.delete(key)
+        })
+      resInflight.set(key, p)
+    }
+    void p.then(() => {
+      if (alive) bump()
+    })
+    return () => {
+      alive = false
+    }
+  }, [key])
+  const entry = resCache.get(key)
+  if (!entry) return { data: null, loading: true, live: false }
+  return { data: entry.data as T, loading: false, live: entry.live }
+}
+
+/* ---------- loading skeleton ---------- */
+function Skeleton({ height = 200, className = '' }: { height?: number; className?: string }) {
+  return <div className={`animate-pulse rounded bg-[var(--panel-2)] ${className}`} style={{ height }} />
+}
+
+/* ---------- ingestion status (live; falls back to snapshot coverage) ---------- */
+function IngestPanel() {
+  const { meta, live } = useMeta()
+  const [st, setSt] = useState<IngestStatus | null>(null)
+  useEffect(() => {
+    if (!live) return
+    let alive = true
+    fetchIngestStatus().then((s) => alive && setSt(s)).catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [live])
+
+  if (!st) {
+    // 快照 fallback：只有涵蓋交易日數與跨度
+    return (
+      <Panel title="資料擷取狀態" sub={live ? '載入中…' : '快照涵蓋'}>
+        <table className="w-full text-[13px] mono">
+          <tbody>
+            {meta.coverage.map((c) => (
+              <tr key={c.label} className="border-b border-[var(--line)] last:border-0">
+                <td className="py-2 text-[var(--fg)]">{c.label}</td>
+                <td className="py-2 tnum text-right text-[var(--muted)]">{c.days} 交易日</td>
+                <td className="py-2 pl-3 text-right text-[11px] text-[var(--muted)]">{c.span}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    )
+  }
+
+  return (
+    <Panel title="資料擷取狀態" sub={`以交易日曆判缺口 · 最後擷取 ${st.last_run ? st.last_run.slice(0, 16) : '—'}`}>
+      <table className="w-full text-[13px] mono">
+        <tbody>
+          {st.sources.map((s) => (
+            <tr key={s.label} className="border-b border-[var(--line)] last:border-0">
+              <td className="py-2 text-[var(--fg)]">{s.label}</td>
+              <td className="py-2 tnum text-right text-[var(--muted)]">{s.days} 交易日</td>
+              <td className="py-2 pl-3 tnum text-right" style={{ color: s.gaps ? 'var(--warn)' : 'var(--good)' }}>
+                {s.gaps ? `缺 ${s.gaps}` : '無缺口'}
+              </td>
+              <td className="py-2 pl-3 text-right text-[11px] text-[var(--muted)]">{s.span}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {st.recent_failures.length > 0 && (
+        <details className="mt-3">
+          <summary className="text-[11px] text-[var(--warn)] cursor-pointer">
+            最近失敗 {st.recent_failures.length} 筆（擷取紀錄 {st.records} 筆 · 失敗 {st.failed} 筆）
+          </summary>
+          <div className="mt-2 max-h-40 overflow-y-auto text-[11px] mono text-[var(--muted)]">
+            {st.recent_failures.map((f, i) => (
+              <div key={i} className="py-0.5 border-b border-[var(--line)] last:border-0">
+                <span className="text-[var(--fg)]">{f.attempt_ts.slice(0, 19)}</span>　{f.source}/{f.table} @ {f.date}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </Panel>
+  )
+}
+
 /* ---------- pages ---------- */
 function Overview() {
-  const m = D.backtest.metrics
+  const { meta } = useMeta()
+  const [ws, we] = meta.window.split('~')
+  const market = useResource('market', fetchMarket, () => FALLBACK.market)
+  const cap = useResource('capacity', fetchCapacity, () => FALLBACK.capacity)
+  // 總覽只需 Sharpe，但回測較重 → 進度式：頁面即刻可用，KPI 就緒才填。與回測頁共用快取鍵。
+  const bt = useResource(`backtest|${ws}|${we}`, () => fetchBacktest(ws, we), () => FALLBACK.backtest)
+  const m = bt.data?.metrics
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Kpi label="最新行情日" value={D.meta.as_of} />
-        <Kpi label="回測 Sharpe（成本後）" value={m.sharpe.toFixed(2)} tone={sign(m.sharpe)} />
-        <Kpi label="策略容量上限" value={oku(D.capacity.twd)} tone="var(--accent)" />
-        <Kpi label="目標持股" value={`${D.capacity.n_positions} 檔`} />
+        <Kpi label="最新行情日" value={meta.as_of ?? '—'} />
+        <Kpi label="回測 Sharpe（成本後）" value={m ? m.sharpe.toFixed(2) : '…'} tone={m ? sign(m.sharpe) : undefined} />
+        <Kpi label="策略容量上限" value={cap.data ? oku(cap.data.twd) : '…'} tone="var(--accent)" />
+        <Kpi label="目標持股" value={cap.data ? `${cap.data.n_positions} 檔` : '…'} />
       </div>
       <div className="grid md:grid-cols-2 gap-4">
-        <Panel title="資料擷取狀態" sub="以交易日曆判缺口">
-          <table className="w-full text-[13px] mono">
-            <tbody>
-              {D.meta.coverage.map((c) => (
-                <tr key={c.label} className="border-b border-[var(--line)] last:border-0">
-                  <td className="py-2 text-[var(--fg)]">{c.label}</td>
-                  <td className="py-2 tnum text-right text-[var(--muted)]">{c.days} 交易日</td>
-                  <td className="py-2 pl-3 text-right text-[11px] text-[var(--muted)]">{c.span}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-        <Panel title="等權市場指數" sub={`${D.market.length} 交易日`}>
-          <CandleChart data={D.market} height={230} />
+        <IngestPanel />
+        <Panel title="等權市場指數" sub={market.data ? `${market.data.length} 交易日` : '載入中…'}>
+          {market.data ? <CandleChart data={market.data} height={230} /> : <Skeleton height={230} />}
         </Panel>
       </div>
     </div>
   )
 }
 
-function Market() {
-  const [sid, setSid] = useState<string>(D.meta.top_stocks[0])
+/* ---------- 中文名標籤 + 個股因子體檢卡 ---------- */
+const labelOf = (meta: StockMetaMap, sid: string) => {
+  const n = meta[sid]?.name
+  return n ? `${sid} ${n}` : sid
+}
+
+function ScorecardPanel({ sid }: { sid: string }) {
+  const empty: Scorecard = { sid, name: null, industry: null, market: null, as_of: null, factors: [], composite: null }
+  const sc = useResource(`scorecard:${sid}`, () => fetchStockFactors(sid), () => empty)
+  if (sc.loading) return <Panel title="個股因子體檢"><Skeleton height={240} /></Panel>
+  const card = sc.data ?? empty
+  const name = card.name ?? ''
+  if (!card.factors.length) {
+    return (
+      <Panel title="個股因子體檢" sub={sid}>
+        <div className="h-[110px] flex items-center justify-center text-center px-4 text-[13px] text-[var(--muted)]">
+          {sid}
+          {name ? ` ${name}` : ''} 無足夠因子資料（非四碼普通股或史料不足）
+        </div>
+      </Panel>
+    )
+  }
+  const rows = [...card.factors].sort((a, b) => (b.signed_z ?? 0) - (a.signed_z ?? 0))
+  const verdict = (sz: number | null) =>
+    sz == null
+      ? { t: '—', c: 'var(--muted)' }
+      : sz > 0.5
+        ? { t: '強順', c: 'var(--up)' }
+        : sz < -0.5
+          ? { t: '逆勢', c: 'var(--down)' }
+          : { t: '中性', c: 'var(--muted)' }
+  const comp = card.composite
+  return (
+    <Panel title="個股因子體檢" sub={card.as_of ?? ''}>
+      <div className="flex flex-wrap items-baseline gap-2 mb-1">
+        <span className="text-[16px] font-semibold text-[var(--fg)]">
+          {sid} {name}
+        </span>
+        {card.industry && (
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--panel-2)]" style={{ color: 'var(--accent)' }}>
+            {card.industry}
+          </span>
+        )}
+      </div>
+      {comp && (
+        <div className="text-[12px] text-[var(--muted)] mb-3">
+          綜合因子傾向：宇宙前{' '}
+          <span style={{ color: comp.pct >= 0.5 ? 'var(--up)' : 'var(--down)' }}>{Math.round((1 - comp.pct) * 100)}%</span>
+          （signed-z 平均 {comp.signed_z_mean >= 0 ? '+' : ''}
+          {comp.signed_z_mean}，共 {comp.n_universe} 檔）
+        </div>
+      )}
+      <HBars height={rows.length * 24} rows={rows.map((f) => ({ label: f.zh, value: f.signed_z ?? 0 }))} />
+      <div className="overflow-x-auto mt-2">
+        <table className="w-full text-[11px] mono tnum whitespace-nowrap">
+          <thead className="text-[var(--muted)] text-left">
+            <tr className="border-b border-[var(--line)]">
+              <th className="py-1 pr-2 font-medium">因子</th>
+              <th className="py-1 px-2 font-medium text-right">值</th>
+              <th className="py-1 px-2 font-medium text-right">z</th>
+              <th className="py-1 px-2 font-medium text-right">百分位</th>
+              <th className="py-1 px-2 font-medium text-right">方向</th>
+              <th className="py-1 pl-2 font-medium">傾向</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((f) => {
+              const v = verdict(f.signed_z)
+              return (
+                <tr key={f.factor} className="border-b border-[var(--line)] last:border-0">
+                  <td className="py-1 pr-2 text-[var(--fg)]">{f.zh}</td>
+                  <td className="py-1 px-2 text-right text-[var(--muted)]">{f.value ?? '—'}</td>
+                  <td
+                    className="py-1 px-2 text-right"
+                    style={{ color: f.z != null && Math.abs(f.z) > 1 ? (f.z > 0 ? 'var(--up)' : 'var(--down)') : 'var(--muted)' }}
+                  >
+                    {f.z == null ? '—' : `${f.z >= 0 ? '+' : ''}${f.z}`}
+                  </td>
+                  <td className="py-1 px-2 text-right text-[var(--muted)]">{f.pct == null ? '—' : `${Math.round(f.pct * 100)}%`}</td>
+                  <td className="py-1 px-2 text-right text-[var(--muted)]">{f.direction > 0 ? '+1' : '−1'}</td>
+                  <td className="py-1 pl-2" style={{ color: v.c }}>
+                    {v.t}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 text-[10px] text-[var(--muted)] leading-relaxed">
+        紅=站多方、綠=站空方（direction 調整後 z）；百分位＝該因子橫斷面排名。此為「相對定位」，非個股預測力——因子預測力（RankIC）見因子健檢頁。
+      </div>
+    </Panel>
+  )
+}
+
+/* ---------- 個股因子健檢（獨立頁：選股 + K線 + 因子體檢卡）---------- */
+function StockFactors() {
+  const { meta, live } = useMeta()
+  const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
+  const mm = metaMap.data ?? {}
+  const [list, setList] = useState<string[]>(meta.top_stocks)
+  const [sid, setSid] = useState<string>(() => meta.top_stocks[0] ?? '')
+  const [cache, setCache] = useState<Record<string, Candle[]>>(FALLBACK.stocks)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!live) return
+    let alive = true
+    fetchStockList().then((s) => alive && s.length && setList(s)).catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [live])
+
+  useEffect(() => {
+    if (!sid || cache[sid] || !live) return
+    let alive = true
+    setLoading(true)
+    fetchStockOhlc(sid)
+      .then((k) => alive && setCache((m) => ({ ...m, [sid]: k })))
+      .catch(() => {})
+      .finally(() => alive && setLoading(false))
+    return () => {
+      alive = false
+    }
+  }, [sid, live, cache])
+
+  const chips = meta.top_stocks
+  const series = cache[sid]
   return (
     <div className="flex flex-col gap-4">
-      <Panel title="等權市場指數 K 線" sub="基期 1000 · 四碼普通股 · 紅漲綠跌 · 可拖曳縮放">
-        <RangeCandle data={D.market} height={340} volume />
-      </Panel>
-      <Panel title="個股 K 線" sub="成交值前 8 檔">
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {D.meta.top_stocks.map((s) => (
+      <Panel title="選擇個股" sub={live ? `成交值前 ${list.length} 檔（即時）` : '前 8 檔（快照）'}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {chips.map((s) => (
             <button
               key={s}
               onClick={() => setSid(s)}
@@ -284,29 +593,261 @@ function Market() {
               }`}
             >
               {s}
+              {mm[s]?.name && <span className="ml-1 text-[11px] opacity-75">{mm[s]?.name}</span>}
             </button>
           ))}
+          {live && list.length > chips.length && (
+            <select
+              value={chips.includes(sid) ? '' : sid}
+              onChange={(e) => e.target.value && setSid(e.target.value)}
+              className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+            >
+              <option value="">更多個股（前 {list.length}）…</option>
+              {list.map((s) => (
+                <option key={s} value={s}>{labelOf(mm, s)}</option>
+              ))}
+            </select>
+          )}
         </div>
-        <RangeCandle key={sid} data={D.stocks[sid]} height={340} volume />
+      </Panel>
+      {sid && series && series.length > 0 && (
+        <Panel title={`${labelOf(mm, sid)} · K 線`} sub="紅漲綠跌 · 可拖曳縮放">
+          <RangeCandle key={sid} data={series} height={280} volume />
+        </Panel>
+      )}
+      {sid && live ? (
+        <ScorecardPanel sid={sid} />
+      ) : (
+        <Panel title="個股因子體檢">
+          <div className="h-[120px] flex items-center justify-center text-[13px] text-[var(--muted)]">
+            {loading ? `載入 ${labelOf(mm, sid)}…` : live ? '選擇個股以檢視因子體檢' : '需即時 API（twquant serve）'}
+          </div>
+        </Panel>
+      )}
+    </div>
+  )
+}
+
+function Market() {
+  const { meta, live } = useMeta()
+  const market = useResource('market', fetchMarket, () => FALLBACK.market)
+  const indices = useResource('indices', fetchIndices, () => ({ taiex: [], tpex: [] }) as Indices)
+  const [list, setList] = useState<string[]>(meta.top_stocks)
+  const [sid, setSid] = useState<string>(() => meta.top_stocks[0] ?? '') // 空資料湖無個股時避免 undefined
+  const [cache, setCache] = useState<Record<string, Candle[]>>(FALLBACK.stocks)
+  const [loading, setLoading] = useState(false)
+
+  // 即時模式：拉成交值前 150 檔完整選單（快照只內嵌前 8）
+  useEffect(() => {
+    if (!live) return
+    let alive = true
+    fetchStockList().then((s) => alive && s.length && setList(s)).catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [live])
+
+  // 選到未快取的個股 → 即時 fetch OHLC
+  useEffect(() => {
+    if (!sid || cache[sid] || !live) return // 無選定個股（空資料湖）時不打 /api/stocks/undefined
+    let alive = true
+    setLoading(true)
+    fetchStockOhlc(sid)
+      .then((k) => alive && setCache((m) => ({ ...m, [sid]: k })))
+      .catch(() => {})
+      .finally(() => alive && setLoading(false))
+    return () => {
+      alive = false
+    }
+  }, [sid, live, cache])
+
+  const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
+  const mm = metaMap.data ?? {}
+  const chips = meta.top_stocks
+  const series = cache[sid]
+  const taiex = indices.data?.taiex ?? []
+  const otc = indices.data?.tpex ?? []
+  const idxHint = (
+    <div className="h-[300px] flex items-center justify-center text-center px-4 text-[13px] text-[var(--muted)]">
+      尚無官方指數資料——請先{' '}
+      <code className="mono mx-1 text-[var(--fg)]">twquant backfill-index --from 2025-07 --to 2026-07</code>
+    </div>
+  )
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Panel title="加權指數 TAIEX" sub="發行量加權股價指數 · 官方 · 紅漲綠跌">
+          {taiex.length ? (
+            <RangeCandle
+              data={taiex.map((p) => ({ d: p.d, o: p.o ?? p.c, h: p.h ?? p.c, l: p.l ?? p.c, c: p.c }))}
+              height={300}
+            />
+          ) : indices.loading ? (
+            <Skeleton height={300} />
+          ) : (
+            idxHint
+          )}
+        </Panel>
+        <Panel title="櫃買指數 TPEx" sub="上櫃指數 · 官方 · 收盤點數">
+          {otc.length ? <IndexLine data={otc} height={300} /> : indices.loading ? <Skeleton height={300} /> : idxHint}
+        </Panel>
+      </div>
+      <Panel title="等權市場指數 K 線" sub="自算基準 · 基期 1000 · 四碼普通股 · 紅漲綠跌 · 可拖曳縮放">
+        {market.data ? <RangeCandle data={market.data} height={340} volume /> : <Skeleton height={340} />}
+      </Panel>
+      <Panel title="個股 K 線" sub={live ? `成交值前 ${list.length} 檔（即時）` : '成交值前 8 檔（快照）'}>
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          {chips.map((s) => (
+            <button
+              key={s}
+              onClick={() => setSid(s)}
+              className={`px-2.5 py-1 text-[12px] mono rounded border transition-colors ${
+                sid === s ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
+              }`}
+            >
+              {s}
+              {mm[s]?.name && <span className="ml-1 text-[11px] opacity-75">{mm[s]?.name}</span>}
+            </button>
+          ))}
+          {live && list.length > chips.length && (
+            <select
+              value={chips.includes(sid) ? '' : sid}
+              onChange={(e) => e.target.value && setSid(e.target.value)}
+              className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+            >
+              <option value="">更多個股（前 {list.length}）…</option>
+              {list.map((s) => (
+                <option key={s} value={s}>{labelOf(mm, s)}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        {series && series.length > 0 ? (
+          <RangeCandle key={sid} data={series} height={340} volume />
+        ) : (
+          <div className="h-[340px] flex items-center justify-center text-[13px] text-[var(--muted)]">
+            {loading ? `載入 ${labelOf(mm, sid)} K 線…` : sid ? `無 ${labelOf(mm, sid)} 資料` : '資料湖尚無個股資料'}
+          </div>
+        )}
       </Panel>
     </div>
   )
 }
 
+/* ---------- factor display metadata (name → 中文名 + 說明) ---------- */
+const FACTOR_META: Record<string, { zh: string; desc: string }> = {
+  'fundamental.revenue_yoy': { zh: '月營收 YoY', desc: '最新已公布月營收的年增率。正向因子：營收年增動能延續（PEAD 效應基礎）。' },
+  'fundamental.revenue_accel': { zh: '月營收 YoY 加速', desc: '最新公布 YoY 減前一月 YoY（成長的二階變化）。正向：營收成長正在加速。' },
+  'chip.trust_net_10d': { zh: '投信 10 日買超占量比', desc: '投信近 10 日累計淨買超股數 ÷ 10 日成交量。正向先驗：投信作帳與群聚買進。' },
+  'chip.foreign_net_10d': { zh: '外資 10 日買超占量比', desc: '外資近 10 日累計淨買超股數 ÷ 10 日成交量。訊號較投信弱，用於「投信買+外資賣」象限。' },
+  'chip.trust_streak': { zh: '投信連買天數', desc: '截至當日投信連續淨買超的天數。正向：連買越久、作帳意圖越強。' },
+  'chip.margin_velocity_5d': { zh: '5 日融資增速', desc: '近 5 日融資餘額淨增 ÷ 5 日成交量（散戶加碼密集度代理）。反向：散戶追買後股價傾向落後。' },
+  'price.mom_20d': { zh: '20 日動能', desc: '還原收盤價相對 20 個交易日前的漲跌幅。正向：近月強勢股延續動能。' },
+  'price.high_52w': { zh: '52 週高點接近度', desc: '收盤價 ÷ 近 52 週最高價（≤1，越接近 1 越貼近年高）。正向：貼近年高者續強。' },
+  'price.reversal_5d': { zh: '5 日短期反轉', desc: '近 5 個交易日的累計報酬。反向因子：短線漲多者傾向回落。' },
+  'volume.vol_ratio_5d': { zh: '5 日量比', desc: '今日成交量 ÷ 前 5 日均量（不含今日）。正向：異常放量偏多。' },
+  'volume.turnover_z_20d': { zh: '20 日量能 Z 分數', desc: '(今日量 − 20 日均量) ÷ 20 日量的標準差。正向：相對放量偏多。' },
+  'price.mom_60d': { zh: '60 日中期動能', desc: '還原收盤相對 60 個交易日前的漲跌幅。正向：中期強勢延續（連續期實測偏反轉，待更長樣本）。' },
+  'price.vol_20d': { zh: '20 日波動率', desc: '日報酬的 20 日滾動標準差。反向因子：低波動股長期報酬較佳（低波動異象）。' },
+  'price.rs_market_20d': { zh: '相對大盤強弱', desc: '個股 20 日報酬 − 加權指數 20 日報酬。正向：相對大盤強者續強（需 index_daily）。' },
+  'chip.foreign_streak': { zh: '外資連買天數', desc: '截至當日外資連續淨買超天數。正向：外資連買越久、買盤越持續。' },
+  'chip.inst_net_10d': { zh: '三大法人 10 日買超占量', desc: '外資+投信+自營 10 日累計淨買超 ÷ 10 日量。連續期實測強烈反向（t≈−10，法人擁擠出場）。' },
+  'chip.short_margin_ratio': { zh: '券資比', desc: '融券餘額 ÷ 融資餘額。先驗正向（高券資比＝軋空燃料）；實際符號待更長樣本。' },
+}
+const CAT_ZH: Record<string, string> = { price: '價格', volume: '量能', chip: '籌碼', fundamental: '基本面', market: '市場' }
+// null 安全的帶號數字（IC/t/IR/多空價差可能為 null＝資料不足）
+const fnum = (x: number | null, d = 2, plus = true) => (x == null ? '—' : `${plus && x >= 0 ? '+' : ''}${x.toFixed(d)}`)
+const factorZh = (name: string) => FACTOR_META[name]?.zh ?? name
+const factorCat = (name: string) => CAT_ZH[name.split('.')[0]] ?? name.split('.')[0]
+const factorVerdict = (t: number) =>
+  t > 2 ? { txt: '顯著正向', c: 'var(--up)' } : t < -2 ? { txt: '顯著反向', c: 'var(--down)' } : { txt: '無顯著', c: 'var(--muted)' }
+
+/* ---------- hover tooltip: 因子全部細項（cursor-following, fixed → 不被表格 overflow 裁切）---------- */
+function FactorTooltip({ f, x, y }: { f: Fac; x: number; y: number }) {
+  const W = 340
+  const left = Math.max(8, Math.min(x + 16, window.innerWidth - W - 8))
+  const top = Math.max(8, Math.min(y + 16, window.innerHeight - 260))
+  const t10 = f.horizons.find((h) => h.h === 10)?.t ?? 0
+  const v = factorVerdict(t10)
+  return (
+    <div
+      className="fixed z-50 pointer-events-none bg-[var(--panel-2)] border border-[var(--line)] rounded-lg p-3 shadow-xl"
+      style={{ left, top, width: W }}
+    >
+      <div className="flex items-baseline justify-between gap-3 mb-1">
+        <span className="text-[13px] font-semibold text-[var(--fg)]">{factorZh(f.name)}</span>
+        <span className="text-[10px] mono text-[var(--muted)]">{f.name}</span>
+      </div>
+      <div className="text-[11px] text-[var(--muted)] mb-2">
+        類別 {factorCat(f.name)}　·　方向{' '}
+        <span style={{ color: f.direction > 0 ? 'var(--up)' : 'var(--down)' }}>
+          {f.direction > 0 ? '+1（值大看多）' : '−1（值大看空）'}
+        </span>
+      </div>
+      <p className="text-[11px] text-[var(--fg)] leading-relaxed mb-2">{FACTOR_META[f.name]?.desc ?? '（無說明）'}</p>
+      <table className="w-full text-[11px] mono tnum">
+        <thead className="text-[var(--muted)]">
+          <tr>
+            <th className="text-left font-medium pr-2">視窗</th>
+            <th className="text-right font-medium px-1">IC均值</th>
+            <th className="text-right font-medium px-1">t值</th>
+            <th className="text-right font-medium px-1">IR</th>
+            <th className="text-right font-medium px-1">多空價差</th>
+            <th className="text-right font-medium pl-1">樣本日</th>
+          </tr>
+        </thead>
+        <tbody>
+          {f.horizons.map((h) => (
+            <tr key={h.h}>
+              <td className="text-left text-[var(--fg)] pr-2">{h.h}日</td>
+              <td className="text-right px-1">{fnum(h.ic, 4)}</td>
+              <td className="text-right px-1" style={{ color: h.t != null && Math.abs(h.t) > 2 ? sign(h.t) : 'var(--muted)' }}>
+                {fnum(h.t, 2)}
+              </td>
+              <td className="text-right px-1">{fnum(h.ir, 3)}</td>
+              <td className="text-right px-1">{fnum(h.ls, 4)}</td>
+              <td className="text-right pl-1 text-[var(--muted)]">{h.n}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="text-[10px] text-[var(--muted)] mt-2">
+        判讀（10 日，|t|&gt;2 為 5% 顯著）：<span style={{ color: v.c }}>{v.txt}</span>
+      </div>
+    </div>
+  )
+}
+
 function Factors() {
-  const verdict = (t: number) => (t > 2 ? { txt: '顯著正向', c: 'var(--up)' } : t < -2 ? { txt: '顯著反向', c: 'var(--down)' } : { txt: '無顯著', c: 'var(--muted)' })
+  const facs = useResource('factors', fetchFactors, () => FALLBACK.factors)
+  const { meta } = useMeta()
+  const [hover, setHover] = useState<{ f: Fac; x: number; y: number } | null>(null)
+  const factors = facs.data
+  const period = meta.window.split('~').join(' ~ ') // 因子 IC 資料區間，如 2025-08-01 ~ 2025-12-31
+  if (!factors) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Panel title="因子健檢 · RankIC t 值（10 日）" sub={`連續期 ${period} · 計算中…`}>
+          <Skeleton height={280} />
+        </Panel>
+        <Panel title="全因子 IC 明細">
+          <Skeleton height={320} />
+        </Panel>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-4">
-      <Panel title="因子健檢 · RankIC t 值（10 日）" sub="連續期 2025-08~12 · |t|>2 為 5% 顯著">
+      <Panel title="因子健檢 · RankIC t 值（10 日）" sub={`連續期 ${period} · |t|>2 為 5% 顯著`}>
         <HBars
-          height={D.factors.length * 26}
-          rows={D.factors
+          height={factors.length * 26}
+          rows={factors
             .map((f) => ({ f, h: f.horizons.find((h) => h.h === 10)! }))
-            .sort((a, b) => b.h.t - a.h.t)
-            .map(({ f, h }) => ({ label: f.name, value: h.t, sub: `IC ${h.ic >= 0 ? '+' : ''}${h.ic}` }))}
+            .sort((a, b) => (b.h.t ?? 0) - (a.h.t ?? 0))
+            .map(({ f, h }) => ({ label: factorZh(f.name), value: h.t ?? 0, sub: `IC ${fnum(h.ic, 4)}` }))}
         />
       </Panel>
-      <Panel title="全因子 IC 明細">
+      <Panel title="全因子 IC 明細" sub={`資料區間 ${period} · 滑鼠移到因子看全部細項`}>
         <div className="overflow-x-auto">
           <table className="w-full text-[12px] mono tnum whitespace-nowrap">
             <thead className="text-[var(--muted)] text-left">
@@ -320,17 +861,26 @@ function Factors() {
               </tr>
             </thead>
             <tbody>
-              {D.factors.map((f) => {
-                const v = verdict(f.horizons.find((h) => h.h === 10)!.t)
+              {factors.map((f) => {
+                const v = factorVerdict(f.horizons.find((h) => h.h === 10)?.t ?? 0)
                 return (
-                  <tr key={f.name} className="border-b border-[var(--line)] last:border-0">
-                    <td className="py-2 pr-3 text-[var(--fg)]">{f.name}</td>
+                  <tr
+                    key={f.name}
+                    className="border-b border-[var(--line)] last:border-0 cursor-help hover:bg-[var(--panel-2)]"
+                    onMouseMove={(e) => setHover({ f, x: e.clientX, y: e.clientY })}
+                    onMouseLeave={() => setHover((h) => (h?.f.name === f.name ? null : h))}
+                  >
+                    <td className="py-2 pr-3 text-[var(--fg)]">
+                      <span className="underline decoration-dotted decoration-[var(--muted)] underline-offset-2">
+                        {factorZh(f.name)}
+                      </span>
+                    </td>
                     <td className="py-2 px-2 text-right text-[var(--muted)]">{f.direction > 0 ? '+1' : '−1'}</td>
                     {[5, 10, 20].map((hh) => {
-                      const t = f.horizons.find((x) => x.h === hh)!.t
+                      const t = f.horizons.find((x) => x.h === hh)?.t ?? null
                       return (
-                        <td key={hh} className="py-2 px-2 text-right" style={{ color: Math.abs(t) > 2 ? sign(t) : 'var(--muted)' }}>
-                          {t >= 0 ? '+' : ''}{t.toFixed(2)}
+                        <td key={hh} className="py-2 px-2 text-right" style={{ color: t != null && Math.abs(t) > 2 ? sign(t) : 'var(--muted)' }}>
+                          {fnum(t, 2)}
                         </td>
                       )
                     })}
@@ -342,15 +892,43 @@ function Factors() {
           </table>
         </div>
         <p className="text-[11px] text-[var(--muted)] mt-3 leading-relaxed">
-          月營收 YoY（revenue_yoy）最穩健；投信/外資買超占量比近期呈反向（追高反轉），方向先驗保留、待更長樣本 walk-forward 定奪。
+          月營收 YoY 最穩健；投信/外資買超占量比近期呈反向（追高反轉），方向先驗保留、待更長樣本 walk-forward 定奪。
         </p>
       </Panel>
+      {hover && <FactorTooltip f={hover.f} x={hover.x} y={hover.y} />}
     </div>
   )
 }
 
 function Backtest() {
-  const m = D.backtest.metrics
+  const { meta, live } = useMeta()
+  const [ws, we] = meta.window.split('~')
+  const def = useResource(`backtest|${ws}|${we}`, () => fetchBacktest(ws, we), () => FALLBACK.backtest)
+  const [override, setOverride] = useState<BacktestT | null>(null)
+  const [win, setWin] = useState<{ start: string; end: string }>({ start: ws, end: we })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const apply = () => {
+    setBusy(true)
+    setErr(null)
+    fetchBacktest(win.start, win.end)
+      .then(setOverride)
+      .catch((e) => setErr(String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  const bt = override ?? def.data
+  if (!bt) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Panel title="策略回測" sub="跑回測…">
+          <Skeleton height={420} />
+        </Panel>
+      </div>
+    )
+  }
+  const m = bt.metrics
   const kpis: [string, string, string?][] = [
     ['總報酬', pct(m.total_ret, 2), sign(m.total_ret)],
     ['CAGR', pct(m.cagr, 1), sign(m.cagr)],
@@ -363,7 +941,37 @@ function Backtest() {
   ]
   return (
     <div className="flex flex-col gap-4">
-      <Panel title={`策略回測 · ${D.backtest.name}`} sub={`${D.meta.window} · 成本後淨值 · 成交 ${m.n_trades} 筆`}>
+      <Panel title={`策略回測 · ${bt.name}`} sub={`${bt.window ?? meta.window} · 成本後淨值 · 成交 ${m.n_trades} 筆`}>
+        {live && (
+          <div className="flex flex-wrap items-end gap-2 mb-4">
+            <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+              起
+              <input
+                type="date"
+                value={win.start}
+                onChange={(e) => setWin((w) => ({ ...w, start: e.target.value }))}
+                className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+              迄
+              <input
+                type="date"
+                value={win.end}
+                onChange={(e) => setWin((w) => ({ ...w, end: e.target.value }))}
+                className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+              />
+            </label>
+            <button
+              onClick={apply}
+              disabled={busy}
+              className="px-3 py-1.5 text-[12px] rounded border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-50 transition-colors"
+            >
+              {busy ? '回測中…' : '重跑'}
+            </button>
+            {err && <span className="text-[11px] text-[var(--down)] self-center">{err}</span>}
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
           {kpis.map(([l, v, t]) => (
             <div key={l} className="bg-[var(--panel-2)] border border-[var(--line)] rounded px-3 py-2">
@@ -372,7 +980,7 @@ function Backtest() {
             </div>
           ))}
         </div>
-        <EquityChart data={D.backtest.equity} height={280} />
+        <EquityChart data={bt.equity} height={280} />
       </Panel>
       <p className="text-[11px] text-[var(--muted)] px-1 leading-relaxed">
         成交假設與 PaperBroker 同源；含手續費/證交稅/價格相依滑價；跨程序決定性。此為範例策略（月營收 YoY 0.6 + 投信連買 0.4），非最終 alpha。
@@ -382,34 +990,398 @@ function Backtest() {
 }
 
 function Flows() {
+  const { meta } = useMeta()
+  const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
+  const mm = metaMap.data ?? {}
+  const inst = useResource('institutional', fetchInstitutional, () => FALLBACK.institutional as Inst[])
+  const rev = useResource('revenue', fetchRevenue, () => ({
+    rev_month: FALLBACK.meta.rev_month,
+    revenue: FALLBACK.revenue as Rev[],
+  }))
+  const cap = useResource('capacity', fetchCapacity, () => FALLBACK.capacity)
   return (
     <div className="flex flex-col gap-4">
       <div className="grid md:grid-cols-2 gap-4">
-        <Panel title="投信買超前 15" sub={D.meta.as_of}>
-          <HBars height={D.institutional.length * 22} rows={D.institutional.map((r) => ({ label: r.sid, value: r.trust / 1000, sub: `${num(r.px, 1)}` }))} />
+        <Panel title="投信買超前 15" sub={meta.as_of ?? ''}>
+          {inst.data ? (
+            <HBars height={inst.data.length * 22} rows={inst.data.map((r) => ({ label: labelOf(mm, r.sid), value: r.trust / 1000, sub: `${num(r.px, 1)}` }))} />
+          ) : (
+            <Skeleton height={330} />
+          )}
           <p className="text-[10px] text-[var(--muted)] mt-2">單位：張（千股）</p>
         </Panel>
-        <Panel title="月營收 YoY 成長前 15" sub={D.meta.rev_month}>
-          <HBars height={D.revenue.length * 22} rows={D.revenue.map((r) => ({ label: r.sid, value: r.yoy, sub: `${r.rev}億`, color: ACC }))} />
+        <Panel title="月營收 YoY 成長前 15" sub={rev.data?.rev_month ?? meta.rev_month ?? ''}>
+          {rev.data ? (
+            <HBars height={rev.data.revenue.length * 22} rows={rev.data.revenue.map((r) => ({ label: labelOf(mm, r.sid), value: r.yoy, sub: `${r.rev}億`, color: ACC }))} />
+          ) : (
+            <Skeleton height={330} />
+          )}
           <p className="text-[10px] text-[var(--muted)] mt-2">單位：YoY %</p>
         </Panel>
       </div>
       <Panel title="策略容量分析">
-        <div className="flex flex-wrap gap-6 items-end">
-          <div>
-            <div className="eyebrow">資金容量上限</div>
-            <div className="text-[26px] font-semibold mono tnum" style={{ color: 'var(--accent)' }}>{oku(D.capacity.twd)}</div>
-          </div>
-          <div>
-            <div className="eyebrow">瓶頸標的</div>
-            <div className="text-[26px] font-semibold mono">{D.capacity.binding}</div>
-          </div>
-          <div>
-            <div className="eyebrow">參與率上限</div>
-            <div className="text-[26px] font-semibold mono tnum">5%</div>
+        {cap.data ? (
+          <>
+            <div className="flex flex-wrap gap-6 items-end">
+              <div>
+                <div className="eyebrow">資金容量上限</div>
+                <div className="text-[26px] font-semibold mono tnum" style={{ color: 'var(--accent)' }}>{oku(cap.data.twd)}</div>
+              </div>
+              <div>
+                <div className="eyebrow">瓶頸標的</div>
+                <div className="text-[26px] font-semibold mono">{cap.data.binding}</div>
+              </div>
+              <div>
+                <div className="eyebrow">參與率上限</div>
+                <div className="text-[26px] font-semibold mono tnum">5%</div>
+              </div>
+            </div>
+            <p className="text-[11px] text-[var(--muted)] mt-3">容量 = min（參與率上限 × 20 日 ADV ÷ 權重）；瓶頸為組合中低流動性標的。</p>
+          </>
+        ) : (
+          <Skeleton height={80} />
+        )}
+      </Panel>
+    </div>
+  )
+}
+
+/* ---------- 擷取後台（唯讀：熱力圖 + 漏抓清單 + 引導補抓指令）---------- */
+// 運維色盤：綠=有／橙=擷取失敗／紅=漏抓／暗=尚未涵蓋。刻意不套台股紅漲綠跌（紅在此＝缺）。
+const CELL: Record<CellState, string> = {
+  present: 'var(--good)',
+  missing: 'var(--crit)',
+  failed: 'var(--warn)',
+  none: 'var(--panel-2)',
+}
+const STATE_ZH: Record<CellState, string> = { present: '有資料', missing: '漏抓', failed: '擷取失敗', none: '未涵蓋' }
+
+function CopyBtn({ text }: { text: string }) {
+  const [ok, setOk] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setOk(true)
+          setTimeout(() => setOk(false), 1200)
+        })
+      }}
+      className="shrink-0 px-2 py-1 text-[11px] rounded border border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)] hover:border-[var(--accent)] transition-colors"
+    >
+      {ok ? '已複製 ✓' : '複製指令'}
+    </button>
+  )
+}
+
+function HeatLegend() {
+  const items: [CellState, string][] = [
+    ['present', '有資料'],
+    ['missing', '漏抓'],
+    ['failed', '擷取失敗'],
+    ['none', '未涵蓋'],
+  ]
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--muted)]">
+      {items.map(([s, l]) => (
+        <span key={s} className="flex items-center gap-1">
+          <span className="inline-block rounded-[2px]" style={{ width: 11, height: 11, background: CELL[s] }} />
+          {l}
+        </span>
+      ))}
+      <span className="text-[10px]">（運維色，與台股紅漲綠跌無關）</span>
+    </div>
+  )
+}
+
+function Heatmap({ mx }: { mx: IngestMatrix }) {
+  const { datasets, dates, cells } = mx
+  if (dates.length === 0) return <div className="text-[13px] text-[var(--muted)]">資料湖尚無交易日</div>
+  return (
+    <div className="flex flex-col gap-2">
+      <HeatLegend />
+      <div className="overflow-x-auto">
+        <div className="inline-flex flex-col gap-1">
+          {datasets.map((ds) => (
+            <div key={ds.key} className="flex items-center gap-2">
+              <div className="w-20 shrink-0 text-[12px] text-[var(--fg)] whitespace-nowrap">{ds.label}</div>
+              <div className="flex gap-[2px]">
+                {dates.map((d) => {
+                  const s = cells[ds.key]?.[d] ?? 'none'
+                  return (
+                    <div
+                      key={d}
+                      title={`${d}　${ds.label}　${STATE_ZH[s]}`}
+                      className="rounded-[2px]"
+                      style={{ width: 13, height: 13, background: CELL[s] }}
+                    />
+                  )
+                })}
+              </div>
+              <div
+                className="ml-2 shrink-0 text-[11px] mono tnum"
+                style={{ color: ds.window_missing ? 'var(--crit)' : 'var(--muted)' }}
+              >
+                {ds.window_missing ? `缺 ${ds.window_missing}` : '齊'}
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="w-20 shrink-0" />
+            <div className="flex justify-between text-[10px] mono text-[var(--muted)]" style={{ width: dates.length * 15 }}>
+              <span>{dates[0]}</span>
+              <span>{dates[dates.length - 1]}</span>
+            </div>
           </div>
         </div>
-        <p className="text-[11px] text-[var(--muted)] mt-3">容量 = min（參與率上限 × 20 日 ADV ÷ 權重）；瓶頸為組合中低流動性標的。</p>
+      </div>
+    </div>
+  )
+}
+
+function GapList({ gaps }: { gaps: IngestGap[] }) {
+  if (gaps.length === 0) return <div className="text-[13px] text-[var(--good)]">✓ 涵蓋區間內無漏抓</div>
+  return (
+    <div className="flex flex-col">
+      {gaps.map((g, i) => (
+        <div key={`${g.table}-${g.source}-${g.from}-${i}`} className="py-2.5 border-b border-[var(--line)] last:border-0">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-[13px]">
+              <span className="text-[var(--fg)]">{g.label}</span>
+              <span className="mono text-[var(--muted)]">
+                {g.from}
+                {g.to !== g.from ? ` ~ ${g.to}` : ''}
+              </span>
+              <span
+                className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--panel-2)]"
+                style={{ color: g.kind === 'failed' ? 'var(--warn)' : 'var(--crit)' }}
+              >
+                {g.kind === 'failed' ? '失敗' : '漏抓'} {g.days} 日
+              </span>
+            </div>
+            <CopyBtn text={g.command} />
+          </div>
+          <code className="block mt-1.5 px-2 py-1.5 rounded bg-[var(--panel-2)] text-[11px] mono text-[var(--fg)] overflow-x-auto whitespace-nowrap">
+            {g.command}
+          </code>
+          {g.warn_ban && (
+            <div className="mt-1 text-[10px] text-[var(--warn)] leading-relaxed">
+              ⚠ 跨度大：TWSE 免費端點連續大量回補易被暫時封鎖（D-015）→ 建議改走 FinMind 或分塊、加長間隔
+            </div>
+          )}
+          {g.detail && <div className="mt-1 text-[10px] text-[var(--muted)]">失敗原因：{g.detail}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Ingest() {
+  const { meta, live } = useMeta()
+  const [mx, setMx] = useState<IngestMatrix | null>(null)
+  const [gp, setGp] = useState<IngestGaps | null>(null)
+  const [hb, setHb] = useState<Heartbeat | null>(null)
+  const [tick, setTick] = useState(0)
+  const [at, setAt] = useState('')
+
+  useEffect(() => {
+    if (!live) return
+    let alive = true
+    const load = () => {
+      fetchIngestMatrix().then((d) => alive && setMx(d)).catch(() => {})
+      fetchIngestGaps().then((d) => alive && setGp(d)).catch(() => {})
+      fetchHeartbeat().then((d) => alive && setHb(d)).catch(() => {})
+      if (alive) setAt(new Date().toLocaleTimeString('zh-TW', { hour12: false }))
+    }
+    load()
+    const id = setInterval(load, 30000) // 每 30 秒即時更新（ops 看板）
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [live, tick])
+
+  if (!live) {
+    return (
+      <Panel title="資料擷取後台" sub="離線快照">
+        <p className="text-[13px] text-[var(--muted)] leading-relaxed">
+          後台熱力圖與漏抓清單需即時監控 API（<code className="mono">twquant serve</code>）；目前為內嵌快照、無法即時計算缺口。以下為快照涵蓋概況：
+        </p>
+        <table className="w-full text-[13px] mono mt-3">
+          <tbody>
+            {meta.coverage.map((c) => (
+              <tr key={c.label} className="border-b border-[var(--line)] last:border-0">
+                <td className="py-2 text-[var(--fg)]">{c.label}</td>
+                <td className="py-2 tnum text-right text-[var(--muted)]">{c.days} 交易日</td>
+                <td className="py-2 pl-3 text-right text-[11px] text-[var(--muted)]">{c.span}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Kpi label="最新行情日" value={hb?.latest ?? mx?.latest ?? '—'} />
+        <Kpi label="最後擷取" value={mx?.last_run ? mx.last_run.slice(0, 16).replace('T', ' ') : '—'} />
+        <Kpi
+          label="Heartbeat"
+          value={hb?.heartbeat?.day ?? '—'}
+          tone={hb ? (hb.watchdog_ok ? 'var(--good)' : 'var(--warn)') : undefined}
+        />
+        <Kpi
+          label="漏抓合計"
+          value={gp ? `${gp.total_missing} 日` : '…'}
+          tone={gp ? (gp.total_missing ? 'var(--crit)' : 'var(--good)') : undefined}
+        />
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="text-[12px] text-[var(--muted)]">補抓一律走 CLI（唯讀後台，不在此執行）· 每 30 秒自動更新</div>
+        <button
+          onClick={() => setTick((t) => t + 1)}
+          className="px-3 py-1.5 text-[12px] rounded border border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)] hover:border-[var(--accent)] transition-colors"
+        >
+          重新整理{at ? ` · ${at}` : ''}
+        </button>
+      </div>
+      <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
+        {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
+      </Panel>
+      <Panel
+        title="漏抓清單 · 補抓指令"
+        sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}
+      >
+        {gp ? <GapList gaps={gp.gaps} /> : <Skeleton height={120} />}
+      </Panel>
+    </div>
+  )
+}
+
+/* ---------- 資金板塊（族群資金流 / 資金移動）---------- */
+function Sectors() {
+  const [win, setWin] = useState(20)
+  const flows = useResource(`sector-flows:${win}`, () => fetchSectorFlows(win), () => null as unknown as SectorFlows)
+  const f = flows.data
+  if (flows.loading || !f) return <Panel title="資金板塊 · 族群資金流"><Skeleton height={420} /></Panel>
+  if (!f.sectors.length) {
+    return (
+      <Panel title="資金板塊 · 族群資金流" sub="需 stock_meta（族群）+ 三大法人 + 行情">
+        <div className="h-[140px] flex items-center justify-center text-center px-4 text-[13px] text-[var(--muted)]">
+          尚無資料——請先 <code className="mono mx-1 text-[var(--fg)]">twquant ingest-meta</code>（族群）
+        </div>
+      </Panel>
+    )
+  }
+  const byAbs = [...f.sectors].sort((a, b) => Math.abs(b.net_yi) - Math.abs(a.net_yi)).slice(0, 16)
+  const maxDaily = Math.max(1, ...byAbs.flatMap((s) => f.dates.map((d) => Math.abs(f.daily[s.industry]?.[d] ?? 0))))
+  const flowColor = (v: number) => {
+    const a = Math.min(1, Math.abs(v) / maxDaily) * 0.8 + 0.06
+    return v >= 0 ? `rgba(229,72,77,${a})` : `rgba(46,163,107,${a})` // 紅=流入、綠=流出
+  }
+  const sgn = (x: number) => (x >= 0 ? '+' : '')
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[12px] text-[var(--muted)]">
+          {f.as_of} · {f.sectors.length} 族群 · 三大法人淨買 × 收盤＝淨流入 ·{' '}
+          <span style={{ color: 'var(--up)' }}>紅=資金流入</span> <span style={{ color: 'var(--down)' }}>綠=流出</span>
+        </div>
+        <div className="flex gap-1">
+          {[5, 20, 60].map((w) => (
+            <button
+              key={w}
+              onClick={() => setWin(w)}
+              className={`px-2.5 py-1 text-[12px] rounded border transition-colors ${win === w ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'}`}
+            >
+              {w}日
+            </button>
+          ))}
+        </div>
+      </div>
+      <Panel title="族群資金淨流入排行" sub={`近 ${f.window} 交易日 · 億元 · 副標=窗報酬`}>
+        <HBars
+          height={f.sectors.length * 22}
+          rows={f.sectors.map((s) => ({ label: s.industry, value: s.net_yi, sub: `${sgn(s.ret_pct)}${s.ret_pct}%` }))}
+        />
+      </Panel>
+      <Panel title="族群 × 日 資金流熱力圖" sub={`|淨流入| 前 ${byAbs.length} 族群 · 每格＝當日淨流入（億）`}>
+        <div className="overflow-x-auto">
+          <div className="inline-flex flex-col gap-[3px]">
+            {byAbs.map((s) => (
+              <div key={s.industry} className="flex items-center gap-2">
+                <div className="w-24 shrink-0 text-[12px] text-[var(--fg)] whitespace-nowrap">{s.industry}</div>
+                <div className="flex gap-[2px]">
+                  {f.dates.map((d) => {
+                    const v = f.daily[s.industry]?.[d] ?? 0
+                    return (
+                      <div
+                        key={d}
+                        title={`${d}　${s.industry}　${sgn(v)}${v} 億`}
+                        className="rounded-[2px]"
+                        style={{ width: 13, height: 13, background: flowColor(v) }}
+                      />
+                    )
+                  })}
+                </div>
+                <div className="ml-2 shrink-0 text-[11px] mono tnum" style={{ color: s.net_yi >= 0 ? 'var(--up)' : 'var(--down)' }}>
+                  {sgn(s.net_yi)}
+                  {s.net_yi}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 mt-0.5">
+              <div className="w-24 shrink-0" />
+              <div className="flex justify-between text-[10px] mono text-[var(--muted)]" style={{ width: f.dates.length * 15 }}>
+                <span>{f.dates[0]}</span>
+                <span>{f.dates[f.dates.length - 1]}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Panel>
+      <Panel title="族群明細" sub="淨流入排序">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px] mono tnum whitespace-nowrap">
+            <thead className="text-[var(--muted)] text-left">
+              <tr className="border-b border-[var(--line)]">
+                <th className="py-2 pr-3 font-medium">族群</th>
+                <th className="py-2 px-2 font-medium text-right">檔數</th>
+                <th className="py-2 px-2 font-medium text-right">淨流入(億)</th>
+                <th className="py-2 px-2 font-medium text-right">外資</th>
+                <th className="py-2 px-2 font-medium text-right">投信</th>
+                <th className="py-2 px-2 font-medium text-right">窗報酬</th>
+                <th className="py-2 pl-2 font-medium text-right">成交值(億)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {f.sectors.map((s) => (
+                <tr key={s.industry} className="border-b border-[var(--line)] last:border-0">
+                  <td className="py-1.5 pr-3 text-[var(--fg)]">{s.industry}</td>
+                  <td className="py-1.5 px-2 text-right text-[var(--muted)]">{s.n}</td>
+                  <td className="py-1.5 px-2 text-right" style={{ color: s.net_yi >= 0 ? 'var(--up)' : 'var(--down)' }}>
+                    {sgn(s.net_yi)}
+                    {s.net_yi}
+                  </td>
+                  <td className="py-1.5 px-2 text-right" style={{ color: s.frgn_yi >= 0 ? 'var(--up)' : 'var(--down)' }}>
+                    {sgn(s.frgn_yi)}
+                    {s.frgn_yi}
+                  </td>
+                  <td className="py-1.5 px-2 text-right" style={{ color: s.trust_yi >= 0 ? 'var(--up)' : 'var(--down)' }}>
+                    {sgn(s.trust_yi)}
+                    {s.trust_yi}
+                  </td>
+                  <td className="py-1.5 px-2 text-right" style={{ color: sign(s.ret_pct / 100) }}>
+                    {sgn(s.ret_pct)}
+                    {s.ret_pct}%
+                  </td>
+                  <td className="py-1.5 pl-2 text-right text-[var(--muted)]">{num(s.amt_yi)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </div>
   )
@@ -419,12 +1391,16 @@ function Flows() {
 const PAGES = [
   { id: 'overview', label: '總覽', el: <Overview /> },
   { id: 'market', label: '市場 K 線', el: <Market /> },
+  { id: 'stock', label: '個股因子', el: <StockFactors /> },
   { id: 'factors', label: '因子健檢', el: <Factors /> },
   { id: 'backtest', label: '策略回測', el: <Backtest /> },
   { id: 'flows', label: '法人 · 營收 · 容量', el: <Flows /> },
+  { id: 'sectors', label: '資金板塊', el: <Sectors /> },
+  { id: 'ingest', label: '資料後台', el: <Ingest /> },
 ]
 
-export default function App() {
+function Shell() {
+  const { meta, live } = useMeta()
   const [page, setPage] = useState('overview')
   const cur = useMemo(() => PAGES.find((p) => p.id === page)!, [page])
   return (
@@ -452,7 +1428,7 @@ export default function App() {
           ))}
         </nav>
         <div className="mt-auto p-4 text-[10px] text-[var(--muted)] border-t border-[var(--line)] leading-relaxed">
-          <div>資料快照 {D.meta.as_of}</div>
+          <div>資料 {live ? '即時' : '快照'} {meta.as_of ?? '—'}</div>
           <div>TWSE · TPEX · MOPS</div>
           <div className="mt-1">
             <span style={{ color: 'var(--up)' }}>紅漲</span> · <span style={{ color: 'var(--down)' }}>綠跌</span>（台股慣例）
@@ -463,10 +1439,48 @@ export default function App() {
       <main className="flex-1 min-w-0">
         <header className="px-6 py-4 border-b border-[var(--line)] flex items-baseline justify-between">
           <h1 className="text-[17px] font-semibold tracking-wide">{cur.label}</h1>
-          <span className="text-[12px] mono text-[var(--muted)]">唯讀快照 · 非即時報價 · lightweight-charts</span>
+          <span className="text-[12px] mono text-[var(--muted)] flex items-center gap-2">
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ background: live ? 'var(--good)' : 'var(--muted)' }}
+              title={live ? '即時連線 API' : '離線快照 fallback'}
+            />
+            {live ? '即時 · 讀資料湖' : '快照 · 內嵌 data.json'} · lightweight-charts
+          </span>
         </header>
         <div className="p-6 max-w-[1180px]">{cur.el}</div>
       </main>
     </div>
+  )
+}
+
+function Splash({ note }: { note: string }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center text-[var(--muted)]">
+      <div className="flex flex-col items-center gap-3">
+        <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: 'var(--accent)' }} />
+        <div className="text-[13px] mono">{note}</div>
+      </div>
+    </div>
+  )
+}
+
+export default function App() {
+  // 啟動只載輕量 meta（不預算因子/回測/容量）；各頁切到才 fetch 自己那段。
+  const [ctx, setCtx] = useState<MetaCtxT | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetchMeta()
+      .then((m) => alive && setCtx({ meta: m, live: true }))
+      .catch(() => alive && setCtx({ meta: FALLBACK.meta, live: false })) // API 不可達 → 內嵌 meta
+    return () => {
+      alive = false
+    }
+  }, [])
+  if (!ctx) return <Splash note="連線監控 API…" />
+  return (
+    <MetaCtx.Provider value={ctx}>
+      <Shell />
+    </MetaCtx.Provider>
   )
 }
