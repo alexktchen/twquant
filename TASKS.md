@@ -47,6 +47,15 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-024（一鍵補抓）/ D-018**（2026-07-09）資料後台從「唯讀 + 複製指令」加上伺服器端
+  執行：`monitoring/jobs.py`（`build_args` 由缺口識別 (table,source,from,to) 白名單推導
+  twquant 子指令 argv——非白名單直接拒、`needs_force` 對 TWSE 行情大區間套 D-015 護欄；
+  `JobManager` 單一併發＋輸出尾行緩衝＋最近 20 筆歷史）。`monitoring/api.py` 加
+  `POST /api/ingest-jobs`（409 已忙／400 白名單或 D-015）＋ GET 清單/單筆輪詢，CORS 放行
+  POST。前端漏抓清單每列加「一鍵補抓」鈕（warn_ban 先 confirm 再帶 force）、新增「補抓工作」
+  面板（狀態＋輸出尾行、3 秒輪詢，工作結束自動刷新矩陣/缺口）。指令由子行程走同一
+  `python -m twquant`，與手動 CLI 同路徑。閘門全綠（218 tests、mypy strict、frontend
+  oxlint＋tsc）。tests/test_ingest_admin.py 補白名單/併發/護欄/端點測試。
 - **T-010（擷取層可插拔化）/ D-017**（2026-07-07）SOURCE 與 STORAGE 雙插件化 + TDCC
   股權分散。`data/ingest/`：ports（唯寫 `IngestSink`＝Warehouse 零改動結構滿足；自足
   `SourcePort`；`FetchCleanSource` 包裝既有來源零改寫）、registry（`SourceSpec`/register/

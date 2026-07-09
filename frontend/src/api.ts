@@ -35,7 +35,7 @@ export type IngestStatus = {
   recent_failures: IngestFailure[]
 }
 
-// 擷取後台（唯讀）：涵蓋矩陣 / 漏抓清單 / heartbeat。
+// 擷取後台：涵蓋矩陣 / 漏抓清單 / heartbeat / 一鍵補抓工作（D-018）。
 export type CellState = 'present' | 'missing' | 'failed' | 'none'
 export type IngestDataset = {
   key: string; table: string; source: string; label: string; span: string; days: number; window_missing: number
@@ -53,6 +53,11 @@ export type Heartbeat = {
   heartbeat: { day: string; git_hash: string; ts: string } | null
   latest: string | null; watchdog_ok: boolean; watchdog_reason: string
 }
+export type IngestJob = {
+  id: string; label: string; command: string; status: 'running' | 'success' | 'failed'
+  started: string; ended: string | null; exit_code: number | null; tail: string[]
+}
+export type IngestJobs = { jobs: IngestJob[]; busy: boolean }
 
 // 個股中繼資料（中文名 / 產業別族群 / 市場別）+ 個股因子體檢卡。
 export type StockMetaEntry = { name: string | null; industry: string | null; market: string | null }
@@ -85,6 +90,26 @@ async function getJSON<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
+// POST（一鍵補抓）：失敗時盡量帶回後端 detail（409 進行中 / 400 白名單、D-015 護欄）。
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let detail = `${path} → HTTP ${res.status}`
+    try {
+      const j = (await res.json()) as { detail?: unknown }
+      if (j.detail) detail = String(j.detail)
+    } catch {
+      /* 非 JSON 錯誤體：保留 HTTP 狀態訊息 */
+    }
+    throw new Error(detail)
+  }
+  return (await res.json()) as T
+}
+
 export const fetchSnapshot = () => getJSON<Data>('/api/snapshot')
 // 逐段（逐頁）端點：各頁切到才 fetch，重運算（因子/回測/容量）只在該頁被開啟時才算。
 export const fetchMeta = () => getJSON<Meta>('/api/meta')
@@ -105,6 +130,11 @@ export const fetchIngestStatus = () => getJSON<IngestStatus>('/api/ingest-status
 export const fetchIngestMatrix = () => getJSON<IngestMatrix>('/api/ingest-matrix')
 export const fetchIngestGaps = () => getJSON<IngestGaps>('/api/ingest-gaps')
 export const fetchHeartbeat = () => getJSON<Heartbeat>('/api/heartbeat')
+export const fetchIngestJobs = () => getJSON<IngestJobs>('/api/ingest-jobs')
+export const startIngestJob = (g: IngestGap, force = false) =>
+  postJSON<IngestJob>('/api/ingest-jobs', {
+    table: g.table, source: g.source, from: g.from, to: g.to, force,
+  })
 export const fetchSectorFlows = (window = 20) =>
   getJSON<{ flows: SectorFlows }>(`/api/sector-flows?window=${window}`).then((r) => r.flows)
 export const fetchBacktest = (start: string, end: string) =>

@@ -8,6 +8,8 @@ ingest_log，無需完整策略配置。
 from __future__ import annotations
 
 import datetime as dt
+import sys
+import time
 from pathlib import Path
 
 import polars as pl
@@ -18,6 +20,7 @@ from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.warehouse import Warehouse
 from twquant.monitoring import api
+from twquant.monitoring import jobs as jobmod
 from twquant.monitoring import snapshot as snap
 from twquant.reporting.ingest_log import record
 
@@ -187,3 +190,167 @@ def test_api_matrix_bad_date(snapshot_wh: Warehouse) -> None:
     with pytest.raises(HTTPException) as ei:
         api.get_ingest_matrix(snapshot_wh, start="nope")
     assert ei.value.status_code == 400
+
+
+# ── 一鍵補抓（D-018）：白名單 argv ────────────────────────────────────
+def test_build_args_daily_single_and_range() -> None:
+    assert jobmod.build_args("margin_daily", "twse", "2026-06-30", "2026-06-30") == [
+        "ingest",
+        "--date",
+        "2026-06-30",
+        "--tables",
+        "margin_daily",
+    ]
+    # 區間補非行情表必須 --no-skip-existing：backfill 的續傳判斷以 prices_daily 分區
+    # 為準，「行情已在、法人缺」的日子否則會被整天跳過。
+    assert jobmod.build_args("institutional_daily", "twse", "2026-06-29", "2026-07-01") == [
+        "backfill",
+        "--from",
+        "2026-06-29",
+        "--to",
+        "2026-07-01",
+        "--tables",
+        "institutional_daily",
+        "--no-skip-existing",
+    ]
+
+
+def test_build_args_month_batched_tables() -> None:
+    # 指數為月批：同月 → ingest-index；跨月 → backfill-index（以月為端點）。
+    assert jobmod.build_args("index_daily", "tpex", "2026-06-05", "2026-06-30") == [
+        "ingest-index",
+        "--month",
+        "2026-06",
+    ]
+    assert jobmod.build_args("index_daily", "twse", "2026-05-05", "2026-06-30") == [
+        "backfill-index",
+        "--from",
+        "2026-05",
+        "--to",
+        "2026-06",
+    ]
+    # 月營收的 from/to 本來就是 YYYY-MM。
+    assert jobmod.build_args("monthly_revenue", "mops", "2026-05", "2026-05") == [
+        "ingest-revenue",
+        "--month",
+        "2026-05",
+    ]
+    assert jobmod.build_args("monthly_revenue", "mops", "2026-04", "2026-06") == [
+        "backfill-revenue",
+        "--from",
+        "2026-04",
+        "--to",
+        "2026-06",
+    ]
+
+
+def test_build_args_rejects_bad_input() -> None:
+    with pytest.raises(ValueError, match="白名單"):
+        jobmod.build_args("prices_daily", "finmind", "2026-06-29", "2026-06-30")
+    with pytest.raises(ValueError, match="白名單"):
+        jobmod.build_args("prices_daily; rm -rf /", "twse", "2026-06-29", "2026-06-30")
+    with pytest.raises(ValueError, match="日期格式"):
+        jobmod.build_args("prices_daily", "twse", "nope", "2026-06-30")
+    with pytest.raises(ValueError, match="早於"):
+        jobmod.build_args("prices_daily", "twse", "2026-07-01", "2026-06-30")
+    with pytest.raises(ValueError, match="月份格式"):
+        jobmod.build_args("monthly_revenue", "mops", "2026-06-01", "2026-06-01")
+
+
+def test_needs_force_only_for_large_twse_price_ranges(tmp_path: Path) -> None:
+    wh = Warehouse(tmp_path)
+    days: list[dt.date] = []
+    d = _D1
+    while len(days) < snap.TWSE_BACKFILL_WARN + 5:  # 25 個平日 → 交易日曆超過警戒
+        if d.weekday() < 5:
+            days.append(d)
+        d += dt.timedelta(days=1)
+    wh.write("clean", "prices_daily", _prices([(x, "2330", 100.0) for x in days]), source="tpex")
+    a, b = days[0].isoformat(), days[-1].isoformat()
+    assert jobmod.needs_force(wh, "prices_daily", "twse", a, b) is True
+    assert jobmod.needs_force(wh, "prices_daily", "twse", a, days[3].isoformat()) is False
+    assert jobmod.needs_force(wh, "institutional_daily", "twse", a, b) is False  # 護欄只針對行情
+    # API 層：未帶 force → 400 並點名 D-015（護欄失效才會走到 start，故先斷開真實指令）。
+    req = api.IngestJobRequest.model_validate(
+        {"table": "prices_daily", "source": "twse", "from": a, "to": b}
+    )
+    with pytest.raises(HTTPException) as ei:
+        api.post_ingest_job(req, wh)
+    assert ei.value.status_code == 400
+    assert "D-015" in str(ei.value.detail)
+
+
+# ── 一鍵補抓（D-018）：工作管理與 API 端點 ────────────────────────────
+def _wait_done(mgr: jobmod.JobManager, timeout: float = 30.0) -> dict[str, object]:
+    """輪詢到最新工作離開 running（子行程結束由背景執行緒收斂）。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        entries = mgr.jobs()
+        if entries and entries[0]["status"] != "running":
+            return entries[0]
+        time.sleep(0.05)
+    raise AssertionError("補抓工作逾時未結束")
+
+
+def test_job_manager_success_records_tail() -> None:
+    mgr = jobmod.JobManager()
+    job = mgr.start("測試", "echo", [sys.executable, "-c", "print('hello 補抓')"])
+    assert job["status"] == "running"
+    done = _wait_done(mgr)
+    assert done["status"] == "success"
+    assert done["exit_code"] == 0
+    tail = done["tail"]
+    assert isinstance(tail, list)
+    assert any("hello" in str(x) for x in tail)
+
+
+def test_job_manager_failure_and_single_concurrency() -> None:
+    mgr = jobmod.JobManager()
+    mgr.start(
+        "慢工作",
+        "sleep",
+        [sys.executable, "-c", "import time; time.sleep(2); raise SystemExit(3)"],
+    )
+    with pytest.raises(jobmod.JobBusyError):
+        mgr.start("第二個", "echo", [sys.executable, "-c", "print('x')"])
+    done = _wait_done(mgr)
+    assert done["status"] == "failed"
+    assert done["exit_code"] == 3
+    assert mgr.running() is False
+
+
+def test_api_post_rejects_non_whitelist(snapshot_wh: Warehouse) -> None:
+    req = api.IngestJobRequest.model_validate(
+        {"table": "nope", "source": "twse", "from": "2026-06-30", "to": "2026-06-30"}
+    )
+    with pytest.raises(HTTPException) as ei:
+        api.post_ingest_job(req, snapshot_wh)
+    assert ei.value.status_code == 400
+
+
+def test_api_post_busy_returns_409(snapshot_wh: Warehouse, monkeypatch: pytest.MonkeyPatch) -> None:
+    mgr = jobmod.JobManager()
+    monkeypatch.setattr(jobmod, "MANAGER", mgr)
+    mgr.start("占用", "sleep", [sys.executable, "-c", "import time; time.sleep(2)"])
+    req = api.IngestJobRequest.model_validate(
+        {"table": "margin_daily", "source": "twse", "from": "2026-06-30", "to": "2026-06-30"}
+    )
+    with pytest.raises(HTTPException) as ei:
+        api.post_ingest_job(req, snapshot_wh)
+    assert ei.value.status_code == 409
+    _wait_done(mgr)  # 收斂背景工作，避免洩漏到其他測試
+
+
+def test_api_job_endpoints_list_and_get() -> None:
+    mgr = jobmod.JobManager()
+    started = mgr.start("查詢", "echo", [sys.executable, "-c", "print('q')"])
+    jid = str(started["id"])
+    listing = mgr.jobs()
+    assert listing[0]["id"] == jid
+    got = mgr.get(jid)
+    assert got is not None
+    assert mgr.get("j999") is None
+    with pytest.raises(HTTPException) as ei:
+        api.get_ingest_job("j999")
+    assert ei.value.status_code == 404
+    _wait_done(mgr)

@@ -8,6 +8,7 @@ import {
   fetchHeartbeat,
   fetchIndices,
   fetchIngestGaps,
+  fetchIngestJobs,
   fetchIngestMatrix,
   fetchIngestStatus,
   fetchInstitutional,
@@ -19,6 +20,7 @@ import {
   fetchStockList,
   fetchStockMeta,
   fetchStockOhlc,
+  startIngestJob,
   type Backtest as BacktestT,
   type Candle,
   type CellState,
@@ -29,6 +31,8 @@ import {
   type Indices,
   type IngestGap,
   type IngestGaps,
+  type IngestJob,
+  type IngestJobs,
   type IngestMatrix,
   type IngestStatus,
   type Inst,
@@ -580,10 +584,53 @@ function StockFactors() {
 
   const chips = meta.top_stocks
   const series = cache[sid]
+  const [q, setQ] = useState('')
+  const allStocks = useMemo(
+    () =>
+      Object.entries(mm)
+        .filter(([c]) => /^[1-9]\d{3}$/.test(c))
+        .map(([c, e]) => [c, e.name ?? ''] as [string, string])
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    [mm],
+  )
+  const pick = (raw: string) => {
+    const t = raw.trim()
+    const code = t.match(/^([1-9]\d{3})/)
+    if (code) {
+      setSid(code[1])
+      setQ('')
+      return
+    }
+    const byName = allStocks.find(([, name]) => name === t)
+    if (byName) {
+      setSid(byName[0])
+      setQ('')
+    }
+  }
   return (
     <div className="flex flex-col gap-4">
-      <Panel title="選擇個股" sub={live ? `成交值前 ${list.length} 檔（即時）` : '前 8 檔（快照）'}>
-        <div className="flex flex-wrap items-center gap-1.5">
+      <Panel title="選擇個股" sub={`搜尋全部上市櫃普通股（${allStocks.length} 檔）· 或點熱門`}>
+        <div className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              list="sf-stocklist"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') pick(q)
+              }}
+              onBlur={() => pick(q)}
+              placeholder="輸入代號或中文名，如 6488 或 環球晶…"
+              className="px-2.5 py-1.5 w-60 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)] focus:border-[var(--accent)] outline-none"
+            />
+            <datalist id="sf-stocklist">
+              {allStocks.map(([c, name]) => (
+                <option key={c} value={`${c} ${name}`} />
+              ))}
+            </datalist>
+            <span className="text-[11px] text-[var(--muted)]">Enter 查詢 · 不限前 150</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
           {chips.map((s) => (
             <button
               key={s}
@@ -608,6 +655,7 @@ function StockFactors() {
               ))}
             </select>
           )}
+          </div>
         </div>
       </Panel>
       {sid && series && series.length > 0 && (
@@ -753,6 +801,10 @@ const FACTOR_META: Record<string, { zh: string; desc: string }> = {
   'chip.foreign_streak': { zh: '外資連買天數', desc: '截至當日外資連續淨買超天數。正向：外資連買越久、買盤越持續。' },
   'chip.inst_net_10d': { zh: '三大法人 10 日買超占量', desc: '外資+投信+自營 10 日累計淨買超 ÷ 10 日量。連續期實測強烈反向（t≈−10，法人擁擠出場）。' },
   'chip.short_margin_ratio': { zh: '券資比', desc: '融券餘額 ÷ 融資餘額。先驗正向（高券資比＝軋空燃料）；實際符號待更長樣本。' },
+  'price.overnight_ret_20d': { zh: '20 日隔夜累計報酬', desc: 'Σln(開盤/前收) 近 20 日累計。反向：隔夜強者其後走弱（Lou/Polk/Skouras 2019 跨時段反轉；台股 OMOM 為負，Ho et al. 2023）。' },
+  'price.intraday_ret_20d': { zh: '20 日盤中累計報酬', desc: 'Σln(收盤/開盤) 近 20 日累計。正向：盤中動能延續——投資人對盤中資訊反應不足（台股 IMOM 為正，Ho et al. 2023）。' },
+  'price.residual_reversal_5d': { zh: '5 日產業殘差反轉', desc: '個股 5 日報酬減同產業等權平均。反向：濾掉產業共同走勢後只有殘差會反轉，訊號更純（Da/Liu/Schaumburg 2014）。' },
+  'price.mom_1d': { zh: '1 日動能', desc: '前一交易日報酬。正向先驗：台股屬日動能市場——1 日續勢、第 2 日起反轉（Gao et al. NBER 31839）。預測窗在 1 日，5/10/20 日 IC 呈負屬預期。' },
 }
 const CAT_ZH: Record<string, string> = { price: '價格', volume: '量能', chip: '籌碼', fundamental: '基本面', market: '市場' }
 // null 安全的帶號數字（IC/t/IR/多空價差可能為 null＝資料不足）
@@ -854,7 +906,7 @@ function Factors() {
               <tr className="border-b border-[var(--line)]">
                 <th className="py-2 pr-3 font-medium">因子</th>
                 <th className="py-2 px-2 font-medium text-right">方向</th>
-                {[5, 10, 20].map((h) => (
+                {[1, 5, 10, 20].map((h) => (
                   <th key={h} className="py-2 px-2 font-medium text-right">{h}日 t</th>
                 ))}
                 <th className="py-2 pl-3 font-medium">判讀(10日)</th>
@@ -876,7 +928,7 @@ function Factors() {
                       </span>
                     </td>
                     <td className="py-2 px-2 text-right text-[var(--muted)]">{f.direction > 0 ? '+1' : '−1'}</td>
-                    {[5, 10, 20].map((hh) => {
+                    {[1, 5, 10, 20].map((hh) => {
                       const t = f.horizons.find((x) => x.h === hh)?.t ?? null
                       return (
                         <td key={hh} className="py-2 px-2 text-right" style={{ color: t != null && Math.abs(t) > 2 ? sign(t) : 'var(--muted)' }}>
@@ -1046,7 +1098,7 @@ function Flows() {
   )
 }
 
-/* ---------- 擷取後台（唯讀：熱力圖 + 漏抓清單 + 引導補抓指令）---------- */
+/* ---------- 擷取後台（熱力圖 + 漏抓清單 + 一鍵補抓 / 引導指令）---------- */
 // 運維色盤：綠=有／橙=擷取失敗／紅=漏抓／暗=尚未涵蓋。刻意不套台股紅漲綠跌（紅在此＝缺）。
 const CELL: Record<CellState, string> = {
   present: 'var(--good)',
@@ -1138,7 +1190,7 @@ function Heatmap({ mx }: { mx: IngestMatrix }) {
   )
 }
 
-function GapList({ gaps }: { gaps: IngestGap[] }) {
+function GapList({ gaps, busy, onRun }: { gaps: IngestGap[]; busy: boolean; onRun: (g: IngestGap) => void }) {
   if (gaps.length === 0) return <div className="text-[13px] text-[var(--good)]">✓ 涵蓋區間內無漏抓</div>
   return (
     <div className="flex flex-col">
@@ -1158,7 +1210,16 @@ function GapList({ gaps }: { gaps: IngestGap[] }) {
                 {g.kind === 'failed' ? '失敗' : '漏抓'} {g.days} 日
               </span>
             </div>
-            <CopyBtn text={g.command} />
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => onRun(g)}
+                disabled={busy}
+                className="px-2 py-1 text-[11px] rounded border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--bg)] transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              >
+                {busy ? '補抓中…' : '一鍵補抓'}
+              </button>
+              <CopyBtn text={g.command} />
+            </div>
           </div>
           <code className="block mt-1.5 px-2 py-1.5 rounded bg-[var(--panel-2)] text-[11px] mono text-[var(--fg)] overflow-x-auto whitespace-nowrap">
             {g.command}
@@ -1175,11 +1236,50 @@ function GapList({ gaps }: { gaps: IngestGap[] }) {
   )
 }
 
+// 補抓工作狀態色：執行中=accent、成功=綠、失敗=紅（運維色）。
+const JOB_TONE: Record<IngestJob['status'], string> = {
+  running: 'var(--accent)',
+  success: 'var(--good)',
+  failed: 'var(--crit)',
+}
+const JOB_ZH: Record<IngestJob['status'], string> = { running: '執行中', success: '成功', failed: '失敗' }
+
+function JobList({ jobs }: { jobs: IngestJob[] }) {
+  return (
+    <div className="flex flex-col">
+      {jobs.map((j) => (
+        <details key={j.id} open={j.status === 'running'} className="py-2 border-b border-[var(--line)] last:border-0">
+          <summary className="flex flex-wrap items-center gap-2 cursor-pointer text-[13px]">
+            <span
+              className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--panel-2)]"
+              style={{ color: JOB_TONE[j.status] }}
+            >
+              {JOB_ZH[j.status]}
+              {j.status === 'failed' && j.exit_code !== null ? ` (exit ${j.exit_code})` : ''}
+            </span>
+            <span className="text-[var(--fg)]">{j.label}</span>
+            <code className="mono text-[11px] text-[var(--muted)]">{j.command}</code>
+            <span className="ml-auto text-[10px] mono text-[var(--muted)]">
+              {j.started.slice(11, 19)}
+              {j.ended ? ` → ${j.ended.slice(11, 19)}` : ''}
+            </span>
+          </summary>
+          <pre className="mt-1.5 px-2 py-1.5 rounded bg-[var(--panel-2)] text-[10px] mono text-[var(--muted)] leading-relaxed overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">
+            {j.tail.length ? j.tail.join('\n') : '（尚無輸出）'}
+          </pre>
+        </details>
+      ))}
+    </div>
+  )
+}
+
 function Ingest() {
   const { meta, live } = useMeta()
   const [mx, setMx] = useState<IngestMatrix | null>(null)
   const [gp, setGp] = useState<IngestGaps | null>(null)
   const [hb, setHb] = useState<Heartbeat | null>(null)
+  const [jb, setJb] = useState<IngestJobs | null>(null)
+  const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
   const [at, setAt] = useState('')
 
@@ -1199,6 +1299,43 @@ function Ingest() {
       clearInterval(id)
     }
   }, [live, tick])
+
+  // 補抓工作獨立輪詢（3 秒：追執行中的輸出尾行）；工作一結束立即刷新矩陣/缺口。
+  useEffect(() => {
+    if (!live) return
+    let alive = true
+    let busyPrev = false
+    const poll = () =>
+      fetchIngestJobs()
+        .then((d) => {
+          if (!alive) return
+          setJb(d)
+          if (busyPrev && !d.busy) setTick((t) => t + 1)
+          busyPrev = d.busy
+        })
+        .catch(() => {})
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [live])
+
+  const busy = jb?.busy ?? false
+  const runGap = (g: IngestGap) => {
+    if (
+      g.warn_ban &&
+      !window.confirm(
+        `跨度 ${g.days} 交易日：TWSE 免費端點連續大量回補易被暫時封鎖（D-015），建議分塊或改走 FinMind。仍要強制執行？`,
+      )
+    )
+      return
+    setErr('')
+    startIngestJob(g, g.warn_ban)
+      .then(() => fetchIngestJobs().then((d) => setJb(d)).catch(() => {}))
+      .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
+  }
 
   if (!live) {
     return (
@@ -1238,7 +1375,7 @@ function Ingest() {
         />
       </div>
       <div className="flex items-center justify-between">
-        <div className="text-[12px] text-[var(--muted)]">補抓一律走 CLI（唯讀後台，不在此執行）· 每 30 秒自動更新</div>
+        <div className="text-[12px] text-[var(--muted)]">一鍵補抓在伺服器端執行 twquant CLI（單一併發）· 每 30 秒自動更新</div>
         <button
           onClick={() => setTick((t) => t + 1)}
           className="px-3 py-1.5 text-[12px] rounded border border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)] hover:border-[var(--accent)] transition-colors"
@@ -1246,14 +1383,20 @@ function Ingest() {
           重新整理{at ? ` · ${at}` : ''}
         </button>
       </div>
+      {err && <div className="text-[12px] text-[var(--crit)]">補抓失敗：{err}</div>}
       <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
         {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
       </Panel>
+      {jb && jb.jobs.length > 0 && (
+        <Panel title="補抓工作" sub="伺服器端執行 twquant CLI · 單一併發 · 重啟 API 後清空">
+          <JobList jobs={jb.jobs} />
+        </Panel>
+      )}
       <Panel
-        title="漏抓清單 · 補抓指令"
+        title="漏抓清單 · 一鍵補抓"
         sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}
       >
-        {gp ? <GapList gaps={gp.gaps} /> : <Skeleton height={120} />}
+        {gp ? <GapList gaps={gp.gaps} busy={busy} onRun={runGap} /> : <Skeleton height={120} />}
       </Panel>
     </div>
   )
