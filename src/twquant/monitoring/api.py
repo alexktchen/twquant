@@ -1,8 +1,9 @@
-"""唯讀監控 API（SPEC-007）。
+"""監控 API（SPEC-007）。
 
 FastAPI/JSON 服務，供 React 前端即時讀 clean 資料湖（取代靜態 data.json 快照，
-並取代已退役的 Streamlit 儀表板）。全部 GET、無操作端點（操作走 CLI + DECISIONS，
-避免誤觸）。以 `twquant serve` 啟動；docker-compose 的 `api` 服務常駐。
+並取代已退役的 Streamlit 儀表板）。查詢全部 GET；唯一的操作端點是資料後台的
+「一鍵補抓」（POST /api/ingest-jobs，D-018：白名單指令 + 單一併發，其餘操作仍走
+CLI + DECISIONS）。以 `twquant serve` 啟動；docker-compose 的 `api` 服務常駐。
 
 重運算（全因子 IC + 回測）以「最新行情日」為鍵快取——資料湖日頻更新，同一日內
 重覆請求直接命中，換日自動失效重算。
@@ -17,10 +18,12 @@ from typing import Annotated, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from twquant.config import SystemConfig, load_config
 from twquant.data.warehouse import Warehouse
 from twquant.errors import DataError, TwquantError
+from twquant.monitoring import jobs
 from twquant.monitoring import snapshot as snap
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
@@ -70,11 +73,11 @@ def _memo(name: str, wh: Warehouse, build: Callable[[], object]) -> object:
 app = FastAPI(
     title="twquant 監控 API", version="1.0", docs_url="/api/docs", openapi_url="/api/openapi.json"
 )
-# 唯讀 GET API + 本機工具：放行跨來源（dev vite proxy / 直開單檔皆可）。
+# 查詢 GET + 補抓 POST（本機工具）：放行跨來源（dev vite proxy / 直開單檔皆可）。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -228,8 +231,8 @@ def get_ingest_status(wh: WarehouseDep) -> dict[str, object]:
     return snap.ingest_status(wh)
 
 
-# 擷取後台（唯讀）：矩陣/缺口/heartbeat 即時計算、不走 _memo——失敗一發生就要看得到，
-# 且成本低（目錄 glob + 小 parquet）。補抓仍走 CLI，D-016 唯讀原則不變。
+# 擷取後台：矩陣/缺口/heartbeat 即時計算、不走 _memo——失敗一發生就要看得到，
+# 且成本低（目錄 glob + 小 parquet）。補抓可走 CLI 或一鍵補抓端點（D-018）。
 @app.get("/api/ingest-matrix")
 def get_ingest_matrix(
     wh: WarehouseDep,
@@ -249,8 +252,58 @@ def get_ingest_matrix(
 
 @app.get("/api/ingest-gaps")
 def get_ingest_gaps(wh: WarehouseDep) -> dict[str, object]:
-    """漏抓/失敗缺口清單，含歸併區段與建議補抓 CLI 指令（唯讀，不執行）。"""
+    """漏抓/失敗缺口清單，含歸併區段與建議補抓 CLI 指令。"""
     return snap.ingest_gaps(wh)
+
+
+class IngestJobRequest(BaseModel):
+    """一鍵補抓請求：只收缺口識別（指令由白名單推導，不收命令字串）。"""
+
+    table: str
+    source: str
+    from_: str = Field(alias="from")
+    to: str
+    force: bool = False  # D-015 護欄：TWSE 行情大區間回補需明示強制
+
+
+@app.post("/api/ingest-jobs", status_code=201)
+def post_ingest_job(req: IngestJobRequest, wh: WarehouseDep) -> dict[str, object]:
+    """一鍵補抓（D-018）：以子行程執行 twquant CLI，單一併發；回傳工作供輪詢。"""
+    try:
+        args = jobs.build_args(req.table, req.source, req.from_, req.to)
+        if not req.force and jobs.needs_force(wh, req.table, req.source, req.from_, req.to):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"TWSE 行情回補超過 {snap.TWSE_BACKFILL_WARN} 交易日易觸發封鎖（D-015）："
+                    "建議分塊或改走 FinMind；確定要跑請帶 force"
+                ),
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        return jobs.MANAGER.start(
+            jobs.job_label(req.table, req.source, req.from_, req.to),
+            jobs.display_command(args),
+            jobs.full_argv(args),
+        )
+    except jobs.JobBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/ingest-jobs")
+def get_ingest_jobs() -> dict[str, object]:
+    """補抓工作清單（新在前，含輸出尾行）＋是否有工作進行中（不快取）。"""
+    return {"jobs": jobs.MANAGER.jobs(), "busy": jobs.MANAGER.running()}
+
+
+@app.get("/api/ingest-jobs/{jid}")
+def get_ingest_job(jid: str) -> dict[str, object]:
+    """單一補抓工作明細（輪詢輸出尾行用）。"""
+    job = jobs.MANAGER.get(jid)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"查無工作 {jid}")
+    return job
 
 
 @app.get("/api/heartbeat")
