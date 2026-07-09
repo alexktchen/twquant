@@ -33,7 +33,7 @@ WINDOW_START = dt.date(2025, 8, 1)  # 連續期起點，避開 TWSE 2026-01 後�
 WINDOW_END = dt.date(2025, 12, 31)
 SNAPSHOT_TOP_N = 8  # 離線快照內嵌的個股數（data.json 大小取捨）
 LIQUID_TOP_N = 150  # 即時個股選單涵蓋的成交值前 N 檔
-IC_HORIZONS = (5, 10, 20)  # 因子前向報酬視窗（交易日）
+IC_HORIZONS = (1, 5, 10, 20)  # 因子前向報酬視窗（交易日）；1 供短線因子（如 price.mom_1d）
 
 _REPO = Path(__file__).resolve().parents[3]
 CONFIGS_DIR = _REPO / "configs"
@@ -128,6 +128,10 @@ FACTOR_ZH: dict[str, str] = {
     "chip.foreign_streak": "外資連買天數",
     "chip.inst_net_10d": "三大法人10日買超占量",
     "chip.short_margin_ratio": "券資比",
+    "price.overnight_ret_20d": "20日隔夜累報",
+    "price.intraday_ret_20d": "20日盤中累報",
+    "price.residual_reversal_5d": "5日產業殘差反轉",
+    "price.mom_1d": "1日動能",
 }
 
 
