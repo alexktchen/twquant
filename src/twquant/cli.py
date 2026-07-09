@@ -539,7 +539,7 @@ def serve(
     host: str = typer.Option("127.0.0.1", help="綁定位址（容器內用 0.0.0.0）"),
     port: int = typer.Option(8000, help="埠號"),
 ) -> None:
-    """啟動唯讀監控 API（FastAPI/uvicorn），供 React 前端即時讀資料湖。"""
+    """啟動監控 API（FastAPI/uvicorn），供 React 前端即時讀資料湖與一鍵補抓。"""
     import uvicorn
 
     from twquant.monitoring.api import app as api_app
