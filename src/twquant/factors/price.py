@@ -177,3 +177,144 @@ def rs_market_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="price.overnight_ret_20d",
+    category="price",
+    direction=-1,
+    tables=["prices_daily"],
+    lookback_days=25,
+    params={"window": 20},
+    anchor_invariant=True,
+)
+def overnight_ret_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """20 日累計隔夜報酬：Σ ln(open_t / close_{t-1})（PAPERS-SHORTTERM §B）。
+
+    反向：隔夜報酬高者其後走弱——Lou/Polk/Skouras (2019, JFE) 跨時段反轉；台股
+    OMOM 為負由 Ho/Hsiao/Lo/Yang (2023, PBFJ) 複製。與 intraday_ret_20d 互補：
+    兩者之和 = 20 日累計 ln 總報酬（分解恆等式，測試驗證）。
+    """
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    prices = (
+        view.table("prices_daily")
+        .select("date", "stock_id", "open", "close")
+        .sort(["stock_id", "date"])
+    )
+    prev = pl.col("close").shift(1).over("stock_id", order_by="date")
+    on = (
+        pl.when((pl.col("open") > 0) & (prev > 0))
+        .then((pl.col("open") / prev).log())
+        .otherwise(None)
+    )
+    return (
+        prices.with_columns(_on=on)
+        .with_columns(value=pl.col("_on").rolling_sum(window).over("stock_id"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="price.intraday_ret_20d",
+    category="price",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=25,
+    params={"window": 20},
+    anchor_invariant=True,
+)
+def intraday_ret_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """20 日累計盤中報酬：Σ ln(close_t / open_t)（PAPERS-SHORTTERM §B）。
+
+    正向：盤中動能延續（對盤中資訊反應不足）——台股 IMOM 顯著為正
+    （Ho/Hsiao/Lo/Yang 2023, PBFJ 82:102151）。
+    """
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    prices = (
+        view.table("prices_daily")
+        .select("date", "stock_id", "open", "close")
+        .sort(["stock_id", "date"])
+    )
+    intra = (
+        pl.when((pl.col("open") > 0) & (pl.col("close") > 0))
+        .then((pl.col("close") / pl.col("open")).log())
+        .otherwise(None)
+    )
+    return (
+        prices.with_columns(_in=intra)
+        .with_columns(value=pl.col("_in").rolling_sum(window).over("stock_id"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="price.residual_reversal_5d",
+    category="price",
+    direction=-1,
+    tables=["prices_daily", "stock_meta"],
+    lookback_days=10,
+    params={"window": 5},
+)
+def residual_reversal_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """5 日產業殘差反轉：個股 5 日報酬 − 同產業等權平均 5 日報酬（反向）。
+
+    Da/Liu/Schaumburg (2014, Mgmt Sci)：系統性（基本面/共同）驅動的漲跌不反轉，
+    殘差才反轉——濾掉產業共同走勢後反轉訊號更純。產業別取自 stock_meta（緩變維度、
+    現值套用全歷史，與個股體檢卡同一近似）；無 stock_meta 時 scan raise，健檢自動略過
+    （同 rs_market_20d 的 index_daily 慣例）。單一成員產業殘差為 0。
+    """
+    raw = params.get("window", 5)
+    window = int(raw) if isinstance(raw, int | float | str) else 5
+    px = view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    ret = pl.col("close") / pl.col("close").shift(window).over("stock_id", order_by="date") - 1.0
+    meta = (
+        view.table("stock_meta")
+        .select("stock_id", "industry")
+        .drop_nulls("industry")
+        .unique(subset=["stock_id"])
+    )
+    return (
+        px.with_columns(_r=ret)
+        .drop_nulls("_r")
+        .join(meta, on="stock_id", how="inner")
+        .with_columns(value=pl.col("_r") - pl.col("_r").mean().over(["date", "industry"]))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="price.mom_1d",
+    category="price",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=5,
+    params={"window": 1},
+    anchor_invariant=True,
+)
+def mom_1d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """1 日動能：close(t)/close(t-1) − 1（PAPERS-SHORTTERM §A）。
+
+    正向先驗：台股屬「日動能」市場——Gao/Jiang/Xiong/Xiong (NBER 31839) 21 個新興
+    市場中 14 個（含台灣）日動能顯著為正，1 日續勢、第 2 日起反轉。預測窗在 1 日
+    （IC_HORIZONS 含 1 即為此因子）；5/10/20 日 IC 呈負屬預期（反轉主導），勿誤判。
+    """
+    raw = params.get("window", 1)
+    window = int(raw) if isinstance(raw, int | float | str) else 1
+    prices = (
+        view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
+    )
+    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
+    return (
+        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )
