@@ -137,9 +137,9 @@ def _drop(cfg: ServingConfig) -> None:
 
 
 def test_scorecard_pg_shape(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
     from twquant.data.serving import materialize as smat
 
-    cfg = _pg_cfg_or_skip()
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", _prices(25, {"1111": 100.0, "2222": 50.0, "3333": 200.0}))
     try:
@@ -171,9 +171,9 @@ def test_scorecard_pg_shape(tmp_path: Path) -> None:
 
 
 def test_source_pg_and_empty_when_missing(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
     from twquant.data.serving import sync as ssync
 
-    cfg = _pg_cfg_or_skip()
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", _prices(3, {"1111": 100.0}))
     try:

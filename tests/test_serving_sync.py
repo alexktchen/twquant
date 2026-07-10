@@ -70,9 +70,9 @@ def _count(conn: Any, table: str) -> int:
 
 
 def test_ac2_incremental_and_idempotent(tmp_path: Path) -> None:
+    conn = _connect_or_skip()
     from twquant.data.serving import sync as srv
 
-    conn = _connect_or_skip()
     cfg = ServingConfig(pg_schema=_SCHEMA)
     wh = Warehouse(tmp_path)
     d1, d2, d3 = dt.date(2026, 6, 1), dt.date(2026, 6, 2), dt.date(2026, 6, 3)
@@ -107,9 +107,9 @@ def test_ac2_incremental_and_idempotent(tmp_path: Path) -> None:
 
 
 def test_rebuild_reloads(tmp_path: Path) -> None:
+    conn = _connect_or_skip()
     from twquant.data.serving import sync as srv
 
-    conn = _connect_or_skip()
     cfg = ServingConfig(pg_schema=_SCHEMA)
     wh = Warehouse(tmp_path)
     d1 = dt.date(2026, 6, 1)
@@ -132,9 +132,9 @@ def test_rebuild_reloads(tmp_path: Path) -> None:
 def test_sync_catches_backfilled_older_date(tmp_path: Path) -> None:
     """sync 補齊資料湖裡所有未進 PG 的分區——含晚於初次同步才 backfill 的『舊』日期
     （舊 watermark 邏輯會漏；這是換成比對 PG 已有日期的關鍵行為）。"""
+    conn = _connect_or_skip()
     from twquant.data.serving import sync as srv
 
-    conn = _connect_or_skip()
     cfg = ServingConfig(pg_schema=_SCHEMA)
     wh = Warehouse(tmp_path)
     d1, d2, d3 = dt.date(2026, 6, 1), dt.date(2026, 6, 2), dt.date(2026, 6, 3)
@@ -157,9 +157,9 @@ def test_sync_catches_backfilled_older_date(tmp_path: Path) -> None:
 def test_sync_catches_new_source_file_in_existing_date(tmp_path: Path) -> None:
     """日期已在 PG、但事後同一分區補了新來源檔（如 TWSE 晚於 TPEX）→ sync 以檔案 mtime
     偵測並重同步該日，新來源的列被補進 PG。"""
+    conn = _connect_or_skip()
     from twquant.data.serving import sync as srv
 
-    conn = _connect_or_skip()
     cfg = ServingConfig(pg_schema=_SCHEMA)
     wh = Warehouse(tmp_path)
     d1 = dt.date(2026, 6, 1)

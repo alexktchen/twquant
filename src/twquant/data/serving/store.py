@@ -33,6 +33,6 @@ def ping(cfg: ServingConfig) -> bool:
     try:
         with psycopg.connect(resolve_dsn(cfg)) as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
-            return cur.fetchone() == (1,)
+            return bool(cur.fetchone() == (1,))
     except (psycopg.Error, ConfigError):
         return False

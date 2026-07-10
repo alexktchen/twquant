@@ -71,11 +71,11 @@ def _drop(conn: Any) -> None:
 
 
 def test_ac3_materialized_value_matches_compute(tmp_path: Path) -> None:
+    conn = _connect_or_skip()
     import twquant.factors.builtins  # noqa: F401
     from twquant.data.serving import materialize as smat
     from twquant.factors.compute import compute
 
-    conn = _connect_or_skip()
     cfg_schema = _SCHEMA
     from twquant.config import ServingConfig
 
