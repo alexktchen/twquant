@@ -46,6 +46,18 @@ class SystemConfig(BaseConfig):
     quality_gate: QualityGateConfig = QualityGateConfig()
 
 
+class ServingConfig(BaseConfig):
+    """serving.yaml 的模型（SPEC-009 §1 為權威）。PG 供應層＝衍生、可重建、僅供展示。"""
+
+    enabled: bool = False  # 總開關；false 時 API 一律走 DuckDB 路徑
+    dsn_env: str = "TWQUANT_PG_DSN"  # 存 DSN 的環境變數名（DSN 本體只在 .env）
+    pg_schema: str = "serving"  # PG schema 名（避開 pydantic BaseModel.schema 遮蔽）
+    pool_min: int = 1
+    pool_max: int = 8
+    factor_history_days: int = 1100  # factor_values 保留窗（≈3 年）
+    fallback_duckdb: bool = True  # PG 不可用時降級 DuckDB（false 則回 503）
+
+
 def load_config[T: BaseConfig](path: str | Path, model: type[T]) -> T:
     """讀 YAML → 用 model 驗證 → 回傳實例。缺欄位/多欄位/型別錯 → ConfigError（含欄位名）。"""
     p = Path(path)

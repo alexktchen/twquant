@@ -18,15 +18,24 @@ import {
   fetchMeta,
   fetchRevenue,
   fetchSectorFlows,
+  fetchStockBrokers,
+  fetchStockCompositeHistory,
+  fetchStockFactorHistory,
   fetchStockFactors,
+  fetchStockInstitutional,
   fetchStockList,
+  fetchStockMargin,
   fetchStockMeta,
   fetchStockOhlc,
+  fetchStockOverview,
+  fetchStockRevenue,
   startHolidayFetch,
   startIngestFetch,
   startIngestJob,
   type Backtest as BacktestT,
+  type BrokerRow,
   type Candle,
+  type CompositePoint,
   type CellState,
   type Data,
   type Fac,
@@ -42,11 +51,18 @@ import {
   type IngestStatus,
   type IngestTrack,
   type Inst,
+  type InstRow,
+  type MarginRow,
   type Meta,
   type Rev,
+  type RevenueRow,
   type Scorecard,
   type SectorFlows,
+  type StockBrokers,
+  type StockFactorHistory,
   type StockMetaMap,
+  type StockOverview,
+  type StockSeries,
 } from './api'
 
 const FALLBACK = fallbackRaw as unknown as Data
@@ -466,9 +482,65 @@ const labelOf = (meta: StockMetaMap, sid: string) => {
   return n ? `${sid} ${n}` : sid
 }
 
+/* P7：因子 z 值 250 日迷你走勢（表格內欄位）。0 軸虛線 + 折線；資料不足畫點。 */
+function Spark({ zs }: { zs: number[] | undefined }) {
+  const W = 110, H = 22
+  if (!zs || zs.length === 0) return <span className="text-[10px] text-[var(--muted)]">—</span>
+  const lo = Math.min(...zs, 0), hi = Math.max(...zs, 0)
+  const rng = hi - lo || 1
+  const y = (v: number) => H - 2 - ((v - lo) / rng) * (H - 4)
+  const step = zs.length > 1 ? W / (zs.length - 1) : 0
+  const pts = zs.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  const last = zs[zs.length - 1]
+  return (
+    <svg width={W} height={H} className="block">
+      <line x1={0} y1={y(0)} x2={W} y2={y(0)} stroke="var(--line)" strokeWidth={1} strokeDasharray="2,3" />
+      {zs.length > 1 ? (
+        <polyline points={pts} fill="none" stroke={last >= 0 ? UP : DOWN} strokeWidth={1.2} />
+      ) : (
+        <circle cx={W / 2} cy={y(last)} r={2} fill={last >= 0 ? UP : DOWN} />
+      )}
+    </svg>
+  )
+}
+
+/* P8：綜合因子分位趨勢（棒=signed_z 平均、線=宇宙分位）。 */
+function CompositeTrendPanel({ sid }: { sid: string }) {
+  const empty: StockSeries<CompositePoint> = { sid, as_of: null, source: 'pg', rows: [] }
+  const r = useResource(`chist:${sid}`, () => fetchStockCompositeHistory(sid, 250), () => empty)
+  if (r.loading) return <Panel title="綜合因子分位趨勢"><Skeleton height={100} /></Panel>
+  const rows = r.data?.rows ?? []
+  if (rows.length < 2) return null
+  const last = rows[rows.length - 1]
+  return (
+    <Panel title="綜合因子分位趨勢" sub={`棒=signed-z 平均 · 線=宇宙分位 · ${rows.length} 日 · pg`}>
+      <MiniTS bars={rows.map((x) => x.signed_z_mean)} line={rows.map((x) => x.pct)} />
+      <div className="flex flex-wrap gap-x-4 mt-2 text-[11px] mono">
+        <span className="text-[var(--muted)]">
+          最新分位 <span style={{ color: last.pct >= 0.5 ? 'var(--up)' : 'var(--down)' }}>{Math.round(last.pct * 100)}%</span>
+        </span>
+        <span className="text-[var(--muted)]">signed-z 平均 {last.signed_z_mean >= 0 ? '+' : ''}{last.signed_z_mean.toFixed(2)}</span>
+        <span className="text-[var(--muted)]">{last.date}</span>
+      </div>
+    </Panel>
+  )
+}
+
 function ScorecardPanel({ sid }: { sid: string }) {
   const empty: Scorecard = { sid, name: null, industry: null, market: null, as_of: null, factors: [], composite: null }
   const sc = useResource(`scorecard:${sid}`, () => fetchStockFactors(sid), () => empty)
+  const names = (sc.data ?? empty).factors.map((f) => f.factor)
+  const emptyFH: StockFactorHistory = { sid, as_of: null, source: 'pg', rows: [] }
+  const fh = useResource(
+    `fhist:${sid}:${names.length}`,
+    () => (names.length ? fetchStockFactorHistory(sid, names, 250) : Promise.resolve(emptyFH)),
+    () => emptyFH,
+  )
+  const zMap = useMemo(() => {
+    const m = new Map<string, number[]>()
+    for (const g of fh.data?.rows ?? []) m.set(g.factor, g.series.map((p) => p.z ?? 0))
+    return m
+  }, [fh.data])
   if (sc.loading) return <Panel title="個股因子體檢"><Skeleton height={240} /></Panel>
   const card = sc.data ?? empty
   const name = card.name ?? ''
@@ -523,6 +595,7 @@ function ScorecardPanel({ sid }: { sid: string }) {
               <th className="py-1 px-2 font-medium text-right">百分位</th>
               <th className="py-1 px-2 font-medium text-right">方向</th>
               <th className="py-1 pl-2 font-medium">傾向</th>
+              <th className="py-1 pl-2 font-medium">250日 z 走勢</th>
             </tr>
           </thead>
           <tbody>
@@ -543,6 +616,7 @@ function ScorecardPanel({ sid }: { sid: string }) {
                   <td className="py-1 pl-2" style={{ color: v.c }}>
                     {v.t}
                   </td>
+                  <td className="py-1 pl-2"><Spark zs={zMap.get(f.factor)} /></td>
                 </tr>
               )
             })}
@@ -556,7 +630,183 @@ function ScorecardPanel({ sid }: { sid: string }) {
   )
 }
 
-/* ---------- 個股因子健檢（獨立頁：選股 + K線 + 因子體檢卡）---------- */
+/* ---------- 個股頁首：看盤式總覽（名稱/產業/最新價/漲跌/52週位置/綜合分位）---------- */
+function StockHeader({ sid, fallbackName }: { sid: string; fallbackName: string }) {
+  const empty: StockOverview = {
+    sid, name: fallbackName || null, industry: null, market: null, as_of: null,
+    source: 'pg', close: null, chg: null, chg_pct: null, volume: null, pos_52w: null, composite: null,
+  }
+  const r = useResource(`overview:${sid}`, () => fetchStockOverview(sid), () => empty)
+  const d = r.data ?? empty
+  const up = (d.chg ?? 0) >= 0
+  const col = up ? 'var(--up)' : 'var(--down)'
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[18px] font-semibold text-[var(--fg)]">{sid} {d.name ?? fallbackName}</span>
+        {d.industry && (
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--panel-2)]" style={{ color: 'var(--accent)' }}>{d.industry}</span>
+        )}
+        {d.market && <span className="text-[11px] text-[var(--muted)]">{d.market}</span>}
+        <span className="ml-auto text-[24px] font-semibold mono tnum" style={{ color: col }}>
+          {d.close != null ? d.close.toLocaleString() : '—'}
+        </span>
+        {d.chg != null && (
+          <span className="text-[14px] mono tnum" style={{ color: col }}>
+            {up ? '▲' : '▼'}{Math.abs(d.chg).toFixed(2)} ({up ? '+' : ''}{((d.chg_pct ?? 0) * 100).toFixed(2)}%)
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-[12px] mono">
+        {d.pos_52w != null && (
+          <span className="text-[var(--muted)]">52週位置 <span className="text-[var(--fg)]">{Math.round(d.pos_52w * 100)}%</span></span>
+        )}
+        {d.composite && (
+          <span className="text-[var(--muted)]">綜合因子分位 <span style={{ color: d.composite.pct >= 0.5 ? 'var(--up)' : 'var(--down)' }}>{Math.round(d.composite.pct * 100)}%</span>（{d.composite.n_universe} 檔）</span>
+        )}
+        {d.volume != null && (
+          <span className="text-[var(--muted)]">成交 {Math.round(d.volume / 1000).toLocaleString()} 張</span>
+        )}
+        <span className="ml-auto text-[10px] text-[var(--muted)]">{d.as_of ?? ''} · {d.source}</span>
+      </div>
+    </Panel>
+  )
+}
+
+/* ---------- 個股資料面板（法人 / 融資券 / 月營收；讀 PG 供應層，降級資料湖）---------- */
+function MiniTS({ bars, line, height = 84 }: { bars: number[]; line?: number[]; height?: number }) {
+  const n = bars.length
+  if (!n) return <div className="h-[60px] flex items-center text-[11px] text-[var(--muted)]">無資料</div>
+  const step = Math.max(2.5, Math.min(16, 900 / n))
+  const W = n * step
+  const bmax = Math.max(...bars.map((v) => Math.abs(v)), 1e-9)
+  const zero = height / 2
+  let pts = ''
+  if (line && line.length === n) {
+    const lo = Math.min(...line)
+    const hi = Math.max(...line)
+    const rng = hi - lo || 1
+    pts = line.map((v, i) => `${i * step + step / 2},${height - ((v - lo) / rng) * (height - 6) - 3}`).join(' ')
+  }
+  return (
+    <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
+      {bars.map((v, i) => {
+        const h = (Math.abs(v) / bmax) * (height / 2 - 2)
+        return (
+          <rect key={i} x={i * step + 0.75} y={v >= 0 ? zero - h : zero} width={Math.max(1, step - 1.5)}
+            height={Math.max(0.5, h)} fill={v >= 0 ? UP : DOWN} opacity={0.8} />
+        )
+      })}
+      {pts && <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={1.3} vectorEffect="non-scaling-stroke" />}
+    </svg>
+  )
+}
+function Delta({ label, v, unit = '' }: { label: string; v: number; unit?: string }) {
+  const c = v > 0 ? 'var(--up)' : v < 0 ? 'var(--down)' : 'var(--muted)'
+  return (
+    <span className="text-[11px] mono">
+      <span className="text-[var(--muted)]">{label} </span>
+      <span style={{ color: c }}>{v > 0 ? '+' : ''}{v.toLocaleString()}{unit}</span>
+    </span>
+  )
+}
+const zhang = (shares: number) => Math.round(shares / 1000)
+
+function InstitutionalPanel({ sid }: { sid: string }) {
+  const empty: StockSeries<InstRow> = { sid, as_of: null, source: 'pg', rows: [] }
+  const r = useResource(`inst:${sid}`, () => fetchStockInstitutional(sid, 90), () => empty)
+  if (r.loading) return <Panel title="法人買賣超"><Skeleton height={100} /></Panel>
+  const rows = r.data?.rows ?? []
+  if (!rows.length) return null
+  const last = rows[rows.length - 1]
+  return (
+    <Panel title="法人買賣超（張）" sub={`外資日買賣超 + 累計 · ${r.data?.source}`}>
+      <MiniTS bars={rows.map((x) => zhang(x.foreign_net))} line={rows.map((x) => zhang(x.cum_foreign))} />
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+        <Delta label="外資" v={zhang(last.foreign_net)} />
+        <Delta label="投信" v={zhang(last.trust_net)} />
+        <Delta label="自營" v={zhang(last.dealer_net)} />
+        <span className="text-[11px] mono text-[var(--muted)]">累計外資 {zhang(last.cum_foreign).toLocaleString()} 張</span>
+      </div>
+    </Panel>
+  )
+}
+
+function MarginPanel({ sid }: { sid: string }) {
+  const empty: StockSeries<MarginRow> = { sid, as_of: null, source: 'pg', rows: [] }
+  const r = useResource(`margin:${sid}`, () => fetchStockMargin(sid, 90), () => empty)
+  if (r.loading) return <Panel title="融資券"><Skeleton height={100} /></Panel>
+  const rows = r.data?.rows ?? []
+  if (!rows.length) return null
+  const last = rows[rows.length - 1]
+  const ratio = last.short_margin_ratio
+  return (
+    <Panel title="融資券（張）" sub={`融資餘額(線) + 日增減(棒) · ${r.data?.source}`}>
+      <MiniTS bars={rows.map((x) => zhang(x.margin_chg ?? 0))} line={rows.map((x) => zhang(x.margin_balance))} />
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+        <span className="text-[11px] mono text-[var(--muted)]">融資餘額 {zhang(last.margin_balance).toLocaleString()} 張</span>
+        <span className="text-[11px] mono text-[var(--muted)]">融券餘額 {zhang(last.short_balance).toLocaleString()} 張</span>
+        <span className="text-[11px] mono text-[var(--muted)]">券資比 {ratio == null ? '—' : `${(ratio * 100).toFixed(1)}%`}</span>
+      </div>
+    </Panel>
+  )
+}
+
+function RevenuePanel({ sid }: { sid: string }) {
+  const empty: StockSeries<RevenueRow> = { sid, as_of: null, source: 'pg', rows: [] }
+  const r = useResource(`rev:${sid}`, () => fetchStockRevenue(sid, 36), () => empty)
+  if (r.loading) return <Panel title="月營收"><Skeleton height={100} /></Panel>
+  const rows = r.data?.rows ?? []
+  if (!rows.length) return null
+  const last = rows[rows.length - 1]
+  const yi = (v: number | null) => (v == null ? 0 : v / 1e8)
+  return (
+    <Panel title="月營收（億元）" sub={`月營收(棒) + YoY(線) · ${r.data?.source}`}>
+      <MiniTS bars={rows.map((x) => yi(x.revenue))} line={rows.map((x) => (x.yoy ?? 0) * 100)} />
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+        <span className="text-[11px] mono text-[var(--muted)]">{last.month} 營收 {yi(last.revenue).toFixed(2)} 億</span>
+        <Delta label="YoY" v={Math.round((last.yoy ?? 0) * 1000) / 10} unit="%" />
+        <Delta label="MoM" v={Math.round((last.mom ?? 0) * 1000) / 10} unit="%" />
+      </div>
+    </Panel>
+  )
+}
+
+function BrokerPanel({ sid }: { sid: string }) {
+  const empty: StockBrokers = { sid, as_of: null, source: 'pg', window_days: 5, top_buy: [], top_sell: [], summary: [] }
+  const r = useResource(`brokers:${sid}`, () => fetchStockBrokers(sid, 5), () => empty)
+  if (r.loading) return <Panel title="主力券商買賣超"><Skeleton height={120} /></Panel>
+  const d = r.data ?? empty
+  if (!d.top_buy.length && !d.top_sell.length) return null
+  const bcol = (rows: BrokerRow[], title: string, up: boolean) => (
+    <div>
+      <div className="text-[12px] font-semibold mb-1" style={{ color: up ? 'var(--up)' : 'var(--down)' }}>{title}</div>
+      <table className="w-full text-[11px] mono tnum">
+        <tbody>
+          {rows.slice(0, 10).map((b) => (
+            <tr key={b.broker} className="border-b border-[var(--line)] last:border-0">
+              <td className="py-0.5 pr-2 text-[var(--fg)] whitespace-nowrap">{b.broker}</td>
+              <td className="py-0.5 text-right" style={{ color: up ? 'var(--up)' : 'var(--down)' }}>
+                {up ? '+' : ''}{Math.round(b.net_shares / 1000).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+  return (
+    <Panel title="主力券商買賣超（張）" sub={`富邦DJ 母公司 · 近 ${d.window_days} 日彙總 · ${d.source}`}>
+      <div className="grid grid-cols-2 gap-4">
+        {bcol(d.top_buy, '買超前 10', true)}
+        {bcol(d.top_sell, '賣超前 10', false)}
+      </div>
+      <div className="mt-2 text-[10px] text-[var(--muted)]">來源為券商母公司層級 top-15，非分點明細、無成交均價。</div>
+    </Panel>
+  )
+}
+
+/* ---------- 個股因子健檢（獨立頁：選股 + K線 + 法人/融資券/營收/主力 + 因子體檢卡）---------- */
 function StockFactors() {
   const { meta, live } = useMeta()
   const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
@@ -664,11 +914,20 @@ function StockFactors() {
           </div>
         </div>
       </Panel>
+      {sid && live && <StockHeader sid={sid} fallbackName={mm[sid]?.name ?? ''} />}
       {sid && series && series.length > 0 && (
         <Panel title={`${labelOf(mm, sid)} · K 線`} sub="紅漲綠跌 · 可拖曳縮放">
           <RangeCandle key={sid} data={series} height={280} volume />
         </Panel>
       )}
+      {sid && live && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <InstitutionalPanel sid={sid} />
+          <MarginPanel sid={sid} />
+        </div>
+      )}
+      {sid && live && <RevenuePanel sid={sid} />}
+      {sid && live && <BrokerPanel sid={sid} />}
       {sid && live ? (
         <ScorecardPanel sid={sid} />
       ) : (
@@ -678,6 +937,7 @@ function StockFactors() {
           </div>
         </Panel>
       )}
+      {sid && live && <CompositeTrendPanel sid={sid} />}
     </div>
   )
 }

@@ -40,12 +40,85 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-028 | advisor + 提案生命週期（proposals/、validate/approve CLI、回饋迴路） | SPEC-008 §2.2/§4 | T-019, T-026 | 部分完成 |
 | T-029 | 容量分析：各 sleeve 周轉 × ADV 分布 + 衝擊函數 → 容量上限，寫回 STRATEGY §2 | STRATEGY §5a | T-018 | 部分完成 |
 | T-030 | 待評估策略族回測 + DECISIONS 決策：配對/統計套利、指數 ETF 換股、除權息、融券軋空 | STRATEGY §5a | T-018 | B | todo |
+| T-031 | PG 供應層底座：ServingConfig+configs/serving.yaml、docker `pg` 服務、`data/serving/`（schema/sync/rebuild CLI）、鏡射六張現成表、sync_state 冪等、IO 邊界擴充（禁 psycopg/serving import） | SPEC-009 §1/§2/§5 + PRD-001 | T-011 | A | done |
+| T-032 | 因子物化：`data/serving/materialize.py`、factor_values/factor_cross_stats/composite_daily、每日 pipeline 尾波掛點、歷史逐日回補（as_of 逐日推進）、與 PitView 現算抽樣一致性測試 | SPEC-009 §3 | T-031, T-012 | A | done |
+| T-033 | 個股 API v2：overview/ohlc/institutional/margin/revenue/factors-history/composite-history 端點 + scorecard 改讀 PG + DuckDB 降級 + `source` 欄；`monitoring/stock_api.py` | SPEC-009 §4 + PRD-001 §5 | T-031, T-032 | B | done |
+| T-034 | 前端個股頁改版：Header+P1–P4+P6+P7（含 sparkline）+P8 全數上線；元件抽出 `frontend/src/stock/` 目錄未做（純整理，另開任務） | PRD-001 §3 | T-033 | B | done |
+| T-035 | broker_trades 全市場抓取+回補（富邦DJ，禮貌限流）+ `/brokers` 端點 + P6；集保週頻 ingest 排程 + `/dispersion` 端點 + P5 | SPEC-009 §2.2/§4 + STRATEGY §3 + D-019 | T-010, T-031 | B | 部分完成 |
+| T-036 | 主力分點因子上板：T-016 的 chip.concentration_* 落地後併入 factor_values/計分卡/P6 集中度折線（依賴 broker ≥60 交易日史） | STRATEGY §3 + SPEC-009 §3 | T-016, T-032, T-035 | B | todo |
+| T-037 | inst_holding ingest（FinMind）+ Header 外資持股比 + 上櫃法人/融資券補源 + TDCC 互動站備援來源評估 | SPEC-001 §1 + PRD-001 §4 | T-010, T-031 | B | todo |
+
+> 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
+> [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
+> + PG 底座）、Phase 2（T-035，籌碼補全）、Phase 3（T-036/037，主力因子與持股深化）。
 
 > 依賴修正（REVIEW H15）：T-003 改以靜態日曆檔起步（不再假依賴 prices_daily）；
 > T-005 依賴補上轉接器；T-023 的 report 步驟改為掛點預留、T-024 接上（解除 T-023↔T-024
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-035（主力券商買賣超·部分完成）**（2026-07-10）富邦DJ 券商(母公司)買賣超進 PG + 個股頁面板。
+  `broker_trades` 直接列入 serving 鏡射表（每檔每日 top-15±、量小，不另做預聚合）；
+  `stock_api.brokers`：近 window 日彙總各券商淨買賣超 → 買/賣超前 15 + 每日家數，PG 優先降級
+  資料湖；端點 `/api/stocks/{sid}/brokers`。前端 P6「主力券商買賣超」面板（買/賣超前 10 兩欄）。
+  **閘門**：ruff+mypy(124)+pytest 250 passed（broker 彙總測試）；frontend oxlint+build 過。
+  真實驗證：2330 近 5 日買超前 3 券商 +5.84M/+3.73M/+2.36M 股。**進行中**：全市場 2026-07-08
+  爬取（~1800 檔、1 req/2s、背景）。**待接**：集保 P5、主力集中度因子（T-036，需 broker ≥60 日
+  史 + T-016）、爬取排程、真分點來源決策（富邦DJ 為母公司層級的先天限制）。
+
+- **T-034（前端個股頁·部分完成）**（2026-07-10）「個股因子」頁在 K 線與因子體檢卡之間加三面板：
+  法人買賣超（外資日買賣超棒＋累計線）、融資券（融資餘額線＋日增減棒＋券資比）、月營收
+  （營收棒＋YoY 線），皆讀 T-033 端點（/institutional·/margin·/revenue，envelope 含 source，
+  PG 空或失連自動降級資料湖）。`api.ts` 加 v2 型別與 fetcher；`App.tsx` 加 `MiniTS`（棒＋疊線
+  inline SVG，紅漲綠跌）與三面板元件，無資料則不顯示（上櫃法人/融資券缺口優雅留白）。**閘門**：
+  frontend oxlint 綠、`tsc -b`＋vite build 成功（42 模組）；後端 249 tests 不受影響。**待接**：
+  P7 因子 sparkline/點擊展開、P8 綜合分位趨勢（/composite-history·/factors/history 端點已備）、
+  Header overview 面板、抽出 frontend/src/stock/ 元件目錄、P5 集保/P6 分點（Phase 2）。
+  **上線提醒**：docker 常駐服務仍為舊映像；`docker compose build api frontend && docker compose
+  up -d api frontend` 後 :8899 才會出現新面板（serving 空時走資料湖，仍有真實法人/融資券/營收）。
+
+- **T-033 / SPEC-009（個股 API v2）**（2026-07-10）個股頁 8 端點 + PG 讀取 + DuckDB 降級。
+  `monitoring/stock_api.py`：overview/ohlc/institutional/margin/revenue（時序，PG 空或失連即
+  降級資料湖、回應標 `source`）+ composite-history/factors-history（PG 物化，無則留白）+
+  scorecard 改讀 factor_values（PG）否則現算（snapshot），payload 形狀不變（AC-4）。衍生欄
+  伺服器端算：外資/投信累計淨買超、券資比/日增減、營收 MoM、52 週位置。psycopg 延後 import
+  （api.py 於頂層 import stock_api，CI 無 serving 群組仍可）。configs/serving.yaml enabled→true
+  （PG 不可達自動降級）。`monitoring/api.py` 加 8 路由 + `_stock_ep` 錯誤包裝（非法代號 400、
+  其餘 503）。**閘門**：ruff+mypy(124)+pytest 249 passed（AC-4 計分卡形狀相容、AC-5 降級標
+  duckdb、AC-6 累計/券資比/MoM 正確、source=="pg" 對真 PG）；CI 路徑（無 psycopg/PG）mypy 綠、
+  PG 整合測試 skip。**待接（T-034）**：前端個股頁八面板改版讀這些端點。
+
+- **T-032 / SPEC-009（因子物化）**（2026-07-10）PitView → factor_values/factor_cross_stats/
+  composite_daily。schema 加三張因子表（factor_values PK(factor,stock_id,date)＋索引(factor,date)、
+  factor_cross_stats、composite_daily）；TableSpec 索引一般化（`indexes` 取代 date_index）。
+  materialize.py：對每個 as_of 用 PitView 對因子宇宙（四碼普通股）算全部註冊因子 →
+  winsorize/z-score → signed_z ＋ 綜合宇宙分位 → upsert（橫斷面演算法與 snapshot scorecard
+  一致，一天算一次落地取代每請求重算）；materialize_day / materialize_range（逐日推進 as_of
+  維持 PIT）。sync.upsert staging 表帶表名，一交易可連續寫三表。CLI `serving materialize
+  --date | --from/--to`；每日 pipeline 尾波加「供應層」步驟（sync＋物化，best-effort，未啟用/
+  PG 不可達即略過，display-only 不影響訊號）。**閘門**：ruff＋mypy(122) 全綠、pytest 240 passed
+  （AC-3：factor_values.value 與 PitView 現算一致 1e-9、逐日各自成列）。**真實湖 smoke**：物化
+  2026-07-07/08 各 ~32k 因子列/19 因子/~1955 檔，2 日 21.4s；單股因子計分卡查詢 6.0ms（2330
+  19 因子含 high_52w pct 0.96、投信連買、綜合分位 0.506）——取代舊全宇宙重算。**待接（T-033）**：
+  個股 API 改讀這三張表 ＋ DuckDB 降級。
+
+- **T-031 / SPEC-009（PG 供應層底座）**（2026-07-10）Parquet 湖 → PostgreSQL 衍生讀取層。
+  `ServingConfig`（configs/serving.yaml；`pg_schema` 欄名避開 pydantic BaseModel 遮蔽）；
+  docker `pg` 服務（postgres:16-alpine、named volume、對外埠 5433、pg_isready healthcheck、
+  對 api/scheduler 軟依賴）；`data/serving/`：schema.py（`TableSpec` 單一真相 → 六張鏡射表
+  ＋ sync_state DDL，冪等＋識別字防呆）、store.py（psycopg 連線／DSN 解析／ping，唯一
+  import psycopg 處）、sync.py（watermark 增量 COPY→temp staging→ON CONFLICT upsert、
+  snapshot 表全量、rebuild、status）；CLI `serving sync/rebuild/status`。IO 邊界靜態測試
+  擴充：純運算層禁 import psycopg 與 twquant.data.serving/monitoring.pg_store（AC-7）。
+  psycopg 進選用 `serving` 依賴群組＋mypy override，無 PG 的 CI 靠 importorskip 跳過整合
+  測試仍綠（AC-8）。**閘門**：ruff＋mypy(strict, 120 files) 全綠、pytest 239 passed
+  （AC-1 DDL 冪等、AC-2 sync 增量/冪等對真實 PG 執行）。**真實資料湖 smoke**：全六表鏡射
+  5.24M 列（prices 4.82M/762 日、法人 184k、融資券 183k、營收 20k、集保 50k、meta 2010），
+  單股查詢 5.4ms（2330 近 3 日）——取代舊 scorecard 全宇宙重算。**待接（T-032/033）**：
+  factor 物化＋每日 pipeline 尾波自動掛點、個股 API 改讀 PG。**註**：`twquant check` 包裝在
+  本機 Windows 因 pytest temp symlink 清理 PermissionError 誤報，各階段以獨立 basetemp 分開
+  驗綠；A 級「測試先行」與實作於同一 session（非分離 session），如實記錄。
 
 - **T-003 / T-024（官方開休市日曆）**（2026-07-10）到證交所抓官方「市場開休市日期」，補上
   現行交易日曆「只由 prices_daily 觀測推導、無法前瞻」的缺口。來源 `data/sources/twse_holiday.py`

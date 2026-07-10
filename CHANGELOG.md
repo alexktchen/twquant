@@ -1,5 +1,67 @@
 # CHANGELOG
 
+- 2026-07-10 T-034 完成：P7 因子計分卡加 250 日 z-sparkline 欄（一次抓全因子歷史）、P8 綜合
+  因子分位趨勢面板（棒=signed-z 均值、線=宇宙分位）。`factors/history` 端點改「每因子最近 N 個
+  物化點」（row_number 視窗，與 composite-history 同語義——稀疏歷史仍回滿序列）。個股頁八面板
+  （Header/K線/法人/融資券/營收/主力/計分卡+sparkline/綜合趨勢）全數上線且全 PG。
+  閘門 ruff+mypy(124)+pytest 250；前端 oxlint+build；實測 mom_20d 250 點/composite 250 日。
+
+- 2026-07-10 sync 補「部分分區」偵測：日期已在 PG、事後同一分區又補了新來源檔（如 TWSE 晚於
+  TPEX 進同一天）→ 以分區檔 mtime 晚於 sync_state.last_synced_at 偵測並重同步該日（新增
+  對應測試）。一次性 rebuild prices（941 日/5.70M 列）修復 2026-07 上市股缺日（2308 等 K 線
+  斷點根因——PG 該日只有上櫃來源）。閘門 ruff+mypy+pytest 全綠。
+
+- 2026-07-10 個股 API 改「只讀 PG、移除 DuckDB 降級」（使用者裁決）：`stock_api` 全部端點一律讀
+  serving PG——無該股資料回空、PG 連不上讓端點 503，不再降級資料湖（消除 PG↔湖不一致的混淆）；
+  衍生欄抽成純函數（derive_institutional/margin/revenue/brokers）便於單元測試；前端 K 線改讀
+  PG `/ohlc`、`Src` 型別收斂為 `'pg'`（UI 不再出現 duckdb）。SPEC-009 §4/AC-5/AC-6 同步更新。
+  閘門 ruff+mypy(124)+pytest 全綠；docker api/frontend 重建上線，6 端點實測 source=pg、前端 0 個 duckdb。
+
+- 2026-07-10 供應層三則修正：(1) `serving sync` 改為「比對 PG 已有日期、補齊資料湖所有尚未進
+  PG 的分區」——含事後 backfill 的舊日期，不再只認 watermark（補完舊史直接 sync 即可，免 rebuild）；
+  (2) 前端 K 線改讀 PG `/ohlc`（去重、與其餘面板同源），並 rebuild prices(880 日)/法人/融資券/
+  營收 使 PG 與資料湖一致；(3) 修 broker_trades 舊 PoC 分區 Big5 亂碼（重爬＋rebuild broker）。
+  閘門 ruff+mypy(124)+pytest 251（新增 backfill 舊日期同步測試）。
+
+- 2026-07-10 T-034（續）個股頁首總覽列（名稱/產業/最新價/漲跌/52週位置/綜合分位，讀
+  `/overview`）+ 全端上線：docker api/frontend 映像重建、compose 資料湖掛載改用
+  `TWQUANT_DATA_HOST` 環境變數（確定性掛主 repo 真實湖，解決 worktree 空 data 問題）。
+  :8899 個股頁八面板中的 Header/K線/法人/融資券/營收/主力/計分卡全部即時 PG 資料。
+  frontend oxlint+build 過；api /overview 實測 2330 source=pg。
+
+- 2026-07-10 T-035（部分）主力券商買賣超：`broker_trades` 進 serving 鏡射 +
+  `/api/stocks/{sid}/brokers` 端點（近 window 日彙總買/賣超前 15，PG 優先降級 lake）+ 前端 P6
+  面板（富邦DJ 母公司層級 top-15±）。爬蟲驗證可用、全市場當日爬取進行中。閘門 ruff+mypy(124)+
+  pytest 250；frontend build 過。
+
+- 2026-07-10 T-034（部分）前端個股頁：個股因子頁加法人買賣超/融資券/月營收三面板（inline SVG
+  棒＋疊線，讀 /api/stocks/{sid}/institutional·margin·revenue，含 source、PG 空則降級資料湖）。
+  api.ts 加 v2 型別/fetcher。frontend oxlint＋tsc -b＋vite build 全過。待接 P7/P8、Header、元件抽出。
+
+- 2026-07-10 T-033 個股 API v2（SPEC-009 §4）：`monitoring/stock_api.py` + 8 個
+  `/api/stocks/{sid}/*` 端點（overview/ohlc/institutional/margin/revenue/factors/history/
+  composite-history），PG 讀取優先、空或失連自動降級 DuckDB 並標 `source`；scorecard 改讀
+  factor_values（payload 不變）。serving.yaml enabled→true。閘門 ruff+mypy(124)+pytest
+  249 passed；CI 無 PG 仍綠（降級/skip）。
+
+- 2026-07-10 T-032 因子物化（SPEC-009）：`data/serving/materialize.py` 把 21 因子經 PitView
+  對全宇宙算好（value/z/pct/signed_z/composite）落地 factor_values/factor_cross_stats/
+  composite_daily；CLI `serving materialize`；每日 pipeline 尾波加供應層步驟（best-effort）。
+  閘門 ruff＋mypy(122)＋pytest 240 passed（AC-3 與 PitView 現算一致 1e-9）；真實湖 smoke
+  2 日各 ~32k 因子列、單股計分卡查詢 6ms。
+
+- 2026-07-10 T-031 PG 供應層底座（SPEC-009）：`ServingConfig` + docker `pg` 服務 +
+  `data/serving/`（schema 六鏡射表＋sync_state DDL、store psycopg 連線、sync watermark
+  增量 upsert＋rebuild）+ CLI `serving sync/rebuild/status` + IO 邊界擴充（純運算層禁
+  import psycopg／serving）。psycopg 進選用 `serving` 群組；無 PG 的 CI 跳過整合測試仍綠。
+  閘門 ruff＋mypy(120)＋pytest 239 passed；真實湖 smoke 鏡射 5.24M 列、單股查詢 5.4ms。
+
+- 2026-07-10 個股頁改版立案（PRD-001 / SPEC-009）：新增產品需求 `docs/PRD-001-stock-page.md`
+  （看盤式個股頁八面板：法人/融資券/分點/集保/月營收/因子計分卡+歷史）與工程規格
+  `docs/specs/SPEC-009-serving.md`（PostgreSQL 衍生讀取層——Parquet 湖仍為唯一真相源與
+  PIT 基準，PG 僅供展示、可 rebuild、禁回饋因子計算）。TASKS.md 登記 T-031~T-037（分三期）；
+  SPEC-000 配置白名單加 `configs/serving.yaml`、.env 加 `TWQUANT_PG_DSN`。純文件，不動程式。
+
 - 2026-07-10 官方開休市日曆（TWSE market_holidays，T-003/T-024）：到 TWSE OpenAPI 抓官方
   「市場開休市日期」。新增 `data/sources/twse_holiday.py`（TwseHolidaySource）、
   `clean_market_holidays`（民國封裝碼 "1150101"→2026-01-01；closed 分類：名稱含「開始/最後

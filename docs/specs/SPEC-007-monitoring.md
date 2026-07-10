@@ -45,6 +45,10 @@
 docker-compose 的 `api` + `frontend` 兩服務常駐（`frontend` 的 nginx 反代 `/api`）。
 （原 Streamlit 單頁 `monitoring/dashboard.py` 已於 D-016 退役。）
 
+個股頁改版（看盤式八面板：法人/融資券/分點/集保/月營收/因子計分卡+歷史）與查詢
+效能的 PostgreSQL 供應層另立規格：見 [PRD-001](../PRD-001-stock-page.md) 與
+[SPEC-009](SPEC-009-serving.md)。供應層是唯讀原則下的衍生讀取層，不改本節唯讀語義。
+
 ## 驗收條件
 
 - AC-1：fixture 注入已知損益 → 日報的帳戶/各 sleeve 損益與手算一致（< 0.01 TWD）

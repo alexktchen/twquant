@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "twquant serving (pg)",
+      "Group": "twquant",
+      "Host": "pg",
+      "Port": 5432,
+      "MaintenanceDB": "twquant",
+      "Username": "twquant",
+      "SSLMode": "prefer",
+      "Comment": "供應層 PG（SPEC-009）；schema=serving。密碼預設 twquant。"
+    }
+  }
+}

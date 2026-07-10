@@ -1,0 +1,11 @@
+# 供應層配置（權威欄位定義見 SPEC-009 §1）。PG 是 Parquet 湖的衍生讀取快取，
+# 僅供儀表板展示、可隨時 rebuild、禁回饋因子計算。
+# DSN 本體只在 .env（黃金規則 9）；此處只存環境變數名。
+
+enabled: true             # 總開關；true 時 API 讀 PG（不可達自動降級 DuckDB，見 fallback_duckdb）
+dsn_env: TWQUANT_PG_DSN   # 存 DSN 的環境變數名稱（DSN 本體在 .env）
+pg_schema: serving        # PG schema 名（欄位名避開 pydantic BaseModel.schema 遮蔽）
+pool_min: 1               # 連線池下限
+pool_max: 8               # 連線池上限
+factor_history_days: 1100 # factor_values 保留窗（≈3 年）；超出裁剪
+fallback_duckdb: true     # PG 不可用時降級 DuckDB（false 則回 503）

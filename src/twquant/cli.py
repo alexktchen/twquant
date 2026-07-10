@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     import polars as pl
 
-    from twquant.config import SystemConfig
+    from twquant.config import ServingConfig, SystemConfig
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
 
@@ -633,10 +633,26 @@ def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 to
         strat = load_strategy(_CONFIG_DIR / "strategies" / "sample_revenue_trust.yaml")
         return f"{build_targets(strat, wh, day).height} 檔目標"
 
+    def _serving_step() -> str:
+        # 尾波：鏡射同步 + 物化當日因子 → PG 供應層（display-only，best-effort）。
+        from twquant.data.serving import materialize as smat
+        from twquant.data.serving import store
+        from twquant.data.serving import sync as ssync
+
+        scfg = _load_serving()
+        if not scfg.enabled:
+            return "未啟用（serving.yaml enabled=false）"
+        if not store.ping(scfg):
+            return "PG 不可達，略過（display-only）"
+        ssync.sync_all(wh, scfg)
+        m = smat.materialize_day(wh, scfg, day)
+        return f"鏡射同步 + 物化 {m.factor_rows} 因子列"
+
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
+        PipelineStep("供應層", _serving_step),
     ]
     res = run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
     typer.secho(f"=== 每日 pipeline @ {day} ===", fg=typer.colors.CYAN, bold=True)
@@ -1119,6 +1135,95 @@ def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL"
     result = Warehouse(cfg.data_dir).sql(query)
     with pl_config():
         typer.echo(str(result))
+
+
+serving_app = typer.Typer(
+    add_completion=False, help="供應層 PG（SPEC-009）：sync / rebuild / status。"
+)
+app.add_typer(serving_app, name="serving")
+
+
+def _load_serving() -> ServingConfig:
+    from twquant.config import ServingConfig, load_config
+
+    return load_config(_CONFIG_DIR / "serving.yaml", ServingConfig)
+
+
+def _echo_sync_results(results: list[object]) -> None:
+    from twquant.data.serving.sync import SyncResult
+
+    for r in results:
+        assert isinstance(r, SyncResult)
+        tail = f"→ {r.last_date}" if r.last_date else "（快照）"
+        typer.secho(
+            f"[OK] {r.table}：+{r.synced_dates} 日、PG 共 {r.row_count} 列 {tail}",
+            fg=typer.colors.GREEN,
+        )
+
+
+@serving_app.command("sync")
+def serving_sync() -> None:
+    """增量同步 clean 資料湖 → PG 供應層（watermark，冪等）。"""
+    from twquant.data.serving import sync as serving_sync_mod
+    from twquant.data.warehouse import Warehouse
+
+    wh = Warehouse(_load_system().data_dir)
+    _echo_sync_results(list(serving_sync_mod.sync_all(wh, _load_serving())))
+
+
+@serving_app.command("rebuild")
+def serving_rebuild(
+    tables: str = typer.Option("", help="逗號分隔的表名；空＝全部鏡射表"),
+) -> None:
+    """truncate + 重置 watermark 後全量重灌（供來源修訂/初始化）。"""
+    from twquant.data.serving import sync as serving_sync_mod
+    from twquant.data.warehouse import Warehouse
+
+    tlist = [t.strip() for t in tables.split(",") if t.strip()] or None
+    wh = Warehouse(_load_system().data_dir)
+    _echo_sync_results(list(serving_sync_mod.rebuild(wh, _load_serving(), tlist)))
+
+
+@serving_app.command("status")
+def serving_status() -> None:
+    """列出各表 sync_state（last_date / 最後同步時間 / 列數）。"""
+    from twquant.data.serving import sync as serving_sync_mod
+
+    rows = serving_sync_mod.status(_load_serving())
+    if not rows:
+        typer.echo("（sync_state 為空——尚未同步）")
+        return
+    for r in rows:
+        typer.echo(
+            f"{r['table']:<24} last_date={r['last_date']!s:<12} "
+            f"rows={r['row_count']:<8} synced_at={r['last_synced_at']}"
+        )
+
+
+@serving_app.command("materialize")
+def serving_materialize(
+    date: str = typer.Option("today", help="單日 YYYY-MM-DD 或 today（= 最新行情日）"),
+    from_: str = typer.Option("", "--from", help="範圍起（含）YYYY-MM-DD"),
+    to: str = typer.Option("", "--to", help="範圍迄（含）YYYY-MM-DD"),
+) -> None:
+    """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。"""
+    from twquant.data.serving import materialize as smat
+    from twquant.data.warehouse import Warehouse
+
+    wh = Warehouse(_load_system().data_dir)
+    cfg = _load_serving()
+    if from_ and to:
+        results = smat.materialize_range(
+            wh, cfg, dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+        )
+    else:
+        day = None if date == "today" else dt.date.fromisoformat(date)
+        results = [smat.materialize_day(wh, cfg, day)]
+    for r in results:
+        typer.secho(
+            f"[OK] {r.as_of}：{r.factor_rows} 因子列、{r.composite_rows} 綜合列、{r.factors} 因子",
+            fg=typer.colors.GREEN,
+        )
 
 
 def pl_config() -> pl.Config:
