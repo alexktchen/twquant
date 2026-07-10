@@ -18,20 +18,11 @@ from twquant.errors import DataError
 from twquant.monitoring import snapshot as snap
 
 _SID_RE = re.compile(r"^[0-9A-Z]{2,6}$")
-_cfg_cache: list[Any] = [0.0, None]  # [mtime, ServingConfig]
 
 
 def serving_cfg() -> ServingConfig:
-    """載入並快取 configs/serving.yaml（mtime 變即重載）。"""
-    path = snap.CONFIGS_DIR / "serving.yaml"
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    if _cfg_cache[1] is None or _cfg_cache[0] != mtime:
-        _cfg_cache[0] = mtime
-        _cfg_cache[1] = load_config(path, ServingConfig)
-    return cast("ServingConfig", _cfg_cache[1])
+    """每個請求都重新載入 configs/serving.yaml（不快取；改配置即時生效）。"""
+    return load_config(snap.CONFIGS_DIR / "serving.yaml", ServingConfig)
 
 
 def _check(sid: str, table: str) -> None:
@@ -84,6 +75,25 @@ def _meta(cfg: ServingConfig, sid: str) -> dict[str, Any]:
 
 def _wrap(sid: str, rows: list[dict[str, Any]], key: str = "date") -> dict[str, Any]:
     return {"sid": sid, "as_of": (rows[-1][key] if rows else None), "source": "pg", "rows": rows}
+
+
+def stock_meta_all(wh: object, cfg: ServingConfig) -> dict[str, Any]:
+    """全宇宙 代號→中文名/產業/市場（PG serving.stock_meta 一次讀）。
+
+    供個股頁選單/追蹤股標中文；取代讀資料湖的 snapshot.stock_meta_map（全湖掃描、慢）。
+    """
+    from psycopg.rows import dict_row
+
+    from twquant.data.serving import store
+
+    with store.connect(cfg) as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(f'SELECT stock_id, name, industry, market FROM "{cfg.pg_schema}".stock_meta')
+        rows = list(cur.fetchall())
+    meta = {
+        str(r["stock_id"]): {"name": r["name"], "industry": r["industry"], "market": r["market"]}
+        for r in rows
+    }
+    return {"meta": meta}
 
 
 # ── 純衍生函數（可單元測試，不碰 PG）──────────────────────────────
@@ -204,6 +214,63 @@ def brokers(wh: object, cfg: ServingConfig, sid: str, window: int = 5) -> dict[s
     _check(sid, "broker_trades")
     d = derive_brokers(_rows(cfg, "broker_trades", _BROKER, sid, window * 60), window)
     return {"sid": sid, "source": "pg", **d}
+
+
+def composite_top(wh: object, cfg: ServingConfig, n: int = 10) -> dict[str, Any]:
+    """宇宙綜合因子排名前 n（最新物化日、pct 遞減）＋名稱：個股頁「熱門」列。
+
+    composite_daily 的宇宙在物化時已限定四碼普通股（materialize._UNIVERSE），此處不再過濾。
+    未物化（表空）回空列。
+    """
+    from psycopg.rows import dict_row
+
+    from twquant.data.serving import store
+
+    sch = cfg.pg_schema
+    # as_of 直接取自回列的 c.date（全部列同日）——另發第二句 max(date) 在 READ COMMITTED
+    # 下可能撞上 materialize 提交、標到與列不一致的日期。
+    sql = (
+        "SELECT c.date, c.stock_id, c.signed_z_mean, c.pct, m.name "
+        f'FROM "{sch}".composite_daily c '
+        f'LEFT JOIN "{sch}".stock_meta m ON m.stock_id = c.stock_id '
+        f'WHERE c.date = (SELECT max(date) FROM "{sch}".composite_daily) '
+        "ORDER BY c.pct DESC, c.signed_z_mean DESC, c.stock_id LIMIT %s"
+    )
+    with store.connect(cfg) as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, (int(n),))
+        rows = list(cur.fetchall())
+    day = rows[0]["date"] if rows else None
+    out = [
+        {
+            "stock_id": str(r["stock_id"]),
+            "name": r["name"],
+            "signed_z_mean": round(float(r["signed_z_mean"]), 2),
+            "pct": round(float(r["pct"]), 3),
+        }
+        for r in rows
+    ]
+    return {"as_of": day, "source": "pg", "rows": out}
+
+
+def broker_flow(wh: object, cfg: ServingConfig, sid: str, days: int = 250) -> dict[str, Any]:
+    """主力（富邦DJ top-15±）每日淨買超（股）序列：SUM(buy_shares − sell_shares) per date，
+    date 遞增。供個股頁 K 線副圖（日條＋累計線；累計由前端算）。"""
+    _check(sid, "broker_trades")
+    from psycopg.rows import dict_row
+
+    from twquant.data.serving import store
+
+    sql = (
+        "SELECT date, SUM(COALESCE(buy_shares, 0) - COALESCE(sell_shares, 0)) AS net "
+        f'FROM "{cfg.pg_schema}".broker_trades WHERE stock_id = %s '
+        "GROUP BY date ORDER BY date DESC LIMIT %s"
+    )
+    with store.connect(cfg) as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, (sid, int(days)))
+        rows = list(cur.fetchall())
+    rows.reverse()
+    out = [{"date": r["date"], "net": int(r["net"] or 0)} for r in rows]
+    return {"sid": sid, "as_of": (out[-1]["date"] if out else None), "source": "pg", "rows": out}
 
 
 def overview(wh: object, cfg: ServingConfig, sid: str) -> dict[str, Any]:

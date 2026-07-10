@@ -5,8 +5,9 @@ FastAPI/JSON 服務，供 React 前端即時讀 clean 資料湖（取代靜態 d
 「一鍵補抓」（POST /api/ingest-jobs，D-018：白名單指令 + 單一併發，其餘操作仍走
 CLI + DECISIONS）。以 `twquant serve` 啟動；docker-compose 的 `api` 服務常駐。
 
-重運算（全因子 IC + 回測）以「最新行情日」為鍵快取——資料湖日頻更新，同一日內
-重覆請求直接命中，換日自動失效重算。
+不快取：每個請求都即時查資料源（個股端點走 PG serving、儀表板段落現算資料湖），
+資料一更新下一個請求就反映，不必等換日失效。代價是重運算端點（全因子 IC + 回測 +
+容量）每請求重算。
 """
 
 from __future__ import annotations
@@ -40,34 +41,6 @@ def get_warehouse() -> Warehouse:
 
 WarehouseDep = Annotated[Warehouse, Depends(get_warehouse)]
 
-# 以 (段名, 資料湖根, 最新行情日, config 指紋) 為鍵的記憶化——換日/換倉/改配置自動失效。
-# 前端逐頁 fetch 各段；重運算（因子 IC、回測、容量）只在該段被請求時才算並快取。
-_cache: dict[str, object] = {}
-
-
-def _latest(wh: Warehouse) -> str:
-    d = wh.latest_date("prices_daily")
-    return d.isoformat() if d else "none"
-
-
-def _config_stamp() -> str:
-    """策略/成本 YAML 的 mtime 指紋——併入快取鍵，config 一改即失效（不必等換日）。"""
-    stamps = []
-    for p in (snap.STRATEGY_PATH, snap.COSTS_PATH):
-        try:
-            stamps.append(str(p.stat().st_mtime_ns))
-        except OSError:
-            stamps.append("0")
-    return "|".join(stamps)
-
-
-def _memo(name: str, wh: Warehouse, build: Callable[[], object]) -> object:
-    """記憶化某段資料。build 失敗不入快取（下次重試）。"""
-    key = f"{name}|{wh.root}|{_latest(wh)}|{_config_stamp()}"
-    if key not in _cache:
-        _cache[key] = build()
-    return _cache[key]
-
 
 # openapi_url 也放 /api/ 下，讓 /api/docs 經 nginx/vite 反代時仍能載到 schema。
 app = FastAPI(
@@ -95,7 +68,7 @@ def get_snapshot(wh: WarehouseDep) -> dict[str, object]:
     前端已改逐頁 fetch 各段端點（見下），一般渲染不再打此重端點。
     """
     try:
-        return cast("dict[str, object]", _memo("snapshot", wh, lambda: snap.build_snapshot(wh)))
+        return snap.build_snapshot(wh)
     except (TwquantError, ValueError) as exc:
         # 無行情/缺配置/無交易日等 → 服務暫時無法產出（非使用者輸入層級）
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -104,38 +77,34 @@ def get_snapshot(wh: WarehouseDep) -> dict[str, object]:
 @app.get("/api/meta")
 def get_meta(wh: WarehouseDep) -> dict[str, object]:
     """輕量中繼資料：最新行情日、回測窗、營收月、前 8 檔個股、涵蓋（供 shell 與各頁預設）。"""
-
-    def build() -> dict[str, object]:
-        as_of = wh.latest_date("prices_daily")
-        rev_month, _ = snap.revenue(wh)
-        return {
-            "as_of": as_of.isoformat() if as_of else None,
-            "window": f"{snap.WINDOW_START}~{snap.WINDOW_END}",
-            "rev_month": rev_month,
-            "top_stocks": snap.liquid_stocks(wh, snap.SNAPSHOT_TOP_N),
-            "coverage": snap.coverage(wh),
-        }
-
-    return cast("dict[str, object]", _memo("meta", wh, build))
+    as_of = wh.latest_date("prices_daily")
+    rev_month, _ = snap.revenue(wh)
+    return {
+        "as_of": as_of.isoformat() if as_of else None,
+        "window": f"{snap.WINDOW_START}~{snap.WINDOW_END}",
+        "rev_month": rev_month,
+        "top_stocks": snap.liquid_stocks(wh, snap.SNAPSHOT_TOP_N),
+        "coverage": snap.coverage(wh),
+    }
 
 
 @app.get("/api/market")
 def get_market(wh: WarehouseDep) -> dict[str, object]:
     """等權市場指數日 OHLC（總覽/市場頁）。"""
-    return {"market": _memo("market", wh, lambda: snap.market_index(wh))}
+    return {"market": snap.market_index(wh)}
 
 
 @app.get("/api/indices")
 def get_indices(wh: WarehouseDep) -> dict[str, object]:
     """官方指數：加權指數 TAIEX（OHLC）+ 櫃買指數 TPEX（收盤）（市場頁）。"""
-    return {"indices": _memo("indices", wh, lambda: snap.market_indices(wh))}
+    return {"indices": snap.market_indices(wh)}
 
 
 @app.get("/api/factors")
 def get_factors(wh: WarehouseDep) -> dict[str, object]:
     """全因子 RankIC（因子健檢頁）——重運算，僅此端點被請求時才算。"""
     try:
-        return {"factors": _memo("factors", wh, lambda: snap.factor_reports(wh))}
+        return {"factors": snap.factor_reports(wh)}
     except (TwquantError, ValueError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -143,25 +112,21 @@ def get_factors(wh: WarehouseDep) -> dict[str, object]:
 @app.get("/api/institutional")
 def get_institutional(wh: WarehouseDep) -> dict[str, object]:
     """投信買超前 15（法人頁）。"""
-    return {"institutional": _memo("institutional", wh, lambda: snap.institutional(wh))}
+    return {"institutional": snap.institutional(wh)}
 
 
 @app.get("/api/revenue")
 def get_revenue(wh: WarehouseDep) -> dict[str, object]:
     """月營收 YoY 成長前 15（營收頁）。"""
-
-    def build() -> dict[str, object]:
-        ym, rows = snap.revenue(wh)
-        return {"rev_month": ym, "revenue": rows}
-
-    return cast("dict[str, object]", _memo("revenue", wh, build))
+    ym, rows = snap.revenue(wh)
+    return {"rev_month": ym, "revenue": rows}
 
 
 @app.get("/api/capacity")
 def get_capacity(wh: WarehouseDep) -> dict[str, object]:
     """策略資金容量上限（總覽 KPI/容量頁）——需跑 build_targets。"""
     try:
-        return {"capacity": _memo("capacity", wh, lambda: snap.capacity(wh))}
+        return {"capacity": snap.capacity(wh)}
     except (TwquantError, ValueError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -174,8 +139,11 @@ def get_stocks(wh: WarehouseDep) -> dict[str, object]:
 
 @app.get("/api/stock-meta")
 def get_stock_meta(wh: WarehouseDep) -> dict[str, object]:
-    """代號 → 中文名 / 產業別（族群）/ 市場別；前端據此把數字股號標成中文。"""
-    return {"meta": _memo("stock_meta", wh, lambda: snap.stock_meta_map(wh))}
+    """代號 → 中文名 / 產業別（族群）/ 市場別（PG serving.stock_meta，毫秒級）；前端據此標中文。
+
+    原讀資料湖（全湖掃描，實測 ~108s）改讀 PG——個股頁選單與追蹤股名稱即時可用。
+    """
+    return _stock_ep(lambda: stock_api.stock_meta_all(wh, stock_api.serving_cfg()))
 
 
 @app.get("/api/stocks/{sid}")
@@ -252,6 +220,22 @@ def get_stock_brokers(
     return _stock_ep(lambda: stock_api.brokers(wh, stock_api.serving_cfg(), sid, window))
 
 
+@app.get("/api/composite-top")
+def get_composite_top(
+    wh: WarehouseDep, n: Annotated[int, Query(ge=1, le=50)] = 10
+) -> dict[str, object]:
+    """宇宙綜合因子排名前 n（最新物化日、pct 遞減）；個股因子頁「熱門」列。"""
+    return _stock_ep(lambda: stock_api.composite_top(wh, stock_api.serving_cfg(), n))
+
+
+@app.get("/api/stocks/{sid}/broker-flow")
+def get_stock_broker_flow(
+    sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=2000)] = 250
+) -> dict[str, object]:
+    """個股主力（富邦DJ top-15±）每日淨買超（股）序列；供 K 線副圖日條＋累計線。"""
+    return _stock_ep(lambda: stock_api.broker_flow(wh, stock_api.serving_cfg(), sid, days))
+
+
 @app.get("/api/stocks/{sid}/composite-history")
 def get_stock_composite_history(
     sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=2000)] = 250
@@ -289,10 +273,7 @@ def get_backtest(
     if s >= e:
         raise HTTPException(status_code=400, detail="起始日需早於結束日")
     try:
-        return cast(
-            "dict[str, object]",
-            _memo(f"backtest|{s}|{e}", wh, lambda: snap.backtest_result(wh, s, e)),
-        )
+        return snap.backtest_result(wh, s, e)
     except (TwquantError, ValueError) as exc:
         # run_backtest 對「區間內無交易日」（如未來日期）raise ValueError → 使用者輸入層級
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -304,7 +285,7 @@ def get_ingest_status(wh: WarehouseDep) -> dict[str, object]:
     return snap.ingest_status(wh)
 
 
-# 擷取後台：矩陣/缺口/heartbeat 即時計算、不走 _memo——失敗一發生就要看得到，
+# 擷取後台：矩陣/缺口/heartbeat 即時計算——失敗一發生就要看得到，
 # 且成本低（目錄 glob + 小 parquet）。補抓可走 CLI 或一鍵補抓端點（D-018）。
 @app.get("/api/ingest-matrix")
 def get_ingest_matrix(
@@ -413,4 +394,4 @@ def get_sector_flows(
     window: Annotated[int, Query(ge=1, le=120, description="回看交易日數")] = snap.SECTOR_WINDOW,
 ) -> dict[str, object]:
     """各產業別（族群）近 window 交易日的三大法人資金淨流入 + 報酬 + 成交值（資金移動板塊）。"""
-    return {"flows": _memo(f"sector-flows|{window}", wh, lambda: snap.sector_flows(wh, window))}
+    return {"flows": snap.sector_flows(wh, window)}

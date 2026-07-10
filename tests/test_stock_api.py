@@ -77,6 +77,11 @@ def test_bad_sid_raises() -> None:
         stock_api.ohlc(None, ServingConfig(pg_schema="serving"), "bad!")
 
 
+def test_broker_flow_bad_sid_raises() -> None:
+    with pytest.raises(DataError, match="非法股票代號"):
+        stock_api.broker_flow(None, ServingConfig(pg_schema="serving"), "bad!")
+
+
 def test_factor_history_no_factors_empty() -> None:
     out = stock_api.factor_history(None, ServingConfig(pg_schema="serving"), "2330", [])
     assert out["source"] == "pg" and out["rows"] == []
@@ -184,5 +189,114 @@ def test_source_pg_and_empty_when_missing(tmp_path: Path) -> None:
         # PG 沒有的股票 → 回空（不降級資料湖）
         empty = stock_api.ohlc(None, cfg, "9999")
         assert empty["source"] == "pg" and empty["rows"] == []
+    finally:
+        _drop(cfg)
+
+
+def test_composite_top_pg_rank_order(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
+    from twquant.data.serving import materialize as smat
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, {"1111": 100.0, "2222": 50.0, "3333": 200.0}))
+    try:
+        _drop(cfg)
+        smat.materialize_day(wh, cfg, dt.date(2026, 6, 25))
+        out = stock_api.composite_top(None, cfg, 10)
+        assert out["source"] == "pg" and out["as_of"] == dt.date(2026, 6, 25)
+        rows = out["rows"]
+        assert len(rows) == 3  # 宇宙 3 檔全回
+        pcts = [r["pct"] for r in rows]
+        assert pcts == sorted(pcts, reverse=True)  # pct 遞減
+        assert {r["stock_id"] for r in rows} == {"1111", "2222", "3333"}
+        # n 截斷
+        assert len(stock_api.composite_top(None, cfg, 2)["rows"]) == 2
+    finally:
+        _drop(cfg)
+
+
+def test_stock_meta_all_pg(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
+    from twquant.data.serving import sync as ssync
+
+    wh = Warehouse(tmp_path)
+    wh.write(
+        "clean",
+        "stock_meta",
+        pl.DataFrame(
+            {
+                "stock_id": ["2330", "0050"],
+                "name": ["台積電", "元大台灣50"],
+                "market": ["TWSE", "TWSE"],
+                "industry": ["半導體業", "ETF"],
+                "list_date": [None, None],
+                "delist_date": [None, None],
+            }
+        ).with_columns(pl.col("list_date").cast(pl.Date), pl.col("delist_date").cast(pl.Date)),
+    )
+    try:
+        _drop(cfg)
+        ssync.sync_all(wh, cfg)
+        out = stock_api.stock_meta_all(None, cfg)
+        meta = out["meta"]
+        assert meta["2330"]["name"] == "台積電" and meta["2330"]["industry"] == "半導體業"
+        assert meta["0050"]["name"] == "元大台灣50"  # 保前導零
+    finally:
+        _drop(cfg)
+
+
+def _broker_trades(rows_by_day: dict[dt.date, list[tuple[str, int, int]]]) -> pl.DataFrame:
+    from twquant.conventions import TZ
+
+    rows = []
+    for d, entries in rows_by_day.items():
+        at = dt.datetime(d.year, d.month, d.day, 20, 0, tzinfo=TZ)  # 券商次日晚到
+        for bid, buy, sell in entries:
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": "1111",
+                    "broker_id": bid,
+                    "buy_shares": buy,
+                    "sell_shares": sell,
+                    "avg_price": None,
+                    "available_at": at,
+                }
+            )
+    return pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(_TZ),
+        pl.col("avg_price").cast(pl.Float64),
+        pl.col("buy_shares").cast(pl.Int64),
+        pl.col("sell_shares").cast(pl.Int64),
+    )
+
+
+def test_broker_flow_pg_daily_net(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
+    from twquant.data.serving import sync as ssync
+
+    d1, d2 = dt.date(2026, 6, 1), dt.date(2026, 6, 2)
+    wh = Warehouse(tmp_path)
+    wh.write(
+        "clean",
+        "broker_trades",
+        _broker_trades(
+            {
+                d1: [("甲券", 5000, 0), ("乙券", 0, 2000)],  # 淨 = +3000
+                d2: [("甲券", 1000, 4000), ("乙券", 500, 0)],  # 淨 = -2500
+            }
+        ),
+    )
+    try:
+        _drop(cfg)
+        ssync.sync_all(wh, cfg)
+        out = stock_api.broker_flow(None, cfg, "1111")
+        assert out["source"] == "pg"
+        # date 遞增、每日淨買超為當日各券商 (buy − sell) 加總
+        assert [r["net"] for r in out["rows"]] == [3000, -2500]
+        assert [str(r["date"]) for r in out["rows"]] == ["2026-06-01", "2026-06-02"]
+        assert out["as_of"] == d2
+        # 未知股 → 空列（不降級資料湖）
+        assert stock_api.broker_flow(None, cfg, "9999")["rows"] == []
     finally:
         _drop(cfg)
