@@ -244,6 +244,12 @@ def test_build_args_month_batched_tables() -> None:
     ]
 
 
+def test_build_args_market_holidays_one_click() -> None:
+    # 官方開休市日曆：端點無年度參數，整年一抓 → ingest-holidays（from/to 忽略）。
+    assert jobmod.build_args("market_holidays", "twse", "-", "-") == ["ingest-holidays"]
+    assert jobmod.job_label("market_holidays", "twse", "-", "-") == "官方開休市日曆"
+
+
 def test_build_args_rejects_bad_input() -> None:
     with pytest.raises(ValueError, match="白名單"):
         jobmod.build_args("prices_daily", "finmind", "2026-06-29", "2026-06-30")
@@ -255,6 +261,43 @@ def test_build_args_rejects_bad_input() -> None:
         jobmod.build_args("prices_daily", "twse", "2026-07-01", "2026-06-30")
     with pytest.raises(ValueError, match="月份格式"):
         jobmod.build_args("monthly_revenue", "mops", "2026-06-01", "2026-06-01")
+
+
+def test_fetchable_tracks_whitelist() -> None:
+    tracks = jobmod.fetchable_tracks()
+    keys = {(t["table"], t["source"]) for t in tracks}
+    # 每日行情軌與月營收都在可手動抓取清單。
+    assert ("prices_daily", "twse") in keys
+    assert ("prices_daily", "tpex") in keys
+    assert ("monthly_revenue", "mops") in keys
+    units = {(t["table"], t["source"]): t["unit"] for t in tracks}
+    assert units[("prices_daily", "twse")] == "date"  # 日軌收 YYYY-MM-DD
+    assert units[("monthly_revenue", "mops")] == "month"  # 月營收收 YYYY-MM
+    # 清單即白名單：每個回傳的 (table, source) 都能通過 build_args（不 raise）。
+    for t in tracks:
+        span = "2026-05" if t["unit"] == "month" else "2026-06-30"
+        jobmod.build_args(t["table"], t["source"], span, span)
+
+
+def test_api_ingest_tracks_endpoint() -> None:
+    payload = api.get_ingest_tracks()
+    tracks = payload["tracks"]
+    assert isinstance(tracks, list)
+    assert tracks  # 非空
+    assert all({"table", "source", "label", "unit"} <= set(t) for t in tracks)
+
+
+def test_needs_force_empty_lake_uses_weekday_estimate(tmp_path: Path) -> None:
+    # 空資料湖尚無 prices_daily / 交易日曆：needs_force 不得因無日曆而拋錯（否則手動
+    # 抓取表單初次建置會 500）。單日 → 免 force；大區間（>20 平日）→ 仍套 D-015 護欄。
+    wh = Warehouse(tmp_path)
+    assert wh.latest_date("prices_daily") is None
+    assert jobmod.needs_force(wh, "prices_daily", "twse", "2026-07-08", "2026-07-08") is False
+    assert jobmod.needs_force(wh, "prices_daily", "twse", "2026-06-01", "2026-07-08") is True
+    # 非行情表不套護欄（即便空湖）。
+    assert (
+        jobmod.needs_force(wh, "institutional_daily", "twse", "2026-06-01", "2026-07-08") is False
+    )
 
 
 def test_needs_force_only_for_large_twse_price_ranges(tmp_path: Path) -> None:

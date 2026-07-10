@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from twquant.errors import DataError
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -91,6 +93,73 @@ def persist(wh: Warehouse, calendar: TradingCalendar) -> None:
     tmp = p.with_suffix(".parquet.tmp")
     df.write_parquet(tmp)
     tmp.replace(p)
+
+
+def _year_days(year: int) -> list[dt.date]:
+    """該西元年所有日曆日（1/1..12/31）。"""
+    start, end = dt.date(year, 1, 1), dt.date(year, 12, 31)
+    return [start + dt.timedelta(days=i) for i in range((end - start).days + 1)]
+
+
+def official_holidays(wh: Warehouse) -> pl.DataFrame | None:
+    """讀官方開休市日曆表 market_holidays；尚未擷取（ingest-holidays）回 None。
+
+    以「有無已落地 .parquet」為準而非僅目錄存在：中斷的寫入可能只留 part-*.parquet.tmp，
+    此時 warehouse.connect 不會建視圖、`SELECT ... FROM market_holidays` 會拋 DuckDB
+    CatalogException——回 None 讓「尚未擷取」保持乾淨降級（endpoint 回 available:False）。
+    """
+    if not any((wh.root / "clean" / "market_holidays").rglob("*.parquet")):
+        return None
+    return wh.sql(
+        "SELECT holiday_date, year, name, weekday, description, closed FROM market_holidays"
+    )
+
+
+def official_calendar(wh: Warehouse) -> TradingCalendar:
+    """由官方 market_holidays 建交易日曆：涵蓋年度內所有平日 − 官方休市日。
+
+    與 derive_from_prices 不同，這是「前瞻」日曆——不需先有行情即知未來開市/休市，補假、
+    週末、國定假日皆依官方公布正確排除。TWSE 一般不於補班週六交易，故只取平日再扣休市；
+    若真有特殊週六交易，derive_from_prices（觀測）仍會捕捉、cross_check_official 會標出。
+    尚無官方日曆 → raise（提示先 ingest-holidays）。
+    """
+    hol = official_holidays(wh)
+    if hol is None or hol.is_empty():
+        raise DataError(
+            "market_holidays", None, "尚無官方開休市日曆，請先 `twquant ingest-holidays`"
+        )
+    closed = set(hol.filter(pl.col("closed"))["holiday_date"].to_list())
+    years = sorted({int(y) for y in hol["year"].to_list()})
+    sessions = [
+        day for year in years for day in _year_days(year) if day.weekday() < 5 and day not in closed
+    ]
+    return TradingCalendar(sessions)
+
+
+def cross_check_official(wh: Warehouse) -> dict[str, object]:
+    """官方交易日曆 vs 觀測（prices_daily 各來源日期聯集）在官方涵蓋年度內的差異。
+
+    missing＝官方判開市卻無行情（真缺口）；unexpected＝有行情卻官方判休市/未涵蓋（異常）。
+    只在官方有涵蓋的年度內比對，避免只抓某年官方日曆卻據以指謫他年觀測日。無行情時回空比對。
+    """
+    hol = official_holidays(wh)
+    covered = sorted({int(y) for y in hol["year"].to_list()}) if hol is not None else []
+    empty: dict[str, object] = {"missing": [], "unexpected": [], "range": None, "years": covered}
+    if hol is None or hol.is_empty() or wh.latest_date("prices_daily") is None:
+        return empty
+    official = official_calendar(wh)
+    obs = [d for d in derive_from_prices(wh).sessions if d.year in set(covered)]
+    if not obs:
+        return empty
+    lo, hi = obs[0], obs[-1]
+    off_in = set(official.between(lo, hi))
+    obs_set = set(obs)
+    return {
+        "missing": sorted(off_in - obs_set),
+        "unexpected": sorted(obs_set - off_in),
+        "range": (lo, hi),
+        "years": covered,
+    }
 
 
 def cross_check(wh: Warehouse, calendar: TradingCalendar) -> dict[str, list[dt.date]]:

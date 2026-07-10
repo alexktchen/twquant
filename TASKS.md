@@ -47,6 +47,32 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-003 / T-024（官方開休市日曆）**（2026-07-10）到證交所抓官方「市場開休市日期」，補上
+  現行交易日曆「只由 prices_daily 觀測推導、無法前瞻」的缺口。來源 `data/sources/twse_holiday.py`
+  （TWSE OpenAPI `holidaySchedule`，端點無年度參數、只回當前公布年度）；`clean_market_holidays`
+  解析民國封裝碼（"1150101"→2026-01-01），**closed 分類**＝名稱含「開始交易/最後交易」者為
+  交易日註記（closed=False），其餘休市——此端點夾帶「農曆春節前最後交易日」等純交易日列，全
+  當休市會誤刪真實交易日（清洗層 + 測試明確涵蓋）。schemas 新增 `market_holidays`（參考表，
+  無 date 欄→`_all` 單分區、無 available_at，比照 stock_meta/trading_calendar）。`calendar`：
+  `official_calendar`＝涵蓋年度平日 − 官方休市（前瞻日曆，不需先有行情）、`cross_check_official`
+  官方 vs 觀測缺口核對（只在官方涵蓋年度內比對）。CLI `ingest-holidays`（抓→存→印近期休市 +
+  核對）。UI：資料後台「抓官方開休市日曆」一鍵鈕（重用補抓工作進度）+「官方開休市日曆」面板，
+  `GET /api/holiday-calendar` + `snapshot.holiday_calendar`。**刻意不改** `calendar.load()` 的
+  持久化權威（官方全年含未來日期，若直接取代會讓 ingest_matrix 顯示未來空格）；官方日曆以顯式
+  API + 核對提供，待日後 matrix 夾到當日再併為權威。閘門全綠（mypy strict、frontend
+  oxlint+build）＋實抓驗證（2026：243 開市日、休市 24／交易日註記 3、官方 vs 觀測一致）。
+- **T-024（手動抓取歷史資料）**（2026-07-10）資料後台加「主動指定期間抓取」入口：現有
+  一鍵補抓只由漏抓清單驅動，而漏抓只在既有涵蓋範圍內偵測——空資料湖初次建置、或往前
+  延伸歷史過去只能敲 CLI。後端 `POST /api/ingest-jobs` 本就吃任意 (table, source, from, to)
+  白名單，故本次幾乎純前端：`monitoring/api.py` 加 `GET /api/ingest-tracks`（回
+  `jobs.fetchable_tracks()`＝與補抓同一白名單，unit=date/month 決定輸入粒度）；前端
+  `App.tsx` 加 `FetchForm`（資料集下拉＋起迄，日/月輸入，D-015 大區間 400→confirm 帶 force
+  重送），重用既有補抓工作進度面板（running/success/failed＋輸出尾行）。台股行情為全市場
+  擷取，抓完某段期間後於「個股因子/市場 K 線」頁即可查任一檔歷史 K 線。**修正**：`needs_force`
+  在空資料湖（無交易日曆）會 500（`cal.load` 去查不存在的 prices_daily）→ 改以區間平日數
+  估交易日，讓初次建置也套 D-015 護欄且不再 500。閘門全綠（214 tests、mypy strict、frontend
+  oxlint+tsc+build）＋空資料湖端到端手驗（抓 2026-07-08 全市場、job success、個股 2330 K 線
+  可查）。tests/test_ingest_admin.py 補白名單/端點/空湖護欄三測。
 - **T-024（一鍵補抓）/ D-018**（2026-07-09）資料後台從「唯讀 + 複製指令」加上伺服器端
   執行：`monitoring/jobs.py`（`build_args` 由缺口識別 (table,source,from,to) 白名單推導
   twquant 子指令 argv——非白名單直接拒、`needs_force` 對 TWSE 行情大區間套 D-015 護欄；
