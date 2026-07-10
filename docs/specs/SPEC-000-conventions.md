@@ -72,11 +72,12 @@
 | `configs/costs.yaml` | SPEC-004 §2 |
 | `configs/risk.yaml` | SPEC-005 §2（kill-switch 數字）、IC 門檻 `ic_tstat_screen/promote` |
 | `configs/llm.yaml` | MODEL-POLICY §3、SPEC-008（含 pricing 與 usd_twd） |
+| `configs/serving.yaml` | SPEC-009 §1（PG 供應層；DSN 本體在 .env） |
 
   各 config 的 pydantic 模型必填欄位清單直接列在對應 SPEC，使 AC-2 可寫成
   確定性測試。
 - 環境變數只放秘密與環境路徑（`.env`）：`FINMIND_TOKEN`、`SHIOAJI_API_KEY`、
-  `SHIOAJI_SECRET`、`TWQUANT_DATA_DIR`
+  `SHIOAJI_SECRET`、`TWQUANT_DATA_DIR`、`TWQUANT_PG_DSN`（供應層 PG，SPEC-009）
 
 ## 錯誤處理
 

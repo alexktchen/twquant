@@ -5,20 +5,25 @@ name: twquant
 # 起排程+監控： docker compose up -d scheduler api frontend
 # React 監控儀表板（即時讀資料湖，lightweight-charts）： http://localhost:8899
 # 唯讀 JSON API（供前端 fetch；亦可直接打或看 /api/docs）：  http://localhost:8000/api
+# 供應層 PostgreSQL（SPEC-009，衍生讀取層）：      docker compose up -d pg   （對外埠 5433）
 
 services:
   app:
     build: .
     image: twquant:latest
     volumes:
-      - ./data:/app/data
+      - ${TWQUANT_DATA_HOST:-./data}:/app/data
+    environment:
+      TWQUANT_PG_DSN: ${TWQUANT_PG_DSN_DOCKER:-postgresql://twquant:twquant@pg:5432/twquant}
     profiles: ["cli"] # 不隨 up 自動啟動；供 `docker compose run` 臨時執行 CLI
 
   scheduler:
     build: .
     image: twquant:latest
     volumes:
-      - ./data:/app/data
+      - ${TWQUANT_DATA_HOST:-./data}:/app/data
+    environment:
+      TWQUANT_PG_DSN: ${TWQUANT_PG_DSN_DOCKER:-postgresql://twquant:twquant@pg:5432/twquant}
     command: ["scheduler", "--at", "16:40"]
     restart: unless-stopped
 
@@ -26,7 +31,9 @@ services:
     build: .
     image: twquant:latest
     volumes:
-      - ./data:/app/data
+      - ${TWQUANT_DATA_HOST:-./data}:/app/data
+    environment:
+      TWQUANT_PG_DSN: ${TWQUANT_PG_DSN_DOCKER:-postgresql://twquant:twquant@pg:5432/twquant}
     # ENTRYPOINT 為 `python -m twquant`；容器內綁 0.0.0.0 讓 frontend 反代與本機皆可達
     command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
     ports:
@@ -43,3 +50,42 @@ services:
     ports:
       - "8899:80"
     restart: unless-stopped
+
+  pg:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-twquant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-twquant}
+      POSTGRES_DB: ${POSTGRES_DB:-twquant}
+    volumes:
+      - pgdata:/var/lib/postgresql/data # named volume；勿 bind mount（Windows I/O 陷阱，SPEC-009 §5）
+    ports:
+      - "5433:5432" # 對外 5433，避免撞本機既有 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-twquant} -d ${POSTGRES_DB:-twquant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # pgAdmin：預先掛好連到 pg 容器的伺服器（configs/pgadmin/servers.json）。
+  # 開 http://localhost:5050 → 直接進、展開「twquant serving (pg)」→ 首次連線輸入密碼 twquant。
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@twquant.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-twquant}
+      PGADMIN_CONFIG_SERVER_MODE: "False" # 單人本機：跳過多使用者登入
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False" # 免主密碼，開即用
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./configs/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - pg
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  pgadmin_data:

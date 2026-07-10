@@ -15,8 +15,12 @@ from pathlib import Path
 _PURE_DIRS = ["factors", "strategy", "backtest", "portfolio", "insight"]
 
 # 禁止 import 的模組。insight 允許 anthropic（洞悉層是唯一能呼叫 LLM 的純運算例外）。
-_BANNED_IMPORTS = {"requests", "httpx", "urllib3"}
+# psycopg：供應層（SPEC-009）是衍生展示層，純運算層不得碰 PG。
+_BANNED_IMPORTS = {"requests", "httpx", "urllib3", "psycopg"}
 _BANNED_IMPORTS_EXCEPT_INSIGHT = {"anthropic"}
+
+# 禁止 import 的內部模組路徑前綴：供應層讀寫（SPEC-009）不得回饋純運算層。
+_BANNED_INTERNAL = ("twquant.data.serving", "twquant.monitoring.pg_store")
 
 # 禁止的呼叫：內建 open() 與 DataFrame 落地方法
 _BANNED_CALL_NAMES = {"open"}
@@ -39,6 +43,10 @@ def _banned_modules_for(path: Path) -> set[str]:
     return banned
 
 
+def _is_banned_internal(module: str) -> bool:
+    return any(module == p or module.startswith(p + ".") for p in _BANNED_INTERNAL)
+
+
 def _violations(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     banned_mods = _banned_modules_for(path)
@@ -47,12 +55,12 @@ def _violations(path: Path) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top = alias.name.split(".")[0]
-                if top in banned_mods:
+                if top in banned_mods or _is_banned_internal(alias.name):
                     out.append(f"L{node.lineno}: import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
-            top = (node.module or "").split(".")[0]
-            if top in banned_mods:
-                out.append(f"L{node.lineno}: from {node.module} import ...")
+            module = node.module or ""
+            if module.split(".")[0] in banned_mods or _is_banned_internal(module):
+                out.append(f"L{node.lineno}: from {module} import ...")
         elif isinstance(node, ast.Call):
             fn = node.func
             if isinstance(fn, ast.Name) and fn.id in _BANNED_CALL_NAMES:
@@ -73,9 +81,14 @@ def test_pure_layers_have_no_io() -> None:
 
 def test_scanner_detects_violation(tmp_path: Path) -> None:
     """反向測試：確認掃描器真的抓得到違規（防止測試變成恆真）。"""
-    bad = tmp_path / "insight" / "bad.py"
+    bad = tmp_path / "factors" / "bad.py"
     bad.parent.mkdir(parents=True)
-    bad.write_text("import requests\nopen('x')\n", encoding="utf-8")
+    bad.write_text(
+        "import requests\nimport psycopg\nfrom twquant.data.serving import store\nopen('x')\n",
+        encoding="utf-8",
+    )
     v = _violations(bad)
     assert any("requests" in x for x in v)
+    assert any("psycopg" in x for x in v)
+    assert any("twquant.data.serving" in x for x in v)
     assert any("open" in x for x in v)

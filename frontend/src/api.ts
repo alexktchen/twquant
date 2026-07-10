@@ -121,11 +121,64 @@ export const fetchInstitutional = () =>
 export const fetchRevenue = () => getJSON<{ rev_month: string | null; revenue: Rev[] }>('/api/revenue')
 export const fetchCapacity = () => getJSON<{ capacity: Capacity }>('/api/capacity').then((r) => r.capacity)
 export const fetchStockList = () => getJSON<{ stocks: string[] }>('/api/stocks').then((r) => r.stocks)
+// K 線改讀 PG 供應層 /ohlc（去重、與頁面其餘面板同源）；PG 不可達時端點自動降級資料湖。
 export const fetchStockOhlc = (sid: string) =>
-  getJSON<{ sid: string; ohlc: Candle[] }>(`/api/stocks/${encodeURIComponent(sid)}`).then((r) => r.ohlc)
+  getJSON<StockSeries<{ date: string; open: number; high: number; low: number; close: number; volume: number }>>(
+    `/api/stocks/${encodeURIComponent(sid)}/ohlc?days=5000`,
+  ).then((r) => r.rows.map((x) => ({ d: x.date, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume })))
 export const fetchStockMeta = () => getJSON<{ meta: StockMetaMap }>('/api/stock-meta').then((r) => r.meta)
 export const fetchStockFactors = (sid: string) =>
   getJSON<Scorecard>(`/api/stocks/${encodeURIComponent(sid)}/factors`)
+
+// 個股 API v2（envelope: {sid, as_of, source, rows}）；只讀 PG，source 恆為 'pg'。
+export type Src = 'pg'
+export type StockOverview = {
+  sid: string; name: string | null; industry: string | null; market: string | null
+  as_of: string | null; source: Src; close: number | null; chg: number | null
+  chg_pct: number | null; volume: number | null; pos_52w: number | null
+  composite: { signed_z_mean: number; pct: number; n_universe: number } | null
+}
+export type InstRow = {
+  date: string; foreign_net: number; trust_net: number; dealer_net: number
+  cum_foreign: number; cum_trust: number
+}
+export type MarginRow = {
+  date: string; margin_balance: number; margin_chg: number | null
+  short_balance: number; short_chg: number | null; short_margin_ratio: number | null
+}
+export type RevenueRow = { month: string; revenue: number | null; yoy: number | null; mom: number | null }
+export type StockSeries<T> = { sid: string; as_of: string | null; source: Src; rows: T[] }
+
+const enc = encodeURIComponent
+export const fetchStockOverview = (sid: string) =>
+  getJSON<StockOverview>(`/api/stocks/${enc(sid)}/overview`)
+export const fetchStockInstitutional = (sid: string, days = 120) =>
+  getJSON<StockSeries<InstRow>>(`/api/stocks/${enc(sid)}/institutional?days=${days}`)
+export const fetchStockMargin = (sid: string, days = 120) =>
+  getJSON<StockSeries<MarginRow>>(`/api/stocks/${enc(sid)}/margin?days=${days}`)
+export const fetchStockRevenue = (sid: string, months = 36) =>
+  getJSON<StockSeries<RevenueRow>>(`/api/stocks/${enc(sid)}/revenue?months=${months}`)
+
+export type BrokerRow = { broker: string; buy_shares: number; sell_shares: number; net_shares: number }
+export type BrokerSummary = { date: string; buy_brokers: number; sell_brokers: number; broker_count_diff: number }
+export type StockBrokers = {
+  sid: string; as_of: string | null; source: Src; window_days: number
+  top_buy: BrokerRow[]; top_sell: BrokerRow[]; summary: BrokerSummary[]
+}
+export const fetchStockBrokers = (sid: string, window = 5) =>
+  getJSON<StockBrokers>(`/api/stocks/${enc(sid)}/brokers?window=${window}`)
+
+// P7/P8：因子歷史（每因子 z/pct 序列）與綜合分位趨勢（皆需 PG 物化歷史）。
+export type FactorHistPoint = { date: string; value: number | null; z: number | null; pct: number | null }
+export type FactorHistGroup = { factor: string; series: FactorHistPoint[] }
+export type StockFactorHistory = { sid: string; as_of: string | null; source: Src; rows: FactorHistGroup[] }
+export const fetchStockFactorHistory = (sid: string, factors: string[], days = 250) =>
+  getJSON<StockFactorHistory>(
+    `/api/stocks/${enc(sid)}/factors/history?factors=${encodeURIComponent(factors.join(','))}&days=${days}`,
+  )
+export type CompositePoint = { date: string; signed_z_mean: number; pct: number }
+export const fetchStockCompositeHistory = (sid: string, days = 250) =>
+  getJSON<StockSeries<CompositePoint>>(`/api/stocks/${enc(sid)}/composite-history?days=${days}`)
 export const fetchIngestStatus = () => getJSON<IngestStatus>('/api/ingest-status')
 export const fetchIngestMatrix = () => getJSON<IngestMatrix>('/api/ingest-matrix')
 export const fetchIngestGaps = () => getJSON<IngestGaps>('/api/ingest-gaps')

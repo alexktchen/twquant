@@ -34,6 +34,9 @@ api = [
 insight = [
     "anthropic>=0.40",
 ]
+serving = [  # 供應層 PG（SPEC-009）；唯 data/serving 與 monitoring/pg_store 用
+    "psycopg[binary]>=3.2",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -71,7 +74,8 @@ files = ["src", "tests"]
 warn_unused_configs = true
 # 第三方庫缺型別 stub 時不擋（polars/duckdb/pandera 自帶或部分缺）
 [[tool.mypy.overrides]]
-module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*"]
+# psycopg 未列於 CI 預設群組（serving 為選用）；缺套件時不擋型別檢查（同 anthropic）。
+module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*", "psycopg", "psycopg.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

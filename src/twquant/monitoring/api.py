@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from twquant.config import SystemConfig, load_config
 from twquant.data.warehouse import Warehouse
 from twquant.errors import DataError, TwquantError
-from twquant.monitoring import jobs
+from twquant.monitoring import jobs, stock_api
 from twquant.monitoring import snapshot as snap
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
@@ -190,15 +190,86 @@ def get_stock(sid: str, wh: WarehouseDep) -> dict[str, object]:
     return {"sid": sid, "ohlc": ohlc}
 
 
-@app.get("/api/stocks/{sid}/factors")
-def get_stock_factors(sid: str, wh: WarehouseDep) -> dict[str, object]:
-    """單一個股的因子體檢卡（各因子橫斷面 z / 百分位 / 方向 + 綜合排名 + 中文名/族群）。"""
+def _stock_ep(fn: Callable[[], object]) -> dict[str, object]:
+    """個股端點共用錯誤處理：非法代號→400、其餘（含 PG 突發不可用）→503。"""
     try:
-        return snap.stock_factor_scorecard(wh, sid)
+        return cast("dict[str, object]", fn())
     except DataError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except (TwquantError, ValueError) as exc:
+    except Exception as exc:  # 服務層錯誤（PG/資料湖）→ 503，不外洩堆疊
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/stocks/{sid}/factors")
+def get_stock_factors(sid: str, wh: WarehouseDep) -> dict[str, object]:
+    """單一個股的因子體檢卡（PG factor_values 優先，否則現算；payload 形狀不變）。"""
+    return _stock_ep(lambda: stock_api.scorecard(wh, stock_api.serving_cfg(), sid))
+
+
+@app.get("/api/stocks/{sid}/overview")
+def get_stock_overview(sid: str, wh: WarehouseDep) -> dict[str, object]:
+    """個股頁首：名稱/產業/最新價/漲跌/52週位置/綜合因子分位（+ source）。"""
+    return _stock_ep(lambda: stock_api.overview(wh, stock_api.serving_cfg(), sid))
+
+
+@app.get("/api/stocks/{sid}/ohlc")
+def get_stock_ohlc(
+    sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=5000)] = 500
+) -> dict[str, object]:
+    """個股日 K（envelope 版，含 source）；舊 /api/stocks/{sid} 為相容別名。"""
+    return _stock_ep(lambda: stock_api.ohlc(wh, stock_api.serving_cfg(), sid, days))
+
+
+@app.get("/api/stocks/{sid}/institutional")
+def get_stock_institutional(
+    sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=2000)] = 120
+) -> dict[str, object]:
+    """個股三大法人買賣超 + 外資/投信累計淨買超。"""
+    return _stock_ep(lambda: stock_api.institutional(wh, stock_api.serving_cfg(), sid, days))
+
+
+@app.get("/api/stocks/{sid}/margin")
+def get_stock_margin(
+    sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=2000)] = 120
+) -> dict[str, object]:
+    """個股融資券餘額 + 日增減 + 券資比。"""
+    return _stock_ep(lambda: stock_api.margin(wh, stock_api.serving_cfg(), sid, days))
+
+
+@app.get("/api/stocks/{sid}/revenue")
+def get_stock_revenue(
+    sid: str, wh: WarehouseDep, months: Annotated[int, Query(ge=1, le=240)] = 36
+) -> dict[str, object]:
+    """個股月營收 + YoY + MoM。"""
+    return _stock_ep(lambda: stock_api.revenue(wh, stock_api.serving_cfg(), sid, months))
+
+
+@app.get("/api/stocks/{sid}/brokers")
+def get_stock_brokers(
+    sid: str, wh: WarehouseDep, window: Annotated[int, Query(ge=1, le=60)] = 5
+) -> dict[str, object]:
+    """個股主力券商買賣超（富邦DJ 母公司層級 top-15±，近 window 交易日彙總）。"""
+    return _stock_ep(lambda: stock_api.brokers(wh, stock_api.serving_cfg(), sid, window))
+
+
+@app.get("/api/stocks/{sid}/composite-history")
+def get_stock_composite_history(
+    sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=2000)] = 250
+) -> dict[str, object]:
+    """個股綜合因子分位歷史（需 PG 物化；無則回空）。"""
+    return _stock_ep(lambda: stock_api.composite_history(wh, stock_api.serving_cfg(), sid, days))
+
+
+@app.get("/api/stocks/{sid}/factors/history")
+def get_stock_factor_history(
+    sid: str,
+    wh: WarehouseDep,
+    factors: Annotated[str, Query(description="逗號分隔的因子名")] = "",
+    days: Annotated[int, Query(ge=1, le=2000)] = 250,
+) -> dict[str, object]:
+    """個股各因子的 z/pct 歷史序列（需 PG 物化；無則回空）。"""
+    flist = [f.strip() for f in factors.split(",") if f.strip()]
+    return _stock_ep(lambda: stock_api.factor_history(wh, stock_api.serving_cfg(), sid, flist, days))
 
 
 @app.get("/api/backtest")
