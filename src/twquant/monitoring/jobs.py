@@ -46,6 +46,24 @@ def _check_month(s: str) -> None:
         raise ValueError(f"月份格式錯誤：{s}") from exc
 
 
+def fetchable_tracks() -> list[dict[str, str]]:
+    """可手動抓取的資料軌白名單（供前端「手動抓取歷史資料」表單的資料集選單）。
+
+    單一真相源為 _TRACK_LABEL（＝INGEST_TRACKS 每日軌 + 月營收），與一鍵補抓共用；
+    `unit` 決定前端輸入粒度：月營收以 YYYY-MM 為端點，其餘（含月批的指數，build_args
+    內部自行截成月）收 YYYY-MM-DD。回傳順序即白名單插入順序（每日軌在前、月營收在後）。
+    """
+    return [
+        {
+            "table": table,
+            "source": source,
+            "label": label,
+            "unit": "month" if table == "monthly_revenue" else "date",
+        }
+        for (table, source), label in _TRACK_LABEL.items()
+    ]
+
+
 def build_args(table: str, source: str, frm: str, to: str) -> list[str]:
     """由缺口識別推導 twquant 子指令 argv（白名單；非法輸入一律 ValueError）。
 
@@ -54,6 +72,8 @@ def build_args(table: str, source: str, frm: str, to: str) -> list[str]:
       backfill 的續傳判斷以 prices_daily 分區為準，補其他表時必須關閉，否則
       「行情已存在、法人缺」的日子會被整天跳過。
     """
+    if table == "market_holidays":
+        return ["ingest-holidays"]  # 官方開休市日曆：端點無年度參數，整年一抓（from/to 忽略）
     if (table, source) not in _TRACK_LABEL:
         raise ValueError(f"不在補抓白名單：{table}:{source}")
     if table == "monthly_revenue":
@@ -85,18 +105,31 @@ def display_command(args: list[str]) -> str:
 
 
 def job_label(table: str, source: str, frm: str, to: str) -> str:
+    if table == "market_holidays":
+        return "官方開休市日曆"
     zh = _TRACK_LABEL.get((table, source), f"{table}:{source}")
     return f"{zh} {frm}" if frm == to else f"{zh} {frm}~{to}"
 
 
+def _weekday_span(a: dt.date, b: dt.date) -> int:
+    """[a, b] 含端點的平日數；空資料湖尚無交易日曆時，作交易日數的保守估計。"""
+    return sum(1 for i in range((b - a).days + 1) if (a + dt.timedelta(days=i)).weekday() < 5)
+
+
 def needs_force(wh: Warehouse, table: str, source: str, frm: str, to: str) -> bool:
-    """D-015 護欄：TWSE 行情回補超過 TWSE_BACKFILL_WARN 個交易日 → 需明示 force。"""
+    """D-015 護欄：TWSE 行情回補超過 TWSE_BACKFILL_WARN 個交易日 → 需明示 force。
+
+    空資料湖尚無交易日曆（`cal.load` 會去查 prices_daily）→ 改以區間平日數估交易日：
+    讓「初次建置」也套同一護欄，且不因無日曆而讓端點 500（手動抓取表單的主要情境）。
+    """
     if not (table == "prices_daily" and source == "twse"):
         return False
+    a, b = _parse_date(frm), _parse_date(to)
+    if wh.latest_date("prices_daily") is None:
+        return _weekday_span(a, b) > TWSE_BACKFILL_WARN
     from twquant.data import calendar as cal
 
-    sessions = cal.load(wh).between(_parse_date(frm), _parse_date(to))
-    return len(sessions) > TWSE_BACKFILL_WARN
+    return len(cal.load(wh).between(a, b)) > TWSE_BACKFILL_WARN
 
 
 @dataclass

@@ -95,9 +95,19 @@ def _prices(days: int, stocks: dict[str, float]) -> pl.DataFrame:
         for sid, p0 in stocks.items():
             c = float(p0 + i)
             rows.append(
-                {"date": d, "stock_id": sid, "open": c, "high": c, "low": c, "close": c,
-                 "volume": 1000, "amount": c * 1000.0, "limit_up_price": None,
-                 "limit_down_price": None, "available_at": at}
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 1000,
+                    "amount": c * 1000.0,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": at,
+                }
             )
     return pl.DataFrame(rows).with_columns(
         pl.col("available_at").cast(_TZ),
@@ -136,10 +146,25 @@ def test_scorecard_pg_shape(tmp_path: Path) -> None:
         _drop(cfg)
         smat.materialize_day(wh, cfg, dt.date(2026, 6, 25))
         sc = stock_api.scorecard(None, cfg, "1111")
-        assert set(sc.keys()) == {"sid", "name", "industry", "market", "as_of", "factors", "composite"}
+        assert set(sc.keys()) == {
+            "sid",
+            "name",
+            "industry",
+            "market",
+            "as_of",
+            "factors",
+            "composite",
+        }
         assert sc["factors"] and sc["composite"] is not None
         assert set(sc["factors"][0].keys()) == {
-            "factor", "zh", "category", "value", "z", "pct", "direction", "signed_z"
+            "factor",
+            "zh",
+            "category",
+            "value",
+            "z",
+            "pct",
+            "direction",
+            "signed_z",
         }
     finally:
         _drop(cfg)

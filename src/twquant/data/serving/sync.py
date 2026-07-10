@@ -43,13 +43,11 @@ def partition_dates(wh: Warehouse, table: str, layer: str = "clean") -> list[dt.
     )
 
 
-def _read_dates(wh: Warehouse, table: str, dates: list[dt.date], layer: str = "clean") -> pl.DataFrame:
+def _read_dates(
+    wh: Warehouse, table: str, dates: list[dt.date], layer: str = "clean"
+) -> pl.DataFrame:
     base = wh.root / layer / table
-    files = [
-        f
-        for d in dates
-        for f in sorted((base / f"date={d.isoformat()}").glob("*.parquet"))
-    ]
+    files = [f for d in dates for f in sorted((base / f"date={d.isoformat()}").glob("*.parquet"))]
     if not files:
         return pl.DataFrame()
     return pl.scan_parquet(files, missing_columns="insert").collect()
@@ -171,9 +169,7 @@ def sync_all(wh: Warehouse, cfg: ServingConfig) -> list[SyncResult]:
         return [_sync_spec(wh, conn, spec, cfg.pg_schema) for spec in sch.MIRROR_SPECS]
 
 
-def rebuild(
-    wh: Warehouse, cfg: ServingConfig, tables: list[str] | None = None
-) -> list[SyncResult]:
+def rebuild(wh: Warehouse, cfg: ServingConfig, tables: list[str] | None = None) -> list[SyncResult]:
     """truncate 指定表（預設全部）+ 重置 watermark 後全量重灌。"""
     targets = [s for s in sch.MIRROR_SPECS if tables is None or s.name in tables]
     with store.connect(cfg) as conn:
@@ -199,6 +195,5 @@ def status(cfg: ServingConfig) -> list[dict[str, Any]]:
             )
             rows = cur.fetchall()
     return [
-        {"table": r[0], "last_date": r[1], "last_synced_at": r[2], "row_count": r[3]}
-        for r in rows
+        {"table": r[0], "last_date": r[1], "last_synced_at": r[2], "row_count": r[3]} for r in rows
     ]

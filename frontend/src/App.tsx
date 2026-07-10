@@ -6,11 +6,13 @@ import {
   fetchCapacity,
   fetchFactors,
   fetchHeartbeat,
+  fetchHolidayCalendar,
   fetchIndices,
   fetchIngestGaps,
   fetchIngestJobs,
   fetchIngestMatrix,
   fetchIngestStatus,
+  fetchIngestTracks,
   fetchInstitutional,
   fetchMarket,
   fetchMeta,
@@ -27,6 +29,8 @@ import {
   fetchStockOhlc,
   fetchStockOverview,
   fetchStockRevenue,
+  startHolidayFetch,
+  startIngestFetch,
   startIngestJob,
   type Backtest as BacktestT,
   type BrokerRow,
@@ -36,6 +40,7 @@ import {
   type Data,
   type Fac,
   type Heartbeat,
+  type HolidayCalendar,
   type IndexPoint,
   type Indices,
   type IngestGap,
@@ -44,6 +49,7 @@ import {
   type IngestJobs,
   type IngestMatrix,
   type IngestStatus,
+  type IngestTrack,
   type Inst,
   type InstRow,
   type MarginRow,
@@ -1533,12 +1539,220 @@ function JobList({ jobs }: { jobs: IngestJob[] }) {
   )
 }
 
+/* ---------- 手動抓取歷史資料（指定資料集 + 期間，伺服器端跑 twquant CLI）---------- */
+const p2 = (n: number) => String(n).padStart(2, '0')
+function todayISO(): string {
+  const d = new Date() // 表單預設值用瀏覽器本地日期即可（非時間點語意）
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+}
+function monthsBackISO(baseISO: string, n: number): string {
+  const [y, m, d] = baseISO.split('-').map(Number)
+  const back = new Date(y, m - 1 - n, d || 1)
+  return `${back.getFullYear()}-${p2(back.getMonth() + 1)}-${p2(back.getDate())}`
+}
+
+function FetchForm({
+  tracks,
+  latest,
+  busy,
+  onSubmitted,
+}: {
+  tracks: IngestTrack[]
+  latest: string | null
+  busy: boolean
+  onSubmitted: () => void
+}) {
+  const [key, setKey] = useState('prices_daily:twse')
+  const track = tracks.find((t) => `${t.table}:${t.source}` === key) ?? tracks[0]
+  const unit = track?.unit ?? 'date'
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [sending, setSending] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+
+  // 切資料集或首次拿到最新行情日 → 重設期間預設值（日軌預設近一個月、月軌預設當月）。
+  useEffect(() => {
+    const base = latest ?? todayISO()
+    if (unit === 'month') {
+      setFrom(base.slice(0, 7))
+      setTo(base.slice(0, 7))
+    } else {
+      setFrom(monthsBackISO(base, 1))
+      setTo(base)
+    }
+    setMsg(null)
+  }, [key, unit, latest])
+
+  const run = (force: boolean) => {
+    if (!track || !from || !to) return
+    setSending(true)
+    setMsg(null)
+    startIngestFetch({ table: track.table, source: track.source, from, to, force })
+      .then((j) => {
+        setSending(false)
+        setMsg({ kind: 'ok', text: `已排入：${j.label}（於下方「補抓工作」看進度）` })
+        onSubmitted()
+      })
+      .catch((e: unknown) => {
+        const text = e instanceof Error ? e.message : String(e)
+        // D-015：TWSE 行情大區間需明示 force → 後端回 400，這裡確認後帶 force 重送。
+        if (!force && /D-015|force/i.test(text) && window.confirm(`${text}\n\n仍要強制執行？`)) {
+          run(true)
+          return
+        }
+        setSending(false)
+        setMsg({ kind: 'err', text })
+      })
+  }
+
+  const disabled = busy || sending || !track || !from || !to
+  return (
+    <Panel
+      title="手動抓取歷史資料"
+      sub="指定資料集 + 期間 · 伺服器端跑 twquant CLI · 單一併發"
+    >
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+          資料集
+          <select
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            className="px-2 py-1.5 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+          >
+            {tracks.map((t) => (
+              <option key={`${t.table}:${t.source}`} value={`${t.table}:${t.source}`}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+          起
+          <input
+            type={unit === 'month' ? 'month' : 'date'}
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+          迄
+          <input
+            type={unit === 'month' ? 'month' : 'date'}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+          />
+        </label>
+        <button
+          onClick={() => run(false)}
+          disabled={disabled}
+          className="px-3 py-1.5 text-[12px] rounded border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--bg)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          {sending ? '排入中…' : busy ? '有工作進行中…' : '抓取'}
+        </button>
+      </div>
+      <p className="mt-2.5 text-[11px] text-[var(--muted)] leading-relaxed">
+        台股行情為全市場擷取（單日含所有個股）——抓完某段期間後，即可到「個股因子 / 市場 K 線」頁查任一檔的歷史 K 線。
+        此表單不受漏抓清單限制，可往前延伸歷史或初次建置資料湖。
+      </p>
+      {msg && (
+        <div
+          className="mt-2 text-[12px]"
+          style={{ color: msg.kind === 'ok' ? 'var(--good)' : 'var(--crit)' }}
+        >
+          {msg.kind === 'ok' ? '✓ ' : '抓取失敗：'}
+          {msg.text}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/* ---------- 官方開休市日曆（TWSE market_holidays）---------- */
+function HolidayPanel({
+  hc,
+  busy,
+  onFetch,
+}: {
+  hc: HolidayCalendar | null
+  busy: boolean
+  onFetch: () => void
+}) {
+  const today = todayISO()
+  const upcoming = (hc?.closed ?? []).filter((r) => r.date >= today).slice(0, 8)
+  const cc = hc?.cross_check
+  const nMiss = cc?.missing.length ?? 0
+  const nUnexp = cc?.unexpected.length ?? 0
+  return (
+    <Panel
+      title="官方開休市日曆"
+      sub={hc?.available ? `${hc.sessions} 開市日 · ${hc.first}~${hc.last}` : 'TWSE 官方公布'}
+    >
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button
+          onClick={onFetch}
+          disabled={busy}
+          className="px-3 py-1.5 text-[12px] rounded border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--bg)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          {busy ? '有工作進行中…' : '抓官方開休市日曆'}
+        </button>
+        <span className="text-[11px] text-[var(--muted)]">
+          TWSE OpenAPI · 當前公布年度 · 平日−官方休市＝前瞻交易日曆
+        </span>
+      </div>
+      {!hc?.available ? (
+        <div className="text-[13px] text-[var(--muted)]">
+          尚未擷取——按上方「抓官方開休市日曆」，或 CLI{' '}
+          <code className="mono text-[var(--fg)]">twquant ingest-holidays</code>。
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="text-[12px]">
+            官方 vs 觀測（{cc?.range ? `${cc.range[0]}~${cc.range[1]}` : '尚無行情'}）：
+            {cc?.range == null ? (
+              <span className="text-[var(--muted)]"> 尚無行情可核對</span>
+            ) : nMiss === 0 && nUnexp === 0 ? (
+              <span style={{ color: 'var(--good)' }}> ✓ 涵蓋年度內完全一致</span>
+            ) : (
+              <span style={{ color: 'var(--warn)' }}>
+                {nMiss ? ` 官方開市卻無行情 ${nMiss} 日` : ''}
+                {nUnexp ? ` 有行情卻官方判休市 ${nUnexp} 日` : ''}
+              </span>
+            )}
+          </div>
+          <div>
+            <div className="eyebrow mb-1">近期休市（{upcoming.length}）</div>
+            {upcoming.length === 0 ? (
+              <div className="text-[12px] text-[var(--muted)]">今年後續無休市註記</div>
+            ) : (
+              <table className="w-full text-[12px] mono">
+                <tbody>
+                  {upcoming.map((r) => (
+                    <tr key={r.date} className="border-b border-[var(--line)] last:border-0">
+                      <td className="py-1 tnum text-[var(--fg)]">{r.date}</td>
+                      <td className="py-1 pl-3 text-[var(--muted)]">{r.weekday ? `（${r.weekday}）` : ''}</td>
+                      <td className="py-1 pl-3 text-[var(--fg)]">{r.name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 function Ingest() {
   const { meta, live } = useMeta()
   const [mx, setMx] = useState<IngestMatrix | null>(null)
   const [gp, setGp] = useState<IngestGaps | null>(null)
   const [hb, setHb] = useState<Heartbeat | null>(null)
   const [jb, setJb] = useState<IngestJobs | null>(null)
+  const [hc, setHc] = useState<HolidayCalendar | null>(null)
+  const [tracks, setTracks] = useState<IngestTrack[]>([])
   const [err, setErr] = useState('')
   const [tick, setTick] = useState(0)
   const [at, setAt] = useState('')
@@ -1550,6 +1764,7 @@ function Ingest() {
       fetchIngestMatrix().then((d) => alive && setMx(d)).catch(() => {})
       fetchIngestGaps().then((d) => alive && setGp(d)).catch(() => {})
       fetchHeartbeat().then((d) => alive && setHb(d)).catch(() => {})
+      fetchHolidayCalendar().then((d) => alive && setHc(d)).catch(() => {})
       if (alive) setAt(new Date().toLocaleTimeString('zh-TW', { hour12: false }))
     }
     load()
@@ -1582,7 +1797,24 @@ function Ingest() {
     }
   }, [live])
 
+  // 資料軌白名單（手動抓取表單的資料集選單）：載一次即可。
+  useEffect(() => {
+    if (!live) return
+    let alive = true
+    fetchIngestTracks()
+      .then((t) => alive && setTracks(t))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [live])
+
   const busy = jb?.busy ?? false
+  const refreshJobs = () => {
+    fetchIngestJobs()
+      .then((d) => setJb(d))
+      .catch(() => {})
+  }
   const runGap = (g: IngestGap) => {
     if (
       g.warn_ban &&
@@ -1593,7 +1825,13 @@ function Ingest() {
       return
     setErr('')
     startIngestJob(g, g.warn_ban)
-      .then(() => fetchIngestJobs().then((d) => setJb(d)).catch(() => {}))
+      .then(refreshJobs)
+      .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
+  }
+  const runHolidayFetch = () => {
+    setErr('')
+    startHolidayFetch()
+      .then(refreshJobs)
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
   }
 
@@ -1644,14 +1882,23 @@ function Ingest() {
         </button>
       </div>
       {err && <div className="text-[12px] text-[var(--crit)]">補抓失敗：{err}</div>}
-      <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
-        {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
-      </Panel>
+      {tracks.length > 0 && (
+        <FetchForm
+          tracks={tracks}
+          latest={hb?.latest ?? mx?.latest ?? meta.as_of ?? null}
+          busy={busy}
+          onSubmitted={refreshJobs}
+        />
+      )}
       {jb && jb.jobs.length > 0 && (
         <Panel title="補抓工作" sub="伺服器端執行 twquant CLI · 單一併發 · 重啟 API 後清空">
           <JobList jobs={jb.jobs} />
         </Panel>
       )}
+      <HolidayPanel hc={hc} busy={busy} onFetch={runHolidayFetch} />
+      <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
+        {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
+      </Panel>
       <Panel
         title="漏抓清單 · 一鍵補抓"
         sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}

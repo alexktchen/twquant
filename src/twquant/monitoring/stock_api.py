@@ -51,7 +51,9 @@ def _rows(
     from twquant.data.serving import store
 
     collist = ", ".join(f'"{c}"' for c in cols)
-    sql = f'SELECT {collist} FROM "{cfg.pg_schema}"."{table}" WHERE stock_id = %s ORDER BY date DESC'
+    sql = (
+        f'SELECT {collist} FROM "{cfg.pg_schema}"."{table}" WHERE stock_id = %s ORDER BY date DESC'
+    )
     if limit:
         sql += f" LIMIT {int(limit)}"
     with store.connect(cfg) as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -137,17 +139,30 @@ def derive_brokers(rows: list[dict[str, Any]], window: int) -> dict[str, Any]:
         b["buy"] += int(r.get("buy_shares") or 0)
         b["sell"] += int(r.get("sell_shares") or 0)
     ranked: list[dict[str, Any]] = [
-        {"broker": k, "buy_shares": v["buy"], "sell_shares": v["sell"], "net_shares": v["buy"] - v["sell"]}
+        {
+            "broker": k,
+            "buy_shares": v["buy"],
+            "sell_shares": v["sell"],
+            "net_shares": v["buy"] - v["sell"],
+        }
         for k, v in agg.items()
     ]
     return {
         "window_days": window,
         "as_of": win_dates[-1],
-        "top_buy": sorted((b for b in ranked if b["net_shares"] > 0), key=lambda x: -x["net_shares"])[:15],
-        "top_sell": sorted((b for b in ranked if b["net_shares"] < 0), key=lambda x: x["net_shares"])[:15],
+        "top_buy": sorted(
+            (b for b in ranked if b["net_shares"] > 0), key=lambda x: -x["net_shares"]
+        )[:15],
+        "top_sell": sorted(
+            (b for b in ranked if b["net_shares"] < 0), key=lambda x: x["net_shares"]
+        )[:15],
         "summary": [
-            {"date": d, "buy_brokers": by_day[d]["buy"], "sell_brokers": by_day[d]["sell"],
-             "broker_count_diff": by_day[d]["buy"] - by_day[d]["sell"]}
+            {
+                "date": d,
+                "buy_brokers": by_day[d]["buy"],
+                "sell_brokers": by_day[d]["sell"],
+                "broker_count_diff": by_day[d]["buy"] - by_day[d]["sell"],
+            }
             for d in sorted(by_day)
         ],
     }
@@ -196,9 +211,17 @@ def overview(wh: object, cfg: ServingConfig, sid: str) -> dict[str, Any]:
     rows = _rows(cfg, "prices_daily", _OHLC, sid, 252)
     meta = _meta(cfg, sid)
     out: dict[str, Any] = {
-        "sid": sid, "name": meta.get("name"), "industry": meta.get("industry"),
-        "market": meta.get("market"), "as_of": (rows[-1]["date"] if rows else None), "source": "pg",
-        "close": None, "chg": None, "chg_pct": None, "volume": None, "pos_52w": None,
+        "sid": sid,
+        "name": meta.get("name"),
+        "industry": meta.get("industry"),
+        "market": meta.get("market"),
+        "as_of": (rows[-1]["date"] if rows else None),
+        "source": "pg",
+        "close": None,
+        "chg": None,
+        "chg_pct": None,
+        "volume": None,
+        "pos_52w": None,
         "composite": _latest_composite(cfg, sid),
     }
     if rows:
@@ -256,7 +279,7 @@ def factor_history(
     # 物化歷史稀疏時仍回滿序列，不受日曆窗影響。
     sql = (
         "SELECT factor, date, value, z, pct FROM ("
-        f'  SELECT factor, date, value, z, pct, row_number() OVER '
+        f"  SELECT factor, date, value, z, pct, row_number() OVER "
         f"  (PARTITION BY factor ORDER BY date DESC) rn "
         f'  FROM "{sch}".factor_values WHERE stock_id = %s AND factor IN ({placeholders})'
         ") t WHERE rn <= %s ORDER BY factor, date"
@@ -283,10 +306,17 @@ def scorecard(wh: object, cfg: ServingConfig, sid: str) -> dict[str, Any]:
     sch = cfg.pg_schema
     meta = _meta(cfg, sid)
     base: dict[str, Any] = {
-        "sid": sid, "name": meta.get("name"), "industry": meta.get("industry"),
-        "market": meta.get("market"), "as_of": None, "factors": [], "composite": None,
+        "sid": sid,
+        "name": meta.get("name"),
+        "industry": meta.get("industry"),
+        "market": meta.get("market"),
+        "as_of": None,
+        "factors": [],
+        "composite": None,
     }
-    day_row = _one(cfg, f'SELECT max(date) d FROM "{sch}".factor_values WHERE stock_id = %s', (sid,))
+    day_row = _one(
+        cfg, f'SELECT max(date) d FROM "{sch}".factor_values WHERE stock_id = %s', (sid,)
+    )
     day = day_row["d"] if day_row else None
     if day is None:
         return base
@@ -304,9 +334,14 @@ def scorecard(wh: object, cfg: ServingConfig, sid: str) -> dict[str, Any]:
         z = float(r["z"])
         factors_out.append(
             {
-                "factor": name, "zh": snap.FACTOR_ZH.get(name, name), "category": name.split(".")[0],
-                "value": round(float(r["value"]), 4), "z": round(z, 2), "pct": round(float(r["pct"]), 3),
-                "direction": d, "signed_z": round(z * d, 2),
+                "factor": name,
+                "zh": snap.FACTOR_ZH.get(name, name),
+                "category": name.split(".")[0],
+                "value": round(float(r["value"]), 4),
+                "z": round(z, 2),
+                "pct": round(float(r["pct"]), 3),
+                "direction": d,
+                "signed_z": round(z * d, 2),
             }
         )
     base["as_of"] = day.isoformat() if isinstance(day, dt.date) else None

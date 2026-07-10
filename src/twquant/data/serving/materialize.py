@@ -78,7 +78,9 @@ def _compute_universe(wh: Warehouse, as_of: dt.date) -> pl.DataFrame | None:
     return merged.with_columns((pl.col("z") * dir_expr).alias("signed_z"))
 
 
-def _materialize_on(wh: Warehouse, conn: Any, cfg: ServingConfig, as_of: dt.date) -> MaterializeResult:
+def _materialize_on(
+    wh: Warehouse, conn: Any, cfg: ServingConfig, as_of: dt.date
+) -> MaterializeResult:
     merged = _compute_universe(wh, as_of)
     if merged is None:
         return MaterializeResult(as_of, 0, 0, 0)
@@ -95,7 +97,8 @@ def _materialize_on(wh: Warehouse, conn: Any, cfg: ServingConfig, as_of: dt.date
     cnt = pl.col("signed_z_mean").count().over("date")
     comp = comp.with_columns(
         (
-            (pl.col("signed_z_mean").rank().over("date") - 1) / pl.max_horizontal(cnt - 1, pl.lit(1))
+            (pl.col("signed_z_mean").rank().over("date") - 1)
+            / pl.max_horizontal(cnt - 1, pl.lit(1))
         ).alias("pct")
     )
 

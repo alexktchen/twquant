@@ -13,6 +13,7 @@ import polars as pl
 
 from twquant.conventions import SHARES_PER_LOT, TZ
 from twquant.data import schemas
+from twquant.errors import DataError
 
 
 def _at(date: dt.date, hour: int) -> dt.datetime:
@@ -257,6 +258,42 @@ def clean_stock_meta(raw: pl.DataFrame, market: str) -> pl.DataFrame:
     out = out.filter(pl.col("stock_id").str.contains(r"^[0-9]{4}[A-Z]?$"))
     out = out.unique(subset=["stock_id"], keep="first")
     return schemas.validate("stock_meta", out)
+
+
+def clean_market_holidays(raw: pl.DataFrame) -> pl.DataFrame:
+    """TWSE 官方開休市日曆原始 → market_holidays（參考表，無 date 分區、無 available_at）。
+
+    Date 為民國封裝碼（"1150101"＝民國 115=2026 年 1 月 1 日）：固定 7 碼（ROC 年 3＋月 2＋
+    日 2），長度不符即來源格式變動 → raise（黃金規則 5：不靜默套錯解析）。closed 由名稱判定：
+    名稱含「開始交易」或「最後交易」者為交易日註記（closed=False），其餘為休市（closed=True）
+    ——此端點夾帶「農曆春節前最後交易日」等純交易日資訊列，全當休市會誤刪真實交易日。
+    """
+    d = pl.col("Date").str.strip_chars()
+    bad = raw.filter(d.str.len_chars() != 7).height
+    if bad:
+        raise DataError("market_holidays", None, f"官方日曆 Date 非 7 碼民國格式（{bad} 筆）")
+    year = d.str.slice(0, 3).cast(pl.Int32, strict=False) + 1911  # 民國 3 碼 → 西元年
+    # 組西元封裝碼 YYYYMMDD 後 strptime（strict=False）：月/日超範圍或非數字 → null，交由下方
+    # guard raise DataError；不用 pl.date——它對超範圍值會拋 polars ComputeError，繞過 DataError
+    # 與 ingest_log 失敗記錄（違反黃金規則 5：失敗要走結構化路徑）。
+    holiday_date = (year.cast(pl.Utf8) + d.str.slice(3, 4)).str.strptime(
+        pl.Date, "%Y%m%d", strict=False
+    )
+    is_trading = pl.col("Name").str.contains("開始交易", literal=True) | pl.col(
+        "Name"
+    ).str.contains("最後交易", literal=True)
+    out = raw.select(
+        holiday_date.alias("holiday_date"),
+        year.alias("year"),
+        pl.col("Name").str.strip_chars().alias("name"),
+        pl.col("Weekday").str.strip_chars().alias("weekday"),
+        pl.col("Description").str.strip_chars().alias("description"),
+        (~is_trading).alias("closed"),
+    )
+    if out.filter(pl.col("holiday_date").is_null()).height:
+        raise DataError("market_holidays", None, "官方日曆有無法解析的日期（月/日超範圍？）")
+    out = out.unique(subset=["holiday_date"], keep="first", maintain_order=True)
+    return schemas.validate("market_holidays", out)
 
 
 # 表名 → (clean 函數) 註冊表（TWSE）

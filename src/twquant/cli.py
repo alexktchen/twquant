@@ -523,6 +523,79 @@ def ingest_meta() -> None:
         typer.secho(f"[OK] {tag}：{clean.height} 檔已存入", fg=typer.colors.GREEN)
 
 
+@app.command(name="ingest-holidays")
+def ingest_holidays() -> None:
+    """抓 TWSE 官方『市場開休市日期』（當前公布年度），存入 market_holidays，並與觀測日曆核對。
+
+    此端點無年度參數、只回當前已公布年度；重抓覆蓋同表。抓後印休市概況、近期休市日，以及
+    官方交易日曆 vs 觀測行情（prices_daily）在該年度內的差異，直接回答「哪天開市/該補哪天」。
+    """
+    from typing import cast
+
+    import polars as pl
+
+    from twquant.conventions import now_tw
+    from twquant.data import calendar as cal
+    from twquant.data.clean import clean_market_holidays
+    from twquant.data.http import HttpClient
+    from twquant.data.sources.twse_holiday import TwseHolidaySource
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+    from twquant.reporting.ingest_log import record
+
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    src = TwseHolidaySource(HttpClient(source="twse_holiday", rate=cfg.source_rates["twse_rwd"]))
+    typer.secho(">> [twse] 官方市場開休市日期", fg=typer.colors.CYAN, bold=True)
+    try:
+        clean = clean_market_holidays(src.fetch())
+        wh.write("clean", "market_holidays", clean, source="twse")
+    except DataError as exc:
+        record(cfg.data_dir, "twse", "market_holidays", "_all", "failed", detail=str(exc))
+        typer.secho(f"[SKIP] {exc}", fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    record(cfg.data_dir, "twse", "market_holidays", "_all", "success", rows=clean.height)
+
+    n_closed = clean.filter(pl.col("closed")).height
+    years = sorted({int(y) for y in clean["year"].to_list()})
+    typer.secho(
+        f"[OK] {clean.height} 筆（休市 {n_closed}、交易日註記 {clean.height - n_closed}）· 年度 {years}",
+        fg=typer.colors.GREEN,
+        bold=True,
+    )
+
+    offical = cal.official_calendar(wh)
+    typer.secho(
+        f"官方交易日曆：{offical.sessions[0]} ~ {offical.sessions[-1]}　{len(offical)} 開市日",
+        fg=typer.colors.CYAN,
+    )
+    today = now_tw().date()
+    upcoming = (
+        clean.filter(pl.col("closed") & (pl.col("holiday_date") >= today))
+        .sort("holiday_date")
+        .head(6)
+    )
+    if not upcoming.is_empty():
+        typer.secho("近期休市：", fg=typer.colors.CYAN)
+        for r in upcoming.to_dicts():
+            typer.echo(f"  {r['holiday_date']}（{r['weekday']}）{r['name']}")
+
+    chk = cal.cross_check_official(wh)
+    missing = cast("list[dt.date]", chk["missing"])
+    unexpected = cast("list[dt.date]", chk["unexpected"])
+    if chk["range"] is None:
+        typer.secho("（尚無行情，略過官方 vs 觀測核對）", fg=typer.colors.YELLOW)
+    elif not missing and not unexpected:
+        typer.secho("官方 vs 觀測：涵蓋年度內完全一致。", fg=typer.colors.GREEN)
+    else:
+        if missing:
+            head = ", ".join(str(d) for d in missing[:5])
+            typer.secho(f"官方開市卻無行情 {len(missing)} 日：{head}", fg=typer.colors.YELLOW)
+        if unexpected:
+            head = ", ".join(str(d) for d in unexpected[:5])
+            typer.secho(f"有行情卻官方判休市 {len(unexpected)} 日：{head}", fg=typer.colors.YELLOW)
+
+
 def _git_hash() -> str:
     try:
         out = subprocess.run(
@@ -1064,7 +1137,9 @@ def sql(query: str = typer.Argument(..., help="對 clean 資料湖執行的 SQL"
         typer.echo(str(result))
 
 
-serving_app = typer.Typer(add_completion=False, help="供應層 PG（SPEC-009）：sync / rebuild / status。")
+serving_app = typer.Typer(
+    add_completion=False, help="供應層 PG（SPEC-009）：sync / rebuild / status。"
+)
 app.add_typer(serving_app, name="serving")
 
 

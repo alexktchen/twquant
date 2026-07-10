@@ -269,7 +269,9 @@ def get_stock_factor_history(
 ) -> dict[str, object]:
     """個股各因子的 z/pct 歷史序列（需 PG 物化；無則回空）。"""
     flist = [f.strip() for f in factors.split(",") if f.strip()]
-    return _stock_ep(lambda: stock_api.factor_history(wh, stock_api.serving_cfg(), sid, flist, days))
+    return _stock_ep(
+        lambda: stock_api.factor_history(wh, stock_api.serving_cfg(), sid, flist, days)
+    )
 
 
 @app.get("/api/backtest")
@@ -325,6 +327,18 @@ def get_ingest_matrix(
 def get_ingest_gaps(wh: WarehouseDep) -> dict[str, object]:
     """漏抓/失敗缺口清單，含歸併區段與建議補抓 CLI 指令。"""
     return snap.ingest_gaps(wh)
+
+
+@app.get("/api/ingest-tracks")
+def get_ingest_tracks() -> dict[str, object]:
+    """可手動抓取的資料軌白名單（供「手動抓取歷史資料」表單的資料集選單）。"""
+    return {"tracks": jobs.fetchable_tracks()}
+
+
+@app.get("/api/holiday-calendar")
+def get_holiday_calendar(wh: WarehouseDep) -> dict[str, object]:
+    """官方開休市日曆（market_holidays）：開市日數、休市清單、官方 vs 觀測核對。"""
+    return snap.holiday_calendar(wh)
 
 
 class IngestJobRequest(BaseModel):
