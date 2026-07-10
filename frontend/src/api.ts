@@ -124,6 +124,8 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T
 }
 
+// 存活探針（毫秒級）：開頁以此判定 live，不等重端點。
+export const fetchHealth = () => getJSON<{ status: string }>('/api/health')
 export const fetchSnapshot = () => getJSON<Data>('/api/snapshot')
 // 逐段（逐頁）端點：各頁切到才 fetch，重運算（因子/回測/容量）只在該頁被開啟時才算。
 export const fetchMeta = () => getJSON<Meta>('/api/meta')
@@ -181,6 +183,16 @@ export type StockBrokers = {
 }
 export const fetchStockBrokers = (sid: string, window = 5) =>
   getJSON<StockBrokers>(`/api/stocks/${enc(sid)}/brokers?window=${window}`)
+
+// 主力（富邦DJ top-15±）每日淨買超（股）序列；K 線副圖日條＋累計線（累計由前端算）。
+export type BrokerFlowPoint = { date: string; net: number }
+export const fetchStockBrokerFlow = (sid: string, days = 250) =>
+  getJSON<StockSeries<BrokerFlowPoint>>(`/api/stocks/${enc(sid)}/broker-flow?days=${days}`)
+
+// 宇宙綜合因子排名前 N（最新物化日、pct 遞減）；個股因子頁「熱門」列。
+export type CompositeTopRow = { stock_id: string; name: string | null; signed_z_mean: number; pct: number }
+export type CompositeTop = { as_of: string | null; source: Src; rows: CompositeTopRow[] }
+export const fetchCompositeTop = (n = 10) => getJSON<CompositeTop>(`/api/composite-top?n=${n}`)
 
 // P7/P8：因子歷史（每因子 z/pct 序列）與綜合分位趨勢（皆需 PG 物化歷史）。
 export type FactorHistPoint = { date: string; value: number | null; z: number | null; pct: number | null }

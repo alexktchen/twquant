@@ -93,7 +93,10 @@ DDL 由 `data/serving/schema.py` 建立（`CREATE TABLE IF NOT EXISTS` +
 
 - 端點與 payload 形狀以 **PRD-001 §5 為權威**：`overview`、`ohlc`、`institutional`、
   `margin`、`revenue`、`dispersion`、`brokers`、`factors`（相容現行 Scorecard）、
-  `factors/history`、`composite-history`。
+  `factors/history`、`composite-history`。追加（2026-07-10，K 線副圖與熱門列）：
+  `broker-flow`（主力每日淨買超序列 `{date, net}`，net=股、SUM(buy−sell) per date）、
+  `composite-top`（宇宙綜合排名前 N：最新物化日 pct 遞減 + stock_meta 名稱，非個股路徑
+  `GET /api/composite-top?n=`）。
 - **回應外殼**：`{ "sid", "as_of", "source": "pg", "rows": [...] }`（overview 為單物件不含 rows）。
 - **只讀 PG（使用者裁決，2026-07-10）**：個股端點一律讀 PG，**不降級資料湖 DuckDB**——PG 有
   資料回列、無該資料回空列、連不上讓端點 503。移除原健康旗標/`fallback_duckdb` 降級路徑，避免

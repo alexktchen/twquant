@@ -1,5 +1,34 @@
 # CHANGELOG
 
+- 2026-07-10 開頁零等待（使用者裁決：「開頁都不需要先讀東西，直接到個股因子，然後都不要快取」）：
+  App 不再阻塞等 `/api/meta`（讀資料湖、實測單次 138s）——立即以內嵌 meta 渲染、`/api/health`
+  （毫秒級）判定 live、meta 背景載入補欄位；預設頁改「個股因子」（全 PG 直查、毫秒級）；
+  Splash 移除。維持全面不快取。另修復審查確認的 5 項缺陷：K 線圖打字重建（RangeCandle
+  useMemo 穩定 identity）、composite-top as_of 與回列跨語句競態（as_of 改取自回列）、換股
+  瞬間舊 K 線殘影（OHLC state 以 sid 標記，個股/市場頁皆修）、離線追蹤股 K 線無聲消失（補
+  占位訊息）、主力副圖單位標示（張）。
+
+- 2026-07-10 個股頁三則增強（使用者指示）：(1) K 線副圖化——lightweight-charts 升 v5 原生
+  pane，K 線下疊「量 / 綜合因子分位（signed-z 棒+分位線）/ 主力買賣超（日淨買超條+累計線，張）」
+  三副圖共用時間軸與十字線；新端點 `GET /api/stocks/{sid}/broker-flow`（PG broker_trades 每日
+  SUM(buy−sell)）；獨立「綜合因子分位趨勢」面板併入副圖後移除。(2) 追蹤股——個股因子頁
+  ☆/★ 追蹤按鈕 + 追蹤 chips 列（localStorage 本機持久化、預設選股優先追蹤第一檔）。
+  (3) 熱門列改宇宙排名——新端點 `GET /api/composite-top?n=10`（composite_daily 最新物化日
+  pct 遞減 + stock_meta 名稱），chips 顯示名次，PG 未物化退回快照熱門。SPEC-009 §4 追加
+  兩端點。閘門後端 ruff+mypy+pytest 綠（PG 整合測試含 broker-flow/composite-top，無 DSN skip）、
+  前端 oxlint+tsc+build 綠。
+
+- 2026-07-10 全鏈路移除快取（使用者裁決「都不要快取，每個都到 PG query」）：
+  **後端**拔掉 `monitoring/api.py` 的 `_memo`/`_cache`（原以「段名+湖根+最新行情日+config
+  指紋」為鍵，同一交易日內重覆請求命中舊值——PG/湖盤中更新看不到的根因），所有儀表板端點改
+  每請求即時現算/直查；`stock_api.serving_cfg()` 亦不再按 mtime 快取，改每請求重讀
+  serving.yaml。個股端點本就每請求直查 PG，行為不變。**前端** `App.tsx` 拔掉 `useResource`
+  的 module 級 `resCache`/`resInflight`（改每次掛載/換鍵即時重打），個股頁/市場頁的
+  `cache[sid]` OHLC map 改單一 `series` state（換股即重抓、離線退回內嵌樣本）。端點 payload
+  形狀不變。代價：重運算端點（全因子 IC/回測/容量）每請求重算、換頁/換股每次重打。閘門後端
+  ruff+ruff-format+mypy(本地 bs4 未裝的既有紅除外)+pytest 254 綠、前端 oxlint+tsc+build 綠；
+  瀏覽器實測：換頁 StrictMode 雙打證無 module 快取、回到已看過的個股仍重抓 ohlc、0 console error。
+
 - 2026-07-10 T-034 完成：P7 因子計分卡加 250 日 z-sparkline 欄（一次抓全因子歷史）、P8 綜合
   因子分位趨勢面板（棒=signed-z 均值、線=宇宙分位）。`factors/history` 端點改「每因子最近 N 個
   物化點」（row_number 視窗，與 composite-history 同語義——稀疏歷史仍回滿序列）。個股頁八面板

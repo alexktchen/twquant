@@ -1,10 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { ColorType, CrosshairMode, createChart } from 'lightweight-charts'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, createChart } from 'lightweight-charts'
 import fallbackRaw from './data.json'
 import {
   fetchBacktest,
   fetchCapacity,
+  fetchCompositeTop,
   fetchFactors,
+  fetchHealth,
   fetchHeartbeat,
   fetchHolidayCalendar,
   fetchIndices,
@@ -19,6 +21,7 @@ import {
   fetchRevenue,
   fetchSectorFlows,
   fetchStockBrokers,
+  fetchStockBrokerFlow,
   fetchStockCompositeHistory,
   fetchStockFactorHistory,
   fetchStockFactors,
@@ -33,9 +36,11 @@ import {
   startIngestFetch,
   startIngestJob,
   type Backtest as BacktestT,
+  type BrokerFlowPoint,
   type BrokerRow,
   type Candle,
   type CompositePoint,
+  type CompositeTop,
   type CellState,
   type Data,
   type Fac,
@@ -100,35 +105,74 @@ const baseChart = (el: HTMLDivElement, height: number) =>
     handleScale: { axisPressedMouseMove: { time: true, price: false } },
   })
 
-/* ---------- candlestick (lightweight-charts) ---------- */
-function CandleChart({ data, height = 320, volume = false }: { data: Candle[]; height?: number; volume?: boolean }) {
+/* ---------- candlestick + 選配副圖（v5 原生 pane：量 / 綜合因子 / 主力買賣超）---------- */
+const VOL_UP = 'rgba(229,72,77,0.45)', VOL_DOWN = 'rgba(46,163,107,0.45)'
+function CandleChart({
+  data,
+  height = 320,
+  volume = false,
+  composite,
+  brokerFlow,
+}: {
+  data: Candle[]
+  height?: number
+  volume?: boolean
+  composite?: CompositePoint[]
+  brokerFlow?: BrokerFlowPoint[]
+}) {
   const box = useRef<HTMLDivElement>(null)
   const legend = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = box.current
     if (!el) return
     const chart = baseChart(el, height)
-    const candle = chart.addCandlestickSeries({
-      upColor: UP,
-      downColor: DOWN,
-      borderUpColor: UP,
-      borderDownColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
-    })
+    const candle = chart.addSeries(
+      CandlestickSeries,
+      { upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN },
+      0,
+    )
     candle.setData(data.map((k) => ({ time: k.d, open: k.o, high: k.h, low: k.l, close: k.c })))
+
+    // 每個副圖各佔一個 pane；stretch factor 讓主圖佔大部分高度
+    const stretch: number[] = [6]
+    let pane = 1
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let pctS: any = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let cumS: any = null
+
     if (volume) {
-      candle.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } })
-      const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' })
-      vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
-      vol.setData(
-        data.map((k) => ({
-          time: k.d,
-          value: k.v ?? k.amt ?? 0,
-          color: k.c >= k.o ? 'rgba(229,72,77,0.4)' : 'rgba(46,163,107,0.4)',
-        })),
-      )
+      const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'right' }, pane)
+      vol.setData(data.map((k) => ({ time: k.d, value: k.v ?? k.amt ?? 0, color: k.c >= k.o ? VOL_UP : VOL_DOWN })))
+      stretch.push(1.6)
+      pane++
     }
+
+    if (composite && composite.length) {
+      const zbar = chart.addSeries(
+        HistogramSeries,
+        { priceFormat: { type: 'price', precision: 2, minMove: 0.01 }, priceScaleId: 'right', base: 0 },
+        pane,
+      )
+      zbar.setData(composite.map((p) => ({ time: p.date, value: p.signed_z_mean, color: p.signed_z_mean >= 0 ? VOL_UP : VOL_DOWN })))
+      pctS = chart.addSeries(LineSeries, { priceScaleId: 'pct', color: ACC, lineWidth: 1, priceLineVisible: false, lastValueVisible: false }, pane)
+      pctS.setData(composite.map((p) => ({ time: p.date, value: p.pct * 100 })))
+      stretch.push(2)
+      pane++
+    }
+
+    if (brokerFlow && brokerFlow.length) {
+      const nbar = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'right', base: 0 }, pane)
+      nbar.setData(brokerFlow.map((p) => ({ time: p.date, value: Math.round(p.net / 1000), color: p.net >= 0 ? VOL_UP : VOL_DOWN })))
+      let cum = 0
+      cumS = chart.addSeries(LineSeries, { priceScaleId: 'cum', color: ACC, lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, pane)
+      cumS.setData(brokerFlow.map((p) => { cum += Math.round(p.net / 1000); return { time: p.date, value: cum } }))
+      stretch.push(2.4)
+      pane++
+    }
+
+    const panes = chart.panes()
+    stretch.forEach((s, i) => panes[i]?.setStretchFactor(s))
     chart.timeScale().fitContent()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     chart.subscribeCrosshairMove((param: any) => {
@@ -140,8 +184,13 @@ function CandleChart({ data, height = 320, volume = false }: { data: Candle[]; h
         return
       }
       const up = d.close >= d.open
+      let html = `<span style="color:${MUT}">${param.time}</span>　開 ${d.open}　高 ${d.high}　低 ${d.low}　收 <b style="color:${up ? UP : DOWN}">${d.close}</b>`
+      const pc = pctS && param.seriesData?.get(pctS)
+      if (pc) html += `　<span style="color:${MUT}">綜合分位</span> ${Math.round(pc.value)}%`
+      const cc = cumS && param.seriesData?.get(cumS)
+      if (cc) html += `　<span style="color:${MUT}">主力累計</span> <b style="color:${cc.value >= 0 ? UP : DOWN}">${cc.value >= 0 ? '+' : ''}${num(cc.value)}</b> 張`
       lg.style.opacity = '1'
-      lg.innerHTML = `<span style="color:${MUT}">${param.time}</span>　開 ${d.open}　高 ${d.high}　低 ${d.low}　收 <b style="color:${up ? UP : DOWN}">${d.close}</b>`
+      lg.innerHTML = html
     })
     const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
     ro.observe(el)
@@ -149,7 +198,7 @@ function CandleChart({ data, height = 320, volume = false }: { data: Candle[]; h
       ro.disconnect()
       chart.remove()
     }
-  }, [data, height, volume])
+  }, [data, height, volume, composite, brokerFlow])
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -170,7 +219,7 @@ function EquityChart({ data, height = 260 }: { data: { d: string; e: number }[];
     const el = box.current
     if (!el) return
     const chart = baseChart(el, height)
-    const area = chart.addAreaSeries({
+    const area = chart.addSeries(AreaSeries, {
       lineColor: ACC,
       topColor: 'rgba(224,168,59,0.26)',
       bottomColor: 'rgba(224,168,59,0.02)',
@@ -218,7 +267,7 @@ function IndexLine({ data, height = 300 }: { data: IndexPoint[]; height?: number
     const el = box.current
     if (!el) return
     const chart = baseChart(el, height)
-    const area = chart.addAreaSeries({
+    const area = chart.addSeries(AreaSeries, {
       lineColor: ACC,
       topColor: 'rgba(224,168,59,0.22)',
       bottomColor: 'rgba(224,168,59,0.02)',
@@ -259,9 +308,33 @@ function IndexLine({ data, height = 300 }: { data: IndexPoint[]; height?: number
 }
 
 /* ---------- range chips (slice history) ---------- */
-function RangeCandle({ data, height, volume }: { data: Candle[]; height?: number; volume?: boolean }) {
+function RangeCandle({
+  data,
+  height,
+  volume,
+  composite,
+  brokerFlow,
+}: {
+  data: Candle[]
+  height?: number
+  volume?: boolean
+  composite?: CompositePoint[]
+  brokerFlow?: BrokerFlowPoint[]
+}) {
   const [range, setRange] = useState(0)
-  const shown = range > 0 ? data.slice(-range) : data
+  // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，
+  // 每次 render 產生新陣列會導致父層任何 state 變動（如搜尋框打字）都整座圖砍掉重建。
+  const shown = useMemo(() => (range > 0 ? data.slice(-range) : data), [data, range])
+  // 副圖切到與主圖同一時間窗（日期字串可字典序比較）
+  const cutoff = shown.length ? shown[0].d : ''
+  const compShown = useMemo(
+    () => (composite ? composite.filter((p) => p.date >= cutoff) : undefined),
+    [composite, cutoff],
+  )
+  const flowShown = useMemo(
+    () => (brokerFlow ? brokerFlow.filter((p) => p.date >= cutoff) : undefined),
+    [brokerFlow, cutoff],
+  )
   return (
     <div>
       <div className="flex gap-1 justify-end mb-1">
@@ -277,7 +350,7 @@ function RangeCandle({ data, height, volume }: { data: Candle[]; height?: number
           </button>
         ))}
       </div>
-      <CandleChart data={shown} height={height} volume={volume} />
+      <CandleChart data={shown} height={height} volume={volume} composite={compShown} brokerFlow={flowShown} />
     </div>
   )
 }
@@ -341,41 +414,23 @@ function useMeta(): MetaCtxT {
 }
 
 /* ---------- 逐頁懶載入 resource ----------
-   切到某頁才 fetch 該段（重運算的因子/回測/容量只在對應頁開啟時才算）；module 級快取
-   → 換頁再回來不重打；API 不可達則退回內嵌 data.json 對應段（保留離線可用）。
-   同鍵並發去重（含 StrictMode 開發雙呼）。*/
+   切到某頁才 fetch 該段（重運算的因子/回測/容量只在對應頁開啟時才算）。不快取：
+   每次掛載/換鍵都即時重打 API，資料一更新下一次就反映；API 不可達則退回內嵌 data.json
+   對應段（保留離線可用）。*/
 type Res<T> = { data: T | null; loading: boolean; live: boolean }
-const resCache = new Map<string, { data: unknown; live: boolean }>()
-const resInflight = new Map<string, Promise<void>>()
 function useResource<T>(key: string, fetcher: () => Promise<T>, fallback: () => T): Res<T> {
-  const [, bump] = useReducer((x: number) => x + 1, 0)
+  const [res, setRes] = useState<Res<T>>({ data: null, loading: true, live: false })
   useEffect(() => {
-    if (resCache.has(key)) return
     let alive = true
-    let p = resInflight.get(key)
-    if (!p) {
-      p = fetcher()
-        .then((d) => {
-          resCache.set(key, { data: d, live: true })
-        })
-        .catch(() => {
-          resCache.set(key, { data: fallback(), live: false })
-        })
-        .finally(() => {
-          resInflight.delete(key)
-        })
-      resInflight.set(key, p)
-    }
-    void p.then(() => {
-      if (alive) bump()
-    })
+    setRes({ data: null, loading: true, live: false })
+    fetcher()
+      .then((d) => alive && setRes({ data: d, loading: false, live: true }))
+      .catch(() => alive && setRes({ data: fallback(), loading: false, live: false }))
     return () => {
       alive = false
     }
   }, [key])
-  const entry = resCache.get(key)
-  if (!entry) return { data: null, loading: true, live: false }
-  return { data: entry.data as T, loading: false, live: entry.live }
+  return res
 }
 
 /* ---------- loading skeleton ---------- */
@@ -505,23 +560,31 @@ function Spark({ zs }: { zs: number[] | undefined }) {
 }
 
 /* P8：綜合因子分位趨勢（棒=signed_z 平均、線=宇宙分位）。 */
-function CompositeTrendPanel({ sid }: { sid: string }) {
-  const empty: StockSeries<CompositePoint> = { sid, as_of: null, source: 'pg', rows: [] }
-  const r = useResource(`chist:${sid}`, () => fetchStockCompositeHistory(sid, 250), () => empty)
-  if (r.loading) return <Panel title="綜合因子分位趨勢"><Skeleton height={100} /></Panel>
-  const rows = r.data?.rows ?? []
-  if (rows.length < 2) return null
-  const last = rows[rows.length - 1]
+/* ---------- 個股 K 線 + 副圖（量 / 綜合因子分位 / 主力買賣超日條＋累計）----------
+   綜合因子分位趨勢與主力買賣超併進 K 線副圖（v5 原生 pane、共用時間軸）；不再各佔獨立面板。*/
+function StockChartPanel({ sid, title, series }: { sid: string; title: string; series: Candle[] }) {
+  const emptyC: StockSeries<CompositePoint> = { sid, as_of: null, source: 'pg', rows: [] }
+  const emptyB: StockSeries<BrokerFlowPoint> = { sid, as_of: null, source: 'pg', rows: [] }
+  // 一律嘗試 fetch（API 不可達由 useResource catch 退回空列）——不依 live 閘，
+  // 避免開頁瞬間 live=false 時掛載後永不重抓（useResource 以 key 為準）。
+  const comp = useResource(`chist:${sid}`, () => fetchStockCompositeHistory(sid, 250), () => emptyC)
+  const flow = useResource(`bflow:${sid}`, () => fetchStockBrokerFlow(sid, 250), () => emptyB)
+  const cRows = comp.data?.rows ?? []
+  const fRows = flow.data?.rows ?? []
+  const hasComp = cRows.length > 1
+  const hasFlow = fRows.length > 1
+  const tall = hasComp || hasFlow || comp.loading || flow.loading
+  const subs = ['量(股)', hasComp && '綜合因子分位', hasFlow && '主力買賣超(日條+累計，張)'].filter(Boolean).join(' / ')
   return (
-    <Panel title="綜合因子分位趨勢" sub={`棒=signed-z 平均 · 線=宇宙分位 · ${rows.length} 日 · pg`}>
-      <MiniTS bars={rows.map((x) => x.signed_z_mean)} line={rows.map((x) => x.pct)} />
-      <div className="flex flex-wrap gap-x-4 mt-2 text-[11px] mono">
-        <span className="text-[var(--muted)]">
-          最新分位 <span style={{ color: last.pct >= 0.5 ? 'var(--up)' : 'var(--down)' }}>{Math.round(last.pct * 100)}%</span>
-        </span>
-        <span className="text-[var(--muted)]">signed-z 平均 {last.signed_z_mean >= 0 ? '+' : ''}{last.signed_z_mean.toFixed(2)}</span>
-        <span className="text-[var(--muted)]">{last.date}</span>
-      </div>
+    <Panel title={title} sub={`副圖：${subs} · 紅漲綠跌 · 可拖曳縮放`}>
+      <RangeCandle
+        key={sid}
+        data={series}
+        height={tall ? 540 : 300}
+        volume
+        composite={hasComp ? cRows : undefined}
+        brokerFlow={hasFlow ? fRows : undefined}
+      />
     </Panel>
   )
 }
@@ -806,15 +869,54 @@ function BrokerPanel({ sid }: { sid: string }) {
   )
 }
 
+/* ---------- 追蹤股（localStorage 持久化；單機儀表板免帳號）---------- */
+const WATCH_KEY = 'twquant.watchlist'
+function loadWatch(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(WATCH_KEY) ?? '[]')
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+const chipCls = (active: boolean) =>
+  `px-2.5 py-1 text-[12px] mono rounded border transition-colors ${
+    active ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
+  }`
+
 /* ---------- 個股因子健檢（獨立頁：選股 + K線 + 法人/融資券/營收/主力 + 因子體檢卡）---------- */
 function StockFactors() {
   const { meta, live } = useMeta()
   const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
   const mm = metaMap.data ?? {}
   const [list, setList] = useState<string[]>(meta.top_stocks)
-  const [sid, setSid] = useState<string>(() => meta.top_stocks[0] ?? '')
-  const [cache, setCache] = useState<Record<string, Candle[]>>(FALLBACK.stocks)
+  // 預設選股：優先第一檔追蹤股，其次熱門第一檔
+  const [sid, setSid] = useState<string>(() => loadWatch()[0] ?? meta.top_stocks[0] ?? '')
+  // OHLC 以 sid 標記：換股瞬間舊資料因 sid 不符而不渲染，杜絕「新標題配舊 K 線」殘影
+  const [ohlc, setOhlc] = useState<{ sid: string; rows: Candle[] } | undefined>(() =>
+    live || !sid ? undefined : { sid, rows: FALLBACK.stocks[sid] ?? [] },
+  )
   const [loading, setLoading] = useState(false)
+  const [watch, setWatch] = useState<string[]>(loadWatch)
+  const toggleWatch = (s: string) =>
+    setWatch((w) => {
+      const next = w.includes(s) ? w.filter((x) => x !== s) : [...w, s]
+      try {
+        localStorage.setItem(WATCH_KEY, JSON.stringify(next))
+      } catch {
+        /* 隱私模式等寫入失敗：追蹤僅本次會話有效 */
+      }
+      return next
+    })
+  // 熱門列＝宇宙綜合排名前 10（最新物化日）；PG 未物化/離線退回快照熱門。
+  // 一律嘗試 fetch（不依 live 閘）——開頁瞬間 live 尚未翻正，靠 key 的 useResource 不會重抓。
+  const emptyTop: CompositeTop = { as_of: null, source: 'pg', rows: [] }
+  const top = useResource('ctop', () => fetchCompositeTop(10), () => emptyTop)
+  const topRows = top.data?.rows ?? []
+  const hot = topRows.length
+    ? topRows.map((r, i) => ({ sid: r.stock_id, name: r.name ?? mm[r.stock_id]?.name ?? '', rank: i + 1, pct: r.pct as number | null }))
+    : meta.top_stocks.map((s) => ({ sid: s, name: mm[s]?.name ?? '', rank: 0, pct: null as number | null }))
 
   useEffect(() => {
     if (!live) return
@@ -825,21 +927,26 @@ function StockFactors() {
     }
   }, [live])
 
+  // 不快取：每次換股都即時重抓 OHLC（離線退回內嵌樣本；樣本沒有該股則空列→占位訊息）
   useEffect(() => {
-    if (!sid || cache[sid] || !live) return
+    if (!sid) return
+    if (!live) {
+      setOhlc({ sid, rows: FALLBACK.stocks[sid] ?? [] })
+      return
+    }
     let alive = true
     setLoading(true)
+    setOhlc(undefined)
     fetchStockOhlc(sid)
-      .then((k) => alive && setCache((m) => ({ ...m, [sid]: k })))
-      .catch(() => {})
+      .then((k) => alive && setOhlc({ sid, rows: k }))
+      .catch(() => alive && setOhlc({ sid, rows: FALLBACK.stocks[sid] ?? [] }))
       .finally(() => alive && setLoading(false))
     return () => {
       alive = false
     }
-  }, [sid, live, cache])
+  }, [sid, live])
+  const series = ohlc?.sid === sid ? ohlc.rows : undefined
 
-  const chips = meta.top_stocks
-  const series = cache[sid]
   const [q, setQ] = useState('')
   const allStocks = useMemo(
     () =>
@@ -865,7 +972,7 @@ function StockFactors() {
   }
   return (
     <div className="flex flex-col gap-4">
-      <Panel title="選擇個股" sub={`搜尋全部上市櫃普通股（${allStocks.length} 檔）· 或點熱門`}>
+      <Panel title="選擇個股" sub={`搜尋全部上市櫃普通股（${allStocks.length} 檔）· 或點熱門/追蹤`}>
         <div className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -885,41 +992,74 @@ function StockFactors() {
               ))}
             </datalist>
             <span className="text-[11px] text-[var(--muted)]">Enter 查詢 · 不限前 150</span>
+            {sid && (
+              <button
+                onClick={() => toggleWatch(sid)}
+                className={`ml-auto px-2.5 py-1 text-[12px] mono rounded border transition-colors ${
+                  watch.includes(sid)
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
+                }`}
+                title={watch.includes(sid) ? '點擊取消追蹤' : '加入追蹤（存於本機瀏覽器）'}
+              >
+                {watch.includes(sid) ? '★ 已追蹤' : '☆ 追蹤'} {labelOf(mm, sid)}
+              </button>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-          {chips.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSid(s)}
-              className={`px-2.5 py-1 text-[12px] mono rounded border transition-colors ${
-                sid === s ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
-              }`}
-            >
-              {s}
-              {mm[s]?.name && <span className="ml-1 text-[11px] opacity-75">{mm[s]?.name}</span>}
-            </button>
-          ))}
-          {live && list.length > chips.length && (
-            <select
-              value={chips.includes(sid) ? '' : sid}
-              onChange={(e) => e.target.value && setSid(e.target.value)}
-              className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
-            >
-              <option value="">更多個股（前 {list.length}）…</option>
-              {list.map((s) => (
-                <option key={s} value={s}>{labelOf(mm, s)}</option>
+          {watch.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-[var(--muted)] mr-0.5">追蹤</span>
+              {watch.map((s) => (
+                <button key={s} onClick={() => setSid(s)} className={chipCls(sid === s)}>
+                  <span style={{ color: 'var(--accent)' }}>★</span> {s}
+                  {mm[s]?.name && <span className="ml-1 text-[11px] opacity-75">{mm[s]?.name}</span>}
+                </button>
               ))}
-            </select>
+            </div>
           )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-[var(--muted)] mr-0.5">{topRows.length ? `宇宙前 ${hot.length}` : '熱門'}</span>
+            {hot.map((h) => (
+              <button
+                key={h.sid}
+                onClick={() => setSid(h.sid)}
+                className={chipCls(sid === h.sid)}
+                title={h.pct != null ? `綜合分位 ${Math.round(h.pct * 100)}%` : undefined}
+              >
+                {h.rank > 0 && <span className="mr-1 opacity-60">{h.rank}</span>}
+                {h.sid}
+                {h.name && <span className="ml-1 text-[11px] opacity-75">{h.name}</span>}
+              </button>
+            ))}
+            {live && list.length > hot.length && (
+              <select
+                value={hot.some((h) => h.sid === sid) ? '' : sid}
+                onChange={(e) => e.target.value && setSid(e.target.value)}
+                className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+              >
+                <option value="">更多個股（前 {list.length}）…</option>
+                {list.map((s) => (
+                  <option key={s} value={s}>{labelOf(mm, s)}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </Panel>
       {sid && live && <StockHeader sid={sid} fallbackName={mm[sid]?.name ?? ''} />}
-      {sid && series && series.length > 0 && (
-        <Panel title={`${labelOf(mm, sid)} · K 線`} sub="紅漲綠跌 · 可拖曳縮放">
-          <RangeCandle key={sid} data={series} height={280} volume />
+      {sid && series && series.length > 0 ? (
+        <StockChartPanel sid={sid} title={`${labelOf(mm, sid)} · K 線`} series={series} />
+      ) : sid ? (
+        <Panel title={`${labelOf(mm, sid)} · K 線`}>
+          <div className="h-[120px] flex items-center justify-center text-[13px] text-[var(--muted)]">
+            {!series || loading
+              ? `載入 ${labelOf(mm, sid)} K 線…`
+              : live
+                ? `無 ${labelOf(mm, sid)} K 線資料`
+                : `離線快照僅含熱門 ${meta.top_stocks.length} 檔，無 ${labelOf(mm, sid)} K 線`}
+          </div>
         </Panel>
-      )}
+      ) : null}
       {sid && live && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <InstitutionalPanel sid={sid} />
@@ -937,7 +1077,6 @@ function StockFactors() {
           </div>
         </Panel>
       )}
-      {sid && live && <CompositeTrendPanel sid={sid} />}
     </div>
   )
 }
@@ -948,7 +1087,10 @@ function Market() {
   const indices = useResource('indices', fetchIndices, () => ({ taiex: [], tpex: [] }) as Indices)
   const [list, setList] = useState<string[]>(meta.top_stocks)
   const [sid, setSid] = useState<string>(() => meta.top_stocks[0] ?? '') // 空資料湖無個股時避免 undefined
-  const [cache, setCache] = useState<Record<string, Candle[]>>(FALLBACK.stocks)
+  // OHLC 以 sid 標記：換股瞬間舊資料因 sid 不符而不渲染，杜絕「新標題配舊 K 線」殘影
+  const [ohlc, setOhlc] = useState<{ sid: string; rows: Candle[] } | undefined>(() =>
+    live || !sid ? undefined : { sid, rows: FALLBACK.stocks[sid] ?? [] },
+  )
   const [loading, setLoading] = useState(false)
 
   // 即時模式：拉成交值前 150 檔完整選單（快照只內嵌前 8）
@@ -961,24 +1103,29 @@ function Market() {
     }
   }, [live])
 
-  // 選到未快取的個股 → 即時 fetch OHLC
+  // 不快取：選到個股就即時重抓 OHLC（離線退回內嵌樣本）
   useEffect(() => {
-    if (!sid || cache[sid] || !live) return // 無選定個股（空資料湖）時不打 /api/stocks/undefined
+    if (!sid) return // 無選定個股（空資料湖）時不打 /api/stocks/undefined
+    if (!live) {
+      setOhlc({ sid, rows: FALLBACK.stocks[sid] ?? [] })
+      return
+    }
     let alive = true
     setLoading(true)
+    setOhlc(undefined)
     fetchStockOhlc(sid)
-      .then((k) => alive && setCache((m) => ({ ...m, [sid]: k })))
-      .catch(() => {})
+      .then((k) => alive && setOhlc({ sid, rows: k }))
+      .catch(() => alive && setOhlc({ sid, rows: FALLBACK.stocks[sid] ?? [] }))
       .finally(() => alive && setLoading(false))
     return () => {
       alive = false
     }
-  }, [sid, live, cache])
+  }, [sid, live])
+  const series = ohlc?.sid === sid ? ohlc.rows : undefined
 
   const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
   const mm = metaMap.data ?? {}
   const chips = meta.top_stocks
-  const series = cache[sid]
   const taiex = indices.data?.taiex ?? []
   const otc = indices.data?.tpex ?? []
   const idxHint = (
@@ -2051,7 +2198,8 @@ const PAGES = [
 
 function Shell() {
   const { meta, live } = useMeta()
-  const [page, setPage] = useState('overview')
+  // 預設落在個股因子頁（PG 直查、毫秒級）；總覽等讀湖頁面切到才算（分鐘級）
+  const [page, setPage] = useState('stock')
   const cur = useMemo(() => PAGES.find((p) => p.id === page)!, [page])
   return (
     <div className="min-h-screen flex text-[var(--fg)]">
@@ -2104,30 +2252,22 @@ function Shell() {
   )
 }
 
-function Splash({ note }: { note: string }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center text-[var(--muted)]">
-      <div className="flex flex-col items-center gap-3">
-        <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: 'var(--accent)' }} />
-        <div className="text-[13px] mono">{note}</div>
-      </div>
-    </div>
-  )
-}
-
 export default function App() {
-  // 啟動只載輕量 meta（不預算因子/回測/容量）；各頁切到才 fetch 自己那段。
-  const [ctx, setCtx] = useState<MetaCtxT | null>(null)
+  // 開頁零等待（使用者裁決，2026-07-10）：立即以內嵌 meta 渲染殼，/api/health（毫秒級）
+  // 判定 live；meta 讀資料湖可能要分鐘級，改背景載入、到了再補 as_of/涵蓋等欄位。不快取。
+  const [ctx, setCtx] = useState<MetaCtxT>({ meta: FALLBACK.meta, live: false })
   useEffect(() => {
     let alive = true
+    fetchHealth()
+      .then(() => alive && setCtx((c) => (c.live ? c : { ...c, live: true })))
+      .catch(() => {}) // 探針失敗 → 維持快照模式；meta 若成功仍會翻 live
     fetchMeta()
       .then((m) => alive && setCtx({ meta: m, live: true }))
-      .catch(() => alive && setCtx({ meta: FALLBACK.meta, live: false })) // API 不可達 → 內嵌 meta
+      .catch(() => {}) // API 不可達 → 維持內嵌 meta
     return () => {
       alive = false
     }
   }, [])
-  if (!ctx) return <Splash note="連線監控 API…" />
   return (
     <MetaCtx.Provider value={ctx}>
       <Shell />
