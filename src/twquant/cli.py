@@ -253,6 +253,124 @@ def backfill_revenue(
         ingest_revenue(month=month)
 
 
+def _fubon_universe(wh: object, pattern: str) -> list[str]:
+    """從資料湖推導全市場股票池：優先 stock_meta，退回 prices_daily；過濾 pattern、排序去重。
+
+    scan 只讀已存分區的 stock_id 欄（不觸發 schema 驗證），故資料湖有行情/基本資料即可，
+    無須另開網路 universe 端點（富邦DJ 亦無此端點）。兩表皆無資料 → 回 []（呼叫端報錯）。
+    """
+    import polars as pl
+
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+
+    assert isinstance(wh, Warehouse)
+    for table in ("stock_meta", "prices_daily"):
+        try:
+            df = wh.scan(table).select("stock_id").unique().collect()
+        except DataError:
+            continue
+        sids = df.filter(pl.col("stock_id").str.contains(pattern))["stock_id"].sort().to_list()
+        if sids:
+            return sids
+    return []
+
+
+@app.command(name="backfill-fubon-chip")
+def backfill_fubon_chip(
+    from_: str = typer.Option(..., "--from", help="起始日 YYYY-MM-DD"),
+    to: str = typer.Option(..., "--to", help="結束日 YYYY-MM-DD"),
+    stocks: str = typer.Option(
+        "", "--stocks", help="股票代號逗號分隔（如 2330,2317）；留空＝全市場"
+    ),
+    universe: str = typer.Option(
+        r"^[1-9][0-9]{3}$", help="全市場模式的代號過濾（預設四碼、排除權證/ETF）"
+    ),
+    data_dir: str | None = typer.Option(
+        None,
+        "--data-dir",
+        help="覆寫資料湖路徑（預設用 system.yaml；全市場模式需已有 stock_meta/行情）",
+    ),
+    skip_existing: bool = typer.Option(True, help="跳過已抓過的日期分區（續傳）"),
+    yes: bool = typer.Option(False, "--yes", help="全市場大量請求前不再確認"),
+) -> None:
+    """回補富邦DJ 券商分點買賣超 → broker_trades（免費爬蟲，D-019）。
+
+    --stocks 指定個股；**留空＝全市場**（股票池讀資料湖 stock_meta，退回 prices_daily）。
+    逐日→逐股抓取，raw HTML 落 data/raw/fubon_chip/date=<d>/<sid>.html 續傳；某日全股累積後
+    該日一次寫入 clean/broker_trades（part-fubon.parquet，Warehouse 分區級替換）。
+
+    ⚠️ 全市場一天 ~1800 檔、限流 1 req/2s → 單日約 1 小時；請求量大，>100 檔會先確認。
+    """
+    import polars as pl
+
+    from twquant.data.sources import fubon_chip
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import DataError
+
+    start = dt.date.fromisoformat(from_)
+    end = dt.date.fromisoformat(to)
+    cfg = _load_system()
+    wh = Warehouse(data_dir or cfg.data_dir)
+    client = fubon_chip.browser_client(cfg.source_rates["fubon"])
+    raw_root = Path(data_dir or cfg.data_dir) / "raw" / "fubon_chip"
+
+    sids = [s.strip() for s in stocks.split(",") if s.strip()]
+    mode = f"{len(sids)} 檔"
+    if not sids:  # 全市場：從資料湖推導股票池
+        sids = _fubon_universe(wh, universe)
+        if not sids:
+            typer.secho(
+                "資料湖無 stock_meta/prices_daily 可推導股票池；先 backfill 或改用 --stocks 指定。",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+        mode = f"全市場 {len(sids)} 檔"
+
+    days = [d for d in _daterange(start, end) if d.weekday() < 5]  # 跳週末（非交易日自然空表）
+    rate = cfg.source_rates["fubon"]
+    est_min = len(sids) * len(days) * (rate.per_seconds / max(rate.max_requests, 1)) / 60
+    typer.secho(
+        f"富邦DJ 分點回補 {start}~{end}｜{mode} × {len(days)} 平日｜約 {est_min:.0f} 分鐘",
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
+    if len(sids) > 100 and not yes:
+        typer.confirm(f"將對富邦DJ 發出約 {len(sids) * len(days)} 次請求，確定執行？", abort=True)
+
+    for day in days:
+        if skip_existing and wh.partition_exists("clean", "broker_trades", day, "fubon"):
+            typer.secho(f"  [{day}] 已存在，跳過", fg=typer.colors.YELLOW)
+            continue
+        raw_dir = raw_root / f"date={day.isoformat()}"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        frames: list[pl.DataFrame] = []
+        for sid in sids:
+            cache = raw_dir / f"{sid}.html"
+            if cache.exists():
+                html = cache.read_bytes()
+            else:
+                try:
+                    html = fubon_chip.fetch_broker_trades(client, sid, day)
+                except DataError as exc:
+                    typer.secho(f"  [SKIP] {day} {sid}：{exc}", fg=typer.colors.YELLOW)
+                    continue
+                cache.write_bytes(html)
+            df = fubon_chip.rows_to_canonical(fubon_chip.parse_broker_rows(html), sid, day)
+            if not df.is_empty():
+                frames.append(df)
+        if not frames:
+            typer.secho(f"  [{day}] 無分點資料（非交易日或全空）", fg=typer.colors.YELLOW)
+            continue
+        full = pl.concat(frames)
+        wh.write("clean", "broker_trades", full, source="fubon")
+        typer.secho(
+            f"  [OK] {day}：{full.height} 列（{full['stock_id'].n_unique()} 檔）已存入",
+            fg=typer.colors.GREEN,
+        )
+    typer.secho("富邦DJ 分點回補完成。", fg=typer.colors.GREEN, bold=True)
+
+
 def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
     """距離下一個 hh:mm（同時區）的秒數；已過今日該時刻則算明日。"""
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
