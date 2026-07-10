@@ -77,6 +77,25 @@ def _wrap(sid: str, rows: list[dict[str, Any]], key: str = "date") -> dict[str, 
     return {"sid": sid, "as_of": (rows[-1][key] if rows else None), "source": "pg", "rows": rows}
 
 
+def stock_meta_all(wh: object, cfg: ServingConfig) -> dict[str, Any]:
+    """全宇宙 代號→中文名/產業/市場（PG serving.stock_meta 一次讀）。
+
+    供個股頁選單/追蹤股標中文；取代讀資料湖的 snapshot.stock_meta_map（全湖掃描、慢）。
+    """
+    from psycopg.rows import dict_row
+
+    from twquant.data.serving import store
+
+    with store.connect(cfg) as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(f'SELECT stock_id, name, industry, market FROM "{cfg.pg_schema}".stock_meta')
+        rows = list(cur.fetchall())
+    meta = {
+        str(r["stock_id"]): {"name": r["name"], "industry": r["industry"], "market": r["market"]}
+        for r in rows
+    }
+    return {"meta": meta}
+
+
 # ── 純衍生函數（可單元測試，不碰 PG）──────────────────────────────
 
 

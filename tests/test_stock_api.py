@@ -215,6 +215,36 @@ def test_composite_top_pg_rank_order(tmp_path: Path) -> None:
         _drop(cfg)
 
 
+def test_stock_meta_all_pg(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
+    from twquant.data.serving import sync as ssync
+
+    wh = Warehouse(tmp_path)
+    wh.write(
+        "clean",
+        "stock_meta",
+        pl.DataFrame(
+            {
+                "stock_id": ["2330", "0050"],
+                "name": ["台積電", "元大台灣50"],
+                "market": ["TWSE", "TWSE"],
+                "industry": ["半導體業", "ETF"],
+                "list_date": [None, None],
+                "delist_date": [None, None],
+            }
+        ).with_columns(pl.col("list_date").cast(pl.Date), pl.col("delist_date").cast(pl.Date)),
+    )
+    try:
+        _drop(cfg)
+        ssync.sync_all(wh, cfg)
+        out = stock_api.stock_meta_all(None, cfg)
+        meta = out["meta"]
+        assert meta["2330"]["name"] == "台積電" and meta["2330"]["industry"] == "半導體業"
+        assert meta["0050"]["name"] == "元大台灣50"  # 保前導零
+    finally:
+        _drop(cfg)
+
+
 def _broker_trades(rows_by_day: dict[dt.date, list[tuple[str, int, int]]]) -> pl.DataFrame:
     from twquant.conventions import TZ
 

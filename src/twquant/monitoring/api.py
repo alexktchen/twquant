@@ -139,8 +139,11 @@ def get_stocks(wh: WarehouseDep) -> dict[str, object]:
 
 @app.get("/api/stock-meta")
 def get_stock_meta(wh: WarehouseDep) -> dict[str, object]:
-    """代號 → 中文名 / 產業別（族群）/ 市場別；前端據此把數字股號標成中文。"""
-    return {"meta": snap.stock_meta_map(wh)}
+    """代號 → 中文名 / 產業別（族群）/ 市場別（PG serving.stock_meta，毫秒級）；前端據此標中文。
+
+    原讀資料湖（全湖掃描，實測 ~108s）改讀 PG——個股頁選單與追蹤股名稱即時可用。
+    """
+    return _stock_ep(lambda: stock_api.stock_meta_all(wh, stock_api.serving_cfg()))
 
 
 @app.get("/api/stocks/{sid}")
