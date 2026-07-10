@@ -22,6 +22,9 @@ source_rates:
   finmind:
     max_requests: 6
     per_seconds: 1.0
+  fubon:  # 富邦DJ 分點頁（免費公開站，禮貌限流；全市場一天 ~1800 檔）
+    max_requests: 1
+    per_seconds: 2.0
 
 quality_gate:
   min_rows_ratio: 0.8

@@ -9,6 +9,29 @@
 
 ## 已裁決
 
+### D-019（2026-07-09，已裁決）broker_trades 分點來源改走免費富邦DJ（取代 D-001）
+- 問題：D-001 裁定分點走 FinMind **付費** API；但 FinMind 的分點 dataset 屬贊助會員，
+  成本與額度是門檻。既有 legacy `cloudDailyReport` 已有可用的富邦DJ 分點抓法，能否改走
+  免費來源接上 canonical `broker_trades`（schema 早已定義，T-010/T-016 待接）。
+- 選項：A. 照 D-001 走 FinMind 付費；B. 改寫富邦DJ 免費爬蟲成 twquant 來源；C. 只先評估。
+- 裁決：**B，取代 D-001 的來源選擇**（D-001 clause B「禁止驗證碼自動破解」仍有效；
+  富邦DJ 是公開頁面爬取，與 TPEX/TDCC 既有爬法同性質，非破解）。新增
+  `data/sources/fubon_chip.py`（`fetch → parse_broker_rows → rows_to_canonical`，注入式
+  HttpClient、內建 html.parser 解析）+ CLI `backfill-fubon-chip`。
+- 來源特性與限制（寫進因子設計前提，重要）：富邦DJ zco 頁為**母公司層級 top-15 買超 +
+  top-15 賣超**彙總（實測會混入少數本土分點如「新光-台中」），故 canonical：
+  `broker_id` = **券商名稱**（無官方代號）、`avg_price` = **null**（頁面無均價）、
+  單位張 ×1000 轉股、`available_at` = 交易日 **18:00** 台北（盤後，比照 prices/institutional，
+  D-008 訊號截點 20:00 內同日可見）。**無分公司(分點)全貌、無鉅額/隔日沖明細** → T-016
+  的「總公司排除／分點集中度全譜」不可由此來源完全計算；需分點全貌時另接官方 bsr/付費源。
+- 架構歸屬：**不註冊為 daily SourceSpec**。富邦DJ 每檔每日、全市場一天 ~1800 請求屬批量
+  回補，由專屬 CLI 指令驅動（比照 finmind `backfill-finmind`、非每日編排迴圈），限流
+  `source_rates.fubon`（1 req / 2s）。承接 D-011/D-014 的 (table,date,source) 分片替換：
+  逐日累積全股後**該日一次**寫 `part-fubon.parquet`（Warehouse 分區級替換 → 逐股寫會互蓋）。
+- 範圍：來源模組 + 回補指令 + 離線 fixture 測試。`backfill-fubon-chip` 支援 `--stocks` 指定
+  個股，或**留空＝全市場**（股票池讀資料湖 stock_meta→prices_daily，`^[1-9][0-9]{3}$` 過濾、
+  >100 檔先確認、`--data-dir` 可指向已populated 的資料湖）。`chip.concentration_*` 因子待 T-016。
+
 ### D-018（2026-07-09，已裁決）資料後台「一鍵補抓」——白名單指令 + 伺服器端執行
 - 問題：D-016 定監控 API 唯讀、補抓走 CLI（複製建議指令、自己開終端貼上）。實務上
   漏抓多為零星單日/單表，來回切終端摩擦大；希望在後台直接按鈕補抓。
