@@ -256,6 +256,18 @@ def get_ingest_gaps(wh: WarehouseDep) -> dict[str, object]:
     return snap.ingest_gaps(wh)
 
 
+@app.get("/api/ingest-tracks")
+def get_ingest_tracks() -> dict[str, object]:
+    """可手動抓取的資料軌白名單（供「手動抓取歷史資料」表單的資料集選單）。"""
+    return {"tracks": jobs.fetchable_tracks()}
+
+
+@app.get("/api/holiday-calendar")
+def get_holiday_calendar(wh: WarehouseDep) -> dict[str, object]:
+    """官方開休市日曆（market_holidays）：開市日數、休市清單、官方 vs 觀測核對。"""
+    return snap.holiday_calendar(wh)
+
+
 class IngestJobRequest(BaseModel):
     """一鍵補抓請求：只收缺口識別（指令由白名單推導，不收命令字串）。"""
 

@@ -58,6 +58,20 @@ export type IngestJob = {
   started: string; ended: string | null; exit_code: number | null; tail: string[]
 }
 export type IngestJobs = { jobs: IngestJob[]; busy: boolean }
+// 可手動抓取的資料軌（白名單）：unit=date 收 YYYY-MM-DD、month 收 YYYY-MM。
+export type IngestTrack = { table: string; source: string; label: string; unit: 'date' | 'month' }
+export type IngestReq = { table: string; source: string; from: string; to: string; force?: boolean }
+// 官方開休市日曆（market_holidays）：開市日數 + 休市清單 + 官方 vs 觀測核對。
+export type HolidayRow = { date: string; weekday: string | null; name: string }
+export type HolidayCalendar = {
+  available: boolean
+  years?: number[]
+  sessions?: number
+  first?: string | null
+  last?: string | null
+  closed?: HolidayRow[]
+  cross_check?: { missing: string[]; unexpected: string[]; range: [string, string] | null }
+}
 
 // 個股中繼資料（中文名 / 產業別族群 / 市場別）+ 個股因子體檢卡。
 export type StockMetaEntry = { name: string | null; industry: string | null; market: string | null }
@@ -131,10 +145,19 @@ export const fetchIngestMatrix = () => getJSON<IngestMatrix>('/api/ingest-matrix
 export const fetchIngestGaps = () => getJSON<IngestGaps>('/api/ingest-gaps')
 export const fetchHeartbeat = () => getJSON<Heartbeat>('/api/heartbeat')
 export const fetchIngestJobs = () => getJSON<IngestJobs>('/api/ingest-jobs')
-export const startIngestJob = (g: IngestGap, force = false) =>
+export const fetchIngestTracks = () => getJSON<{ tracks: IngestTrack[] }>('/api/ingest-tracks').then((r) => r.tracks)
+// 補抓／手動抓取共用同一端點（POST /api/ingest-jobs）：指令由後端白名單推導。
+const postIngestJob = (req: IngestReq) =>
   postJSON<IngestJob>('/api/ingest-jobs', {
-    table: g.table, source: g.source, from: g.from, to: g.to, force,
+    table: req.table, source: req.source, from: req.from, to: req.to, force: req.force ?? false,
   })
+export const startIngestJob = (g: IngestGap, force = false) =>
+  postIngestJob({ table: g.table, source: g.source, from: g.from, to: g.to, force })
+export const startIngestFetch = (req: IngestReq) => postIngestJob(req)
+export const fetchHolidayCalendar = () => getJSON<HolidayCalendar>('/api/holiday-calendar')
+// 官方開休市日曆一鍵抓取（端點無年度參數；from/to 忽略，後端整年一抓）。
+export const startHolidayFetch = () =>
+  postIngestJob({ table: 'market_holidays', source: 'twse', from: '-', to: '-' })
 export const fetchSectorFlows = (window = 20) =>
   getJSON<{ flows: SectorFlows }>(`/api/sector-flows?window=${window}`).then((r) => r.flows)
 export const fetchBacktest = (start: string, end: string) =>

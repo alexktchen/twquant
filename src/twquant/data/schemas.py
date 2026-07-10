@@ -207,6 +207,21 @@ TRADING_CALENDAR = _schema(
     },
 )
 
+MARKET_HOLIDAYS = _schema(
+    "market_holidays",
+    1,
+    {
+        # 參考/維度表（無 date 欄 → 單一 _all 分區；官方年度公布，非 PIT 事實，無 available_at）。
+        # 用 holiday_date 而非 date，避免 warehouse 依 date 逐日分區（整年一檔即可）。
+        "holiday_date": _col(pl.Date),  # 該註記所屬日期
+        "year": _col(pl.Int32),  # 西元年（民國換算）
+        "name": _col(pl.String),  # 假日/註記名稱
+        "weekday": _col(pl.String, nullable=True),  # 原始星期字（四/五/六…）
+        "description": _col(pl.String, nullable=True),
+        "closed": _col(pl.Boolean),  # True=休市；False=僅為交易日註記（開始/最後交易日）
+    },
+)
+
 INGEST_LOG = _schema(
     "ingest_log",
     1,
@@ -245,6 +260,7 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "taifex_institutional": TAIFEX_INSTITUTIONAL,
     "stock_meta": STOCK_META,
     "trading_calendar": TRADING_CALENDAR,
+    "market_holidays": MARKET_HOLIDAYS,
     "ingest_log": INGEST_LOG,
     "structural_breaks": STRUCTURAL_BREAKS,
 }

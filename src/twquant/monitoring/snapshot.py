@@ -364,7 +364,13 @@ def institutional(wh: Warehouse) -> list[dict[str, object]]:
 
 
 def revenue(wh: Warehouse) -> tuple[str | None, list[dict[str, object]]]:
-    """最新月營收 YoY 成長前 15（營收 > 5 億）；回傳 (年月, 明細)。"""
+    """最新月營收 YoY 成長前 15（營收 > 5 億）；回傳 (年月, 明細)。
+
+    尚未擷取 monthly_revenue（只抓了行情的資料湖）→ 回 (None, [])，不讓 /api/meta 因單一
+    可選表缺席而 500（比照 market_indices/stock_meta_map/sector_flows 的存在性守衛）。
+    """
+    if not (wh.root / "clean" / "monthly_revenue").exists():
+        return None, []
     ym = wh.sql("SELECT max(year_month) ym FROM monthly_revenue")["ym"][0]
     if ym is None:
         return None, []
@@ -702,6 +708,43 @@ def _revenue_gaps(wh: Warehouse) -> list[dict[str, object]]:
             }
         )
     return out
+
+
+def holiday_calendar(wh: Warehouse) -> dict[str, object]:
+    """官方開休市日曆摘要（供資料後台「官方開休市日曆」面板）。
+
+    未擷取（ingest-holidays）→ {"available": False}。否則回開市日數、涵蓋區間、休市清單
+    （前端依當日過濾出近期休市）與官方 vs 觀測（prices_daily）核對結果。
+    """
+    from twquant.data import calendar as cal
+
+    hol = cal.official_holidays(wh)
+    if hol is None or hol.is_empty():
+        return {"available": False}
+    tc = cal.official_calendar(wh)
+    closed = (
+        hol.filter(pl.col("closed"))
+        .sort("holiday_date")
+        .select(pl.col("holiday_date").cast(pl.Utf8).alias("date"), "weekday", "name")
+        .to_dicts()
+    )
+    chk = cal.cross_check_official(wh)
+    rng = cast("tuple[dt.date, dt.date] | None", chk["range"])
+    missing = cast("list[dt.date]", chk["missing"])
+    unexpected = cast("list[dt.date]", chk["unexpected"])
+    return {
+        "available": True,
+        "years": chk["years"],
+        "sessions": len(tc),
+        "first": tc.sessions[0].isoformat() if tc.sessions else None,
+        "last": tc.sessions[-1].isoformat() if tc.sessions else None,
+        "closed": closed,
+        "cross_check": {
+            "missing": [d.isoformat() for d in missing],
+            "unexpected": [d.isoformat() for d in unexpected],
+            "range": [rng[0].isoformat(), rng[1].isoformat()] if rng else None,
+        },
+    }
 
 
 def ingest_gaps(wh: Warehouse) -> dict[str, object]:
