@@ -107,7 +107,7 @@ PG 是可隨時全量重建的衍生讀取層（詳 §6）。
 | institutional_daily | P2 | ✅ 2025-07-01~2026-07-08、146 交易日、1,381 檔（**僅上市 TWSE T86**） | 上櫃法人走 FinMind（T-010） | 1（上櫃缺口標註於 UI） |
 | margin_daily | P3 | ✅ 同期間（僅上市 MI_MARGN） | 上櫃融資券走 FinMind（T-010） | 1（同上） |
 | monthly_revenue | P4 | ✅ 上市+上櫃，24 個月分區 | — | 1 |
-| index_daily | （rs_market 因子輸入） | ✅ | — | 1 |
+| index_daily | （resid_mom β 因子輸入） | ✅ | — | 1 |
 | shareholding_dispersion | P5 | ⚠️ 僅 1 週快照（2026-07-03，3,350 檔，**實測含 2,952 檔四碼普通股**——程式註解「僅 6 碼」已過時） | 週頻 ingest 排入排程，歷史往前累積；TDCC opendata 無歷史回補 | 2 |
 | broker_trades | P6 | ⚠️ PoC：1 日 × 4 檔 × 119 列。富邦DJ 來源（D-019）為**母公司層級** top-15 買賣超：`broker_id` = 券商中文名（無分點代號）、`avg_price` 恆 null | 全市場每日抓取 + 回補（禮貌限流）；真分點需新來源（見 §12-2） | 2 |
 | inst_holding | Header 外資持股比 | ❌ schema only，無轉接器 | T-010 | 3 |
@@ -271,7 +271,7 @@ PG 內容僅供展示，**永不作為因子/回測輸入**。Header 顯示「�
 
 | category | 因子（direction） |
 |---|---|
-| price（10） | mom_1d(+)、mom_20d(+)、mom_60d(+)、high_52w(+)、reversal_5d(−)、vol_20d(−)、rs_market_20d(+)、overnight_ret_20d(−)、intraday_ret_20d(+)、residual_reversal_5d(−) |
+| price（10） | mom_1d(+)、mom_20d(+)、mom_60d(+)、high_52w(+)、reversal_5d(−)、vol_20d(−)、resid_mom_20d(+)、overnight_ret_20d(−)、intraday_ret_20d(+)、residual_reversal_5d(−) |
 | volume（2） | vol_ratio_5d(+)、turnover_z_20d(+) |
 | chip（7） | trust_net_10d(+)、foreign_net_10d(+)、trust_streak(+)、foreign_streak(+)、inst_net_10d(+)、margin_velocity_5d(−)、short_margin_ratio(+) |
 | fundamental（2） | revenue_yoy(+)、revenue_accel(+) |

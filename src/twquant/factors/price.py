@@ -144,37 +144,64 @@ def vol_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
 
 
 @factor(
-    name="price.rs_market_20d",
+    name="price.resid_mom_20d",
     category="price",
     direction=1,
     tables=["prices_daily", "index_daily"],
-    lookback_days=25,
-    params={"window": 20},
+    lookback_days=70,
+    params={"window": 20, "beta_window": 60},
 )
-def rs_market_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
-    """相對大盤強弱：個股 20 日報酬 − 加權指數 20 日報酬（正向：相對強者續強）。
+def resid_mom_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """beta 調整殘差動能：個股 20 日報酬 − β·大盤 20 日報酬（β 由 60 日日報酬迴歸；正向）。
+
+    取代舊 rs_market_20d（D-020）。舊版對橫斷面每檔減去同一個大盤 20 日報酬＝常數平移，
+    經去極值/z-score/排名後與 mom_20d 完全同構，在綜合分中把 20 日動能隱性雙倍加權；它其實
+    是本因子在 β≡1 的退化特例。此處每檔 β = Cov(r_i, r_m) / Var(r_m)（過去 beta_window 日
+    日報酬，僅用 ≤t 資料），使市場調整量隨個股變動、恢復獨立橫斷面資訊。
 
     需 index_daily（TAIEX）；未 backfill-index 時 view.table 讀無資料 raise，此因子自動略過。
+    大盤日報酬在窗內變異數為 0（如史料不足或指數平盤）時 β 未定義 → 該列不產生（不靜默填值）。
+    退化價（close=0，schema 為 _nonneg 允許）會使日報酬出現 0/0=NaN 或 x/0=inf；只保留有限
+    值（該股不產生值，比照 null），避免單一非有限值污染整個橫斷面標準化（median/std 傳染 NaN）。
     """
     raw = params.get("window", 20)
     window = int(raw) if isinstance(raw, int | float | str) else 20
+    braw = params.get("beta_window", 60)
+    beta_window = int(braw) if isinstance(braw, int | float | str) else 60
     px = view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
-    sret = pl.col("close") / pl.col("close").shift(window).over("stock_id", order_by="date") - 1.0
     idx = (
         view.table("index_daily")
         .filter(pl.col("index_id") == "TAIEX")
         .select("date", "close")
         .sort("date")
     )
-    idx = idx.with_columns(_mret=pl.col("close") / pl.col("close").shift(window) - 1.0).select(
-        "date", "_mret"
+    # 大盤日報酬與 20 日報酬一次算在指數序列上（正確的交易日位移），再 broadcast join
+    idxf = idx.with_columns(
+        _m=pl.col("close") / pl.col("close").shift(1) - 1.0,
+        _m20=pl.col("close") / pl.col("close").shift(window) - 1.0,
+    ).select("date", "_m", "_m20")
+    sret_d = pl.col("close") / pl.col("close").shift(1).over("stock_id", order_by="date") - 1.0
+    sret_20 = (
+        pl.col("close") / pl.col("close").shift(window).over("stock_id", order_by="date") - 1.0
     )
+    joined = (
+        px.with_columns(_r=sret_d, _s20=sret_20)
+        .join(idxf, on="date", how="inner")
+        .sort(["stock_id", "date"])
+    )
+    # β = Cov(r,m)/Var(m)，以 rolling_mean 組合（母體動差，尾窗、僅回看；不足窗回 null）
+    e_rm = (pl.col("_r") * pl.col("_m")).rolling_mean(beta_window).over("stock_id", order_by="date")
+    e_r = pl.col("_r").rolling_mean(beta_window).over("stock_id", order_by="date")
+    e_m = pl.col("_m").rolling_mean(beta_window).over("stock_id", order_by="date")
+    e_mm = (pl.col("_m") * pl.col("_m")).rolling_mean(beta_window).over("stock_id", order_by="date")
+    cov = e_rm - e_r * e_m
+    var = e_mm - e_m * e_m
+    beta = pl.when(var > 0).then(cov / var).otherwise(None)
     return (
-        px.with_columns(_sret=sret)
-        .join(idx, on="date", how="inner")
-        .with_columns(value=pl.col("_sret") - pl.col("_mret"))
+        joined.with_columns(_beta=beta)
+        .with_columns(value=pl.col("_s20") - pl.col("_beta") * pl.col("_m20"))
         .select("date", "stock_id", "value")
-        .drop_nulls("value")
+        .filter(pl.col("value").is_finite())  # 去 null 與 NaN/inf（退化價），不外洩非有限值
         .collect()
     )
 

@@ -122,7 +122,7 @@ FACTOR_ZH: dict[str, str] = {
     "price.high_52w": "52週高接近度",
     "price.reversal_5d": "5日短期反轉",
     "price.vol_20d": "20日波動率",
-    "price.rs_market_20d": "相對大盤強弱",
+    "price.resid_mom_20d": "beta殘差動能",
     "volume.vol_ratio_5d": "5日量比",
     "volume.turnover_z_20d": "20日量能Z",
     "chip.foreign_streak": "外資連買天數",

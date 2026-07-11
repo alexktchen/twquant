@@ -368,8 +368,10 @@ def scorecard(wh: object, cfg: ServingConfig, sid: str) -> dict[str, Any]:
     """個股因子計分卡（只讀 PG factor_values；未物化即回空卡，不再現算）。"""
     _check(sid, "factor_values")
     import twquant.factors.builtins  # noqa: F401  # 觸發註冊（取 direction）
-    from twquant.factors.registry import get
+    from twquant.factors.registry import get, list_factors
 
+    registered = set(list_factors())  # factor_values 為可重建快取、upsert 不刪列；
+    # 因子退役（如 D-020 的 rs_market_20d）後舊列可能殘留 → 顯示時略過非註冊因子，避免 get() raise。
     sch = cfg.pg_schema
     meta = _meta(cfg, sid)
     base: dict[str, Any] = {
@@ -397,6 +399,8 @@ def scorecard(wh: object, cfg: ServingConfig, sid: str) -> dict[str, Any]:
     factors_out: list[dict[str, Any]] = []
     for r in sorted(fvs, key=lambda x: str(x["factor"])):
         name = str(r["factor"])
+        if name not in registered:  # 退役因子的殘留舊列 → 略過（見上）
+            continue
         d = int(get(name).direction)
         z = float(r["z"])
         factors_out.append(

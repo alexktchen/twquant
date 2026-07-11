@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-11 因子去重（D-020）：`price.rs_market_20d` 與 `mom_20d` 橫斷面標準化後同構（常數平移，
+  綜合分把動能雙倍加權），移除並改造為 beta 調整殘差動能 `price.resid_mom_20d`（個股 20d − β·大盤 20d，
+  β 由 60 日日報酬迴歸）；factor 加非有限值護欄（退化價 close=0 致 NaN，避免污染 standardize）；
+  scorecard 略過退役因子殘留舊列。閘門全綠（pytest 279）＋前端 build 過。live PG 已重物化顯示窗
+  250 日並刪 rs_market 全史舊列。
+
 - 2026-07-10 `/api/stock-meta` 改讀 PG（使用者回報：追蹤股/選單無中文名）：原讀資料湖全湖
   掃描實測 ~108s，前端 stock-meta 名稱圖長期空→追蹤 chips/搜尋（0 檔）/更多個股皆無名。
   改讀 `serving.stock_meta`（`stock_api.stock_meta_all`），實測 0.25s；追蹤股顯示中文名、

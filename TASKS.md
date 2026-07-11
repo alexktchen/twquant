@@ -58,6 +58,24 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **D-020（因子維護：rs_market_20d → resid_mom_20d）**（2026-07-11）`price.rs_market_20d`
+  在橫斷面標準化流程與 `price.mom_20d` **數學同構**（同日對全宇宙減同一大盤報酬＝常數平移，
+  MAD/z-score/rank 皆不變 → z/pct/RankIC 幾乎逐點相同；實證 max|Δz|=8.88e-16），使綜合分
+  `signed_z_mean` 把 20 日動能隱性雙倍加權。改造為 **beta 調整殘差動能** `price.resid_mom_20d`
+  （β=Cov(r_i,r_m)/Var(r_m) 過去 60 日；`value=個股20d − β·大盤20d`；舊版即 β≡1 退化特例）——
+  β 隨個股變動 → 恢復獨立橫斷面資訊（實證 corr(z_mom,z_res)=0.958、max|Δz|=1.24、β 估計 vs 真值
+  corr=0.943）。改動：`factors/price.py`（刪/加）、`monitoring/snapshot.py` FACTOR_ZH、
+  `frontend/src/App.tsx` 詞條、`docs/PRD-001` §7、`stock_api.scorecard` 加退役因子防禦（略過
+  非註冊舊列，避免 PG 殘留使端點 500）。決策與運維清理 SQL 見 DECISIONS.md D-020。
+  **閘門**：ruff check + ruff format + mypy(127) + pytest **279 passed**（新增 6 測試：退役/註冊、
+  手算 β、與 mom 不同構＋舊 rs 同構對比、市場零變異守門、**非有限值護欄**、反前視）；
+  frontend oxlint+build 過。無 golden 依賴、SPEC 無因子清單條文需改。
+  **重物化（live PG）**：顯示窗 2025-07-01..2026-07-09（250 日）逐日重物化，resid_mom 覆蓋
+  250/250 日、綜合分改用新因子集；刪 rs_market 全史 1,204,875+690 列。過程發現退化價（2248 等
+  close=0）致 resid_mom 出 NaN 污染 standardize、被 `_compute_universe` 靜默吞掉（125/250 日缺列），
+  已於因子加 `is_finite` 護欄修正並補齊。**附帶暴露**（另開任務）：standardize 對 NaN 不 robust、
+  `_compute_universe` 靜默吞因子失敗、prices_daily 有 close=0 資料品質問題。
+
 - **T-035（主力券商買賣超·部分完成）**（2026-07-10）富邦DJ 券商(母公司)買賣超進 PG + 個股頁面板。
   `broker_trades` 直接列入 serving 鏡射表（每檔每日 top-15±、量小，不另做預聚合）；
   `stock_api.brokers`：近 window 日彙總各券商淨買賣超 → 買/賣超前 15 + 每日家數，PG 優先降級

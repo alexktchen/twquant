@@ -9,6 +9,51 @@
 
 ## 已裁決
 
+### D-020（2026-07-11，已裁決）rs_market_20d 與 mom_20d 橫斷面同構 → 改造為 beta 殘差動能
+- 問題：因子 `price.rs_market_20d`（個股 20 日報酬 − 大盤 20 日報酬）在體檢卡/factor_values
+  的橫斷面標準化流程裡與 `price.mom_20d` **數學同構**。同一天對所有股票減去同一個大盤
+  20 日報酬 = 對整個橫斷面加一個**常數平移**；MAD 去極值（median±k·MAD 邊界一起平移、
+  clip 後平移消去）、z-score（減均值時常數消去）、rank/percentile（平移保序）皆不改變
+  結果，故 z / pct / signed_z / RankIC 與 mom_20d 幾乎逐點相同（實證：合成 30 檔×120 日
+  標準化後 max|Δz| = 8.88e-16 = 浮點零；使用者實測 2025-07~2026-07 逐日 IC 完全一致）。
+  後果：綜合分 `composite_daily.signed_z_mean`（各因子 signed_z 逐檔平均）中，20 日動能被
+  **隱性雙倍加權**（rs 與 mom 兩欄近乎相同、direction 同為 +1）。反前視/單元測試皆攔不住
+  （各自都「正確」）。
+- 選項：A. 從註冊表移除 `rs_market_20d`（最小修正，消雙倍加權但丟失「相對大盤強弱」概念）；
+  B. 改造為 **beta 調整殘差動能**（估每檔 β，市場調整量隨個股變動 → 恢復獨立橫斷面資訊）；
+  C. 維持現狀。
+- 裁決：**B**。移除 `price.rs_market_20d`，新增 `price.resid_mom_20d`（direction=1，
+  tables=[prices_daily, index_daily]，params={window:20, beta_window:60}）：
+  `value(t) = [close_i(t)/close_i(t−20)−1] − β_i(t)·[TAIEX(t)/TAIEX(t−20)−1]`，
+  `β_i(t) = Cov(r_i,d, r_m,d) / Var(r_m,d)`（過去 beta_window 日日報酬，僅用 ≤t 資料）。
+  關鍵洞察：**舊 rs_market_20d 正是 β≡1 的退化特例**——β 固定為 1 時市場項是常數、被橫斷面
+  標準化消去；估出隨個股不同的 β 後，市場調整量在橫斷面有變異，因子恢復獨立資訊（實證
+  corr(z_mom, z_res)=0.958 但 max|Δz|=1.24，非同構；β 估計 vs 真值 corr=0.943）。
+- 邊界與慣例：延用 rs_market_20d 的「無 index_daily → view.table raise → 健檢自動略過」慣例；
+  市場日報酬變異數為 0 的日子 β 未定義 → 該列不產生（黃金規則 5，不靜默填值）。方向先驗維持
+  +1（相對強者續強），實際符號由體檢卡 z/pct/RankIC 呈現。
+- 影響範圍：`factors/price.py`（刪 rs_market_20d、加 resid_mom_20d）、
+  `monitoring/snapshot.py` FACTOR_ZH、`frontend/src/App.tsx` 因子詞條、`docs/PRD-001` §7 因子表。
+  規格：SPEC-002 只定機制不列因子清單、STRATEGY.md 未引用此因子，故無 SPEC 條文需改。
+  無 golden fixture 引用 rs_market_20d（tests/golden 尚未存在），不觸黃金規則 6。
+- 運維（PG 衍生層）：`factor_values` 為可重建快取（PRD §6.6）。upsert 不刪列，故重跑
+  `serving materialize` 不會移除既存的 `price.rs_market_20d` 舊列。為此
+  `monitoring/stock_api.scorecard` 加防禦：顯示時略過非註冊因子（避免舊列使 `get()` raise 而
+  端點 500）。一次性清理（已於 2026-07-11 對 live PG 執行）：
+  `DELETE FROM serving.factor_values WHERE factor = 'price.rs_market_20d';`
+  `DELETE FROM serving.factor_cross_stats WHERE factor = 'price.rs_market_20d';`
+- 非有限值護欄（重物化時發現）：schema `close` 為 `_nonneg`（允許 0）；個股 2248 等在資料湖
+  clean 層有 7 個 close=0，使 resid_mom 的 60 日 β 迴歸出現 `0/0=NaN`／`x/0=inf`。原
+  `.drop_nulls("value")` 不擋 NaN，單一 NaN 經 standardize 的 median/std 傳染整個 (date,factor)
+  橫斷面 → z 全 NaN → `_compute_universe` 的 `.filter(z.is_finite())` 把該因子整日丟掉（實測
+  近 250 交易日中 125 日 resid_mom 缺列）。修正：因子改 `.filter(value.is_finite())`（退化股
+  比照 null 不產生值、不外洩非有限值）。附帶暴露兩個既有系統性脆弱點（另開任務、不在本次範圍）：
+  (a) standardize 對單一 NaN 不 robust；(b) `_compute_universe` 的 `except: continue` 靜默吞因子
+  失敗（使此問題長期不可見）；(c) prices_daily clean 層存在 close=0 資料品質問題。
+- 運維已完成（2026-07-11，對 live docker PG:5433）：以 worktree 新因子碼指向主 repo 資料湖，
+  逐日重物化顯示窗 2025-07-01..2026-07-09（250 交易日），resid_mom 覆蓋 250/250 日、綜合分改用
+  新因子集重算；刪除 rs_market_20d 全史 1,204,875（factor_values）+ 690（factor_cross_stats）列。
+
 ### D-019（2026-07-09，已裁決）broker_trades 分點來源改走免費富邦DJ（取代 D-001）
 - 問題：D-001 裁定分點走 FinMind **付費** API；但 FinMind 的分點 dataset 屬贊助會員，
   成本與額度是門檻。既有 legacy `cloudDailyReport` 已有可用的富邦DJ 分點抓法，能否改走
