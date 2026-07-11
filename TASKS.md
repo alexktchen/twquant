@@ -47,6 +47,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-035 | broker_trades 全市場抓取+回補（富邦DJ，禮貌限流）+ `/brokers` 端點 + P6；集保週頻 ingest 排程 + `/dispersion` 端點 + P5 | SPEC-009 §2.2/§4 + STRATEGY §3 + D-019 | T-010, T-031 | B | 部分完成 |
 | T-036 | 主力分點因子上板：T-016 的 chip.concentration_* 落地後併入 factor_values/計分卡/P6 集中度折線（依賴 broker ≥60 交易日史） | STRATEGY §3 + SPEC-009 §3 | T-016, T-032, T-035 | B | todo |
 | T-037 | inst_holding ingest（FinMind）+ Header 外資持股比 + 上櫃法人/融資券補源 + TDCC 互動站備援來源評估 | SPEC-001 §1 + PRD-001 §4 | T-010, T-031 | B | todo |
+| T-038 | 綜合分預測力研究（D-020）：滾動 PIT IC 加權(A) vs 實證有效子集(B) 樣本內估計＋樣本外驗證報告 → 回 D-020 裁決；C（前端「非預測訊號」標示）依裁決同批落地 | SPEC-009 §3 + D-020 | T-032 | B | done |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -57,6 +58,30 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-038（綜合分預測力研究 + B/C 落地·done）**（2026-07-11）D-020 全程。
+  **研究**：PIT-safe 重跑（worktree 21 因子、資料湖 2023-01~2026-07、IS/OOS 切分）證實等權
+  綜合分樣本外無力（5d IC=−0.0047 t=−0.88、20d t=+0.09），忠實重現回報。三方對照——**B 有效
+  子集**兩 horizon OOS 皆過 D-006 promote（5d t≈8–9、20d t≈3–5）；**A 滾動 IC 加權** 20d OOS
+  從 IS t=8.63 崩到 t=0.04（過擬合）。報告 [docs/research/COMPOSITE-IC-D020.md](docs/research/COMPOSITE-IC-D020.md)。
+  **裁決 B+C**（D-020）並落地：
+  - **B**：新增純函數 `data/serving/composite.py::composite_from_signed`（子集 signed_z 均值＋
+    宇宙百分位，單一真相源），`materialize.py`（PG 物化）與 `monitoring/snapshot.py`（live 現算）
+    共用。子集入 `configs/serving.yaml.composite_factors`＝{reversal_5d, residual_reversal_5d,
+    revenue_yoy}（黃金規則 8，不寫死）＋ `ServingConfig.composite_factors`。factor_values/
+    cross_stats 仍寫全因子（體檢卡展示），僅 composite 用子集。SPEC-009 §3 同步。
+  - **C**：前端三處標示「非預測訊號」——體檢卡綜合分說明、K 線 P8 綜合分位副圖 sub、
+    宇宙熱門列 label tooltip（`frontend/src/App.tsx`）。
+  - **閘門**：ruff＋ruff format＋mypy(strict, 83 files) 全綠；pytest 266 passed / 11 skipped
+    （+5 新 `tests/test_serving_composite.py` 子集斷言；`test_serving_materialize.py` 補 composite=
+    子集均值斷言）＋ 1 pre-existing 環境失敗（`test_api_stock_meta_and_factors`，本機 venv 無
+    libpq/PG DSN，git stash 驗證 baseline 同樣失敗、非本次回歸）。frontend oxlint＋tsc＋vite build
+    成功（42 模組；本機 node_modules 曾殘留 lightweight-charts v4，`npm install` 同步回 lock 之 v5，
+    未改 package.json/lock）。**真實湖 smoke**：2330 綜合分 signed_z_mean=0.03＝子集三因子均值
+    （mom_20d 0.42 仍展示於 14 因子但不入綜合分）。
+  - **上線注意**：既有 `composite_daily` 為舊全因子物化 → 需
+    `serving rebuild --tables composite_daily`（或重跑 materialize 區間）才反映子集；docker 前端
+    需重建映像才顯示新標示。
 
 - **T-035（主力券商買賣超·部分完成）**（2026-07-10）富邦DJ 券商(母公司)買賣超進 PG + 個股頁面板。
   `broker_trades` 直接列入 serving 鏡射表（每檔每日 top-15±、量小，不另做預聚合）；

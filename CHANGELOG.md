@@ -1,5 +1,21 @@
 # CHANGELOG
 
+- 2026-07-11 D-020 裁決 B+C 落地：綜合分（composite_daily）由「全因子等權」改為「實證有效子集」
+  ＝短反轉＋產業殘差反轉＋月營收 YoY（`configs/serving.yaml.composite_factors`）。新增純函數
+  `data/serving/composite.py`，materialize（PG）與 snapshot（live）共用；factor_values 仍存全因子、
+  僅綜合分用子集。前端體檢卡/P8 副圖/宇宙熱門列標示「非預測訊號」。閘門：mypy strict 83 files、
+  pytest 266 passed（+5 子集斷言）、frontend build 綠。**上線需** `serving rebuild --tables
+  composite_daily` 重物化 + docker 前端重建。SPEC-009 §3 同步。
+
+- 2026-07-11 T-038 綜合分預測力研究完成（D-020 證據）：PIT-safe 實測確認等權綜合分樣本外無力
+  （5d IC=−0.0047 t=−0.88、20d t=+0.09）。三方樣本外對照：B 有效子集兩 horizon 皆過 D-006
+  promote（t≥3）、A 滾動 IC 加權 20d OOS 崩潰（t=0.04 過擬合）→ 建議 B+C、不建議 A。報告
+  docs/research/COMPOSITE-IC-D020.md，證據寫入 D-020。
+
+- 2026-07-11 D-020 開研究案（T-038）：composite_daily 綜合分實證無預測力（2023-01~2026-07，
+  動能/量能七因子 IC 與宣稱方向相反、與反轉/營收正 IC 抵銷，5 日 IC≈−0.009）。提案
+  A 滾動 PIT IC 加權 / B 實證有效子集 / C 前端標示「非預測訊號」，待裁決；純文件變更。
+
 - 2026-07-11 因子選股加「訊號最強/最弱」切換 + K 線可加選多個因子副圖（使用者需求）：
   `factor_top` 加 `order=top|bottom`（bottom＝方向化 z 遞增，找最逆因子方向個股，如 5 日
   反轉的漲多股）；`/api/factor-top` 加 `order` query（非法值 400）。前端 FactorScreener 加

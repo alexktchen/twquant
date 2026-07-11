@@ -119,6 +119,26 @@ def test_ac3_materialized_value_matches_compute(tmp_path: Path) -> None:
             assert cur.fetchone()[0] == 4  # 四檔宇宙
             cur.execute(f'SELECT count(*) FROM "{_SCHEMA}".composite_daily WHERE date = %s', (d21,))
             assert cur.fetchone()[0] == 4
+
+        # D-020：composite_daily 只由有效子集因子構成（非全因子等權）
+        from twquant.factors.registry import get
+
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT factor, z FROM "{_SCHEMA}".factor_values WHERE stock_id=%s AND date=%s',
+                ("1111", d21),
+            )
+            fv = {r[0]: float(r[1]) for r in cur.fetchall()}
+            present = [f for f in cfg.composite_factors if f in fv]
+            assert present, "子集因子應至少有一個可算（reversal_5d/residual_reversal_5d）"
+            assert "price.mom_20d" in fv  # 非子集因子仍寫入 factor_values（體檢卡展示）
+            expected = sum(fv[f] * get(f).direction for f in present) / len(present)
+            cur.execute(
+                f'SELECT signed_z_mean FROM "{_SCHEMA}".composite_daily '
+                "WHERE stock_id=%s AND date=%s",
+                ("1111", d21),
+            )
+            assert cur.fetchone()[0] == pytest.approx(expected, abs=1e-9)
     finally:
         _drop(conn)
         conn.close()
