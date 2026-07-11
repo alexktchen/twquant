@@ -46,6 +46,15 @@ class SystemConfig(BaseConfig):
     quality_gate: QualityGateConfig = QualityGateConfig()
 
 
+# D-020 綜合分有效子集的預設值（serving.yaml.composite_factors 缺省時後備）。
+# 權威值在 configs/serving.yaml；此常數僅為 pydantic 預設與 snapshot fallback 的單一來源。
+DEFAULT_COMPOSITE_FACTORS: tuple[str, ...] = (
+    "price.reversal_5d",
+    "price.residual_reversal_5d",
+    "fundamental.revenue_yoy",
+)
+
+
 class ServingConfig(BaseConfig):
     """serving.yaml 的模型（SPEC-009 §1 為權威）。PG 供應層＝衍生、可重建、僅供展示。"""
 
@@ -56,6 +65,8 @@ class ServingConfig(BaseConfig):
     pool_max: int = 8
     factor_history_days: int = 1100  # factor_values 保留窗（≈3 年）
     fallback_duckdb: bool = True  # PG 不可用時降級 DuckDB（false 則回 503）
+    # D-020：綜合分（composite_daily）只納入的實證有效子集（非全因子等權）。
+    composite_factors: tuple[str, ...] = DEFAULT_COMPOSITE_FACTORS
 
 
 def load_config[T: BaseConfig](path: str | Path, model: type[T]) -> T:

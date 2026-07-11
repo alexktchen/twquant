@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING, cast
 
 import polars as pl
 
-from twquant.errors import DataError
+from twquant.config import ServingConfig, load_config
+from twquant.data.serving.composite import composite_from_signed
+from twquant.errors import ConfigError, DataError
 
 if TYPE_CHECKING:
     from twquant.data.calendar import TradingCalendar
@@ -39,6 +41,20 @@ _REPO = Path(__file__).resolve().parents[3]
 CONFIGS_DIR = _REPO / "configs"
 STRATEGY_PATH = CONFIGS_DIR / "strategies" / "sample_revenue_trust.yaml"
 COSTS_PATH = CONFIGS_DIR / "costs.yaml"
+SERVING_PATH = CONFIGS_DIR / "serving.yaml"
+
+
+def _composite_factors() -> list[str]:
+    """綜合分有效子集（D-020）：讀 serving.yaml；缺檔/驗證失敗 → ServingConfig 預設子集。
+
+    live 現算（本模組）與 PG 物化（materialize.py）共用同一子集，維持綜合分定義單一真相源。
+    """
+    try:
+        cfg = load_config(SERVING_PATH, ServingConfig)
+    except ConfigError:  # 缺檔或驗證失敗 → 用內建預設子集（非靜默吞資料錯，僅 config 後備）
+        cfg = ServingConfig()
+    return list(cfg.composite_factors)
+
 
 _SID_RE = re.compile(r"[0-9A-Z]{2,6}")  # 個股代號白名單（API 路徑參數防 SQL 注入）
 
@@ -195,18 +211,12 @@ def stock_factor_scorecard(
     merged = ranked.join(zdf, on=["date", "stock_id", "factor"], how="inner").filter(
         pl.col("z").is_finite()
     )
-    # 綜合傾向 = 各因子 direction 調整後 z 的等權平均（策略配置無關）；再取宇宙百分位排名
+    # 綜合分 = D-020 有效子集的 direction 調整後 z（signed_z）均值，再取宇宙百分位排名
+    # （非全因子等權——等權在台股實證無預測力，見 D-020）；體檢卡下方仍列全部因子。
     dir_expr = pl.col("factor").replace_strict(directions, return_dtype=pl.Int64)
-    comp = (
-        merged.with_columns((pl.col("z") * dir_expr).alias("sz"))
-        .group_by(["date", "stock_id"])
-        .agg(pl.col("sz").mean().alias("composite"))
-    )
-    cnt = pl.col("composite").count().over("date")
-    comp = comp.with_columns(
-        (
-            (pl.col("composite").rank().over("date") - 1) / pl.max_horizontal(cnt - 1, pl.lit(1))
-        ).alias("cpct")
+    merged = merged.with_columns((pl.col("z") * dir_expr).alias("signed_z"))
+    comp = composite_from_signed(
+        merged.select("date", "stock_id", "factor", "signed_z"), _composite_factors()
     )
 
     factors_out: list[dict[str, object]] = []
@@ -229,8 +239,8 @@ def stock_factor_scorecard(
     crows = comp.filter(pl.col("stock_id") == sid).to_dicts()
     if crows:
         base["composite"] = {
-            "signed_z_mean": round(float(crows[0]["composite"]), 2),
-            "pct": round(float(crows[0]["cpct"]), 3),
+            "signed_z_mean": round(float(crows[0]["signed_z_mean"]), 2),
+            "pct": round(float(crows[0]["pct"]), 3),
             "n_universe": int(comp.height),
         }
     return cast("dict[str, object]", _sanitize(base))
