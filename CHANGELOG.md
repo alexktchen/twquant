@@ -1,5 +1,16 @@
 # CHANGELOG
 
+- 2026-07-11 K 線主圖疊加均線與關鍵價位（使用者需求）：`CandleChart` 主圖（pane 0）加
+  MA5/10/20/60 收盤均線（以完整史料滾動平均後裁切到視窗，視窗首日均值才正確）＋量價分布
+  關鍵價位 POC（最大量價位，實線）/VA頂·VA底（70% 價值區虛線，price-line 標籤帶價位數字）。
+  `RangeCandle` 加均線 chips（預設 MA5/MA20）與「關鍵價位」開關；crosshair legend 顯示各
+  均線值。關鍵價位為視覺化確認層（隨區間重算，非預測因子，見 research/PAPERS-KEYLEVELS.md §C）。
+  純前端：oxlint 綠、vite build 過。
+
+- 2026-07-11 研究：價量關鍵價位文獻調查（research/PAPERS-KEYLEVELS.md 第三批——CGO/
+  V 型未實現損益/支撐壓力實證）→ STRATEGY §4a 行為錨定因子規格 + T-039 排程（blocked）
+  + D-021 待裁決（周轉率權重資料來源）。
+
 - 2026-07-11 D-020 裁決 B+C 落地：綜合分（composite_daily）由「全因子等權」改為「實證有效子集」
   ＝短反轉＋產業殘差反轉＋月營收 YoY（`configs/serving.yaml.composite_factors`）。新增純函數
   `data/serving/composite.py`，materialize（PG）與 snapshot（live）共用；factor_values 仍存全因子、

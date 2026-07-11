@@ -48,6 +48,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-036 | 主力分點因子上板：T-016 的 chip.concentration_* 落地後併入 factor_values/計分卡/P6 集中度折線（依賴 broker ≥60 交易日史） | STRATEGY §3 + SPEC-009 §3 | T-016, T-032, T-035 | B | todo |
 | T-037 | inst_holding ingest（FinMind）+ Header 外資持股比 + 上櫃法人/融資券補源 + TDCC 互動站備援來源評估 | SPEC-001 §1 + PRD-001 §4 | T-010, T-031 | B | todo |
 | T-038 | 綜合分預測力研究（D-020）：滾動 PIT IC 加權(A) vs 實證有效子集(B) 樣本內估計＋樣本外驗證報告 → 回 D-020 裁決；C（前端「非預測訊號」標示）依裁決同批落地 | SPEC-009 §3 + D-020 | T-032 | B | done |
+| T-039 | 行為錨定因子：`price.cgo_250d` + `gain/loss_overhang_250d`（精讀 An 2016 §2 定案公式 → 實作三因子 → IC 報告含與 52週高/動能/反轉的相關矩陣） | STRATEGY §4a + research/PAPERS-KEYLEVELS.md + D-021 | T-011（還原價）, T-012 | B | blocked（D-021 + 還原價） |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, createChart, createTextWatermark } from 'lightweight-charts'
+import { AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createTextWatermark } from 'lightweight-charts'
 import fallbackRaw from './data.json'
 import {
   fetchBacktest,
@@ -88,6 +88,8 @@ const pct = (x: number, d = 1) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(d)}%`
 const sign = (x: number) => (x >= 0 ? 'var(--up)' : 'var(--down)')
 const num = (x: number, d = 0) => x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
 const oku = (x: number) => `${(x / 1e8).toFixed(1)} 億`
+// 關鍵價位標籤精度：依台股價位量級調整小數位（>=1000→整數、>=100→1位、其餘2位）
+const priceFmt = (p: number) => (p >= 1000 ? p.toFixed(0) : p >= 100 ? p.toFixed(1) : p.toFixed(2))
 
 const baseChart = (el: HTMLDivElement, height: number) =>
   createChart(el, {
@@ -114,6 +116,46 @@ const baseChart = (el: HTMLDivElement, height: number) =>
 const VOL_UP = 'rgba(229,72,77,0.45)', VOL_DOWN = 'rgba(46,163,107,0.45)'
 // 因子副圖：一因子一 pane，畫方向化 z（z×direction，正=順風）
 export type FactorPane = { label: string; direction: number; series: FactorHistPoint[] }
+// 主圖疊加均線：由呼叫端以「完整史料」計算再裁切，視窗首日的均值才正確
+export type MaLine = { label: string; color: string; points: { time: string; value: number }[] }
+
+/* 量價分布關鍵價位（volume profile）：把視窗內每日成交量按當日 H–L 區間比例攤進價格
+   bins，取 POC（最大量價位）與 70% 價值區頂/底。純視覺化確認層，非預測因子
+   （依據 docs/research/PAPERS-KEYLEVELS.md §C）。 */
+function volumeProfileLevels(data: Candle[]): { poc: number; vah: number; val: number } | null {
+  const pts = data.filter((k) => (k.v ?? k.amt ?? 0) > 0)
+  if (pts.length < 10) return null
+  let lo = Infinity, hi = -Infinity
+  for (const k of pts) { lo = Math.min(lo, k.l); hi = Math.max(hi, k.h) }
+  if (!(hi > lo)) return null
+  const N = 24, bw = (hi - lo) / N
+  const vol = Array.from({ length: N }, () => 0)
+  for (const k of pts) {
+    const v = k.v ?? k.amt ?? 0
+    const span = k.h - k.l
+    const a = Math.max(0, Math.min(N - 1, Math.floor((k.l - lo) / bw)))
+    if (span <= 0) { vol[a] += v; continue }
+    const b = Math.max(a, Math.min(N - 1, Math.floor((k.h - lo) / bw - 1e-9)))
+    for (let i = a; i <= b; i++) {
+      const bLo = lo + i * bw
+      const ov = Math.min(bLo + bw, k.h) - Math.max(bLo, k.l)
+      if (ov > 0) vol[i] += v * (ov / span)
+    }
+  }
+  const total = vol.reduce((s, x) => s + x, 0)
+  if (total <= 0) return null
+  let pocI = 0
+  for (let i = 1; i < N; i++) if (vol[i] > vol[pocI]) pocI = i
+  // 由 POC 向兩側擴張（每步取量較大側）直到涵蓋 70% 成交量
+  let acc = vol[pocI], loI = pocI, hiI = pocI
+  while (acc < total * 0.7 && (loI > 0 || hiI < N - 1)) {
+    const dn = loI > 0 ? vol[loI - 1] : -1
+    const up = hiI < N - 1 ? vol[hiI + 1] : -1
+    if (up >= dn) { hiI++; acc += vol[hiI] } else { loI--; acc += vol[loI] }
+  }
+  return { poc: lo + (pocI + 0.5) * bw, vah: lo + (hiI + 1) * bw, val: lo + loI * bw }
+}
+
 function CandleChart({
   data,
   height = 320,
@@ -121,6 +163,8 @@ function CandleChart({
   composite,
   brokerFlow,
   factorPanes,
+  mas,
+  keyLevels = false,
 }: {
   data: Candle[]
   height?: number
@@ -128,6 +172,8 @@ function CandleChart({
   composite?: CompositePoint[]
   brokerFlow?: BrokerFlowPoint[]
   factorPanes?: FactorPane[]
+  mas?: MaLine[]
+  keyLevels?: boolean
 }) {
   const box = useRef<HTMLDivElement>(null)
   const legend = useRef<HTMLDivElement>(null)
@@ -141,6 +187,30 @@ function CandleChart({
       0,
     )
     candle.setData(data.map((k) => ({ time: k.d, open: k.o, high: k.h, low: k.l, close: k.c })))
+
+    // 主圖疊加均線（pane 0）；legend 隨 crosshair 顯示各均線值
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const maRefs: { label: string; color: string; s: any }[] = []
+    for (const m of mas ?? []) {
+      if (m.points.length < 2) continue
+      const s = chart.addSeries(
+        LineSeries,
+        { color: m.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
+        0,
+      )
+      s.setData(m.points.map((p) => ({ time: p.time, value: p.value })))
+      maRefs.push({ label: m.label, color: m.color, s })
+    }
+
+    // 關鍵價位（視窗內量價分布）：POC 實線 + 70% 價值區頂/底虛線，標在主圖價格軸
+    if (keyLevels) {
+      const lv = volumeProfileLevels(data)
+      if (lv) {
+        candle.createPriceLine({ price: lv.poc, color: ACC, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `POC ${priceFmt(lv.poc)}` })
+        candle.createPriceLine({ price: lv.vah, color: MUT, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `VA頂 ${priceFmt(lv.vah)}` })
+        candle.createPriceLine({ price: lv.val, color: MUT, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `VA底 ${priceFmt(lv.val)}` })
+      }
+    }
 
     // 每個副圖各佔一個 pane；stretch factor 讓主圖佔大部分高度。
     // titles 與 pane 序號對齊——每個副圖左上角以 watermark 標示指標名稱。
@@ -224,6 +294,10 @@ function CandleChart({
       }
       const up = d.close >= d.open
       let html = `<span style="color:${MUT}">${param.time}</span>　開 ${d.open}　高 ${d.high}　低 ${d.low}　收 <b style="color:${up ? UP : DOWN}">${d.close}</b>`
+      for (const m of maRefs) {
+        const mv = param.seriesData?.get(m.s)
+        if (mv) html += `　<span style="color:${m.color}">${m.label}</span> ${Number(mv.value).toFixed(2)}`
+      }
       const pc = pctS && param.seriesData?.get(pctS)
       if (pc) html += `　<span style="color:${MUT}">綜合分位</span> ${Math.round(pc.value)}%`
       const cc = cumS && param.seriesData?.get(cumS)
@@ -237,7 +311,7 @@ function CandleChart({
       ro.disconnect()
       chart.remove()
     }
-  }, [data, height, volume, composite, brokerFlow, factorPanes])
+  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels])
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -346,7 +420,8 @@ function IndexLine({ data, height = 300 }: { data: IndexPoint[]; height?: number
   )
 }
 
-/* ---------- range chips (slice history) ---------- */
+/* ---------- range chips (slice history) + 主圖均線/關鍵價位開關 ---------- */
+const MA_DEFS: [number, string][] = [[5, '#f2c94c'], [10, '#5aa2f7'], [20, '#e578d1'], [60, '#9b8cff']]
 function RangeCandle({
   data,
   height,
@@ -363,11 +438,34 @@ function RangeCandle({
   factorPanes?: FactorPane[]
 }) {
   const [range, setRange] = useState(0)
+  const [maOn, setMaOn] = useState<number[]>([5, 20])
+  const [levelsOn, setLevelsOn] = useState(true)
+  const toggleMa = (w: number) => setMaOn((cur) => (cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w]))
   // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，
   // 每次 render 產生新陣列會導致父層任何 state 變動（如搜尋框打字）都整座圖砍掉重建。
   const shown = useMemo(() => (range > 0 ? data.slice(-range) : data), [data, range])
   // 副圖切到與主圖同一時間窗（日期字串可字典序比較）
   const cutoff = shown.length ? shown[0].d : ''
+  // 均線以「完整史料」滾動平均後才裁切到視窗——視窗首日的均值才正確
+  const mas = useMemo(() => {
+    const out: MaLine[] = []
+    for (const [w, color] of MA_DEFS) {
+      if (!maOn.includes(w) || data.length < w) continue
+      const pts: { time: string; value: number }[] = []
+      let s = 0
+      for (let i = 0; i < data.length; i++) {
+        s += data[i].c
+        if (i >= w) s -= data[i - w].c
+        if (i >= w - 1) pts.push({ time: data[i].d, value: +(s / w).toFixed(2) })
+      }
+      out.push({ label: `MA${w}`, color, points: pts })
+    }
+    return out
+  }, [data, maOn])
+  const masShown = useMemo(
+    () => mas.map((m) => ({ ...m, points: m.points.filter((p) => p.time >= cutoff) })).filter((m) => m.points.length > 1),
+    [mas, cutoff],
+  )
   const compShown = useMemo(
     () => (composite ? composite.filter((p) => p.date >= cutoff) : undefined),
     [composite, cutoff],
@@ -385,20 +483,45 @@ function RangeCandle({
   )
   return (
     <div>
-      <div className="flex gap-1 justify-end mb-1">
-        {([[0, '全部'], [120, '120日'], [60, '60日']] as [number, string][]).map(([r, label]) => (
+      <div className="flex flex-wrap items-center gap-1 justify-between mb-1">
+        <div className="flex flex-wrap items-center gap-1">
+          {MA_DEFS.map(([w, color]) => (
+            <button key={w} onClick={() => toggleMa(w)} className={chipCls(maOn.includes(w))} title={`${w} 日收盤均線`}>
+              <span style={maOn.includes(w) ? { color } : undefined}>MA{w}</span>
+            </button>
+          ))}
           <button
-            key={label}
-            onClick={() => setRange(r)}
-            className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-              range === r ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
-            }`}
+            onClick={() => setLevelsOn((v) => !v)}
+            className={chipCls(levelsOn)}
+            title="視窗內量價分布的關鍵價位：POC＝最大量價位（實線）、VA頂/VA底＝70% 價值區（虛線）"
           >
-            {label}
+            關鍵價位
           </button>
-        ))}
+        </div>
+        <div className="flex gap-1">
+          {([[0, '全部'], [120, '120日'], [60, '60日']] as [number, string][]).map(([r, label]) => (
+            <button
+              key={label}
+              onClick={() => setRange(r)}
+              className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                range === r ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      <CandleChart data={shown} height={height} volume={volume} composite={compShown} brokerFlow={flowShown} factorPanes={fpShown} />
+      <CandleChart
+        data={shown}
+        height={height}
+        volume={volume}
+        composite={compShown}
+        brokerFlow={flowShown}
+        factorPanes={fpShown}
+        mas={masShown.length ? masShown : undefined}
+        keyLevels={levelsOn}
+      />
     </div>
   )
 }
