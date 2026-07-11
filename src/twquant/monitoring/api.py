@@ -228,6 +228,16 @@ def get_composite_top(
     return _stock_ep(lambda: stock_api.composite_top(wh, stock_api.serving_cfg(), n))
 
 
+@app.get("/api/factor-top")
+def get_factor_top(
+    wh: WarehouseDep,
+    factor: Annotated[str, Query(description="因子名，如 price.reversal_5d")] = "price.reversal_5d",
+    n: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, object]:
+    """單因子選股：該因子最新物化日、方向化 z 遞減前 n；個股因子頁「因子選股」篩選器。"""
+    return _stock_ep(lambda: stock_api.factor_top(wh, stock_api.serving_cfg(), factor, n))
+
+
 @app.get("/api/stocks/{sid}/broker-flow")
 def get_stock_broker_flow(
     sid: str, wh: WarehouseDep, days: Annotated[int, Query(ge=1, le=2000)] = 250

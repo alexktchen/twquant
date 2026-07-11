@@ -87,6 +87,11 @@ def test_factor_history_no_factors_empty() -> None:
     assert out["source"] == "pg" and out["rows"] == []
 
 
+def test_factor_top_unknown_factor_raises() -> None:
+    with pytest.raises(DataError, match="未註冊"):
+        stock_api.factor_top(None, ServingConfig(pg_schema="serving"), "price.not_exist")
+
+
 # ── 需真 PG 的整合測試 ──────────────────────────────────────────
 
 
@@ -211,6 +216,34 @@ def test_composite_top_pg_rank_order(tmp_path: Path) -> None:
         assert {r["stock_id"] for r in rows} == {"1111", "2222", "3333"}
         # n 截斷
         assert len(stock_api.composite_top(None, cfg, 2)["rows"]) == 2
+    finally:
+        _drop(cfg)
+
+
+def test_factor_top_pg_signed_order(tmp_path: Path) -> None:
+    cfg = _pg_cfg_or_skip()
+    from twquant.data.serving import materialize as smat
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, {"1111": 100.0, "2222": 50.0, "3333": 200.0}))
+    try:
+        _drop(cfg)
+        smat.materialize_day(wh, cfg, dt.date(2026, 6, 25))
+        out = stock_api.factor_top(None, cfg, "price.reversal_5d", 10)
+        assert out["source"] == "pg" and out["as_of"] == dt.date(2026, 6, 25)
+        assert out["factor"] == "price.reversal_5d" and out["direction"] == -1
+        rows = out["rows"]
+        assert len(rows) == 3
+        szs = [r["signed_z"] for r in rows]
+        assert szs == sorted(szs, reverse=True)  # 方向化 z 遞減（訊號最強在前）
+        # 等差 +1/日 → 基期最高的 3333 近 5 日報酬最小 → 反轉（direction=-1）訊號最強
+        assert rows[0]["stock_id"] == "3333"
+        assert set(rows[0].keys()) == {"stock_id", "name", "value", "z", "pct", "signed_z"}
+        # available 供前端下拉：至少含已註冊的價量因子
+        avail = {a["factor"] for a in out["available"]}
+        assert "price.reversal_5d" in avail and "price.mom_20d" in avail
+        # n 截斷
+        assert len(stock_api.factor_top(None, cfg, "price.reversal_5d", 2)["rows"]) == 2
     finally:
         _drop(cfg)
 

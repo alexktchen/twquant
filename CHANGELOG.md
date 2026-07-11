@@ -1,5 +1,12 @@
 # CHANGELOG
 
+- 2026-07-11 個股因子頁新增「因子選股」篩選器（使用者需求：直接找出 5 日短期反轉訊號最強個股）：
+  新端點 `GET /api/factor-top?factor=&n=`（`stock_api.factor_top`）——該因子最新物化日、
+  方向化 z（z×direction）遞減前 n，winsorize 並列以方向化 pct 決勝、附 stock_meta 中文名與
+  `available` 因子清單（前端下拉免硬編碼）；未註冊因子回 400、未物化回空。前端 FactorScreener
+  面板預設 `price.reversal_5d`（2023-2026 實證 5 日 RankIC +0.065 最高），點擊即選股。
+  測試：未知因子 raise + PG 整合（方向排序/截斷/available）。
+
 - 2026-07-10 `/api/stock-meta` 改讀 PG（使用者回報：追蹤股/選單無中文名）：原讀資料湖全湖
   掃描實測 ~108s，前端 stock-meta 名稱圖長期空→追蹤 chips/搜尋（0 檔）/更多個股皆無名。
   改讀 `serving.stock_meta`（`stock_api.stock_meta_all`），實測 0.25s；追蹤股顯示中文名、

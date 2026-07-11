@@ -5,6 +5,7 @@ import {
   fetchBacktest,
   fetchCapacity,
   fetchCompositeTop,
+  fetchFactorTop,
   fetchFactors,
   fetchHealth,
   fetchHeartbeat,
@@ -42,6 +43,7 @@ import {
   type CompositePoint,
   type CompositeTop,
   type CellState,
+  type FactorTop,
   type Data,
   type Fac,
   type Heartbeat,
@@ -885,6 +887,70 @@ const chipCls = (active: boolean) =>
     active ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
   }`
 
+/* ---------- 因子選股（單因子最新物化日、方向化 z 由強到弱；點擊即選股）---------- */
+const DEFAULT_SCREEN_FACTOR = 'price.reversal_5d' // 實證 IC 最高的因子（見 DECISIONS/研究紀錄）
+function FactorScreener({ sid, setSid, mm }: { sid: string; setSid: (s: string) => void; mm: StockMetaMap }) {
+  const [factor, setFactor] = useState(DEFAULT_SCREEN_FACTOR)
+  const empty = (): FactorTop => ({
+    factor, zh: factor, direction: 1, as_of: null, source: 'pg', rows: [], available: [],
+  })
+  const res = useResource(`ftop:${factor}`, () => fetchFactorTop(factor, 10), empty)
+  const d = res.data
+  const rows = d?.rows ?? []
+  const avail = d?.available ?? []
+  return (
+    <Panel
+      title="因子選股"
+      sub={d?.as_of ? `最新物化日 ${d.as_of} · 訊號最強前 ${rows.length}` : '需 PG 物化因子'}
+    >
+      <div className="flex flex-col gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={factor}
+            onChange={(e) => setFactor(e.target.value)}
+            className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+          >
+            {(avail.length ? avail : [{ factor, zh: factor, direction: 1 }]).map((a) => (
+              <option key={a.factor} value={a.factor}>
+                {a.zh}（{a.factor}）
+              </option>
+            ))}
+          </select>
+          <span className="text-[11px] text-[var(--muted)]">
+            依因子方向排序（如 5日反轉＝近5日跌深者在前）· 點擊即選股
+          </span>
+        </div>
+        {rows.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {rows.map((r, i) => (
+              <button
+                key={r.stock_id}
+                onClick={() => setSid(r.stock_id)}
+                className={chipCls(sid === r.stock_id)}
+                title={`值 ${r.value} · z ${r.z} · 宇宙分位 ${Math.round(r.pct * 100)}%`}
+              >
+                <span className="mr-1 opacity-60">{i + 1}</span>
+                {r.stock_id}
+                {(r.name ?? mm[r.stock_id]?.name) && (
+                  <span className="ml-1 text-[11px] opacity-75">{r.name ?? mm[r.stock_id]?.name}</span>
+                )}
+                <span className="ml-1 text-[11px] mono opacity-75">
+                  {r.signed_z >= 0 ? '+' : ''}
+                  {r.signed_z.toFixed(2)}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="text-[12px] text-[var(--muted)]">
+            {res.loading ? '載入中…' : '此因子尚無物化資料（PG 未物化或 API 離線）'}
+          </div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
 /* ---------- 個股因子健檢（獨立頁：選股 + K線 + 法人/融資券/營收/主力 + 因子體檢卡）---------- */
 function StockFactors() {
   const { meta, live } = useMeta()
@@ -1046,6 +1112,7 @@ function StockFactors() {
           </div>
         </div>
       </Panel>
+      {live && <FactorScreener sid={sid} setSid={setSid} mm={mm} />}
       {sid && live && <StockHeader sid={sid} fallbackName={mm[sid]?.name ?? ''} />}
       {sid && series && series.length > 0 ? (
         <StockChartPanel sid={sid} title={`${labelOf(mm, sid)} · K 線`} series={series} />
