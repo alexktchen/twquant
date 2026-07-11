@@ -92,6 +92,13 @@ def test_factor_top_unknown_factor_raises() -> None:
         stock_api.factor_top(None, ServingConfig(pg_schema="serving"), "price.not_exist")
 
 
+def test_factor_top_bad_order_raises() -> None:
+    with pytest.raises(DataError, match="order"):
+        stock_api.factor_top(
+            None, ServingConfig(pg_schema="serving"), "price.reversal_5d", order="sideways"
+        )
+
+
 # ── 需真 PG 的整合測試 ──────────────────────────────────────────
 
 
@@ -232,6 +239,7 @@ def test_factor_top_pg_signed_order(tmp_path: Path) -> None:
         out = stock_api.factor_top(None, cfg, "price.reversal_5d", 10)
         assert out["source"] == "pg" and out["as_of"] == dt.date(2026, 6, 25)
         assert out["factor"] == "price.reversal_5d" and out["direction"] == -1
+        assert out["order"] == "top"
         rows = out["rows"]
         assert len(rows) == 3
         szs = [r["signed_z"] for r in rows]
@@ -244,6 +252,12 @@ def test_factor_top_pg_signed_order(tmp_path: Path) -> None:
         assert "price.reversal_5d" in avail and "price.mom_20d" in avail
         # n 截斷
         assert len(stock_api.factor_top(None, cfg, "price.reversal_5d", 2)["rows"]) == 2
+        # order=bottom：訊號最弱在前（方向化 z 遞增），首檔為 top 的末檔
+        bot = stock_api.factor_top(None, cfg, "price.reversal_5d", 10, order="bottom")
+        assert bot["order"] == "bottom"
+        bszs = [r["signed_z"] for r in bot["rows"]]
+        assert bszs == sorted(bszs)  # 遞增
+        assert bot["rows"][0]["stock_id"] == rows[-1]["stock_id"]
     finally:
         _drop(cfg)
 

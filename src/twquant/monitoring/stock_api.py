@@ -252,14 +252,19 @@ def composite_top(wh: object, cfg: ServingConfig, n: int = 10) -> dict[str, Any]
     return {"as_of": day, "source": "pg", "rows": out}
 
 
-def factor_top(wh: object, cfg: ServingConfig, factor: str, n: int = 10) -> dict[str, Any]:
-    """單因子選股：該因子最新物化日、方向化 z（z×direction）遞減前 n ＋名稱。
+def factor_top(
+    wh: object, cfg: ServingConfig, factor: str, n: int = 10, order: str = "top"
+) -> dict[str, Any]:
+    """單因子選股：該因子最新物化日、方向化 z（z×direction）排序前 n ＋名稱。
 
     個股因子頁「因子選股」篩選器（如 5 日短期反轉＝近 5 日跌深者訊號最強）。
-    以該因子自身的 max(date) 為 as_of（各因子物化進度不同，不共用全表最新日）。
-    未註冊因子 → DataError（端點轉 400）；未物化（無列）回空列。available 回傳
-    全部已註冊因子（factor/zh/direction）供前端下拉，避免前端硬編碼因子清單。
+    order="top"＝方向化 z 遞減（訊號最強、最順因子方向）；"bottom"＝遞增（訊號最弱、
+    最逆因子方向，如 5 日反轉的漲多股）。以該因子自身的 max(date) 為 as_of（各因子物化
+    進度不同，不共用全表最新日）。未註冊因子 / order 非法 → DataError（端點轉 400）；
+    未物化（無列）回空列。available 回傳全部已註冊因子（factor/zh/direction）供前端下拉。
     """
+    if order not in ("top", "bottom"):
+        raise DataError("factor_values", None, f"order 需為 top/bottom：{order!r}")
     import twquant.factors.builtins  # noqa: F401  # 觸發註冊（取 direction 與清單）
     from twquant.errors import TwquantError
     from twquant.factors.registry import get, list_factors
@@ -280,12 +285,13 @@ def factor_top(wh: object, cfg: ServingConfig, factor: str, n: int = 10) -> dict
         f'LEFT JOIN "{sch}".stock_meta m ON m.stock_id = f.stock_id '
         "WHERE f.factor = %s AND f.date = "
         f'(SELECT max(date) FROM "{sch}".factor_values WHERE factor = %s) '
-        # 第二鍵用方向化 pct：winsorize 使極端值 z 並列，pct 保留原值全序
+        # 方向化 z 排序；bottom 反號取最逆風。第二鍵用方向化 pct：winsorize 使極端值 z
+        # 並列，pct 保留原值全序。
         "ORDER BY f.z * %s DESC, f.pct * %s DESC, f.stock_id LIMIT %s"
     )
     with store.connect(cfg) as conn, conn.cursor(row_factory=dict_row) as cur:
-        d = float(fdef.direction)
-        cur.execute(sql, (factor, factor, d, d, int(n)))
+        s = float(fdef.direction) * (1.0 if order == "top" else -1.0)
+        cur.execute(sql, (factor, factor, s, s, int(n)))
         rows = list(cur.fetchall())
     day = rows[0]["date"] if rows else None
     out = [
@@ -307,6 +313,7 @@ def factor_top(wh: object, cfg: ServingConfig, factor: str, n: int = 10) -> dict
         "factor": factor,
         "zh": snap.FACTOR_ZH.get(factor, factor),
         "direction": int(fdef.direction),
+        "order": order,
         "as_of": day,
         "source": "pg",
         "rows": out,

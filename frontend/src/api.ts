@@ -199,12 +199,13 @@ export type FactorTopRow = {
   stock_id: string; name: string | null; value: number; z: number; pct: number; signed_z: number
 }
 export type FactorOption = { factor: string; zh: string; direction: number }
+export type FactorOrder = 'top' | 'bottom'
 export type FactorTop = {
-  factor: string; zh: string; direction: number; as_of: string | null; source: Src
-  rows: FactorTopRow[]; available: FactorOption[]
+  factor: string; zh: string; direction: number; order: FactorOrder
+  as_of: string | null; source: Src; rows: FactorTopRow[]; available: FactorOption[]
 }
-export const fetchFactorTop = (factor: string, n = 10) =>
-  getJSON<FactorTop>(`/api/factor-top?factor=${enc(factor)}&n=${n}`)
+export const fetchFactorTop = (factor: string, n = 10, order: FactorOrder = 'top') =>
+  getJSON<FactorTop>(`/api/factor-top?factor=${enc(factor)}&n=${n}&order=${order}`)
 
 // P7/P8：因子歷史（每因子 z/pct 序列）與綜合分位趨勢（皆需 PG 物化歷史）。
 export type FactorHistPoint = { date: string; value: number | null; z: number | null; pct: number | null }

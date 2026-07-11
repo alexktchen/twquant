@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, createChart } from 'lightweight-charts'
+import { AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, createChart, createTextWatermark } from 'lightweight-charts'
 import fallbackRaw from './data.json'
 import {
   fetchBacktest,
@@ -43,6 +43,9 @@ import {
   type CompositePoint,
   type CompositeTop,
   type CellState,
+  type FactorHistPoint,
+  type FactorOption,
+  type FactorOrder,
   type FactorTop,
   type Data,
   type Fac,
@@ -107,20 +110,24 @@ const baseChart = (el: HTMLDivElement, height: number) =>
     handleScale: { axisPressedMouseMove: { time: true, price: false } },
   })
 
-/* ---------- candlestick + 選配副圖（v5 原生 pane：量 / 綜合因子 / 主力買賣超）---------- */
+/* ---------- candlestick + 選配副圖（v5 原生 pane：量 / 綜合因子 / 主力買賣超 / 因子z）---------- */
 const VOL_UP = 'rgba(229,72,77,0.45)', VOL_DOWN = 'rgba(46,163,107,0.45)'
+// 因子副圖：一因子一 pane，畫方向化 z（z×direction，正=順風）
+export type FactorPane = { label: string; direction: number; series: FactorHistPoint[] }
 function CandleChart({
   data,
   height = 320,
   volume = false,
   composite,
   brokerFlow,
+  factorPanes,
 }: {
   data: Candle[]
   height?: number
   volume?: boolean
   composite?: CompositePoint[]
   brokerFlow?: BrokerFlowPoint[]
+  factorPanes?: FactorPane[]
 }) {
   const box = useRef<HTMLDivElement>(null)
   const legend = useRef<HTMLDivElement>(null)
@@ -135,8 +142,10 @@ function CandleChart({
     )
     candle.setData(data.map((k) => ({ time: k.d, open: k.o, high: k.h, low: k.l, close: k.c })))
 
-    // 每個副圖各佔一個 pane；stretch factor 讓主圖佔大部分高度
+    // 每個副圖各佔一個 pane；stretch factor 讓主圖佔大部分高度。
+    // titles 與 pane 序號對齊——每個副圖左上角以 watermark 標示指標名稱。
     const stretch: number[] = [6]
+    const titles: string[] = ['']
     let pane = 1
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let pctS: any = null
@@ -147,6 +156,7 @@ function CandleChart({
       const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'right' }, pane)
       vol.setData(data.map((k) => ({ time: k.d, value: k.v ?? k.amt ?? 0, color: k.c >= k.o ? VOL_UP : VOL_DOWN })))
       stretch.push(1.6)
+      titles.push('成交量（股）')
       pane++
     }
 
@@ -160,6 +170,7 @@ function CandleChart({
       pctS = chart.addSeries(LineSeries, { priceScaleId: 'pct', color: ACC, lineWidth: 1, priceLineVisible: false, lastValueVisible: false }, pane)
       pctS.setData(composite.map((p) => ({ time: p.date, value: p.pct * 100 })))
       stretch.push(2)
+      titles.push('綜合因子分位（棒＝signed-z ｜ 線＝宇宙分位%）')
       pane++
     }
 
@@ -170,11 +181,37 @@ function CandleChart({
       cumS = chart.addSeries(LineSeries, { priceScaleId: 'cum', color: ACC, lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, pane)
       cumS.setData(brokerFlow.map((p) => { cum += Math.round(p.net / 1000); return { time: p.date, value: cum } }))
       stretch.push(2.4)
+      titles.push('主力買賣超（張 ｜ 線＝累計）')
+      pane++
+    }
+
+    for (const fp of factorPanes ?? []) {
+      const pts = fp.series.filter((p) => p.z != null)
+      if (pts.length < 2) continue
+      const fbar = chart.addSeries(
+        HistogramSeries,
+        { priceFormat: { type: 'price', precision: 2, minMove: 0.01 }, priceScaleId: 'right', base: 0 },
+        pane,
+      )
+      fbar.setData(pts.map((p) => {
+        const v = (p.z as number) * fp.direction
+        return { time: p.date, value: v, color: v >= 0 ? VOL_UP : VOL_DOWN }
+      }))
+      stretch.push(1.8)
+      titles.push(`${fp.label}（方向化z ｜ 正=順風）`)
       pane++
     }
 
     const panes = chart.panes()
     stretch.forEach((s, i) => panes[i]?.setStretchFactor(s))
+    titles.forEach((t, i) => {
+      if (t && panes[i])
+        createTextWatermark(panes[i], {
+          horzAlign: 'left',
+          vertAlign: 'top',
+          lines: [{ text: t, color: 'rgba(139,152,165,0.85)', fontSize: 11 }],
+        })
+    })
     chart.timeScale().fitContent()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     chart.subscribeCrosshairMove((param: any) => {
@@ -200,7 +237,7 @@ function CandleChart({
       ro.disconnect()
       chart.remove()
     }
-  }, [data, height, volume, composite, brokerFlow])
+  }, [data, height, volume, composite, brokerFlow, factorPanes])
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -316,12 +353,14 @@ function RangeCandle({
   volume,
   composite,
   brokerFlow,
+  factorPanes,
 }: {
   data: Candle[]
   height?: number
   volume?: boolean
   composite?: CompositePoint[]
   brokerFlow?: BrokerFlowPoint[]
+  factorPanes?: FactorPane[]
 }) {
   const [range, setRange] = useState(0)
   // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，
@@ -336,6 +375,13 @@ function RangeCandle({
   const flowShown = useMemo(
     () => (brokerFlow ? brokerFlow.filter((p) => p.date >= cutoff) : undefined),
     [brokerFlow, cutoff],
+  )
+  const fpShown = useMemo(
+    () =>
+      factorPanes
+        ? factorPanes.map((fp) => ({ ...fp, series: fp.series.filter((p) => p.date >= cutoff) }))
+        : undefined,
+    [factorPanes, cutoff],
   )
   return (
     <div>
@@ -352,7 +398,7 @@ function RangeCandle({
           </button>
         ))}
       </div>
-      <CandleChart data={shown} height={height} volume={volume} composite={compShown} brokerFlow={flowShown} />
+      <CandleChart data={shown} height={height} volume={volume} composite={compShown} brokerFlow={flowShown} factorPanes={fpShown} />
     </div>
   )
 }
@@ -562,30 +608,82 @@ function Spark({ zs }: { zs: number[] | undefined }) {
 }
 
 /* P8：綜合因子分位趨勢（棒=signed_z 平均、線=宇宙分位）。 */
-/* ---------- 個股 K 線 + 副圖（量 / 綜合因子分位 / 主力買賣超日條＋累計）----------
-   綜合因子分位趨勢與主力買賣超併進 K 線副圖（v5 原生 pane、共用時間軸）；不再各佔獨立面板。*/
-function StockChartPanel({ sid, title, series }: { sid: string; title: string; series: Candle[] }) {
+/* ---------- 個股 K 線 + 副圖（量 / 綜合因子分位 / 主力買賣超日條＋累計 / 可選因子z）----------
+   副圖全部併進 K 線（v5 原生 pane、共用時間軸），每個 pane 左上以 watermark 標示指標名稱。
+   factors＝要加開的因子副圖（一因子一 pane，方向化 z）；available＋onToggle 提供 chips 多選。*/
+const MAX_FACTOR_PANES = 4 // 副圖因子上限：再多主圖會被壓縮到難以閱讀
+function StockChartPanel({
+  sid,
+  title,
+  series,
+  factors = [],
+  available = [],
+  onToggle,
+}: {
+  sid: string
+  title: string
+  series: Candle[]
+  factors?: FactorOption[]
+  available?: FactorOption[]
+  onToggle?: (f: FactorOption) => void
+}) {
   const emptyC: StockSeries<CompositePoint> = { sid, as_of: null, source: 'pg', rows: [] }
   const emptyB: StockSeries<BrokerFlowPoint> = { sid, as_of: null, source: 'pg', rows: [] }
   // 一律嘗試 fetch（API 不可達由 useResource catch 退回空列）——不依 live 閘，
   // 避免開頁瞬間 live=false 時掛載後永不重抓（useResource 以 key 為準）。
   const comp = useResource(`chist:${sid}`, () => fetchStockCompositeHistory(sid, 250), () => emptyC)
   const flow = useResource(`bflow:${sid}`, () => fetchStockBrokerFlow(sid, 250), () => emptyB)
+  const codes = factors.map((f) => f.factor)
+  const emptyFH: StockFactorHistory = { sid, as_of: null, source: 'pg', rows: [] }
+  const fh = useResource(
+    `fpanes:${sid}:${codes.join(',')}`,
+    () => (codes.length ? fetchStockFactorHistory(sid, codes, 250) : Promise.resolve(emptyFH)),
+    () => emptyFH,
+  )
+  const factorPanes = useMemo(() => {
+    const groups = new Map((fh.data?.rows ?? []).map((g) => [g.factor, g.series]))
+    return factors
+      .map((f) => ({ label: f.zh, direction: f.direction, series: groups.get(f.factor) ?? [] }))
+      .filter((fp) => fp.series.length > 1)
+    // codes.join 已涵蓋 factors 內容變化；fh.data 換股/換因子時更新
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fh.data, codes.join(',')])
   const cRows = comp.data?.rows ?? []
   const fRows = flow.data?.rows ?? []
   const hasComp = cRows.length > 1
   const hasFlow = fRows.length > 1
   const tall = hasComp || hasFlow || comp.loading || flow.loading
-  const subs = ['量(股)', hasComp && '綜合因子分位', hasFlow && '主力買賣超(日條+累計，張)'].filter(Boolean).join(' / ')
+  const subs = [
+    '量(股)',
+    hasComp && '綜合因子分位',
+    hasFlow && '主力買賣超(日條+累計，張)',
+    ...factorPanes.map((fp) => fp.label),
+  ].filter(Boolean).join(' / ')
   return (
     <Panel title={title} sub={`副圖：${subs} · 紅漲綠跌 · 可拖曳縮放`}>
+      {available.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          <span className="text-[11px] text-[var(--muted)] mr-0.5">副圖因子（最多 {MAX_FACTOR_PANES}）</span>
+          {available.map((a) => (
+            <button
+              key={a.factor}
+              onClick={() => onToggle?.(a)}
+              className={chipCls(codes.includes(a.factor))}
+              title={`${a.factor}（direction ${a.direction > 0 ? '+1' : '−1'}）`}
+            >
+              {a.zh}
+            </button>
+          ))}
+        </div>
+      )}
       <RangeCandle
         key={sid}
         data={series}
-        height={tall ? 540 : 300}
+        height={(tall ? 540 : 300) + factorPanes.length * 90}
         volume
         composite={hasComp ? cRows : undefined}
         brokerFlow={hasFlow ? fRows : undefined}
+        factorPanes={factorPanes.length ? factorPanes : undefined}
       />
     </Panel>
   )
@@ -887,37 +985,68 @@ const chipCls = (active: boolean) =>
     active ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
   }`
 
-/* ---------- 因子選股（單因子最新物化日、方向化 z 由強到弱；點擊即選股）---------- */
-const DEFAULT_SCREEN_FACTOR = 'price.reversal_5d' // 實證 IC 最高的因子（見 DECISIONS/研究紀錄）
-function FactorScreener({ sid, setSid, mm }: { sid: string; setSid: (s: string) => void; mm: StockMetaMap }) {
-  const [factor, setFactor] = useState(DEFAULT_SCREEN_FACTOR)
-  const empty = (): FactorTop => ({
-    factor, zh: factor, direction: 1, as_of: null, source: 'pg', rows: [], available: [],
-  })
-  const res = useResource(`ftop:${factor}`, () => fetchFactorTop(factor, 10), empty)
-  const d = res.data
+/* ---------- 因子選股（單因子最新物化日、方向化 z 由強到弱；點擊即選股）----------
+   受控元件：factor 狀態由 StockFactors 持有（篩選器選中的因子同步進 K 線副圖）。*/
+const DEFAULT_SCREEN: FactorOption = { factor: 'price.reversal_5d', zh: '5日短期反轉', direction: -1 } // 實證 IC 最高
+function FactorScreener({
+  sid, setSid, mm, value, onChange, order, onOrderChange, data, loading,
+}: {
+  sid: string
+  setSid: (s: string) => void
+  mm: StockMetaMap
+  value: FactorOption
+  onChange: (f: FactorOption) => void
+  order: FactorOrder
+  onOrderChange: (o: FactorOrder) => void
+  data: FactorTop | null
+  loading: boolean
+}) {
+  const d = data
   const rows = d?.rows ?? []
   const avail = d?.available ?? []
+  const strongest = order === 'top'
   return (
     <Panel
       title="因子選股"
-      sub={d?.as_of ? `最新物化日 ${d.as_of} · 訊號最強前 ${rows.length}` : '需 PG 物化因子'}
+      sub={
+        d?.as_of
+          ? `最新物化日 ${d.as_of} · 訊號${strongest ? '最強' : '最弱'}前 ${rows.length}`
+          : '需 PG 物化因子'
+      }
     >
       <div className="flex flex-col gap-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <select
-            value={factor}
-            onChange={(e) => setFactor(e.target.value)}
+            value={value.factor}
+            onChange={(e) => {
+              const opt = avail.find((a) => a.factor === e.target.value)
+              if (opt) onChange(opt)
+            }}
             className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
           >
-            {(avail.length ? avail : [{ factor, zh: factor, direction: 1 }]).map((a) => (
+            {(avail.length ? avail : [value]).map((a) => (
               <option key={a.factor} value={a.factor}>
                 {a.zh}（{a.factor}）
               </option>
             ))}
           </select>
+          <div className="inline-flex rounded border border-[var(--line)] overflow-hidden">
+            {([['top', '訊號最強'], ['bottom', '訊號最弱']] as [FactorOrder, string][]).map(([o, lbl]) => (
+              <button
+                key={o}
+                onClick={() => onOrderChange(o)}
+                className={`px-2.5 py-1 text-[12px] mono transition-colors ${
+                  order === o ? 'bg-[var(--panel-2)] text-[var(--accent)]' : 'text-[var(--muted)] hover:text-[var(--fg)]'
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
           <span className="text-[11px] text-[var(--muted)]">
-            依因子方向排序（如 5日反轉＝近5日跌深者在前）· 點擊即選股
+            {strongest
+              ? '最順因子方向（如 5日反轉＝近5日跌深者）· 點擊即選股'
+              : '最逆因子方向（如 5日反轉＝近5日漲多者）· 點擊即選股'}
           </span>
         </div>
         {rows.length > 0 ? (
@@ -943,7 +1072,7 @@ function FactorScreener({ sid, setSid, mm }: { sid: string; setSid: (s: string) 
           </div>
         ) : (
           <div className="text-[12px] text-[var(--muted)]">
-            {res.loading ? '載入中…' : '此因子尚無物化資料（PG 未物化或 API 離線）'}
+            {loading ? '載入中…' : '此因子尚無物化資料（PG 未物化或 API 離線）'}
           </div>
         )}
       </div>
@@ -975,6 +1104,26 @@ function StockFactors() {
       }
       return next
     })
+  // 因子選股狀態上提：篩選器選中的因子自動加入 K 線副圖（chips 可增減，上限 MAX_FACTOR_PANES）
+  const [screen, setScreen] = useState<FactorOption>(DEFAULT_SCREEN)
+  const [order, setOrder] = useState<FactorOrder>('top') // 訊號最強(top) / 最弱(bottom)
+  const emptyFT = (): FactorTop => ({
+    factor: screen.factor, zh: screen.zh, direction: screen.direction, order,
+    as_of: null, source: 'pg', rows: [], available: [],
+  })
+  const ftop = useResource(`ftop:${screen.factor}:${order}`, () => fetchFactorTop(screen.factor, 10, order), emptyFT)
+  const [subFactors, setSubFactors] = useState<FactorOption[]>([DEFAULT_SCREEN])
+  useEffect(() => {
+    setSubFactors((prev) =>
+      prev.some((f) => f.factor === screen.factor) ? prev : [...prev, screen].slice(-MAX_FACTOR_PANES),
+    )
+  }, [screen])
+  const toggleSub = (f: FactorOption) =>
+    setSubFactors((prev) =>
+      prev.some((x) => x.factor === f.factor)
+        ? prev.filter((x) => x.factor !== f.factor)
+        : [...prev, f].slice(-MAX_FACTOR_PANES),
+    )
   // 熱門列＝宇宙綜合排名前 10（最新物化日）；PG 未物化/離線退回快照熱門。
   // 一律嘗試 fetch（不依 live 閘）——開頁瞬間 live 尚未翻正，靠 key 的 useResource 不會重抓。
   const emptyTop: CompositeTop = { as_of: null, source: 'pg', rows: [] }
@@ -1112,10 +1261,29 @@ function StockFactors() {
           </div>
         </div>
       </Panel>
-      {live && <FactorScreener sid={sid} setSid={setSid} mm={mm} />}
+      {live && (
+        <FactorScreener
+          sid={sid}
+          setSid={setSid}
+          mm={mm}
+          value={screen}
+          onChange={setScreen}
+          order={order}
+          onOrderChange={setOrder}
+          data={ftop.data}
+          loading={ftop.loading}
+        />
+      )}
       {sid && live && <StockHeader sid={sid} fallbackName={mm[sid]?.name ?? ''} />}
       {sid && series && series.length > 0 ? (
-        <StockChartPanel sid={sid} title={`${labelOf(mm, sid)} · K 線`} series={series} />
+        <StockChartPanel
+          sid={sid}
+          title={`${labelOf(mm, sid)} · K 線`}
+          series={series}
+          factors={subFactors}
+          available={ftop.data?.available ?? []}
+          onToggle={toggleSub}
+        />
       ) : sid ? (
         <Panel title={`${labelOf(mm, sid)} · K 線`}>
           <div className="h-[120px] flex items-center justify-center text-[13px] text-[var(--muted)]">

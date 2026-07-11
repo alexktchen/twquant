@@ -233,9 +233,10 @@ def get_factor_top(
     wh: WarehouseDep,
     factor: Annotated[str, Query(description="因子名，如 price.reversal_5d")] = "price.reversal_5d",
     n: Annotated[int, Query(ge=1, le=100)] = 20,
+    order: Annotated[str, Query(description="top＝訊號最強｜bottom＝最弱")] = "top",
 ) -> dict[str, object]:
-    """單因子選股：該因子最新物化日、方向化 z 遞減前 n；個股因子頁「因子選股」篩選器。"""
-    return _stock_ep(lambda: stock_api.factor_top(wh, stock_api.serving_cfg(), factor, n))
+    """單因子選股：該因子最新物化日、方向化 z 排序前 n（top 最強/bottom 最弱）。"""
+    return _stock_ep(lambda: stock_api.factor_top(wh, stock_api.serving_cfg(), factor, n, order))
 
 
 @app.get("/api/stocks/{sid}/broker-flow")
