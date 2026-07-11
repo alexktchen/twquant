@@ -20,6 +20,45 @@
 
 ## 已裁決
 
+### D-023（2026-07-11，已裁決）backfill-fubon-chip 預設不留 raw HTML（省磁碟）
+- 問題：raw HTML 快取（`data/raw/fubon_chip/date=<d>/<sid>.html`）每檔 ~11KB、全市場每日
+  ~1432 檔 ≈ 15MB/日（~3.8GB/年、數萬個小檔，stat 都嫌慢）。使用者要求下載時「不用再留
+  實體檔案，尤其 HTML 太浪費空間」。
+- 釐清資料流（避免誤解）：canonical 分點資料落 **parquet 資料湖** `clean/broker_trades`
+  （欄式、極小，是黃金規則 1 因子透過 PitView 讀的**單一真相源**）；**PG 是可重建鏡射**，由
+  另一步 `twquant serving sync` 從資料湖增量 upsert（broker_trades 為 6 張鏡射表之一，
+  SPEC-009 §3）。故：真正浪費的是 HTML，不是 parquet；且回補**不該**直寫 PG（會繞過資料湖／
+  PitView，且 PG rebuild 會失資料）。
+- 裁決：`backfill-fubon-chip` 新增 `--keep-raw-html/--no-keep-raw-html`，**預設不留**
+  （純串流：抓→解析→丟，不讀不寫 HTML；不建立 date= 目錄）。保留 parquet clean 層不變。
+  想要分日內續傳／免重抓重解析者用 `--keep-raw-html` 顯式開啟。
+- 取捨：不留 HTML → 失去分日內續傳（run 中斷需重抓整日）與「改 parser 後免重抓重解析」的
+  能力；但續傳仍有**分區級**粒度（skip_existing 跳已完成日），單日 ~10 分可接受。此 HTML
+  快取本就非 SPEC-001 §7 的版本化 raw archive（是 `<sid>.html` 覆寫式暫存），故弱化其
+  留存不牴觸 raw 落地原則。既有已下載的 `data/raw/fubon_chip` 可安全刪除回收空間（canonical
+  在資料湖、PG sync 後亦在 PG）。
+- 範圍：`cli.py`（`_fetch_fubon_day` 加 `keep_raw` + `--keep-raw-html` 選項）、`tests/test_cli.py`。
+
+### D-022（2026-07-11，已裁決）backfill-fubon-chip 平行下載 + 富邦限流上調
+- 問題：`backfill-fubon-chip` 全市場單日 ~1800 檔、序列 1 req/2s → 約 1 小時（D-019）。
+  使用者要求改為多執行緒平行下載提速。
+- 關鍵事實：真正的吞吐節流是共用的 `SlidingWindowLimiter`，不是執行緒數。只加執行緒
+  而不提高限流，各執行緒會卡在 `acquire()` 排隊，總速率不變。且原 limiter 非 thread-safe
+  （check-then-append 無鎖），多執行緒會 race。
+- 裁決（使用者選「積極 6 workers」，2026-07-11）：
+  - `SlidingWindowLimiter.acquire` 與 `HttpClient._get_transport` 加鎖 → 共用 client 下
+    thread-safe（全域限流仍準確、單一 requests.Session）。此為全來源共用類別，加鎖對單執行緒
+    行為無影響。
+  - `backfill-fubon-chip` 新增 `--workers`，逐股迴圈改 `ThreadPoolExecutor`；`.map` 保序
+    → 輸出與序列版 bit-identical（黃金規則／§4 冪等）。並行度預設＝限流 `max_requests`
+    （超過亦被節流，僅徒增排隊），不寫死。
+  - `configs/system.yaml` 富邦限流 **1 req/2s → 6 req/2s**（3 req/s），全市場單日 ~10 分。
+- 風險與取捨：富邦DJ 為免費公開站；D-015 已載 TWSE 對「持續大量」即使在 rate 內也會封 IP。
+  6 req/2s 是**使用者明示授權的積極設定**、被封風險自負；若被擋，調降 `--workers`／`max_requests`
+  或改分批。此條為對 D-019「限流 1 req/2s」敘述的刻意調整（來源特性、canonical schema 不變）。
+- 範圍：`data/http.py`、`cli.py`（helper `_fetch_fubon_day` + `--workers`）、`configs/system.yaml`、
+  `tests/test_http.py`、`tests/test_cli.py`。
+
 ### D-020（2026-07-11，已裁決 B+C）composite_daily 綜合分無預測力——採實證有效子集 + 前端標示
 - **裁決（2026-07-11，使用者）**：採 **B（縮減綜合分為實證有效子集）+ C（前端明確標示
   「非預測訊號」）**，**不採 A**（滾動 IC 加權，20d 樣本外崩潰、過擬合風險高）。

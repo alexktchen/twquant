@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import polars as pl
 
     from twquant.config import ServingConfig, SystemConfig
+    from twquant.data.http import HttpClient
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
 
@@ -276,6 +277,45 @@ def _fubon_universe(wh: object, pattern: str) -> list[str]:
     return []
 
 
+def _fetch_fubon_day(
+    client: HttpClient,
+    sids: list[str],
+    day: dt.date,
+    raw_dir: Path,
+    workers: int,
+    keep_raw: bool,
+) -> list[tuple[str, bytes | None, str | None]]:
+    """逐股抓某日富邦DJ HTML → [(sid, html, err), ...]，**永遠依 sids 序回傳**（決定性）。
+
+    keep_raw=True 時每檔先讀 raw 快取（續傳）、未命中才抓並落檔；keep_raw=False 則純串流
+    ——不讀不寫 HTML，解析後即丟（省磁碟，見 D-023；代價是失去分日內續傳與免重抓重解析）。
+    DataError（重試耗盡）不中斷整批，記入 err 由呼叫端印 SKIP。workers>1 時以執行緒池平行；
+    共用 client 的滑動窗限流節流全域速率，`ThreadPoolExecutor.map` 保序 → 輸出與序列版一致。
+    """
+    from twquant.data.sources import fubon_chip
+    from twquant.errors import DataError
+
+    def _one(sid: str) -> tuple[str, bytes | None, str | None]:
+        cache = raw_dir / f"{sid}.html"
+        if keep_raw and cache.exists():
+            return sid, cache.read_bytes(), None
+        try:
+            html = fubon_chip.fetch_broker_trades(client, sid, day)
+        except DataError as exc:
+            return sid, None, str(exc)
+        if keep_raw:
+            cache.write_bytes(html)
+        return sid, html, None
+
+    if workers <= 1:
+        return [_one(sid) for sid in sids]
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(_one, sids))
+
+
 @app.command(name="backfill-fubon-chip")
 def backfill_fubon_chip(
     from_: str = typer.Option(..., "--from", help="起始日 YYYY-MM-DD"),
@@ -292,21 +332,32 @@ def backfill_fubon_chip(
         help="覆寫資料湖路徑（預設用 system.yaml；全市場模式需已有 stock_meta/行情）",
     ),
     skip_existing: bool = typer.Option(True, help="跳過已抓過的日期分區（續傳）"),
+    workers: int | None = typer.Option(
+        None, "--workers", help="平行抓取執行緒數；留空＝依限流 max_requests（configs/system.yaml）"
+    ),
+    keep_raw_html: bool = typer.Option(
+        False,
+        "--keep-raw-html/--no-keep-raw-html",
+        help="是否保留 raw HTML 於 data/raw/fubon_chip（預設否＝省磁碟、不留實體檔；D-023）",
+    ),
     yes: bool = typer.Option(False, "--yes", help="全市場大量請求前不再確認"),
 ) -> None:
     """回補富邦DJ 券商分點買賣超 → broker_trades（免費爬蟲，D-019）。
 
     --stocks 指定個股；**留空＝全市場**（股票池讀資料湖 stock_meta，退回 prices_daily）。
-    逐日→逐股抓取，raw HTML 落 data/raw/fubon_chip/date=<d>/<sid>.html 續傳；某日全股累積後
-    該日一次寫入 clean/broker_trades（part-fubon.parquet，Warehouse 分區級替換）。
+    逐日→逐股抓取，解析後某日全股累積該日一次寫入 clean/broker_trades（part-fubon.parquet，
+    Warehouse 分區級替換）。**PG 供應層由另一步 `twquant serving sync` 從資料湖鏡射**（D-019/
+    SPEC-009；PG 是可重建鏡射，不由本指令直寫）。
 
-    ⚠️ 全市場一天 ~1800 檔、限流 1 req/2s → 單日約 1 小時；請求量大，>100 檔會先確認。
+    --keep-raw-html 才會保留 raw HTML；預設不留（純串流解析，省磁碟，D-023）。
+    --workers 開執行緒池平行抓取（D-022），限流仍節流全域速率，故並行度上限＝
+    source_rates.fubon.max_requests；留空即取該值。全市場 6 workers（6 req/2s）約 10 分/日。
+    ⚠️ 免費公開站，並行度越高被封 IP 風險越高（參 D-015）；請求量大，>100 檔會先確認。
     """
     import polars as pl
 
     from twquant.data.sources import fubon_chip
     from twquant.data.warehouse import Warehouse
-    from twquant.errors import DataError
 
     start = dt.date.fromisoformat(from_)
     end = dt.date.fromisoformat(to)
@@ -329,9 +380,13 @@ def backfill_fubon_chip(
 
     days = [d for d in _daterange(start, end) if d.weekday() < 5]  # 跳週末（非交易日自然空表）
     rate = cfg.source_rates["fubon"]
+    # 限流即全域吞吐上限；並行度預設取 max_requests（超過亦被限流器節流，僅徒增排隊）
+    n_workers = max(workers if workers is not None else rate.max_requests, 1)
     est_min = len(sids) * len(days) * (rate.per_seconds / max(rate.max_requests, 1)) / 60
+    raw_note = "保留 raw HTML" if keep_raw_html else "不留 raw HTML（串流）"
     typer.secho(
-        f"富邦DJ 分點回補 {start}~{end}｜{mode} × {len(days)} 平日｜約 {est_min:.0f} 分鐘",
+        f"富邦DJ 分點回補 {start}~{end}｜{mode} × {len(days)} 平日"
+        f"｜{n_workers} 執行緒｜{raw_note}｜約 {est_min:.0f} 分鐘",
         fg=typer.colors.CYAN,
         bold=True,
     )
@@ -343,19 +398,16 @@ def backfill_fubon_chip(
             typer.secho(f"  [{day}] 已存在，跳過", fg=typer.colors.YELLOW)
             continue
         raw_dir = raw_root / f"date={day.isoformat()}"
-        raw_dir.mkdir(parents=True, exist_ok=True)
+        if keep_raw_html:
+            raw_dir.mkdir(parents=True, exist_ok=True)
         frames: list[pl.DataFrame] = []
-        for sid in sids:
-            cache = raw_dir / f"{sid}.html"
-            if cache.exists():
-                html = cache.read_bytes()
-            else:
-                try:
-                    html = fubon_chip.fetch_broker_trades(client, sid, day)
-                except DataError as exc:
-                    typer.secho(f"  [SKIP] {day} {sid}：{exc}", fg=typer.colors.YELLOW)
-                    continue
-                cache.write_bytes(html)
+        for sid, html, err in _fetch_fubon_day(
+            client, sids, day, raw_dir, n_workers, keep_raw_html
+        ):
+            if err is not None:
+                typer.secho(f"  [SKIP] {day} {sid}：{err}", fg=typer.colors.YELLOW)
+                continue
+            assert html is not None  # err is None → html 必有值（mypy narrowing）
             df = fubon_chip.rows_to_canonical(fubon_chip.parse_broker_rows(html), sid, day)
             if not df.is_empty():
                 frames.append(df)

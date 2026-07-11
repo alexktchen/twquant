@@ -7,6 +7,7 @@ token bucket——後者冷啟動 burst 可在窗內超額觸發封鎖。時鐘�
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -68,19 +69,25 @@ class SlidingWindowLimiter:
         self.per_seconds = per_seconds
         self._clock = clock
         self._times: deque[float] = deque()
+        self._lock = threading.Lock()  # 多執行緒共用同一 limiter 時保護窗記帳（backfill --workers）
 
     def acquire(self) -> None:
-        """阻塞直到可發下一個請求（滑動窗未滿），並記錄本次時間。"""
-        while True:
-            now = self._clock.monotonic()
-            cutoff = now - self.per_seconds
-            while self._times and self._times[0] <= cutoff:
-                self._times.popleft()
-            if len(self._times) < self.max_requests:
-                self._times.append(now)
-                return
-            wait = self._times[0] + self.per_seconds - now
-            self._clock.sleep(max(wait, 0.0))
+        """阻塞直到可發下一個請求（滑動窗未滿），並記錄本次時間。
+
+        鎖涵蓋整個窗記帳與等待：多執行緒下 acquire 序列化（不會 race 讓 burst 漏過），
+        但實際 HTTP 請求在 client.get 的鎖外執行，故各執行緒的網路往返仍重疊。
+        """
+        with self._lock:
+            while True:
+                now = self._clock.monotonic()
+                cutoff = now - self.per_seconds
+                while self._times and self._times[0] <= cutoff:
+                    self._times.popleft()
+                if len(self._times) < self.max_requests:
+                    self._times.append(now)
+                    return
+                wait = self._times[0] + self.per_seconds - now
+                self._clock.sleep(max(wait, 0.0))
 
 
 @dataclass
@@ -104,24 +111,30 @@ class HttpClient:
         self._limiter = SlidingWindowLimiter(
             self.rate.max_requests, self.rate.per_seconds, self.clock
         )
+        self._transport_lock = threading.Lock()  # 多執行緒下只建一次共用 Session
 
     def _get_transport(self) -> Transport:
         if self.transport is not None:
             return self.transport
-        import requests  # 延遲 import：純測試路徑（注入 transport）不需 requests
+        with self._transport_lock:  # double-checked：避免多執行緒各自建 Session
+            if self.transport is not None:
+                return self.transport
+            import requests  # 延遲 import：純測試路徑（注入 transport）不需 requests
 
-        session = requests.Session()
-        session.headers["User-Agent"] = self.user_agent
-        if self.headers:
-            session.headers.update(self.headers)
+            # requests.Session 由多執行緒共用發 GET：urllib3 連線池與 cookiejar 皆自帶鎖，
+            # header 建立後唯讀，故並行讀取安全（backfill --workers 的共用 client）。
+            session = requests.Session()
+            session.headers["User-Agent"] = self.user_agent
+            if self.headers:
+                session.headers.update(self.headers)
 
-        def _send(
-            method: str, url: str, *, params: dict[str, str] | None, timeout: float
-        ) -> Response:
-            return session.request(method, url, params=params, timeout=timeout)
+            def _send(
+                method: str, url: str, *, params: dict[str, str] | None, timeout: float
+            ) -> Response:
+                return session.request(method, url, params=params, timeout=timeout)
 
-        self.transport = _send
-        return _send
+            self.transport = _send
+            return _send
 
     def get(self, url: str, params: dict[str, str] | None = None) -> Response:
         """GET，含限流與重試。重試耗盡後 raise DataError。"""

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+- 2026-07-11 D-023 `backfill-fubon-chip` 預設不留 raw HTML（使用者需求、省磁碟）：新增
+  `--keep-raw-html/--no-keep-raw-html`，預設純串流（抓→解析→丟，不寫 `data/raw/fubon_chip`，
+  ~15MB/日 → 0）。canonical 仍落 parquet `clean/broker_trades`（小、因子/PitView 真相源）；
+  PG 由既有 `twquant serving sync` 從資料湖鏡射，非本指令直寫。既有 raw HTML 可安全刪除。
+  閘門：ruff/mypy 綠、tests 28 passed（+串流不落檔測試）。
+
+- 2026-07-11 D-022 `backfill-fubon-chip` 平行下載（使用者需求）：逐股抓取改用執行緒池
+  （新增 `--workers`，預設取 `source_rates.fubon.max_requests`），`SlidingWindowLimiter`
+  與 `HttpClient` 共用 client 下加鎖（thread-safe 全域限流＋單一 Session）。富邦限流調至
+  6 req/2s（使用者授權的積極設定，全市場單日 ~10 分；被封風險見 D-015）。`ThreadPoolExecutor.map`
+  保序 → 輸出與序列版 bit-identical（冪等）。閘門：ruff/mypy 綠、test_http+test_cli+test_fubon_chip 27 passed。
+
 - 2026-07-11 K 線主圖疊加均線與關鍵價位（使用者需求）：`CandleChart` 主圖（pane 0）加
   MA5/10/20/60 收盤均線（以完整史料滾動平均後裁切到視窗，視窗首日均值才正確）＋量價分布
   關鍵價位 POC（最大量價位，實線）/VA頂·VA底（70% 價值區虛線，price-line 標籤帶價位數字）。
