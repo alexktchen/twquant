@@ -1,5 +1,13 @@
 # CHANGELOG
 
+- 2026-07-11 供應層物化韌性修補（D-020 衍生）：(1) `standardize` 的 winsorize/zscore 改為
+  群內忽略非有限值估 median/mean/std，單一退化股的 NaN 不再經 `.over` 傳染成整個
+  (date,factor) 橫斷面 NaN，也不再讓整因子被 `_compute_universe` 的 `filter(is_finite)` 丟棄；
+  退化股自身維持非有限，僅它被下游過濾。(2) `_compute_universe` 吞因子例外不再靜默——
+  預期資料缺口（DataError）記 DEBUG、非預期錯誤記 WARNING 附堆疊（黃金規則 5）。
+  補屬性測試（單一 NaN 不汙染同群其他股 z）＋物化日誌測試。閘門：ruff/format 綠、
+  mypy strict 全綠、pytest 284 passed。
+
 - 2026-07-11 K 線主圖疊加均線與關鍵價位（使用者需求）：`CandleChart` 主圖（pane 0）加
   MA5/10/20/60 收盤均線（以完整史料滾動平均後裁切到視窗，視窗首日均值才正確）＋量價分布
   關鍵價位 POC（最大量價位，實線）/VA頂·VA底（70% 價值區虛線，price-line 標籤帶價位數字）。

@@ -21,6 +21,13 @@
 ## 已裁決
 
 ### D-020（2026-07-11，已裁決 B+C）composite_daily 綜合分無預測力——採實證有效子集 + 前端標示
+- **衍生韌性修補（2026-07-11，已落地）**：調查 D-020 時發現兩個耦合的靜默失效——
+  (1) `standardize` 的 winsorize/zscore 以 polars `.over` 算 median/mean/std，群內任一 NaN
+  會傳染成整個 (date,factor) 橫斷面 NaN，再被 `_compute_universe` 的 `filter(is_finite)`
+  丟棄，使某因子在約半數交易日無聲消失；(2) `_compute_universe` 以 bare `except: continue`
+  吞因子例外，讓上述缺口不可見。已改：standardize 群內忽略非有限值估統計量、退化股自身
+  維持非有限僅它被過濾；物化吞例外改記日誌（DataError→DEBUG、非預期→WARNING 附堆疊）。
+  補屬性測試（單一 NaN 不汙染同群）＋物化日誌測試（見 CHANGELOG 2026-07-11）。
 - **裁決（2026-07-11，使用者）**：採 **B（縮減綜合分為實證有效子集）+ C（前端明確標示
   「非預測訊號」）**，**不採 A**（滾動 IC 加權，20d 樣本外崩潰、過擬合風險高）。
   - 子集 = `{price.reversal_5d, price.residual_reversal_5d, fundamental.revenue_yoy}`
