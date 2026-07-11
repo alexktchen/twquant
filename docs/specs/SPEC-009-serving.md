@@ -86,9 +86,13 @@ DDL 由 `data/serving/schema.py` 建立（`CREATE TABLE IF NOT EXISTS` +
   短反轉＋產業殘差反轉＋月營收 YoY（樣本外兩 horizon 皆過 D-006 promote）。子集由
   `configs/serving.yaml` 注入（黃金規則 8）；`materialize.py` 與 `monitoring.snapshot`
   共用純函數 `data/serving/composite.py`，維持 live 現算與 PG 物化的綜合分定義一致。
-- **`serving rebuild [--tables t1,t2] [--from --to]`**：truncate 指定表後依區間重灌；
-  因子歷史**逐日推進 as_of** 呼叫 materialize，維持 PIT 語義
-  （**禁止**用最新資料一次性回填歷史因子值）。
+- **`serving rebuild [--tables t1,t2]`**：truncate 指定**鏡射表**（自 clean 資料湖 COPY
+  全量重灌）+ 重置 watermark，供來源修訂/初始化。**只支援鏡射表**：傳入因子表
+  （factor_values / factor_cross_stats / composite_daily）或未知表名一律 raise、不靜默
+  略過（黃金規則 5），並指引改用 `serving materialize`。
+- **`serving materialize [--date d | --from --to]`**：（重）物化因子表；**逐日推進 as_of**
+  呼叫 materialize，維持 PIT 語義（**禁止**用最新資料一次性回填歷史因子值）。因子表非
+  鏡射自資料湖，故其重灌走此指令而非 rebuild；改動 `composite_factors` 子集後亦以此重物化。
 - **`serving status`**：印各表 `sync_state`（last_date / row_count / 落後交易日數）。
 - **pipeline 掛點**：每日 pipeline（LOOP §3）尾波跑 `serving sync` + `materialize(今日)`；
   次日晨前置波做 catch-up（`available_at` 晚到者，如 broker_trades 次日 08:00）。

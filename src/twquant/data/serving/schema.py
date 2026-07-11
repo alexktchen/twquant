@@ -206,6 +206,32 @@ def spec_of(table: str) -> TableSpec:
     raise ValueError(f"未知供應層表：{table}")
 
 
+def rebuild_targets(tables: list[str] | None) -> tuple[TableSpec, ...]:
+    """rebuild 要重灌的鏡射表 spec；tables=None ＝全部鏡射表。
+
+    rebuild 只能處理**鏡射表**（自 clean 資料湖 COPY 全量重灌）。因子表
+    （factor_values / factor_cross_stats / composite_daily）由 PitView 逐日物化、
+    非鏡射自資料湖，故傳入這些表名（或任何非鏡射表名）一律 raise——不靜默略過無效
+    targets（黃金規則 5）。因子表的錯誤訊息指引改用 `serving materialize --from/--to`。
+    """
+    if tables is None:
+        return MIRROR_SPECS
+    invalid = [t for t in tables if t not in MIRROR_TABLES]
+    if invalid:
+        factor = [t for t in invalid if t in FACTOR_TABLES]
+        hint = (
+            f" 其中 {factor} 為因子表，由 PitView 逐日物化（非鏡射自資料湖）——"
+            "請改用 `python -m twquant serving materialize --from <起> --to <迄>` 重物化。"
+            if factor
+            else ""
+        )
+        raise ValueError(
+            f"serving rebuild 只支援鏡射表 {list(MIRROR_TABLES)}；"
+            f"收到不支援的表名 {invalid}。{hint}"
+        )
+    return tuple(s for s in MIRROR_SPECS if s.name in tables)
+
+
 def table_ddls(schema: str) -> dict[str, str]:
     """回傳 {表名: CREATE TABLE IF NOT EXISTS ...}（schema 限定，冪等）。"""
     _check_ident(schema)

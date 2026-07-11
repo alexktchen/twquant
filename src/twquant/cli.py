@@ -1181,7 +1181,12 @@ def serving_rebuild(
 
     tlist = [t.strip() for t in tables.split(",") if t.strip()] or None
     wh = Warehouse(_load_system().data_dir)
-    _echo_sync_results(list(serving_sync_mod.rebuild(wh, _load_serving(), tlist)))
+    try:
+        results: list[object] = list(serving_sync_mod.rebuild(wh, _load_serving(), tlist))
+    except ValueError as exc:  # 非鏡射表名（如因子表 composite_daily）→ 清楚報錯而非靜默無效
+        typer.secho(f"[ERROR] {exc}", fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    _echo_sync_results(results)
 
 
 @serving_app.command("status")
