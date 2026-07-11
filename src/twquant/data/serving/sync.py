@@ -170,8 +170,13 @@ def sync_all(wh: Warehouse, cfg: ServingConfig) -> list[SyncResult]:
 
 
 def rebuild(wh: Warehouse, cfg: ServingConfig, tables: list[str] | None = None) -> list[SyncResult]:
-    """truncate 指定表（預設全部）+ 重置 watermark 後全量重灌。"""
-    targets = [s for s in sch.MIRROR_SPECS if tables is None or s.name in tables]
+    """truncate 指定鏡射表（預設全部）+ 重置 watermark 後全量重灌。
+
+    只處理鏡射表。因子表（factor_values / factor_cross_stats / composite_daily）或未知
+    表名由 sch.rebuild_targets raise，不靜默略過（黃金規則 5）——那些表請用 serving
+    materialize 逐日重物化。
+    """
+    targets = sch.rebuild_targets(tables)
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
         with conn.cursor() as cur:
