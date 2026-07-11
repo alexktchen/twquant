@@ -17,7 +17,7 @@ Gervais/Kaniel/Mingelgrin 2001（高量溢酬）、Brock 1992/Sullivan 1999/Bajg
 | ✓ | Grinblatt & Han (2005), "Prospect theory, mental accounting, and momentum," *JFE* 78(2):311-339（前身 NBER w8734） | 提出 **CGO（capital gains overhang）**：以周轉率加權的歷史價格估全體持有人參考成本 R，CGO=(P−R)/P。高未實現獲利股後續報酬較高；CGO 進迴歸後**動能效應消失**——動能的行為真身。原文用週頻、5 年回看 | `price.cgo_250d`（STRATEGY §4a）。權重 ω 即「目前流通股最後一次成交在該日」的機率——**volume profile 的機率化版本** |
 | ✓ | An (2016), "Asset Pricing When Traders Sell Extreme Winners and Losers," *RFS* 29(3):823-861（前身 "The V-shaped Disposition Effect"） | **V 型處分效果**：未實現獲利與損失幅度愈大、淨賣壓愈強（獲利端強度約為損失端 **5.9 倍**）；把 overhang 拆成 gain/loss 兩段，**同時有大 gain 與大 loss 的股票下月報酬更高**（策略月 alpha 0.5–1%、Sharpe≈1.5）；**吃掉 CGO 效應**；損失端的預測方向與動能相反 | `price.gain_overhang_250d`(+1)、`price.loss_overhang_250d`(−1)。**公式細節（週頻/跳過近期窗）實作時以刊出版 §2 為準**（工作論文 PDF 離線無法解析，僅結構已核） |
 | ✓ | Kaustia (2010), "Prospect Theory and the Disposition Effect," *JFQA* 45(3) | 實證：投資人**賣出傾向在參考價位（成本價）處跳升**，越過後對利得幅度不敏感——處分效果非純 prospect theory 偏好可解釋 | 佐證「特定價位=行為關鍵價位」的微觀機制；支持 overhang 類因子的賣壓解釋 |
-| ✓ | Barber, Lee, Liu & Odean (2007), "Is the Aggregate Investor Reluctant to Realize Losses? Evidence from Taiwan," *European Financial Mgmt* 13(3) | 1995–1999 台灣證交所**全市場**帳戶資料：整體投資人（尤其散戶）顯著不願實現損失，處分效果強 | **台股在地證據**：錨定/賣壓機制在散戶佔比高的台股應更強——T-038 的先驗依據 |
+| ✓ | Barber, Lee, Liu & Odean (2007), "Is the Aggregate Investor Reluctant to Realize Losses? Evidence from Taiwan," *European Financial Mgmt* 13(3) | 1995–1999 台灣證交所**全市場**帳戶資料：整體投資人（尤其散戶）顯著不願實現損失，處分效果強 | **台股在地證據**：錨定/賣壓機制在散戶佔比高的台股應更強——T-039 的先驗依據 |
 | ○ | TEJ（2023–2024），「Capital Gain Overhang 因子研究 Part 1/2」 | 以 TEJ 資料在**台股**實作 GH 版 CGO 因子並驗證選股力 | 台股實務先例（付費資料）；我們以資料湖自建，結果可互相對照 |
 
 ## B. 支撐/壓力價位的直接統計檢驗
@@ -39,7 +39,7 @@ Steidlmayer（CBOT，1980s）的 Market Profile/TPO 與其產物 **POC**（最�
 **結論**：POC/HVN 適合作前端視覺化（K 線副圖的量價密集區）與人工確認層，
 **不作為獨立預測因子**；預測力走 A 類因子路線。
 
-## D. 因子落地對應（T-038，規格見 STRATEGY §4a）
+## D. 因子落地對應（T-039，規格見 STRATEGY §4a）
 
 | 因子 | 方向 | 依據 |
 |---|---|---|
@@ -47,7 +47,7 @@ Steidlmayer（CBOT，1980s）的 Market Profile/TPO 與其產物 **POC**（最�
 | `price.gain_overhang_250d` | +1 | An 2016 獲利端賣壓 |
 | `price.loss_overhang_250d` | −1 | An 2016 損失端（**與 GH/動能符號相反，以台股 RankIC 定奪**） |
 
-資料前提與風險檢查點（詳 STRATEGY §4a.3、D-020）：還原價（T-011 待補項）為硬前置；
-周轉率需在外流通股數（D-020）；2017 當沖稅改灌水周轉率（§5a 結構斷點）；漲跌停鎖死
+資料前提與風險檢查點（詳 STRATEGY §4a.3、D-021）：還原價（T-011 待補項）為硬前置；
+周轉率需在外流通股數（D-021）；2017 當沖稅改灌水周轉率（§5a 結構斷點）；漲跌停鎖死
 日的量權重畸低；與 `price.high_52w`/`mom_20d`/`reversal_5d` 的相關矩陣必查（An 聲稱
 吃掉 CGO、與動能部分重疊）。

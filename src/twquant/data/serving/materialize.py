@@ -19,6 +19,7 @@ import polars as pl
 from twquant.config import ServingConfig
 from twquant.data.serving import schema as sch
 from twquant.data.serving import store
+from twquant.data.serving.composite import composite_from_signed
 from twquant.data.serving.sync import partition_dates, upsert
 from twquant.data.warehouse import Warehouse
 from twquant.errors import DataError
@@ -91,15 +92,11 @@ def _materialize_on(
         pl.col("value").std().alias("std"),
         pl.len().cast(pl.Int32).alias("n_universe"),
     )
-    comp = merged.group_by(["date", "stock_id"]).agg(
-        pl.col("signed_z").mean().alias("signed_z_mean")
-    )
-    cnt = pl.col("signed_z_mean").count().over("date")
-    comp = comp.with_columns(
-        (
-            (pl.col("signed_z_mean").rank().over("date") - 1)
-            / pl.max_horizontal(cnt - 1, pl.lit(1))
-        ).alias("pct")
+    # 綜合分：D-020 有效子集的 signed_z 均值 + 宇宙百分位（非全因子等權）。
+    # factor_values/factor_cross_stats 仍含全部因子（體檢卡展示用），僅 composite 用子集。
+    comp = composite_from_signed(
+        merged.select("date", "stock_id", "factor", "signed_z"),
+        list(cfg.composite_factors),
     )
 
     with conn.cursor() as cur:

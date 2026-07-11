@@ -5,7 +5,7 @@
 
 ## 待裁決
 
-### D-020（2026-07-11，待裁決）CGO/overhang 因子（T-038）的周轉率權重資料
+### D-021（2026-07-11，待裁決）CGO/overhang 因子（T-039）的周轉率權重資料
 - 問題：STRATEGY §4a 的參考價權重需個股**日周轉率 = 成交股數 ÷ 在外流通股數**；
   資料湖尚無在外股數（T-014 的本地 SMB/HML/市值中性化同卡此欄）。另參考價需
   **還原價**序列（T-011 待補項），為共同硬前置。
@@ -15,10 +15,80 @@
   - B. 第一版以「視窗內成交量佔比」近似權重（不需新資料即可動工，但偏離 GH/An
     定義，權重失去「最後成交機率」語義，論文對照性打折）
   - C. B 先行驗證 IC 有無訊號、A 為正式定義後補（B 作穩健性對照保留）
-- 建議：C。影響範圍：T-038、T-014（中性化基準）、SPEC-001（若採 A 需新表
+- 建議：C。影響範圍：T-039、T-014（中性化基準）、SPEC-001（若採 A 需新表
   shares_outstanding 或 stock_meta 日頻化）。
 
 ## 已裁決
+
+### D-020（2026-07-11，已裁決 B+C）composite_daily 綜合分無預測力——採實證有效子集 + 前端標示
+- **裁決（2026-07-11，使用者）**：採 **B（縮減綜合分為實證有效子集）+ C（前端明確標示
+  「非預測訊號」）**，**不採 A**（滾動 IC 加權，20d 樣本外崩潰、過擬合風險高）。
+  - 子集 = `{price.reversal_5d, price.residual_reversal_5d, fundamental.revenue_yoy}`
+    （短反轉＋產業殘差反轉＋月營收 YoY；T-038 樣本外 5d t=+8.58、20d t=+4.88，兩 horizon
+    過 D-006 promote；且有 STRATEGY.md §1 先驗）。子集入 `configs/serving.yaml.composite_factors`
+    （黃金規則 8，不寫死）；`materialize.py` 與 `snapshot.py` 共用純函數
+    `data/serving/composite.py` 算「子集 signed_z 均值＋宇宙百分位」，維持單一真相源。
+  - 體檢卡仍展示全部因子的值/z/百分位，僅**綜合分**改用子集；SPEC-009 §3 同步、
+    tests 補子集斷言；前端 P8 綜合分位趨勢/宇宙熱門列/體檢卡加標示。
+  - **上線注意**：既有 `composite_daily` 為舊全因子物化，改版後需
+    `serving rebuild --tables composite_daily`（或重跑 materialize 區間）才反映子集。
+  - 若日後仍要走加權（A 家族），須改收縮/貝式框架並以 T-019 `walk_forward` 逐窗驗證
+    promote，非固定 252 窗直接上線。
+
+### D-020 分析與證據（原待裁決內容，保留供追溯）
+composite_daily 綜合分無預測力——動能/量能因子實證 IC 與宣稱方向相反
+- 發現（2023-01~2026-07 RankIC 檢驗，四碼普通股宇宙）：`composite_daily.signed_z_mean`
+  為 19 個註冊因子 signed_z（z × direction）的**等權平均**（`data/serving/materialize.py`，
+  SPEC-009 §3）。其中動能類（`price.mom_1d`、`price.mom_20d`、`price.mom_60d`、
+  `price.high_52w`、`price.rs_market_20d`）與量能類（`volume.turnover_z_20d`、
+  `volume.vol_ratio_5d`）七個宣稱 direction=+1 的因子，實證 IC 在宣稱方向上**顯著為負
+  （t < −2）**，與反轉類（`price.reversal_5d`、`price.residual_reversal_5d`，dir=−1）/
+  營收類（`fundamental.revenue_yoy`）的正 IC 互相抵銷，綜合分 5 日 IC ≈ −0.009、
+  20 日 IC ≈ −0.004——統計上無預測力。
+- 與既有文件的一致性：此發現**不意外**。STRATEGY.md §1-1 已載明美式橫斷面動能在台股
+  無效（Chui/Titman/Wei 2010，反轉主導）；T-013 完成註記早已實測 `price.mom_20d`
+  5 日 t=−2.32、T-014 註記量能因子 5 日偏負。問題在 composite 把「已知在台股反向」的
+  因子仍以 +1 等權灌入。`snapshot.py` 體檢卡 docstring 與前端體檢卡表格已聲明
+  「描述性定位，非預測力」，但**綜合分本身的出口**（composite-top 宇宙熱門列、個股頁
+  P8 綜合分位趨勢）未帶此標示，易被誤讀為選股訊號。
+- 選項：
+  - **A. 滾動實證 IC 加權**：以滾動視窗（如 252 日）PIT 估各因子 RankIC 符號/大小做
+    權重取代等權。權重估計**只准用 as_of 之前的資料**（黃金規則 1；權重時序落 PG 供
+    稽核），否則是把未來 IC 灌進當日綜合分。預測力上限最高，但引入估計噪音與過擬合面；
+    SPEC-009 §3、materialize、snapshot/stock_api、前端文案與測試全要同步改。
+  - **B. 縮減為實證有效子集**：綜合分只納入通過 D-006 門檻（|t| ≥ `ic_tstat_screen`=2，
+    正式 ≥ `ic_tstat_promote`=3，門檻引用 configs 不另寫死）的因子——候選：短期反轉
+    `price.reversal_5d`、殘差反轉 `price.residual_reversal_5d`、月營收
+    `fundamental.revenue_yoy`；其餘因子仍展示於體檢卡但不進綜合分。改動面小於 A、
+    語義清楚；子集選擇本身即樣本內決策，仍需樣本外驗證。
+  - **C. 維持描述性定位**：演算法不動，前端在綜合分、composite-top 熱門列、綜合分位
+    趨勢明確標示「綜合分為橫斷面相對定位，非預測訊號」（與 snapshot.py docstring 對齊）。
+    零過擬合風險、零回歸面，但熱門列繼續以無預測力的分數排序。
+- 過擬合防線（走 A/B 的前提）：以樣本內（如 2023-01~2025-06）估權重/選子集、
+  留出樣本外（如 2025-07~2026-07）驗證期，樣本外 IC t-stat 過 D-006 門檻才上線；
+  驗證由 T-038 產出報告後回此條裁決。A/B 任一採行都需同步 SPEC-009 §3、PRD-001、
+  snapshot.py docstring 與對應測試（體檢卡「描述性」聲明若失真即改寫）。
+- 影響範圍：`data/serving/materialize.py`（composite 計算）、`monitoring/snapshot.py`
+  （scorecard 綜合宇宙排名）、`monitoring/stock_api.py`（composite-history/
+  composite-top）、`frontend/src/App.tsx`（P8/熱門列文案）、SPEC-009 §3、
+  tests/test_serving_materialize.py。C 為純前端文案，與 A/B 不互斥、任何裁決下皆可先行。
+- **實證證據（T-038，2026-07-11）**：全報告見 [docs/research/COMPOSITE-IC-D020.md](docs/research/COMPOSITE-IC-D020.md)。
+  PIT-safe 重跑（worktree 21 因子、資料湖 2023-01~2026-07、IS=2023-01~2025-06 / OOS=2025-07~2026-07）：
+  - **發現成立**：等權綜合分樣本外無力——5d IC=−0.0047（t=−0.88）、20d IC=+0.0005（t=+0.09）；
+    全期 5d IC=−0.0072、20d=−0.0016，忠實重現回報值。機制確認：5d 有 8 個動能/量能因子
+    signed-t 顯著為負、7 個反轉/營收因子顯著為正，等權相抵。
+  - **B（有效子集）最穩健**：預設子集（reversal_5d＋residual_reversal_5d＋revenue_yoy）
+    OOS 5d IC=+0.0549（t=+8.58）、20d IC=+0.0256（t=+4.88）；資料驅動子集 OOS 5d t=+9.03、
+    20d t=+3.24。**兩 horizon 樣本外皆過 D-006 promote（t≥3）**，且有 STRATEGY.md §1 先驗。
+  - **A（滾動 IC 加權，win=252）有過擬合風險**：5d OOS t=+6.78 但 IS→OOS 衰減 41%；
+    **20d OOS 從 IS t=8.63 崩到 t=+0.04（完全蒸發）**——長 horizon 的滾動 IC 估計隨 regime
+    反覆，不穩健。
+  - **建議**：採 **B 重定義綜合分 + C 前端標示無論如何先行；不建議 A**（若日後走加權須改
+    收縮/貝式框架並以 T-019 walk_forward 逐窗驗證，非固定窗直接上線）。
+  - Caveats：法人/融資券 2023-2024 覆蓋缺口（chip 因子分析窗大多缺席，近端 2025-2026 在場，
+    上線前需複核近端子期）；未還原價（T-011 待補，與生產因子同基礎故比較公平）；3 個 chip
+    因子 + mom_1d 在分析窗 IC 全 NaN（無覆蓋/近退化）。
+  - **已裁決 B+C（見本條頂部）**：研究完成、證據已備，實作依 CLAUDE.md §6 於裁決後展開。
 
 ### D-019（2026-07-09，已裁決）broker_trades 分點來源改走免費富邦DJ（取代 D-001）
 - 問題：D-001 裁定分點走 FinMind **付費** API；但 FinMind 的分點 dataset 屬贊助會員，

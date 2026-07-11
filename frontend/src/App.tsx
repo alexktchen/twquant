@@ -782,8 +782,9 @@ function StockChartPanel({
     hasFlow && '主力買賣超(日條+累計，張)',
     ...factorPanes.map((fp) => fp.label),
   ].filter(Boolean).join(' / ')
+  const compNote = hasComp ? ' · 綜合分位為相對定位、非預測訊號(D-020)' : ''
   return (
-    <Panel title={title} sub={`副圖：${subs} · 紅漲綠跌 · 可拖曳縮放`}>
+    <Panel title={title} sub={`副圖：${subs} · 紅漲綠跌 · 可拖曳縮放${compNote}`}>
       {available.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 mb-2">
           <span className="text-[11px] text-[var(--muted)] mr-0.5">副圖因子（最多 {MAX_FACTOR_PANES}）</span>
@@ -863,11 +864,16 @@ function ScorecardPanel({ sid }: { sid: string }) {
         )}
       </div>
       {comp && (
-        <div className="text-[12px] text-[var(--muted)] mb-3">
-          綜合因子傾向：宇宙前{' '}
-          <span style={{ color: comp.pct >= 0.5 ? 'var(--up)' : 'var(--down)' }}>{Math.round((1 - comp.pct) * 100)}%</span>
-          （signed-z 平均 {comp.signed_z_mean >= 0 ? '+' : ''}
-          {comp.signed_z_mean}，共 {comp.n_universe} 檔）
+        <div className="mb-3">
+          <div className="text-[12px] text-[var(--muted)]">
+            綜合因子傾向：宇宙前{' '}
+            <span style={{ color: comp.pct >= 0.5 ? 'var(--up)' : 'var(--down)' }}>{Math.round((1 - comp.pct) * 100)}%</span>
+            （signed-z 平均 {comp.signed_z_mean >= 0 ? '+' : ''}
+            {comp.signed_z_mean}，共 {comp.n_universe} 檔）
+          </div>
+          <div className="text-[10px] text-[var(--muted)] mt-0.5 leading-relaxed">
+            綜合分＝實證有效子集（短反轉＋產業殘差反轉＋月營收 YoY）的橫斷面相對定位，<b>非預測訊號</b>（D-020；因子預測力 RankIC 見健檢頁）
+          </div>
         </div>
       )}
       <HBars height={rows.length * 24} rows={rows.map((f) => ({ label: f.zh, value: f.signed_z ?? 0 }))} />
@@ -1356,7 +1362,12 @@ function StockFactors() {
             </div>
           )}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-[var(--muted)] mr-0.5">{topRows.length ? `宇宙前 ${hot.length}` : '熱門'}</span>
+            <span
+              className="text-[11px] text-[var(--muted)] mr-0.5"
+              title="宇宙綜合排名＝描述性相對定位，非預測訊號（D-020；因子預測力 RankIC 見健檢頁）"
+            >
+              {topRows.length ? `宇宙前 ${hot.length}` : '熱門'}
+            </span>
             {hot.map((h) => (
               <button
                 key={h.sid}

@@ -136,11 +136,11 @@
 | P2 | 地緣分點、官股買賣超 | chip | §3.2 |
 | P1 | `price.cgo_250d`、`price.gain/loss_overhang_250d`（行為錨定） | price | §4a + research/PAPERS-KEYLEVELS.md |
 
-## 4a. 行為錨定價位因子規格（T-038 實作內容）
+## 4a. 行為錨定價位因子規格（T-039 實作內容）
 
 依據：台股整體投資人處分效果顯著（Barber/Lee/Liu/Odean 2007，全市場帳戶資料）→
 未實現損益的賣壓錨定機制在散戶佔比高的台股應更強。文獻與驗證等級見
-research/PAPERS-KEYLEVELS.md；資料前提裁決見 D-020。
+research/PAPERS-KEYLEVELS.md；資料前提裁決見 D-021。
 
 ### 4a.1 參考價與權重（單一定義，三因子共用）
 
@@ -152,7 +152,7 @@ R(t)   = Σ_n ω(t,n)·P(t−n) / Σ_n ω(t,n)             回看 N 日（config
 - 直覺：ω 是「目前流通股最後一次成交在 t−n 日」的機率 → R 即全體持有人的
   量加權平均成本——**volume profile 的機率化版本**（GH 2005）。
 - 全程使用**還原價**（除息跳空會假性製造 loss overhang）→ T-011 還原價待補項為硬前置。
-- 周轉率分母需在外流通股數，資料湖尚無 → **D-020 待裁決**。
+- 周轉率分母需在外流通股數，資料湖尚無 → **D-021 待裁決**。
 - 窗長 N 與頻率（日/週；原文週頻 5 年）是 configs 參數，250d 僅預設起點。
 
 ### 4a.2 因子定義（factors/price/）

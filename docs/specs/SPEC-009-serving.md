@@ -77,9 +77,15 @@ DDL 由 `data/serving/schema.py` 建立（`CREATE TABLE IF NOT EXISTS` +
   `broker_trades` 亦為鏡射表之一，同路徑同步（買/賣超彙總移至 `/brokers` 端點查詢時算）。
 - **`materialize_factors(as_of)`**：`list_factors()` 全部因子 →
   `compute(view=Warehouse.view(as_of))` → `standardize`（winsorize_mad → zscore，
-  per `(date, factor)`）→ `signed_z = z × direction`、composite（signed_z 均值 +
-  宇宙百分位）→ upsert `factor_values`/`factor_cross_stats`/`composite_daily`。
-  單日成本 ≈ 現行一次 scorecard 請求；一天只算一次。
+  per `(date, factor)`）→ `signed_z = z × direction` →
+  `factor_values`/`factor_cross_stats` 寫**全部因子**（體檢卡展示）、
+  `composite_daily` 只寫 **D-020 有效子集**（`serving.yaml.composite_factors`）的
+  signed_z 均值 + 宇宙百分位 → upsert 三表。單日成本 ≈ 現行一次 scorecard 請求；
+  一天只算一次。**綜合分子集**：全因子等權在台股實證無預測力（動能/量能因子 signed
+  IC<0 與反轉/營收 signed IC>0 相抵，D-020 / T-038），故 `composite_daily` 只納入
+  短反轉＋產業殘差反轉＋月營收 YoY（樣本外兩 horizon 皆過 D-006 promote）。子集由
+  `configs/serving.yaml` 注入（黃金規則 8）；`materialize.py` 與 `monitoring.snapshot`
+  共用純函數 `data/serving/composite.py`，維持 live 現算與 PG 物化的綜合分定義一致。
 - **`serving rebuild [--tables t1,t2] [--from --to]`**：truncate 指定表後依區間重灌；
   因子歷史**逐日推進 as_of** 呼叫 materialize，維持 PIT 語義
   （**禁止**用最新資料一次性回填歷史因子值）。
