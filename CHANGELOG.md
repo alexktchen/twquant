@@ -1,6 +1,15 @@
 # CHANGELOG
 
-- 2026-07-11 K 線主圖疊加均線與關鍵價位（使用者需求）：`CandleChart` 主圖（pane 0）加
+- 2026-07-11 修 `serving rebuild` 靜默無效 + 修正 composite 重物化指引（使用者回報）：
+  `serving rebuild --tables composite_daily`（及其他因子表 factor_values/factor_cross_stats）
+  過去因 `rebuild()` 只過濾 `MIRROR_SPECS` 而 targets 為空、什麼都不做也不報錯（違反黃金
+  規則 5），正是 composite_daily 全歷史殘留 D-020 前舊演算法值的排查根因。改為
+  `schema.rebuild_targets()` 單一真相：收到非鏡射表名一律 raise，因子表訊息指引改用
+  `serving materialize --from/--to`；CLI 清楚報錯並以非零碼結束。同步修 `configs/serving.yaml`
+  的 composite_factors 註解與 SPEC-009 §3（rebuild 只重灌鏡射表、因子表走 materialize）。
+  閘門：ruff/format/mypy 綠、pytest 274 passed（+6 rebuild_targets 斷言，不需 PG）；
+  既有 `test_stock_meta::test_api_stock_meta_and_factors` 因本環境無 TWQUANT_PG_DSN 而紅
+  （與本變更無關，git stash 驗證基線同樣紅）。
   MA5/10/20/60 收盤均線（以完整史料滾動平均後裁切到視窗，視窗首日均值才正確）＋量價分布
   關鍵價位 POC（最大量價位，實線）/VA頂·VA底（70% 價值區虛線，price-line 標籤帶價位數字）。
   `RangeCandle` 加均線 chips（預設 MA5/MA20）與「關鍵價位」開關；crosshair legend 顯示各
