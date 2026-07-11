@@ -11,6 +11,7 @@ stock_factor_scorecard 一致，差別只在此處寫全宇宙進 PG、後者回
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +24,8 @@ from twquant.data.serving.composite import composite_from_signed
 from twquant.data.serving.sync import partition_dates, upsert
 from twquant.data.warehouse import Warehouse
 from twquant.errors import DataError
+
+_log = logging.getLogger("twquant.serving")
 
 _UNIVERSE = r"^[1-9][0-9]{3}$"  # 因子宇宙＝四碼普通股（PRD-001 §3；同 snapshot.UNIVERSE）
 
@@ -47,10 +50,15 @@ def _compute_universe(wh: Warehouse, as_of: dt.date) -> pl.DataFrame | None:
     view = wh.view(as_of)
     frames: list[pl.DataFrame] = []
     for name in list_factors():
+        # 單一因子失敗不中斷全宇宙物化，但一律留日誌（黃金規則 5：禁止靜默）。
+        # 預期資料缺口（DataError：缺表/史料不足）記 DEBUG；非預期錯誤記 WARNING 附堆疊，
+        # 讓「某因子在某些交易日悄悄消失」這類 bug 從無聲變可見（D-020）。
         try:
             frames.append(compute([name], view, dates=[as_of]))
-        except Exception:  # noqa: BLE001  # 該日史料不足/缺表的因子略過（同 scorecard）
-            continue
+        except DataError as exc:
+            _log.debug("因子 %s 於 %s 無可算資料，略過：%s", name, as_of, exc)
+        except Exception as exc:  # noqa: BLE001  # 記錄後續算，不吞掉整天
+            _log.warning("因子 %s 於 %s 計算失敗，略過：%s", name, as_of, exc, exc_info=exc)
     if not frames:
         return None
     fdf = (

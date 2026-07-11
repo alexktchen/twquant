@@ -7,6 +7,7 @@ compute 比對（容差 1e-9），並確認逐日各自成列（非以最新回�
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ import pytest
 from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.warehouse import Warehouse
+from twquant.errors import DataError
 
 _SCHEMA = "serving_test_mat"
 _STOCKS = {"1111": 100.0, "2222": 50.0, "3333": 200.0, "4444": 80.0}
@@ -68,6 +70,67 @@ def _connect_or_skip() -> Any:
 def _drop(conn: Any) -> None:
     with conn.cursor() as cur:
         cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
+
+
+def test_compute_universe_logs_unexpected_factor_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """D-020 issue 1：_compute_universe 吞掉的因子不再靜默——非預期錯誤留 WARNING，
+    宇宙其餘因子照常物化（不因單一因子失敗整天消失）。無需 PG。"""
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.data.serving import materialize as smat
+    from twquant.factors import compute as compute_mod
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    as_of = dt.date(2026, 6, 24)
+    real = compute_mod.compute
+
+    def flaky(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+        if names == ["price.mom_20d"]:
+            raise RuntimeError("boom")  # 非 DataError → 視為非預期
+        return real(names, view, dates=dates)
+
+    monkeypatch.setattr(compute_mod, "compute", flaky)
+    with caplog.at_level(logging.WARNING, logger="twquant.serving"):
+        merged = smat._compute_universe(wh, as_of)
+
+    assert merged is not None  # 其他因子仍成功物化
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("price.mom_20d" in r.getMessage() for r in warnings), [
+        r.getMessage() for r in warnings
+    ]
+
+
+def test_compute_universe_expected_data_gap_logged_below_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """D-020 issue 1：預期資料缺口（DataError，如缺表/史料不足）仍留日誌但不升級為
+    WARNING 噪音——與非預期錯誤區分。"""
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.data.serving import materialize as smat
+    from twquant.factors import compute as compute_mod
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    as_of = dt.date(2026, 6, 24)
+    real = compute_mod.compute
+
+    def flaky(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+        if names == ["price.mom_20d"]:
+            raise DataError("chip_table", as_of, "clean 層無資料")
+        return real(names, view, dates=dates)
+
+    monkeypatch.setattr(compute_mod, "compute", flaky)
+    with caplog.at_level(logging.DEBUG, logger="twquant.serving"):
+        merged = smat._compute_universe(wh, as_of)
+
+    assert merged is not None
+    recs = [r for r in caplog.records if "price.mom_20d" in r.getMessage()]
+    assert recs, "預期資料缺口也必須留下日誌，不得完全靜默"
+    assert all(r.levelno < logging.WARNING for r in recs), [
+        (r.levelname, r.getMessage()) for r in recs
+    ]
 
 
 def test_ac3_materialized_value_matches_compute(tmp_path: Path) -> None:
