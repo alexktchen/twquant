@@ -134,6 +134,45 @@
 | P2 | 外資期貨淨 OI、外資 PCR、融資維持率 | market | §2 Overlay-3 |
 | P2 | `chip.stability_10d`、主力成本乖離、隔日沖反向因子 | chip | §3.2 |
 | P2 | 地緣分點、官股買賣超 | chip | §3.2 |
+| P1 | `price.cgo_250d`、`price.gain/loss_overhang_250d`（行為錨定） | price | §4a + research/PAPERS-KEYLEVELS.md |
+
+## 4a. 行為錨定價位因子規格（T-038 實作內容）
+
+依據：台股整體投資人處分效果顯著（Barber/Lee/Liu/Odean 2007，全市場帳戶資料）→
+未實現損益的賣壓錨定機制在散戶佔比高的台股應更強。文獻與驗證等級見
+research/PAPERS-KEYLEVELS.md；資料前提裁決見 D-020。
+
+### 4a.1 參考價與權重（單一定義，三因子共用）
+
+```
+ω(t,n) = V(t−n) × Π_{τ=1..n−1} (1 − V(t−n+τ))     V = 日周轉率
+R(t)   = Σ_n ω(t,n)·P(t−n) / Σ_n ω(t,n)             回看 N 日（configs）
+```
+
+- 直覺：ω 是「目前流通股最後一次成交在 t−n 日」的機率 → R 即全體持有人的
+  量加權平均成本——**volume profile 的機率化版本**（GH 2005）。
+- 全程使用**還原價**（除息跳空會假性製造 loss overhang）→ T-011 還原價待補項為硬前置。
+- 周轉率分母需在外流通股數，資料湖尚無 → **D-020 待裁決**。
+- 窗長 N 與頻率（日/週；原文週頻 5 年）是 configs 參數，250d 僅預設起點。
+
+### 4a.2 因子定義（factors/price/）
+
+- `price.cgo_250d` = (P − R)/P，方向 +1（GH 2005：動能的行為真身）
+- `price.gain_overhang_250d` = Σ ω·max(0, (P−P_s)/P)，方向 +1
+- `price.loss_overhang_250d` = Σ ω·min(0, (P−P_s)/P)，方向 −1（An 2016：深損失→高後續報酬）
+- V 型組合權重（gain + λ·|loss|，An 估計獲利端:損失端 ≈ 5.9:1 → λ≈0.17 起點）
+  屬策略層 configs，不進因子定義
+- An 2016 的精確構造（週頻、是否跳過最近數週）**實作時以 RFS 刊出版 §2 為準**，
+  嚴禁憑印象猜（CLAUDE.md §6）
+
+### 4a.3 使用原則與檢查點
+
+- **損失端符號 GH 與 An 相反**（GH：損失→續跌；An：深損失→反彈）→ 比照 T-015
+  trust_net 前例，先驗不鎖死，以台股連續期 RankIC 定奪
+- IC 報告相關矩陣必查 `price.high_52w`、`price.mom_20d`、`price.reversal_5d`
+  （An 聲稱吃掉 CGO 且與動能部分重疊；高相關則擇一）
+- 2017 當沖稅改使周轉率灌水 → 權重分母比照 §5a 結構斷點處理（淨成交量或分段回測）
+- 漲跌停鎖死日成交量畸低 → ω 權重失真，處置股/連續漲停案例需人工抽查
 
 ## 5. 與系統閘門的銜接
 
@@ -198,4 +237,5 @@
 | Hsieh 2013, IRFA；Hung/Lu/Lee 2010, PBFJ；Hung/Lien/Kuo 2020（窗飾）；Lien et al. 2020；Wang 2021, JFE；Bongaerts et al.（條件式波動目標）；Zaremba et al.（市場寬度）；McConnell/Xu 2008, FAJ（月轉換） | 機構群聚、投信窗飾、高量溢酬延伸、條件式波動目標、寬度預測力、月轉換效應 | ✓ 2026-07-05 逐篇網路確認 |
 | Moreira/Muir 2017, JF；Harvey et al. 2018（波動目標）；Faber（10 月 SMA）；Du/Huang/Liao（動能季節性） | 波動管理、趨勢濾網、1–2 月反轉季節性 | ○ 額度未驗；前三篇為公認經典 |
 | 台指期 OI / 外資 PCR / 融資擇時來源（TEJ、PBFJ、Economic Modelling） | Overlay 輔助情緒訊號 | ○ 未驗 |
+| Grinblatt/Han 2005, JFE；An 2016, RFS；Kaustia 2010, JFQA；Barber et al. 2007, EFM（台灣）；Osler 2000, FRBNY | 未實現損益錨定（CGO/V 型）、參考價賣壓跳升、支撐壓力價位檢驗 | ✓ 2026-07-11 網路核對出處，詳 research/PAPERS-KEYLEVELS.md |
 | FinLab/XQ/CMoney 實務回測與定義 | 主力定義、集中度門檻、隔日沖名單、組合策略年化 33.9% | ○ 實務來源，複製前須自行回測 |
