@@ -20,6 +20,43 @@
 
 ## 已裁決
 
+### D-025（2026-07-12，已裁決）backfill-fubon-chip 改 PG 直寫 + fubon_fetch_log 抓取帳本
+- 需求（使用者）：(1) 抓到就直接進 PG，不留實體檔案；(2) 逐 (日, 股) 續傳——每次抓新日期
+  先檢查已抓過的股號跳過；(3) **多程序併跑**且檢查間隔要小，不能漏抓；(4) 新增查詢：
+  以天為單位顯示已抓檔數＋佔宇宙總數的百分比。
+- 裁決：帳本放 PG（資料庫本就擅長並行協調，取代檔案帳本）：
+  - 新簿記表 `serving.fubon_fetch_log`（date, stock_id, n_rows, fetched_at；PK (date,stock_id)；
+    比照 sync_state，不屬鏡射/因子表，sync/rebuild 不觸碰）。
+  - worker 抓完一檔 → 解析 → **同一交易** upsert `broker_trades` ＋寫 log → commit。
+    **log 列存在 ⇔ 資料已入庫**，故「查 log 跳過」永不漏抓；競態最壞情況＝兩程序重抓同檔
+    （upsert 冪等，無害）。skip_if 在**抓取當下**逐檔查 log（非日初快照，間隔最小）。
+  - 假日探測（D-024）改以 SENTINEL 列（stock_id='_day_empty'）持久化；該日事後發現有
+    資料時自動 `clear_sentinel` 解除。
+  - 新指令 `fubon-chip-status`：讀 log 依日彙總（已抓/宇宙總數＋百分比、有資料檔數、
+    非交易日標記）。
+  - **資料湖不棄守**：日終自 PG `read_day` 讀回該日完整資料（含他程序貢獻）補寫
+    `clean/broker_trades` 分區。理由：湖是因子層（PitView，黃金規則 1）與
+    `serving rebuild`（truncate 後自湖全量重灌）的真相源——只寫 PG 而不寫湖，一次
+    rebuild 就會清光直寫資料。此為對「不用進 parquet」的刻意保留，成本僅日終一次寫入。
+  - `Warehouse._write_partition` tmp 檔名帶 pid：多程序同刻寫同一分區不互踩同一 tmp。
+- 煙霧驗證（本機 PG 5433）：ensure_schema 建表、mark 冪等、day_stats FILTER/sentinel、
+  read_day 讀回 2026-05-07 全日 56,362 列且 available_at 轉回 Asia/Taipei 18:00、過 schema 驗證。
+- 取代 D-023 的「純串流」與 D-024 原檔案式探測快取；raw HTML 完全不落地。
+- 範圍：`data/serving/schema.py`（FUBON_FETCH_LOG_SPEC）、新模組 `data/serving/chip_ingest.py`、
+  `data/warehouse.py`（pid tmp）、`cli.py`（backfill 重構 + fubon-chip-status）、`tests/test_cli.py`。
+
+### D-024（2026-07-12，已裁決）backfill-fubon-chip 假日探測跳過 + 進度列
+- 需求（使用者）：非交易日不要整天 ~1800 檔白抓；即時顯示目前抓取的股號/日期、
+  進度條、整體百分比、起始/預估結束時間。（週六日既有 `weekday<5` 過濾本就跳過；
+  問題是**平日國定假日**，如 2026-01-01、2026-05-01，全市場白抓一小時。）
+- 裁決：每日先抓前 `--probe` 檔（預設 5，CLI 參數非寫死）：**全數 HTTP 成功但 parse
+  皆無 t01 表** → 判定非交易日、跳過整天（D-025 起並以 SENTINEL 持久化）。任何 err
+  （被擋/重試耗盡）**不算證據**、照常全抓——避免把「被擋」誤判成假日而無聲丟掉交易日。
+  進度列單行 \r 重繪：進度條、整體 %、done/total、目前日期+股號、開始/已用/預估結束
+  （平均速率外推）；thread-safe（worker 完成即 tick，不論成敗/跳過）。
+- 已知限制：富邦DJ 軟擋（HTTP 200 回空頁）與假日不可分——若探測檔全被軟擋會誤標非交易日；
+  訊息會大聲印出，且該日一旦有資料會自動解除標記（D-025 clear_sentinel）；`--probe 0` 停用。
+
 ### D-023（2026-07-11，已裁決）backfill-fubon-chip 預設不留 raw HTML（省磁碟）
 - 問題：raw HTML 快取（`data/raw/fubon_chip/date=<d>/<sid>.html`）每檔 ~11KB、全市場每日
   ~1432 檔 ≈ 15MB/日（~3.8GB/年、數萬個小檔，stat 都嫌慢）。使用者要求下載時「不用再留

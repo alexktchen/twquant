@@ -1,5 +1,15 @@
 # CHANGELOG
 
+- 2026-07-12 D-024/D-025 `backfill-fubon-chip` PG 直寫＋假日探測＋進度列（使用者需求）：
+  逐檔抓完當場 upsert PG `broker_trades`＋同交易寫新帳本表 `fubon_fetch_log`（log 存在 ⇔
+  資料已入庫 → 多程序併跑逐檔跳過永不漏抓，競態最壞重抓一檔）；raw HTML 完全不落地。
+  假日探測 `--probe`（預設 5）：全空即標記 SENTINEL 跳過整天（err 不算證據防誤判）。
+  單行進度列（進度條/整體 %/目前日期股號/開始/已用/預估結束）。新指令 `fubon-chip-status`：
+  每日已抓檔數/宇宙總數＋百分比。日終自 PG 讀回完整日補寫資料湖分區（防 serving rebuild
+  清空、因子層 PitView 仍有真相源）；`Warehouse` 分區 tmp 帶 pid 防多程序互踩。
+  閘門：ruff/mypy 綠、pytest 302 passed（僅既有無 DSN 的 test_stock_meta 紅）；
+  本機 PG 5433 煙霧：建表/mark 冪等/day_stats/read_day 56,362 列 tz 正確全過。
+
 - 2026-07-11 D-023 `backfill-fubon-chip` 預設不留 raw HTML（使用者需求、省磁碟）：新增
   `--keep-raw-html/--no-keep-raw-html`，預設純串流（抓→解析→丟，不寫 `data/raw/fubon_chip`，
   ~15MB/日 → 0）。canonical 仍落 parquet `clean/broker_trades`（小、因子/PitView 真相源）；

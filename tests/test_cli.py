@@ -1,12 +1,20 @@
-"""CLI 純邏輯測試（排程時間計算、富邦DJ 平行回補 D-022）。"""
+"""CLI 純邏輯測試（排程時間計算、富邦DJ 平行回補 D-022/D-024/D-025）。"""
 
 from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from pathlib import Path
 
-from twquant.cli import _daterange, _fetch_fubon_day, _seconds_until
+import pytest
+
+from twquant.cli import (
+    _daterange,
+    _fetch_fubon_day,
+    _fubon_status_lines,
+    _make_progress,
+    _probe_all_empty,
+    _seconds_until,
+)
 from twquant.config import SourceRate
 from twquant.conventions import TZ
 from twquant.data.http import HttpClient
@@ -43,7 +51,7 @@ def test_daterange_weekday_filter() -> None:
     assert dt.date(2026, 6, 20) not in weekdays  # 但被濾掉
 
 
-# ── 富邦DJ 平行回補（D-022，_fetch_fubon_day）──────────────────────────
+# ── 富邦DJ 平行抓取（D-022/D-025，_fetch_fubon_day）───────────────────
 
 _FUBON_DAY = dt.date(2026, 5, 7)
 
@@ -80,17 +88,13 @@ def _fubon_client(
     )
 
 
-def test_fetch_fubon_day_parallel_matches_sequential(tmp_path: Path) -> None:
+def test_fetch_fubon_day_parallel_matches_sequential() -> None:
     # 冪等/決定性（CLAUDE.md §4）：workers=6 與序列版逐元素相同、且永遠依 sids 序
     sids = [f"{i:04d}" for i in range(1000, 1030)]  # 30 檔
-    seq_dir, par_dir = tmp_path / "seq", tmp_path / "par"
-    seq_dir.mkdir()
-    par_dir.mkdir()
-
     seq_calls: dict[str, int] = {}
     par_calls: dict[str, int] = {}
-    seq = _fetch_fubon_day(_fubon_client(seq_calls), sids, _FUBON_DAY, seq_dir, 1, True)
-    par = _fetch_fubon_day(_fubon_client(par_calls), sids, _FUBON_DAY, par_dir, 6, True)
+    seq = _fetch_fubon_day(_fubon_client(seq_calls), sids, _FUBON_DAY, 1)
+    par = _fetch_fubon_day(_fubon_client(par_calls), sids, _FUBON_DAY, 6)
 
     assert [s for s, _, _ in seq] == sids  # 依 sids 序
     assert seq == par  # 平行與序列 bit-identical
@@ -98,50 +102,123 @@ def test_fetch_fubon_day_parallel_matches_sequential(tmp_path: Path) -> None:
     assert par_calls == {s: 1 for s in sids}
 
 
-def test_fetch_fubon_day_cache_resume_no_refetch(tmp_path: Path) -> None:
-    # raw HTML 快取續傳：第二次全部命中 → 零網路請求
-    sids = ["2330", "2317"]
-    raw = tmp_path / "d"
-    raw.mkdir()
-    calls: dict[str, int] = {}
-    client = _fubon_client(calls)
-    first = _fetch_fubon_day(client, sids, _FUBON_DAY, raw, 2, True)
-    calls.clear()
-    second = _fetch_fubon_day(client, sids, _FUBON_DAY, raw, 2, True)
-    assert first == second
-    assert calls == {}  # 續傳：無新請求
-    assert (raw / "2330.html").read_bytes() == b"<html>2330</html>"
-
-
-def test_fetch_fubon_day_stream_mode_writes_no_html(tmp_path: Path) -> None:
-    # keep_raw=False（D-023）：純串流——不落 HTML，且每次都重抓（無快取續傳）
-    sids = ["2330", "2317"]
-    raw = tmp_path / "d"  # 刻意不 mkdir：串流模式不應觸碰此目錄
-    calls: dict[str, int] = {}
-    client = _fubon_client(calls)
-    first = _fetch_fubon_day(client, sids, _FUBON_DAY, raw, 2, False)
-    second = _fetch_fubon_day(client, sids, _FUBON_DAY, raw, 2, False)
-
-    assert [(s, h) for s, h, _ in first] == [(s, f"<html>{s}</html>".encode()) for s in sids]
-    assert first == second  # 解析結果一致（決定性）
-    assert not raw.exists()  # 未寫任何實體檔
-    assert calls == {s: 2 for s in sids}  # 兩趟各重抓一次（無續傳）
-
-
-def test_fetch_fubon_day_dataerror_recorded_not_raised(tmp_path: Path) -> None:
-    # 單檔重試耗盡 → 記入 err（不中斷整批、不落快取），順序仍保留
+def test_fetch_fubon_day_dataerror_recorded_not_raised() -> None:
+    # 單檔重試耗盡 → 記入 err（不中斷整批），順序仍保留
     sids = ["2330", "9999", "2317"]
-    raw = tmp_path / "d"
-    raw.mkdir()
     calls: dict[str, int] = {}
-    out = _fetch_fubon_day(
-        _fubon_client(calls, fail={"9999"}, max_retries=0), sids, _FUBON_DAY, raw, 3, True
-    )
+    out = _fetch_fubon_day(_fubon_client(calls, fail={"9999"}, max_retries=0), sids, _FUBON_DAY, 3)
 
     assert [s for s, _, _ in out] == sids  # 序保留
-    ok = {s for s, _, err in out if err is None}
-    failed = [(s, err) for s, _, err in out if err is not None]
-    assert ok == {"2330", "2317"}
-    assert len(failed) == 1 and failed[0][0] == "9999"
-    assert not (raw / "9999.html").exists()  # 失敗檔不落快取
-    assert (raw / "2330.html").exists()
+    assert {s for s, _, err in out if err is None} == {"2330", "2317"}
+    assert [s for s, _, err in out if err is not None] == ["9999"]
+
+
+def test_fetch_fubon_day_skip_if_checked_per_stock() -> None:
+    # D-025 帳本跳過：skip_if 回 True 的檔不發請求、不回呼 on_fetched，結果 (sid, None, None)
+    sids = ["2330", "2317", "1101"]
+    calls: dict[str, int] = {}
+    fetched: list[str] = []
+    out = _fetch_fubon_day(
+        _fubon_client(calls),
+        sids,
+        _FUBON_DAY,
+        2,
+        skip_if=lambda sid: sid == "2317",
+        on_fetched=lambda sid, html: fetched.append(sid),
+    )
+    assert out[1] == ("2317", None, None)  # 跳過非錯誤
+    assert "2317" not in calls  # 未發請求
+    assert sorted(fetched) == ["1101", "2330"]  # 只有實際抓到的才回呼
+
+
+def test_fetch_fubon_day_on_fetched_not_called_on_error() -> None:
+    fetched: list[str] = []
+    out = _fetch_fubon_day(
+        _fubon_client({}, fail={"9999"}, max_retries=0),
+        ["9999"],
+        _FUBON_DAY,
+        1,
+        on_fetched=lambda sid, html: fetched.append(sid),
+    )
+    assert fetched == []  # 失敗不回呼（不會把壞頁寫進 PG）
+    assert out[0][2] is not None
+
+
+def test_fetch_fubon_day_on_done_called_once_per_sid() -> None:
+    # 進度回呼：每檔完成恰呼叫一次（成功/失敗/跳過皆算），平行與序列一致
+    import threading
+
+    sids = ["2330", "9999", "2317", "1101"]
+    seen: list[str] = []
+    lock = threading.Lock()
+
+    def cb(sid: str) -> None:
+        with lock:
+            seen.append(sid)
+
+    for workers in (1, 3):
+        seen.clear()
+        client = _fubon_client({}, fail={"9999"}, max_retries=0)
+        _fetch_fubon_day(
+            client, sids, _FUBON_DAY, workers, skip_if=lambda sid: sid == "1101", on_done=cb
+        )
+        assert sorted(seen) == sorted(sids)
+
+
+# ── 假日探測（D-024）與進度列／進度查詢（D-025）───────────────────────
+
+_EMPTY_HTML = b"<html><body>no table</body></html>"  # 無 t01 表 → parse []
+# 有一列資料的最小 t01 表（前 8 列表頭會被 parse 跳過）
+_DATA_HTML = (
+    "<table class='t01'>"
+    + "<tr><td>h</td></tr>" * 8
+    + "<tr>"
+    + "".join(f"<td>{c}</td>" for c in ["券商A", "1", "2", "-1", "", "", "", "", ""])
+    + "</tr></table>"
+).encode()
+
+
+def test_probe_all_empty_detects_holiday() -> None:
+    # 全數成功且皆無分點表 → True（非交易日）
+    assert _probe_all_empty([("1101", _EMPTY_HTML, None), ("1102", _EMPTY_HTML, None)]) is True
+
+
+def test_probe_all_empty_any_data_means_trading_day() -> None:
+    assert _probe_all_empty([("1101", _EMPTY_HTML, None), ("2330", _DATA_HTML, None)]) is False
+
+
+def test_probe_all_empty_error_or_skip_is_not_evidence() -> None:
+    # err（被擋/重試耗盡）或帳本跳過（html=None err=None）都不算證據 → False（照抓整天）
+    assert _probe_all_empty([("1101", None, "HTTP 503"), ("1102", _EMPTY_HTML, None)]) is False
+    assert _probe_all_empty([("1101", None, None), ("1102", _EMPTY_HTML, None)]) is False
+
+
+def test_probe_all_empty_no_probe_is_false() -> None:
+    assert _probe_all_empty([]) is False
+
+
+def test_make_progress_renders_pct_label_and_eta(capsys: pytest.CaptureFixture[str]) -> None:
+    progress = _make_progress(4)
+    progress("2026-05-07 2330", 1)
+    out = capsys.readouterr().out
+    assert "25.0%" in out and "1/4" in out and "2026-05-07 2330" in out
+    assert "開始" in out and "預估結束" in out
+    progress("2026-05-07 收尾", 3)
+    out = capsys.readouterr().out
+    assert "100.0%" in out and "4/4" in out
+
+
+def test_fubon_status_lines_pct_and_holiday() -> None:
+    rows = [
+        (dt.date(2026, 5, 1), 0, 0, True),  # SENTINEL 標記日
+        (dt.date(2026, 5, 7), 1432, 1180, False),
+    ]
+    lines = _fubon_status_lines(rows, total=1797)
+    assert "2026-05-01" in lines[0] and "非交易日" in lines[0]
+    assert "1432/1797" in lines[1] and "79.7%" in lines[1] and "1180" in lines[1]
+
+
+def test_fubon_status_lines_zero_total_no_crash() -> None:
+    # 資料湖不可用（宇宙總數 0）→ 百分比顯示 n/a，不除零
+    lines = _fubon_status_lines([(dt.date(2026, 5, 7), 3, 1, False)], total=0)
+    assert "n/a" in lines[0]
