@@ -197,15 +197,33 @@ def test_probe_all_empty_no_probe_is_false() -> None:
     assert _probe_all_empty([]) is False
 
 
-def test_make_progress_renders_pct_label_and_eta(capsys: pytest.CaptureFixture[str]) -> None:
-    progress = _make_progress(4)
+def test_make_progress_tty_rewrites_single_line(capsys: pytest.CaptureFixture[str]) -> None:
+    progress = _make_progress(4, tty=True)
     progress("2026-05-07 2330", 1)
     out = capsys.readouterr().out
+    assert out.startswith("\r") and not out.endswith("\n")  # \r 重繪、不換行
     assert "25.0%" in out and "1/4" in out and "2026-05-07 2330" in out
     assert "開始" in out and "預估結束" in out
     progress("2026-05-07 收尾", 3)
     out = capsys.readouterr().out
     assert "100.0%" in out and "4/4" in out
+
+
+def test_make_progress_non_tty_emits_lines_for_docker_logs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # 非 TTY（docker logs / 背景）：換行完整 log；step 節流（total=400 → 每 2 檔一行）
+    progress = _make_progress(400, tty=False)
+    progress("2026-05-07 1101", 1)  # done=1：未達 step → 不輸出
+    assert capsys.readouterr().out == ""
+    progress("2026-05-07 1102", 1)  # done=2：step 命中 → 完整一行
+    out = capsys.readouterr().out
+    assert out.endswith("\n") and "\r" not in out
+    assert "0.5%" in out and "2/400" in out and "1102" in out
+    progress("2026-05-08 已存在", 397)  # advance>1 的日級事件必印（done=399 非 step 倍數）
+    assert "399/400" in capsys.readouterr().out
+    progress("2026-05-09 收尾", 1)  # done=total 必印
+    assert "100.0%" in capsys.readouterr().out
 
 
 def test_fubon_status_lines_pct_and_holiday() -> None:
