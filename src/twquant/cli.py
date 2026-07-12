@@ -362,21 +362,28 @@ def _fmt_hms(seconds: float) -> str:
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
-def _make_progress(total: int) -> Callable[[str, int], None]:
-    """建 thread-safe 單行進度列（\\r 重繪）。回傳 update(label, advance)。
+def _make_progress(total: int, tty: bool | None = None) -> Callable[[str, int], None]:
+    """建 thread-safe 進度回報。回傳 update(label, advance)。
 
+    TTY（前景終端）：單行 \\r 重繪進度列。非 TTY（`docker logs` / 背景 / 重導向——
+    行緩衝的 log driver 吞掉無換行輸出）：改輸出完整換行 log，每 ~0.5% 一行
+    （advance>1 的日級事件與收尾必印），docker logs -f 可直接追進度。
     顯示：進度條、整體百分比、完成/總數、目前日期+股號、起始時刻、已用時間、
     預估結束時刻（以平均速率外推）。total=0 時百分比視為 100%（防除零）。
+    tty=None 自動偵測 stdout；測試可顯式指定。
     """
     import threading
     import time
 
     from twquant.conventions import now_tw
 
+    if tty is None:
+        tty = sys.stdout.isatty()
     lock = threading.Lock()
     state = {"done": 0}
     t0 = time.monotonic()
     started = now_tw()
+    step = max(1, total // 200)  # 非 TTY：~0.5% 粒度（全市場單月 ≈ 每 2 分鐘一行）
 
     def update(label: str, advance: int) -> None:
         with lock:
@@ -389,12 +396,15 @@ def _make_progress(total: int) -> Callable[[str, int], None]:
             if done and total:
                 remain = elapsed / done * (total - done)
                 eta = (now_tw() + dt.timedelta(seconds=remain)).strftime("%H:%M:%S")
-            typer.echo(
-                f"\r[{bar}] {frac * 100:5.1f}% {done}/{total}"
+            line = (
+                f"[{bar}] {frac * 100:5.1f}% {done}/{total}"
                 f"｜{label}｜開始 {started:%H:%M:%S} 已用 {_fmt_hms(elapsed)}"
-                f" 預估結束 {eta}".ljust(100),
-                nl=False,
+                f" 預估結束 {eta}"
             )
+            if tty:
+                typer.echo(f"\r{line}".ljust(100), nl=False)
+            elif advance != 1 or done % step == 0 or done >= total:
+                typer.echo(line)
 
     return update
 
