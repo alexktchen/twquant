@@ -8,6 +8,7 @@ point-in-time 過濾：訊號生成截點 = 當日 20:00（D-008），回測與�
 from __future__ import annotations
 
 import datetime as dt
+import os
 from pathlib import Path
 
 import duckdb
@@ -76,7 +77,9 @@ class Warehouse:
     def _write_partition(self, part: Path, df: pl.DataFrame, fname: str) -> None:
         part.mkdir(parents=True, exist_ok=True)
         final = part / fname
-        tmp = part / f"{fname}.tmp"
+        # tmp 名帶 pid：多程序同寫同一 (table,date,source) 不互踩同一 tmp（D-025 平行回補）；
+        # 殘留孤兒 tmp 不含 .parquet 結尾，scan 的 *.parquet glob 不會撿到（§7 寫入協定）
+        tmp = part / f"{fname}.tmp-{os.getpid()}"
         df.write_parquet(tmp)
         tmp.replace(final)  # 原子替換該來源的分區檔
 

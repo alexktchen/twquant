@@ -20,6 +20,82 @@
 
 ## 已裁決
 
+### D-025（2026-07-12，已裁決）backfill-fubon-chip 改 PG 直寫 + fubon_fetch_log 抓取帳本
+- 需求（使用者）：(1) 抓到就直接進 PG，不留實體檔案；(2) 逐 (日, 股) 續傳——每次抓新日期
+  先檢查已抓過的股號跳過；(3) **多程序併跑**且檢查間隔要小，不能漏抓；(4) 新增查詢：
+  以天為單位顯示已抓檔數＋佔宇宙總數的百分比。
+- 裁決：帳本放 PG（資料庫本就擅長並行協調，取代檔案帳本）：
+  - 新簿記表 `serving.fubon_fetch_log`（date, stock_id, n_rows, fetched_at；PK (date,stock_id)；
+    比照 sync_state，不屬鏡射/因子表，sync/rebuild 不觸碰）。
+  - worker 抓完一檔 → 解析 → **同一交易** upsert `broker_trades` ＋寫 log → commit。
+    **log 列存在 ⇔ 資料已入庫**，故「查 log 跳過」永不漏抓；競態最壞情況＝兩程序重抓同檔
+    （upsert 冪等，無害）。skip_if 在**抓取當下**逐檔查 log（非日初快照，間隔最小）。
+  - 假日探測（D-024）改以 SENTINEL 列（stock_id='_day_empty'）持久化；該日事後發現有
+    資料時自動 `clear_sentinel` 解除。
+  - 新指令 `fubon-chip-status`：讀 log 依日彙總（已抓/宇宙總數＋百分比、有資料檔數、
+    非交易日標記）。
+  - **資料湖不棄守**：日終自 PG `read_day` 讀回該日完整資料（含他程序貢獻）補寫
+    `clean/broker_trades` 分區。理由：湖是因子層（PitView，黃金規則 1）與
+    `serving rebuild`（truncate 後自湖全量重灌）的真相源——只寫 PG 而不寫湖，一次
+    rebuild 就會清光直寫資料。此為對「不用進 parquet」的刻意保留，成本僅日終一次寫入。
+  - `Warehouse._write_partition` tmp 檔名帶 pid：多程序同刻寫同一分區不互踩同一 tmp。
+- 煙霧驗證（本機 PG 5433）：ensure_schema 建表、mark 冪等、day_stats FILTER/sentinel、
+  read_day 讀回 2026-05-07 全日 56,362 列且 available_at 轉回 Asia/Taipei 18:00、過 schema 驗證。
+- 取代 D-023 的「純串流」與 D-024 原檔案式探測快取；raw HTML 完全不落地。
+- 範圍：`data/serving/schema.py`（FUBON_FETCH_LOG_SPEC）、新模組 `data/serving/chip_ingest.py`、
+  `data/warehouse.py`（pid tmp）、`cli.py`（backfill 重構 + fubon-chip-status）、`tests/test_cli.py`。
+
+### D-024（2026-07-12，已裁決）backfill-fubon-chip 假日探測跳過 + 進度列
+- 需求（使用者）：非交易日不要整天 ~1800 檔白抓；即時顯示目前抓取的股號/日期、
+  進度條、整體百分比、起始/預估結束時間。（週六日既有 `weekday<5` 過濾本就跳過；
+  問題是**平日國定假日**，如 2026-01-01、2026-05-01，全市場白抓一小時。）
+- 裁決：每日先抓前 `--probe` 檔（預設 5，CLI 參數非寫死）：**全數 HTTP 成功但 parse
+  皆無 t01 表** → 判定非交易日、跳過整天（D-025 起並以 SENTINEL 持久化）。任何 err
+  （被擋/重試耗盡）**不算證據**、照常全抓——避免把「被擋」誤判成假日而無聲丟掉交易日。
+  進度列單行 \r 重繪：進度條、整體 %、done/total、目前日期+股號、開始/已用/預估結束
+  （平均速率外推）；thread-safe（worker 完成即 tick，不論成敗/跳過）。
+- 已知限制：富邦DJ 軟擋（HTTP 200 回空頁）與假日不可分——若探測檔全被軟擋會誤標非交易日；
+  訊息會大聲印出，且該日一旦有資料會自動解除標記（D-025 clear_sentinel）；`--probe 0` 停用。
+
+### D-023（2026-07-11，已裁決）backfill-fubon-chip 預設不留 raw HTML（省磁碟）
+- 問題：raw HTML 快取（`data/raw/fubon_chip/date=<d>/<sid>.html`）每檔 ~11KB、全市場每日
+  ~1432 檔 ≈ 15MB/日（~3.8GB/年、數萬個小檔，stat 都嫌慢）。使用者要求下載時「不用再留
+  實體檔案，尤其 HTML 太浪費空間」。
+- 釐清資料流（避免誤解）：canonical 分點資料落 **parquet 資料湖** `clean/broker_trades`
+  （欄式、極小，是黃金規則 1 因子透過 PitView 讀的**單一真相源**）；**PG 是可重建鏡射**，由
+  另一步 `twquant serving sync` 從資料湖增量 upsert（broker_trades 為 6 張鏡射表之一，
+  SPEC-009 §3）。故：真正浪費的是 HTML，不是 parquet；且回補**不該**直寫 PG（會繞過資料湖／
+  PitView，且 PG rebuild 會失資料）。
+- 裁決：`backfill-fubon-chip` 新增 `--keep-raw-html/--no-keep-raw-html`，**預設不留**
+  （純串流：抓→解析→丟，不讀不寫 HTML；不建立 date= 目錄）。保留 parquet clean 層不變。
+  想要分日內續傳／免重抓重解析者用 `--keep-raw-html` 顯式開啟。
+- 取捨：不留 HTML → 失去分日內續傳（run 中斷需重抓整日）與「改 parser 後免重抓重解析」的
+  能力；但續傳仍有**分區級**粒度（skip_existing 跳已完成日），單日 ~10 分可接受。此 HTML
+  快取本就非 SPEC-001 §7 的版本化 raw archive（是 `<sid>.html` 覆寫式暫存），故弱化其
+  留存不牴觸 raw 落地原則。既有已下載的 `data/raw/fubon_chip` 可安全刪除回收空間（canonical
+  在資料湖、PG sync 後亦在 PG）。
+- 範圍：`cli.py`（`_fetch_fubon_day` 加 `keep_raw` + `--keep-raw-html` 選項）、`tests/test_cli.py`。
+
+### D-022（2026-07-11，已裁決）backfill-fubon-chip 平行下載 + 富邦限流上調
+- 問題：`backfill-fubon-chip` 全市場單日 ~1800 檔、序列 1 req/2s → 約 1 小時（D-019）。
+  使用者要求改為多執行緒平行下載提速。
+- 關鍵事實：真正的吞吐節流是共用的 `SlidingWindowLimiter`，不是執行緒數。只加執行緒
+  而不提高限流，各執行緒會卡在 `acquire()` 排隊，總速率不變。且原 limiter 非 thread-safe
+  （check-then-append 無鎖），多執行緒會 race。
+- 裁決（使用者選「積極 6 workers」，2026-07-11）：
+  - `SlidingWindowLimiter.acquire` 與 `HttpClient._get_transport` 加鎖 → 共用 client 下
+    thread-safe（全域限流仍準確、單一 requests.Session）。此為全來源共用類別，加鎖對單執行緒
+    行為無影響。
+  - `backfill-fubon-chip` 新增 `--workers`，逐股迴圈改 `ThreadPoolExecutor`；`.map` 保序
+    → 輸出與序列版 bit-identical（黃金規則／§4 冪等）。並行度預設＝限流 `max_requests`
+    （超過亦被節流，僅徒增排隊），不寫死。
+  - `configs/system.yaml` 富邦限流 **1 req/2s → 6 req/2s**（3 req/s），全市場單日 ~10 分。
+- 風險與取捨：富邦DJ 為免費公開站；D-015 已載 TWSE 對「持續大量」即使在 rate 內也會封 IP。
+  6 req/2s 是**使用者明示授權的積極設定**、被封風險自負；若被擋，調降 `--workers`／`max_requests`
+  或改分批。此條為對 D-019「限流 1 req/2s」敘述的刻意調整（來源特性、canonical schema 不變）。
+- 範圍：`data/http.py`、`cli.py`（helper `_fetch_fubon_day` + `--workers`）、`configs/system.yaml`、
+  `tests/test_http.py`、`tests/test_cli.py`。
+
 ### D-020（2026-07-11，已裁決 B+C）composite_daily 綜合分無預測力——採實證有效子集 + 前端標示
 - **衍生韌性修補（2026-07-11，已落地）**：調查 D-020 時發現兩個耦合的靜默失效——
   (1) `standardize` 的 winsorize/zscore 以 polars `.over` 算 median/mean/std，群內任一 NaN

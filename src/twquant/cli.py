@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import polars as pl
 
     from twquant.config import ServingConfig, SystemConfig
+    from twquant.data.http import HttpClient
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
 
@@ -276,6 +277,128 @@ def _fubon_universe(wh: object, pattern: str) -> list[str]:
     return []
 
 
+def _fetch_fubon_day(
+    client: HttpClient,
+    sids: list[str],
+    day: dt.date,
+    workers: int,
+    skip_if: Callable[[str], bool] | None = None,
+    on_fetched: Callable[[str, bytes], None] | None = None,
+    on_done: Callable[[str], None] | None = None,
+) -> list[tuple[str, bytes | None, str | None]]:
+    """逐股抓某日富邦DJ HTML → [(sid, html, err), ...]，**永遠依 sids 序回傳**（決定性）。
+
+    多程序協調鉤子（D-025，帳本在 PG fubon_fetch_log）：
+    - skip_if 在**抓取當下**逐檔呼叫（非日初快照，檢查間隔最小）——回 True 即跳過
+      （已被任一程序抓過），結果為 (sid, None, None)（非錯誤）。
+    - on_fetched 於抓取成功後在 worker 執行緒呼叫（呼叫端負責解析＋PG 同交易落地；
+      帳本列存在 ⇔ 資料已 commit，故靠 skip_if 跳過永不漏抓）。
+    DataError（重試耗盡）不中斷整批，記入 err 由呼叫端印 SKIP。workers>1 時以執行緒池
+    平行；共用 client 的滑動窗限流節流全域速率，`ThreadPoolExecutor.map` 保序 → 輸出與
+    序列版一致。on_done 每檔完成即回呼（成敗/跳過皆算），供進度列；回呼須 thread-safe。
+    """
+    from twquant.data.sources import fubon_chip
+    from twquant.errors import DataError
+
+    def _one(sid: str) -> tuple[str, bytes | None, str | None]:
+        try:
+            if skip_if is not None and skip_if(sid):
+                return sid, None, None  # 任一程序已抓 → 跳過（非錯誤）
+            try:
+                html = fubon_chip.fetch_broker_trades(client, sid, day)
+            except DataError as exc:
+                return sid, None, str(exc)
+            if on_fetched is not None:
+                on_fetched(sid, html)
+            return sid, html, None
+        finally:
+            if on_done is not None:
+                on_done(sid)
+
+    if not sids:
+        return []
+    if workers <= 1:
+        return [_one(sid) for sid in sids]
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(_one, sids))
+
+
+def _fubon_status_lines(day_rows: list[tuple[dt.date, int, int, bool]], total: int) -> list[str]:
+    """fubon_fetch_log 日彙總 → 顯示行：每日已抓/宇宙總數＋百分比；SENTINEL 日標非交易。"""
+    out: list[str] = []
+    for d, fetched, with_data, holiday in day_rows:
+        if holiday:
+            out.append(f"{d}  非交易日（探測標記）")
+            continue
+        pct = f"{fetched / total * 100:.1f}%" if total else "n/a"
+        out.append(f"{d}  已抓 {fetched}/{total}（{pct}）｜有分點資料 {with_data} 檔")
+    return out
+
+
+def _probe_all_empty(results: list[tuple[str, bytes | None, str | None]]) -> bool:
+    """探測結果是否「全數抓取成功、但皆無分點表」→ 視為非交易日（假日）。
+
+    任何 err（重試耗盡/被擋）不算證據——回 False 讓整天照抓，避免把「被擋」誤判成假日
+    而無聲丟掉一個交易日。空清單（未探測）亦回 False。
+    """
+    from twquant.data.sources import fubon_chip
+
+    if not results:
+        return False
+    for _sid, html, err in results:
+        if err is not None or html is None:
+            return False
+        if fubon_chip.parse_broker_rows(html):
+            return False
+    return True
+
+
+def _fmt_hms(seconds: float) -> str:
+    """秒數 → H:MM:SS。"""
+    s = int(seconds)
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+
+
+def _make_progress(total: int) -> Callable[[str, int], None]:
+    """建 thread-safe 單行進度列（\\r 重繪）。回傳 update(label, advance)。
+
+    顯示：進度條、整體百分比、完成/總數、目前日期+股號、起始時刻、已用時間、
+    預估結束時刻（以平均速率外推）。total=0 時百分比視為 100%（防除零）。
+    """
+    import threading
+    import time
+
+    from twquant.conventions import now_tw
+
+    lock = threading.Lock()
+    state = {"done": 0}
+    t0 = time.monotonic()
+    started = now_tw()
+
+    def update(label: str, advance: int) -> None:
+        with lock:
+            state["done"] += advance
+            done = state["done"]
+            frac = done / total if total else 1.0
+            bar = "█" * int(frac * 20) + "░" * (20 - int(frac * 20))
+            elapsed = time.monotonic() - t0
+            eta = "--:--:--"
+            if done and total:
+                remain = elapsed / done * (total - done)
+                eta = (now_tw() + dt.timedelta(seconds=remain)).strftime("%H:%M:%S")
+            typer.echo(
+                f"\r[{bar}] {frac * 100:5.1f}% {done}/{total}"
+                f"｜{label}｜開始 {started:%H:%M:%S} 已用 {_fmt_hms(elapsed)}"
+                f" 預估結束 {eta}".ljust(100),
+                nl=False,
+            )
+
+    return update
+
+
 @app.command(name="backfill-fubon-chip")
 def backfill_fubon_chip(
     from_: str = typer.Option(..., "--from", help="起始日 YYYY-MM-DD"),
@@ -291,29 +414,55 @@ def backfill_fubon_chip(
         "--data-dir",
         help="覆寫資料湖路徑（預設用 system.yaml；全市場模式需已有 stock_meta/行情）",
     ),
-    skip_existing: bool = typer.Option(True, help="跳過已抓過的日期分區（續傳）"),
+    skip_existing: bool = typer.Option(True, help="跳過已抓過的 (日, 股)（讀 PG 帳本續傳）"),
+    workers: int | None = typer.Option(
+        None, "--workers", help="平行抓取執行緒數；留空＝依限流 max_requests（configs/system.yaml）"
+    ),
+    probe: int = typer.Option(
+        5,
+        "--probe",
+        min=0,
+        help="非交易日探測：每日先抓前 N 檔，全數成功且皆無分點表 → 跳過整天（0=停用；D-024）",
+    ),
     yes: bool = typer.Option(False, "--yes", help="全市場大量請求前不再確認"),
 ) -> None:
-    """回補富邦DJ 券商分點買賣超 → broker_trades（免費爬蟲，D-019）。
+    """回補富邦DJ 券商分點買賣超 → **直寫 PG** broker_trades（免費爬蟲，D-019/D-025）。
 
     --stocks 指定個股；**留空＝全市場**（股票池讀資料湖 stock_meta，退回 prices_daily）。
-    逐日→逐股抓取，raw HTML 落 data/raw/fubon_chip/date=<d>/<sid>.html 續傳；某日全股累積後
-    該日一次寫入 clean/broker_trades（part-fubon.parquet，Warehouse 分區級替換）。
+    逐日→逐股抓取，每檔解析後**當場 upsert 進 PG**（serving.broker_trades）並在同一交易
+    寫入抓取帳本 fubon_fetch_log——不落 raw HTML。日終自 PG 讀回該日完整資料補寫資料湖
+    分區（clean/broker_trades part-fubon.parquet）：湖仍是因子層（PitView）與
+    `serving rebuild` 的真相源，缺了它 rebuild 會清掉 PG 直寫的資料。
 
-    ⚠️ 全市場一天 ~1800 檔、限流 1 req/2s → 單日約 1 小時；請求量大，>100 檔會先確認。
+    **多程序併跑安全（D-025）**：帳本在 PG——每檔在「抓取當下」查 log（非日初快照，
+    間隔最小），已被任一程序 commit 即跳過；帳本列存在 ⇔ 資料已入庫，故跳過永不漏抓；
+    競態最壞情況是重抓一檔（upsert 冪等）。進度查詢：`twquant fubon-chip-status`。
+
+    週六日不排入；平日假日由 --probe 探測跳過並標記（D-024）。進度列即時顯示目前
+    日期/股號、整體百分比、起始/已用/預估結束時間。
+    --workers 開執行緒池平行抓取（D-022），限流仍節流全域速率，故並行度上限＝
+    source_rates.fubon.max_requests；留空即取該值。全市場 6 workers（6 req/2s）約 10 分/日。
+    ⚠️ 免費公開站，並行度越高被封 IP 風險越高（參 D-015）；多程序各有「自己的」限流窗，
+    總請求速率 = 程序數 × 6 req/2s，請自行斟酌。請求量大，>100 檔會先確認。
     """
-    import polars as pl
+    import threading
 
+    from twquant.data.serving import chip_ingest, store
+    from twquant.data.serving import schema as sch
     from twquant.data.sources import fubon_chip
     from twquant.data.warehouse import Warehouse
-    from twquant.errors import DataError
 
     start = dt.date.fromisoformat(from_)
     end = dt.date.fromisoformat(to)
     cfg = _load_system()
     wh = Warehouse(data_dir or cfg.data_dir)
     client = fubon_chip.browser_client(cfg.source_rates["fubon"])
-    raw_root = Path(data_dir or cfg.data_dir) / "raw" / "fubon_chip"
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)  # PG 直寫（D-025）；TWQUANT_PG_DSN 未設會 raise ConfigError
+    sch.ensure_schema(conn, scfg.pg_schema)
+    pg = scfg.pg_schema
+    pg_lock = threading.Lock()  # 多 worker 共用單一連線：所有 PG 操作經此鎖序列化
 
     sids = [s.strip() for s in stocks.split(",") if s.strip()]
     mode = f"{len(sids)} 檔"
@@ -329,46 +478,141 @@ def backfill_fubon_chip(
 
     days = [d for d in _daterange(start, end) if d.weekday() < 5]  # 跳週末（非交易日自然空表）
     rate = cfg.source_rates["fubon"]
+    # 限流即全域吞吐上限；並行度預設取 max_requests（超過亦被限流器節流，僅徒增排隊）
+    n_workers = max(workers if workers is not None else rate.max_requests, 1)
     est_min = len(sids) * len(days) * (rate.per_seconds / max(rate.max_requests, 1)) / 60
     typer.secho(
-        f"富邦DJ 分點回補 {start}~{end}｜{mode} × {len(days)} 平日｜約 {est_min:.0f} 分鐘",
+        f"富邦DJ 分點回補 {start}~{end}｜{mode} × {len(days)} 平日"
+        f"｜{n_workers} 執行緒｜PG 直寫｜約 {est_min:.0f} 分鐘",
         fg=typer.colors.CYAN,
         bold=True,
     )
     if len(sids) > 100 and not yes:
         typer.confirm(f"將對富邦DJ 發出約 {len(sids) * len(days)} 次請求，確定執行？", abort=True)
 
-    for day in days:
-        if skip_existing and wh.partition_exists("clean", "broker_trades", day, "fubon"):
-            typer.secho(f"  [{day}] 已存在，跳過", fg=typer.colors.YELLOW)
-            continue
-        raw_dir = raw_root / f"date={day.isoformat()}"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        frames: list[pl.DataFrame] = []
-        for sid in sids:
-            cache = raw_dir / f"{sid}.html"
-            if cache.exists():
-                html = cache.read_bytes()
-            else:
-                try:
-                    html = fubon_chip.fetch_broker_trades(client, sid, day)
-                except DataError as exc:
-                    typer.secho(f"  [SKIP] {day} {sid}：{exc}", fg=typer.colors.YELLOW)
-                    continue
-                cache.write_bytes(html)
-            df = fubon_chip.rows_to_canonical(fubon_chip.parse_broker_rows(html), sid, day)
-            if not df.is_empty():
-                frames.append(df)
-        if not frames:
-            typer.secho(f"  [{day}] 無分點資料（非交易日或全空）", fg=typer.colors.YELLOW)
-            continue
-        full = pl.concat(frames)
-        wh.write("clean", "broker_trades", full, source="fubon")
-        typer.secho(
-            f"  [OK] {day}：{full.height} 列（{full['stock_id'].n_unique()} 檔）已存入",
-            fg=typer.colors.GREEN,
-        )
+    progress = _make_progress(len(days) * len(sids))
+
+    with conn:  # 結束（含例外）自動 commit/rollback + close
+        for day in days:
+            with pg_lock, conn.cursor() as cur:
+                logged = chip_ingest.logged(cur, pg, day) if skip_existing else {}
+            if chip_ingest.SENTINEL in logged:
+                progress(f"{day} 非交易日(已標記)", len(sids))
+                typer.echo("")
+                typer.secho(f"  [{day}] 已標記非交易日，跳過", fg=typer.colors.YELLOW)
+                continue
+            if (
+                skip_existing
+                and not logged
+                and wh.partition_exists("clean", "broker_trades", day, "fubon")
+            ):
+                # 無帳本紀錄但湖分區已在：帳本啟用前的舊回補，視為完成
+                progress(f"{day} 已存在", len(sids))
+                typer.echo("")
+                typer.secho(f"  [{day}] 資料湖已存在（舊回補），跳過", fg=typer.colors.YELLOW)
+                continue
+
+            pending = [s for s in sids if s not in logged]
+            if len(pending) < len(sids):
+                progress(
+                    f"{day} 續傳（已抓 {len(sids) - len(pending)} 檔）", len(sids) - len(pending)
+                )
+
+            def _tick(sid: str, _day: dt.date = day) -> None:
+                progress(f"{_day} {sid}", 1)
+
+            def _seen(sid: str, _day: dt.date = day) -> bool:
+                # 抓取當下的逐檔帳本檢查（間隔最小）：他程序剛 commit 的檔立刻可見
+                with pg_lock, conn.cursor() as cur:
+                    return chip_ingest.is_logged(cur, pg, _day, sid)
+
+            def _commit(sid: str, html: bytes, _day: dt.date = day) -> None:
+                # 解析 → 同一交易 upsert 資料＋寫帳本 → commit：帳本列存在 ⇔ 資料已入庫
+                df = fubon_chip.rows_to_canonical(fubon_chip.parse_broker_rows(html), sid, _day)
+                with pg_lock, conn.cursor() as cur:
+                    if not df.is_empty():
+                        chip_ingest.upsert_broker_rows(cur, pg, df)
+                    chip_ingest.mark(cur, pg, _day, sid, df.height)
+                    conn.commit()
+
+            skip_if = _seen if skip_existing else None
+
+            # 假日探測（D-024）：該日尚無任何有資料紀錄時，pending 前 head_n 檔全空 → 非交易日
+            has_data = any(n > 0 for n in logged.values())
+            head_n = min(probe, len(pending)) if probe > 0 and not has_data else 0
+            results = _fetch_fubon_day(
+                client, pending[:head_n], day, n_workers, skip_if, _commit, _tick
+            )
+            if head_n and _probe_all_empty(results):
+                with pg_lock, conn.cursor() as cur:
+                    chip_ingest.mark(cur, pg, day, chip_ingest.SENTINEL, 0)
+                    conn.commit()
+                progress(f"{day} 非交易日", len(pending) - head_n)
+                typer.echo("")
+                typer.secho(
+                    f"  [{day}] 探測前 {head_n} 檔皆無分點表（假日/非交易日），標記並跳過整天",
+                    fg=typer.colors.YELLOW,
+                )
+                continue
+            results += _fetch_fubon_day(
+                client, pending[head_n:], day, n_workers, skip_if, _commit, _tick
+            )
+
+            typer.echo("")
+            for sid, _html, err in results:
+                if err is not None:
+                    typer.secho(f"  [SKIP] {day} {sid}：{err}", fg=typer.colors.YELLOW)
+
+            # 日終：自 PG 讀回該日完整資料（含他程序貢獻）→ 補寫資料湖分區（冪等）
+            with pg_lock, conn.cursor() as cur:
+                full = chip_ingest.read_day(cur, pg, day)
+            if full.is_empty():
+                typer.secho(f"  [{day}] 無分點資料（非交易日或全空）", fg=typer.colors.YELLOW)
+                continue
+            with pg_lock, conn.cursor() as cur:
+                chip_ingest.clear_sentinel(cur, pg, day)  # 曾誤標非交易而今有資料 → 解除
+                conn.commit()
+            wh.write("clean", "broker_trades", full, source="fubon")
+            typer.secho(
+                f"  [OK] {day}：{full.height} 列（{full['stock_id'].n_unique()} 檔）已入 PG＋資料湖",
+                fg=typer.colors.GREEN,
+            )
     typer.secho("富邦DJ 分點回補完成。", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="fubon-chip-status")
+def fubon_chip_status(
+    data_dir: str | None = typer.Option(
+        None, "--data-dir", help="覆寫資料湖路徑（宇宙總數自 stock_meta/行情推導）"
+    ),
+    universe: str = typer.Option(
+        r"^[1-9][0-9]{3}$", help="宇宙總數的代號過濾（與 backfill-fubon-chip 預設一致）"
+    ),
+) -> None:
+    """富邦DJ 分點回補進度：每日已抓檔數／宇宙總數＋百分比（讀 PG fubon_fetch_log，D-025）。"""
+    from twquant.data.serving import chip_ingest, store
+    from twquant.data.serving import schema as sch
+    from twquant.data.warehouse import Warehouse
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    with store.connect(scfg) as conn:
+        sch.ensure_schema(conn, scfg.pg_schema)
+        with conn.cursor() as cur:
+            day_rows = chip_ingest.day_stats(cur, scfg.pg_schema)
+    if not day_rows:
+        typer.secho("尚無抓取紀錄（fubon_fetch_log 為空）。", fg=typer.colors.YELLOW)
+        return
+    total = len(_fubon_universe(Warehouse(data_dir or cfg.data_dir), universe))
+    for line in _fubon_status_lines(day_rows, total):
+        typer.echo(line)
+    fetched_days = sum(1 for _, _, _, holiday in day_rows if not holiday)
+    holidays = len(day_rows) - fetched_days
+    typer.secho(
+        f"共 {len(day_rows)} 日（交易日 {fetched_days}、標記非交易日 {holidays}）｜宇宙 {total} 檔",
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
 
 
 def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:

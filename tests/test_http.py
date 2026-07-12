@@ -47,6 +47,37 @@ def test_ac4_sliding_window_max_3_per_5s() -> None:
     assert grants[3] == 5.0
 
 
+def test_limiter_thread_safe_no_over_admission() -> None:
+    # D-022：多執行緒共用同一 limiter（backfill --workers）。鎖保護窗記帳：
+    # 8 執行緒各 acquire 4 次應 (1) 不因 deque race 崩潰/死鎖、(2) 全域吞吐仍受限流節制。
+    import threading
+    import time
+
+    from twquant.data.http import SystemClock
+
+    lim = SlidingWindowLimiter(max_requests=5, per_seconds=0.2, clock=SystemClock())
+    count = {"n": 0}
+    lock = threading.Lock()
+
+    def worker() -> None:
+        for _ in range(4):
+            lim.acquire()
+            with lock:
+                count["n"] += 1
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    t0 = time.monotonic()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    elapsed = time.monotonic() - t0
+
+    assert count["n"] == 32  # 全數放行、無死鎖、deque 未損毀
+    # 32 次 @ 5/0.2s 滑動窗 → 理論最少 ~1.2s；限流器有作用即耗時 ≥ 此下界（慢機只會更久）
+    assert elapsed >= 0.9
+
+
 def test_retry_succeeds_after_two_failures() -> None:
     clock = FakeClock()
     calls = {"n": 0}

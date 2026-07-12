@@ -191,7 +191,26 @@ SYNC_STATE_SPEC = TableSpec(
     pk=("table_name",),
 )
 
-_ALL_SPECS: tuple[TableSpec, ...] = (*MIRROR_SPECS, *FACTOR_SPECS, SYNC_STATE_SPEC)
+# 富邦DJ 分點回補的抓取帳本（D-025）：一列＝一次「已 commit」的 (日, 股) 抓取（含空結果
+# n_rows=0）；stock_id 可為 chip_ingest.SENTINEL 標記整日非交易。簿記表（比照 sync_state）：
+# 不屬鏡射/因子表，sync/rebuild 不觸碰。
+FUBON_FETCH_LOG_SPEC = TableSpec(
+    "fubon_fetch_log",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("n_rows", "integer"),
+        ("fetched_at", "timestamptz"),
+    ),
+    pk=("date", "stock_id"),
+)
+
+_ALL_SPECS: tuple[TableSpec, ...] = (
+    *MIRROR_SPECS,
+    *FACTOR_SPECS,
+    SYNC_STATE_SPEC,
+    FUBON_FETCH_LOG_SPEC,
+)
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
 FACTOR_TABLES: tuple[str, ...] = tuple(s.name for s in FACTOR_SPECS)
