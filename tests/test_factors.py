@@ -129,6 +129,37 @@ def test_ac4_standardize_zero_mean_unit_std() -> None:
     assert mx < 3.0
 
 
+def test_ac4_standardize_nan_one_stock_does_not_nuke_group() -> None:
+    """D-020 回歸防線：某 (date,factor) 群內單一 NaN 不得汙染同群其他股票的 z，
+    也不得影響另一群。退化股自身維持非有限，供下游以 is_finite 過濾。"""
+    d = dt.date(2026, 6, 30)
+    df = pl.DataFrame(
+        {
+            "date": [d] * 8,
+            "stock_id": ["a", "b", "c", "bad", "a", "b", "c", "d"],
+            "factor": ["price.x"] * 4 + ["price.y"] * 4,
+            "value": [1.0, 2.0, 3.0, float("nan"), 10.0, 20.0, 30.0, 40.0],
+        }
+    )
+    std = standardize(df)
+
+    # 含 NaN 的 price.x 群：其他三檔仍得有限 z，且橫斷面 mean≈0 / std≈1（NaN 不參與估計）
+    x_good = std.filter((pl.col("factor") == "price.x") & (pl.col("stock_id") != "bad"))
+    assert x_good.select(pl.col("value").is_finite().all()).item()
+    assert abs(x_good.select(pl.col("value").mean()).item()) < 1e-9
+    assert abs(x_good.select(pl.col("value").std()).item() - 1.0) < 1e-6
+
+    # 退化股自身維持 NaN（≠ 自己），下游 filter(is_finite) 才能剔除它而非整因子消失
+    bad_z = std.filter(pl.col("stock_id") == "bad").select("value").item()
+    assert bad_z != bad_z
+
+    # 另一群 price.y 完全不受鄰群 NaN 影響
+    y = std.filter(pl.col("factor") == "price.y")
+    assert y.select(pl.col("value").is_finite().all()).item()
+    assert abs(y.select(pl.col("value").mean()).item()) < 1e-9
+    assert abs(y.select(pl.col("value").std()).item() - 1.0) < 1e-6
+
+
 # ── 反前視護欄（AC-3）────────────────────────────────────────────
 
 

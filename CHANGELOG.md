@@ -12,6 +12,25 @@
   6 req/2s（使用者授權的積極設定，全市場單日 ~10 分；被封風險見 D-015）。`ThreadPoolExecutor.map`
   保序 → 輸出與序列版 bit-identical（冪等）。閘門：ruff/mypy 綠、test_http+test_cli+test_fubon_chip 27 passed。
 
+- 2026-07-11 供應層物化韌性修補（D-020 衍生）：(1) `standardize` 的 winsorize/zscore 改為
+  群內忽略非有限值估 median/mean/std，單一退化股的 NaN 不再經 `.over` 傳染成整個
+  (date,factor) 橫斷面 NaN，也不再讓整因子被 `_compute_universe` 的 `filter(is_finite)` 丟棄；
+  退化股自身維持非有限，僅它被下游過濾。(2) `_compute_universe` 吞因子例外不再靜默——
+  預期資料缺口（DataError）記 DEBUG、非預期錯誤記 WARNING 附堆疊（黃金規則 5）。
+  補屬性測試（單一 NaN 不汙染同群其他股 z）＋物化日誌測試。閘門：ruff/format 綠、
+  mypy strict 全綠、pytest 284 passed。
+
+- 2026-07-11 修 `serving rebuild` 靜默無效 + 修正 composite 重物化指引（使用者回報）：
+  `serving rebuild --tables composite_daily`（及其他因子表 factor_values/factor_cross_stats）
+  過去因 `rebuild()` 只過濾 `MIRROR_SPECS` 而 targets 為空、什麼都不做也不報錯（違反黃金
+  規則 5），正是 composite_daily 全歷史殘留 D-020 前舊演算法值的排查根因。改為
+  `schema.rebuild_targets()` 單一真相：收到非鏡射表名一律 raise，因子表訊息指引改用
+  `serving materialize --from/--to`；CLI 清楚報錯並以非零碼結束。同步修 `configs/serving.yaml`
+  的 composite_factors 註解與 SPEC-009 §3（rebuild 只重灌鏡射表、因子表走 materialize）。
+  閘門：ruff/format/mypy 綠、pytest 274 passed（+6 rebuild_targets 斷言，不需 PG）；
+  既有 `test_stock_meta::test_api_stock_meta_and_factors` 因本環境無 TWQUANT_PG_DSN 而紅
+  （與本變更無關，git stash 驗證基線同樣紅）。
+
 - 2026-07-11 K 線主圖疊加均線與關鍵價位（使用者需求）：`CandleChart` 主圖（pane 0）加
   MA5/10/20/60 收盤均線（以完整史料滾動平均後裁切到視窗，視窗首日均值才正確）＋量價分布
   關鍵價位 POC（最大量價位，實線）/VA頂·VA底（70% 價值區虛線，price-line 標籤帶價位數字）。

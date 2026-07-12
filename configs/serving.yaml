@@ -13,7 +13,9 @@ fallback_duckdb: true     # PG 不可用時降級 DuckDB（false 則回 503）
 # D-020：綜合分（composite_daily）只納入的實證有效子集（非全因子等權）。
 # 依 T-038 樣本外驗證（docs/research/COMPOSITE-IC-D020.md）：短反轉＋產業殘差反轉＋
 # 月營收 YoY 兩 horizon 樣本外皆過 D-006 promote（t≥3）。體檢卡仍展示全部因子，
-# 僅綜合分用此子集。改動此清單後需 `serving rebuild --tables composite_daily`。
+# 僅綜合分用此子集。改動此清單後需以受影響日期重物化 composite_daily：
+#   python -m twquant serving materialize --from <起> --to <迄>   （單日用 --date）
+# 注意：`serving rebuild` 只重灌鏡射表，不含因子表；對 composite_daily 下 rebuild 會 raise。
 composite_factors:
   - price.reversal_5d
   - price.residual_reversal_5d
