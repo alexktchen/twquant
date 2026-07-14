@@ -426,6 +426,25 @@ function IndexLine({ data, height = 300 }: { data: IndexPoint[]; height?: number
 }
 
 /* ---------- range chips (slice history) + 主圖均線/關鍵價位開關 ---------- */
+/* 開關設定 localStorage 持久化：跨股票、跨重整維持使用者最後選擇（不隨換股/換頁重置）。 */
+const CHART_SETTINGS_KEY = 'twquant.chartSettings'
+type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean }
+function loadChartSettings(): ChartSettings {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(CHART_SETTINGS_KEY) ?? 'null')
+    if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>
+      return {
+        range: typeof o.range === 'number' ? o.range : 0,
+        maOn: Array.isArray(o.maOn) ? o.maOn.filter((x): x is number => typeof x === 'number') : [5, 20],
+        levelsOn: typeof o.levelsOn === 'boolean' ? o.levelsOn : true,
+      }
+    }
+  } catch {
+    /* 壞資料：退回預設 */
+  }
+  return { range: 0, maOn: [5, 20], levelsOn: true }
+}
 const MA_DEFS: [number, string][] = [[5, '#f2c94c'], [10, '#5aa2f7'], [20, '#e578d1'], [60, '#9b8cff']]
 function RangeCandle({
   data,
@@ -442,9 +461,16 @@ function RangeCandle({
   brokerFlow?: BrokerFlowPoint[]
   factorPanes?: FactorPane[]
 }) {
-  const [range, setRange] = useState(0)
-  const [maOn, setMaOn] = useState<number[]>([5, 20])
-  const [levelsOn, setLevelsOn] = useState(true)
+  const [range, setRange] = useState(() => loadChartSettings().range)
+  const [maOn, setMaOn] = useState<number[]>(() => loadChartSettings().maOn)
+  const [levelsOn, setLevelsOn] = useState(() => loadChartSettings().levelsOn)
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ range, maOn, levelsOn }))
+    } catch {
+      /* 隱私模式等寫入失敗：設定僅本次會話有效 */
+    }
+  }, [range, maOn, levelsOn])
   const toggleMa = (w: number) => setMaOn((cur) => (cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w]))
   // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，
   // 每次 render 產生新陣列會導致父層任何 state 變動（如搜尋框打字）都整座圖砍掉重建。
@@ -1122,6 +1148,22 @@ const chipCls = (active: boolean) =>
 /* ---------- 因子選股（單因子最新物化日、方向化 z 由強到弱；點擊即選股）----------
    受控元件：factor 狀態由 StockFactors 持有（篩選器選中的因子同步進 K 線副圖）。*/
 const DEFAULT_SCREEN: FactorOption = { factor: 'price.reversal_5d', zh: '5日短期反轉', direction: -1 } // 實證 IC 最高
+
+/* 副圖因子選擇 localStorage 持久化：跨股票、跨重整維持使用者最後選擇。 */
+const SUBFACTORS_KEY = 'twquant.subFactors'
+function isFactorOption(x: unknown): x is FactorOption {
+  const o = x as Record<string, unknown> | null
+  return !!o && typeof o.factor === 'string' && typeof o.zh === 'string' && typeof o.direction === 'number'
+}
+function loadSubFactors(): FactorOption[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(SUBFACTORS_KEY) ?? 'null')
+    if (Array.isArray(v) && v.length && v.every(isFactorOption)) return v
+  } catch {
+    /* 壞資料：退回預設 */
+  }
+  return [DEFAULT_SCREEN]
+}
 function FactorScreener({
   sid, setSid, mm, value, onChange, order, onOrderChange, data, loading,
 }: {
@@ -1246,12 +1288,19 @@ function StockFactors() {
     as_of: null, source: 'pg', rows: [], available: [],
   })
   const ftop = useResource(`ftop:${screen.factor}:${order}`, () => fetchFactorTop(screen.factor, 10, order), emptyFT)
-  const [subFactors, setSubFactors] = useState<FactorOption[]>([DEFAULT_SCREEN])
+  const [subFactors, setSubFactors] = useState<FactorOption[]>(loadSubFactors)
   useEffect(() => {
     setSubFactors((prev) =>
       prev.some((f) => f.factor === screen.factor) ? prev : [...prev, screen].slice(-MAX_FACTOR_PANES),
     )
   }, [screen])
+  useEffect(() => {
+    try {
+      localStorage.setItem(SUBFACTORS_KEY, JSON.stringify(subFactors))
+    } catch {
+      /* 隱私模式等寫入失敗：設定僅本次會話有效 */
+    }
+  }, [subFactors])
   const toggleSub = (f: FactorOption) =>
     setSubFactors((prev) =>
       prev.some((x) => x.factor === f.factor)
