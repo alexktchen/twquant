@@ -4,7 +4,10 @@
 signed_z + 綜合分位 → upsert PG。橫斷面量（z / pct / composite pct）一天算一次、落地供查表，
 取代舊 scorecard 每請求全宇宙重算。逐日推進 as_of 維持 PIT（不以最新資料回填歷史值）。
 
-本模組不 import psycopg——連線由 store 提供。橫斷面演算法與 monitoring.snapshot 的
+因子計算的讀取源是 `TableSource`（`data.warehouse.TableSource`，鴨型別）——生產走
+`data.serving.pg_view.PgTableSource`（D-026：全面停用 parquet，因子物化改讀 PG serving
+鏡射表），測試/舊路徑可仍傳 `Warehouse`（parquet）。本模組不 import psycopg——PG 連線由
+呼叫端經 `store`/`pg_view` 提供。橫斷面演算法與 monitoring.snapshot 的
 stock_factor_scorecard 一致，差別只在此處寫全宇宙進 PG、後者回單股。
 """
 
@@ -21,8 +24,8 @@ from twquant.config import ServingConfig
 from twquant.data.serving import schema as sch
 from twquant.data.serving import store
 from twquant.data.serving.composite import composite_from_signed
-from twquant.data.serving.sync import partition_dates, upsert
-from twquant.data.warehouse import Warehouse
+from twquant.data.serving.sync import upsert
+from twquant.data.warehouse import TableSource
 from twquant.errors import DataError
 
 _log = logging.getLogger("twquant.serving")
@@ -40,14 +43,14 @@ class MaterializeResult:
     factors: int  # 成功物化的因子數
 
 
-def _compute_universe(wh: Warehouse, as_of: dt.date) -> pl.DataFrame | None:
+def _compute_universe(source: TableSource, as_of: dt.date) -> pl.DataFrame | None:
     """算全宇宙全因子並附 pct / z / signed_z；無可算資料回 None。"""
     import twquant.factors.builtins  # noqa: F401  # 觸發因子註冊
     from twquant.factors.compute import compute
     from twquant.factors.registry import get, list_factors
     from twquant.factors.standardize import standardize
 
-    view = wh.view(as_of)
+    view = source.view(as_of)
     frames: list[pl.DataFrame] = []
     for name in list_factors():
         # 單一因子失敗不中斷全宇宙物化，但一律留日誌（黃金規則 5：禁止靜默）。
@@ -88,9 +91,9 @@ def _compute_universe(wh: Warehouse, as_of: dt.date) -> pl.DataFrame | None:
 
 
 def _materialize_on(
-    wh: Warehouse, conn: Any, cfg: ServingConfig, as_of: dt.date
+    source: TableSource, conn: Any, cfg: ServingConfig, as_of: dt.date
 ) -> MaterializeResult:
-    merged = _compute_universe(wh, as_of)
+    merged = _compute_universe(source, as_of)
     if merged is None:
         return MaterializeResult(as_of, 0, 0, 0)
 
@@ -118,22 +121,22 @@ def _materialize_on(
 
 
 def materialize_day(
-    wh: Warehouse, cfg: ServingConfig, as_of: dt.date | None = None
+    source: TableSource, cfg: ServingConfig, as_of: dt.date | None = None
 ) -> MaterializeResult:
     """物化單一交易日（as_of 預設為最新行情日）。"""
-    day = as_of or wh.latest_date("prices_daily")
+    day = as_of or source.latest_date("prices_daily")
     if day is None:
         raise DataError("prices_daily", None, "無行情資料，無法物化因子")
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
-        return _materialize_on(wh, conn, cfg, day)
+        return _materialize_on(source, conn, cfg, day)
 
 
 def materialize_range(
-    wh: Warehouse, cfg: ServingConfig, start: dt.date, end: dt.date
+    source: TableSource, cfg: ServingConfig, start: dt.date, end: dt.date
 ) -> list[MaterializeResult]:
-    """逐日物化 [start, end]（僅有行情分區的交易日）；as_of 逐日推進，維持 PIT。"""
-    days = [d for d in partition_dates(wh, "prices_daily") if start <= d <= end]
+    """逐日物化 [start, end]（僅有行情資料的交易日）；as_of 逐日推進，維持 PIT。"""
+    days = source.dates_in_range("prices_daily", start, end)
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
-        return [_materialize_on(wh, conn, cfg, d) for d in days]
+        return [_materialize_on(source, conn, cfg, d) for d in days]

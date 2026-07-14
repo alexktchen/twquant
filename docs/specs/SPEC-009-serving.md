@@ -7,14 +7,21 @@
 
 ## 0. 定位與不變量（黃金規則保全）
 
-- PG 是**衍生、可重建、僅供展示**的讀取快取；Parquet 湖為唯一真相源與 PIT 基準。
-- 因子計算的唯一讀路徑仍是 `PitView`（黃金規則 1）。PG 只存**已算好**的值，
-  **永不**作為因子/回測/策略/投組的輸入。
-- **IO 邊界擴充（CLAUDE.md §4 靜態閘門）**：`factors/ strategy/ backtest/ portfolio/
-  insight/` 不得 `import psycopg`，亦不得 import `twquant.data.serving.*` 或
-  `twquant.monitoring.pg_store`。此把「PG 不回饋純運算層」升級為機器可攔。
+- **D-026（2026-07-14）更新**：因子物化的讀取路徑已改為 PG serving 鏡射表（不再是
+  parquet 湖），下一段取代原「PG 永不回饋因子計算」敘述——`PitView` 抽為 `TableSource`
+  協定（`data/warehouse.py`），`data/serving/pg_view.PgTableSource` 是其 PG 實作，
+  結構滿足即可餵給既有 `PitView`；因子函數（`factors/*.py`）完全不知道、也不需要知道
+  背後是 parquet 還是 PG，黃金規則 1「因子只能透過 PitView 讀資料」不變，改變的只是
+  PitView 背後的儲存後端。backtest/strategy/portfolio 仍走 parquet `Warehouse`（D-026
+  刻意界線，未列入本次變更）。
+- PG 對因子物化而言不再是「唯讀展示快取」，而是因子計算的實際輸入來源；仍是**可重建**
+  （`serving rebuild` 重灌鏡射表 + `serving materialize` 重物化因子表）。
+- **IO 邊界擴充（CLAUDE.md §4 靜態閘門）維持不變**：`factors/ strategy/ backtest/
+  portfolio/ insight/` 仍不得 `import psycopg`，亦不得 import `twquant.data.serving.*`
+  或 `twquant.monitoring.pg_store`——因子函數只收注入的 `view` 物件，PG 連線與型別皆
+  留在 `data/serving/` 內，此邊界不因 D-026 而鬆動。
 - serving 程式碼落點：`src/twquant/data/serving/`（允許 IO 的資料層：schema/sync/
-  materialize）+ `src/twquant/monitoring/pg_store.py`（API 讀取 repository）。
+  materialize/pg_view）+ `src/twquant/monitoring/pg_store.py`（API 讀取 repository）。
 
 ## 1. `configs/serving.yaml`（權威欄位清單，pydantic `extra="forbid"`）
 
@@ -76,7 +83,9 @@ DDL 由 `data/serving/schema.py` 建立（`CREATE TABLE IF NOT EXISTS` +
   `INSERT … ON CONFLICT (pk) DO UPDATE`（冪等，重跑安全）→ 更新 `sync_state`。
   `broker_trades` 亦為鏡射表之一，同路徑同步（買/賣超彙總移至 `/brokers` 端點查詢時算）。
 - **`materialize_factors(as_of)`**：`list_factors()` 全部因子 →
-  `compute(view=Warehouse.view(as_of))` → `standardize`（winsorize_mad → zscore，
+  `compute(view=PgTableSource(conn, schema).view(as_of))`（D-026：讀取源為 PG，非
+  `Warehouse`；CLI 呼叫端建 `PgTableSource`，`materialize.py` 的函式簽名只認
+  `TableSource` 協定） → `standardize`（winsorize_mad → zscore，
   per `(date, factor)`）→ `signed_z = z × direction` →
   `factor_values`/`factor_cross_stats` 寫**全部因子**（體檢卡展示）、
   `composite_daily` 只寫 **D-020 有效子集**（`serving.yaml.composite_factors`）的
