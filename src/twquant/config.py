@@ -69,6 +69,37 @@ class ServingConfig(BaseConfig):
     composite_factors: tuple[str, ...] = DEFAULT_COMPOSITE_FACTORS
 
 
+class ScreenerPool(BaseConfig):
+    """單一選股池的展示定義（規則屬程式碼，key 對應 screener.py 的條件；SPEC-007 §6）。"""
+
+    key: str
+    name: str
+    rule: str
+    note: str = ""
+
+
+class ScreenerWindows(BaseConfig):
+    """選股池指標的回看窗（交易日）。"""
+
+    conc: int = 10  # 主力短窗集中度
+    accum: int = 60  # 主力長窗累積
+    ma_fast: int = 20
+    ma_slow: int = 60
+    amt: int = 20  # 流動性均額窗
+
+
+class ScreenerConfig(BaseConfig):
+    """screener.yaml 的模型（SPEC-007 §6 為權威）。"""
+
+    liquidity_floor_twd: float = 20_000_000.0
+    windows: ScreenerWindows = ScreenerWindows()
+    pct_hi: float = 0.9  # 「前 10%」門檻（宇宙百分位）
+    pct_lo: float = 0.1  # 「後 10%」門檻
+    yoy_min: float = 0.2  # 月營收 YoY 下限
+    streak_days: int = 30  # 連續在池天數的回看窗
+    pools: tuple[ScreenerPool, ...] = ()
+
+
 def load_config[T: BaseConfig](path: str | Path, model: type[T]) -> T:
     """讀 YAML → 用 model 驗證 → 回傳實例。缺欄位/多欄位/型別錯 → ConfigError（含欄位名）。"""
     p = Path(path)

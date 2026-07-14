@@ -1013,6 +1013,33 @@ def serve(
     uvicorn.run(api_app, host=host, port=port)
 
 
+@app.command("screener-snapshot")
+def screener_snapshot(
+    from_: str | None = typer.Option(None, "--from", help="起 YYYY-MM-DD（省略＝最新交易日）"),
+    to: str | None = typer.Option(None, "--to", help="迄 YYYY-MM-DD（省略＝最新交易日）"),
+) -> None:
+    """策略選股池每日快照入 PG（serving.screener_daily，冪等；供 /api/screener?date= 回溯）。"""
+    import datetime as _dt
+
+    from twquant.monitoring import screener, stock_api
+
+    try:
+        d0 = _dt.date.fromisoformat(from_) if from_ else None
+        d1 = _dt.date.fromisoformat(to) if to else None
+        res = screener.snapshot(stock_api.serving_cfg(), d0, d1)
+    except ValueError as exc:
+        typer.secho(f"參數錯誤：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    if res["rows"] == 0:
+        typer.secho("無可快照的資料（prices_daily 空或區間無交易日）。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    typer.secho(
+        f"選股池快照：{res['from']} ~ {res['to']}，screener_daily 區間內共 {res['rows']} 列",
+        fg=typer.colors.GREEN,
+        bold=True,
+    )
+
+
 @app.command()
 def calendar() -> None:
     """由 prices_daily 推導交易日曆、核對來源缺口、持久化至 clean/trading_calendar。"""

@@ -49,6 +49,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-037 | inst_holding ingest（FinMind）+ Header 外資持股比 + 上櫃法人/融資券補源 + TDCC 互動站備援來源評估 | SPEC-001 §1 + PRD-001 §4 | T-010, T-031 | B | todo |
 | T-038 | 綜合分預測力研究（D-020）：滾動 PIT IC 加權(A) vs 實證有效子集(B) 樣本內估計＋樣本外驗證報告 → 回 D-020 裁決；C（前端「非預測訊號」標示）依裁決同批落地 | SPEC-009 §3 + D-020 | T-032 | B | done |
 | T-039 | 行為錨定因子：`price.cgo_250d` + `gain/loss_overhang_250d`（精讀 An 2016 §2 定案公式 → 實作三因子 → IC 報告含與 52週高/動能/反轉的相關矩陣） | STRATEGY §4a + research/PAPERS-KEYLEVELS.md + D-021 | T-011（還原價）, T-012 | B | blocked（D-021 + 還原價） |
+| T-040 | 策略選股池篩選器：`monitoring/screener.py` 五池（主力吸籌/集中×營收/趨勢×營收/三面向/出貨警示）+ `configs/screener.yaml` + `/api/screener` + 前端面板 | SPEC-007 §6 AC-7~11 | T-031, T-035 | — | done |
+| T-041 | 選股池每日快照與回溯：`serving.screener_daily` 表 + CLI `screener-snapshot`（區間回補、冪等）+ `/api/screener?date=`（快照優先、無則回算）+ 前端日期選擇 | SPEC-007 §6 AC-12~14 | T-040 | — | done |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -59,6 +61,30 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-040 + T-041（策略選股池：篩選器＋每日快照回溯·done）**（2026-07-14）
+  **出處**：主力買賣超研究（本日 session；樣本 2022-02~2026-06、隔日開盤進場、
+  20 日均額 ≥ 20M、對全池超額、NW 日聚合 t）。五池＝逐年穩定的高勝率條件：
+  主力 60 日累積買超前 10%（5/5 年正）、主力 10 日集中×YoY≥20%（勝率 48.5% 全表最高）、
+  多頭排列×YoY≥20%（超額 +1.14% 全表最大）、三面向共振、主力 60 日累積賣超後 10%
+  （警示，−0.71% t −3.4）。
+  - **T-040**：`monitoring/screener.py` 純函數（daily_metrics/assign_pools/add_streaks/
+    build_payload）＋ PG 讀取；閾值入 `configs/screener.yaml`（`ScreenerConfig`）；
+    `GET /api/screener?n=`；前端「個股因子」頁新面板（池 chips＋成員連N日＋點擊選股）。
+    YoY 取 ≤ 當日最近已物化值前向沿用（物化落後行情日的常態）。
+  - **T-041**：`serving.screener_daily`（PK date/pool/stock_id，DO NOTHING＝首錄保留）；
+    CLI `screener-snapshot [--from --to]` 整段單次回算批次寫入（回補 2026-06-01~07-14
+    共 14,643 列、重跑冪等）；`?date=` 快照優先（snapshot=true）、無快照即時回算；
+    前端日期選擇＋「已存快照/即時回算」標示。API 維持唯讀，寫入只走 CLI。
+  - **閘門**：ruff check/format 全綠；mypy strict 85 檔全綠；pytest 全套綠（含
+    `tests/test_screener.py` 10 測試：AC-7~14 ＋配置載入；AC-12 為 PG 整合、無 DSN skip）。
+    frontend oxlint＋tsc＋vite build 綠。
+  - **真 PG 煙霧**：as_of=2026-07-14 宇宙 1,039 檔、五池 104/41/87/24/103；
+    ?date=2026-07-01 讀快照（宇宙 1,073）、?date=2026-03-02 即時回算（宇宙 934）；
+    瀏覽器實測面板渲染/池切換/點擊選股/日期回溯皆過。
+  - **維運註**：`check` 內建 pytest 在本機因 Windows 長 tmp 路徑失敗（既知環境問題），
+    以 `uv run --all-groups pytest --basetemp=/c/t/pt` 等效跑全套。每日快照可在既有
+    排程後追加 `python -m twquant screener-snapshot`（尚未掛排程）。
 
 - **T-038（綜合分預測力研究 + B/C 落地·done）**（2026-07-11）D-020 全程。
   **研究**：PIT-safe 重跑（worktree 21 因子、資料湖 2023-01~2026-07、IS/OOS 切分）證實等權

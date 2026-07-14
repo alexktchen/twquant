@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from twquant.config import SystemConfig, load_config
 from twquant.data.warehouse import Warehouse
 from twquant.errors import DataError, TwquantError
-from twquant.monitoring import jobs, stock_api
+from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
@@ -237,6 +237,19 @@ def get_factor_top(
 ) -> dict[str, object]:
     """單因子選股：該因子最新物化日、方向化 z 排序前 n（top 最強/bottom 最弱）。"""
     return _stock_ep(lambda: stock_api.factor_top(wh, stock_api.serving_cfg(), factor, n, order))
+
+
+@app.get("/api/screener")
+def get_screener(
+    wh: WarehouseDep,
+    n: Annotated[int, Query(ge=1, le=200, description="每池成員上限")] = 30,
+    date: Annotated[str | None, Query(description="回溯日 YYYY-MM-DD（省略＝最新即時）")] = None,
+) -> dict[str, object]:
+    """策略選股池（SPEC-007 §6）：籌碼×技術×基本面高勝率條件的每日成員與連續在池天數。
+
+    date 給定＝回溯：先讀 screener_daily 快照（snapshot=true）、無快照即時回算。
+    """
+    return _stock_ep(lambda: screener.payload_for(wh, stock_api.serving_cfg(), n, date))
 
 
 @app.get("/api/stocks/{sid}/broker-flow")

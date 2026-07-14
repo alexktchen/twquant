@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-14 T-040/T-041 策略選股池（使用者需求）：主力買賣超研究的高勝率條件常態化為
+  五個每日選股池（`monitoring/screener.py`＋`configs/screener.yaml`＋`/api/screener`＋
+  前端「個股因子」頁面板）；`serving.screener_daily` 每日快照（CLI `screener-snapshot`，
+  冪等、可回補）＋ `?date=` 回溯（快照優先、無則即時回算）。SPEC-007 §6 / AC-7~14。
+
 - 2026-07-12 D-024/D-025 `backfill-fubon-chip` PG 直寫＋假日探測＋進度列（使用者需求）：
   逐檔抓完當場 upsert PG `broker_trades`＋同交易寫新帳本表 `fubon_fetch_log`（log 存在 ⇔
   資料已入庫 → 多程序併跑逐檔跳過永不漏抓，競態最壞重抓一檔）；raw HTML 完全不落地。

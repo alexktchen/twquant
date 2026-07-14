@@ -205,11 +205,33 @@ FUBON_FETCH_LOG_SPEC = TableSpec(
     pk=("date", "stock_id"),
 )
 
+# 策略選股池每日快照（SPEC-007 §6 / T-041）：一列＝某日某池一名成員，記錄「當日實際
+# 顯示」的池組成供回溯——之後改配置閾值不重寫歷史（首錄保留）。衍生表：由 CLI
+# `screener-snapshot` 寫入，非鏡射/因子表，sync/rebuild 不觸碰。
+SCREENER_DAILY_SPEC = TableSpec(
+    "screener_daily",
+    (
+        ("date", "date"),
+        ("pool", "text"),
+        ("stock_id", "text"),
+        ("close", "double precision"),
+        ("chg", "double precision"),
+        ("yoy", "double precision"),
+        ("conc", "double precision"),
+        ("accum_ratio", "double precision"),
+        ("streak", "integer"),
+        ("universe_n", "integer"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "pool", "stock_id"),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
     SYNC_STATE_SPEC,
     FUBON_FETCH_LOG_SPEC,
+    SCREENER_DAILY_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
