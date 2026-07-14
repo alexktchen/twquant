@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import duckdb
 import polars as pl
@@ -21,11 +22,28 @@ from twquant.errors import DataError
 _LAYERS = frozenset({"raw", "clean", "feature", "signal"})
 
 
+@runtime_checkable
+class TableSource(Protocol):
+    """PitView／因子物化需要的最小讀取介面（D-026）。`Warehouse`（parquet）與
+    `data.serving.pg_view.PgTableSource`（PG serving 鏡射表）皆結構滿足，
+    互為可替換的讀取後端——PitView 本身不知道、也不需要知道背後是哪一種。"""
+
+    def scan(self, table: str, layer: str = "clean") -> pl.LazyFrame: ...
+
+    def latest_date(self, table: str, layer: str = "clean") -> dt.date | None: ...
+
+    def dates_in_range(
+        self, table: str, start: dt.date, end: dt.date, layer: str = "clean"
+    ) -> list[dt.date]: ...
+
+    def view(self, as_of: dt.date | dt.datetime) -> PitView: ...
+
+
 class PitView:
     """某個 as_of 截點的資料視圖：只看 available_at <= 截點的列。"""
 
-    def __init__(self, warehouse: Warehouse, cutoff: dt.datetime) -> None:
-        self._wh = warehouse
+    def __init__(self, source: TableSource, cutoff: dt.datetime) -> None:
+        self._source = source
         self._cutoff = cutoff
 
     @property
@@ -33,8 +51,13 @@ class PitView:
         return self._cutoff
 
     def table(self, name: str) -> pl.LazyFrame:
-        """回傳已按 available_at <= 截點過濾的 LazyFrame。無 available_at 欄的表原樣回傳。"""
-        lf = self._wh.scan(name)
+        """回傳已按 available_at <= 截點過濾的 LazyFrame。無 available_at 欄的表原樣回傳。
+
+        available_at 一律以 Asia/Taipei 比較——parquet 湖本就以此時區存放；
+        PG-backed 來源（timestamptz 走線皆為 UTC）須在 `.scan()` 內先 convert_time_zone
+        到 Asia/Taipei 再回傳，此處不重複處理（單一正規化點，避免兩處時區邏輯漂移）。
+        """
+        lf = self._source.scan(name)
         if "available_at" in lf.collect_schema().names():
             lf = lf.filter(pl.col("available_at") <= self._cutoff)
         return lf
@@ -111,6 +134,18 @@ class Warehouse:
             if p.name != "date=_all"
         ]
         return max(dates) if dates else None
+
+    def dates_in_range(
+        self, table: str, start: dt.date, end: dt.date, layer: str = "clean"
+    ) -> list[dt.date]:
+        """該表在 [start, end] 內所有已存資料的日期分區（排序）。供逐日物化區間推進。"""
+        base = self._root / layer / table
+        dates = [
+            dt.date.fromisoformat(p.name[len("date=") :])
+            for p in base.glob("date=*")
+            if p.name != "date=_all"
+        ]
+        return sorted(d for d in dates if start <= d <= end)
 
     def source_dates(self, table: str, source: str, layer: str = "clean") -> list[dt.date]:
         """某來源在該表已存資料的所有日期（排序）。供擷取狀態/缺口檢視。"""

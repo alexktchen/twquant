@@ -1529,19 +1529,28 @@ def serving_materialize(
     from_: str = typer.Option("", "--from", help="範圍起（含）YYYY-MM-DD"),
     to: str = typer.Option("", "--to", help="範圍迄（含）YYYY-MM-DD"),
 ) -> None:
-    """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。"""
-    from twquant.data.serving import materialize as smat
-    from twquant.data.warehouse import Warehouse
+    """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。
 
-    wh = Warehouse(_load_system().data_dir)
+    讀取源改為 PG serving 鏡射表（D-026，全面停用 parquet）：`PgTableSource` 結構滿足
+    `PitView` 需要的介面，因子函數不變、只是不再讀本地資料湖。
+    """
+    from twquant.data.serving import materialize as smat
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+
     cfg = _load_serving()
-    if from_ and to:
-        results = smat.materialize_range(
-            wh, cfg, dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
-        )
-    else:
-        day = None if date == "today" else dt.date.fromisoformat(date)
-        results = [smat.materialize_day(wh, cfg, day)]
+    conn = store.connect(cfg)
+    try:
+        source = PgTableSource(conn, cfg.pg_schema)
+        if from_ and to:
+            results = smat.materialize_range(
+                source, cfg, dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+            )
+        else:
+            day = None if date == "today" else dt.date.fromisoformat(date)
+            results = [smat.materialize_day(source, cfg, day)]
+    finally:
+        conn.close()
     for r in results:
         typer.secho(
             f"[OK] {r.as_of}：{r.factor_rows} 因子列、{r.composite_rows} 綜合列、{r.factors} 因子",

@@ -20,6 +20,50 @@
 
 ## 已裁決
 
+### D-026（2026-07-14，已裁決）全面停用 parquet——因子物化改讀 PG，PitView 抽為 TableSource 協定
+- 背景：本機 bind-mount 的 parquet 資料湖（`D:\project\twquant\data`）在一次排查中發現完全
+  是空的，而 PG `serving.*` 卻已有數月歷史——資料湖早就沒被持續寫入。回補這幾天缺口時，
+  使用者明確裁示（2026-07-14）：**全部資料（raw 表與因子）長期只落地 PG，不再有 parquet**。
+- 衝突：此裁示與既有設計相牴觸——D-017（2026-07-07）明訂「分析讀取側 scan/sql/connect/
+  view/PitView 維持具體 Warehouse、不抽象化……未來採 Postgres 時另開 ReadPort 條目」；
+  SPEC-009 §0 明文「因子計算的唯一讀路徑仍是 PitView……PG 只存已算好的值，永不作為
+  因子/回測/策略/投組的輸入」。本條即 D-017 預留的「ReadPort 條目」，正式裁定該原則
+  的因子計算部分反轉；**回測/策略/投組讀取側維持原樣不動**（範圍見下）。
+- 裁決：
+  - `data/warehouse.py` 新增 `TableSource`（`Protocol`，鴨型別）：`scan/latest_date/
+    dates_in_range/view` 四個方法。`PitView.__init__` 參數型別由具體 `Warehouse` 放寬成
+    `TableSource`——`Warehouse` 零改動即結構滿足（新增 `dates_in_range` 方法對齊協定）。
+  - 新模組 `data/serving/pg_view.py`：`PgTableSource`（結構滿足 `TableSource`）整表讀出
+    PG serving 鏡射表 → `pl.LazyFrame`；`available_at`（PG `timestamptz` 走線為 UTC）在
+    `.scan()` 內 `convert_time_zone` 正規化到 Asia/Taipei，與 parquet 路徑的 `TW_DT` dtype
+    對齊，`PitView.table()` 的截點比較邏輯不必知道、也不用改。本模組不 import
+    psycopg（IO 邊界：只有 `data/serving/` 得碰 PG 連線，`store.connect()` 提供）。
+  - `data/serving/materialize.py` 的 `_compute_universe`/`_materialize_on`/`materialize_day`/
+    `materialize_range` 参數型別由 `Warehouse` 放寬為 `TableSource`；`materialize_range`
+    不再依賴 `sync.partition_dates`（parquet 分區目錄），改用 `source.dates_in_range()`
+    （PG 走 `SELECT DISTINCT date ... WHERE date BETWEEN`，parquet 走既有目錄枚舉）。
+  - CLI `serving materialize` 改建 `PgTableSource`（PG 直連）取代
+    `Warehouse(_load_system().data_dir)`；`pipeline()` 每日流程的 `_serving_step()`
+    **不動**（仍傳本地 `Warehouse`——`materialize_day` 兩種來源皆吃，向後相容，該函式的
+    ingest/gate/signal 全流程改 PG-only 是另一個更大的範圍，見下）。
+  - raw 表回補（prices/institutional/margin/monthly_revenue/shareholding_dispersion）已在
+    本次回補中改走「來源 SourcePort 抓 → schemas.validate → `sync.upsert()` 直進 PG」，
+    略過 `Warehouse.write()`；`broker_trades`（D-025）本就 PG 直寫，其 parquet 寫回
+    （`serving rebuild` 安全網）暫保留、屬另一範圍。
+- 刻意界線（本條**只**涵蓋因子物化的讀取路徑，其餘維持 D-017 原判）：backtest/strategy/
+  portfolio/monitoring 的 PIT 讀取、`twquant daily`/`backfill`/`pipeline` 的 ingest/gate
+  仍走 parquet `Warehouse`。這些模組要不要也搬離 parquet，是**另一個決策**（規模與 D-017
+  估計的「~8 模組」相近），未來要做就再開一條 D-02x，不在本條隱含。
+- IO 邊界（SPEC-009 AC-7）不受影響：`factors/*.py` 仍完全不 import psycopg/`data.serving`——
+  它們只收一個 `view` 物件、不知道背後是 parquet 還是 PG，靜態閘門 `test_io_boundary.py`
+  無需改動。SPEC-009 §0/§3 同步更新（見文件）。
+- 驗證：`data/serving/pg_view.py` 對真實 PG 手動驗證過 `available_at` 時區正規化
+  （PG `timestamptz` UTC → polars `Datetime[us, Asia/Taipei]`，D-008 截點比較結果與
+  parquet 路徑一致）；`tests/test_pg_view.py`（新增，`TWQUANT_PG_DSN` 未設則 skip）覆蓋
+  PIT 截點過濾與 `dates_in_range`。
+- 範圍：`data/warehouse.py`、`data/serving/pg_view.py`（新）、`data/serving/materialize.py`、
+  `cli.py`（`serving materialize`）、`docs/specs/SPEC-009-serving.md`、`tests/test_pg_view.py`。
+
 ### D-025（2026-07-12，已裁決）backfill-fubon-chip 改 PG 直寫 + fubon_fetch_log 抓取帳本
 - 需求（使用者）：(1) 抓到就直接進 PG，不留實體檔案；(2) 逐 (日, 股) 續傳——每次抓新日期
   先檢查已抓過的股號跳過；(3) **多程序併跑**且檢查間隔要小，不能漏抓；(4) 新增查詢：
