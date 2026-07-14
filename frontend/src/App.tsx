@@ -221,6 +221,8 @@ function CandleChart({
     let pctS: any = null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let cumS: any = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let nbarS: any = null
 
     if (volume) {
       const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'right' }, pane)
@@ -247,6 +249,7 @@ function CandleChart({
     if (brokerFlow && brokerFlow.length) {
       const nbar = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'right', base: 0 }, pane)
       nbar.setData(brokerFlow.map((p) => ({ time: p.date, value: Math.round(p.net / 1000), color: p.net >= 0 ? VOL_UP : VOL_DOWN })))
+      nbarS = nbar
       let cum = 0
       cumS = chart.addSeries(LineSeries, { priceScaleId: 'cum', color: ACC, lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, pane)
       cumS.setData(brokerFlow.map((p) => { cum += Math.round(p.net / 1000); return { time: p.date, value: cum } }))
@@ -300,6 +303,8 @@ function CandleChart({
       }
       const pc = pctS && param.seriesData?.get(pctS)
       if (pc) html += `　<span style="color:${MUT}">綜合分位</span> ${Math.round(pc.value)}%`
+      const nb = nbarS && param.seriesData?.get(nbarS)
+      if (nb) html += `　<span style="color:${MUT}">主力當日</span> <b style="color:${nb.value >= 0 ? UP : DOWN}">${nb.value >= 0 ? '+' : ''}${num(nb.value)}</b> 張`
       const cc = cumS && param.seriesData?.get(cumS)
       if (cc) html += `　<span style="color:${MUT}">主力累計</span> <b style="color:${cc.value >= 0 ? UP : DOWN}">${cc.value >= 0 ? '+' : ''}${num(cc.value)}</b> 張`
       lg.style.opacity = '1'
