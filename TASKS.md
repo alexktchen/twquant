@@ -83,8 +83,22 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
     ?date=2026-07-01 讀快照（宇宙 1,073）、?date=2026-03-02 即時回算（宇宙 934）；
     瀏覽器實測面板渲染/池切換/點擊選股/日期回溯皆過。
   - **維運註**：`check` 內建 pytest 在本機因 Windows 長 tmp 路徑失敗（既知環境問題），
-    以 `uv run --all-groups pytest --basetemp=/c/t/pt` 等效跑全套。每日快照可在既有
-    排程後追加 `python -m twquant screener-snapshot`（尚未掛排程）。
+    以 `uv run --all-groups pytest --basetemp=/c/t/pt` 等效跑全套。
+
+- **排程改跑完整 pipeline（追加 T-023 進度，非新任務）**（2026-07-14）`scheduler`
+  常駐迴圈原本每日觸發只裸呼叫 `_ingest_date`（僅擷取進資料湖，供應層鏡射/物化
+  仍須手動 `pipeline`/`serving materialize`）。抽出共用 `_run_daily_pipeline(day)`
+  （`pipeline` CLI 與 `scheduler` 迴圈皆呼叫同一份步驟：擷取→品質閘門→訊號生成→
+  供應層→**選股池快照**新尾波），使每日 16:40 觸發即完成到選股池快照，不再需要
+  手動補跑。供應層/選股池快照步驟皆 best-effort（PG 未啟用或不可達時該步回報略過，
+  不中斷擷取/訊號主線；單日整體例外排程迴圈照樣續跑下一觸發時刻）。
+  **仍未做**（T-023 原範圍，維持部分完成）：LOOP.md §3 的多波次擷取（16:30/21:45
+  分波）、report 步驟掛點。
+  **驗證**：`python -m twquant pipeline --date 2026-07-14` 手動跑通，選股池快照
+  step 回報「359 列」；重跑同日期驗證冪等（PG 列數不變）。ruff/mypy/pytest 全套
+  （含既有 `test_pipeline.py`）綠——`run_pipeline`/`PipelineStep` 框架未變、只是
+  CLI 層新增一步與重構呼叫路徑，無獨立 CLI 整合測試（比照既有 `pipeline` 指令本身
+  亦無 CliRunner 測試的慣例）。
 
 - **T-038（綜合分預測力研究 + B/C 落地·done）**（2026-07-11）D-020 全程。
   **研究**：PIT-safe 重跑（worktree 21 因子、資料湖 2023-01~2026-07、IS/OOS 切分）證實等權

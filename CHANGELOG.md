@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-07-14 排程改跑完整 pipeline（使用者需求）：`scheduler` 常駐迴圈原本每日只裸
+  擷取，供應層/選股池快照要手動補跑；抽出共用 `_run_daily_pipeline`，每日 16:40
+  觸發即完成擷取→品質閘門→訊號→供應層→選股池快照全流程（best-effort，不中斷主線）。
+
 - 2026-07-14 T-040/T-041 策略選股池（使用者需求）：主力買賣超研究的高勝率條件常態化為
   五個每日選股池（`monitoring/screener.py`＋`configs/screener.yaml`＋`/api/screener`＋
   前端「個股因子」頁面板）；`serving.screener_daily` 每日快照（CLI `screener-snapshot`，

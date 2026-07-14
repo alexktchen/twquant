@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from twquant.data.http import HttpClient
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
+    from twquant.pipeline import PipelineResult
 
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
 
@@ -637,19 +638,25 @@ def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
 def scheduler(
     at: str = typer.Option("16:40", help="每日觸發時刻 HH:MM（台北）"),
 ) -> None:
-    """常駐排程（v1）：每日於 at 時刻跑 daily 擷取。完整 pipeline 見 T-023。"""
+    """常駐排程：每日於 at 時刻跑完整 pipeline（擷取→品質閘門→訊號→供應層→選股池快照，T-023）。
+
+    供應層/選股池快照皆 best-effort（PG 不可達不影響擷取主線，見 _run_daily_pipeline）；
+    單日整體失敗（如來源全斷線）不中斷排程，記錄後等下一觸發時刻續跑。
+    """
     import time
 
     from twquant.conventions import now_tw
 
     hh, mm = (int(x) for x in at.split(":"))
-    typer.secho(f"排程啟動：每日 {at} (Asia/Taipei) 觸發擷取", fg=typer.colors.CYAN, bold=True)
+    typer.secho(
+        f"排程啟動：每日 {at} (Asia/Taipei) 觸發完整 pipeline", fg=typer.colors.CYAN, bold=True
+    )
     while True:
         delay = _seconds_until(now_tw(), hh, mm)
         typer.secho(f"下次觸發：{delay / 3600:.1f} 小時後", fg=typer.colors.CYAN)
         time.sleep(delay)
         try:
-            _ingest_date(now_tw().date(), None, tolerant=True)
+            _echo_pipeline_result(_run_daily_pipeline(now_tw().date()))
         except Exception as exc:  # noqa: BLE001  # 排程不因單日失敗而死；記錄後續跑
             typer.secho(f"[排程錯誤] {exc}", fg=typer.colors.RED)
 
@@ -860,9 +867,13 @@ def _git_hash() -> str:
         return "unknown"
 
 
-@app.command()
-def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today")) -> None:
-    """每日營運 pipeline：擷取→品質閘門→訊號生成，寫 heartbeat（LOOP §3）。"""
+def _run_daily_pipeline(day: dt.date) -> PipelineResult:
+    """每日營運 pipeline：擷取→品質閘門→訊號生成→供應層→選股池快照，寫 heartbeat（LOOP §3）。
+
+    供 `pipeline` CLI 一次性指令與 `scheduler` 常駐迴圈共用（T-023：排程改跑完整
+    pipeline，不再只做裸擷取）。供應層／選股池快照皆 best-effort（display-only，
+    PG 不可達不影響擷取/訊號主線）；回傳 twquant.pipeline.PipelineResult。
+    """
     from twquant.conventions import now_tw
     from twquant.data.warehouse import Warehouse
     from twquant.errors import DataError
@@ -872,7 +883,6 @@ def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 to
 
     cfg = _load_system()
     wh = Warehouse(cfg.data_dir)
-    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
 
     def _ingest_step() -> str:
         return f"{_ingest_date(day, None, tolerant=True)} 表"
@@ -902,14 +912,32 @@ def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 to
         m = smat.materialize_day(wh, scfg, day)
         return f"鏡射同步 + 物化 {m.factor_rows} 因子列"
 
+    def _screener_step() -> str:
+        # 選股池每日快照（SPEC-007 §6 / T-041）：需供應層已同步當日資料，故排在其後；
+        # display-only、best-effort，寫入冪等（ON CONFLICT DO NOTHING）。
+        from twquant.data.serving import store
+        from twquant.monitoring import screener as scr
+
+        scfg = _load_serving()
+        if not scfg.enabled:
+            return "未啟用（serving.yaml enabled=false）"
+        if not store.ping(scfg):
+            return "PG 不可達，略過（display-only）"
+        res = scr.snapshot(scfg, day, day)
+        return f"{res['rows']} 列" if res["rows"] else "無可快照資料（尚無當日供應層資料）"
+
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("供應層", _serving_step),
+        PipelineStep("選股池快照", _screener_step),
     ]
-    res = run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
-    typer.secho(f"=== 每日 pipeline @ {day} ===", fg=typer.colors.CYAN, bold=True)
+    return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
+
+
+def _echo_pipeline_result(res: PipelineResult) -> None:
+    typer.secho(f"=== 每日 pipeline @ {res.day} ===", fg=typer.colors.CYAN, bold=True)
     for s in res.steps:
         color = {"ok": typer.colors.GREEN, "failed": typer.colors.RED}.get(
             s.status, typer.colors.YELLOW
@@ -917,6 +945,15 @@ def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 to
         typer.secho(f"  [{s.status.upper()}] {s.name}：{s.detail}", fg=color)
     tag = "降級（沿用前日權重）" if res.degraded else "正常"
     typer.secho(f"結果：{tag}，訊號{'已' if res.signals_produced else '未'}產出", bold=True)
+
+
+@app.command()
+def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today")) -> None:
+    """每日營運 pipeline：擷取→品質閘門→訊號生成→供應層→選股池快照，寫 heartbeat（LOOP §3）。"""
+    from twquant.conventions import now_tw
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    _echo_pipeline_result(_run_daily_pipeline(day))
 
 
 @app.command()

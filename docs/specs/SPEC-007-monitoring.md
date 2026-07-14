@@ -66,11 +66,15 @@ docker-compose 的 `api` + `frontend` 兩服務常駐（`frontend` 的 nginx 反
 - 端點：`GET /api/screener?n=&date=`（n＝每池成員數上限）→
   `{as_of, source, snapshot, universe_n, pools:[{key,name,rule,note,total,members:[...]}]}`；
   PG 不可用 → 503。
-- 每日快照與回溯（T-041）：CLI `screener-snapshot [--from --to]` 把每日池成員
-  存入 `serving.screener_daily`（PK＝date/pool/stock_id；`ON CONFLICT DO NOTHING`
-  ＝首錄保留——之後改配置閾值或資料修訂不重寫歷史）。`?date=` 給定時優先讀快照
-  （payload 標 `snapshot: true`）、該日無快照則以 ≤ date 資料即時回算
-  （`snapshot: false`；非交易日貼齊前一交易日）。寫入只走 CLI，API 維持唯讀。
+- 每日快照與回溯（T-041）：把每日池成員存入 `serving.screener_daily`（PK＝
+  date/pool/stock_id；`ON CONFLICT DO NOTHING` ＝首錄保留——之後改配置閾值或
+  資料修訂不重寫歷史）。`?date=` 給定時優先讀快照（payload 標 `snapshot: true`）、
+  該日無快照則以 ≤ date 資料即時回算（`snapshot: false`；非交易日貼齊前一交易日）。
+  寫入只走 CLI/pipeline，API 維持唯讀。
+  - CLI `screener-snapshot [--from --to]`：一次性回補指定區間（省略＝最新交易日）。
+  - 每日 `pipeline`（LOOP.md §3；`scheduler` 常駐迴圈每日觸發同一 pipeline，T-023）
+    新增「選股池快照」尾波步驟——排在供應層鏡射同步/物化之後（需當日資料已入
+    PG），best-effort（PG 不可達或未啟用時略過，不影響擷取/訊號主線）。
 
 ## 驗收條件
 
