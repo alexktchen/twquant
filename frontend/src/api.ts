@@ -207,6 +207,21 @@ export type FactorTop = {
 export const fetchFactorTop = (factor: string, n = 10, order: FactorOrder = 'top') =>
   getJSON<FactorTop>(`/api/factor-top?factor=${enc(factor)}&n=${n}&order=${order}`)
 
+// 策略選股池（SPEC-007 §6）：研究高勝率條件的每日成員 + 連續在池天數；描述性、非交易訊號。
+export type ScreenerMember = {
+  stock_id: string; name: string | null; close: number | null; chg: number | null
+  yoy: number | null; conc: number | null; accum_ratio: number | null; streak: number
+}
+export type ScreenerPool = {
+  key: string; name: string; rule: string; note: string; total: number; members: ScreenerMember[]
+}
+export type Screener = {
+  as_of: string | null; source: Src; snapshot: boolean; universe_n: number; pools: ScreenerPool[]
+}
+// date 給定＝回溯：後端先讀 screener_daily 快照（snapshot=true）、無快照即時回算。
+export const fetchScreener = (n = 30, date?: string) =>
+  getJSON<Screener>(`/api/screener?n=${n}${date ? `&date=${enc(date)}` : ''}`)
+
 // P7/P8：因子歷史（每因子 z/pct 序列）與綜合分位趨勢（皆需 PG 物化歷史）。
 export type FactorHistPoint = { date: string; value: number | null; z: number | null; pct: number | null }
 export type FactorHistGroup = { factor: string; series: FactorHistPoint[] }
