@@ -82,6 +82,14 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
   - **實機煙霧**：`twquant serve` + vite dev；資料後台頁 `PipelinePanel` 渲染正確（空湖 →
     「⚠ 尚無 heartbeat」橫幅、一鍵/補跑鈕就位）；`POST /api/pipeline-jobs {date:"nope"}` → 400、
     端點在 OpenAPI schema。happy-path spawn 未實跑（＝既有一鍵補抓同一 `MANAGER.start`，已生產驗證）。
+  - **券商買賣超納入 pipeline（同需求續，使用者裁決「併入共用 pipeline」）**：反映
+    「沒有跑券商買賣超跟因子」——查證因子物化本就在供應層步驟（materialize_day），
+    券商買賣超原僅獨立 `backfill-fubon-chip`。抽 `_run_fubon_day`（單日 best-effort：
+    非互動、skip_existing 續傳、假日探測跳過），`_run_daily_pipeline` 加「券商買賣超」
+    步驟（品質閘門後、選股池快照前，五池依賴 broker_trades）。一鍵＋16:40 排程皆抓；
+    PG 未啟用/不可達或來源失敗 best-effort 略過。閘門：ruff/format、mypy strict(86)、
+    pytest 63（test_cli+pipeline+ingest_admin+fubon_chip；+1 `_run_fubon_day` 週末短路離線測）；
+    frontend oxlint＋build 綠。
 
 - **T-040 + T-041（策略選股池：篩選器＋每日快照回溯·done）**（2026-07-14）
   **出處**：主力買賣超研究（本日 session；樣本 2022-02~2026-06、隔日開盤進場、
