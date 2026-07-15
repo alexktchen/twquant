@@ -396,6 +396,32 @@ def get_ingest_job(jid: str) -> dict[str, object]:
     return job
 
 
+class PipelineJobRequest(BaseModel):
+    """手動補跑每日 pipeline：只收一個交易日（省略＝今日台北），無其他自由輸入。"""
+
+    date: str | None = None
+
+
+@app.post("/api/pipeline-jobs", status_code=201)
+def post_pipeline_job(req: PipelineJobRequest) -> dict[str, object]:
+    """手動補跑當日 pipeline（排程錯過時的介面補跑）：以子行程跑 `twquant pipeline --date`。
+
+    與補抓共用同一 JobManager（單一併發：pipeline 內含擷取，不得與補抓並跑）；工作出現
+    在同一 `/api/ingest-jobs` 清單供輪詢。
+    """
+    try:
+        day = jobs.resolve_trading_day(req.date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    args = jobs.pipeline_args(day)
+    try:
+        return jobs.MANAGER.start(
+            jobs.pipeline_label(day), jobs.display_command(args), jobs.full_argv(args)
+        )
+    except jobs.JobBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.get("/api/heartbeat")
 def get_heartbeat(wh: WarehouseDep) -> dict[str, object]:
     """pipeline heartbeat + 最新行情日 + watchdog（供後台狀態條）。"""

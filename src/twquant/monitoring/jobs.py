@@ -1,10 +1,17 @@
-"""補抓工作執行器（資料後台「一鍵補抓」，D-018）。
+"""伺服器端工作執行器（資料後台「一鍵補抓」D-018＋「手動補跑每日 pipeline」）。
 
-在 API 伺服器端以子行程執行 twquant CLI 補抓，取代「複製指令、自己開終端貼上」。
+在 API 伺服器端以子行程執行 twquant CLI，取代「複製指令、自己開終端貼上」。工作
+分兩類、共用同一 JobManager（單一併發）：
+
+- **補抓**：指令由缺口識別 (table, source, from, to) 推導（build_args）。
+- **手動 pipeline**：排程若錯過每日觸發（機器離線等），從介面補跑完整每日 pipeline
+  （pipeline_args＝`pipeline --date <day>`，與 scheduler 16:40 觸發同一路徑）。
+
 安全邊界（D-018 對 D-016 唯讀原則的收斂放寬）：
 
-- 白名單：指令只由缺口識別 (table, source, from, to) 推導，不接受命令字串（無注入面）。
-- 單一併發：同時最多一個工作——資料湖寫入不併發，也避免對免費來源疊加請求量。
+- 白名單：補抓指令只由缺口識別推導、pipeline 只收單一交易日，皆不接受命令字串（無注入面）。
+- 單一併發：同時最多一個工作——資料湖寫入不併發（pipeline 內含擷取，故與補抓互斥），
+  也避免對免費來源疊加請求量。
 - D-015 護欄：TWSE 行情大區間回補需呼叫端明示 force（前端先 confirm）。
 
 工作狀態存於行程記憶體（uvicorn 單行程），重啟即清空——後台是操作台而非稽核
@@ -109,6 +116,33 @@ def job_label(table: str, source: str, frm: str, to: str) -> str:
         return "官方開休市日曆"
     zh = _TRACK_LABEL.get((table, source), f"{table}:{source}")
     return f"{zh} {frm}" if frm == to else f"{zh} {frm}~{to}"
+
+
+# ── 手動補跑每日 pipeline（排程錯過時的介面補跑）─────────────────────────
+def resolve_trading_day(date: str | None) -> str:
+    """None／空字串 → 今日（台北）ISO；否則驗證為 ISO 日期字串（非法 → ValueError）。
+
+    排程以 `now_tw().date()` 觸發，故手動補跑預設同語意；伺服器時區與台北可能不同，
+    一律以台北換日，不用呼叫端的本地日期。
+    """
+    if not date:
+        from twquant.conventions import now_tw
+
+        return now_tw().date().isoformat()
+    return _parse_date(date).isoformat()
+
+
+def pipeline_args(day: str) -> list[str]:
+    """手動補跑每日 pipeline 的 twquant 子指令 argv（day 為已解析 ISO 交易日）。
+
+    與 scheduler 常駐迴圈跑的是同一 `pipeline` 指令（擷取→品質閘門→訊號→供應層→
+    選股池快照，見 cli._run_daily_pipeline），故「補跑」等同「重放當日排程」。
+    """
+    return ["pipeline", "--date", day]
+
+
+def pipeline_label(day: str) -> str:
+    return f"每日 pipeline {day}"
 
 
 def _weekday_span(a: dt.date, b: dt.date) -> int:

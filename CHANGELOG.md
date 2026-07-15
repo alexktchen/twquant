@@ -1,5 +1,15 @@
 # CHANGELOG
 
+- 2026-07-15 一鍵跑當日全部資料（使用者需求）：排程若錯過每日觸發（機器離線等），
+  資料後台新增「一鍵跑當日全部資料」面板——一鍵在伺服器端跑 `twquant pipeline`
+  （＝ scheduler 16:40 同一完整流程：擷取全市場行情＋法人＋融資券＋… → 品質閘門 →
+  訊號 → 供應層 → 選股池快照）。`monitoring/jobs.py` 加 `pipeline_args/pipeline_label/
+  resolve_trading_day`（date 省略＝今日台北），`POST /api/pipeline-jobs`（與一鍵補抓
+  共用同一單一併發 JobManager、工作出現在同一清單）；前端 `PipelinePanel`（watchdog
+  橫幅標示排程是否錯過＋主動作一鍵今日＋次動作補跑指定交易日）；「補抓工作」面板改名
+  「背景工作」（含 pipeline 工作）。閘門：ruff/format、mypy strict(86)、pytest 全綠
+  （+5 `test_ingest_admin.py`：argv/label/resolve/400/409）；前端 oxlint＋tsc＋build 綠。
+
 - 2026-07-14 排程改跑完整 pipeline（使用者需求）：`scheduler` 常駐迴圈原本每日只裸
   擷取，供應層/選股池快照要手動補跑；抽出共用 `_run_daily_pipeline`，每日 16:40
   觸發即完成擷取→品質閘門→訊號→供應層→選股池快照全流程（best-effort，不中斷主線）。

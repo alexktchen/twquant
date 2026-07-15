@@ -62,6 +62,27 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **一鍵跑當日全部資料（追加 T-023/T-024 進度，非新任務）**（2026-07-15）使用者需求：
+  排程（`scheduler` 每日 16:40）若錯過觸發（機器離線、當日忘開），供應層/選股池快照
+  就停在舊日，只能敲 CLI 補跑。資料後台加「一鍵跑當日全部資料」面板，一鍵在伺服器端
+  跑 `twquant pipeline`（＝ scheduler 同一 `_run_daily_pipeline`：擷取全市場行情＋法人＋
+  融資券＋… → 品質閘門 → 訊號 → 供應層 → 選股池快照）。
+  - **後端**：`monitoring/jobs.py` 加 `resolve_trading_day`（None/空＝今日台北、否則驗 ISO）、
+    `pipeline_args`（`pipeline --date <day>`）、`pipeline_label`；`POST /api/pipeline-jobs`
+    （`PipelineJobRequest.date` 選填）。與一鍵補抓共用同一 `JobManager`（單一併發——pipeline
+    內含擷取，不得與補抓並跑；工作出現在同一 `/api/ingest-jobs` 清單供輪詢）。
+  - **前端**：`PipelinePanel`——watchdog 橫幅（heartbeat 日 vs 最新行情日，標示排程是否錯過/
+    從未執行）＋主動作「▶ 一鍵跑今日全部資料」（date 省略、後端補台北今日）＋次動作
+    「補跑此日」（指定交易日，供連假後補多天）。「補抓工作」面板改名「背景工作」（現含
+    pipeline 工作）。
+  - **閘門**：ruff check/format 全綠；mypy strict 86 檔全綠；pytest `test_ingest_admin.py`
+    28 passed（+5：`pipeline_argv_and_label`/`resolve_trading_day`/`api_post_pipeline_job_starts`
+    /`_bad_date`/`_busy_409`——後三者以假 MANAGER/monkeypatch 攔截，不真的 spawn 擷取）；
+    frontend oxlint＋tsc＋vite build 綠。
+  - **實機煙霧**：`twquant serve` + vite dev；資料後台頁 `PipelinePanel` 渲染正確（空湖 →
+    「⚠ 尚無 heartbeat」橫幅、一鍵/補跑鈕就位）；`POST /api/pipeline-jobs {date:"nope"}` → 400、
+    端點在 OpenAPI schema。happy-path spawn 未實跑（＝既有一鍵補抓同一 `MANAGER.start`，已生產驗證）。
+
 - **T-040 + T-041（策略選股池：篩選器＋每日快照回溯·done）**（2026-07-14）
   **出處**：主力買賣超研究（本日 session；樣本 2022-02~2026-06、隔日開盤進場、
   20 日均額 ≥ 20M、對全池超額、NW 日聚合 t）。五池＝逐年穩定的高勝率條件：
