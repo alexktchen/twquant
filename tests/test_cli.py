@@ -13,6 +13,7 @@ from twquant.cli import (
     _fubon_status_lines,
     _make_progress,
     _probe_all_empty,
+    _run_fubon_day,
     _seconds_until,
 )
 from twquant.config import SourceRate
@@ -49,6 +50,11 @@ def test_daterange_weekday_filter() -> None:
     weekdays = [d for d in days if d.weekday() < 5]
     assert dt.date(2026, 6, 20) in days  # 週六在原範圍
     assert dt.date(2026, 6, 20) not in weekdays  # 但被濾掉
+
+
+def test_run_fubon_day_weekend_short_circuits() -> None:
+    # 每日 pipeline 券商買賣超步驟：週末直接跳過（不碰 config/PG/網路，故可離線斷言）。
+    assert _run_fubon_day(dt.date(2026, 7, 18)) == "週末，跳過"  # 2026-07-18 為週六
 
 
 # ── 富邦DJ 平行抓取（D-022/D-025，_fetch_fubon_day）───────────────────

@@ -867,12 +867,89 @@ def _git_hash() -> str:
         return "unknown"
 
 
+def _run_fubon_day(day: dt.date) -> str:
+    """單日富邦DJ 全市場券商分點 → PG broker_trades ＋資料湖（每日 pipeline 尾波共用）。
+
+    `backfill-fubon-chip` 的單日 best-effort 精簡版：非互動（無確認/進度列）、
+    skip_existing 續傳（讀 PG 帳本）、假日探測跳過。回傳摘要字串；PG 未啟用/不可達或
+    無宇宙 → 回略過訊息（不 raise）。全市場 ~6700 檔、workers＝限流 max_requests 約
+    10 分鐘——排在選股池快照前，讓快照吃到當日主力買賣超（T-040 五池依賴 broker_trades）。
+    """
+    if day.weekday() >= 5:  # 週末先擋（避免在無 libpq 環境仍 import psycopg）
+        return "週末，跳過"
+
+    import threading
+
+    from twquant.data.serving import chip_ingest, store
+    from twquant.data.serving import schema as sch
+    from twquant.data.sources import fubon_chip
+    from twquant.data.warehouse import Warehouse
+
+    scfg = _load_serving()
+    if not scfg.enabled:
+        return "未啟用（serving.yaml enabled=false）"
+    if not store.ping(scfg):  # DSN 未設或不可達 → best-effort 略過，不擋主線
+        return "PG 不可達，略過"
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    sids = _fubon_universe(wh, r"^[1-9][0-9]{3}$")  # 四碼普通股（排除權證/ETF）
+    if not sids:
+        return "資料湖無宇宙可推導，略過"
+    rate = cfg.source_rates["fubon"]
+    n_workers = max(rate.max_requests, 1)
+    client = fubon_chip.browser_client(rate)
+    pg = scfg.pg_schema
+    pg_lock = threading.Lock()  # 多 worker 共用單一連線：PG 操作經此鎖序列化
+
+    with store.connect(scfg) as conn:
+        sch.ensure_schema(conn, pg)
+        with pg_lock, conn.cursor() as cur:
+            logged = chip_ingest.logged(cur, pg, day)
+        if chip_ingest.SENTINEL in logged:
+            return "已標記非交易日，跳過"
+        if not logged and wh.partition_exists("clean", "broker_trades", day, "fubon"):
+            return "資料湖已存在（舊回補），跳過"
+        pending = [s for s in sids if s not in logged]
+
+        def _seen(sid: str) -> bool:
+            with pg_lock, conn.cursor() as cur:
+                return chip_ingest.is_logged(cur, pg, day, sid)
+
+        def _commit(sid: str, html: bytes) -> None:
+            df = fubon_chip.rows_to_canonical(fubon_chip.parse_broker_rows(html), sid, day)
+            with pg_lock, conn.cursor() as cur:
+                if not df.is_empty():
+                    chip_ingest.upsert_broker_rows(cur, pg, df)
+                chip_ingest.mark(cur, pg, day, sid, df.height)
+                conn.commit()
+
+        # 假日探測（D-024）：無任何有資料紀錄時先抓前 N 檔，全空 → 標記非交易日跳過整天
+        has_data = any(n > 0 for n in logged.values())
+        head_n = min(5, len(pending)) if not has_data else 0
+        probe = _fetch_fubon_day(client, pending[:head_n], day, n_workers, _seen, _commit)
+        if head_n and _probe_all_empty(probe):
+            with pg_lock, conn.cursor() as cur:
+                chip_ingest.mark(cur, pg, day, chip_ingest.SENTINEL, 0)
+                conn.commit()
+            return "探測前數檔皆無分點表（非交易日），標記跳過"
+        _fetch_fubon_day(client, pending[head_n:], day, n_workers, _seen, _commit)
+        with pg_lock, conn.cursor() as cur:
+            full = chip_ingest.read_day(cur, pg, day)
+        if full.is_empty():
+            return "無分點資料（非交易日或全空）"
+        with pg_lock, conn.cursor() as cur:
+            chip_ingest.clear_sentinel(cur, pg, day)  # 曾誤標而今有資料 → 解除
+            conn.commit()
+        wh.write("clean", "broker_trades", full, source="fubon")  # 湖為 PitView/rebuild 真相源
+        return f"{full.height} 列（{full['stock_id'].n_unique()} 檔）入 PG＋資料湖"
+
+
 def _run_daily_pipeline(day: dt.date) -> PipelineResult:
-    """每日營運 pipeline：擷取→品質閘門→訊號生成→供應層→選股池快照，寫 heartbeat（LOOP §3）。
+    """每日營運 pipeline：擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照，寫 heartbeat（LOOP §3）。
 
     供 `pipeline` CLI 一次性指令與 `scheduler` 常駐迴圈共用（T-023：排程改跑完整
-    pipeline，不再只做裸擷取）。供應層／選股池快照皆 best-effort（display-only，
-    PG 不可達不影響擷取/訊號主線）；回傳 twquant.pipeline.PipelineResult。
+    pipeline，不再只做裸擷取）。券商買賣超／供應層／選股池快照皆 best-effort（display-only，
+    PG 不可達或來源失敗不影響擷取/訊號主線）；回傳 twquant.pipeline.PipelineResult。
     """
     from twquant.conventions import now_tw
     from twquant.data.warehouse import Warehouse
@@ -912,6 +989,12 @@ def _run_daily_pipeline(day: dt.date) -> PipelineResult:
         m = smat.materialize_day(wh, scfg, day)
         return f"鏡射同步 + 物化 {m.factor_rows} 因子列"
 
+    def _broker_step() -> str:
+        # 券商買賣超（富邦DJ 全市場分點，~10 分）：排在選股池快照前，讓快照吃到當日主力
+        # 買賣超（T-040 五池依賴 broker_trades）。best-effort：非交易日由探測快速跳過、
+        # 續傳冪等；PG 未啟用/不可達或來源失敗不擋主線（見 _run_fubon_day）。
+        return _run_fubon_day(day)
+
     def _screener_step() -> str:
         # 選股池每日快照（SPEC-007 §6 / T-041）：需供應層已同步當日資料，故排在其後；
         # display-only、best-effort，寫入冪等（ON CONFLICT DO NOTHING）。
@@ -929,6 +1012,7 @@ def _run_daily_pipeline(day: dt.date) -> PipelineResult:
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
+        PipelineStep("券商買賣超", _broker_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
