@@ -397,3 +397,77 @@ def test_api_job_endpoints_list_and_get() -> None:
         api.get_ingest_job("j999")
     assert ei.value.status_code == 404
     _wait_done(mgr)
+
+
+# ── 手動補跑每日 pipeline（排程錯過時的介面補跑）─────────────────────────
+def test_pipeline_argv_and_label() -> None:
+    # 已解析交易日 → `pipeline --date <day>`（與 scheduler 16:40 同一指令）。
+    assert jobmod.pipeline_args("2026-06-30") == ["pipeline", "--date", "2026-06-30"]
+    assert jobmod.pipeline_label("2026-06-30") == "每日 pipeline 2026-06-30"
+    assert jobmod.full_argv(jobmod.pipeline_args("2026-06-30")) == [
+        sys.executable,
+        "-m",
+        "twquant",
+        "pipeline",
+        "--date",
+        "2026-06-30",
+    ]
+    assert jobmod.display_command(jobmod.pipeline_args("2026-06-30")) == (
+        "twquant pipeline --date 2026-06-30"
+    )
+
+
+def test_resolve_trading_day_default_today_and_validate() -> None:
+    from twquant.conventions import now_tw
+
+    today = now_tw().date().isoformat()
+    # 省略／空字串 → 今日台北（不看伺服器本地時區）。
+    assert jobmod.resolve_trading_day(None) == today
+    assert jobmod.resolve_trading_day("") == today
+    # 顯式合法日期原樣回傳；非法格式 → ValueError（API 轉 400）。
+    assert jobmod.resolve_trading_day("2026-06-30") == "2026-06-30"
+    with pytest.raises(ValueError, match="日期格式"):
+        jobmod.resolve_trading_day("nope")
+
+
+def test_api_post_pipeline_job_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 不真的 spawn（會打網路擷取）：以假 MANAGER 攔截 start，斷言 argv／label 正確。
+    captured: dict[str, object] = {}
+
+    class _FakeManager:
+        def start(self, label: str, command: str, argv: list[str]) -> dict[str, object]:
+            captured["label"] = label
+            captured["command"] = command
+            captured["argv"] = argv
+            return {"id": "j1", "status": "running"}
+
+    monkeypatch.setattr(jobmod, "MANAGER", _FakeManager())
+    res = api.post_pipeline_job(api.PipelineJobRequest(date="2026-06-30"))
+    assert res["id"] == "j1"
+    assert captured["label"] == "每日 pipeline 2026-06-30"
+    assert captured["command"] == "twquant pipeline --date 2026-06-30"
+    assert captured["argv"] == [
+        sys.executable,
+        "-m",
+        "twquant",
+        "pipeline",
+        "--date",
+        "2026-06-30",
+    ]
+
+
+def test_api_post_pipeline_job_bad_date() -> None:
+    with pytest.raises(HTTPException) as ei:
+        api.post_pipeline_job(api.PipelineJobRequest(date="nope"))
+    assert ei.value.status_code == 400
+
+
+def test_api_post_pipeline_job_busy_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    # pipeline 與補抓共用單一併發：有工作進行中 → 409（pipeline 內含擷取，不得並跑）。
+    mgr = jobmod.JobManager()
+    monkeypatch.setattr(jobmod, "MANAGER", mgr)
+    mgr.start("占用", "sleep", [sys.executable, "-c", "import time; time.sleep(2)"])
+    with pytest.raises(HTTPException) as ei:
+        api.post_pipeline_job(api.PipelineJobRequest(date="2026-06-30"))
+    assert ei.value.status_code == 409
+    _wait_done(mgr)  # 收斂背景工作，避免洩漏到其他測試

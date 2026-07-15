@@ -247,6 +247,10 @@ const postIngestJob = (req: IngestReq) =>
 export const startIngestJob = (g: IngestGap, force = false) =>
   postIngestJob({ table: g.table, source: g.source, from: g.from, to: g.to, force })
 export const startIngestFetch = (req: IngestReq) => postIngestJob(req)
+// 手動補跑每日 pipeline（排程錯過時的介面補跑）：省略 date → 後端以今日台北補跑；
+// 與補抓共用同一工作佇列（回傳的工作出現在 /api/ingest-jobs 清單）。
+export const startPipelineJob = (date?: string) =>
+  postJSON<IngestJob>('/api/pipeline-jobs', { date: date ?? null })
 export const fetchHolidayCalendar = () => getJSON<HolidayCalendar>('/api/holiday-calendar')
 // 官方開休市日曆一鍵抓取（端點無年度參數；from/to 忽略，後端整年一抓）。
 export const startHolidayFetch = () =>

@@ -37,6 +37,7 @@ import {
   startHolidayFetch,
   startIngestFetch,
   startIngestJob,
+  startPipelineJob,
   type Backtest as BacktestT,
   type BrokerFlowPoint,
   type BrokerRow,
@@ -2210,6 +2211,110 @@ function monthsBackISO(baseISO: string, n: number): string {
   return `${back.getFullYear()}-${p2(back.getMonth() + 1)}-${p2(back.getDate())}`
 }
 
+/* ---------- 一鍵跑當日全部資料（排程錯過時的介面補跑，＝排程 16:40 同一 pipeline）---------- */
+function PipelinePanel({
+  hb,
+  busy,
+  onSubmitted,
+}: {
+  hb: Heartbeat | null
+  busy: boolean
+  onSubmitted: () => void
+}) {
+  const [date, setDate] = useState('')
+  const [sending, setSending] = useState<'today' | 'date' | null>(null)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+
+  // 「指定交易日」欄預設今日；台灣使用者瀏覽器本地日即台北日（一鍵今日不看此欄）。
+  useEffect(() => {
+    setDate(todayISO())
+  }, [])
+
+  // watchdog：heartbeat 日 ≠ 最新行情日 → 排程可能錯過（未跑到最新交易日）。
+  const never = hb != null && hb.heartbeat == null
+  const missed = hb != null && hb.heartbeat != null && !hb.watchdog_ok
+  const stale = never || missed
+
+  // day 省略 → 後端以今日台北補跑（一鍵今日）；給定 → 補跑指定交易日。
+  const run = (which: 'today' | 'date', day?: string) => {
+    if (which === 'date' && !day) return
+    setSending(which)
+    setMsg(null)
+    startPipelineJob(day)
+      .then((j) => {
+        setSending(null)
+        setMsg({ kind: 'ok', text: `已排入：${j.label}（於下方「背景工作」看即時進度）` })
+        onSubmitted()
+      })
+      .catch((e: unknown) => {
+        setSending(null)
+        setMsg({ kind: 'err', text: e instanceof Error ? e.message : String(e) })
+      })
+  }
+
+  const anyBusy = busy || sending != null
+  return (
+    <Panel
+      title="一鍵跑當日全部資料"
+      sub="擷取全市場行情＋法人＋融資券＋… → 品質閘門 → 訊號 → 供應層 → 選股池快照（＝排程 16:40 同一流程）"
+    >
+      {hb && (
+        <div
+          className="mb-3 px-3 py-2 rounded text-[12px] leading-relaxed"
+          style={{ background: 'var(--panel-2)', color: stale ? 'var(--warn)' : 'var(--good)' }}
+        >
+          {never
+            ? '⚠ 尚無 heartbeat：pipeline 從未執行，按下方按鈕跑一次建立每日狀態。'
+            : missed
+              ? `⚠ 排程可能已錯過：heartbeat 停在 ${hb.heartbeat?.day}，最新行情日 ${hb.latest ?? '—'}（${hb.watchdog_reason}）。按下方一鍵補上今日全部資料。`
+              : `✓ pipeline 已跑到 ${hb.heartbeat?.day}（與最新行情日一致）。`}
+        </div>
+      )}
+      {/* 主動作：一鍵跑今日（不需選日期，後端以台北今日補跑）。*/}
+      <button
+        onClick={() => run('today')}
+        disabled={anyBusy}
+        className="px-4 py-2 text-[13px] font-medium rounded border border-[var(--accent)] bg-[var(--accent)] text-[var(--bg)] hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none transition-opacity"
+      >
+        {sending === 'today' ? '排入中…' : busy ? '有工作進行中…' : '▶ 一鍵跑今日全部資料'}
+      </button>
+      {/* 次動作：補跑過去某個交易日（如連假後補多天）。*/}
+      <div className="flex flex-wrap items-end gap-2 mt-3 pt-3 border-t border-[var(--line)]">
+        <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+          指定交易日
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="px-2 py-1 text-[12px] mono rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+          />
+        </label>
+        <button
+          onClick={() => run('date', date)}
+          disabled={anyBusy || !date}
+          className="px-3 py-1.5 text-[12px] rounded border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--bg)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          {sending === 'date' ? '排入中…' : '補跑此日'}
+        </button>
+      </div>
+      <p className="mt-2.5 text-[11px] text-[var(--muted)] leading-relaxed">
+        非交易日或當日行情尚未公布時，品質閘門會擋下訊號（降級、沿用前日）——與排程行為一致。
+        重跑同一日冪等，會重新擷取當日資料並更新供應層與選股池快照。
+      </p>
+      {msg && (
+        <div
+          className="mt-2 text-[12px]"
+          style={{ color: msg.kind === 'ok' ? 'var(--good)' : 'var(--crit)' }}
+        >
+          {msg.kind === 'ok' ? '✓ ' : '補跑失敗：'}
+          {msg.text}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/* ---------- 手動抓取歷史資料（指定資料集 + 期間，伺服器端跑 twquant CLI）---------- */
 function FetchForm({
   tracks,
   latest,
@@ -2249,7 +2354,7 @@ function FetchForm({
     startIngestFetch({ table: track.table, source: track.source, from, to, force })
       .then((j) => {
         setSending(false)
-        setMsg({ kind: 'ok', text: `已排入：${j.label}（於下方「補抓工作」看進度）` })
+        setMsg({ kind: 'ok', text: `已排入：${j.label}（於下方「背景工作」看進度）` })
         onSubmitted()
       })
       .catch((e: unknown) => {
@@ -2541,6 +2646,7 @@ function Ingest() {
         </button>
       </div>
       {err && <div className="text-[12px] text-[var(--crit)]">補抓失敗：{err}</div>}
+      <PipelinePanel hb={hb} busy={busy} onSubmitted={refreshJobs} />
       {tracks.length > 0 && (
         <FetchForm
           tracks={tracks}
@@ -2550,7 +2656,7 @@ function Ingest() {
         />
       )}
       {jb && jb.jobs.length > 0 && (
-        <Panel title="補抓工作" sub="伺服器端執行 twquant CLI · 單一併發 · 重啟 API 後清空">
+        <Panel title="背景工作" sub="伺服器端執行 twquant CLI（補抓／每日 pipeline）· 單一併發 · 重啟 API 後清空">
           <JobList jobs={jb.jobs} />
         </Panel>
       )}
