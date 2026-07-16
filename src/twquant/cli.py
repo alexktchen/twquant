@@ -636,13 +636,14 @@ def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
 
 @app.command()
 def scheduler(
-    at: str = typer.Option("21:00", help="每日觸發時刻 HH:MM（台北）"),
+    at: str = typer.Option("19:00", help="每日觸發時刻 HH:MM（台北）"),
 ) -> None:
     """常駐排程：每日於 at 時刻跑完整 pipeline（擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照）。
 
-    預設 21:00：券商買賣超（富邦DJ 分點）傍晚才公布，太早跑會抓空（2026-07-16 事件）；
-    行情/法人/融資券那時早已齊。券商買賣超/供應層/選股池快照皆 best-effort（PG 不可達或
-    來源未公布不影響擷取/訊號主線，見 _run_daily_pipeline）；單日整體失敗不中斷排程。
+    預設 19:00：券商買賣超（富邦DJ 分點）傍晚才公布，太早跑會抓空（2026-07-16 事件）；
+    行情/法人/融資券那時早已齊。若當日 19:00 仍未公布，券商步驟只回「稍後重試」不污染
+    當日（不再標 SENTINEL），晚點一鍵補跑即可。券商買賣超/供應層/選股池快照皆 best-effort
+    （PG 不可達或來源未公布不影響擷取/訊號主線，見 _run_daily_pipeline）；單日整體失敗不中斷排程。
     """
     import time
 

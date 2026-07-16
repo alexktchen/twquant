@@ -5,9 +5,10 @@
   （SENTINEL `_day_empty`）**，之後晚點一鍵/排程再跑都撞 SENTINEL 而跳過，當日永久無資料。
   根因兩修：(1)`_run_fubon_day` pipeline 版**不再讀/寫 SENTINEL**——探測改「抓前 N 檔但
   不落地」，全空只回「稍後重試」、不污染當日（假日 SENTINEL 標記留給明示 backfill 指令）；
-  成功路徑仍 `clear_sentinel` 自癒既有污染。(2) 排程時刻 16:40 → **21:00**（docker-compose
-  command ＋ CLI 預設；分點傍晚才出，行情/法人/融資券那時早已齊）。當日 07-16 以
-  `backfill-fubon-chip --no-skip-existing` 補齊。閘門：ruff/format、mypy strict(86)、
+  成功路徑仍 `clear_sentinel` 自癒既有污染。(2) 排程時刻 16:40 → **19:00**（docker-compose
+  command ＋ CLI 預設；分點傍晚才出，行情/法人/融資券那時早已齊；19:00 仍未公布則券商步驟
+  回「稍後重試」不污染、晚點一鍵補跑）。當日 07-16 以 `backfill-fubon-chip --no-skip-existing`
+  補齊（54,064 列/1,963 檔）。閘門：ruff/format、mypy strict(86)、
   pytest 63 passed（test_cli+pipeline+fubon_chip+ingest_admin）。
 
 - 2026-07-15 一鍵跑當日全部資料·券商買賣超納入 pipeline（使用者需求續）：反映「沒有跑
