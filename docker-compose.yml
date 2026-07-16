@@ -24,7 +24,8 @@ services:
       - ${TWQUANT_DATA_HOST:-./data}:/app/data
     environment:
       TWQUANT_PG_DSN: ${TWQUANT_PG_DSN_DOCKER:-postgresql://twquant:twquant@pg:5432/twquant}
-    command: ["scheduler", "--at", "16:40"]
+    # 21:00：富邦DJ 券商分點傍晚才公布，太早跑券商步驟會抓空（2026-07-16 事件）。
+    command: ["scheduler", "--at", "21:00"]
     restart: unless-stopped
 
   api:
