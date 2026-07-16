@@ -636,12 +636,14 @@ def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
 
 @app.command()
 def scheduler(
-    at: str = typer.Option("16:40", help="每日觸發時刻 HH:MM（台北）"),
+    at: str = typer.Option("19:00", help="每日觸發時刻 HH:MM（台北）"),
 ) -> None:
-    """常駐排程：每日於 at 時刻跑完整 pipeline（擷取→品質閘門→訊號→供應層→選股池快照，T-023）。
+    """常駐排程：每日於 at 時刻跑完整 pipeline（擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照）。
 
-    供應層/選股池快照皆 best-effort（PG 不可達不影響擷取主線，見 _run_daily_pipeline）；
-    單日整體失敗（如來源全斷線）不中斷排程，記錄後等下一觸發時刻續跑。
+    預設 19:00：券商買賣超（富邦DJ 分點）傍晚才公布，太早跑會抓空（2026-07-16 事件）；
+    行情/法人/融資券那時早已齊。若當日 19:00 仍未公布，券商步驟只回「稍後重試」不污染
+    當日（不再標 SENTINEL），晚點一鍵補跑即可。券商買賣超/供應層/選股池快照皆 best-effort
+    （PG 不可達或來源未公布不影響擷取/訊號主線，見 _run_daily_pipeline）；單日整體失敗不中斷排程。
     """
     import time
 
@@ -871,9 +873,11 @@ def _run_fubon_day(day: dt.date) -> str:
     """單日富邦DJ 全市場券商分點 → PG broker_trades ＋資料湖（每日 pipeline 尾波共用）。
 
     `backfill-fubon-chip` 的單日 best-effort 精簡版：非互動（無確認/進度列）、
-    skip_existing 續傳（讀 PG 帳本）、假日探測跳過。回傳摘要字串；PG 未啟用/不可達或
-    無宇宙 → 回略過訊息（不 raise）。全市場 ~6700 檔、workers＝限流 max_requests 約
-    10 分鐘——排在選股池快照前，讓快照吃到當日主力買賣超（T-040 五池依賴 broker_trades）。
+    skip_existing 續傳（讀 PG 帳本）、探測分點是否已公布——**但不寫 SENTINEL**：太早跑
+    （分點未公布）只回「稍後重試」、不污染當日，晚點排程/一鍵會自動補齊（2026-07-16 事件
+    修正）。回傳摘要字串；PG 未啟用/不可達或無宇宙 → 回略過訊息（不 raise）。四碼普通股
+    ~1960 檔、workers＝限流 max_requests 約 10 分鐘——排在選股池快照前，讓快照吃到當日
+    主力買賣超（T-040 五池依賴 broker_trades）。
     """
     if day.weekday() >= 5:  # 週末先擋（避免在無 libpq 環境仍 import psycopg）
         return "週末，跳過"
@@ -905,11 +909,14 @@ def _run_fubon_day(day: dt.date) -> str:
         sch.ensure_schema(conn, pg)
         with pg_lock, conn.cursor() as cur:
             logged = chip_ingest.logged(cur, pg, day)
-        if chip_ingest.SENTINEL in logged:
-            return "已標記非交易日，跳過"
+        # 太早跑污染防護（2026-07-16 事件）：pipeline 版**不讀也不寫 SENTINEL**——太早跑
+        # （分點尚未公布）只是「稍後重試」，非「非交易日」；舊碼會標 SENTINEL 讓當日永久
+        # 跳過，晚點排程/一鍵補跑也被擋。SENTINEL 的假日標記留給明示的 backfill 指令。
         if not logged and wh.partition_exists("clean", "broker_trades", day, "fubon"):
             return "資料湖已存在（舊回補），跳過"
         pending = [s for s in sids if s not in logged]
+        if not pending:
+            return "當日已全數抓過（續傳完成）"
 
         def _seen(sid: str) -> bool:
             with pg_lock, conn.cursor() as cur:
@@ -923,16 +930,16 @@ def _run_fubon_day(day: dt.date) -> str:
                 chip_ingest.mark(cur, pg, day, sid, df.height)
                 conn.commit()
 
-        # 假日探測（D-024）：無任何有資料紀錄時先抓前 N 檔，全空 → 標記非交易日跳過整天
+        # 探測當日分點是否已公布：抓前 N 檔但**不落地**（on_fetched=None，不 mark）；全空＝
+        # 尚未公布或非交易日 → 直接返回、不寫任何紀錄，稍後（晚點排程/一鍵）自動重試。
         has_data = any(n > 0 for n in logged.values())
-        head_n = min(5, len(pending)) if not has_data else 0
-        probe = _fetch_fubon_day(client, pending[:head_n], day, n_workers, _seen, _commit)
-        if head_n and _probe_all_empty(probe):
-            with pg_lock, conn.cursor() as cur:
-                chip_ingest.mark(cur, pg, day, chip_ingest.SENTINEL, 0)
-                conn.commit()
-            return "探測前數檔皆無分點表（非交易日），標記跳過"
-        _fetch_fubon_day(client, pending[head_n:], day, n_workers, _seen, _commit)
+        head_n = 0 if has_data else min(5, len(pending))
+        if head_n:
+            probe = _fetch_fubon_day(client, pending[:head_n], day, n_workers, _seen)
+            if _probe_all_empty(probe):
+                return "尚無分點資料（未公布或非交易日），未落地、稍後自動重試"
+        # 有資料 → 全量抓並落地（含探測過的前 N 檔，因探測未落地故一併重抓）
+        _fetch_fubon_day(client, pending, day, n_workers, _seen, _commit)
         with pg_lock, conn.cursor() as cur:
             full = chip_ingest.read_day(cur, pg, day)
         if full.is_empty():
