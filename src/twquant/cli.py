@@ -1212,26 +1212,46 @@ def ic_report(
     universe: str = typer.Option(r"^[1-9][0-9]{3}$", help="股票代號過濾（預設四碼、排除權證）"),
     start: str = typer.Option("", help="IC 期間起（YYYY-MM-DD，空=全部）"),
     end: str = typer.Option("", help="as_of 截點（YYYY-MM-DD，空=最新）"),
+    event_study: bool = typer.Option(
+        False,
+        "--event-study",
+        help="事件型稀疏因子加跑事件研究（成立日樣本、事件後超額、勝率、漲停占比）",
+    ),
+    pg: bool = typer.Option(
+        True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
+    ),
 ) -> None:
     """對因子跑 IC 檢驗（RankIC t-stat、多空價差），印出並記入 research_log。"""
     import hashlib
+    import math
 
     import polars as pl
 
     import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource, Warehouse
     from twquant.factors.compute import compute
-    from twquant.factors.ic import compute_ic_report
+    from twquant.factors.ic import compute_event_study, compute_ic_report
     from twquant.reporting.research_log import append_research_log, trials_count
 
     cfg = _load_system()
-    wh = Warehouse(cfg.data_dir)
-    as_of = dt.date.fromisoformat(end) if end else wh.latest_date("prices_daily")
+    if pg:
+        from twquant.data.serving import store
+        from twquant.data.serving.pg_view import PgTableSource
+
+        scfg = _load_serving()
+        pg_conn = store.connect(scfg)
+        src: TableSource = PgTableSource(pg_conn, scfg.pg_schema)
+    else:
+        pg_conn = None
+        src = Warehouse(cfg.data_dir)
+    as_of = dt.date.fromisoformat(end) if end else src.latest_date("prices_daily")
     if as_of is None:
-        typer.secho("資料湖無行情，先 ingest/backfill。", fg=typer.colors.RED)
+        if pg_conn is not None:
+            pg_conn.close()
+        typer.secho("無行情資料——先 ingest/backfill（或 serving sync）。", fg=typer.colors.RED)
         raise typer.Exit(1)
 
-    view = wh.view(as_of)
+    view = src.view(as_of)
     hz = [int(x) for x in horizons.split(",")]
     factor_df = compute([factor], view).filter(pl.col("stock_id").str.contains(universe))
     prices = (
@@ -1271,11 +1291,52 @@ def ic_report(
                     "trial_scope": f"ic:{factor}",
                 }
             )
+    if event_study:
+        px_flags = (
+            view.table("prices_daily")
+            .select("date", "stock_id", "close", "limit_up_price")
+            .filter(pl.col("stock_id").str.contains(universe))
+            .collect()
+        )
+        es = compute_event_study(factor, factor_df, px_flags, hz)
+        lu = "n/a" if math.isnan(es.limit_up_share) else f"{es.limit_up_share:.1%}"
+        typer.secho(
+            f"事件研究 · 成立日 {es.n_events} 件 · 成立日漲停占比 {lu}",
+            fg=typer.colors.CYAN,
+            bold=True,
+        )
+        for eh in es.horizons:
+            typer.echo(
+                f"  {eh.horizon:>2}日：超額中位 {eh.median_excess:+.4f}　"
+                f"均值 {eh.mean_excess:+.4f}　勝率 {eh.hit_rate:.1%}（n={eh.n_events}）"
+            )
+        base_entry: dict[str, object] = {
+            "entry_type": "ic_test",
+            "strategy": "",
+            "factor": factor,
+            "params_hash": phash,
+            "date": as_of.isoformat(),
+            "trial_scope": f"ic:{factor}",
+        }
+        for eh in es.horizons:
+            for name, val in [
+                ("es_mean_excess", eh.mean_excess),
+                ("es_hit_rate", eh.hit_rate),
+            ]:
+                entries.append(
+                    dict(base_entry, metric_name=f"{name}_{eh.horizon}d", metric_value=float(val))
+                )
+        entries.append(dict(base_entry, metric_name="es_n_events", metric_value=float(es.n_events)))
+        entries.append(
+            dict(base_entry, metric_name="es_limit_up_share", metric_value=es.limit_up_share)
+        )
     append_research_log(cfg.data_dir, entries)
     n = trials_count(cfg.data_dir, f"ic:{factor}")
     typer.secho(
         f"已記入 research_log（trial_scope ic:{factor} 累計 {n} 組參數）", fg=typer.colors.GREEN
     )
+    if pg_conn is not None:
+        pg_conn.close()
 
 
 @app.command()

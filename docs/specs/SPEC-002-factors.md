@@ -81,6 +81,13 @@ research_log）由 `reporting/`（IO 層）負責。factors/ 內禁止寫檔（�
 - 因子自相關（衰退曲線）、換手率含義
 - 與既有因子庫全成員的橫斷面相關矩陣（|ρ| > 0.7 高亮）
 
+**事件型稀疏因子另出事件研究（T-043，STRATEGY §4b.3）**：`compute_event_study`
+純函數（`factors/ic.py`）——事件 = 同股連續交易日輸出段的首日（`event_starts`，
+交易日序取自 prices 面板）；統計樣本數、事件後各視窗相對宇宙中位數的超額報酬
+（均值/中位數）、勝率、「成立日收漲停（買不到）」占比（prices 需含
+limit_up_price，缺欄則 NaN）。CLI `ic-report --event-study` 印出並以 `es_*`
+指標名落地 research_log。
+
 reporting 層負責 append 到 `research_log/`（分片 append-only，SPEC-001 §7）。
 research_log schema（唯一定義，供 deflated Sharpe 的 trials，REVIEW M17）：
 `entry_type`（ic_test|backtest）、`strategy`、`factor`、`params_hash`、`date`、

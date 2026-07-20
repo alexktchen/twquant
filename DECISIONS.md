@@ -5,6 +5,16 @@
 
 ## 待裁決
 
+### D-028（2026-07-20，待裁決）基線 mypy 紅燈：tests/test_screener.py 3 錯（T-040/T-041 遺留）
+- 問題：T-042 開工前基線檢查發現 HEAD 的全套 mypy 已紅（與 T-042 無關，stash 驗證）：
+  `tests/test_screener.py:15` Module "twquant.monitoring" has no attribute "screener"、
+  `:82` Returning Any from function declared to return "DataFrame"、
+  `:205` Module "twquant.data.serving" has no attribute "schema"（皆 attr-defined/no-any-return）。
+  疑似 T-040/T-041 收尾時 mypy 未跑全套或模組屬性匯出變動。
+- 選項：A. 開小任務修 test_screener.py 的型別（import 路徑改直接模組匯入 + 回傳型別註記，
+  預估 <20 行）；B. 併入 T-040/T-041 的複審回合處理。
+- 建議：A（純測試檔型別修正，不影響行為）。依 CLAUDE.md §7 基線紅不動手修，先記錄。
+
 ### D-021（2026-07-11，待裁決）CGO/overhang 因子（T-039）的周轉率權重資料
 - 問題：STRATEGY §4a 的參考價權重需個股**日周轉率 = 成交股數 ÷ 在外流通股數**；
   資料湖尚無在外股數（T-014 的本地 SMB/HML/市值中性化同卡此欄）。另參考價需
@@ -19,6 +29,22 @@
   shares_outstanding 或 stock_meta 日頻化）。
 
 ## 已裁決
+
+### D-027（2026-07-20，已裁決）技術型態回測走規則式因子（B1）；AI 視覺辨識僅作離線標註
+- 背景：使用者提出兩個回測系統方向——「吃 XQ」與「AI 依技術線圖辨識」。評估：
+  XQ 無公開程式 API、為本機 Windows 軟體，與 all-cloud 方向衝突（只能手動匯出檔案，
+  進不了每日 pipeline）；LLM 看圖若進因子/回測迴圈則違反黃金規則 10（factors/ 禁連網）
+  與 SPEC-004 AC-8（同輸入 bit-identical）。
+- 裁決（使用者 2026-07-20）：採 B1——規則式型態偵測作為 `price.*` 事件因子（樞紐點
+  確認延遲反前視），完整重用既有因子框架與回測引擎。規格 STRATEGY §4b，任務
+  T-042/T-043。
+  - 命名沿用 `price.*` 類別：註冊表正則本就允許、不動介面（比照 T-039 行為錨定前例）；
+    不新增 `pattern` 類別。
+  - AI 視覺辨識定位為洞悉層（SPEC-008）離線標註/校準工具；標籤若入庫，為含 as_of 的
+    資料表（資料而非邏輯），因子只讀表——決定性與 IO 邊界皆守住。待 B1 有 IC 結果後
+    再評估開任務。
+  - XQ 不作為資料源；日後若需驗證 XS 策略，走「訊號重放」模式（回測引擎加外部訊號
+    入口，共用 fill/costs），屆時另開任務並增修 SPEC-004。
 
 ### D-026（2026-07-14，已裁決）全面停用 parquet——因子物化改讀 PG，PitView 抽為 TableSource 協定
 - 背景：本機 bind-mount 的 parquet 資料湖（`D:\project\twquant\data`）在一次排查中發現完全

@@ -86,6 +86,99 @@ def _quintile_spread(factor_df: pl.DataFrame, fwd_df: pl.DataFrame) -> float:
     return float(val) if val is not None else float("nan")
 
 
+@dataclass(frozen=True)
+class HorizonEventStats:
+    """事件後單一前向視窗的統計。"""
+
+    horizon: int
+    n_events: int  # 有足夠前向資料的事件數
+    mean_excess: float  # 事件後 h 日報酬 − 同日宇宙中位數，事件平均
+    median_excess: float
+    hit_rate: float  # 超額 > 0 的事件占比
+
+
+@dataclass(frozen=True)
+class EventStudyReport:
+    """事件研究報告（STRATEGY §4b.3：事件型稀疏因子的檢驗雙軌之二）。"""
+
+    factor: str
+    n_events: int  # 成立日總數
+    limit_up_share: float  # 成立日收在漲停價（買不到）的事件占比；無旗標欄或無事件 → NaN
+    horizons: list[HorizonEventStats]
+
+
+def event_starts(factor_df: pl.DataFrame, prices: pl.DataFrame) -> pl.DataFrame:
+    """事件成立日：同股「連續交易日」的輸出列視為同一事件，取首日。
+
+    交易日順序以 prices 面板中該股的日期序為準（active_days 持續窗只是同一事件的
+    延續，不重複計數）。回傳 (date, stock_id, value)。
+    """
+    idx = (
+        prices.sort(["stock_id", "date"])
+        .with_columns(pl.col("date").cum_count().over("stock_id").alias("t_idx"))
+        .select("date", "stock_id", "t_idx")
+    )
+    joined = factor_df.join(idx, on=["date", "stock_id"], how="inner").sort(["stock_id", "date"])
+    prev = pl.col("t_idx").shift(1).over("stock_id", order_by="date")
+    return (
+        joined.filter(prev.is_null() | (pl.col("t_idx") - prev != 1))
+        .select("date", "stock_id", "value")
+        .sort(["date", "stock_id"])
+    )
+
+
+def compute_event_study(
+    factor_name: str, factor_df: pl.DataFrame, prices: pl.DataFrame, horizons: list[int]
+) -> EventStudyReport:
+    """事件研究：成立日樣本數、事件後相對宇宙中位數超額、勝率、成立日漲停占比。
+
+    factor_df=(date,stock_id,value) 為事件因子輸出（可含持續窗列）；prices 至少含
+    (date,stock_id,close)，有 limit_up_price 欄時另計「成立日收漲停」占比（分母為
+    有旗標資料的事件；缺欄或旗標全缺 → NaN）。純函數。
+    """
+    starts = event_starts(factor_df, prices)
+    n_events = starts.height
+    limit_up_share = float("nan")
+    if "limit_up_price" in prices.columns and n_events:
+        # 分母 = 有漲停旗標資料的事件；旗標全缺（欄位存在但全 null）→ NaN 而非 0
+        covered = starts.join(
+            prices.select("date", "stock_id", "close", "limit_up_price"),
+            on=["date", "stock_id"],
+            how="left",
+        ).filter(pl.col("limit_up_price").is_not_null())
+        if covered.height:
+            flagged = covered.select(
+                (pl.col("close") >= pl.col("limit_up_price")).cast(pl.Float64).mean()
+            ).item()
+            limit_up_share = float(flagged) if flagged is not None else float("nan")
+    close_panel = prices.select("date", "stock_id", "close")
+    out: list[HorizonEventStats] = []
+    for h in horizons:
+        fwd = forward_returns(close_panel, h)
+        med = fwd.group_by("date").agg(pl.col("fwd").median().alias("med"))
+        ev = (
+            starts.join(fwd, on=["date", "stock_id"], how="inner")
+            .join(med, on="date", how="left")
+            .with_columns((pl.col("fwd") - pl.col("med")).alias("excess"))
+            .drop_nulls("excess")
+        )
+        n = ev.height
+        if n:
+            mean_e = float(ev.select(pl.col("excess").mean()).item())
+            median_e = float(ev.select(pl.col("excess").median()).item())
+            hit = float(ev.select((pl.col("excess") > 0).cast(pl.Float64).mean()).item())
+        else:
+            mean_e = median_e = hit = float("nan")
+        out.append(
+            HorizonEventStats(
+                horizon=h, n_events=n, mean_excess=mean_e, median_excess=median_e, hit_rate=hit
+            )
+        )
+    return EventStudyReport(
+        factor=factor_name, n_events=n_events, limit_up_share=limit_up_share, horizons=out
+    )
+
+
 def compute_ic_report(
     factor_name: str, factor_df: pl.DataFrame, prices: pl.DataFrame, horizons: list[int]
 ) -> IcReport:

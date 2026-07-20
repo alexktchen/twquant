@@ -51,6 +51,9 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-039 | 行為錨定因子：`price.cgo_250d` + `gain/loss_overhang_250d`（精讀 An 2016 §2 定案公式 → 實作三因子 → IC 報告含與 52週高/動能/反轉的相關矩陣） | STRATEGY §4a + research/PAPERS-KEYLEVELS.md + D-021 | T-011（還原價）, T-012 | B | blocked（D-021 + 還原價） |
 | T-040 | 策略選股池篩選器：`monitoring/screener.py` 五池（主力吸籌/集中×營收/趨勢×營收/三面向/出貨警示）+ `configs/screener.yaml` + `/api/screener` + 前端面板 | SPEC-007 §6 AC-7~11 | T-031, T-035 | — | done |
 | T-041 | 選股池每日快照與回溯：`serving.screener_daily` 表 + CLI `screener-snapshot`（區間回補、冪等）+ `/api/screener?date=`（快照優先、無則回算）+ 前端日期選擇 | SPEC-007 §6 AC-12~14 | T-040 | — | done |
+| T-042 | 型態因子基元＋首發：`factors/patterns.py` 樞紐點基元（confirm_bars 確認延遲反前視）+ `price.double_bottom_120d`（事件型稀疏輸出、active_days 持續窗）+ 合成序列單元測試 + assert_no_lookahead | STRATEGY §4b + D-027 | T-012 | B | done |
+| T-043 | 型態因子補全＋事件研究：`price.hs_top_120d`、`price.box_breakout_60d` + ic.py 事件研究純函數（樣本數/事件後 5/10/20d 超額/勝率/成立日漲停占比；reporting 落地、SPEC-002 §4 同步）+ 與 52週高/動能相關矩陣 | STRATEGY §4b + D-027 | T-042, T-013 | B | done |
+| T-044 | ic-report PG 讀取路徑：`--pg/--no-pg`（預設 PG，比照 materialize 的 PgTableSource；D-026 後本機資料湖已空）＋型態因子非正價防衛＋漲停占比旗標全缺改 NaN | SPEC-002 §4 + D-026 | T-031, T-043 | B | done |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -61,6 +64,38 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-044**（2026-07-20）ic-report PG 讀取路徑（D-026 補完）。cli.py：ic-report 加
+  `--pg/--no-pg`（預設 PG），比照 serving materialize 以 `PgTableSource` 餵 `TableSource`
+  介面，因子計算路徑不變。真實資料上線抓到兩個問題並修正：(1) serving 鏡射的
+  prices_daily 有 low=0 停牌列 → 型態因子除零；`_price_panel` 比照 price.py 的 > 0
+  防衛剔除非正價列（補測試）。(2) `limit_up_price` 在 serving 鏡射 905 萬列**全 null**
+  → 事件研究「成立日漲停占比」原實作誤報 0%；分母改「有旗標資料的事件」、全缺 → NaN
+  （補測試）。漲停旗標缺料是資料層既有缺口（影響 SPEC-004 回測旗標判定，會走 proxy），
+  另列追蹤。閘門：ic 相關 tests 綠、cli.py ruff/format/mypy 綠。
+
+- **T-043**（2026-07-20）型態因子補全＋事件研究（STRATEGY §4b + D-027）。
+  patterns.py：候選/掃描泛化（`_Candidate` fire/invalid 閾值 + `_scan_events`）＋
+  `price.hs_top_120d`（連續三樞紐高點、中峰 ≥ 兩肩×1.02、兩肩差 ≤3%、頸線＝兩谷均值、
+  跌破成立、漲破中峰作廢，dir=−1）＋ `price.box_breakout_60d`（截至 t−1 的 60 根箱體
+  寬 ≤12%、close 突破箱頂×1.005，值＝突破幅度；polars 滾動向量化＋冷卻期）。
+  ic.py：`event_starts`（連續交易日輸出段取首日）＋ `compute_event_study` 純函數
+  （樣本數、事件後 5/10/20d 相對宇宙中位數超額均值/中位數、勝率、成立日漲停占比）；
+  CLI `ic-report --event-study` 印出並以 es_* 指標落地 research_log；SPEC-002 §4 同步。
+  相關矩陣檢查（vs 52週高/動能）為既有 IC 報告內容，於真實資料跑報告時執行。
+  測試 +8（tests/test_pattern_factors.py 頭肩頂/箱型 6 條含各自 assert_no_lookahead、
+  tests/test_ic.py 事件研究 2 條手算對數）。閘門：ruff/format 綠、pytest 337 passed、
+  mypy 唯一紅燈仍為 D-028 既有基線（test_screener.py，與本任務無關）。
+
+- **T-042**（2026-07-20）型態因子基元＋首發（STRATEGY §4b + D-027）。
+  `factors/patterns.py`：`confirmed_pivots` 樞紐基元（嚴格高/低於前 k、不劣於後 k、
+  同值取最早；確認日 = p+k，t 日只用確認 ≤ t 的樞紐）＋ `price.double_bottom_120d`
+  （雙低容差/最小間隔/頸線＝兩低間最高樞紐高點/深度下限/跌破作廢/突破成立，
+  成立日起 active_days 輸出型態深度；事件稀疏、無型態不回傳列）。掛入 builtins。
+  測試 8 條（tests/test_pattern_factors.py）：樞紐確認與同值 tie-break、成立日＝突破日、
+  截斷視圖部分輸出、容差/間隔拒絕、平坦序列空輸出含 schema、assert_no_lookahead
+  五切點。閘門：ruff/format 綠、pytest 329 passed、mypy 對本任務模組零錯——唯一紅燈
+  為 HEAD 既有 tests/test_screener.py 3 錯（stash 驗證與本任務無關，記 D-028 待裁決）。
 
 - **一鍵跑當日全部資料（追加 T-023/T-024 進度，非新任務）**（2026-07-15）使用者需求：
   排程（`scheduler` 每日 16:40）若錯過觸發（機器離線、當日忘開），供應層/選股池快照
