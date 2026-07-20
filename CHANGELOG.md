@@ -1,5 +1,27 @@
 # CHANGELOG
 
+- 2026-07-20 T-044 ic-report 改讀 PG（D-026 補完）＋真實資料修正：`--pg/--no-pg`
+  （預設 PG，PgTableSource）；型態因子 `_price_panel` 剔除非正價列（serving 鏡射有
+  low=0 停牌列，除零）；事件研究漲停占比分母改「有旗標資料的事件」（serving 的
+  limit_up_price 905 萬列全 null，原實作誤報 0%）。首次全市場 6.5 年型態因子
+  IC＋事件研究已跑（見 research_log ic:price.double_bottom_120d 等三組）。
+
+- 2026-07-20 T-043 型態因子補全＋事件研究（STRATEGY §4b）：price.hs_top_120d（頭肩頂
+  跌破，dir=−1）、price.box_breakout_60d（箱型突破，滾動向量化）＋ compute_event_study
+  純函數（事件＝連續輸出段首日；事件後 5/10/20d 相對宇宙中位數超額、勝率、成立日漲停
+  占比）＋ CLI ic-report --event-study 落地 research_log（es_*）＋ SPEC-002 §4 同步。
+  測試 +8，pytest 337 passed（mypy 唯一紅燈仍為 D-028 既有基線）。
+
+- 2026-07-20 T-042 型態因子基元＋price.double_bottom_120d（STRATEGY §4b）：樞紐點確認
+  延遲反前視基元 + W 底突破事件因子（深度值、active_days 持續窗、事件稀疏輸出），
+  8 條測試含 assert_no_lookahead。閘門綠（基線既有 test_screener mypy 3 錯記 D-028）。
+
+- 2026-07-20 技術型態因子方向定案（D-027，純文件）：評估「吃 XQ」與「AI 看線圖」兩個
+  回測方向後，裁定走 B1 規則式型態事件因子——STRATEGY §4b 新增規格（樞紐點確認延遲
+  反前視、W底/頭肩頂/箱型突破三因子、事件研究雙軌檢驗、不進 composite/不標準化），
+  TASKS 新增 T-042/T-043；AI 看圖定位為洞悉層離線標註（黃金規則 10 + AC-8 約束）、
+  XQ 僅保留日後「訊號重放」選項。無程式碼變更。
+
 - 2026-07-16 券商買賣超 SENTINEL 污染修正＋排程改 21:00（使用者回報「今天沒券商資料」）：
   16:40 排程跑券商步驟時富邦分點尚未公布 → 探測前 5 檔皆空 → **誤標整天為非交易日
   （SENTINEL `_day_empty`）**，之後晚點一鍵/排程再跑都撞 SENTINEL 而跳過，當日永久無資料。
