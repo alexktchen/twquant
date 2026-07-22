@@ -14,7 +14,7 @@ from __future__ import annotations
 import bisect
 import datetime as dt
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import polars as pl
 
@@ -23,7 +23,7 @@ from twquant.errors import DataError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource, Warehouse
 
 _REL_PATH = ("clean", "trading_calendar", "calendar.parquet")
 
@@ -77,12 +77,20 @@ def _path(wh: Warehouse) -> Path:
     return wh.root.joinpath(*_REL_PATH)
 
 
-def load(wh: Warehouse) -> TradingCalendar:
-    """載入持久化日曆；不存在則即時由 prices_daily 推導（讓下游隨時可用）。"""
-    p = _path(wh)
+def load(wh: Warehouse | TableSource) -> TradingCalendar:
+    """載入持久化日曆；不存在則即時由 prices_daily 推導（讓下游隨時可用）。
+
+    無檔案系統的 TableSource（如 PgTableSource，D-026）：無 root/sql，直接以
+    scan("prices_daily") 的 distinct date 推導（與 derive_from_prices 等價語義）。
+    """
+    if not hasattr(wh, "root"):
+        df = wh.scan("prices_daily").select("date").unique().sort("date").collect()
+        return TradingCalendar(df["date"].to_list())
+    fs_wh = cast("Warehouse", wh)  # 有 root ⇒ 檔案系統 Warehouse
+    p = _path(fs_wh)
     if p.exists():
         return TradingCalendar(pl.read_parquet(p)["date"].to_list())
-    return derive_from_prices(wh)
+    return derive_from_prices(fs_wh)
 
 
 def persist(wh: Warehouse, calendar: TradingCalendar) -> None:

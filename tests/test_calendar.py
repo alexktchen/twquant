@@ -24,6 +24,20 @@ _SESSIONS = [
 ]
 
 
+def test_load_from_table_source_stub() -> None:
+    # TableSource（無 root，如 PgTableSource，T-046/D-026）→ 由 prices_daily 推導日曆
+    class _Src:
+        def scan(self, table: str, layer: str = "clean") -> pl.LazyFrame:
+            assert table == "prices_daily"
+            return pl.DataFrame(
+                {"date": [_SESSIONS[1], _SESSIONS[0], _SESSIONS[1]]},
+                schema={"date": pl.Date},
+            ).lazy()
+
+    tc = cal.load(_Src())  # type: ignore[arg-type]  # 鴨型：僅需 scan
+    assert tc.sessions == [_SESSIONS[0], _SESSIONS[1]]
+
+
 def test_is_session_and_between() -> None:
     tc = cal.TradingCalendar(_SESSIONS)
     assert tc.is_session(dt.date(2026, 6, 18))

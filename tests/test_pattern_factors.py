@@ -108,6 +108,7 @@ def test_registered_metadata() -> None:
     assert fdef.tables == ("prices_daily",)
     assert get("price.hs_top_120d").direction == -1
     assert get("price.box_breakout_60d").direction == 1
+    assert get("price.flag_hold_50d").direction == 1
 
 
 def test_pivot_confirmation_and_tiebreak() -> None:
@@ -353,3 +354,57 @@ def test_no_lookahead_box_breakout(tmp_path: Path) -> None:
     wh = _wh(tmp_path, _box_series(98.0))
     cuts = [_d(64), _d(65), _d(70), _d(79)]
     assert_no_lookahead("price.box_breakout_60d", wh, cuts)
+
+
+# 旗形有撐基準序列（42 根）：base 0-20（100/103 交錯，寬 3%）、pole 21-25
+# （106→125，起點 S=20、+25%、5 根 ≤ 10）、flag 26-30（122,121,120,119,121，
+# 回撤 (125−119)/25=24% ≤ 50%）→ t=30 旗形滿 5 根、近 3 根低點 119 觸撐帶、
+# close 121 ≥ 119×1.01 → 成立；value = 0.25 × (1−0.24) = 0.19
+_FLAG = (
+    [100.0, 103.0] * 10
+    + [100.0]  # 0-20 base
+    + [106.0, 110.0, 115.0, 120.0, 125.0]  # 21-25 pole
+    + [122.0, 121.0, 120.0, 119.0, 121.0]  # 26-30 flag → 30 成立
+    + [122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0, 132.0]  # 31-41
+)
+
+
+def test_flag_hold_event_on_support_day(tmp_path: Path) -> None:
+    wh = _wh(tmp_path, _FLAG)
+    out = fc.compute(["price.flag_hold_50d"], wh.view(_d(41))).sort("date")
+    assert out.height == 10
+    assert out["date"].to_list() == [_d(i) for i in range(30, 40)]
+    assert all(v == pytest.approx(0.25 * (1 - 0.24)) for v in out["value"].to_list())
+
+
+def test_flag_hold_weak_pole_rejected(tmp_path: Path) -> None:
+    # 拉升只 +10% < pole_min_gain 20% → 不構成 pole → 不成立
+    closes = (
+        [100.0, 103.0] * 10
+        + [100.0]
+        + [102.0, 104.0, 106.0, 108.0, 110.0]
+        + [109.0, 108.5, 108.0, 107.5, 108.2]
+        + [108.0] * 11
+    )
+    wh = _wh(tmp_path, closes)
+    assert fc.compute(["price.flag_hold_50d"], wh.view(_d(len(closes) - 1))).height == 0
+
+
+def test_flag_hold_deep_retrace_rejected(tmp_path: Path) -> None:
+    # 旗形回撤 (125−111.5)/25 = 54% > retrace_max 50% → 不成立（撐沒守住）
+    closes = (
+        [100.0, 103.0] * 10
+        + [100.0]
+        + [106.0, 110.0, 115.0, 120.0, 125.0]
+        + [118.0, 115.0, 113.0, 112.0, 111.5]
+        + [112.0] * 11
+    )
+    wh = _wh(tmp_path, closes)
+    assert fc.compute(["price.flag_hold_50d"], wh.view(_d(len(closes) - 1))).height == 0
+
+
+def test_no_lookahead_flag_hold(tmp_path: Path) -> None:
+    wh = _wh(tmp_path, _FLAG)
+    # 切點涵蓋：pole 峰、旗形未滿、成立日、active 期間、期後
+    cuts = [_d(25), _d(29), _d(30), _d(35), _d(41)]
+    assert_no_lookahead("price.flag_hold_50d", wh, cuts)

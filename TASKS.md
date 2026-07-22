@@ -54,6 +54,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-042 | 型態因子基元＋首發：`factors/patterns.py` 樞紐點基元（confirm_bars 確認延遲反前視）+ `price.double_bottom_120d`（事件型稀疏輸出、active_days 持續窗）+ 合成序列單元測試 + assert_no_lookahead | STRATEGY §4b + D-027 | T-012 | B | done |
 | T-043 | 型態因子補全＋事件研究：`price.hs_top_120d`、`price.box_breakout_60d` + ic.py 事件研究純函數（樣本數/事件後 5/10/20d 超額/勝率/成立日漲停占比；reporting 落地、SPEC-002 §4 同步）+ 與 52週高/動能相關矩陣 | STRATEGY §4b + D-027 | T-042, T-013 | B | done |
 | T-044 | ic-report PG 讀取路徑：`--pg/--no-pg`（預設 PG，比照 materialize 的 PgTableSource；D-026 後本機資料湖已空）＋型態因子非正價防衛＋漲停占比旗標全缺改 NaN | SPEC-002 §4 + D-026 | T-031, T-043 | B | done |
+| T-045 | 旗形有撐因子：`price.flag_hold_50d`（base→pole→flag→測撐成功日進場，非突破進場）+ 合成序列測試 + assert_no_lookahead + IC/事件研究/逐筆回測實證 | STRATEGY §4b.2 | T-042 | B | done |
+| T-046 | 反轉×營收策略正式化（Sleeve C 原型）：`configs/strategies/reversal_revenue.yaml` + 回測引擎 PG 路徑（calendar TableSource 鴨型、PgTableSource cache、engine/build 型別放寬、CLI backtest --pg）+ 全期回測 + walk-forward | STRATEGY §2 Sleeve C + D-020/D-026 | T-018, T-031 | B | 部分完成（引擎數字被 D-029 資料品質作廢；事件級乾淨驗證通過） |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -64,6 +66,32 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-046（部分完成）**（2026-07-22）反轉×營收策略正式化（Sleeve C 原型）。
+  工程（done，閘門綠 344 tests）：`configs/strategies/reversal_revenue.yaml`
+  （reversal_5d 0.7 × revenue_yoy 0.3、週一再平衡、top20 等權）；回測引擎 PG 路徑——
+  calendar.load 加 TableSource 鴨型分支（+測試）、PgTableSource 加 cache 模式
+  （回測逐訊號日重算，每表只讀一次）、engine/build/calendar 型別放寬 TableSource、
+  CLI backtest `--pg/--no-pg`（預設 PG）。
+  引擎全期回測（2021-07~2026-07）**數字作廢**：CAGR +70.9% 經診斷為停牌跳空幻影
+  （單日 +301%、前 10 大單日貢獻 +813%、獲利前三檔交易間隔 574~1,274 天、
+  已實現損益合計 −338 萬）→ 記 **D-029 待裁決**（品質閘門/還原價/停牌標記為
+  回測硬前置＋引擎缺口防衛）。
+  事件級乾淨驗證（日曆間隔防衛剔除停牌單，僅 5%）：5日跌≥15% 全部桶 20 日淨勝率
+  60.6%/中位 +3.5%；**＋營收YoY>0：64.0%/中位 +5.0%（n=6,753）**——訊號本身成立，
+  組合級績效待 D-029 資料修復後重測；walk-forward 同步遞延。
+
+- **T-045**（2026-07-21）旗形有撐因子（使用者提出：整理→急拉→再整理→整理有撐才進場）。
+  patterns.py：`_flag_hold_events` 四段因果偵測（base 20 根寬 ≤10% → pole ≤10 根
+  +20%（P=近 20 根 close 峰、S=P 前最近滿足漲幅者=最短 pole）→ flag 5–20 根回撤
+  ≤50% → 成立日=近 3 根觸旗形低點 ±2% 支撐帶且當日收回 +1% 上方）＋
+  `price.flag_hold_50d`（value=拉升幅度×(1−回撤)）。測試 +5（含反前視五切點）。
+  順帶修 T-013 遺留：`rank_ic_series` 對「當日因子值全同」的 NaN corr（非 null）
+  會毒化 IC 均值 → 加 is_finite 過濾＋測試（稀疏事件因子必踩）。
+  實證（2020-01~2026-07 全市場）：RankIC 5/10/20d = −0.021/−0.039/−0.060
+  （t=−1.6/−2.9/−4.7，方向與宣稱相反）；事件 1,287 件、超額中位 −0.1%~−0.5%、
+  逐筆淨勝率 37–42%（中位 −1%）→ 寫入 STRATEGY §4b.4，不進策略。
+  閘門：ruff/format 綠、pytest 342+6 passed、mypy 僅 D-028 既有基線紅。
 
 - **T-044**（2026-07-20）ic-report PG 讀取路徑（D-026 補完）。cli.py：ic-report 加
   `--pg/--no-pg`（預設 PG），比照 serving materialize 以 `PgTableSource` 餵 `TableSource`

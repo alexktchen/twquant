@@ -27,9 +27,11 @@ class PgTableSource:
     保留——PG serving 只有單一鏡射層，此參數不影響行為。
     """
 
-    def __init__(self, conn: Any, schema: str) -> None:
+    def __init__(self, conn: Any, schema: str, cache: bool = False) -> None:
         self._conn = conn
         self._schema = schema
+        self._cache = cache
+        self._cached: dict[str, pl.DataFrame] = {}
 
     def _assert_exists(self, table: str) -> None:
         with self._conn.cursor() as cur:
@@ -38,7 +40,13 @@ class PgTableSource:
                 raise DataError(table, None, f"PG serving 無此表：{self._schema}.{table}")
 
     def scan(self, table: str, layer: str = "clean") -> pl.LazyFrame:
-        """整表讀出為 LazyFrame；available_at（若有）正規化到 Asia/Taipei（PitView 比較基準）。"""
+        """整表讀出為 LazyFrame；available_at（若有）正規化到 Asia/Taipei（PitView 比較基準）。
+
+        cache=True（一次性 CLI 流程用，如回測逐訊號日重算因子）：每表只讀 PG 一次、
+        記憶體重用。長駐程序勿開（不會看見 PG 新寫入）。
+        """
+        if self._cache and table in self._cached:
+            return self._cached[table].lazy()
         self._assert_exists(table)
         query = f'SELECT * FROM "{self._schema}"."{table}"'
         df = pl.read_database(query, self._conn)
@@ -46,6 +54,8 @@ class PgTableSource:
             raise DataError(table, None, f"PG serving 無資料：{self._schema}.{table}")
         if "available_at" in df.columns:
             df = df.with_columns(pl.col("available_at").dt.convert_time_zone(str(TZ)))
+        if self._cache:
+            self._cached[table] = df
         return df.lazy()
 
     def latest_date(self, table: str, layer: str = "clean") -> dt.date | None:

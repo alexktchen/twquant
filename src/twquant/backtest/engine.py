@@ -18,7 +18,7 @@ from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 
 if TYPE_CHECKING:
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource
     from twquant.strategy.config import StrategyConfig
 
 _LOT = 1000
@@ -74,7 +74,7 @@ class _State:
     traded_notional: float = 0.0
 
 
-def _price_panel(wh: Warehouse, start: dt.date, end: dt.date) -> dict[dt.date, dict[str, _Row]]:
+def _price_panel(wh: TableSource, start: dt.date, end: dt.date) -> dict[dt.date, dict[str, _Row]]:
     """載入 [start,end] 的日行情，附前收與 20 日 ADV，組成 {date: {stock_id: row}}。"""
     lf = (
         wh.scan("prices_daily")
@@ -213,7 +213,7 @@ def run_backtest(
     cost_cfg: CostConfig,
     start: dt.date,
     end: dt.date,
-    warehouse: Warehouse,
+    warehouse: TableSource,
     initial_capital: float = 10_000_000.0,
     max_participation: float = 0.05,
 ) -> BacktestResult:

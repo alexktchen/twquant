@@ -326,6 +326,126 @@ def hs_top_120d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     return _emit_events(_price_panel(view), _events, active_days)
 
 
+def _flag_hold_events(
+    closes: Sequence[float],
+    highs: Sequence[float],
+    lows: Sequence[float],
+    *,
+    base_len: int,
+    base_width: float,
+    pole_max_len: int,
+    pole_min_gain: float,
+    flag_min_len: int,
+    flag_max_len: int,
+    retrace_max: float,
+    support_band: float,
+    touch_lookback: int,
+    bounce_min: float,
+    active_days: int,
+) -> list[tuple[int, float]]:
+    """旗形有撐（STRATEGY §4b.2）：base→pole→flag 後的「測撐成功日」為成立日。
+
+    P = 近 flag_max_len 根 close 最高（同值取最早）；S = P 前 pole_max_len 根內
+    最近滿足漲幅者（最短 pole = 最「突然」）；全部條件只看 ≤ t 的資料。
+    """
+    n = len(closes)
+    events: list[tuple[int, float]] = []
+    cooldown_until = -1
+    for t in range(flag_max_len, n):
+        if t <= cooldown_until:
+            continue
+        window = range(t - flag_max_len, t + 1)
+        p = max(window, key=lambda i: (closes[i], -i))  # 峰（同值取最早）
+        if not (flag_min_len <= t - p <= flag_max_len):
+            continue
+        peak = closes[p]
+        s = next(
+            (
+                i
+                for i in range(p - 1, max(p - pole_max_len, 0) - 1, -1)
+                if peak / closes[i] - 1.0 >= pole_min_gain
+            ),
+            None,
+        )
+        if s is None or s - base_len < 0:
+            continue
+        base_lo = min(lows[s - base_len : s])
+        base_hi = max(highs[s - base_len : s])
+        if (base_hi - base_lo) / base_lo > base_width:
+            continue
+        flag_low = min(lows[p + 1 : t + 1])
+        pole_height = peak - closes[s]
+        retrace = (peak - flag_low) / pole_height
+        if retrace > retrace_max:
+            continue
+        recent_low = min(lows[max(p + 1, t - touch_lookback + 1) : t + 1])
+        if recent_low > flag_low * (1.0 + support_band):  # 近幾根未回測支撐帶
+            continue
+        if closes[t] < flag_low * (1.0 + bounce_min):  # 當日未收回支撐上方
+            continue
+        events.append((t, (peak / closes[s] - 1.0) * (1.0 - retrace)))
+        cooldown_until = t + active_days - 1
+    return events
+
+
+@factor(
+    name="price.flag_hold_50d",
+    category="price",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=60,
+    params={
+        "base_len": 20,
+        "base_width": 0.10,
+        "pole_max_len": 10,
+        "pole_min_gain": 0.20,
+        "flag_min_len": 5,
+        "flag_max_len": 20,
+        "retrace_max": 0.5,
+        "support_band": 0.02,
+        "touch_lookback": 3,
+        "bounce_min": 0.01,
+        "active_days": 10,
+    },
+    anchor_invariant=True,
+)
+def flag_hold_50d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """旗形有撐事件：整理→急拉→再整理，回測支撐有守的當日成立（非突破進場）。"""
+    base_len = _fint(params, "base_len", 20)
+    base_width = _fnum(params, "base_width", 0.10)
+    pole_max_len = _fint(params, "pole_max_len", 10)
+    pole_min_gain = _fnum(params, "pole_min_gain", 0.20)
+    flag_min_len = _fint(params, "flag_min_len", 5)
+    flag_max_len = _fint(params, "flag_max_len", 20)
+    retrace_max = _fnum(params, "retrace_max", 0.5)
+    support_band = _fnum(params, "support_band", 0.02)
+    touch_lookback = _fint(params, "touch_lookback", 3)
+    bounce_min = _fnum(params, "bounce_min", 0.01)
+    active_days = _fint(params, "active_days", 10)
+
+    def _events(
+        closes: list[float], highs: list[float], lows: list[float]
+    ) -> list[tuple[int, float]]:
+        return _flag_hold_events(
+            closes,
+            highs,
+            lows,
+            base_len=base_len,
+            base_width=base_width,
+            pole_max_len=pole_max_len,
+            pole_min_gain=pole_min_gain,
+            flag_min_len=flag_min_len,
+            flag_max_len=flag_max_len,
+            retrace_max=retrace_max,
+            support_band=support_band,
+            touch_lookback=touch_lookback,
+            bounce_min=bounce_min,
+            active_days=active_days,
+        )
+
+    return _emit_events(_price_panel(view), _events, active_days)
+
+
 @factor(
     name="price.box_breakout_60d",
     category="price",

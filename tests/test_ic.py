@@ -60,6 +60,28 @@ def test_rank_ic_perfect_negative() -> None:
     assert ic["rank_ic"][0] == -1.0
 
 
+def test_rank_ic_constant_day_excluded() -> None:
+    # 當日因子值全同 → pl.corr 回 NaN（非 null）→ 該日剔除、不毒化 IC 均值（T-045 發現）
+    d1, d2 = dt.date(2026, 6, 29), dt.date(2026, 6, 30)
+    factor = pl.DataFrame(
+        {
+            "date": [d1] * 5 + [d2] * 5,
+            "stock_id": list("abcde") * 2,
+            "value": [1.0] * 5 + [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )
+    fwd = pl.DataFrame(
+        {
+            "date": [d1] * 5 + [d2] * 5,
+            "stock_id": list("abcde") * 2,
+            "fwd": [0.01, 0.02, 0.03, 0.04, 0.05] * 2,
+        }
+    )
+    ic = rank_ic_series(factor, fwd)
+    assert ic.height == 1
+    assert ic["rank_ic"][0] == 1.0
+
+
 def test_compute_ic_report_predictive_factor() -> None:
     # 造一個「因子值高 → 下一期報酬高」的資料：價格按 stock 固定成長率遞增，
     # 因子 = 成長率排名。5 檔、20 日，horizon=1。

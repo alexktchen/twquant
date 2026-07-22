@@ -59,6 +59,7 @@ def rank_ic_series(factor_df: pl.DataFrame, fwd_df: pl.DataFrame) -> pl.DataFram
         .filter(pl.col("n") >= 5)  # 橫斷面樣本太少不計
         .select("date", "rank_ic")
         .drop_nulls("rank_ic")
+        .filter(pl.col("rank_ic").is_finite())  # 全同值日 corr=NaN（非 null），不得毒化均值
         .sort("date")
     )
 
