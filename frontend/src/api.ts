@@ -13,7 +13,14 @@ export type Metrics = {
   sharpe: number; cagr: number; mdd: number; sortino: number; calmar: number
   win_rate: number; turnover: number; total_ret: number; n_trades: number
 }
-export type Backtest = { name: string; window?: string; equity: { d: string; e: number }[]; metrics: Metrics }
+export type HoldingRow = { sid: string; shares: number; px: number; value: number; w: number }
+export type Backtest = {
+  name: string
+  window?: string
+  equity: { d: string; e: number }[]
+  metrics: Metrics
+  holdings?: HoldingRow[]
+}
 export type Inst = { sid: string; trust: number; frgn: number; px: number }
 export type Rev = { sid: string; rev: number; yoy: number }
 export type Capacity = { twd: number; binding: string; n_positions: number }

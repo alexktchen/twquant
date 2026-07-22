@@ -350,6 +350,16 @@ def backtest_result(
         "name": strat.name,
         "window": f"{start}~{end}",
         "equity": [{"d": e.date.isoformat(), "e": round(e.equity, 0)} for e in res.equity],
+        "holdings": [
+            {
+                "sid": h.stock_id,
+                "shares": h.shares,
+                "px": round(h.last_close, 2),
+                "value": round(h.value, 0),
+                "w": round(h.weight, 4),
+            }
+            for h in res.final_holdings
+        ],
         "metrics": {
             "sharpe": round(m.sharpe, 2),
             "cagr": round(m.cagr, 4),

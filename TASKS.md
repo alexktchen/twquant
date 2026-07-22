@@ -60,6 +60,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-048 | D-029 治本（資料層）：prices_daily 品質閘門（非漲跌停跳價攔截）、停牌區間標記、2,776 筆 2× 跳價分類盤點（減資/復牌/鏡射缺口）、corporate_events/還原價（T-011 待補項）排程 | D-029 裁決 A 部 + SPEC-001 §7 | T-011 | A | todo |
 | T-049 | Sleeve C 上畫面：`/api/backtest` 接 PG（TableSource）+ `strategy` 參數（列 configs/strategies）+ 前端策略回測頁策略下拉 + 部署 | SPEC-007 + T-046/T-047 | T-046, T-047 | B | done（部署待 merge+rebuild） |
 | T-050 | Sleeve C 事件窗表達：崩跌×營收事件窗因子（active_days=20，比照型態因子）+ 日頻等權門檻策略——在現有引擎表達「事件進場、持有 20 日」；排名式週/月頻已證實 CAGR −17%~−20%（買到「相對最慘」而非「剛崩」+ 持有語意錯配），事件級 64% 勝率需事件持有語意 | STRATEGY §2 Sleeve C + T-046 診斷 | T-046, T-047 | B | todo |
+| T-051 | 回測期末持倉顯示：engine `Holding`/`final_holdings`（SPEC-004 §4 持倉快照期末切片）+ API holdings 欄 + 前端策略回測頁期末持倉表（中文名對照） | SPEC-004 §4 | T-049 | B | done（部署待 merge+rebuild） |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -70,6 +71,14 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-051**（2026-07-22）回測期末持倉顯示。engine.py：`Holding` dataclass ＋
+  `BacktestResult.final_holdings`（期末股數/最後價/市值/權重，市值降冪；SPEC-004 §4
+  持倉快照之期末切片，逐日快照仍待補、SPEC 已註記）。snapshot.backtest_result 加
+  `holdings` 欄；前端策略回測頁加「期末持倉」表（labelOf 中文名對照、市值總計）＋
+  底部說明改動態策略描述。測試 +1（市值加總=期末 positions_value、整數張、權重和
+  ≤1、降冪）。驗證：dev 雙服務端到端——sample 策略期末 19 檔完整渲染。
+  部署待 merge+rebuild。
 
 - **T-049**（2026-07-22）Sleeve C 上畫面。api.py：`/api/strategies`（列
   configs/strategies/*.yaml，壞配置標示不擋清單）＋ `/api/backtest` 加 `strategy`

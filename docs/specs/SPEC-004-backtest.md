@@ -57,8 +57,9 @@ slippage:
 
 ## 4. 輸出（BacktestResult）
 
-- equity curve（日）、持倉快照（日）、逐筆 ledger（date, stock_id, side,
-  shares, price, commission, tax, slippage, reason）
+- equity curve（日）、持倉快照（日；**期末持倉 `final_holdings` 已提供
+  （T-051：股數/最後價/市值/權重，市值降冪），逐日快照待補**）、逐筆 ledger
+  （date, stock_id, side, shares, price, commission, tax, slippage, reason）
 - unfilled ledger（漲跌停/流動性造成的未成交）
 - 指標：CAGR、年化 Sharpe（rf=0，√252）、Sortino、MDD、Calmar、年化周轉率
   （單邊，Σ|Δw|/2）、勝率、平均持有天數、成本佔比分解（費/稅/滑價）
