@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-07-22 T-051 回測期末持倉：engine final_holdings（SPEC-004 §4 期末切片）＋
+  API holdings＋前端期末持倉表（中文名/市值/權重）＋動態策略描述；測試 +1、
+  dev 端到端驗證（19 檔渲染）。
+
 - 2026-07-22 T-049 Sleeve C 上畫面：/api/strategies＋/api/backtest?strategy=（PG 源、
   since 下限讀取 17.4s 回應、fallback 降級）＋前端策略下拉；worktree 雙服務端到端
   驗證通過（部署待 merge+rebuild）。防衛版引擎全期：週頻 CAGR −20.5%、月頻 −17.0%

@@ -55,6 +55,17 @@ class Unfilled:
 
 
 @dataclass(frozen=True)
+class Holding:
+    """期末持倉一檔（SPEC-004 §4 持倉快照的期末切片）。"""
+
+    stock_id: str
+    shares: int
+    last_close: float
+    value: float
+    weight: float  # value / final_equity
+
+
+@dataclass(frozen=True)
 class BacktestResult:
     equity: list[EquityPoint]
     ledger: list[Trade]
@@ -62,6 +73,7 @@ class BacktestResult:
     metrics: Metrics
     initial_capital: float
     final_equity: float
+    final_holdings: list[Holding] = field(default_factory=list)
 
 
 @dataclass
@@ -303,11 +315,28 @@ def run_backtest(
         (single_side / mean_equity) * (252.0 / n_days) if mean_equity > 0 and n_days else 0.0
     )
     metrics = compute_metrics(equity_series, turnover_ann)
+    final_equity = equity_series[-1] if equity_series else initial_capital
+    final_holdings = sorted(
+        (
+            Holding(
+                stock_id=sid,
+                shares=sh,
+                last_close=state.last_close.get(sid, 0.0),
+                value=sh * state.last_close.get(sid, 0.0),
+                weight=(sh * state.last_close.get(sid, 0.0)) / final_equity
+                if final_equity > 0
+                else 0.0,
+            )
+            for sid, sh in state.holdings.items()
+        ),
+        key=lambda h: (-h.value, h.stock_id),
+    )
     return BacktestResult(
         equity=equity_curve,
         ledger=state.ledger,
         unfilled=state.unfilled,
         metrics=metrics,
         initial_capital=initial_capital,
-        final_equity=equity_series[-1] if equity_series else initial_capital,
+        final_equity=final_equity,
+        final_holdings=final_holdings,
     )

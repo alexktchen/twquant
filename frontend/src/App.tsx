@@ -1885,6 +1885,7 @@ function Backtest() {
   const [ws, we] = meta.window.split('~')
   const def = useResource(`backtest|${ws}|${we}`, () => fetchBacktest(ws, we), () => FALLBACK.backtest)
   const strats = useResource('strategies', fetchStrategies, () => [] as StrategyInfo[])
+  const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
   const [override, setOverride] = useState<BacktestT | null>(null)
   const [win, setWin] = useState<{ start: string; end: string }>({ start: ws, end: we })
   const [strat, setStrat] = useState<string>('')
@@ -1979,6 +1980,39 @@ function Backtest() {
         </div>
         <EquityChart data={bt.equity} height={280} />
       </Panel>
+      {bt.holdings && bt.holdings.length > 0 && (
+        <Panel
+          title={`期末持倉 · ${bt.holdings.length} 檔`}
+          sub={`回測窗結束日仍持有 · 持倉市值 ${Math.round(
+            bt.holdings.reduce((a, h) => a + h.value, 0),
+          ).toLocaleString()} 元`}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px] mono tnum">
+              <thead>
+                <tr className="text-[var(--muted)] text-left">
+                  <th className="py-1 pr-3 font-normal">個股</th>
+                  <th className="py-1 pr-3 font-normal text-right">股數</th>
+                  <th className="py-1 pr-3 font-normal text-right">收盤</th>
+                  <th className="py-1 pr-3 font-normal text-right">市值</th>
+                  <th className="py-1 font-normal text-right">權重</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bt.holdings.map((h) => (
+                  <tr key={h.sid} className="border-t border-[var(--line)]">
+                    <td className="py-1 pr-3">{labelOf(metaMap.data ?? {}, h.sid)}</td>
+                    <td className="py-1 pr-3 text-right">{h.shares.toLocaleString()}</td>
+                    <td className="py-1 pr-3 text-right">{h.px.toFixed(2)}</td>
+                    <td className="py-1 pr-3 text-right">{Math.round(h.value).toLocaleString()}</td>
+                    <td className="py-1 text-right">{(h.w * 100).toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
       <p className="text-[11px] text-[var(--muted)] px-1 leading-relaxed">
         成交假設與 PaperBroker 同源；含手續費/證交稅/價格相依滑價；跨程序決定性。
         {(() => {

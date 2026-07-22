@@ -218,6 +218,20 @@ def test_universe_hygiene_excludes_jump(tmp_path: Path) -> None:
     assert "1101" in ids and "2454" in ids
 
 
+def test_final_holdings_snapshot(tmp_path: Path) -> None:
+    # T-051：期末持倉市值加總 = 最後一日 positions_value；權重和 ≤ 1；整數張
+    wh = _synthetic_wh(tmp_path)
+    res = run_backtest(_cfg(), _CC, dt.date(2026, 5, 25), dt.date(2026, 6, 9), wh, 1_000_000.0)
+    assert res.final_holdings, "應有期末持倉"
+    total = sum(h.value for h in res.final_holdings)
+    assert total == pytest.approx(res.equity[-1].positions_value, abs=1e-6)
+    assert all(h.shares % 1000 == 0 for h in res.final_holdings)
+    assert sum(h.weight for h in res.final_holdings) <= 1.0 + 1e-9
+    # 依市值降冪
+    values = [h.value for h in res.final_holdings]
+    assert values == sorted(values, reverse=True)
+
+
 def test_backtest_accounting_and_determinism(tmp_path: Path) -> None:
     wh = _synthetic_wh(tmp_path)
     res = run_backtest(_cfg(), _CC, dt.date(2026, 5, 25), dt.date(2026, 6, 9), wh, 1_000_000.0)
