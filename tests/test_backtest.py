@@ -230,6 +230,13 @@ def test_final_holdings_snapshot(tmp_path: Path) -> None:
     # 依市值降冪
     values = [h.value for h in res.final_holdings]
     assert values == sorted(values, reverse=True)
+    # T-052：本輪首買日/均價/報酬率/最大虧損（MAE）
+    for h in res.final_holdings:
+        buys = [t for t in res.ledger if t.stock_id == h.stock_id and t.side == "buy"]
+        assert h.entry_date == min(t.date for t in buys)  # fixture 無歸零再進場
+        assert min(t.price for t in buys) <= h.avg_cost <= max(t.price for t in buys)
+        assert h.ret == pytest.approx(h.last_close / h.avg_cost - 1.0)
+        assert h.max_loss <= 0.0
 
 
 def test_backtest_accounting_and_determinism(tmp_path: Path) -> None:

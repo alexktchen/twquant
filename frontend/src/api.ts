@@ -13,7 +13,17 @@ export type Metrics = {
   sharpe: number; cagr: number; mdd: number; sortino: number; calmar: number
   win_rate: number; turnover: number; total_ret: number; n_trades: number
 }
-export type HoldingRow = { sid: string; shares: number; px: number; value: number; w: number }
+export type HoldingRow = {
+  sid: string
+  shares: number
+  px: number
+  value: number
+  w: number
+  entry?: string | null
+  cost?: number
+  ret?: number
+  max_loss?: number
+}
 export type Backtest = {
   name: string
   window?: string

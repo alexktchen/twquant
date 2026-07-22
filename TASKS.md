@@ -61,6 +61,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-049 | Sleeve C 上畫面：`/api/backtest` 接 PG（TableSource）+ `strategy` 參數（列 configs/strategies）+ 前端策略回測頁策略下拉 + 部署 | SPEC-007 + T-046/T-047 | T-046, T-047 | B | done（部署待 merge+rebuild） |
 | T-050 | Sleeve C 事件窗表達：崩跌×營收事件窗因子（active_days=20，比照型態因子）+ 日頻等權門檻策略——在現有引擎表達「事件進場、持有 20 日」；排名式週/月頻已證實 CAGR −17%~−20%（買到「相對最慘」而非「剛崩」+ 持有語意錯配），事件級 64% 勝率需事件持有語意 | STRATEGY §2 Sleeve C + T-046 診斷 | T-046, T-047 | B | todo |
 | T-051 | 回測期末持倉顯示：engine `Holding`/`final_holdings`（SPEC-004 §4 持倉快照期末切片）+ API holdings 欄 + 前端策略回測頁期末持倉表（中文名對照） | SPEC-004 §4 | T-049 | B | done（部署待 merge+rebuild） |
+| T-052 | 期末持倉批次明細：engine `_Lot` 追蹤（本輪首買日/加權均價/持有期最低收盤 MAE；加碼併入、歸零或強制出場即重置）→ Holding 加 entry_date/avg_cost/ret/max_loss + API + 前端欄位（買進日/均價/報酬率/最大虧損） | SPEC-004 §4 | T-051 | B | done（部署待 merge+rebuild） |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -71,6 +72,14 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-052**（2026-07-22）期末持倉批次明細。engine.py：`_Lot`（entry_date/
+  cost_shares/cost_amount/min_close）——首買建批、加碼併入均價、部分出場不變均價、
+  歸零或 D-029 強制出場即移除；每日收盤更新 min_close（進場日含開盤與當日收盤）。
+  `Holding` 加 entry_date/avg_cost/ret/max_loss（MAE=持有期最低收盤 vs 均價，≤0）；
+  snapshot holdings 加 entry/cost/ret/max_loss；前端期末持倉表加買進日/均價/報酬率
+  （紅綠著色）/最大虧損欄。測試：首買日=該股首筆買入日、均價介於買入價區間、
+  ret 恆等式、MAE ≤ 0。閘門全綠（pytest 全套）。部署待 merge+rebuild。
 
 - **T-051**（2026-07-22）回測期末持倉顯示。engine.py：`Holding` dataclass ＋
   `BacktestResult.final_holdings`（期末股數/最後價/市值/權重，市值降冪；SPEC-004 §4
