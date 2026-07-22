@@ -357,6 +357,10 @@ def backtest_result(
                 "px": round(h.last_close, 2),
                 "value": round(h.value, 0),
                 "w": round(h.weight, 4),
+                "entry": h.entry_date.isoformat() if h.entry_date else None,
+                "cost": round(h.avg_cost, 2),
+                "ret": round(h.ret, 4),
+                "max_loss": round(h.max_loss, 4),
             }
             for h in res.final_holdings
         ],

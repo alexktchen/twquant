@@ -1992,8 +1992,12 @@ function Backtest() {
               <thead>
                 <tr className="text-[var(--muted)] text-left">
                   <th className="py-1 pr-3 font-normal">個股</th>
-                  <th className="py-1 pr-3 font-normal text-right">股數</th>
+                  <th className="py-1 pr-3 font-normal text-right">買進日</th>
+                  <th className="py-1 pr-3 font-normal text-right">均價</th>
                   <th className="py-1 pr-3 font-normal text-right">收盤</th>
+                  <th className="py-1 pr-3 font-normal text-right">報酬率</th>
+                  <th className="py-1 pr-3 font-normal text-right">最大虧損</th>
+                  <th className="py-1 pr-3 font-normal text-right">股數</th>
                   <th className="py-1 pr-3 font-normal text-right">市值</th>
                   <th className="py-1 font-normal text-right">權重</th>
                 </tr>
@@ -2002,8 +2006,19 @@ function Backtest() {
                 {bt.holdings.map((h) => (
                   <tr key={h.sid} className="border-t border-[var(--line)]">
                     <td className="py-1 pr-3">{labelOf(metaMap.data ?? {}, h.sid)}</td>
-                    <td className="py-1 pr-3 text-right">{h.shares.toLocaleString()}</td>
+                    <td className="py-1 pr-3 text-right">{h.entry ?? '—'}</td>
+                    <td className="py-1 pr-3 text-right">{h.cost != null ? h.cost.toFixed(2) : '—'}</td>
                     <td className="py-1 pr-3 text-right">{h.px.toFixed(2)}</td>
+                    <td
+                      className="py-1 pr-3 text-right"
+                      style={{ color: (h.ret ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}
+                    >
+                      {h.ret != null ? `${(h.ret * 100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="py-1 pr-3 text-right" style={{ color: 'var(--down)' }}>
+                      {h.max_loss != null ? `${(h.max_loss * 100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="py-1 pr-3 text-right">{h.shares.toLocaleString()}</td>
                     <td className="py-1 pr-3 text-right">{Math.round(h.value).toLocaleString()}</td>
                     <td className="py-1 text-right">{(h.w * 100).toFixed(1)}%</td>
                   </tr>

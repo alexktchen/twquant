@@ -54,6 +54,16 @@ class Unfilled:
     reason: str  # limit_up | limit_down | participation | cash
 
 
+@dataclass
+class _Lot:
+    """本輪持有批次（部位 0→>0 起算；加碼併入、部分出場不變均價、歸零即移除）。"""
+
+    entry_date: dt.date
+    cost_shares: int  # 本輪累計買入股數
+    cost_amount: float  # 本輪累計買入價金（不含費用）
+    min_close: float  # 持有期間最低收盤（含進場日）
+
+
 @dataclass(frozen=True)
 class Holding:
     """期末持倉一檔（SPEC-004 §4 持倉快照的期末切片）。"""
@@ -63,6 +73,10 @@ class Holding:
     last_close: float
     value: float
     weight: float  # value / final_equity
+    entry_date: dt.date | None = None  # 本輪首買日
+    avg_cost: float = 0.0  # 本輪加權平均買進價（不含費用）
+    ret: float = 0.0  # last_close / avg_cost − 1
+    max_loss: float = 0.0  # 持有期間最低收盤 vs 成本（≤0，MAE）
 
 
 @dataclass(frozen=True)
@@ -81,6 +95,7 @@ class _State:
     cash: float
     holdings: dict[str, int] = field(default_factory=dict)  # stock_id -> shares
     last_close: dict[str, float] = field(default_factory=dict)
+    lots: dict[str, _Lot] = field(default_factory=dict)  # 本輪持有批次（成本/首買日/MAE）
     ledger: list[Trade] = field(default_factory=list)
     unfilled: list[Unfilled] = field(default_factory=list)
     traded_notional: float = 0.0
@@ -198,11 +213,23 @@ def _fill(
     if side == "buy":
         state.cash -= price * qty + c.total
         state.holdings[sid] = state.holdings.get(sid, 0) + qty
+        day_close = row.get("close")
+        floor0 = min(price, float(day_close)) if day_close is not None else price
+        lot = state.lots.get(sid)
+        if lot is None:  # 本輪首買（部位 0→>0）
+            state.lots[sid] = _Lot(
+                entry_date=day, cost_shares=qty, cost_amount=price * qty, min_close=floor0
+            )
+        else:  # 加碼併入均價
+            lot.cost_shares += qty
+            lot.cost_amount += price * qty
+            lot.min_close = min(lot.min_close, floor0)
     else:
         state.cash += price * qty - c.total
         new = state.holdings.get(sid, 0) - qty
         if new <= 0:
             state.holdings.pop(sid, None)
+            state.lots.pop(sid, None)  # 本輪結束
         else:
             state.holdings[sid] = new
 
@@ -229,6 +256,7 @@ def _forced_exit(state: _State, sid: str, price: float, day: dt.date, cost_cfg: 
     """D-029 防衛：持倉的價格序列出現非漲跌停可解釋的跳價（停牌復牌跳空/減資/資料
     錯誤）→ 以 min(跳價前, 跳價後) 全數出場——幻影跳價不得記成損益。"""
     qty = state.holdings.pop(sid, 0)
+    state.lots.pop(sid, None)
     if qty <= 0 or price <= 0:
         return
     c = trade_cost(side="sell", price=price, shares=qty, participation=0.0, cfg=cost_cfg)
@@ -287,6 +315,9 @@ def run_backtest(
                 and abs(new_c / prev_c - 1.0) > jump_ratio
             ):
                 _forced_exit(state, sid, min(prev_c, new_c), day, cost_cfg)
+            lot = state.lots.get(sid)
+            if lot is not None:
+                lot.min_close = min(lot.min_close, new_c)
             state.last_close[sid] = new_c
 
         if pending is not None:
@@ -316,19 +347,25 @@ def run_backtest(
     )
     metrics = compute_metrics(equity_series, turnover_ann)
     final_equity = equity_series[-1] if equity_series else initial_capital
+
+    def _holding(sid: str, sh: int) -> Holding:
+        px = state.last_close.get(sid, 0.0)
+        lot = state.lots.get(sid)
+        avg = lot.cost_amount / lot.cost_shares if lot and lot.cost_shares > 0 else 0.0
+        return Holding(
+            stock_id=sid,
+            shares=sh,
+            last_close=px,
+            value=sh * px,
+            weight=(sh * px) / final_equity if final_equity > 0 else 0.0,
+            entry_date=lot.entry_date if lot else None,
+            avg_cost=avg,
+            ret=(px / avg - 1.0) if avg > 0 else 0.0,
+            max_loss=min(0.0, lot.min_close / avg - 1.0) if lot and avg > 0 else 0.0,
+        )
+
     final_holdings = sorted(
-        (
-            Holding(
-                stock_id=sid,
-                shares=sh,
-                last_close=state.last_close.get(sid, 0.0),
-                value=sh * state.last_close.get(sid, 0.0),
-                weight=(sh * state.last_close.get(sid, 0.0)) / final_equity
-                if final_equity > 0
-                else 0.0,
-            )
-            for sid, sh in state.holdings.items()
-        ),
+        (_holding(sid, sh) for sid, sh in state.holdings.items()),
         key=lambda h: (-h.value, h.stock_id),
     )
     return BacktestResult(
