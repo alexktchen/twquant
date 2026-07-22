@@ -26,6 +26,10 @@ class UniverseConfig(BaseConfig):
     exclude_recent_ipo_days: int = 60
     min_adv_twd: float | None = 30_000_000  # 20 日成交金額中位數下限
     min_price: float | None = None
+    # D-029 衛生濾網：近窗出現跳價/日曆缺口（停牌復牌、減資、資料缺段）→ 排除
+    max_jump_ratio: float | None = 0.35  # 相鄰列 |Δclose| 上限；None 停用
+    max_gap_days: int | None = 10  # 相鄰列日曆間隔上限；None 停用
+    hygiene_lookback: int = 60  # 衛生濾網回看列數
 
 
 class SignalConfig(BaseConfig):

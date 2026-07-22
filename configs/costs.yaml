@@ -7,3 +7,6 @@ slippage:
   model: adv_impact              # cost = half_spread + k × sqrt(participation)
   half_spread_bps: 5.0           # 半價差下限（bps）；實際取 max(檔位半價差, 此值)
   k_bps: 25.0                    # 衝擊係數
+
+data_guard:                      # D-029 資料防衛（停牌跳空/減資/資料錯誤不入損益）
+  jump_ratio: 0.35               # 相鄰列 |Δclose| 超過即視為資料事件（漲跌停上限 10%）

@@ -67,6 +67,16 @@ def test_fill_limit_up_unfilled() -> None:
     assert st.unfilled and st.unfilled[0].reason == "limit_up"
 
 
+def test_fill_price_jump_unfilled() -> None:
+    # D-029 防衛：開盤價 vs 前收非漲跌停可解釋的跳價 → 不成交
+    st = _State(cash=1e7)
+    row = {"open": 300.0, "limit_up_price": None, "_adv": 1e12, "_prev_close": 100.0}
+    _fill(st, "1101", 1000, dt.date(2026, 6, 30), row, _CC, 0.05)
+    assert "1101" not in st.holdings
+    assert st.cash == pytest.approx(1e7)
+    assert st.unfilled and st.unfilled[0].reason == "price_jump"
+
+
 def test_fill_participation_cap() -> None:
     st = _State(cash=1e12)
     # ADV 小 → 5% 上限只能買少量；其餘記 unfilled
@@ -141,6 +151,71 @@ def _cfg() -> StrategyConfig:
             "overlays": [],
         }
     )
+
+
+def _jump_wh(tmp_path: Path) -> Warehouse:
+    """同 _synthetic_wh，但 2330 自 idx 32 起價格 ×3（模擬減資/停牌復牌跳空）。"""
+    base = dt.date(2026, 5, 1)
+    slopes = {"1101": 1.0, "2330": 2.0, "2454": 0.5}
+    rows = []
+    for i in range(40):
+        d = base + dt.timedelta(days=i)
+        for sid, slope in slopes.items():
+            c = 100.0 + slope * i
+            if sid == "2330" and i >= 32:
+                c *= 3.0
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 100_000,
+                    "amount": 1.0e9,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime(d.year, d.month, d.day, 18, tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df, source="twse")
+    return wh
+
+
+def test_forced_exit_on_price_jump(tmp_path: Path) -> None:
+    # D-029 防衛：持倉中 2330 於 2026-06-02（idx32）close ×3 → 以跳價前收盤強制出場，
+    # 幻影跳價不得進損益；權益不得出現暴漲日
+    wh = _jump_wh(tmp_path)
+    res = run_backtest(_cfg(), _CC, dt.date(2026, 5, 25), dt.date(2026, 6, 9), wh, 1_000_000.0)
+    rets = [
+        res.equity[i].equity / res.equity[i - 1].equity - 1.0 for i in range(1, len(res.equity))
+    ]
+    assert max(rets) < 0.5  # 無幻影暴漲日
+    # 強制出場：跳價日以前一日收盤（100+2×31=162）賣出全數 2330
+    forced = [t for t in res.ledger if t.stock_id == "2330" and t.side == "sell"]
+    assert any(t.price == pytest.approx(162.0) for t in forced)
+    # 會計恆等維持
+    for e in res.equity:
+        assert e.equity == pytest.approx(e.cash + e.positions_value, abs=1e-6)
+
+
+def test_universe_hygiene_excludes_jump(tmp_path: Path) -> None:
+    # D-029 衛生濾網：近窗出現跳價的股票不得進宇宙
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    wh = _jump_wh(tmp_path)
+    d = dt.date(2026, 6, 9)
+    ids = universe_ids(wh.view(d), d, UniverseConfig(min_adv_twd=None, min_price=None))
+    assert "2330" not in ids
+    assert "1101" in ids and "2454" in ids
 
 
 def test_backtest_accounting_and_determinism(tmp_path: Path) -> None:

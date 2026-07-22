@@ -257,5 +257,10 @@ export const startHolidayFetch = () =>
   postIngestJob({ table: 'market_holidays', source: 'twse', from: '-', to: '-' })
 export const fetchSectorFlows = (window = 20) =>
   getJSON<{ flows: SectorFlows }>(`/api/sector-flows?window=${window}`).then((r) => r.flows)
-export const fetchBacktest = (start: string, end: string) =>
-  getJSON<Backtest>(`/api/backtest?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+export type StrategyInfo = { id: string; name: string; description: string }
+export const fetchStrategies = () => getJSON<StrategyInfo[]>('/api/strategies')
+export const fetchBacktest = (start: string, end: string, strategy?: string) =>
+  getJSON<Backtest>(
+    `/api/backtest?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}` +
+      (strategy ? `&strategy=${encodeURIComponent(strategy)}` : ''),
+  )

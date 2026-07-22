@@ -48,6 +48,25 @@ def test_ingest_status(snapshot_wh: Warehouse) -> None:
     assert api.get_ingest_status(snapshot_wh)["failed"] == 0
 
 
+def test_strategies_listing() -> None:
+    # T-049：configs/strategies/*.yaml 全部列出（含 Sleeve C 原型）
+    ids = {s["id"] for s in api.get_strategies()}
+    assert "reversal_revenue" in ids
+    assert "sample_revenue_trust" in ids
+
+
+def test_backtest_unknown_strategy_404(snapshot_wh: Warehouse) -> None:
+    with pytest.raises(HTTPException) as ei:
+        api.get_backtest(snapshot_wh, start="2025-08-01", end="2025-08-31", strategy="no_such")
+    assert ei.value.status_code == 404
+
+
+def test_backtest_strategy_path_escape_404(snapshot_wh: Warehouse) -> None:
+    with pytest.raises(HTTPException) as ei:
+        api.get_backtest(snapshot_wh, start="2025-08-01", end="2025-08-31", strategy="../serving")
+    assert ei.value.status_code == 404
+
+
 def test_backtest_bad_date_format(snapshot_wh: Warehouse) -> None:
     with pytest.raises(HTTPException) as ei:
         api.get_backtest(snapshot_wh, start="nope", end="2025-12-31")

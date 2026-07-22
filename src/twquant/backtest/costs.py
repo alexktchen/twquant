@@ -57,6 +57,12 @@ class SlippageConfig(BaseConfig):
     k_bps: float = 25.0
 
 
+class DataGuardConfig(BaseConfig):
+    """D-029 資料防衛：非漲跌停可解釋的相鄰列跳價（停牌復牌/減資/資料錯誤）不入損益。"""
+
+    jump_ratio: float = 0.35
+
+
 class CostConfig(BaseConfig):
     """交易成本設定（configs/costs.yaml，SPEC-004 §2）。"""
 
@@ -65,6 +71,7 @@ class CostConfig(BaseConfig):
     commission_min_twd: float = 20.0
     tax_rate_sell: float = 0.003
     slippage: SlippageConfig = SlippageConfig()
+    data_guard: DataGuardConfig = DataGuardConfig()
 
 
 @dataclass(frozen=True)

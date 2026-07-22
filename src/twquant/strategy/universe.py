@@ -34,9 +34,30 @@ def universe_ids(view: PitView, signal_date: dt.date, cfg: UniverseConfig) -> li
     )
     # 20 日成交金額中位數（截至 signal_date）；不足 20 日 → null → 淘汰（流動性歷史不足）
     lf = lf.with_columns(_adv=pl.col("amount").rolling_median(20).over("stock_id"))
+    # D-029 衛生濾網：近 hygiene_lookback 列內出現非漲跌停可解釋的跳價或日曆缺口
+    # （停牌復牌/減資/資料缺段）→ 排除，避免買進即將/剛剛經歷資料事件的股票
+    if cfg.max_jump_ratio is not None or cfg.max_gap_days is not None:
+        prev_c = pl.col("close").shift(1).over("stock_id")
+        prev_d = pl.col("date").shift(1).over("stock_id")
+        bad = pl.lit(False)
+        if cfg.max_jump_ratio is not None:
+            bad = bad | ((pl.col("close") / prev_c - 1.0).abs() > cfg.max_jump_ratio)
+        if cfg.max_gap_days is not None:
+            bad = bad | ((pl.col("date") - prev_d).dt.total_days() > cfg.max_gap_days)
+        lf = lf.with_columns(_cum=bad.cast(pl.Int32).fill_null(0).cum_sum().over("stock_id"))
+        lf = lf.with_columns(
+            _badw=(
+                pl.col("_cum")
+                - pl.col("_cum").shift(cfg.hygiene_lookback).over("stock_id").fill_null(0)
+            )
+            > 0
+        )
+    else:
+        lf = lf.with_columns(_badw=pl.lit(False))
     at = lf.filter(pl.col("date") == signal_date)
 
     at = at.filter(pl.col("stock_id").str.contains(_COMMON_STOCK))
+    at = at.filter(~pl.col("_badw"))
     if cfg.min_adv_twd is not None:
         at = at.filter(pl.col("_adv") >= cfg.min_adv_twd)
     if cfg.min_price is not None:

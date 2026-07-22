@@ -27,11 +27,15 @@ class PgTableSource:
     保留——PG serving 只有單一鏡射層，此參數不影響行為。
     """
 
-    def __init__(self, conn: Any, schema: str, cache: bool = False) -> None:
+    def __init__(
+        self, conn: Any, schema: str, cache: bool = False, since: dt.date | None = None
+    ) -> None:
         self._conn = conn
         self._schema = schema
         self._cache = cache
         self._cached: dict[str, pl.DataFrame] = {}
+        self._since = since
+        self._has_date: dict[str, bool] = {}
 
     def _assert_exists(self, table: str) -> None:
         with self._conn.cursor() as cur:
@@ -39,16 +43,31 @@ class PgTableSource:
             if cur.fetchone()[0] is None:
                 raise DataError(table, None, f"PG serving 無此表：{self._schema}.{table}")
 
+    def _date_col(self, table: str) -> bool:
+        if table not in self._has_date:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema=%s AND table_name=%s AND column_name='date'",
+                    (self._schema, table),
+                )
+                self._has_date[table] = cur.fetchone() is not None
+        return self._has_date[table]
+
     def scan(self, table: str, layer: str = "clean") -> pl.LazyFrame:
         """整表讀出為 LazyFrame；available_at（若有）正規化到 Asia/Taipei（PitView 比較基準）。
 
         cache=True（一次性 CLI 流程用，如回測逐訊號日重算因子）：每表只讀 PG 一次、
         記憶體重用。長駐程序勿開（不會看見 PG 新寫入）。
+        since：只讀 date >= since 的列（縮短長駐 API 的讀量）；設定值必須涵蓋
+        最長因子回看（如營收 YoY 需 ~400 天），否則因子輸出會缺前段。
         """
         if self._cache and table in self._cached:
             return self._cached[table].lazy()
         self._assert_exists(table)
         query = f'SELECT * FROM "{self._schema}"."{table}"'
+        if self._since is not None and self._date_col(table):
+            query += f" WHERE date >= '{self._since.isoformat()}'"
         df = pl.read_database(query, self._conn)
         if df.is_empty():
             raise DataError(table, None, f"PG serving 無資料：{self._schema}.{table}")

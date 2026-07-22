@@ -56,6 +56,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-044 | ic-report PG 讀取路徑：`--pg/--no-pg`（預設 PG，比照 materialize 的 PgTableSource；D-026 後本機資料湖已空）＋型態因子非正價防衛＋漲停占比旗標全缺改 NaN | SPEC-002 §4 + D-026 | T-031, T-043 | B | done |
 | T-045 | 旗形有撐因子：`price.flag_hold_50d`（base→pole→flag→測撐成功日進場，非突破進場）+ 合成序列測試 + assert_no_lookahead + IC/事件研究/逐筆回測實證 | STRATEGY §4b.2 | T-042 | B | done |
 | T-046 | 反轉×營收策略正式化（Sleeve C 原型）：`configs/strategies/reversal_revenue.yaml` + 回測引擎 PG 路徑（calendar TableSource 鴨型、PgTableSource cache、engine/build 型別放寬、CLI backtest --pg）+ 全期回測 + walk-forward | STRATEGY §2 Sleeve C + D-020/D-026 | T-018, T-031 | B | 部分完成（引擎數字被 D-029 資料品質作廢；事件級乾淨驗證通過） |
+| T-047 | D-029 引擎防衛：`_fill` 跳價拒單（price_jump）+ 持倉跳價 min 價強制出場 + 宇宙衛生濾網（跳價/缺口近窗排除）+ costs.yaml data_guard + 測試 ×3 | D-029 裁決 B 部 + SPEC-004 §3 | T-018 | B | done |
+| T-048 | D-029 治本（資料層）：prices_daily 品質閘門（非漲跌停跳價攔截）、停牌區間標記、2,776 筆 2× 跳價分類盤點（減資/復牌/鏡射缺口）、corporate_events/還原價（T-011 待補項）排程 | D-029 裁決 A 部 + SPEC-001 §7 | T-011 | A | todo |
+| T-049 | Sleeve C 上畫面：`/api/backtest` 接 PG（TableSource）+ `strategy` 參數（列 configs/strategies）+ 前端策略回測頁策略下拉 + 部署 | SPEC-007 + T-046/T-047 | T-046, T-047 | B | done（部署待 merge+rebuild） |
+| T-050 | Sleeve C 事件窗表達：崩跌×營收事件窗因子（active_days=20，比照型態因子）+ 日頻等權門檻策略——在現有引擎表達「事件進場、持有 20 日」；排名式週/月頻已證實 CAGR −17%~−20%（買到「相對最慘」而非「剛崩」+ 持有語意錯配），事件級 64% 勝率需事件持有語意 | STRATEGY §2 Sleeve C + T-046 診斷 | T-046, T-047 | B | todo |
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上
@@ -66,6 +70,28 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-049**（2026-07-22）Sleeve C 上畫面。api.py：`/api/strategies`（列
+  configs/strategies/*.yaml，壞配置標示不擋清單）＋ `/api/backtest` 加 `strategy`
+  參數（防路徑跳脫、404）＋ PG 資料源（PgTableSource cache＋since=start−420d
+  下限讀取；psycopg.OperationalError 時依 fallback_duckdb 降級注入資料湖）；
+  pg_view.py 加 `since`（information_schema 判 date 欄）；snapshot.backtest_result
+  放寬 TableSource。前端：策略下拉（fetchStrategies）＋重跑帶策略＋底部說明改動態
+  策略描述。驗證：worktree API :8001＋vite :5174 端到端——`/api/strategies` 列出
+  三策略、UI 選 reversal_revenue 重跑（159 筆、17.4s，與 curl 一致）。測試 +3
+  （策略清單、未知策略 404、路徑跳脫 404）。**部署待 PR merge + docker rebuild**。
+  防衛版引擎數字（含 T-047 防衛）：reversal_revenue 週頻全期 CAGR −20.5%
+  （幻影 +70.9% 已清除）、月頻變體 −17.0%——排名式表達買到「相對最慘」而非
+  「剛崩」且持有語意錯配，事件級 edge（64% 勝率）的正確表達開 T-050。
+
+- **T-047**（2026-07-22）D-029 引擎防衛（裁決 B 部）。engine.py：`_fill` 開盤 vs 前收
+  跳價 > jump_ratio（0.35，configs/costs.yaml `data_guard`）→ unfilled reason
+  `price_jump`；持倉 close 跳價 → `_forced_exit` 以 min(跳價前, 跳價後) 全數出場
+  （幻影跳價不入損益，會計恆等維持）。strategy/universe.py：衛生濾網——近
+  hygiene_lookback（60）列內相鄰列跳價 > max_jump_ratio 或日曆缺口 > max_gap_days
+  （10）→ 排除（UniverseConfig 新欄，可 None 停用）。測試 ×3（跳價拒單、強制出場
+  價 162 手算、宇宙排除）。閘門：ruff/format 綠、pytest 347 passed、mypy 僅 D-028
+  既有基線。治本（品質閘門/停牌標記/還原價）在 T-048。
 
 - **T-046（部分完成）**（2026-07-22）反轉×營收策略正式化（Sleeve C 原型）。
   工程（done，閘門綠 344 tests）：`configs/strategies/reversal_revenue.yaml`
