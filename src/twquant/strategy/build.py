@@ -19,7 +19,7 @@ from twquant.strategy.universe import universe_ids
 
 if TYPE_CHECKING:
     from twquant.data.calendar import TradingCalendar
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource
     from twquant.strategy.config import RebalanceConfig, StrategyConfig
 
 _WEEKDAY = {"MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4}
@@ -57,7 +57,7 @@ def _empty() -> pl.DataFrame:
     return pl.DataFrame(schema=_OUT_SCHEMA)
 
 
-def build_targets(cfg: StrategyConfig, wh: Warehouse, signal_date: dt.date) -> pl.DataFrame:
+def build_targets(cfg: StrategyConfig, wh: TableSource, signal_date: dt.date) -> pl.DataFrame:
     """對 signal_date 產出目標權重 (date, stock_id, target_weight)。空手日回空表。"""
     import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.factors.compute import compute

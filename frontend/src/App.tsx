@@ -22,6 +22,7 @@ import {
   fetchRevenue,
   fetchScreener,
   fetchSectorFlows,
+  fetchStrategies,
   fetchStockBrokers,
   fetchStockBrokerFlow,
   fetchStockCompositeHistory,
@@ -47,6 +48,7 @@ import {
   type CellState,
   type FactorHistPoint,
   type FactorOption,
+  type StrategyInfo,
   type FactorOrder,
   type FactorTop,
   type Data,
@@ -1882,15 +1884,17 @@ function Backtest() {
   const { meta, live } = useMeta()
   const [ws, we] = meta.window.split('~')
   const def = useResource(`backtest|${ws}|${we}`, () => fetchBacktest(ws, we), () => FALLBACK.backtest)
+  const strats = useResource('strategies', fetchStrategies, () => [] as StrategyInfo[])
   const [override, setOverride] = useState<BacktestT | null>(null)
   const [win, setWin] = useState<{ start: string; end: string }>({ start: ws, end: we })
+  const [strat, setStrat] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const apply = () => {
     setBusy(true)
     setErr(null)
-    fetchBacktest(win.start, win.end)
+    fetchBacktest(win.start, win.end, strat || undefined)
       .then(setOverride)
       .catch((e) => setErr(String(e)))
       .finally(() => setBusy(false))
@@ -1922,6 +1926,21 @@ function Backtest() {
       <Panel title={`策略回測 · ${bt.name}`} sub={`${bt.window ?? meta.window} · 成本後淨值 · 成交 ${m.n_trades} 筆`}>
         {live && (
           <div className="flex flex-wrap items-end gap-2 mb-4">
+            <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
+              策略
+              <select
+                value={strat}
+                onChange={(e) => setStrat(e.target.value)}
+                className="px-2 py-1 text-[12px] rounded border border-[var(--line)] bg-[var(--panel-2)] text-[var(--fg)]"
+              >
+                <option value="">預設（sample_revenue_trust）</option>
+                {(strats.data ?? []).map((s) => (
+                  <option key={s.id} value={s.id} title={s.description}>
+                    {s.name}（{s.id}）
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="flex flex-col gap-1 text-[11px] text-[var(--muted)]">
               起
               <input
@@ -1961,7 +1980,11 @@ function Backtest() {
         <EquityChart data={bt.equity} height={280} />
       </Panel>
       <p className="text-[11px] text-[var(--muted)] px-1 leading-relaxed">
-        成交假設與 PaperBroker 同源；含手續費/證交稅/價格相依滑價；跨程序決定性。此為範例策略（月營收 YoY 0.6 + 投信連買 0.4），非最終 alpha。
+        成交假設與 PaperBroker 同源；含手續費/證交稅/價格相依滑價；跨程序決定性。
+        {(() => {
+          const cur = (strats.data ?? []).find((s) => s.name === bt.name || s.id === bt.name)
+          return cur?.description ? `策略：${cur.description}` : '策略權重非最終 alpha，僅供驗證。'
+        })()}
       </p>
     </div>
   )

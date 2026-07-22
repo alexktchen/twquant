@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy
+from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 
 if TYPE_CHECKING:
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource
     from twquant.strategy.config import StrategyConfig
 
 _LOT = 1000
@@ -74,7 +74,7 @@ class _State:
     traded_notional: float = 0.0
 
 
-def _price_panel(wh: Warehouse, start: dt.date, end: dt.date) -> dict[dt.date, dict[str, _Row]]:
+def _price_panel(wh: TableSource, start: dt.date, end: dt.date) -> dict[dt.date, dict[str, _Row]]:
     """載入 [start,end] 的日行情，附前收與 20 日 ADV，組成 {date: {stock_id: row}}。"""
     lf = (
         wh.scan("prices_daily")
@@ -160,6 +160,11 @@ def _fill(
 ) -> None:
     side = "buy" if delta > 0 else "sell"
     price = float(row["open"])
+    prev = row.get("_prev_close")
+    # D-029 防衛：非漲跌停可解釋的跳價（停牌復牌/減資/資料錯誤）→ 不成交
+    if prev and abs(price / float(prev) - 1.0) > cost_cfg.data_guard.jump_ratio:
+        _unfill(state, sid, side, abs(delta), day, "price_jump")
+        return
     adv = row.get("_adv")
     d = decide_fill(
         side=side,
@@ -208,12 +213,35 @@ def _unfill(state: _State, sid: str, side: str, shares: int, day: dt.date, reaso
     state.unfilled.append(Unfilled(date=day, stock_id=sid, side=side, shares=shares, reason=reason))
 
 
+def _forced_exit(state: _State, sid: str, price: float, day: dt.date, cost_cfg: CostConfig) -> None:
+    """D-029 防衛：持倉的價格序列出現非漲跌停可解釋的跳價（停牌復牌跳空/減資/資料
+    錯誤）→ 以 min(跳價前, 跳價後) 全數出場——幻影跳價不得記成損益。"""
+    qty = state.holdings.pop(sid, 0)
+    if qty <= 0 or price <= 0:
+        return
+    c = trade_cost(side="sell", price=price, shares=qty, participation=0.0, cfg=cost_cfg)
+    state.cash += price * qty - c.total
+    state.traded_notional += price * qty
+    state.ledger.append(
+        Trade(
+            date=day,
+            stock_id=sid,
+            side="sell",
+            shares=qty,
+            price=price,
+            commission=c.commission,
+            tax=c.tax,
+            slippage=c.slippage,
+        )
+    )
+
+
 def run_backtest(
     strategy_cfg: StrategyConfig,
     cost_cfg: CostConfig,
     start: dt.date,
     end: dt.date,
-    warehouse: Warehouse,
+    warehouse: TableSource,
     initial_capital: float = 10_000_000.0,
     max_participation: float = 0.05,
 ) -> BacktestResult:
@@ -232,11 +260,22 @@ def run_backtest(
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
 
+    jump_ratio = cost_cfg.data_guard.jump_ratio
     for day in sessions:
         day_px = by_date.get(day, {})
         for sid, row in day_px.items():  # 更新最後收盤（停牌沿用）
-            if row.get("close") is not None:
-                state.last_close[sid] = float(row["close"])
+            if row.get("close") is None:
+                continue
+            new_c = float(row["close"])
+            prev_c = state.last_close.get(sid)
+            if (
+                sid in state.holdings
+                and prev_c is not None
+                and prev_c > 0
+                and abs(new_c / prev_c - 1.0) > jump_ratio
+            ):
+                _forced_exit(state, sid, min(prev_c, new_c), day, cost_cfg)
+            state.last_close[sid] = new_c
 
         if pending is not None:
             _execute(state, pending, day, day_px, cost_cfg, max_participation)

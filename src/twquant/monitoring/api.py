@@ -21,8 +21,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from twquant.config import SystemConfig, load_config
-from twquant.data.warehouse import Warehouse
+from twquant.config import ServingConfig, SystemConfig, load_config
+from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
@@ -282,13 +282,41 @@ def get_stock_factor_history(
     )
 
 
+_STRATEGIES_DIR = snap.CONFIGS_DIR / "strategies"
+# 因子回看上限（營收 YoY 需 ~13 個月 + 緩衝）；PG since 讀取下限 = start − 此值
+_BACKTEST_LOOKBACK_DAYS = 420
+
+
+@app.get("/api/strategies")
+def get_strategies() -> list[dict[str, str]]:
+    """列出可回測策略（configs/strategies/*.yaml）；壞配置標示無效不擋清單。"""
+    from twquant.strategy.config import load_strategy
+
+    out: list[dict[str, str]] = []
+    for p in sorted(_STRATEGIES_DIR.glob("*.yaml")):
+        try:
+            s = load_strategy(p)
+        except TwquantError as exc:
+            out.append({"id": p.stem, "name": p.stem, "description": f"配置無效：{exc}"})
+            continue
+        out.append({"id": p.stem, "name": s.name, "description": s.description})
+    return out
+
+
 @app.get("/api/backtest")
 def get_backtest(
     wh: WarehouseDep,
     start: Annotated[str | None, Query(description="回測起 YYYY-MM-DD")] = None,
     end: Annotated[str | None, Query(description="回測迄 YYYY-MM-DD")] = None,
+    strategy: Annotated[
+        str | None, Query(description="策略 id（configs/strategies 檔名，不含 .yaml）")
+    ] = None,
 ) -> dict[str, object]:
-    """指定期間的回測（權益曲線＋指標）；未帶參數用預設連續期。"""
+    """指定期間/策略的回測（權益曲線＋指標）；未帶參數用預設連續期與預設策略。
+
+    資料源：serving.enabled 時走 PG 鏡射（PgTableSource，cache＋since 下限讀取，
+    D-026/T-049）；PG 不可達且 fallback_duckdb 時降級注入的本機資料湖。
+    """
     try:
         s = dt.date.fromisoformat(start) if start else snap.WINDOW_START
         e = dt.date.fromisoformat(end) if end else snap.WINDOW_END
@@ -296,11 +324,42 @@ def get_backtest(
         raise HTTPException(status_code=400, detail=f"日期格式錯誤：{exc}") from exc
     if s >= e:
         raise HTTPException(status_code=400, detail="起始日需早於結束日")
+    strat_path = snap.STRATEGY_PATH
+    if strategy:
+        p = _STRATEGIES_DIR / f"{strategy}.yaml"
+        if Path(strategy).name != strategy or not p.exists():  # 防路徑跳脫 + 白名單目錄
+            raise HTTPException(status_code=404, detail=f"無此策略：{strategy}")
+        strat_path = p
+
+    src: TableSource = wh
+    pg_conn = None
+    scfg = load_config(snap.CONFIGS_DIR / "serving.yaml", ServingConfig)
+    if scfg.enabled:
+        import psycopg
+
+        from twquant.data.serving import store
+        from twquant.data.serving.pg_view import PgTableSource
+
+        try:
+            pg_conn = store.connect(scfg)
+            src = PgTableSource(
+                pg_conn,
+                scfg.pg_schema,
+                cache=True,
+                since=s - dt.timedelta(days=_BACKTEST_LOOKBACK_DAYS),
+            )
+        except psycopg.OperationalError as exc:
+            if not scfg.fallback_duckdb:
+                raise HTTPException(status_code=503, detail=f"PG 不可用：{exc}") from exc
+            pg_conn = None  # 降級注入的本機資料湖
     try:
-        return snap.backtest_result(wh, s, e)
+        return snap.backtest_result(src, s, e, strat_path=strat_path)
     except (TwquantError, ValueError) as exc:
         # run_backtest 對「區間內無交易日」（如未來日期）raise ValueError → 使用者輸入層級
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if pg_conn is not None:
+            pg_conn.close()
 
 
 @app.get("/api/ingest-status")

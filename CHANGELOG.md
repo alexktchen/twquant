@@ -1,5 +1,35 @@
 # CHANGELOG
 
+- 2026-07-22 T-049 Sleeve C 上畫面：/api/strategies＋/api/backtest?strategy=（PG 源、
+  since 下限讀取 17.4s 回應、fallback 降級）＋前端策略下拉；worktree 雙服務端到端
+  驗證通過（部署待 merge+rebuild）。防衛版引擎全期：週頻 CAGR −20.5%、月頻 −17.0%
+  ——幻影已清、排名式表達與事件 edge 錯配（買「相對最慘」非「剛崩」），正確表達
+  （事件窗因子＋日頻等權）開 T-050。測試 +3、pytest 全綠。
+
+- 2026-07-22 T-047 D-029 引擎防衛（裁決採 C，B 部落地）：_fill 跳價拒單
+  （price_jump）、持倉跳價 min 價強制出場（幻影不入損益）、宇宙衛生濾網
+  （近 60 列跳價/缺口排除）；costs.yaml data_guard、UniverseConfig 新欄；
+  測試 +3、pytest 347 passed。治本（品質閘門/停牌標記/還原價）開 T-048；
+  Sleeve C 上前端（/api/backtest 接 PG＋策略選單）開 T-049。
+
+- 2026-07-22 T-046 反轉×營收策略正式化（部分完成）＋重大資料品質發現（D-029）：
+  策略 YAML（Sleeve C 原型）＋回測引擎 PG 路徑（calendar TableSource 鴨型＋測試、
+  PgTableSource cache、型別放寬、CLI backtest --pg）。引擎全期 CAGR +70.9% 診斷為
+  **停牌跳空幻影**（已實現合計 −338 萬；prices_daily 相鄰列 2× 跳價 2,776 次）→
+  D-029 待裁決：品質閘門/還原價/停牌標記為回測硬前置。事件級日曆防衛重驗：
+  反轉＋營收 20 日淨勝率 64.0%/中位 +5.0% 成立。閘門：pytest 344 passed。
+
+- 2026-07-22 型態文獻總表（純文件）：docs/research/PAPERS-PATTERNS.md——三代理並行
+  網路調查、逐篇核實出處（LMW 2000/Savin 2007/Osler 2000·2003/Marshall 系列/
+  BLL→STW→Bajgrowicz 窺探鏈/HZZ trend factor/Bessembinder-Chan 台灣/旗形模板線/
+  JKX 2023 CNN/Murray 2024）＋與 T-042~T-045 台股實證對照表。核心結論：文獻與在地
+  實證一致——型態有資訊、裸訊號不獲利，價值在橫斷面特徵化；台股方向多與美股相反。
+
+- 2026-07-21 T-045 旗形有撐因子 price.flag_hold_50d（STRATEGY §4b.2）：base→pole→
+  flag→測撐成功日進場（非追突破）；+5 測試含反前視。順修 rank_ic_series 全同值日
+  NaN corr 毒化 IC 均值（is_finite 過濾＋測試）。實證：RankIC 三視窗顯著為負
+  （20d t=−4.7）、逐筆淨勝率 37–42% → §4b.4 記錄，不進策略。
+
 - 2026-07-20 T-044 ic-report 改讀 PG（D-026 補完）＋真實資料修正：`--pg/--no-pg`
   （預設 PG，PgTableSource）；型態因子 `_price_panel` 剔除非正價列（serving 鏡射有
   low=0 停牌列，除零）；事件研究漲停占比分母改「有旗標資料的事件」（serving 的

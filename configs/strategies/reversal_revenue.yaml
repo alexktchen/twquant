@@ -1,0 +1,30 @@
+# Sleeve C 原型：5日跌深反轉 × 月營收動能（T-046）。
+# 依據：D-020 實證有效子集（reversal_5d、revenue_yoy 樣本外過 D-006 promote）＋
+# T-046 事件回測（5日跌≥15%＋營收YoY>0：20日淨勝率 63.4%、中位 +4.8%）。
+# 框架表達為雙訊號 zscore 組合（reversal direction=-1 由 build 併入權重 → 跌深高分）；
+# 週頻 MON 再平衡近似事件回測的 5-20 日持有。
+name: reversal_revenue
+description: 週頻跌深反轉衛星——5日反轉為主、月營收 YoY 為質量過濾（Sleeve C 原型）
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000          # 20 日成交金額中位數下限（流動性）
+  min_price: 10.0                   # 避開低價股檔位成本極端區
+
+signals:
+  - factor: price.reversal_5d       # direction=-1：近5日跌深者高分
+    weight: 0.7
+  - factor: fundamental.revenue_yoy # 質量過濾：營收還在成長的跌深股
+    weight: 0.3
+
+combine: zscore_weighted
+selection:
+  method: top_n
+  top_n: 20                         # Sleeve C 規格 20 檔
+weighting: equal
+rebalance:
+  schedule: weekly
+  day: MON
+  execution: next_open
+overlays: []                        # 第一版不掛 regime filter，先看裸策略
+max_weight_per_stock: 0.05

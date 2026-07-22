@@ -27,7 +27,7 @@ from twquant.errors import ConfigError, DataError
 
 if TYPE_CHECKING:
     from twquant.data.calendar import TradingCalendar
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource, Warehouse
 
 # ── 快照參數（named constants，非邏輯內魔術數字）─────────────────────────
 UNIVERSE = r"^[1-9][0-9]{3}$"  # 四碼普通股，排除權證/ETF 尾碼
@@ -330,7 +330,7 @@ def _has_valid_ten_day_t(factor: dict[str, object]) -> bool:
 
 # ── 策略回測 ─────────────────────────────────────────────────────────
 def backtest_result(
-    wh: Warehouse,
+    wh: TableSource,
     start: dt.date = WINDOW_START,
     end: dt.date = WINDOW_END,
     strat_path: Path = STRATEGY_PATH,

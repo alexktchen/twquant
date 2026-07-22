@@ -1383,6 +1383,9 @@ def backtest(
     start: str = typer.Option(..., help="回測起 YYYY-MM-DD"),
     end: str = typer.Option(..., help="回測迄 YYYY-MM-DD"),
     capital: float = typer.Option(10_000_000.0, help="初始資金"),
+    pg: bool = typer.Option(
+        True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
+    ),
 ) -> None:
     """跑回測，印績效指標並記入 research_log（純量化，不需 LLM）。"""
     import hashlib
@@ -1390,17 +1393,31 @@ def backtest(
     from twquant.backtest.costs import CostConfig
     from twquant.backtest.engine import run_backtest
     from twquant.config import load_config
-    from twquant.data.warehouse import Warehouse
+    from twquant.data.warehouse import TableSource, Warehouse
     from twquant.reporting.research_log import append_research_log
     from twquant.strategy.config import load_strategy
 
     cfg = _load_system()
-    wh = Warehouse(cfg.data_dir)
+    if pg:
+        from twquant.data.serving import store
+        from twquant.data.serving.pg_view import PgTableSource
+
+        scfg = _load_serving()
+        pg_conn = store.connect(scfg)
+        # cache=True：回測逐訊號日重算因子，每表只讀 PG 一次（一次性 CLI 流程）
+        wh: TableSource = PgTableSource(pg_conn, scfg.pg_schema, cache=True)
+    else:
+        pg_conn = None
+        wh = Warehouse(cfg.data_dir)
     strat = load_strategy(strategy)
     cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
     s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
 
-    res = run_backtest(strat, cost, s, e, wh, initial_capital=capital)
+    try:
+        res = run_backtest(strat, cost, s, e, wh, initial_capital=capital)
+    finally:
+        if pg_conn is not None:
+            pg_conn.close()
     m = res.metrics
     total_ret = res.final_equity / res.initial_capital - 1.0
     typer.secho(
