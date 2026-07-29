@@ -1,0 +1,8 @@
+# Vercel Python function 的最小依賴（T-059）。刻意不含 pyarrow（polars 可選、僅
+# 跨庫轉換需要）與 pandera（只在擷取層驗證，雲端 API 為唯讀查詢）——250 MB 上限吃緊。
+fastapi>=0.115
+psycopg[binary]>=3.2
+polars>=1.0
+duckdb>=1.0
+pydantic>=2.0
+pyyaml>=6.0
