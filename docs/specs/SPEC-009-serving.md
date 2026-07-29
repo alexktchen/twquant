@@ -33,7 +33,6 @@
 | `pool_min` | int | `1` | 連線池下限 |
 | `pool_max` | int | `8` | 連線池上限 |
 | `factor_history_days` | int | `1100` | factor_values 保留窗（≈3 年）；超出裁剪 |
-| `fallback_duckdb` | bool | `true` | PG 不可用時是否降級 DuckDB（false 則回 503） |
 
 秘密規則：`configs/serving.yaml` 只存 env 變數名，DSN 本體（含帳密）僅在 `.env`
 （黃金規則 9）。`SystemConfig` 之外新增 `ServingConfig(BaseConfig)`（`config.py`）。
@@ -120,7 +119,7 @@ DDL 由 `data/serving/schema.py` 建立（`CREATE TABLE IF NOT EXISTS` +
 - **只讀 PG（使用者裁決，2026-07-10）**：個股端點一律讀 PG，**不降級資料湖 DuckDB**——PG 有
   資料回列、無該資料回空列、連不上讓端點 503。移除原健康旗標/`fallback_duckdb` 降級路徑，避免
   「PG 與湖不一致」的混淆；衍生欄（累計/券資比/MoM/top 券商）抽成純函數單元測試。`source` 恆為
-  `"pg"`。（`fallback_duckdb` 欄位保留於 config 但個股讀取路徑不再參考。）
+  `"pg"`。（`fallback_duckdb` 已於 D-035 完全移除——雲端無資料湖，任何路徑 PG 不可用一律 503。）
 - 舊 `GET /api/stocks/{sid}`（OHLC）保留為 `/ohlc` 別名一版，前端切換後退役
   （記 CHANGELOG）。`/api/stocks/{sid}/factors` payload 與現行 golden 完全相容。
 

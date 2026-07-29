@@ -18,7 +18,6 @@ def test_real_serving_yaml_loads() -> None:
     assert cfg.dsn_env == "TWQUANT_PG_DSN"
     assert cfg.pg_schema == "serving"
     assert cfg.factor_history_days == 1100
-    assert cfg.fallback_duckdb is True
 
 
 def test_defaults_apply(tmp_path: Path) -> None:

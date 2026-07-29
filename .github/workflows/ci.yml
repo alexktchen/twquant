@@ -15,7 +15,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Sync deps
-        # 含 api 群組：mypy/pytest 需 fastapi 型別與 TestClient
-        run: uv sync --dev --group api
+        # --all-groups：除 api（fastapi 型別/TestClient）外，psycopg（serving 群組）自
+        # D-035 起為 API 的必要依賴而非選用——原 `--group api` 會讓 3 個測試
+        # ModuleNotFoundError（CI 自 2026-07-11 即紅）。PG 整合測試仍以無 DSN 自動 skip。
+        run: uv sync --dev --all-groups
       - name: Gate (ruff + mypy + pytest)
         run: uv run python -m twquant check
