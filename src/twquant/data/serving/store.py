@@ -24,8 +24,12 @@ def resolve_dsn(cfg: ServingConfig) -> str:
 
 
 def connect(cfg: ServingConfig) -> Any:
-    """開一條 PG 連線（呼叫端負責關閉或用 with）。"""
-    return psycopg.connect(resolve_dsn(cfg))
+    """開一條 PG 連線（呼叫端負責關閉或用 with）。
+
+    `prepare_threshold=None`：Supabase transaction pooler（:6543）不支援 prepared
+    statements（T-057）；DSN 指向本機 PG 時停用 prepared 亦無害（COPY/upsert 為主）。
+    """
+    return psycopg.connect(resolve_dsn(cfg), prepare_threshold=None)
 
 
 def resolve_cloud_dsn(cfg: ServingConfig) -> str:

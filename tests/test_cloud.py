@@ -115,6 +115,23 @@ def test_ac_windows_cover_max_factor_lookback() -> None:
             )
 
 
+def test_t057_connect_disables_prepared_statements() -> None:
+    """store.connect 必須停用 prepared statements（Supabase pooler 相容，T-057）。"""
+    pytest.importorskip("psycopg")
+    dsn = os.environ.get("TWQUANT_PG_DSN")
+    if not dsn:
+        pytest.skip("TWQUANT_PG_DSN 未設，跳過 PG 整合測試")
+    from twquant.config import ServingConfig
+    from twquant.data.serving import store
+
+    cfg = ServingConfig(enabled=True)
+    conn = store.connect(cfg)
+    try:
+        assert conn.prepare_threshold is None
+    finally:
+        conn.close()
+
+
 def test_ac_prune_window_and_idempotent() -> None:
     conn = _connect_or_skip()
     from twquant.data.serving.cloud import prune

@@ -951,12 +951,15 @@ def _run_fubon_day(day: dt.date) -> str:
         return f"{full.height} 列（{full['stock_id'].n_unique()} 檔）入 PG＋資料湖"
 
 
-def _run_daily_pipeline(day: dt.date) -> PipelineResult:
+def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResult:
     """每日營運 pipeline：擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照，寫 heartbeat（LOOP §3）。
 
     供 `pipeline` CLI 一次性指令與 `scheduler` 常駐迴圈共用（T-023：排程改跑完整
     pipeline，不再只做裸擷取）。券商買賣超／供應層／選股池快照皆 best-effort（display-only，
     PG 不可達或來源失敗不影響擷取/訊號主線）；回傳 twquant.pipeline.PipelineResult。
+
+    pg_signals=True（T-057，GHA 雲端模式）：訊號生成改以 PgTableSource 讀 PG 供應層——
+    雲端 runner 的資料湖是 ephemeral（只有當日擷取），歷史回看必須來自 PG 滾動窗口。
     """
     from twquant.conventions import now_tw
     from twquant.data.warehouse import Warehouse
@@ -979,13 +982,27 @@ def _run_daily_pipeline(day: dt.date) -> PipelineResult:
 
     def _signal_step() -> str:
         strat = load_strategy(_CONFIG_DIR / "strategies" / "sample_revenue_trust.yaml")
+        if pg_signals:  # 雲端模式：歷史回看來自 PG 滾動窗口（T-046 build 已收 TableSource）
+            from twquant.data.serving import store
+            from twquant.data.serving.pg_view import PgTableSource
+
+            scfg = _load_serving()
+            conn = store.connect(scfg)
+            try:
+                n = build_targets(strat, PgTableSource(conn, scfg.pg_schema), day).height
+            finally:
+                conn.close()
+            return f"{n} 檔目標（PG 源）"
         return f"{build_targets(strat, wh, day).height} 檔目標"
 
     def _serving_step() -> str:
         # 尾波：鏡射同步 + 物化當日因子 → PG 供應層（display-only，best-effort）。
+        # 物化讀取源＝PG 鏡射（PgTableSource，D-026/T-057）：與 CLI serving materialize
+        # 一致；本機資料湖歷史不完整（D-026 發現湖空窗），因子回看必須來自 PG。
         from twquant.data.serving import materialize as smat
         from twquant.data.serving import store
         from twquant.data.serving import sync as ssync
+        from twquant.data.serving.pg_view import PgTableSource
 
         scfg = _load_serving()
         if not scfg.enabled:
@@ -993,7 +1010,11 @@ def _run_daily_pipeline(day: dt.date) -> PipelineResult:
         if not store.ping(scfg):
             return "PG 不可達，略過（display-only）"
         ssync.sync_all(wh, scfg)
-        m = smat.materialize_day(wh, scfg, day)
+        conn = store.connect(scfg)
+        try:
+            m = smat.materialize_day(PgTableSource(conn, scfg.pg_schema), scfg, day)
+        finally:
+            conn.close()
         return f"鏡射同步 + 物化 {m.factor_rows} 因子列"
 
     def _broker_step() -> str:
@@ -1039,12 +1060,26 @@ def _echo_pipeline_result(res: PipelineResult) -> None:
 
 
 @app.command()
-def pipeline(date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today")) -> None:
+def pipeline(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+    pg_signals: bool = typer.Option(
+        False, "--pg-signals", help="訊號生成改讀 PG 供應層（GHA 雲端模式，T-057）"
+    ),
+    fail_on_degraded: bool = typer.Option(
+        False,
+        "--fail-on-degraded",
+        help="降級（關鍵步驟失敗）時以非零碼結束——GHA 無人值守需要紅燈；注意國定假日"
+        "（平日休市）也會因無行情而降級",
+    ),
+) -> None:
     """每日營運 pipeline：擷取→品質閘門→訊號生成→供應層→選股池快照，寫 heartbeat（LOOP §3）。"""
     from twquant.conventions import now_tw
 
     day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
-    _echo_pipeline_result(_run_daily_pipeline(day))
+    res = _run_daily_pipeline(day, pg_signals=pg_signals)
+    _echo_pipeline_result(res)
+    if fail_on_degraded and res.degraded:
+        raise typer.Exit(1)
 
 
 @app.command()
