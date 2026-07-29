@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-29 T-054 每日增量歸檔：data/serving/archive.py（dump_day/restore_day，
+  bit-identical 冪等、ON CONFLICT 首錄還原）＋ CLI archive-daily/archive-restore；
+  測試 +3、全套綠。T-053 全史 dump 1.3 GB＋還原演練 9 表精確吻合（Drive 上傳待
+  使用者 rclone OAuth）。
+
 - 2026-07-29 D-030 全雲端搬遷規劃正式化：目標架構裁決（GHA cron + Supabase Free
   滾動窗口 + Drive raw 歸檔 + Vercel）＋任務 T-053~T-062 四期拆解＋待裁決
   D-031/D-032/D-033。純文件，無程式變更。

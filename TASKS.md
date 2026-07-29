@@ -63,7 +63,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-051 | 回測期末持倉顯示：engine `Holding`/`final_holdings`（SPEC-004 §4 持倉快照期末切片）+ API holdings 欄 + 前端策略回測頁期末持倉表（中文名對照） | SPEC-004 §4 | T-049 | B | done（部署待 merge+rebuild） |
 | T-052 | 期末持倉批次明細：engine `_Lot` 追蹤（本輪首買日/加權均價/持有期最低收盤 MAE；加碼併入、歸零或強制出場即重置）→ Holding 加 entry_date/avg_cost/ret/max_loss + API + 前端欄位（買進日/均價/報酬率/最大虧損） | SPEC-004 §4 | T-051 | B | done（部署待 merge+rebuild） |
 | T-053 | 【雲端 Phase 0】全史歸檔保命線：本機 PG 全庫 `pg_dump -Fc` → 上傳 Google Drive（rclone + service account，秘密只進 .env/GHA Secrets）+ **還原演練**（新空 PG 還原、抽查 broker_trades 列數與日期範圍一致）。AC：dump 檔在 Drive、還原後 `SELECT count(*)` 對得上、還原步驟寫成文件 | D-030/D-033 | — | B | 部分完成（dump+還原演練+文件done；Drive 上傳待使用者 rclone OAuth） |
-| T-054 | 【雲端 Phase 0】每日增量歸檔：CLI `archive-daily --date`（dump 當日新增 raw 列，broker_trades 必含）→ 上傳 Drive；冪等（重跑同日覆蓋同檔）；檔案佈局支援日後合併進基底（D-033 選項 B）。AC：連跑兩日產生兩個日檔、重跑冪等、單日檔可還原進空表 | D-030/D-033 | T-053 | B | todo |
+| T-054 | 【雲端 Phase 0】每日增量歸檔：CLI `archive-daily --date`（dump 當日新增 raw 列，broker_trades 必含）→ 上傳 Drive；冪等（重跑同日覆蓋同檔）；檔案佈局支援日後合併進基底（D-033 選項 B）。AC：連跑兩日產生兩個日檔、重跑冪等、單日檔可還原進空表 | D-030/D-033 | T-053 | B | done |
 | T-055 | 【雲端 Phase 1】Supabase 建置 + 滾動窗口：建專案/serving schema；先盤點 configs 全因子的最大價格回看天數（窗口硬下限）；CLI `serving prune --window-config`（prices 260 交易日/broker 明細 10 日/broker_flow 250 日/factor_values 60 日，入 configs/serving.yaml 不寫死）。AC：修剪後總量 < 400 MB、窗口 ≥ 最大回看、prune 冪等 | D-030 + SPEC-009 | T-053 | B | todo |
 | T-056 | 【雲端 Phase 1】GHA 每日 pipeline workflow：`daily-pipeline.yml`（cron UTC `5 11 * * 1-5` + `workflow_dispatch(date)`）；DSN/token 全走 GHA Secrets；步驟=pipeline → 增量歸檔上傳 → prune；失敗通知（GH issue 或 email）。AC：手動 dispatch 跑通一整日、cron 觸發一次成功、Secrets 無明文 | D-030/D-032 | T-054, T-057 | B | todo |
 | T-057 | 【雲端 Phase 1】pipeline 寫 Supabase 相容性：`store.py` DSN 支援 pooler :6543 + 關 prepared statements（psycopg `prepare_threshold=None`）；`_run_daily_pipeline` 在「無本機資料湖、純 PG」環境跑通（D-026 遺留的 parquet 路徑步驟盤點與繞開）；每日 pipeline 對滾動窗口資料計算因子正確（回看不足即 raise 不靜默） | D-030 + SPEC-009 | T-055 | A | todo |
@@ -88,6 +88,25 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-054**（2026-07-29）每日增量歸檔（D-030 保命線）。`data/serving/archive.py`：
+  `dump_day`（ARCHIVE_SPECS＝鏡射表＋fubon_fetch_log/screener_daily＋stock_meta 全量
+  快照；因子表可重算不歸檔；COPY ORDER BY 主鍵＋session UTC＋gzip mtime=0 → 同庫
+  狀態重跑 bit-identical；tmp+replace 原子覆蓋）、`restore_day`（staging COPY →
+  ON CONFLICT DO NOTHING 首錄保留，冪等）。CLI `archive-daily`/`archive-restore`
+  （預設 `<data_dir>/archive/daily/<YYYY>/<YYYYMMDD>/`）。測試 3 條（AC-1 兩日兩目錄、
+  AC-2 重跑 bit-identical、AC-3 還原進空 schema＋重複還原冪等；真 PG、無 DSN skip）。
+  閘門：ruff/format 綠、mypy 僅 D-028 既有基線、pytest 全套綠。真 PG 煙霧：2026-07-23
+  單日 64,766 列 → 525 KB（broker_trades 53,089 列 → 354 KB）。**維運註**：增量必須在
+  serving sync 之後跑（否則歸檔到空切片）；Drive 上傳由 GHA（T-056）/runbook 負責。
+
+- **T-053（部分完成）**（2026-07-29）全史歸檔保命線。本機 PG 15 GB →
+  `pg_dump -Fc -Z 6` 1.3 GB（4 分鐘）落 `data/archive/`；還原演練（臨時
+  postgres:16-alpine 容器、`pg_restore -j 4`）9 表列數與 dump 時刻基準**精確吻合**
+  （broker_trades 55,340,144、factor_values 22,914,835、prices_daily 9,069,140…全表
+  見 docs/OPS-archive.md §3）。runbook `docs/OPS-archive.md`（dump/還原/rclone 上傳/
+  增量佈局）。**待使用者**：`rclone config create gdrive drive scope=drive.file`
+  （OAuth 需本人操作）後 `rclone copy` 上傳 base dump，即全部完成。
 
 - **T-052**（2026-07-22）期末持倉批次明細。engine.py：`_Lot`（entry_date/
   cost_shares/cost_amount/min_close）——首買建批、加碼併入均價、部分出場不變均價、

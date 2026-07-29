@@ -7,12 +7,18 @@
 
 ```
 twquant-archive/
-  base/twquant-full-YYYYMMDD.dump      # 全史基底(pg_dump -Fc,約 1.4 GB/15 GB 庫)
-  daily/YYYY/twquant-inc-YYYYMMDD.dump # 每日增量(T-054;檔名含日期,冪等覆蓋)
+  base/twquant-full-YYYYMMDD.dump   # 全史基底(pg_dump -Fc,約 1.4 GB/15 GB 庫)
+  daily/YYYY/YYYYMMDD/              # 每日增量(T-054,CLI archive-daily)
+    <table>.csv.gz                  #   各原始表單日切片(ORDER BY 主鍵、gzip mtime=0,
+    manifest.json                   #   同庫狀態重跑 bit-identical);manifest 記各表列數
 ```
 
-增量設計成「可合併進基底」:日後容量吃緊時,把最舊一段增量還原進基底庫再重做
-base dump,即可刪除該段日檔(D-033 選項 B)。
+增量範圍 = 原始鏡射表 + fubon_fetch_log/screener_daily + stock_meta 全量快照;
+因子表(factor_values/composite_daily/factor_cross_stats)可重算、不歸檔。
+實測單日 ~525 KB(broker_trades 53k 列 → 354 KB)。**增量必須在 serving sync 之後跑**
+(pipeline 尾波/GHA 步驟順序),否則當日列尚未進 PG、歸檔到空切片。
+增量設計成「可合併進基底」:日後容量吃緊時,把最舊一段增量 `archive-restore`
+進基底庫再重做 base dump,即可刪除該段日檔(D-033 選項 B)。
 
 ## 2. 全史 dump(來源:本機 docker PG)
 
@@ -66,7 +72,15 @@ rclone copy D:/project/twquant/data/archive/twquant-full-20260729.dump gdrive:tw
 rclone check D:/project/twquant/data/archive/ gdrive:twquant-archive/base/ --one-way
 ```
 
-## 5. 全史回測/研究需要完整歷史時
+## 5. 每日增量(T-054 CLI)
 
-本機(或任何有 docker 的機器)照 §3 還原 base dump,再依 daily/ 逐檔
-`pg_restore --data-only` 補增量到目標日期,`TWQUANT_PG_DSN` 指向還原庫即可。
+```bash
+python -m twquant archive-daily --date 2026-07-29          # 預設落 <data_dir>/archive/daily
+python -m twquant archive-restore --date 2026-07-29        # 還原(ON CONFLICT 首錄保留,冪等)
+rclone copy <data_dir>/archive/daily gdrive:twquant-archive/daily/ --progress
+```
+
+## 6. 全史回測/研究需要完整歷史時
+
+本機(或任何有 docker 的機器)照 §3 還原 base dump,再從 Drive 抓 daily/ 後按日期
+順序逐日 `archive-restore` 補到目標日期,`TWQUANT_PG_DSN` 指向還原庫即可。

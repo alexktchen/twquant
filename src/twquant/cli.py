@@ -1727,6 +1727,57 @@ def serving_materialize(
         )
 
 
+@app.command(name="archive-daily")
+def archive_daily(
+    date: str = typer.Option("today", help="歸檔日 YYYY-MM-DD 或 today（台北）"),
+    out: str = typer.Option("", help="歸檔根目錄；空＝<data_dir>/archive/daily"),
+) -> None:
+    """每日增量歸檔（T-054）：serving 原始表單日切片 → csv.gz + manifest（冪等覆蓋）。
+
+    保命線（D-030）：落地後由呼叫端（GHA / runbook）rclone 上傳 Drive，見 docs/OPS-archive.md。
+    """
+    from twquant.conventions import now_tw
+    from twquant.data.serving import archive as sarch
+    from twquant.data.serving import store
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    root = Path(out) if out else Path(_load_system().data_dir) / "archive" / "daily"
+    cfg = _load_serving()
+    conn = store.connect(cfg)
+    try:
+        results = sarch.dump_day(conn, cfg.pg_schema, day, root)
+    finally:
+        conn.close()
+    for r in results:
+        typer.echo(f"  {r.table:<24} {r.rows} 列")
+    total = sum(r.rows for r in results)
+    typer.secho(
+        f"[OK] {day} 增量歸檔 {total} 列 → {sarch.day_dir(root, day)}", fg=typer.colors.GREEN
+    )
+
+
+@app.command(name="archive-restore")
+def archive_restore(
+    date: str = typer.Option(..., help="還原日 YYYY-MM-DD"),
+    root: str = typer.Option("", help="歸檔根目錄；空＝<data_dir>/archive/daily"),
+) -> None:
+    """把某日增量檔還原進 serving schema（ON CONFLICT DO NOTHING 首錄保留，冪等）。"""
+    from twquant.data.serving import archive as sarch
+    from twquant.data.serving import store
+
+    day = dt.date.fromisoformat(date)
+    rootp = Path(root) if root else Path(_load_system().data_dir) / "archive" / "daily"
+    cfg = _load_serving()
+    conn = store.connect(cfg)
+    try:
+        results = sarch.restore_day(conn, cfg.pg_schema, day, rootp)
+    finally:
+        conn.close()
+    for r in results:
+        typer.echo(f"  {r.table:<24} +{r.rows} 列")
+    typer.secho(f"[OK] {day} 還原完成（既有主鍵不覆寫）", fg=typer.colors.GREEN)
+
+
 def pl_config() -> pl.Config:
     import polars as pl
 
