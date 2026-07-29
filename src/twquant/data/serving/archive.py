@@ -21,6 +21,7 @@ from typing import Any
 
 from twquant.conventions import TZ
 from twquant.data.serving.schema import (
+    BROKER_FLOW_DAILY_SPEC,
     FUBON_FETCH_LOG_SPEC,
     MIRROR_SPECS,
     SCREENER_DAILY_SPEC,
@@ -28,7 +29,12 @@ from twquant.data.serving.schema import (
     ensure_schema,
 )
 
-ARCHIVE_SPECS: tuple[TableSpec, ...] = (*MIRROR_SPECS, FUBON_FETCH_LOG_SPEC, SCREENER_DAILY_SPEC)
+ARCHIVE_SPECS: tuple[TableSpec, ...] = (
+    *MIRROR_SPECS,
+    FUBON_FETCH_LOG_SPEC,
+    SCREENER_DAILY_SPEC,
+    BROKER_FLOW_DAILY_SPEC,
+)
 
 _MANIFEST = "manifest.json"
 

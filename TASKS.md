@@ -62,9 +62,9 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-050 | Sleeve C 事件窗表達：崩跌×營收事件窗因子（active_days=20，比照型態因子）+ 日頻等權門檻策略——在現有引擎表達「事件進場、持有 20 日」；排名式週/月頻已證實 CAGR −17%~−20%（買到「相對最慘」而非「剛崩」+ 持有語意錯配），事件級 64% 勝率需事件持有語意 | STRATEGY §2 Sleeve C + T-046 診斷 | T-046, T-047 | B | todo |
 | T-051 | 回測期末持倉顯示：engine `Holding`/`final_holdings`（SPEC-004 §4 持倉快照期末切片）+ API holdings 欄 + 前端策略回測頁期末持倉表（中文名對照） | SPEC-004 §4 | T-049 | B | done（部署待 merge+rebuild） |
 | T-052 | 期末持倉批次明細：engine `_Lot` 追蹤（本輪首買日/加權均價/持有期最低收盤 MAE；加碼併入、歸零或強制出場即重置）→ Holding 加 entry_date/avg_cost/ret/max_loss + API + 前端欄位（買進日/均價/報酬率/最大虧損） | SPEC-004 §4 | T-051 | B | done（部署待 merge+rebuild） |
-| T-053 | 【雲端 Phase 0】全史歸檔保命線：本機 PG 全庫 `pg_dump -Fc` → 上傳 Google Drive（rclone + service account，秘密只進 .env/GHA Secrets）+ **還原演練**（新空 PG 還原、抽查 broker_trades 列數與日期範圍一致）。AC：dump 檔在 Drive、還原後 `SELECT count(*)` 對得上、還原步驟寫成文件 | D-030/D-033 | — | B | 部分完成（dump+還原演練+文件done；Drive 上傳待使用者 rclone OAuth） |
+| T-053 | 【雲端 Phase 0】全史歸檔保命線：本機 PG 全庫 `pg_dump -Fc` → 上傳 Google Drive（rclone + service account，秘密只進 .env/GHA Secrets）+ **還原演練**（新空 PG 還原、抽查 broker_trades 列數與日期範圍一致）。AC：dump 檔在 Drive、還原後 `SELECT count(*)` 對得上、還原步驟寫成文件 | D-030/D-033 | — | B | done（2026-07-29 Drive 上傳完成，base dump MD5 c12d5683 兩端吻合；daily/ rclone check 過） |
 | T-054 | 【雲端 Phase 0】每日增量歸檔：CLI `archive-daily --date`（dump 當日新增 raw 列，broker_trades 必含）→ 上傳 Drive；冪等（重跑同日覆蓋同檔）；檔案佈局支援日後合併進基底（D-033 選項 B）。AC：連跑兩日產生兩個日檔、重跑冪等、單日檔可還原進空表 | D-030/D-033 | T-053 | B | done |
-| T-055 | 【雲端 Phase 1】Supabase 建置 + 滾動窗口：建專案/serving schema；先盤點 configs 全因子的最大價格回看天數（窗口硬下限）；CLI `serving prune --window-config`（prices 260 交易日/broker 明細 10 日/broker_flow 250 日/factor_values 60 日，入 configs/serving.yaml 不寫死）。AC：修剪後總量 < 400 MB、窗口 ≥ 最大回看、prune 冪等 | D-030 + SPEC-009 | T-053 | B | todo |
+| T-055 | 【雲端 Phase 1】Supabase 建置 + 滾動窗口：建專案/serving schema；先盤點 configs 全因子的最大價格回看天數（窗口硬下限）；CLI `serving prune --window-config`（prices 260 交易日/broker 明細 10 日/broker_flow 250 日/factor_values 60 日，入 configs/serving.yaml 不寫死）。AC：修剪後總量 < 400 MB、窗口 ≥ 最大回看、prune 冪等 | D-030 + SPEC-009 | T-053 | B | done（總量 446 MB：factor_values 實測遠超估算，過渡縮窗後低於 Free 500 上限但未達 400 目標 → D-034 裁決長期方案） |
 | T-056 | 【雲端 Phase 1】GHA 每日 pipeline workflow：`daily-pipeline.yml`（cron UTC `5 11 * * 1-5` + `workflow_dispatch(date)`）；DSN/token 全走 GHA Secrets；步驟=pipeline → 增量歸檔上傳 → prune；失敗通知（GH issue 或 email）。AC：手動 dispatch 跑通一整日、cron 觸發一次成功、Secrets 無明文 | D-030/D-032 | T-054, T-057 | B | todo |
 | T-057 | 【雲端 Phase 1】pipeline 寫 Supabase 相容性：`store.py` DSN 支援 pooler :6543 + 關 prepared statements（psycopg `prepare_threshold=None`）；`_run_daily_pipeline` 在「無本機資料湖、純 PG」環境跑通（D-026 遺留的 parquet 路徑步驟盤點與繞開）；每日 pipeline 對滾動窗口資料計算因子正確（回看不足即 raise 不靜默） | D-030 + SPEC-009 | T-055 | A | todo |
 | T-058 | 【雲端 Phase 1】平行運行比對：GHA pipeline 與本機 scheduler 同時跑 ≥5 個交易日，逐日比對兩邊 factor_values/composite_daily/screener_daily（bit-identical 或差異可解釋）；比對腳本落 scripts/。AC：連續 5 交易日全對帳通過才准進 Phase 2 切換 | D-030 | T-056 | B | todo |
@@ -88,6 +88,21 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-055**（2026-07-29）Supabase 滾動窗口建置。`config.CloudConfig`（dsn_env/
+  stock_pattern/pattern_tables/windows，serving.yaml `cloud:` 段）；schema 新表
+  `broker_flow_daily`（券商母公司日聚合，衍生表；本機已回填 2025-07 起 502k 列）；
+  `data/serving/cloud.py`：`prune`（第 N 新 distinct date 為 cutoff，DELETE + pattern
+  過濾，冪等）、`refresh_broker_flow`（upsert 聚合）、`seed_tables`（跨 PG COPY 串流，
+  TRUNCATE 重灌冪等）；`store.connect_cloud`（pooler `prepare_threshold=None`）；CLI
+  `serving prune / broker-flow / seed-cloud`。測試 4 條（窗口 ≥ 因子最大回看靜態把關
+  ——混用未修剪表者由該表驅動回看、prune 冪等、聚合手算對數、seed 窗口＋四碼過濾）。
+  閘門：ruff/format 綠、mypy src 89 檔綠、pytest 全套 354 綠。**實戰紀錄**：首灌
+  725 MB 觸發 Supabase Free 唯讀保護＋DiskFull；教訓（1）TRUNCATE 須獨立 commit 否則
+  隨失敗 COPY 回滾（2）超量後 session `SET default_transaction_read_only='off'` 可解。
+  過渡縮窗（factor 20 日/composite 120 日，D-034）後 **446 MB**：prices 260 日四碼
+  497k 列/75 MB、broker 明細 10 日 541k/84 MB、broker_flow 250 日 479k/61 MB、
+  factor 20 日 700k/105 MB、法人/融資券/月營收/集保全史。
 
 - **T-054**（2026-07-29）每日增量歸檔（D-030 保命線）。`data/serving/archive.py`：
   `dump_day`（ARCHIVE_SPECS＝鏡射表＋fubon_fetch_log/screener_daily＋stock_meta 全量

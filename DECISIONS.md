@@ -5,6 +5,22 @@
 
 ## 待裁決
 
+### D-034（2026-07-29，待裁決）factor_values 雲端佔量遠超估算——窗口與儲存結構取捨
+- 問題：D-030 估 factor_values 60 日入 ~370 MB 總預算；實測 60 日＝2.37M 列、
+  **361 MB**（文字 factor 名進 PK，索引肥），首灌總量 725 MB → Supabase Free 超量
+  進唯讀保護＋磁碟滿。過渡處置（已上線）：factor_values 縮 20 日（105 MB）、
+  composite_daily 縮 120 日，總量 446 MB < 500 MB——但 P7 因子 sparkline 縮到 20 點、
+  P8 綜合分位趨勢縮到 120 點，且僅剩 ~54 MB 餘裕。
+- 選項：
+  - A. 維持過渡值（20/120 日），front 文案標示雲端版縮窗——零改動，餘裕最小
+  - B. 結構優化：factor 名正規化為 smallint id（factor_dim 對照表）＋ value/z/pct 改
+    float4 → 估可把 60 日壓到 ~150 MB，換回 60 點 sparkline；需改 materialize/
+    stock_api/前端對照，工程量中
+  - C. Supabase Pro（USD 25/月，8 GB）：全部窗口放寬、也解 D-031 回測範圍——
+    違背「免費優先」，但一勞永逸
+- 建議：先 A 觀察一週實際成長，若 P7/P8 縮窗影響使用體驗再做 B；C 留作最後手段。
+- 影響範圍：configs/serving.yaml cloud.windows、SPEC-009（雲端節）、前端 P7/P8 文案。
+
 ### D-031（2026-07-29，待裁決）雲端回測端點的資料範圍
 - 問題：`/api/backtest` 現為即時計算，需要完整歷史；搬遷後 Supabase 只有滾動窗口
   （prices 260 交易日、factor_values 60 日），全史回測無資料可用。

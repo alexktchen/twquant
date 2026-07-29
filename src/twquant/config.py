@@ -55,6 +55,17 @@ DEFAULT_COMPOSITE_FACTORS: tuple[str, ...] = (
 )
 
 
+class CloudConfig(BaseConfig):
+    """雲端供應層（D-030：Supabase Free 滾動窗口，T-055）。"""
+
+    dsn_env: str = "TWQUANT_SUPABASE_DSN"  # Supabase transaction pooler DSN 的環境變數名
+    # 大表只留符合此 pattern 的股票（四碼普通股，同 screener 宇宙）；只套用在 pattern_tables
+    stock_pattern: str = "^[1-9][0-9]{3}$"
+    pattern_tables: tuple[str, ...] = ("prices_daily", "broker_trades")
+    # 滾動窗口（交易日數）；未列出的表全史保留（小表）。硬下限＝因子最大回看（有測試把關）
+    windows: dict[str, int] = {}
+
+
 class ServingConfig(BaseConfig):
     """serving.yaml 的模型（SPEC-009 §1 為權威）。PG 供應層＝衍生、可重建、僅供展示。"""
 
@@ -67,6 +78,8 @@ class ServingConfig(BaseConfig):
     fallback_duckdb: bool = True  # PG 不可用時降級 DuckDB（false 則回 503）
     # D-020：綜合分（composite_daily）只納入的實證有效子集（非全因子等權）。
     composite_factors: tuple[str, ...] = DEFAULT_COMPOSITE_FACTORS
+    # D-030：雲端滾動窗口（Supabase）。本機部署不受影響（僅 seed/prune/GHA 讀取）。
+    cloud: CloudConfig = CloudConfig()
 
 
 class ScreenerPool(BaseConfig):

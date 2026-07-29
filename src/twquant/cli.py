@@ -1727,6 +1727,85 @@ def serving_materialize(
         )
 
 
+@serving_app.command("broker-flow")
+def serving_broker_flow(
+    from_: str = typer.Option(..., "--from", help="起日（含）YYYY-MM-DD"),
+    to: str = typer.Option(..., "--to", help="迄日（含）YYYY-MM-DD"),
+    cloud: bool = typer.Option(False, "--cloud", help="對雲端（Supabase）而非本機 PG 執行"),
+) -> None:
+    """從 broker_trades 聚合 (日, 股) 買賣超 → broker_flow_daily（T-055，upsert 冪等）。"""
+    from twquant.data.serving import store
+    from twquant.data.serving.cloud import refresh_broker_flow
+    from twquant.data.serving.schema import ensure_schema
+
+    cfg = _load_serving()
+    d0, d1 = dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+    days = [d0 + dt.timedelta(days=i) for i in range((d1 - d0).days + 1)]
+    conn = store.connect_cloud(cfg) if cloud else store.connect(cfg)
+    try:
+        ensure_schema(conn, cfg.pg_schema)  # 首跑時 broker_flow_daily 可能尚未建（冪等）
+        n = refresh_broker_flow(conn, cfg.pg_schema, days)
+    finally:
+        conn.close()
+    typer.secho(f"[OK] broker_flow_daily：{from_}~{to} 共 {n} 列", fg=typer.colors.GREEN)
+
+
+@serving_app.command("prune")
+def serving_prune(
+    cloud: bool = typer.Option(True, "--cloud/--local", help="預設對雲端執行；--local 打本機 PG"),
+) -> None:
+    """依 configs/serving.yaml cloud.windows 修剪滾動窗口（D-030，冪等）。"""
+    from twquant.data.serving import store
+    from twquant.data.serving.cloud import prune
+
+    cfg = _load_serving()
+    conn = store.connect_cloud(cfg) if cloud else store.connect(cfg)
+    try:
+        results = prune(
+            conn,
+            cfg.pg_schema,
+            dict(cfg.cloud.windows),
+            cfg.cloud.stock_pattern,
+            tuple(cfg.cloud.pattern_tables),
+        )
+    finally:
+        conn.close()
+    for r in results:
+        tail = f"cutoff={r.cutoff}" if r.cutoff else "（未超窗）"
+        typer.secho(f"[OK] {r.table:<20} -{r.deleted} 列 {tail}", fg=typer.colors.GREEN)
+
+
+@serving_app.command("seed-cloud")
+def serving_seed_cloud() -> None:
+    """本機 PG → 雲端（Supabase）一次性搬運滾動窗口（T-055；重跑＝TRUNCATE 重灌）。"""
+    from twquant.data.serving import store
+    from twquant.data.serving.cloud import seed_tables
+    from twquant.data.serving.schema import ALL_TABLES, SYNC_STATE_SPEC
+
+    cfg = _load_serving()
+    tables = [t for t in ALL_TABLES if t != SYNC_STATE_SPEC.name]
+    src = store.connect(cfg)
+    dst = store.connect_cloud(cfg)
+    try:
+        results = seed_tables(
+            src,
+            dst,
+            src_schema=cfg.pg_schema,
+            dst_schema=cfg.pg_schema,
+            tables=tables,
+            windows=dict(cfg.cloud.windows),
+            stock_pattern=cfg.cloud.stock_pattern,
+            pattern_tables=tuple(cfg.cloud.pattern_tables),
+        )
+    finally:
+        src.close()
+        dst.close()
+    total = sum(r.rows for r in results)
+    for r in results:
+        typer.echo(f"  {r.table:<24} {r.rows} 列")
+    typer.secho(f"[OK] seed-cloud 完成：共 {total} 列", fg=typer.colors.GREEN)
+
+
 @app.command(name="archive-daily")
 def archive_daily(
     date: str = typer.Option("today", help="歸檔日 YYYY-MM-DD 或 today（台北）"),

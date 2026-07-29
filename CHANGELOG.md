@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-07-29 T-055 Supabase 滾動窗口：CloudConfig + broker_flow_daily 表 +
+  data/serving/cloud.py（prune/refresh_broker_flow/seed_tables）+ CLI serving
+  prune/broker-flow/seed-cloud；Supabase 446 MB（factor 實測超估 → 過渡縮窗，
+  D-034 待裁決）。T-053 收尾：base dump + 8 天增量上 Drive，MD5 驗證吻合。
+
 - 2026-07-29 T-054 每日增量歸檔：data/serving/archive.py（dump_day/restore_day，
   bit-identical 冪等、ON CONFLICT 首錄還原）＋ CLI archive-daily/archive-restore；
   測試 +3、全套綠。T-053 全史 dump 1.3 GB＋還原演練 9 表精確吻合（Drive 上傳待

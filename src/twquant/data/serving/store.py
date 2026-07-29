@@ -28,6 +28,20 @@ def connect(cfg: ServingConfig) -> Any:
     return psycopg.connect(resolve_dsn(cfg))
 
 
+def resolve_cloud_dsn(cfg: ServingConfig) -> str:
+    """雲端（Supabase）DSN：cfg.cloud.dsn_env 指名的環境變數；未設 → ConfigError。"""
+    dsn = os.environ.get(cfg.cloud.dsn_env)
+    if not dsn:
+        raise ConfigError(f"雲端 DSN 環境變數未設：{cfg.cloud.dsn_env}（見 .env / D-030）")
+    return dsn
+
+
+def connect_cloud(cfg: ServingConfig) -> Any:
+    """開一條雲端 PG 連線。Supabase transaction pooler（:6543）不支援 prepared
+    statements → `prepare_threshold=None` 停用（T-055/T-057）。"""
+    return psycopg.connect(resolve_cloud_dsn(cfg), prepare_threshold=None)
+
+
 def ping(cfg: ServingConfig) -> bool:
     """健康探測：能連上且 SELECT 1 成功回 True，否則 False（供 API 降級判斷）。"""
     try:

@@ -69,8 +69,13 @@ rclone config create gdrive drive scope=drive.file
 
 ```bash
 rclone copy D:/project/twquant/data/archive/twquant-full-20260729.dump gdrive:twquant-archive/base/ --progress
-rclone check D:/project/twquant/data/archive/ gdrive:twquant-archive/base/ --one-way
+rclone check D:/project/twquant/data/archive/daily gdrive:twquant-archive/daily --one-way
 ```
+
+⚠ rclone 的**共用 Google client_id 將於 2026 年內退役**(每次執行都會印 NOTICE):
+退役前需照 https://rclone.org/drive/#making-your-own-client-id 建自己的 client_id
+並 `rclone config update gdrive client_id=... client_secret=...` 換上(token 需重授權)。
+GHA 用的 rclone.conf Secret 屆時同步更新。
 
 ## 5. 每日增量(T-054 CLI)
 
