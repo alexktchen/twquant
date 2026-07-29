@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-29 T-056 雲端每日 pipeline 首跑成功（本機零參與）：擷取→閘門→券商→
+  訊號(PG)→供應層→選股池→broker_flow 聚合→歸檔上 Drive→窗口修剪全綠。
+  卡關為 repo Actions 停用（非分鐘數）。獨立驗證：Drive 11 檔齊全、Supabase
+  prices@07-29 1,958 檔 / factors 30,882 列 / 非四碼 0。⚠ 總量 467 MB
+  （+21 MB/日，餘裕 33 MB）——PG DELETE 不還空間給 OS，D-034 追加觀測。
+
 - 2026-07-29 T-059 前端+API 上雲：api/index.py（Vercel Python function 掛既有
   FastAPI app）+ vercel.json（rewrites /api、includeFiles src/configs）；空湖 +
   Supabase 實測——個股頁/選股池/策略回測/meta 全走 PG，大盤K線/因子IC/指數/容量

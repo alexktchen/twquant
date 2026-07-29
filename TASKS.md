@@ -65,7 +65,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-053 | 【雲端 Phase 0】全史歸檔保命線：本機 PG 全庫 `pg_dump -Fc` → 上傳 Google Drive（rclone + service account，秘密只進 .env/GHA Secrets）+ **還原演練**（新空 PG 還原、抽查 broker_trades 列數與日期範圍一致）。AC：dump 檔在 Drive、還原後 `SELECT count(*)` 對得上、還原步驟寫成文件 | D-030/D-033 | — | B | done（2026-07-29 Drive 上傳完成，base dump MD5 c12d5683 兩端吻合；daily/ rclone check 過） |
 | T-054 | 【雲端 Phase 0】每日增量歸檔：CLI `archive-daily --date`（dump 當日新增 raw 列，broker_trades 必含）→ 上傳 Drive；冪等（重跑同日覆蓋同檔）；檔案佈局支援日後合併進基底（D-033 選項 B）。AC：連跑兩日產生兩個日檔、重跑冪等、單日檔可還原進空表 | D-030/D-033 | T-053 | B | done |
 | T-055 | 【雲端 Phase 1】Supabase 建置 + 滾動窗口：建專案/serving schema；先盤點 configs 全因子的最大價格回看天數（窗口硬下限）；CLI `serving prune --window-config`（prices 260 交易日/broker 明細 10 日/broker_flow 250 日/factor_values 60 日，入 configs/serving.yaml 不寫死）。AC：修剪後總量 < 400 MB、窗口 ≥ 最大回看、prune 冪等 | D-030 + SPEC-009 | T-053 | B | done（總量 446 MB：factor_values 實測遠超估算，過渡縮窗後低於 Free 500 上限但未達 400 目標 → D-034 裁決長期方案） |
-| T-056 | 【雲端 Phase 1】GHA 每日 pipeline workflow：`daily-pipeline.yml`（cron UTC `5 11 * * 1-5` + `workflow_dispatch(date)`）；DSN/token 全走 GHA Secrets；步驟=pipeline → 增量歸檔上傳 → prune；失敗通知（GH issue 或 email）。AC：手動 dispatch 跑通一整日、cron 觸發一次成功、Secrets 無明文 | D-030/D-032 | T-054, T-057 | B | todo |
+| T-056 | 【雲端 Phase 1】GHA 每日 pipeline workflow：`daily-pipeline.yml`（cron UTC `5 11 * * 1-5` + `workflow_dispatch(date)`）；DSN/token 全走 GHA Secrets；步驟=pipeline → 增量歸檔上傳 → prune；失敗通知（GH issue 或 email）。AC：手動 dispatch 跑通一整日、cron 觸發一次成功、Secrets 無明文 | D-030/D-032 | T-054, T-057 | B | 部分完成（2026-07-29 手動 dispatch 全步驟成功並獨立驗證；待 cron 自動觸發驗收） |
 | T-057 | 【雲端 Phase 1】pipeline 寫 Supabase 相容性：`store.py` DSN 支援 pooler :6543 + 關 prepared statements（psycopg `prepare_threshold=None`）；`_run_daily_pipeline` 在「無本機資料湖、純 PG」環境跑通（D-026 遺留的 parquet 路徑步驟盤點與繞開）；每日 pipeline 對滾動窗口資料計算因子正確（回看不足即 raise 不靜默） | D-030 + SPEC-009 | T-055 | A | in_progress |
 | T-058 | 【雲端 Phase 1】平行運行比對：GHA pipeline 與本機 scheduler 同時跑 ≥5 個交易日，逐日比對兩邊 factor_values/composite_daily/screener_daily（bit-identical 或差異可解釋）；比對腳本落 scripts/。AC：連續 5 交易日全對帳通過才准進 Phase 2 切換 | D-030 | T-056 | B | todo |
 | T-059 | 【雲端 Phase 2】Vercel 部署：FastAPI 掛 Python serverless function（`api/index.py` + vercel.json rewrite `/api`）、DSN 指 Supabase pooler；前端 `vite build` 同專案部署（nginx 反代退役）。AC：Vercel 上 `/api/health`/個股頁端點全通、前端頁面互動正常、冷啟 < 3s | D-030 | T-055 | B | 部分完成（程式碼+本機雲端模擬驗證done；待使用者在 vercel.com 連 repo + 設 TWQUANT_PG_DSN 環境變數） |
@@ -89,6 +89,18 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-056（部分完成）**（2026-07-29）雲端每日 pipeline 首跑成功——**本機零參與**。
+  卡關與排除：repo 的 GitHub Actions 原為**停用**狀態（run 排隊 4 小時 55 分、
+  `jobs.total_count=0`；與分鐘數耗盡症狀不同——後者有 job 但分配不到 runner），
+  `gh api -X PUT .../actions/permissions -F enabled=true` 後恢復。
+  **獨立驗證**（非僅看 step exit code）：
+  - Drive `daily/2026/20260729/` 11 檔齊全（broker_trades 395 KB ← 雲端確實抓到分點）
+  - Supabase：prices @07-29 **1,958 檔**（雲端跑含上櫃，較本機當時 1,363 完整）、
+    factor_values @07-29 **30,882 列**、非四碼 0 列（修剪生效）、prices 維持 260 交易日
+  - 總量 **467 MB**（前一日 446 MB）。⚠ 距 Free 500 MB 僅餘 33 MB，且 PG 的 DELETE
+    不還空間給 OS（死 tuple 計入 Supabase 用量）→ 見 D-034，prune 後可能需 VACUUM。
+  **待**：cron 自動觸發（非手動 dispatch）驗收一次。
 
 - **T-055**（2026-07-29）Supabase 滾動窗口建置。`config.CloudConfig`（dsn_env/
   stock_pattern/pattern_tables/windows，serving.yaml `cloud:` 段）；schema 新表
