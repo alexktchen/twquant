@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-29 T-059 前端+API 上雲：api/index.py（Vercel Python function 掛既有
+  FastAPI app）+ vercel.json（rewrites /api、includeFiles src/configs）；空湖 +
+  Supabase 實測——個股頁/選股池/策略回測/meta 全走 PG，大盤K線/因子IC/指數/容量
+  仍需資料湖（開 T-063）。GHA：repo Actions 原為停用狀態（run 排隊 5 小時無 runner），
+  已啟用。
+
 - 2026-07-29 T-055 Supabase 滾動窗口：CloudConfig + broker_flow_daily 表 +
   data/serving/cloud.py（prune/refresh_broker_flow/seed_tables）+ CLI serving
   prune/broker-flow/seed-cloud；Supabase 446 MB（factor 實測超估 → 過渡縮窗，
