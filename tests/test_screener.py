@@ -7,12 +7,13 @@ pct=rank(average)/count ∈ {0.5, 1.0}，pct_hi=0.9 取前一檔、pct_lo=0.5 �
 from __future__ import annotations
 
 import datetime as dt
+from typing import cast
 
 import polars as pl
 import pytest
 
+import twquant.monitoring.screener as screener
 from twquant.config import ScreenerConfig, ScreenerPool, ScreenerWindows
-from twquant.monitoring import screener
 
 D = [dt.date(2026, 6, d) for d in (1, 2, 3, 4, 5, 8)]
 
@@ -164,7 +165,7 @@ def test_ac14_snapshot_frame_matches_live_members() -> None:
         want = {m["stock_id"] for m in pool["members"]}
         assert got == want, f"{pool['key']}: {got} != {want}"
     # streak 封頂 streak_days
-    assert int(frame["streak"].max() or 0) <= CFG.streak_days
+    assert cast("int", frame["streak"].max() or 0) <= CFG.streak_days
 
 
 def test_ac13_payload_from_rows_same_shape_as_live() -> None:
@@ -202,7 +203,7 @@ def test_ac12_write_snapshot_idempotent_pg() -> None:
         conn = psycopg.connect(dsn)
     except psycopg.Error as exc:  # pragma: no cover - 依環境而定
         pytest.skip(f"PG 不可達，跳過：{exc}")
-    from twquant.data.serving import schema as sch
+    import twquant.data.serving.schema as sch
 
     test_schema = "serving_test_t041"
     frame = screener.snapshot_frame(_flags(), CFG, D[-1], D[-1])
