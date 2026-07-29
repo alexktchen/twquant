@@ -24,8 +24,26 @@ def resolve_dsn(cfg: ServingConfig) -> str:
 
 
 def connect(cfg: ServingConfig) -> Any:
-    """開一條 PG 連線（呼叫端負責關閉或用 with）。"""
-    return psycopg.connect(resolve_dsn(cfg))
+    """開一條 PG 連線（呼叫端負責關閉或用 with）。
+
+    `prepare_threshold=None`：Supabase transaction pooler（:6543）不支援 prepared
+    statements（T-057）；DSN 指向本機 PG 時停用 prepared 亦無害（COPY/upsert 為主）。
+    """
+    return psycopg.connect(resolve_dsn(cfg), prepare_threshold=None)
+
+
+def resolve_cloud_dsn(cfg: ServingConfig) -> str:
+    """雲端（Supabase）DSN：cfg.cloud.dsn_env 指名的環境變數；未設 → ConfigError。"""
+    dsn = os.environ.get(cfg.cloud.dsn_env)
+    if not dsn:
+        raise ConfigError(f"雲端 DSN 環境變數未設：{cfg.cloud.dsn_env}（見 .env / D-030）")
+    return dsn
+
+
+def connect_cloud(cfg: ServingConfig) -> Any:
+    """開一條雲端 PG 連線。Supabase transaction pooler（:6543）不支援 prepared
+    statements → `prepare_threshold=None` 停用（T-055/T-057）。"""
+    return psycopg.connect(resolve_cloud_dsn(cfg), prepare_threshold=None)
 
 
 def ping(cfg: ServingConfig) -> bool:

@@ -20,3 +20,18 @@ composite_factors:
   - price.reversal_5d
   - price.residual_reversal_5d
   - fundamental.revenue_yoy
+
+# ── 雲端（D-030：Supabase Free 滾動窗口，T-055）─────────────────────────────
+# 本機部署不受影響；只有 seed-cloud / prune / GHA pipeline 讀這段。
+cloud:
+  dsn_env: TWQUANT_SUPABASE_DSN   # Supabase transaction pooler（6543）DSN 的環境變數
+  stock_pattern: "^[1-9][0-9]{3}$" # 大表只留四碼普通股（同 screener 宇宙）
+  pattern_tables: [prices_daily, broker_trades]
+  windows:                         # 滾動窗（交易日數）；未列出的表全史保留（小表）
+    prices_daily: 260              # 硬下限＝price.high_52w 回看 260（test_cloud 把關）
+    broker_trades: 10              # 明細只留近 10 日（歷史在 Drive 歸檔）
+    fubon_fetch_log: 10
+    factor_values: 20               # D-034 過渡：60 日實測 361 MB 撐爆 Free 500 MB，暫縮 20
+    composite_daily: 120            # D-034 過渡：250 → 120（P8 趨勢縮短，待裁決長期方案）
+    screener_daily: 250
+    broker_flow_daily: 250         # 券商母公司日聚合（P6 折線的雲端資料源）

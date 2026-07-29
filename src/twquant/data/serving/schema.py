@@ -226,12 +226,31 @@ SCREENER_DAILY_SPEC = TableSpec(
     pk=("date", "pool", "stock_id"),
 )
 
+# 券商母公司買賣超日聚合（T-055/D-030）：broker_trades 的 (date, stock) 彙總。雲端只留
+# 10 日明細，250 日折線改讀本表；由 `serving broker-flow`（或雲端 pipeline 尾波）刷新。
+# 衍生表：非鏡射/因子表，sync/rebuild 不觸碰。
+BROKER_FLOW_DAILY_SPEC = TableSpec(
+    "broker_flow_daily",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("buy_shares", "bigint"),
+        ("sell_shares", "bigint"),
+        ("net_shares", "bigint"),
+        ("n_brokers", "integer"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("stock_id", "date"),
+    indexes=(("date",),),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
     SYNC_STATE_SPEC,
     FUBON_FETCH_LOG_SPEC,
     SCREENER_DAILY_SPEC,
+    BROKER_FLOW_DAILY_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

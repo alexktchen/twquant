@@ -1,0 +1,76 @@
+# T-056（D-030）：每日雲端 pipeline——本機關機後的唯一常駐排程。
+# 兩班次（Asia/Taipei）：19:05 主跑（行情/法人已公布）；22:05 補跑（融資券 21:30、
+# 券商分點晚間公布；pipeline 冪等，重跑只補新資料）。GHA cron 常態晚發車 3-15 分。
+# 失敗通知：GitHub 對 scheduled workflow 失敗會寄信給 repo 擁有者（免額外設定）。
+# 已知限制：平日國定假日無行情 → 降級紅燈（~15-20 次/年），屬預期噪音（見 D-030）。
+name: daily-pipeline
+
+on:
+  schedule:
+    - cron: "5 11 * * 1-5" # 19:05 台北
+    - cron: "5 14 * * 1-5" # 22:05 台北（補融資券/券商）
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "交易日 YYYY-MM-DD（留空＝今日台北）"
+        required: false
+        default: ""
+
+concurrency:
+  group: daily-pipeline # 兩班次/手動補跑不重疊（資料寫入不併發，比照 JobManager 單一併發）
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # 雲端模式：serving 層（sync/materialize/screener/fubon 直寫）與訊號 PG 源全指向
+      # Supabase（transaction pooler :6543；store.connect 已停用 prepared statements）
+      TWQUANT_PG_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+      TWQUANT_SUPABASE_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync deps
+        run: uv sync --dev --all-groups
+
+      - name: Install rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+
+      - name: rclone config（Drive 歸檔憑證，Secret 注入）
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+
+      - name: Resolve trading day
+        run: |
+          DAY="${{ inputs.date }}"
+          if [ -z "$DAY" ]; then DAY=$(TZ=Asia/Taipei date +%F); fi
+          echo "DAY=$DAY" >> "$GITHUB_ENV"
+          echo "FROM7=$(date -d "$DAY -7 days" +%F)" >> "$GITHUB_ENV"
+
+      - name: 融資券 T-1 補抓（21:30 才公布，前幾日缺口冪等回補）
+        run: uv run python -m twquant backfill --from "$FROM7" --to "$DAY" --tables margin_daily --no-skip-existing
+
+      - name: 每日 pipeline（擷取→閘門→券商→訊號(PG)→供應層→選股池）
+        run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --fail-on-degraded
+
+      - name: 券商買賣超日聚合（broker_flow_daily，明細修剪前）
+        run: uv run python -m twquant serving broker-flow --from "$DAY" --to "$DAY"
+
+      - name: 每日增量歸檔 → Drive（保命線，D-030）
+        run: |
+          uv run python -m twquant archive-daily --date "$DAY" --out archive_out
+          rclone copy archive_out gdrive:twquant-archive/daily --transfers 4
+          rclone check archive_out gdrive:twquant-archive/daily --one-way
+
+      - name: 滾動窗口修剪（Supabase 500 MB 防線）
+        run: uv run python -m twquant serving prune

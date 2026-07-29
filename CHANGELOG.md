@@ -1,5 +1,19 @@
 # CHANGELOG
 
+- 2026-07-29 T-055 Supabase 滾動窗口：CloudConfig + broker_flow_daily 表 +
+  data/serving/cloud.py（prune/refresh_broker_flow/seed_tables）+ CLI serving
+  prune/broker-flow/seed-cloud；Supabase 446 MB（factor 實測超估 → 過渡縮窗，
+  D-034 待裁決）。T-053 收尾：base dump + 8 天增量上 Drive，MD5 驗證吻合。
+
+- 2026-07-29 T-054 每日增量歸檔：data/serving/archive.py（dump_day/restore_day，
+  bit-identical 冪等、ON CONFLICT 首錄還原）＋ CLI archive-daily/archive-restore；
+  測試 +3、全套綠。T-053 全史 dump 1.3 GB＋還原演練 9 表精確吻合（Drive 上傳待
+  使用者 rclone OAuth）。
+
+- 2026-07-29 D-030 全雲端搬遷規劃正式化：目標架構裁決（GHA cron + Supabase Free
+  滾動窗口 + Drive raw 歸檔 + Vercel）＋任務 T-053~T-062 四期拆解＋待裁決
+  D-031/D-032/D-033。純文件，無程式變更。
+
 - 2026-07-22 T-052 期末持倉批次明細：engine _Lot 追蹤（首買日/加權均價/MAE，
   加碼併入、歸零重置）→ 持倉表加買進日/均價/報酬率/最大虧損欄；測試 +4 斷言。
 
