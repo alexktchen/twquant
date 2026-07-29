@@ -62,6 +62,22 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-050 | Sleeve C 事件窗表達：崩跌×營收事件窗因子（active_days=20，比照型態因子）+ 日頻等權門檻策略——在現有引擎表達「事件進場、持有 20 日」；排名式週/月頻已證實 CAGR −17%~−20%（買到「相對最慘」而非「剛崩」+ 持有語意錯配），事件級 64% 勝率需事件持有語意 | STRATEGY §2 Sleeve C + T-046 診斷 | T-046, T-047 | B | todo |
 | T-051 | 回測期末持倉顯示：engine `Holding`/`final_holdings`（SPEC-004 §4 持倉快照期末切片）+ API holdings 欄 + 前端策略回測頁期末持倉表（中文名對照） | SPEC-004 §4 | T-049 | B | done（部署待 merge+rebuild） |
 | T-052 | 期末持倉批次明細：engine `_Lot` 追蹤（本輪首買日/加權均價/持有期最低收盤 MAE；加碼併入、歸零或強制出場即重置）→ Holding 加 entry_date/avg_cost/ret/max_loss + API + 前端欄位（買進日/均價/報酬率/最大虧損） | SPEC-004 §4 | T-051 | B | done（部署待 merge+rebuild） |
+| T-053 | 【雲端 Phase 0】全史歸檔保命線：本機 PG 全庫 `pg_dump -Fc` → 上傳 Google Drive（rclone + service account，秘密只進 .env/GHA Secrets）+ **還原演練**（新空 PG 還原、抽查 broker_trades 列數與日期範圍一致）。AC：dump 檔在 Drive、還原後 `SELECT count(*)` 對得上、還原步驟寫成文件 | D-030/D-033 | — | B | todo |
+| T-054 | 【雲端 Phase 0】每日增量歸檔：CLI `archive-daily --date`（dump 當日新增 raw 列，broker_trades 必含）→ 上傳 Drive；冪等（重跑同日覆蓋同檔）；檔案佈局支援日後合併進基底（D-033 選項 B）。AC：連跑兩日產生兩個日檔、重跑冪等、單日檔可還原進空表 | D-030/D-033 | T-053 | B | todo |
+| T-055 | 【雲端 Phase 1】Supabase 建置 + 滾動窗口：建專案/serving schema；先盤點 configs 全因子的最大價格回看天數（窗口硬下限）；CLI `serving prune --window-config`（prices 260 交易日/broker 明細 10 日/broker_flow 250 日/factor_values 60 日，入 configs/serving.yaml 不寫死）。AC：修剪後總量 < 400 MB、窗口 ≥ 最大回看、prune 冪等 | D-030 + SPEC-009 | T-053 | B | todo |
+| T-056 | 【雲端 Phase 1】GHA 每日 pipeline workflow：`daily-pipeline.yml`（cron UTC `5 11 * * 1-5` + `workflow_dispatch(date)`）；DSN/token 全走 GHA Secrets；步驟=pipeline → 增量歸檔上傳 → prune；失敗通知（GH issue 或 email）。AC：手動 dispatch 跑通一整日、cron 觸發一次成功、Secrets 無明文 | D-030/D-032 | T-054, T-057 | B | todo |
+| T-057 | 【雲端 Phase 1】pipeline 寫 Supabase 相容性：`store.py` DSN 支援 pooler :6543 + 關 prepared statements（psycopg `prepare_threshold=None`）；`_run_daily_pipeline` 在「無本機資料湖、純 PG」環境跑通（D-026 遺留的 parquet 路徑步驟盤點與繞開）；每日 pipeline 對滾動窗口資料計算因子正確（回看不足即 raise 不靜默） | D-030 + SPEC-009 | T-055 | A | todo |
+| T-058 | 【雲端 Phase 1】平行運行比對：GHA pipeline 與本機 scheduler 同時跑 ≥5 個交易日，逐日比對兩邊 factor_values/composite_daily/screener_daily（bit-identical 或差異可解釋）；比對腳本落 scripts/。AC：連續 5 交易日全對帳通過才准進 Phase 2 切換 | D-030 | T-056 | B | todo |
+| T-059 | 【雲端 Phase 2】Vercel 部署：FastAPI 掛 Python serverless function（`api/index.py` + vercel.json rewrite `/api`）、DSN 指 Supabase pooler；前端 `vite build` 同專案部署（nginx 反代退役）。AC：Vercel 上 `/api/health`/`/api/snapshot`/個股頁端點全通、前端頁面互動正常、冷啟 < 3s | D-030 | T-055 | B | todo |
+| T-060 | 【雲端 Phase 2】長任務端點改 workflow_dispatch：`POST /api/pipeline-jobs`（+補跑日期）改為以 GitHub API 觸發 T-056 workflow；前端「一鍵跑今日全部資料」改輪詢 GHA run 狀態（run id + conclusion）。AC：前端按鈕→GHA 實跑→狀態回顯全鏈通 | D-030 + D-018 | T-056, T-059 | B | todo |
+| T-061 | 【雲端 Phase 2】回測端點雲端化（依 D-031 裁決）：暫按選項 A——區間超出窗口回 400 + 前端提示文案；`/api/backtest` 在 serverless 時限內完成（超時則預先縮範圍或降級） | D-031 | T-059 | B | blocked（D-031） |
+| T-062 | 【雲端 Phase 3】切換與本機退場：驗收清單（T-058 對帳綠、Vercel 端點全通、歸檔鏈連續無斷日、Supabase 保活 job 就位含長假情境）→ 停本機 compose；本機 Docker volume 與 dump 保留 ≥1 個月；memory/文件同步（deploy 佈局說明改雲端版） | D-030 | T-058, T-060, T-061 | B | todo |
+
+> 雲端搬遷任務（T-053~T-062）源自 [D-030](DECISIONS.md)（GHA cron + Supabase Free
+> 滾動窗口 + Drive raw 歸檔 + Vercel）。分四期：Phase 0（T-053/054，歸檔保命線——
+> 做完本機才有資格關機）、Phase 1（T-055~058，GHA pipeline + 平行對帳）、
+> Phase 2（T-059~061，Vercel 前端/API）、Phase 3（T-062，切換退場）。
+> 待裁決 D-031（回測範圍）/D-032（GHA 分鐘）/D-033（Drive 容量）不擋 Phase 0/1 動工。
 
 > 供應層任務（T-031~T-037）源自 [PRD-001](docs/PRD-001-stock-page.md)、規格見
 > [SPEC-009](docs/specs/SPEC-009-serving.md)。分三期：Phase 1（T-031~034，現有資料全上

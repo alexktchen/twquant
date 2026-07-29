@@ -5,6 +5,32 @@
 
 ## 待裁決
 
+### D-031（2026-07-29，待裁決）雲端回測端點的資料範圍
+- 問題：`/api/backtest` 現為即時計算，需要完整歷史；搬遷後 Supabase 只有滾動窗口
+  （prices 260 交易日、factor_values 60 日），全史回測無資料可用。
+- 選項：
+  - A. 雲端版限制回測區間 ≤ 窗口長度，超出回 400 並附提示文案（「全史回測需本機
+    還原 Drive 歸檔」）——零額外基礎設施
+  - B. 回測改離線：`workflow_dispatch` 觸發 GHA 跑回測（GHA 內臨時還原歸檔到
+    service PG），結果落 Supabase 供前端輪詢——全史可用但複雜度高
+  - C. A 先行、B 視使用頻率再開任務
+- 建議：C。影響範圍：T-061、`monitoring/api.py` backtest 端點、前端策略回測頁文案。
+
+### D-032（2026-07-29，待裁決）GHA 分鐘數預算——repo 維持 private 或轉 public
+- 問題：GitHub Free private repo 每月 2000 分鐘；每日 pipeline 估 20–30 分鐘/日
+  → 月耗 ~600–900 分鐘，夠用但不寬裕（加上補跑、回測、CI 會更緊）。public repo
+  分鐘無上限，但程式碼公開（token 本就在 Secrets，不受影響）。
+- 選項：A. 維持 private，監控分鐘用量、逼近上限再議；B. 轉 public。
+- 建議：A（先觀察實際月耗，資料與策略邏輯屬個人資產不宜公開）。影響範圍：T-056。
+
+### D-033（2026-07-29，待裁決）Google Drive 15 GB 容量的長期歸檔策略
+- 問題：免費 15 GB 與 Gmail/相簿共用。初始全史 pg_dump -Fc（估 2–4 GB）+ 每日
+  增量（broker_trades 為大宗）長期累積，一年內可能逼近上限。
+- 選項：A. 升級 Google One 100 GB（NT$65/月，唯一固定成本）；B. 定期把最舊增量
+  合併進基底 dump 重壓（免費但需定期本機開機操作）；C. 增量改存第二個免費帳號。
+- 建議：先按 B 的格式設計歸檔（增量可合併），容量逼近 80% 再裁決 A/B/C。
+  影響範圍：T-053、T-054 的歸檔檔案佈局。
+
 ### D-029（2026-07-22，待裁決）prices_daily 停牌跳空/資料缺口使回測失真——品質閘門與還原價為回測硬前置
 - 問題：T-046 引擎全期回測（reversal_revenue，2021-07~2026-07）出現 CAGR +70.9%
   幻影績效。診斷（scratchpad/bt_diagnose.py）：單日組合報酬 +301%/+221%/+170%
@@ -52,6 +78,31 @@
   shares_outstanding 或 stock_meta 日頻化）。
 
 ## 已裁決
+
+### D-030（2026-07-29，已裁決）全雲端搬遷目標架構——GHA cron + Supabase Free + Drive 歸檔 + Vercel
+- 背景：使用者 2026-07 決定本機將關機，twquant 不能再依賴本機 PG/Docker 常駐
+  （取代 D-013/D-016 的本機 docker-compose 常駐前提；免費優先）。本條為 2026-07-20
+  口頭裁示的正式化，並經 2026-07-29 現況盤點確認可行（本機 PG 15 GB：broker_trades
+  8.9 GB、factor_values 4.3 GB、prices_daily 1.4 GB）。
+- 裁決（目標架構）：
+  - **每日 pipeline → GitHub Actions cron**：平日 19:05 台北（UTC `5 11 * * 1-5`）
+    跑完整 `_run_daily_pipeline`；`workflow_dispatch` 取代後台「一鍵跑今日全部資料」。
+    GHA cron 有 3–15 分鐘延遲，pipeline 須冪等可重跑。富邦 19:00 未公布時沿用
+    「稍後重試不污染」邏輯（D-025/memory 2026-07-16）。
+  - **展示層 DB → Supabase Free（500 MB）滾動窗口**：prices 260 交易日（四碼普通股）、
+    broker 明細 10 日、broker_flow_daily 250 日、factor_values 60 日，估 ~370 MB。
+    連線走 transaction pooler :6543、關 prepared statements。窗口大小以「因子最大
+    價格回看天數」為硬下限（如 240 日動能必須被涵蓋），逐一核對 configs 後定案。
+  - **raw 歸檔 → Google Drive（唯一保命線）**：初始全史 `pg_dump -Fc` 一次 + 每日
+    增量 dump（尤其 broker_trades——券商分點資料過期不可再取得，歸檔鏈絕不能斷）。
+    全史回測/研究 = 暫時開機還原 Drive dump。格式用 pg_dump，不用 parquet（D-026）。
+  - **前端 + API → Vercel 同一專案**：React 靜態建置 + FastAPI 包成 Python serverless
+    function（rewrite `/api` 取代 nginx 反代）；DSN 指向 Supabase pooler。長任務端點
+    （`/api/pipeline-jobs`、`/api/ingest-jobs`）改為透過 GitHub API 觸發
+    `workflow_dispatch`。Vercel 不行再退 Cloud Run。
+- 已知風險（任務內處置）：Supabase Free 閒置 7 天暫停（長假加保活 job）；
+  回測端點資料範圍（D-031）；GHA 分鐘數（D-032）；Drive 容量（D-033）。
+- 範圍：任務 T-053~T-062。切換完成前本機 compose 照常運行（平行期比對）。
 
 ### D-027（2026-07-20，已裁決）技術型態回測走規則式因子（B1）；AI 視覺辨識僅作離線標註
 - 背景：使用者提出兩個回測系統方向——「吃 XQ」與「AI 依技術線圖辨識」。評估：
