@@ -236,7 +236,7 @@ PG 是可隨時全量重建的衍生讀取層（詳 §6）。
 
 - 新 `configs/serving.yaml`（pydantic、`extra="forbid"`；**需在 SPEC-000 配置
   白名單登記**）：`enabled`、`dsn_env: TWQUANT_PG_DSN`（DSN 本體放 `.env`）、
-  `pool_min/max`、`factor_history_days: 1100`、`fallback_duckdb: true`。
+  `pool_min/max`、`factor_history_days: 1100`（`fallback_duckdb` 已於 D-035 移除）。
 - docker-compose 新增 `pg` 服務：`postgres:16-alpine`、**named volume**
   `pgdata`（勿 bind mount——Windows/Docker Desktop I/O 慢）、host port 5433、
   `pg_isready` healthcheck；`api`/`scheduler` 掛 `TWQUANT_PG_DSN`；

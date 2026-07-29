@@ -75,7 +75,7 @@ class ServingConfig(BaseConfig):
     pool_min: int = 1
     pool_max: int = 8
     factor_history_days: int = 1100  # factor_values 保留窗（≈3 年）
-    fallback_duckdb: bool = True  # PG 不可用時降級 DuckDB（false 則回 503）
+    # D-035：不設 DuckDB 降級——雲端無資料湖，PG 不可用即 503（不假裝有資料，黃金規則 5）
     # D-020：綜合分（composite_daily）只納入的實證有效子集（非全因子等權）。
     composite_factors: tuple[str, ...] = DEFAULT_COMPOSITE_FACTORS
     # D-030：雲端滾動窗口（Supabase）。本機部署不受影響（僅 seed/prune/GHA 讀取）。

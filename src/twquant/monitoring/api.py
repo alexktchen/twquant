@@ -315,7 +315,7 @@ def get_backtest(
     """指定期間/策略的回測（權益曲線＋指標）；未帶參數用預設連續期與預設策略。
 
     資料源：serving.enabled 時走 PG 鏡射（PgTableSource，cache＋since 下限讀取，
-    D-026/T-049）；PG 不可達且 fallback_duckdb 時降級注入的本機資料湖。
+    D-026/T-049）；PG 不可達即 503（D-035 移除 DuckDB 降級——雲端無資料湖）。
     """
     try:
         s = dt.date.fromisoformat(start) if start else snap.WINDOW_START
@@ -349,9 +349,7 @@ def get_backtest(
                 since=s - dt.timedelta(days=_BACKTEST_LOOKBACK_DAYS),
             )
         except psycopg.OperationalError as exc:
-            if not scfg.fallback_duckdb:
-                raise HTTPException(status_code=503, detail=f"PG 不可用：{exc}") from exc
-            pg_conn = None  # 降級注入的本機資料湖
+            raise HTTPException(status_code=503, detail=f"PG 不可用：{exc}") from exc
     try:
         return snap.backtest_result(src, s, e, strat_path=strat_path)
     except (TwquantError, ValueError) as exc:

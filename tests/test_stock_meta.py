@@ -6,6 +6,7 @@ clean_stock_meta 以全形空格切代號/中文名、產業別=族群、濾非�
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import polars as pl
@@ -85,14 +86,20 @@ def test_scorecard_rejects_injection(tmp_path: Path) -> None:
         snap.stock_factor_scorecard(Warehouse(tmp_path), "2330'; DROP TABLE prices_daily;--")
 
 
-def test_api_stock_meta_and_factors(tmp_path: Path) -> None:
-    wh = _meta_wh(tmp_path)
-    meta = api.get_stock_meta(wh)["meta"]
-    assert isinstance(meta, dict)
-    assert "2330" in meta
+def test_api_stock_factors_rejects_injection(tmp_path: Path) -> None:
+    """非法代號在碰 PG 之前就被 `_check` 擋下 → 400（不需要 PG，任何環境都該過）。"""
     with pytest.raises(HTTPException) as ei:
-        api.get_stock_factors("bad'; --", wh)
+        api.get_stock_factors("bad'; --", _meta_wh(tmp_path))
     assert ei.value.status_code == 400
+
+
+def test_api_stock_meta_reads_pg(tmp_path: Path) -> None:
+    """/api/stock-meta 走 PG（D-035 起無 DuckDB 降級）；無 PG 環境跳過而非假裝有資料。"""
+    pytest.importorskip("psycopg")
+    if not os.environ.get("TWQUANT_PG_DSN"):
+        pytest.skip("TWQUANT_PG_DSN 未設，跳過 PG 整合測試")
+    meta = api.get_stock_meta(_meta_wh(tmp_path))["meta"]
+    assert isinstance(meta, dict)
 
 
 def test_sector_flows_empty_when_missing(tmp_path: Path) -> None:

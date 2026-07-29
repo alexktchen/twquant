@@ -95,6 +95,24 @@
 
 ## 已裁決
 
+### D-035（2026-07-29，已裁決）移除 DuckDB 降級路徑——PG 不可用即報錯，不假裝有資料
+- 背景：`ServingConfig.fallback_duckdb`（預設 true）讓 PG 不可達時改讀本機 parquet 資料湖。
+  在 D-030 全雲端架構下這條路徑**在雲端根本不存在**（Vercel/GHA runner 無 `data/`），
+  且 D-026 起本機資料湖也已停止寫入（全部資料只在 PG）。留著它的後果是：PG 出問題時
+  端點回「空資料」而非錯誤，屬黃金規則 5 禁止的靜默處理。SPEC-009 §121-123 早已把
+  個股讀取路徑排除在降級之外，僅 `/api/backtest` 仍參考此旗標。
+- 裁決（使用者 2026-07-29「我不需要降級邏輯了」）：**完全移除**。
+  - `ServingConfig` 刪 `fallback_duckdb` 欄位；`configs/serving.yaml` 同步刪除。
+  - `/api/backtest` 的 `psycopg.OperationalError` → 一律 503（原降級分支刪除）。
+  - `stock_api.stock_meta_all` 等 PG 讀取路徑維持「連不上就 raise → 端點轉 503」，
+    不新增降級（本次 CI 紅燈暴露它缺降級，依本裁決**不補**、改修測試環境假設）。
+  - CI 改 `uv sync --dev --all-groups`：psycopg 自此為 API 的**必要**依賴而非選用
+    （原 `--group api` 導致 3 個測試 `ModuleNotFoundError`，自 2026-07-11 CI 即紅）。
+  - 需要「無 PG 也能看」的離線情境仍有前端內嵌 `data.json` 快照兜底（D-016 既有設計），
+    與伺服器端降級是兩回事，不受影響。
+- 範圍：`config.py`、`configs/serving.yaml`、`monitoring/api.py`、`.github/workflows/ci.yml`、
+  `tests/test_serving_config.py`、`tests/test_stock_meta.py`、SPEC-009、PRD-001。
+
 ### D-030（2026-07-29，已裁決）全雲端搬遷目標架構——GHA cron + Supabase Free + Drive 歸檔 + Vercel
 - 背景：使用者 2026-07 決定本機將關機，twquant 不能再依賴本機 PG/Docker 常駐
   （取代 D-013/D-016 的本機 docker-compose 常駐前提；免費優先）。本條為 2026-07-20
