@@ -1,8 +1,12 @@
-# Vercel Python function 的最小依賴（T-059）。刻意不含 pyarrow（polars 可選、僅
-# 跨庫轉換需要）與 pandera（只在擷取層驗證，雲端 API 為唯讀查詢）——250 MB 上限吃緊。
+# Vercel Python function 的依賴（T-059）。刻意不含 pyarrow（polars 可選、僅跨庫
+# 轉換需要）——250 MB 上限吃緊。
+# pandera 為**必要**（非僅擷取層）：monitoring/api.py → data/warehouse.py →
+# data/schemas.py 於模組層 `import pandera.polars`；漏裝會在 function 啟動即崩
+# （2026-07-29 首版部署 FUNCTION_INVOCATION_FAILED 根因）。
 fastapi>=0.115
 psycopg[binary]>=3.2
 polars>=1.0
 duckdb>=1.0
 pydantic>=2.0
 pyyaml>=6.0
+pandera>=0.20
