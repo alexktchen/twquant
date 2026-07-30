@@ -67,6 +67,9 @@
     font-weight: 600;
     color: var(--muted);
   }
+  /* 手機橫向捲動 chip 列：隱藏捲軸但保留可捲（md 起改換行不捲動） */
+  .hscroll { scrollbar-width: none; }
+  .hscroll::-webkit-scrollbar { display: none; }
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-thumb { background: #2b333d; border-radius: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
