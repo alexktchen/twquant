@@ -1,7 +1,7 @@
-// 共用圖表：lightweight-charts 包裝（K 線＋副圖 pane、權益、指數）與 SVG 條圖。
+// 共用圖表：lightweight-charts 包裝（K 線＋副圖 pane、範圍/均線/關鍵價位開關）。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createTextWatermark } from 'lightweight-charts'
-import type { BrokerFlowPoint, Candle, CompositePoint, FactorHistPoint, IndexPoint } from './api'
+import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createTextWatermark } from 'lightweight-charts'
+import type { BrokerFlowPoint, Candle, CompositePoint, FactorHistPoint } from './api'
 import { ACC, DOWN, LINE, MUT, UP, num, priceFmt } from './theme'
 import { chipCls } from './ui'
 
@@ -243,102 +243,6 @@ export function CandleChart({
   )
 }
 
-/* ---------- equity area (lightweight-charts) ---------- */
-export function EquityChart({ data, height = 260 }: { data: { d: string; e: number }[]; height?: number }) {
-  const box = useRef<HTMLDivElement>(null)
-  const legend = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = box.current
-    if (!el) return
-    const chart = baseChart(el, height)
-    const area = chart.addSeries(AreaSeries, {
-      lineColor: ACC,
-      topColor: 'rgba(224,168,59,0.26)',
-      bottomColor: 'rgba(224,168,59,0.02)',
-      lineWidth: 2,
-      priceLineVisible: false,
-    })
-    area.setData(data.map((p) => ({ time: p.d, value: p.e })))
-    chart.timeScale().fitContent()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    chart.subscribeCrosshairMove((param: any) => {
-      const lg = legend.current
-      if (!lg) return
-      const d = param?.time ? param.seriesData?.get(area) : null
-      if (!d) {
-        lg.style.opacity = '0'
-        return
-      }
-      lg.style.opacity = '1'
-      lg.innerHTML = `<span style="color:${MUT}">${param.time}</span>　權益 ${num(d.value)}`
-    })
-    const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
-    ro.observe(el)
-    return () => {
-      ro.disconnect()
-      chart.remove()
-    }
-  }, [data, height])
-  return (
-    <div style={{ position: 'relative' }}>
-      <div
-        ref={legend}
-        className="mono tnum"
-        style={{ position: 'absolute', top: 4, left: 8, zIndex: 3, fontSize: 11, pointerEvents: 'none', opacity: 0 }}
-      />
-      <div ref={box} style={{ width: '100%' }} />
-    </div>
-  )
-}
-
-/* ---------- index line (close-only, e.g. 櫃買指數) ---------- */
-export function IndexLine({ data, height = 300 }: { data: IndexPoint[]; height?: number }) {
-  const box = useRef<HTMLDivElement>(null)
-  const legend = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = box.current
-    if (!el) return
-    const chart = baseChart(el, height)
-    const area = chart.addSeries(AreaSeries, {
-      lineColor: ACC,
-      topColor: 'rgba(224,168,59,0.22)',
-      bottomColor: 'rgba(224,168,59,0.02)',
-      lineWidth: 2,
-      priceLineVisible: false,
-    })
-    area.setData(data.map((p) => ({ time: p.d, value: p.c })))
-    chart.timeScale().fitContent()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    chart.subscribeCrosshairMove((param: any) => {
-      const lg = legend.current
-      if (!lg) return
-      const d = param?.time ? param.seriesData?.get(area) : null
-      if (!d) {
-        lg.style.opacity = '0'
-        return
-      }
-      lg.style.opacity = '1'
-      lg.innerHTML = `<span style="color:${MUT}">${param.time}</span>　指數 ${num(d.value, 2)}`
-    })
-    const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
-    ro.observe(el)
-    return () => {
-      ro.disconnect()
-      chart.remove()
-    }
-  }, [data, height])
-  return (
-    <div style={{ position: 'relative' }}>
-      <div
-        ref={legend}
-        className="mono tnum"
-        style={{ position: 'absolute', top: 4, left: 8, zIndex: 3, fontSize: 11, pointerEvents: 'none', opacity: 0 }}
-      />
-      <div ref={box} style={{ width: '100%' }} />
-    </div>
-  )
-}
-
 /* ---------- range chips (slice history) + 主圖均線/關鍵價位開關 ---------- */
 /* 開關設定 localStorage 持久化：跨股票、跨重整維持使用者最後選擇（不隨換股/換頁重置）。 */
 const CHART_SETTINGS_KEY = 'twquant.chartSettings'
@@ -468,31 +372,5 @@ export function RangeCandle({
         keyLevels={levelsOn}
       />
     </div>
-  )
-}
-
-/* ---------- horizontal bars (svg; non-timeseries) ---------- */
-export function HBars({ rows, height = 220 }: { rows: { label: string; value: number; sub?: string; color?: string }[]; height?: number }) {
-  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1e-9)
-  const rh = Math.min(26, (height - 8) / rows.length)
-  const W = 940, mid = 250
-  return (
-    <svg viewBox={`0 0 ${W} ${rows.length * rh + 8}`} className="w-full" style={{ height: 'auto' }}>
-      {rows.map((r, i) => {
-        const w = (Math.abs(r.value) / max) * (W - mid - 90)
-        const col = r.color ?? (r.value >= 0 ? UP : DOWN)
-        const yy = i * rh + 4
-        return (
-          <g key={i}>
-            <text x={0} y={yy + rh / 2 + 3} fontSize={12} className="mono" fill="var(--fg)">{r.label}</text>
-            {r.sub && <text x={150} y={yy + rh / 2 + 3} fontSize={11} className="mono" fill={MUT}>{r.sub}</text>}
-            <rect x={mid} y={yy + 3} width={Math.max(2, w)} height={rh - 8} rx={2} fill={col} opacity={0.85} />
-            <text x={mid + Math.max(2, w) + 6} y={yy + rh / 2 + 3} fontSize={11} className="mono tnum" fill={col}>
-              {r.value >= 0 ? '+' : ''}{r.value.toFixed(2)}
-            </text>
-          </g>
-        )
-      })}
-    </svg>
   )
 }
