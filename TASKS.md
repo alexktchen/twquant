@@ -73,6 +73,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-060 | 【雲端 Phase 2】長任務端點改 workflow_dispatch：`POST /api/pipeline-jobs`（+補跑日期）改為以 GitHub API 觸發 T-056 workflow；前端「一鍵跑今日全部資料」改輪詢 GHA run 狀態（run id + conclusion）。AC：前端按鈕→GHA 實跑→狀態回顯全鏈通 | D-030 + D-018 | T-056, T-059 | B | todo |
 | T-061 | 【雲端 Phase 2】回測端點雲端化（依 D-031 裁決）：暫按選項 A——區間超出窗口回 400 + 前端提示文案；`/api/backtest` 在 serverless 時限內完成（超時則預先縮範圍或降級） | D-031 | T-059 | B | blocked（D-031） |
 | T-062 | 【雲端 Phase 3】切換與本機退場：驗收清單（T-058 對帳綠、Vercel 端點全通、歸檔鏈連續無斷日、Supabase 保活 job 就位含長假情境）→ 停本機 compose；本機 Docker volume 與 dump 保留 ≥1 個月；memory/文件同步（deploy 佈局說明改雲端版） | D-030 | T-058, T-060, T-061 | B | todo |
+| T-064 | 前端個股因子頁重新設計：元件抽出 `frontend/src/stock/`（T-034 遺留）＋跨頁共用層（theme/fallback/hooks/ui/charts）＋mobile-first 響應式（手機頂欄、橫捲 chip 列、響應式圖高、ZBars）＋終端風精煉（TPanel/方角 chip） | PRD-001 §3 | T-034 | — | done |
 
 > 雲端搬遷任務（T-053~T-062）源自 [D-030](DECISIONS.md)（GHA cron + Supabase Free
 > 滾動窗口 + Drive raw 歸檔 + Vercel）。分四期：Phase 0（T-053/054，歸檔保命線——
@@ -89,6 +90,24 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-064**（2026-07-30）個股因子頁重新設計：元件化＋mobile-first＋終端風精煉。
+  App.tsx 2,968→1,546 行：跨頁共用層抽出 `theme.ts`（調色/格式）、`fallback.ts`、
+  `hooks.ts`（MetaCtx/useResource/useMediaQuery）、`ui.tsx`（Panel/Kpi/Skeleton/chipCls）、
+  `charts.tsx`（CandleChart/RangeCandle/EquityChart/IndexLine/HBars——原封搬移，其餘頁面
+  外觀不變）；個股頁拆進 `src/stock/`（StockPicker/FactorScreener/StrategyPools/
+  StockHeader/StockChartPanel/DataPanels/ScorecardPanel/index＋store）。
+  **mobile-first**：殼層手機 sticky 頂欄＋橫向捲動頁籤（側欄 md 起顯示）、chip 列手機
+  單行橫捲（ChipRow＋`.hscroll`）、搜尋框滿版、圖表高度隨斷點（useMediaQuery）、
+  體檢卡條圖改 div 佈局 `ZBars`（修正 SVG viewBox 在手機縮放後文字不可讀）、
+  法人/融資券與營收/主力改成對 grid（lg 兩欄、only-child 佔滿）。
+  **終端風**：TPanel（方角、accent tick 標題列、header 分隔線、sub 截斷防溢出）、
+  方角 chip、傾向改 [強順]/[中性]/[逆勢] 括號樣式。
+  **行為不變**：localStorage 三鍵沿用（watchlist/subFactors/chartSettings）、D-020
+  「非預測訊號」標示三處保留、useResource 不快取語意與 OHLC 換股殘影防護不變。
+  閘門：oxlint 0 警告、`tsc -b` 綠、vite build 綠（57 模組）；Playwright 煙霧：
+  離線快照＋mock live API 兩模式 × 手機(390px)/桌面(1280px) 視窗零 pageerror、
+  八頁巡檢零錯誤。後端零變更（`git diff` 僅 frontend/）。
 
 - **T-056（部分完成）**（2026-07-29）雲端每日 pipeline 首跑成功——**本機零參與**。
   卡關與排除：repo 的 GitHub Actions 原為**停用**狀態（run 排隊 4 小時 55 分、

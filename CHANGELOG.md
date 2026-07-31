@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-07-30 T-064 個股因子頁重新設計：元件抽出 src/stock/（T-034 遺留）＋共用層
+  theme/fallback/hooks/ui/charts（App.tsx 2,968→1,546 行）；mobile-first（手機
+  sticky 頂欄＋橫捲 chip 列＋響應式圖高＋ZBars 條圖）；終端風 TPanel。行為與
+  localStorage 鍵不變、D-020 標示保留；oxlint/tsc/vite build 綠、Playwright
+  雙視窗煙霧零錯誤；後端零變更。
+
 - 2026-07-29 T-056 雲端每日 pipeline 首跑成功（本機零參與）：擷取→閘門→券商→
   訊號(PG)→供應層→選股池→broker_flow 聚合→歸檔上 Drive→窗口修剪全綠。
   卡關為 repo Actions 停用（非分鐘數）。獨立驗證：Drive 11 檔齊全、Supabase
