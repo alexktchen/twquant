@@ -20,7 +20,13 @@ import random
 import polars as pl
 import pytest
 
-from twquant.ml.evaluate import daily_rank_ic, decile_table, ic_summary, is_monotonic
+from twquant.ml.evaluate import (
+    daily_rank_ic,
+    decile_table,
+    equal_weight_signed,
+    ic_summary,
+    is_monotonic,
+)
 
 _D = [dt.date(2026, 1, 5) + dt.timedelta(days=i) for i in range(6)]
 
@@ -128,3 +134,21 @@ def test_ac9_evaluate_deterministic() -> None:
     assert decile_table(_scored(rows), "score", "label").equals(
         decile_table(_scored(rows), "score", "label")
     )
+
+
+# ── 等權基準（永久對照組）─────────────────────────────────────────────
+
+
+def test_ac9_equal_weight_signed_respects_direction() -> None:
+    w = equal_weight_signed({"price.mom_20d": 1, "price.reversal_5d": -1, "chip.trust_net_10d": 1})
+    assert w == pytest.approx(
+        {"price.mom_20d": 1 / 3, "price.reversal_5d": -1 / 3, "chip.trust_net_10d": 1 / 3}
+    )
+    assert sum(abs(v) for v in w.values()) == pytest.approx(1.0)
+
+
+def test_ac9_equal_weight_rejects_empty_and_bad_direction() -> None:
+    with pytest.raises(ValueError, match="為空"):
+        equal_weight_signed({})
+    with pytest.raises(ValueError, match="±1"):
+        equal_weight_signed({"a.b": 0})

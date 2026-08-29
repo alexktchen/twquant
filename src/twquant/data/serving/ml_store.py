@@ -38,6 +38,35 @@ def read_factor_frames(
     return out
 
 
+def read_factor_long(
+    conn: Any, schema: str, features: list[str], start: object, end: object
+) -> pl.DataFrame:
+    """factor_values 的**原始 value** 長表 (date, stock_id, factor, value)。
+
+    基準組合（strategy/combine.zscore_weighted）自己做 winsorize+z-score，故餵原始值
+    而非已標準化的 z——與策略層的真實路徑一致，對照才公平。逐因子查詢，同 OOM 教訓。
+    """
+    parts: list[pl.DataFrame] = []
+    schema_ = {"date": pl.Date, "stock_id": pl.String, "value": pl.Float64}
+    with conn.cursor() as cur:
+        for name in features:
+            cur.execute(
+                f'SELECT date, stock_id, value FROM "{schema}"."factor_values" '
+                "WHERE factor = %s AND date BETWEEN %s AND %s AND value IS NOT NULL",
+                (name, start, end),
+            )
+            rows = cur.fetchall()
+            if rows:
+                parts.append(
+                    pl.DataFrame(rows, schema=schema_, orient="row").with_columns(
+                        pl.lit(name).alias("factor")
+                    )
+                )
+    if not parts:
+        raise ValueError(f"factor_values 於 {start}~{end} 無任何指定因子資料")
+    return pl.concat(parts).select("date", "stock_id", "factor", "value")
+
+
 def read_prices_open(conn: Any, schema: str, start: object, end: object) -> pl.DataFrame:
     """prices_daily 的 (date, stock_id, open) 切片（server 端過濾，標籤計算用）。"""
     with conn.cursor() as cur:

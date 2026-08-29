@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -101,3 +102,18 @@ def spread(table: pl.DataFrame, col: str = "avg_label") -> float:
     """頭尾價差（最高分位 − 最低分位）。"""
     vals = table[col].to_list()
     return float(vals[-1] - vals[0])
+
+
+def equal_weight_signed(directions: Mapping[str, int]) -> dict[str, float]:
+    """等權基準的 signed_weights：每因子 direction/n（SPEC-010 §7 的永久對照組）。
+
+    direction=-1 的因子以負權重併入，使高分一致代表看多（同 strategy/combine 的約定）。
+    刻意等權而非調參——基準若也可調，「打贏基準」就失去意義。
+    """
+    if not directions:
+        raise ValueError("directions 為空：等權基準至少需要一個因子")
+    bad = {k: v for k, v in directions.items() if v not in (1, -1)}
+    if bad:
+        raise ValueError(f"direction 僅允許 ±1，違反者：{bad}")
+    n = len(directions)
+    return {name: d / n for name, d in directions.items()}

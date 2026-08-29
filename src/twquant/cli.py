@@ -2073,6 +2073,87 @@ def ml_score(
     )
 
 
+@ml_app.command("eval")
+def ml_eval(
+    model: str = typer.Option(..., help="模型目錄（含 meta.json 與 oos_scores.parquet）"),
+    buckets: int = typer.Option(10, help="分位數（SPEC-010 §7 第 2 級）"),
+) -> None:
+    """評估階梯第 1-2 級：模型 OOS 分數 vs 等權基準組合（SPEC-010 §7、AC-9）。
+
+    基準＝`zscore_weighted` 等權（direction 帶符號），刻意不調參——基準若也可調，
+    「打贏基準」就失去意義。兩者用同一批 (date, stock_id) 與同一批標籤，對照才成立。
+    """
+    import json
+
+    import polars as pl
+
+    import twquant.factors.builtins  # noqa: F401  # 副作用：註冊全因子（取 direction）
+    from twquant.data.serving import store
+    from twquant.data.serving.ml_store import read_factor_long
+    from twquant.factors import registry
+    from twquant.ml import evaluate as ev
+    from twquant.reporting.research_log import append_research_log
+    from twquant.strategy.combine import zscore_weighted
+
+    cfg = _load_ml()
+    mdir = Path(model)
+    meta = json.loads((mdir / "meta.json").read_text(encoding="utf-8"))
+    oos = pl.read_parquet(mdir / "oos_scores.parquet")
+    features = [str(f) for f in meta["features"]]
+    lo = cast("dt.date", oos["date"].min())
+    hi = cast("dt.date", oos["date"].max())
+    typer.echo(f"模型 {meta['model_id']}｜OOS {lo} ~ {hi}｜{oos.height} 筆、{len(features)} 特徵")
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        long = read_factor_long(conn, scfg.pg_schema, features, lo, hi)
+    finally:
+        conn.close()
+    weights = ev.equal_weight_signed({f: registry.get(f).direction for f in features})
+    base = zscore_weighted(long, weights).rename({"score": "base_score"})
+    # inner join：兩者必須在完全相同的 (date, stock) 上比較，否則宇宙差異冒充成績差異
+    both = oos.join(base, on=["date", "stock_id"], how="inner")
+    typer.echo(f"共同樣本 {both.height} 筆（模型 {oos.height}、基準 {base.height}）")
+
+    rows = []
+    for name, col in (("ML（LightGBM）", "score"), ("基準（等權 zscore）", "base_score")):
+        ic = ev.daily_rank_ic(both, col, "label")
+        s = ev.ic_summary(ic, nw_lag=cfg.horizon_days)
+        tbl = ev.decile_table(both, col, "label", k=buckets)
+        rows.append((name, s, ev.spread(tbl), ev.is_monotonic(tbl)))
+        typer.echo(
+            f"\n{name}\n  RankIC {s.mean:+.4f}｜IR {s.ir:.3f}｜勝率 {s.hit_rate:.1%}"
+            f"｜t(NW,{cfg.horizon_days}) {s.t_newey_west:.2f}（樸素 {s.t_naive:.2f}）"
+            f"\n  分位頭尾 {ev.spread(tbl):+.4f}｜嚴格單調 {'是' if ev.is_monotonic(tbl) else '否'}"
+        )
+    (_, ml_s, ml_sp, _), (_, bs_s, bs_sp, _) = rows
+    lift = ml_s.mean - bs_s.mean
+    verdict = "ML 勝出" if lift > 0 else "ML 未勝出"
+    typer.secho(
+        f"\n=== 階梯第 1 級：{verdict}｜RankIC 差 {lift:+.4f}"
+        f"（ML {ml_s.mean:+.4f} vs 基準 {bs_s.mean:+.4f}）、分位頭尾差 {ml_sp - bs_sp:+.4f} ===",
+        fg=typer.colors.GREEN if lift > 0 else typer.colors.RED,
+        bold=True,
+    )
+    append_research_log(
+        _load_system().data_dir,
+        [
+            {
+                "entry_type": "ml_eval",
+                "strategy": meta["model_id"],
+                "factor": f,
+                "params_hash": str(meta.get("config_hash", "")),
+                "date": str(hi),
+                "metric_name": "oos_rank_ic",
+                "metric_value": v,
+                "trial_scope": f"ml:h{cfg.horizon_days}",
+            }
+            for f, v in (("ml", ml_s.mean), ("baseline_equal_zscore", bs_s.mean))
+        ],
+    )
+
+
 def pl_config() -> pl.Config:
     import polars as pl
 
