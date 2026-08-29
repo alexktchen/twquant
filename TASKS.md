@@ -102,6 +102,19 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-069 階梯第 1-2 級（部分）**（2026-08-29）ML vs 基準對照＋決定性實測。
+  `ml/evaluate.py`（daily_rank_ic / ic_summary 含 Newey-West / decile_table /
+  equal_weight_signed，12 測試）＋ CLI `ml eval --model`。**實測（同 43.9 萬筆、
+  同標籤、inner join 同宇宙）**：ML RankIC +0.0814（IR 0.974、勝率 87.6%、
+  NW t 6.76、分位嚴格單調、頭尾 +0.086）vs 全因子等權基準 −0.0182（IR −0.167、
+  勝率 41.2%、NW t −1.09、不單調、頭尾 −0.021）→ 差 +0.0997。
+  **決定性（AC-4）真實資料實測通過**：獨立重跑重現同一 model_id 與 IC 至小數
+  第 10 位。⚠ **但基準太弱**：全因子等權正是 D-020 已裁決「無預測力」的
+  composite，打贏它不足以宣稱增值——**須補 D-020 實證有效子集**
+  （reversal_5d / residual_reversal_5d / revenue_yoy 等權，即 serving.yaml
+  composite_factors）**為第二基準，判定取最強基準**，才算第 1 級真正通過。
+  第 3-4 級（成本後回測、DSR）未動。視覺化見 artifact「首訓成績單」。
+
 - **T-067 首訓實測**（2026-08-29）`ml train` 首次真實資料訓練成功（GHA run #5，Drive
   base dump 還原 → walk-forward）。模型 lgbm_h10_20260112_2f5a21a9：訓練 2023-01-03~
   2026-07-29、25 特徵、4 窗、train_end 2026-01-12（金庫期未動）。**樣本外實測**：
