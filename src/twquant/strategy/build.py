@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from twquant.errors import DataError
 from twquant.strategy.combine import combined_score
 from twquant.strategy.overlays import get_overlay
 from twquant.strategy.universe import universe_ids
@@ -66,7 +67,18 @@ def build_targets(cfg: StrategyConfig, wh: TableSource, signal_date: dt.date) ->
     view = wh.view(signal_date)
     uni = universe_ids(view, signal_date, cfg.universe)
     if not uni:
-        return _empty()
+        # D-037/黃金規則 5：宇宙全空是資料或配置問題，不是「空手日」。靜默回空表會讓
+        # 回測輸出 0 成交/0 報酬卻 exit 0，還把無效試驗寫進 research_log 污染 DSR trials。
+        u = cfg.universe
+        raise DataError(
+            "prices_daily",
+            signal_date,
+            f"策略「{cfg.name}」宇宙過濾後為 0 檔——期望 ≥1 檔。"
+            f"檢查該訊號日行情是否缺漏，或濾網是否過嚴："
+            f"min_adv_twd={u.min_adv_twd}、min_price={u.min_price}、"
+            f"max_jump_ratio={u.max_jump_ratio}、max_gap_sessions={u.max_gap_sessions}、"
+            f"hygiene_lookback={u.hygiene_lookback}",
+        )
 
     names = [s.factor for s in cfg.signals]
     fdf = compute(names, view, dates=[signal_date]).filter(pl.col("stock_id").is_in(uni))
