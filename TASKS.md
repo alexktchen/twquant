@@ -74,11 +74,11 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-061 | 【雲端 Phase 2】回測端點雲端化（依 D-031 裁決）：暫按選項 A——區間超出窗口回 400 + 前端提示文案；`/api/backtest` 在 serverless 時限內完成（超時則預先縮範圍或降級） | D-031 | T-059 | B | blocked（D-031） |
 | T-062 | 【雲端 Phase 3】切換與本機退場：驗收清單（T-058 對帳綠、Vercel 端點全通、歸檔鏈連續無斷日、Supabase 保活 job 就位含長假情境）→ 停本機 compose；本機 Docker volume 與 dump 保留 ≥1 個月；memory/文件同步（deploy 佈局說明改雲端版） | D-030 | T-058, T-060, T-061 | B | todo |
 | T-064 | 前端個股因子頁重新設計：元件抽出 `frontend/src/stock/`（T-034 遺留）＋跨頁共用層（theme/fallback/hooks/ui/charts）＋mobile-first 響應式（手機頂欄、橫捲 chip 列、響應式圖高、ZBars）＋終端風精煉（TPanel/方角 chip） | PRD-001 §3 | T-034 | — | done |
-| T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | in_progress |
+| T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | done |
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
-| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | todo |
+| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-3 級通過；第 3 級保留：周轉 1820%＋smoke 0 成交待查。DSR/金庫期未做） |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
@@ -101,6 +101,94 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-069 第 3 級的回測資料修剪：正確性分析**（2026-08-29，供後續接手）
+  為繞過 `universe_ids` 逐訊號日全表重算的效能問題，回測前把 PG `prices_daily`
+  修剪到「回測起日 −120 曆日」。逐一追過依賴後確認**不影響回測準確度**：
+  - `ml.lgbm_rank_10d`（受測策略唯一訊號）`lookback_days=0`、只讀 ml_scores，不碰 prices。
+  - `fundamental.revenue_yoy` 雖宣告 `lookback_days=430`，但 YoY 值直接取自
+    `monthly_revenue.yoy`（該表未修剪），price spine 僅決定輸出日期集合 → 不受影響。
+  - 硬約束是 `universe_ids` 的衛生濾網 60 個交易日（＋20 日 ADV）。實測 120 曆日窗
+    （2024-10-08~2025-02-05）＝ 87 平日 − 國慶/元旦/農曆年 ≈ **78 個交易日**，
+    邊際 18 天；rolling_median(20) 與 shift(60) 的取值皆落在保留範圍內，
+    結果與完整表相同。
+  ⚠ **脆弱之處**：以曆日換算交易日是不穩的假設，遇長年假或補班會使邊際趨近 60。
+  若日後重用此修剪手法，應改為交易日精確定界：
+  `SELECT min(date) FROM (SELECT DISTINCT date FROM serving.prices_daily
+   WHERE date < :bt_from ORDER BY date DESC LIMIT 90) t`。
+  根治仍是讓 `universe_ids` 只取 `signal_date − 回看窗` 的切片（所有 PG 回測共通，另立任務）。
+
+- **T-069 階梯第 1-2 級（部分）**（2026-08-29）ML vs 基準對照＋決定性實測。
+  `ml/evaluate.py`（daily_rank_ic / ic_summary 含 Newey-West / decile_table /
+  equal_weight_signed，12 測試）＋ CLI `ml eval --model`。**實測（同 43.9 萬筆、
+  同標籤、inner join 同宇宙）**：ML RankIC +0.0814（IR 0.974、勝率 87.6%、
+  NW t 6.76、分位嚴格單調、頭尾 +0.086）vs 全因子等權基準 −0.0182（IR −0.167、
+  勝率 41.2%、NW t −1.09、不單調、頭尾 −0.021）→ 差 +0.0997。
+  **決定性（AC-4）真實資料實測通過**：獨立重跑重現同一 model_id 與 IC 至小數
+  第 10 位。⚠ **但基準太弱**：全因子等權正是 D-020 已裁決「無預測力」的
+  composite，打贏它不足以宣稱增值——**須補 D-020 實證有效子集**
+  （reversal_5d / residual_reversal_5d / revenue_yoy 等權，即 serving.yaml
+  composite_factors）**為第二基準，判定取最強基準**，才算第 1 級真正通過。
+  第 3-4 級（成本後回測、DSR）未動。視覺化見 artifact「首訓成績單」。
+
+- **T-069 階梯第 1 級通過**（2026-08-29）補上 D-020 有效子集為第二基準後重跑。
+  三方對照（43.8 萬筆共同樣本、同標籤、inner join 同宇宙）：
+  | | RankIC | IR | 勝率 | NW t | 分位頭尾 | 嚴格單調 |
+  |---|---|---|---|---|---|---|
+  | ML（LightGBM） | +0.0815 | 0.975 | 87.6% | 6.76 | +0.0860 | 是 |
+  | 基準A 全因子等權 | −0.0183 | −0.168 | 41.2% | −1.09 | −0.0209 | 否 |
+  | 基準B D-020 有效子集 | +0.0369 | 0.375 | 70.0% | 3.15 | +0.0380 | 否 |
+  判定對最強基準（B）：**ML 勝出，RankIC 差 +0.0446（2.2 倍）、分位頭尾差 +0.0481**。
+  基準B 本身確實有效（t 3.15 顯著）——D-020 篩選正確，ML 是在有訊號的對手上勝出，
+  且僅 ML 分位嚴格單調。**第 1、2 級通過**；第 3 級（成本後回測，需以
+  `ml.lgbm_rank_10d` 建策略 YAML 接回測引擎，重點看換手率與成本後淨值）與
+  第 4 級（DSR，trials 取 research_log）未動，仍不得部署。
+
+- **T-069 階梯第 3 級：成本後回測（通過，但保留）**（2026-08-29）受測策略
+  `configs/strategies/ml_rank.yaml`——刻意「純」：唯一訊號 `ml.lgbm_rank_10d`
+  權重 1.0、top_n 20、週頻 MON 換股、next_open 成交、單檔上限 5%。分數來源是
+  walk-forward 的**樣本外**分數（`ml backfill-scores` 寫入 ml_scores）——用最終
+  模型回頭對全期推論會是前視。對照組 `reversal_revenue.yaml`，同期間同成本。
+  區間 2025-02-05~2026-01-12（233 個交易日，＝ ml_scores 樣本外範圍）：
+  | | CAGR | Sharpe | Sortino | Calmar | MDD | 年化單邊周轉 | 成交筆數 |
+  |---|---|---|---|---|---|---|---|
+  | ML（ml_rank） | **+23.71%** | **+1.27** | +1.45 | +1.34 | −17.68% | **1820%** | 814 |
+  | 對照（reversal_revenue） | −8.90% | −0.42 | — | — | — | 2659% | — |
+  **成本後仍為正、且大幅勝過對照**——第 1、2 級的 IC 優勢確實穿透了交易成本
+  （含 0.3% 證交稅），不是紙上訊號。
+  ⚠ **保留而非無條件通過，兩點**：
+  （1）**年化單邊周轉 1,820%**＝每年換手約 18 次、平均持有約 13 個交易日
+  （與 10 日標籤視窗一致，屬結構性而非設定失誤）。成本已扣仍賺，但這使淨值對
+  費率假設極度敏感——費率若上修，優勢會等比例被吃掉。降周轉的手段（分數 EMA
+  平滑、buffer-zone 換股）**都要另行驗證並計入 DSR 的 trials 預算**，不得事後挑
+  最好看的參數。
+  （2）**一個月 smoke 回測產出 0 成交／0 周轉／0 報酬，全期卻有 814 筆成交**——
+  尚未查明。不推翻全期結果（全期本身自洽），但在部署前必須解釋清楚，列為 T-069
+  的未結項。
+  第 4 級（DSR，trials 取 research_log）與第 5 級（金庫期最終評估）未動，
+  **仍不得部署**。視覺化見 artifact「首訓成績單」的「成本後回測」面板。
+
+- **T-067 首訓實測**（2026-08-29）`ml train` 首次真實資料訓練成功（GHA run #5，Drive
+  base dump 還原 → walk-forward）。模型 lgbm_h10_20260112_2f5a21a9：訓練 2023-01-03~
+  2026-07-29、25 特徵、4 窗、train_end 2026-01-12（金庫期未動）。**樣本外實測**：
+  RankIC +0.0814（233 日、每日約 1,882 檔、43.9 萬筆）、逐日勝率 87.6%、月勝率 12/12、
+  逐窗 IC 全正（+0.118/+0.055/+0.090/+0.054）、十分位嚴格單調（頭尾 +0.086）。
+  誠實標註：樸素 t=14.87 但 10 日標籤重疊（lag1 自相關 0.72），**Newey-West t=6.76**
+  為準。**尚未對照 zscore_weighted 基準**（階梯第 1 級未完整通過），成本後回測與
+  DSR 未做——不得據此宣稱模型有效。五次重跑的教訓依序為：整表拉 2,300 萬列 OOM →
+  逐因子 server 端過濾；標籤宇宙含權證 → 四碼過濾；factor_values 歷史洞 → 逐月密度
+  判定；判洞閾值誤殺春節月 → 閾值改 <10。視覺化報告見 artifact「首訓成績單」。
+
+- **T-065**（2026-08-29）資料深度審計（SPEC-010 §2 回填）。方法：一次性 GHA workflow
+  ——Drive base dump（twquant-full-20260729，1.4 GB）還原拋棄式 PG（免索引、排除可
+  重算表）→ scripts/audit_data_depth.py 盤點 → 報告 artifact。發現：訓練期定案
+  2020~今 6.5 年（prices 1,592 交易日；train_min_years=2.0 維持）；特徵覆蓋分層
+  （價量/營收 6.5 年全覆蓋、法人系 2024~2025 起、富邦分點系僅 2026 起——raw
+  broker_trades 有 2022 起 4.5 年，物化未回跑，歷史 chip 回補另立任務）；
+  stock_meta 無已下市股票（生存者偏誤——訓練宇宙改以 as-of 行情+流動性建構，
+  不依賴主檔）；Drive 歸檔鏈完整（base 1 + daily 29 日無缺）。首跑磁碟爆滿
+  （broker_trades 55M 列建 PK）→ 清預裝包＋--section 免索引修復。審計 workflow
+  用畢已刪；腳本留 scripts/ 供再用。
 
 - **T-068**（2026-08-29）ml_scores 資料合約＋薄因子（SPEC-010 §5/§6）。schemas.ML_SCORES
   （pandera，17 表普查同步）＋serving DDL（PK (model_id, stock_id, date)）＋

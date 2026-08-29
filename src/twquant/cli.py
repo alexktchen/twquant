@@ -11,7 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
 
@@ -1916,28 +1916,13 @@ def _ml_features_resolved(cfg: MlConfig) -> list[str]:
 
 
 def _ml_feature_frames(
-    source: object, features: list[str], start: dt.date, end: dt.date
+    conn: object, schema: str, features: list[str], start: dt.date, end: dt.date
 ) -> dict[str, pl.DataFrame]:
-    """factor_values.z 切片 → {因子: (date, stock_id, value)}。
+    """factor_values.z 切片 → {因子: (date, stock_id, value)}（逐因子 server 端過濾，
+    見 ml_store.read_factor_frames 的 OOM 教訓）。"""
+    from twquant.data.serving.ml_store import read_factor_frames
 
-    無資料的因子給空表——組裝後整欄 null（缺值語意由 assemble 保留，禁填 0）。
-    """
-    import polars as pl
-
-    from twquant.data.serving.pg_view import PgTableSource
-
-    assert isinstance(source, PgTableSource)
-    fv = (
-        source.scan("factor_values")
-        .filter(pl.col("date").is_between(start, end) & pl.col("factor").is_in(features))
-        .select("factor", "date", "stock_id", pl.col("z").alias("value"))
-        .collect()
-    )
-    empty = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "value": pl.Float64})
-    parts = {
-        str(k[0]): v.drop("factor") for k, v in fv.partition_by("factor", as_dict=True).items()
-    }
-    return {name: parts.get(name, empty) for name in features}
+    return read_factor_frames(conn, schema, features, start, end)
 
 
 @ml_app.command("train")
@@ -1956,7 +1941,7 @@ def ml_train(
 
     from twquant.config import config_hash
     from twquant.data.serving import store
-    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.data.serving.ml_store import read_prices_open
     from twquant.ml import train as mlt
     from twquant.ml.dataset import assemble, excess_rank_labels, forward_open_returns
     from twquant.ml.splits import walk_forward_splits
@@ -1967,19 +1952,22 @@ def ml_train(
     scfg = _load_serving()
     conn = store.connect(scfg)
     try:
-        source = PgTableSource(conn, scfg.pg_schema)
         features = _ml_features_resolved(cfg)
-        feats = _ml_feature_frames(source, features, start, end)
-        px = (
-            source.scan("prices_daily")
-            .filter(pl.col("date").is_between(start, end))
-            .select("date", "stock_id", "open")
-            .collect()
-        )
+        feats = _ml_feature_frames(conn, scfg.pg_schema, features, start, end)
+        px = read_prices_open(conn, scfg.pg_schema, start, end)
     finally:
         conn.close()
+    # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
+    # 數萬檔權證/ETF，混入會稀釋橫斷面排名的意義
+    px = px.filter(pl.col("stock_id").str.contains(scfg.cloud.stock_pattern))
+    px_lo, px_hi = (
+        cast("dt.date | None", px["date"].min()),
+        cast("dt.date | None", px["date"].max()),
+    )
+    typer.echo(f"prices {px.height} 列（{px_lo} ~ {px_hi}）")
     labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
     frame = assemble(feats, labels)
+    labeled = frame.filter(pl.col("label").is_not_null())
     days: list[dt.date] = sorted(px["date"].unique().to_list())
     splits = walk_forward_splits(
         days,
@@ -1989,9 +1977,12 @@ def ml_train(
         vault_days=cfg.split.vault_days,
     )
     typer.echo(
-        f"資料 {len(days)} 交易日、{len(features)} 特徵、{frame.height} 列、{len(splits)} 窗"
+        f"資料 {len(days)} 交易日、{len(features)} 特徵、{frame.height} 列"
+        f"（label 非 null {labeled.height} 列，{cast('dt.date | None', labeled['date'].min())}"
+        f" ~ {cast('dt.date | None', labeled['date'].max())}）、"
+        f"{len(splits)} 窗"
     )
-    result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm)
+    result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm, progress=typer.echo)
     ic = mlt.oos_rank_ic(result.oos_scores)
     train_end = days[-cfg.split.vault_days - 1] if cfg.split.vault_days else days[-1]
     deploy = mlt.fit_ranker(frame.filter(pl.col("date") <= train_end), features, cfg.lgbm)
@@ -2033,7 +2024,6 @@ def ml_score(
 
     from twquant.conventions import now_tw
     from twquant.data.serving import store
-    from twquant.data.serving.pg_view import PgTableSource
     from twquant.ml import score as mls
     from twquant.ml import train as mlt
     from twquant.ml.dataset import assemble, cross_rank_pct
@@ -2050,7 +2040,7 @@ def ml_score(
     scfg = _load_serving()
     conn = store.connect(scfg)
     try:
-        feats = _ml_feature_frames(PgTableSource(conn, scfg.pg_schema), features, day, day)
+        feats = _ml_feature_frames(conn, scfg.pg_schema, features, day, day)
         no_labels = pl.DataFrame(
             schema={"date": pl.Date, "stock_id": pl.String, "label": pl.Float64}
         )
@@ -2080,6 +2070,151 @@ def ml_score(
     typer.secho(
         f"[OK] {day}：{scored.height} 檔 → {out_path}（模型 {mdir.name}）{pg_note}",
         fg=typer.colors.GREEN,
+    )
+
+
+@ml_app.command("backfill-scores")
+def ml_backfill_scores(
+    model: str = typer.Option(..., help="模型目錄（讀其 oos_scores.parquet）"),
+) -> None:
+    """把 walk-forward 的**樣本外**分數寫進 ml_scores，供回測（SPEC-010 §7 第 3 級）。
+
+    回測必須用「該日當時可用的模型」算的分數——`oos_scores.parquet` 正是各窗以
+    ≤train_end 資料訓練、對其後測試段推論的結果，天然滿足此條件；用最終模型回頭
+    對全期推論則是前視。available_at 設為該交易日 19:00（盤後推論可得），使
+    `PitView`（20:00 截點）在訊號日當天即看得到。
+
+    註：各列實際來自不同窗的模型，統一標記為部署模型的 model_id（薄因子以前綴取用）。
+    研究軌專用；生產分數由 `ml score` 逐日寫入。
+    """
+    import json
+
+    import polars as pl
+
+    from twquant.conventions import TZ
+    from twquant.data.serving import store
+    from twquant.data.serving.ml_store import upsert_ml_scores
+    from twquant.data.serving.schema import ensure_schema
+    from twquant.ml.dataset import cross_rank_pct
+
+    mdir = Path(model)
+    meta = json.loads((mdir / "meta.json").read_text(encoding="utf-8"))
+    oos = pl.read_parquet(mdir / "oos_scores.parquet")
+    scored = cross_rank_pct(oos, "score", "rank_pct").with_columns(
+        pl.lit(str(meta["model_id"])).alias("model_id"),
+        pl.col("date")
+        .cast(pl.Datetime("us"))
+        .dt.offset_by("19h")
+        .dt.replace_time_zone(str(TZ))
+        .alias("available_at"),
+    )
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        ensure_schema(conn, scfg.pg_schema)
+        n = upsert_ml_scores(conn, scfg.pg_schema, scored)
+    finally:
+        conn.close()
+    d0 = cast("dt.date", scored["date"].min())
+    d1 = cast("dt.date", scored["date"].max())
+    typer.secho(
+        f"[OK] ml_scores +{n} 列（{d0} ~ {d1}、"
+        f"{scored['stock_id'].n_unique()} 檔、model {meta['model_id']}）",
+        fg=typer.colors.GREEN,
+    )
+
+
+@ml_app.command("eval")
+def ml_eval(
+    model: str = typer.Option(..., help="模型目錄（含 meta.json 與 oos_scores.parquet）"),
+    buckets: int = typer.Option(10, help="分位數（SPEC-010 §7 第 2 級）"),
+) -> None:
+    """評估階梯第 1-2 級：模型 OOS 分數 vs 等權基準組合（SPEC-010 §7、AC-9）。
+
+    基準＝`zscore_weighted` 等權（direction 帶符號），刻意不調參——基準若也可調，
+    「打贏基準」就失去意義。兩者用同一批 (date, stock_id) 與同一批標籤，對照才成立。
+    """
+    import json
+
+    import polars as pl
+
+    import twquant.factors.builtins  # noqa: F401  # 副作用：註冊全因子（取 direction）
+    from twquant.data.serving import store
+    from twquant.data.serving.ml_store import read_factor_long
+    from twquant.factors import registry
+    from twquant.ml import evaluate as ev
+    from twquant.reporting.research_log import append_research_log
+    from twquant.strategy.combine import zscore_weighted
+
+    cfg = _load_ml()
+    mdir = Path(model)
+    meta = json.loads((mdir / "meta.json").read_text(encoding="utf-8"))
+    oos = pl.read_parquet(mdir / "oos_scores.parquet")
+    features = [str(f) for f in meta["features"]]
+    lo = cast("dt.date", oos["date"].min())
+    hi = cast("dt.date", oos["date"].max())
+    typer.echo(f"模型 {meta['model_id']}｜OOS {lo} ~ {hi}｜{oos.height} 筆、{len(features)} 特徵")
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        long = read_factor_long(conn, scfg.pg_schema, features, lo, hi)
+    finally:
+        conn.close()
+    # 兩組基準：全因子等權，以及 D-020 裁決的實證有效子集等權。前者是 D-020 已證實
+    # 無預測力的 composite，只打贏它不足以宣稱增值；後者才是真正該跨過的門檻。
+    subset = [f for f in scfg.composite_factors if f in features]
+    specs = [("base_all", "基準A 全因子等權", features)]
+    if subset:
+        specs.append(("base_d020", "基準B D-020 有效子集", subset))
+    both = oos
+    for col, _, feats in specs:
+        w = ev.equal_weight_signed({f: registry.get(f).direction for f in feats})
+        b = zscore_weighted(long.filter(pl.col("factor").is_in(feats)), w).rename({"score": col})
+        # inner join：三者必須在完全相同的 (date, stock) 上比較，否則宇宙差異冒充成績差異
+        both = both.join(b, on=["date", "stock_id"], how="inner")
+    typer.echo(
+        f"共同樣本 {both.height} 筆｜基準A 全因子等權 {len(features)} 個"
+        + (f"；基準B D-020 有效子集 {len(subset)} 個（{', '.join(subset)}）" if subset else "")
+    )
+
+    rows: list[tuple[str, str, ev.IcSummary, float, bool]] = []
+    for col, name in [("score", "ML（LightGBM）")] + [(c, n) for c, n, _ in specs]:
+        ic = ev.daily_rank_ic(both, col, "label")
+        s = ev.ic_summary(ic, nw_lag=cfg.horizon_days)
+        tbl = ev.decile_table(both, col, "label", k=buckets)
+        rows.append((col, name, s, ev.spread(tbl), ev.is_monotonic(tbl)))
+        typer.echo(
+            f"\n{name}\n  RankIC {s.mean:+.4f}｜IR {s.ir:.3f}｜勝率 {s.hit_rate:.1%}"
+            f"｜t(NW,{cfg.horizon_days}) {s.t_newey_west:.2f}（樸素 {s.t_naive:.2f}）"
+            f"\n  分位頭尾 {ev.spread(tbl):+.4f}｜嚴格單調 {'是' if ev.is_monotonic(tbl) else '否'}"
+        )
+    ml = rows[0]
+    # 判定對「最強基準」（IC 最高者）——打贏最弱的那個不算數，避免挑軟柿子宣布勝利
+    tough = max(rows[1:], key=lambda r: r[2].mean)
+    lift = ml[2].mean - tough[2].mean
+    verdict = "ML 勝出" if lift > 0 else "ML 未勝出"
+    typer.secho(
+        f"\n=== 階梯第 1 級：{verdict}（對最強基準「{tough[1]}」）｜RankIC 差 {lift:+.4f}"
+        f"（ML {ml[2].mean:+.4f} vs {tough[2].mean:+.4f}）、分位頭尾差 {ml[3] - tough[3]:+.4f} ===",
+        fg=typer.colors.GREEN if lift > 0 else typer.colors.RED,
+        bold=True,
+    )
+    append_research_log(
+        _load_system().data_dir,
+        [
+            {
+                "entry_type": "ml_eval",
+                "strategy": meta["model_id"],
+                "factor": "ml" if col == "score" else col,
+                "params_hash": str(meta.get("config_hash", "")),
+                "date": str(hi),
+                "metric_name": "oos_rank_ic",
+                "metric_value": s.mean,
+                "trial_scope": f"ml:h{cfg.horizon_days}",
+            }
+            for col, _, s, _, _ in rows
+        ],
     )
 
 

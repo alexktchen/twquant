@@ -1,0 +1,29 @@
+# T-069 階梯第 3 級的受測策略：純 ML 排序（SPEC-010 §7）。
+# 刻意「純」——只掛 ml.lgbm_rank_10d 一個訊號、不混既有因子、不加 overlay，
+# 這樣成本後的淨值差異可完全歸因於 ML 分數本身，而非組合設計。
+# 換手率是本級的觀察重點：ML 分數逐日重算、波動高於線性組合，來回成本
+# （含 0.3% 證交稅）可能吃掉 IC 優勢；若真如此，解法是分數平滑或 buffer-zone
+# 換股規則——但那些參數需另行驗證並計入 DSR trials，不得在此偷改。
+name: ml_rank
+description: 純 ML 橫斷面排序（T-069 第 3 級受測；未經部署裁決，勿用於實盤）
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000 # 同既有策略的流動性門檻，確保成本假設可比
+  min_price: 10.0
+
+signals:
+  - factor: ml.lgbm_rank_10d # direction=1：rank_pct 越高越看多
+    weight: 1.0
+
+combine: zscore_weighted
+selection:
+  method: top_n
+  top_n: 20 # 同 Sleeve C 規格，便於與既有策略對照
+weighting: equal
+rebalance:
+  schedule: weekly # 標籤視窗 10 交易日 ≈ 兩週；週頻再平衡為其上界
+  day: MON
+  execution: next_open # 與訓練標籤的 open-to-open 定義一致
+overlays: []
+max_weight_per_stock: 0.05

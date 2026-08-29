@@ -21,6 +21,18 @@ CLAUDE.md 黃金規則。
   同 config 同輸入重跑，模型預測輸出 bit-identical（黃金規則冪等性質）。
 - 訓練資料源＝本機完整資料湖（或 Drive 歸檔還原）。雲端 Supabase 滾動窗口
   **只供每日推論**，禁止當訓練源（窗口不足，D-030/T-055）。
+- **執行環境分工（2026-08-29 使用者裁決，實作必須遵守）**：
+  | 軌 | 工作 | 執行環境 | 理由 |
+  |---|---|---|---|
+  | 研究軌 | `ml train`／`ml eval`／`ml backfill-scores`／`backtest` | **本機** | 一次性重運算、需完整歷史（PG 15 GB / prices 907 萬列）、無時限、可互動除錯 |
+  | 生產軌 | `ml score`（每日推論，秒級） | 雲端 GHA | 需每日固定觸發、不該綁本機開機 |
+  D-030 把**常駐排程**搬上雲，不等於研究軌也要上雲——研究軌從來不需要常駐。
+  實測教訓（T-069 第 3 級，2026-08-29）：在 GHA 跑回測三次皆敗，兩次為環境限制
+  （runner 記憶體被砍、容器 `/dev/shm` 僅 64 MB 使 VACUUM 失敗），一次為繞過限制
+  而引入的修剪步驟；且每次實驗前固定付出「下載 1.4 GB dump + 還原」約 10 分鐘。
+  本機完全沒有這些問題，亦不需要為記憶體而修剪 `prices_daily`（該修剪雖經驗證
+  正確，但保留窗僅餘 18 個交易日邊際，見 TASKS）。研究軌一次性 GHA workflow
+  一律視為權宜，不得沉澱為常態路徑。
 - 缺值保留 null（LightGBM 原生處理），**禁止填 0**（黃金規則 5）。
 
 ## 1. `configs/ml.yaml`（權威欄位清單，pydantic `MlConfig`，`extra="forbid"`）
@@ -55,8 +67,31 @@ CLAUDE.md 黃金規則。
 - **標籤**：`open(t+1) → open(t+1+h)` 報酬 − 同日宇宙均值 → 當日橫斷面百分位。
   標籤計算只存在於訓練組裝路徑（研究軌）；推論路徑（`score`）禁止 import 標籤模組。
 - **宇宙**：as-of 當日濾網，與策略層同套；訓練/評估/回測三處宇宙一致。
-- 訓練可用期間：由 T-065 資料深度審計定案後回填本節
-  （含生存者偏誤檢查：`stock_meta` 是否保留已下市股票）。
+- **訓練可用期間（T-065 審計＋首訓逐月密度實測定案，2026-08-29）**：
+  標籤（prices_daily）覆蓋 `2020-01 ~ 今` 6.5 年無虞；但特徵倉（factor_values）
+  **連續可用段為 `2023-01 ~ 今` 約 3.5 年**——2020-05~2020-12、2021-03~2022-12
+  整段缺失（2020-21 僅零星月、~330 檔/日小宇宙），逐因子 min/max 會掩蓋洞，
+  判洞須看逐月資料日數（注意春節月正常僅 12~13 交易日，洞閾值 <10 日）。
+  故現況訓練區間＝`2023-01 ~ 今`；`train_min_years: 2.0` 仍可行（3.5 年 >
+  首窗 2 年＋embargo＋金庫期），**定案**。補洞（`serving materialize` 回跑
+  2020~2022）後訓練期可擴至 6.5 年——與歷史 chip 回補併同另立任務。
+  特徵覆蓋分層（factor_values 實測，缺值留 null 由 LightGBM 原生處理）：
+  - 6.5 年全覆蓋：價量核心（mom/reversal/vol/turnover/overnight/intraday）、
+    fundamental.revenue_yoy/accel、volume.*
+  - 2023-09 起：price.high_52w；2024-01 起：chip.foreign_streak/trust_streak；
+    2025-07 起：chip.foreign_net/trust_net/inst_net_10d
+  - 2026-01 起：富邦分點系（concentration/main_force/broker_count/stability/
+    main_cost）——raw `broker_trades` 有 2022-01 起 4.5 年完整明細，是**物化未回跑**；
+    歷史 chip 因子回補（`serving materialize` 過 2022~2025）另立任務，Phase 2 前做
+  - 型態因子：2026-07 起（事件稀疏，本就非主力特徵）
+- **生存者偏誤（審計實測）**：`stock_meta` 2,010 檔、`delist_date` 全空——主檔
+  **只有現存股票**。緩解：prices_daily 逐年檔數含當年有交易的全部代號（後來下市者
+  的行情仍在），訓練/評估宇宙一律以「as-of 當日有行情＋流動性門檻」建構，
+  不依賴 stock_meta 判在市；產業/市值情境特徵對已下市股票缺值＝null。
+- 其他資料事實（審計）：institutional_daily/margin_daily 原始表僅 2025 起較完整
+  （200/173 日）——法人/融資券「原始表」歷史殘缺，但對 ML 無礙（特徵走 factor_values）；
+  shareholding_dispersion 僅 2 日（Phase 2 用前須回補）；fubon_fetch_log 有未來日期
+  異常列（2026-11-11，帳本表、不入特徵，記錄備查）。
 
 ## 3. 切分器（`ml/splits.py`，純函數）
 

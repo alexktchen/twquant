@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,11 +20,13 @@ from twquant.conventions import now_tw
 from twquant.ml.splits import WalkSplit
 from twquant.reporting.research_log import append_research_log
 
-# 決定性旗標（SPEC-010 §0：同 config 同輸入 bit-identical）——非調參對象，故為常數非配置
+# 決定性旗標（SPEC-010 §0：同 config 同輸入 bit-identical）——非調參對象，故為常數非配置。
+# num_threads 固定 4：LightGBM 在 deterministic+force_row_wise 下同執行緒數即可重現；
+# 單執行緒對全史 walk-forward（百萬列 × 15+ 窗）慢到不可用，4 為固定值非調參。
 _DETERMINISM: dict[str, object] = {
     "deterministic": True,
     "force_row_wise": True,
-    "num_threads": 1,
+    "num_threads": 4,
     "verbosity": -1,
 }
 
@@ -90,11 +92,15 @@ def walk_forward_train(
     splits: Sequence[WalkSplit],
     feature_cols: Sequence[str],
     lgbm: MlLgbmConfig,
+    progress: Callable[[str], None] | None = None,
 ) -> MlTrainResult:
-    """逐窗：以 ≤ train_end 訓練 → 對 [test_start, test_end] 推論（樣本外）。"""
+    """逐窗：以 ≤ train_end 訓練 → 對 [test_start, test_end] 推論（樣本外）。
+
+    progress：每窗完成後回報一行（CLI 傳 typer.echo；長跑在 CI 上要看得到進度）。
+    """
     outs: list[pl.DataFrame] = []
     ics: list[float] = []
-    for s in splits:
+    for i, s in enumerate(splits, start=1):
         train = frame.filter(pl.col("date").is_between(s.train_start, s.train_end))
         test = frame.filter(pl.col("date").is_between(s.test_start, s.test_end))
         booster = fit_ranker(train, feature_cols, lgbm)
@@ -102,7 +108,18 @@ def walk_forward_train(
             test.select("date", "stock_id", "label"), on=["date", "stock_id"], how="left"
         )
         outs.append(scored)
-        ics.append(oos_rank_ic(scored))
+        try:
+            ics.append(oos_rank_ic(scored))
+        except ValueError as exc:
+            n_train = int(train["label"].is_not_null().sum())
+            n_test = int(test["label"].is_not_null().sum())
+            raise ValueError(
+                f"窗 {i}/{len(splits)}（train ≤ {s.train_end}、test {s.test_start}~{s.test_end}）："
+                f"train {train.height} 列（label 非 null {n_train}）、"
+                f"test {test.height} 列（label 非 null {n_test}）｜{exc}"
+            ) from exc
+        if progress is not None:
+            progress(f"  窗 {i}/{len(splits)} {s.test_start}~{s.test_end}：RankIC {ics[-1]:+.4f}")
     return MlTrainResult(oos_scores=pl.concat(outs).sort("date", "stock_id"), window_ics=ics)
 
 
