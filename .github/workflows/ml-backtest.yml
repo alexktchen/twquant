@@ -11,6 +11,11 @@
 # 排序＋rolling_median＋兩輪 cum_sum window，48 個訊號日重複 48 次。繞法：訓練完成後
 # 把 PG 的 prices 砍到「回測期間 + 120 日回看」（涵蓋 20 日 ADV 與 60 列衛生濾網），
 # 約 907 萬 → 60 萬列；並先跑 1 個月 smoke 確認鏈路，再跑全期。
+#
+# 重跑 #3：#2 死在新增的修剪步驟——VACUUM ANALYZE 需 64.0MB 共享記憶體，而 docker
+# postgres 的 /dev/shm 預設僅 64MB，剛好不足（"could not resize shared memory
+# segment ... No space left on device"；DELETE 本身已成功）。修：容器加
+# --shm-size=1g，且 VACUUM 失敗時退回單跑 ANALYZE（回收空間屬優化，統計才是必需）。
 name: ml-backtest
 
 on:
@@ -31,6 +36,7 @@ jobs:
           POSTGRES_DB: twquant
         ports: ["5432:5432"]
         options: >-
+          --shm-size=1g
           --health-cmd "pg_isready -U twquant"
           --health-interval 5s
           --health-timeout 5s
@@ -111,7 +117,9 @@ jobs:
         run: |
           psql "$TWQUANT_PG_DSN" -c "SELECT count(*) AS before_rows FROM serving.prices_daily"
           psql "$TWQUANT_PG_DSN" -c "DELETE FROM serving.prices_daily WHERE date < DATE '$BT_FROM' - INTERVAL '120 days'"
-          psql "$TWQUANT_PG_DSN" -c "VACUUM ANALYZE serving.prices_daily"
+          # VACUUM 回收空間屬優化，失敗不應擋住回測；ANALYZE 更新統計才是查詢計畫必需
+          psql "$TWQUANT_PG_DSN" -c "VACUUM ANALYZE serving.prices_daily" \
+            || psql "$TWQUANT_PG_DSN" -c "ANALYZE serving.prices_daily"
           psql "$TWQUANT_PG_DSN" -c "SELECT count(*) AS after_rows, min(date), max(date) FROM serving.prices_daily"
 
       - name: 回測 smoke（首月，先確認鏈路與速度）
