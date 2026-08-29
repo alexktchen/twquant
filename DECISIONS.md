@@ -102,6 +102,23 @@
 
 ## 已裁決
 
+### D-036（2026-08-29，已裁決）ML 方向：橫斷面 GBDT 排序 meta-factor（SPEC-010）
+
+- 問題：以 ML 分析預測台股，方法路線需定案——時序價格預測、端到端深度學習、
+  或橫斷面排序（以模型學習既有因子的非線性組合）。
+- 裁決（使用者，2026-08-29）：採**橫斷面排序**。LightGBM 學習因子庫非線性組合，
+  輸出落地 `ml_scores` 表（feature 層＋PG 鏡射窗口），經薄因子 `ml.*` 注入策略層；
+  訓練＝研究軌離線 CLI（本機完整湖／歸檔還原，Supabase 窗口禁作訓練源），
+  推論＝pipeline 步驟。明確不做：時序點預測、端到端 DL、RL、日內、LLM 直接產訊號。
+  評估基準＝既有 `zscore_weighted` 線性組合，樣本外打不贏即不部署。
+- 依據：研究報告「台股 ML 研究藍圖」（artifact，2026-08-29）——Gu–Kelly–Xiu (2020)
+  的方法比較、López de Prado 驗證協議（repo 已實作 walk_forward/deflated_sharpe）、
+  台股特有約束（漲跌停截斷、月營收 PIT、證交稅 0.3% 頻率下限）。
+- 影響範圍：新增 `docs/specs/SPEC-010-ml.md`、`src/twquant/ml/`（dataset/splits
+  純函數；train/score 邊界層）、`configs/ml.yaml`、`ml_scores` 資料合約、
+  TASKS T-065~T-070。黃金規則不鬆動：`factors/` 維持純函數、IO 靜態閘門不加例外；
+  部署（T-070）需 T-069 評估階梯全過後另行裁決。
+
 ### D-035（2026-07-29，已裁決）移除 DuckDB 降級路徑——PG 不可用即報錯，不假裝有資料
 - 背景：`ServingConfig.fallback_duckdb`（預設 true）讓 PG 不可達時改讀本機 parquet 資料湖。
   在 D-030 全雲端架構下這條路徑**在雲端根本不存在**（Vercel/GHA runner 無 `data/`），

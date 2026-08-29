@@ -145,6 +145,20 @@ MIRROR_SPECS: tuple[TableSpec, ...] = (
 
 FACTOR_SPECS: tuple[TableSpec, ...] = (
     TableSpec(
+        # ML 排序分數（SPEC-010 §5）：`ml score` 直寫；薄因子 ml.* 經 PitView 讀取
+        "ml_scores",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("model_id", "text"),
+            ("score", "double precision"),
+            ("rank_pct", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("model_id", "stock_id", "date"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
         "factor_values",
         (
             ("factor", "text"),

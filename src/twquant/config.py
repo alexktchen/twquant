@@ -10,9 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from twquant.errors import ConfigError
 
@@ -111,6 +112,82 @@ class ScreenerConfig(BaseConfig):
     yoy_min: float = 0.2  # 月營收 YoY 下限
     streak_days: int = 30  # 連續在池天數的回看窗
     pools: tuple[ScreenerPool, ...] = ()
+
+
+class MlLabelConfig(BaseConfig):
+    """標籤定義（SPEC-010 §1/§2）。目前各欄位僅一種合法值——寫成配置是為了讓
+    語意顯式可查、日後擴充不改介面；新增選項時在 dataset.py 分支。"""
+
+    execution: Literal["next_open"] = "next_open"
+    excess: Literal["market_mean"] = "market_mean"
+    transform: Literal["rank_pct"] = "rank_pct"
+
+
+class MlSplitConfig(BaseConfig):
+    """walk-forward 切分（SPEC-010 §3）。年/月 → 交易日的換算基數也是配置（無魔術數字）。"""
+
+    train_min_years: float = 2.0
+    test_months: int = 3
+    embargo_days: int = 10  # 須 ≥ horizon_days（MlConfig 驗證把關）
+    vault_months: int = 6  # 金庫期：最後 N 個月凍結，僅最終定案評估
+    days_per_year: int = 244  # 台股一年交易日近似（換算 train_min_years 用）
+    days_per_month: int = 21
+
+    @property
+    def train_min_days(self) -> int:
+        """首窗訓練交易日數。"""
+        return int(self.train_min_years * self.days_per_year)
+
+    @property
+    def test_days(self) -> int:
+        """每段測試期交易日數。"""
+        return self.test_months * self.days_per_month
+
+    @property
+    def vault_days(self) -> int:
+        """金庫期交易日數。"""
+        return self.vault_months * self.days_per_month
+
+
+class MlLgbmConfig(BaseConfig):
+    """LightGBM 參數（SPEC-010 §1：只暴露這幾個，其餘鎖庫預設＋決定性旗標）。"""
+
+    num_leaves: int = 31
+    learning_rate: float = 0.05
+    min_data_in_leaf: int = 100
+    feature_fraction: float = 0.8
+    n_estimators: int = 400
+    seed: int = 42
+
+
+class MlRefitConfig(BaseConfig):
+    """生產期重訓（SPEC-010 §4；T-070 接排程）。"""
+
+    schedule: Literal["monthly"] = "monthly"
+
+
+class MlConfig(BaseConfig):
+    """ml.yaml 的模型（SPEC-010 §1 為權威）。"""
+
+    horizon_days: int = 10
+    aux_horizons: tuple[int, ...] = (5, 20)
+    features: tuple[str, ...] = ()  # 空＝訓練時解析為全部註冊因子
+    context_features: tuple[str, ...] = ()
+    label: MlLabelConfig = MlLabelConfig()
+    split: MlSplitConfig = MlSplitConfig()
+    lgbm: MlLgbmConfig = MlLgbmConfig()
+    refit: MlRefitConfig = MlRefitConfig()
+    trials_log: str = "research_log"
+
+    @model_validator(mode="after")
+    def _embargo_covers_horizon(self) -> MlConfig:
+        # SPEC-010 §3：embargo 清除標籤前向視窗與測試期的重疊，必須 ≥ horizon
+        if self.split.embargo_days < self.horizon_days:
+            raise ValueError(
+                f"split.embargo_days（{self.split.embargo_days}）須 ≥ "
+                f"horizon_days（{self.horizon_days}），否則標籤洩漏進測試期"
+            )
+        return self
 
 
 def load_config[T: BaseConfig](path: str | Path, model: type[T]) -> T:

@@ -1,0 +1,65 @@
+# 一次性補跑 2026-08-27（四）/ 2026-08-28（五）：GHA cron 兩日延遲 7-10 小時跨過
+# 台北午夜，daily-pipeline 連 4 紅（runs #44-47），兩交易日行情/訊號/供應層漏跑
+# （margin_daily 因 T-1 回補步驟倖存）。因整合權限無 actions:write 不能 workflow_dispatch，
+# 改以 push 觸發；步驟比照 daily-pipeline.yml、日序 8/27→8/28（品質閘門吃湖內最新日）。
+# 跑綠後本檔即刪。
+name: backfill-0827-0828
+
+on:
+  push:
+    branches: [claude/data-running-check-8b2zil]
+    paths: [".github/workflows/backfill-0827-0828.yml"]
+
+concurrency:
+  group: daily-pipeline # 與每日班次共用群組，避免資料寫入併發
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TWQUANT_PG_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+      TWQUANT_SUPABASE_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync deps
+        run: uv sync --dev --all-groups
+
+      - name: Install rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+
+      - name: rclone config（Drive 歸檔憑證，Secret 注入）
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+
+      - name: 補跑 2026-08-27 pipeline（擷取→閘門→券商→訊號(PG)→供應層→選股池）
+        run: uv run python -m twquant pipeline --date 2026-08-27 --pg-signals --fail-on-degraded
+
+      - name: 券商買賣超日聚合 2026-08-27
+        run: uv run python -m twquant serving broker-flow --from 2026-08-27 --to 2026-08-27
+
+      - name: 補跑 2026-08-28 pipeline
+        run: uv run python -m twquant pipeline --date 2026-08-28 --pg-signals --fail-on-degraded
+
+      - name: 券商買賣超日聚合 2026-08-28
+        run: uv run python -m twquant serving broker-flow --from 2026-08-28 --to 2026-08-28
+
+      - name: 兩日增量歸檔 → Drive（保命線，D-030）
+        run: |
+          uv run python -m twquant archive-daily --date 2026-08-27 --out archive_out
+          uv run python -m twquant archive-daily --date 2026-08-28 --out archive_out
+          rclone copy archive_out gdrive:twquant-archive/daily --transfers 4
+          rclone check archive_out gdrive:twquant-archive/daily --one-way
+
+      - name: 滾動窗口修剪（Supabase 500 MB 防線）
+        run: uv run python -m twquant serving prune

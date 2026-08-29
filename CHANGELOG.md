@@ -1,5 +1,29 @@
 # CHANGELOG
 
+- 2026-08-29 T-068 ml_scores 資料合約＋薄因子：pandera schema＋serving DDL＋滾動窗、
+  factors/ml.py `ml.lgbm_rank_10d`（registry 加 ml 類別、過 assert_no_lookahead）、
+  `ml score --pg` 直寫（寫前驗證＋冪等 upsert）；並修 ML 特徵解析排除 ml.* 自身
+  （自我參照洩漏）。7 測試、閘門全綠（374 passed）。
+
+- 2026-08-29 T-067 ML 訓練/推論 CLI：configs/ml.yaml＋MlConfig、ml/train.py＋
+  ml/score.py（決定性訓練、meta 反前視斷言、research_log 登記）、CLI `ml train`/
+  `ml score`（PG serving 源）；lightgbm 入依賴。12 測試、閘門全綠。
+
+- 2026-08-29 T-066 ML 資料集組裝＋切分器：src/twquant/ml/（dataset/splits 純函數，
+  入 IO 靜態閘門）；open-to-open 標籤、橫斷面百分位、purged walk-forward（embargo/
+  金庫期）。A 級測試先行，19 測試（含 hypothesis 屬性）先凍結後實作，閘門全綠。
+
+- 2026-08-29 ML 方向定案（D-036）＋SPEC-010-ml 草稿＋T-065~T-070 任務切分：
+  橫斷面 LightGBM 排序 meta-factor——訓練走研究軌離線 CLI、推論落地 ml_scores 表、
+  策略層以薄因子讀取；黃金規則與 IO 靜態閘門不鬆動，部署被 T-069 評估階梯
+  （OOS RankIC→分位單調→成本後回測→DSR→金庫期）裁決擋住。研究藍圖見 artifact 報告。
+
+- 2026-08-29 daily-pipeline 交易日解析修復＋8/27-28 補跑：GHA cron 於 8/27、8/28
+  延遲 7-10 小時跨過台北午夜，DAY 解析成隔日/週六 → 連 4 紅（runs #44-47），兩交易日
+  行情/訊號/供應層漏跑（margin_daily 因 T-1 回補步驟倖存）。修法：schedule 觸發改
+  「台北 17:00 前視為前一日、週末回退週五」（帶明確 date 的手動觸發不受影響）；
+  另以一次性 push workflow（backfill-0827-0828.yml，跑綠即刪）補齊兩日。
+
 - 2026-07-30 T-064 個股因子頁重新設計：元件抽出 src/stock/（T-034 遺留）＋共用層
   theme/fallback/hooks/ui/charts（App.tsx 2,968→1,546 行）；mobile-first（手機
   sticky 頂欄＋橫捲 chip 列＋響應式圖高＋ZBars 條圖）；終端風 TPanel。行為與
