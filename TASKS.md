@@ -78,7 +78,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
-| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-2 級工具與首訓實測完成；基準對照/回測/DSR 未做） |
+| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-3 級通過；第 3 級保留：周轉 1820%＋smoke 0 成交待查。DSR/金庫期未做） |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
@@ -143,6 +143,30 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
   且僅 ML 分位嚴格單調。**第 1、2 級通過**；第 3 級（成本後回測，需以
   `ml.lgbm_rank_10d` 建策略 YAML 接回測引擎，重點看換手率與成本後淨值）與
   第 4 級（DSR，trials 取 research_log）未動，仍不得部署。
+
+- **T-069 階梯第 3 級：成本後回測（通過，但保留）**（2026-08-29）受測策略
+  `configs/strategies/ml_rank.yaml`——刻意「純」：唯一訊號 `ml.lgbm_rank_10d`
+  權重 1.0、top_n 20、週頻 MON 換股、next_open 成交、單檔上限 5%。分數來源是
+  walk-forward 的**樣本外**分數（`ml backfill-scores` 寫入 ml_scores）——用最終
+  模型回頭對全期推論會是前視。對照組 `reversal_revenue.yaml`，同期間同成本。
+  區間 2025-02-05~2026-01-12（233 個交易日，＝ ml_scores 樣本外範圍）：
+  | | CAGR | Sharpe | Sortino | Calmar | MDD | 年化單邊周轉 | 成交筆數 |
+  |---|---|---|---|---|---|---|---|
+  | ML（ml_rank） | **+23.71%** | **+1.27** | +1.45 | +1.34 | −17.68% | **1820%** | 814 |
+  | 對照（reversal_revenue） | −8.90% | −0.42 | — | — | — | 2659% | — |
+  **成本後仍為正、且大幅勝過對照**——第 1、2 級的 IC 優勢確實穿透了交易成本
+  （含 0.3% 證交稅），不是紙上訊號。
+  ⚠ **保留而非無條件通過，兩點**：
+  （1）**年化單邊周轉 1,820%**＝每年換手約 18 次、平均持有約 13 個交易日
+  （與 10 日標籤視窗一致，屬結構性而非設定失誤）。成本已扣仍賺，但這使淨值對
+  費率假設極度敏感——費率若上修，優勢會等比例被吃掉。降周轉的手段（分數 EMA
+  平滑、buffer-zone 換股）**都要另行驗證並計入 DSR 的 trials 預算**，不得事後挑
+  最好看的參數。
+  （2）**一個月 smoke 回測產出 0 成交／0 周轉／0 報酬，全期卻有 814 筆成交**——
+  尚未查明。不推翻全期結果（全期本身自洽），但在部署前必須解釋清楚，列為 T-069
+  的未結項。
+  第 4 級（DSR，trials 取 research_log）與第 5 級（金庫期最終評估）未動，
+  **仍不得部署**。視覺化見 artifact「首訓成績單」的「成本後回測」面板。
 
 - **T-067 首訓實測**（2026-08-29）`ml train` 首次真實資料訓練成功（GHA run #5，Drive
   base dump 還原 → walk-forward）。模型 lgbm_h10_20260112_2f5a21a9：訓練 2023-01-03~
