@@ -15,7 +15,7 @@ from pathlib import Path
 _PURE_DIRS = ["factors", "strategy", "backtest", "portfolio", "insight"]
 
 # ml/ 只有純運算子模組入列（SPEC-010 §0）：train/score 是邊界層，允許 IO
-_PURE_FILES = ["ml/dataset.py", "ml/splits.py"]
+_PURE_FILES = ["ml/dataset.py", "ml/splits.py", "ml/evaluate.py"]
 
 # 禁止 import 的模組。insight 允許 anthropic（洞悉層是唯一能呼叫 LLM 的純運算例外）。
 # psycopg：供應層（SPEC-009）是衍生展示層，純運算層不得碰 PG。
