@@ -1957,8 +1957,13 @@ def ml_train(
         px = read_prices_open(conn, scfg.pg_schema, start, end)
     finally:
         conn.close()
+    # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
+    # 數萬檔權證/ETF，混入會稀釋橫斷面排名的意義
+    px = px.filter(pl.col("stock_id").str.contains(scfg.cloud.stock_pattern))
+    typer.echo(f"prices {px.height} 列（{px['date'].min()} ~ {px['date'].max()}）")
     labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
     frame = assemble(feats, labels)
+    labeled = frame.filter(pl.col("label").is_not_null())
     days: list[dt.date] = sorted(px["date"].unique().to_list())
     splits = walk_forward_splits(
         days,
@@ -1968,9 +1973,11 @@ def ml_train(
         vault_days=cfg.split.vault_days,
     )
     typer.echo(
-        f"資料 {len(days)} 交易日、{len(features)} 特徵、{frame.height} 列、{len(splits)} 窗"
+        f"資料 {len(days)} 交易日、{len(features)} 特徵、{frame.height} 列"
+        f"（label 非 null {labeled.height} 列，{labeled['date'].min()} ~ {labeled['date'].max()}）、"
+        f"{len(splits)} 窗"
     )
-    result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm)
+    result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm, progress=typer.echo)
     ic = mlt.oos_rank_ic(result.oos_scores)
     train_end = days[-cfg.split.vault_days - 1] if cfg.split.vault_days else days[-1]
     deploy = mlt.fit_ranker(frame.filter(pl.col("date") <= train_end), features, cfg.lgbm)

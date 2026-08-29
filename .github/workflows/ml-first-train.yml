@@ -1,4 +1,5 @@
 # 一次性：T-067 `ml train` 首次真實資料訓練煙霧（研究軌，SPEC-010 §4）。
+# 重跑 #3：診斷輔助（label join 健康度、逐窗進度、失敗帶窗上下文）＋標籤宇宙改四碼普通股。
 # 重跑 #2：run #1 於 ml train 載入特徵時遭 runner shutdown（疑整表拉 2,300 萬列
 # factor_values OOM）——已改逐因子 server 端過濾讀取（ml_store.read_factor_frames）。
 # Drive base dump（含 factor_values 特徵）→ 拋棄式 PG → 逐因子覆蓋盤點 →
