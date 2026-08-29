@@ -2073,6 +2073,57 @@ def ml_score(
     )
 
 
+@ml_app.command("backfill-scores")
+def ml_backfill_scores(
+    model: str = typer.Option(..., help="模型目錄（讀其 oos_scores.parquet）"),
+) -> None:
+    """把 walk-forward 的**樣本外**分數寫進 ml_scores，供回測（SPEC-010 §7 第 3 級）。
+
+    回測必須用「該日當時可用的模型」算的分數——`oos_scores.parquet` 正是各窗以
+    ≤train_end 資料訓練、對其後測試段推論的結果，天然滿足此條件；用最終模型回頭
+    對全期推論則是前視。available_at 設為該交易日 19:00（盤後推論可得），使
+    `PitView`（20:00 截點）在訊號日當天即看得到。
+
+    註：各列實際來自不同窗的模型，統一標記為部署模型的 model_id（薄因子以前綴取用）。
+    研究軌專用；生產分數由 `ml score` 逐日寫入。
+    """
+    import json
+
+    import polars as pl
+
+    from twquant.conventions import TZ
+    from twquant.data.serving import store
+    from twquant.data.serving.ml_store import upsert_ml_scores
+    from twquant.data.serving.schema import ensure_schema
+    from twquant.ml.dataset import cross_rank_pct
+
+    mdir = Path(model)
+    meta = json.loads((mdir / "meta.json").read_text(encoding="utf-8"))
+    oos = pl.read_parquet(mdir / "oos_scores.parquet")
+    scored = cross_rank_pct(oos, "score", "rank_pct").with_columns(
+        pl.lit(str(meta["model_id"])).alias("model_id"),
+        pl.col("date")
+        .cast(pl.Datetime("us"))
+        .dt.offset_by("19h")
+        .dt.replace_time_zone(str(TZ))
+        .alias("available_at"),
+    )
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        ensure_schema(conn, scfg.pg_schema)
+        n = upsert_ml_scores(conn, scfg.pg_schema, scored)
+    finally:
+        conn.close()
+    d0 = cast("dt.date", scored["date"].min())
+    d1 = cast("dt.date", scored["date"].max())
+    typer.secho(
+        f"[OK] ml_scores +{n} 列（{d0} ~ {d1}、"
+        f"{scored['stock_id'].n_unique()} 檔、model {meta['model_id']}）",
+        fg=typer.colors.GREEN,
+    )
+
+
 @ml_app.command("eval")
 def ml_eval(
     model: str = typer.Option(..., help="模型目錄（含 meta.json 與 oos_scores.parquet）"),
