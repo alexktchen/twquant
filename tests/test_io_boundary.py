@@ -14,6 +14,9 @@ from pathlib import Path
 # 純運算層：禁止網路 IO 與直接寫檔
 _PURE_DIRS = ["factors", "strategy", "backtest", "portfolio", "insight"]
 
+# ml/ 只有純運算子模組入列（SPEC-010 §0）：train/score 是邊界層，允許 IO
+_PURE_FILES = ["ml/dataset.py", "ml/splits.py"]
+
 # 禁止 import 的模組。insight 允許 anthropic（洞悉層是唯一能呼叫 LLM 的純運算例外）。
 # psycopg：供應層（SPEC-009）是衍生展示層，純運算層不得碰 PG。
 _BANNED_IMPORTS = {"requests", "httpx", "urllib3", "psycopg"}
@@ -33,6 +36,7 @@ def _pure_py_files() -> list[Path]:
     files: list[Path] = []
     for d in _PURE_DIRS:
         files.extend((_SRC_ROOT / d).rglob("*.py"))
+    files.extend(p for f in _PURE_FILES if (p := _SRC_ROOT / f).exists())
     return files
 
 
