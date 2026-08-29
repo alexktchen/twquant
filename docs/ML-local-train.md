@@ -69,3 +69,41 @@ config_hash 區分；embargo < horizon 會在載入配置時就被擋）。
   策略 YAML 把它列入 signals 即可（SPEC-010 §6）。
 - T-069 評估階梯：OOS RankIC → 分位單調 → 成本後回測 → DSR → 金庫期，全過才
   裁決部署（SPEC-010 §7）。
+
+## 5. 第 3 級：成本後回測（本機跑，不需修剪資料）
+
+CI 上為了擠進 16GB 記憶體與時限，必須把 `prices_daily` 修剪到「回測期間 +
+回看窗」（見 TASKS 的正確性分析——安全但邊際只有 18 個交易日）。**本機不需要
+這個妥協**：完整 907 萬列直接跑，沒有窗口邊際問題，也不必擔心 runner 被砍。
+
+```powershell
+# 1) 訓練（若 data/models/ 已有模型可跳過）
+uv run python -m twquant ml train --from 2023-01-01 --to 2026-07-29
+
+# 2) 把 walk-forward 的樣本外分數寫進 ml_scores
+#    回測必須用「該日當時可用的模型」算的分數——oos_scores 天然滿足，
+#    用最終模型回頭對全期推論則是前視。
+$MDIR = (Get-ChildItem data/models -Directory | Select-Object -Last 1).FullName
+uv run python -m twquant ml backfill-scores --model $MDIR
+
+# 3) 回測受測策略（純 ML 排序）與既有策略對照，同期間同成本
+uv run python -m twquant backtest --strategy configs/strategies/ml_rank.yaml `
+  --start 2025-02-05 --end 2026-01-12 --pg
+uv run python -m twquant backtest --strategy configs/strategies/reversal_revenue.yaml `
+  --start 2025-02-05 --end 2026-01-12 --pg
+```
+
+回測區間＝`ml_scores` 的樣本外範圍（訓練期不能拿來回測）。查實際範圍：
+
+```powershell
+psql $env:TWQUANT_PG_DSN -c "SELECT min(date), max(date), count(*) FROM serving.ml_scores"
+```
+
+**看什麼**：CAGR、Sharpe、MDD、Calmar、勝率，以及最關鍵的 **turnover（年化單邊）**
+——ML 分數逐日重算、波動高於線性組合，來回成本含 0.3% 證交稅可能吃掉 IC 優勢。
+若換手率過高，解法是分數平滑（EMA）或 buffer-zone 換股，但那些參數要另行驗證
+並計入 DSR trials（SPEC-010 §5/§7）。
+
+**已知慢點**：`universe_ids` 每個訊號日對整張 prices 做 sort + rolling_median(20)
++ 兩輪 cum_sum，48 個訊號日重複 48 次。本機記憶體足夠不會掛，但仍慢；
+根治是改取 `signal_date − 回看窗` 的切片（所有 PG 回測共通，另立任務）。
