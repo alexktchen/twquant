@@ -1,6 +1,7 @@
 # T-056（D-030）：每日雲端 pipeline——本機關機後的唯一常駐排程。
 # 兩班次（Asia/Taipei）：19:05 主跑（行情/法人已公布）；22:05 補跑（融資券 21:30、
-# 券商分點晚間公布；pipeline 冪等，重跑只補新資料）。GHA cron 常態晚發車 3-15 分。
+# 券商分點晚間公布；pipeline 冪等，重跑只補新資料）。GHA cron 常態晚發車 3-15 分，
+# 但 2026-08-27/28 曾延遲 7-10 小時跨過台北午夜——交易日解析見下方 Resolve trading day。
 # 失敗通知：GitHub 對 scheduled workflow 失敗會寄信給 repo 擁有者（免額外設定）。
 # 已知限制：平日國定假日無行情 → 降級紅燈（~15-20 次/年），屬預期噪音（見 D-030）。
 name: daily-pipeline
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: "交易日 YYYY-MM-DD（留空＝今日台北）"
+        description: "交易日 YYYY-MM-DD（留空＝自動推斷：台北 17:00 前視為前一日、週末回退週五）"
         required: false
         default: ""
 
@@ -53,7 +54,21 @@ jobs:
       - name: Resolve trading day
         run: |
           DAY="${{ inputs.date }}"
-          if [ -z "$DAY" ]; then DAY=$(TZ=Asia/Taipei date +%F); fi
+          if [ -z "$DAY" ]; then
+            # 不能直接用「執行當下的台北日期」：GHA cron 晚發車跨過台北午夜時（2026-08-27/28
+            # 延遲 7-10 小時），會解析成隔日甚至週六 → 品質閘門必紅、原定交易日整天漏抓。
+            # 行情最早也要 17:00（台北）後才齊、班次在 19:05/22:05，故 17:00 前發車一律視為
+            # 前一日的延遲補跑；解析落在週末（cron 只排平日，必為延遲或手動）回退到週五。
+            if [ "$(TZ=Asia/Taipei date +%-H)" -lt 17 ]; then
+              DAY=$(TZ=Asia/Taipei date -d yesterday +%F)
+            else
+              DAY=$(TZ=Asia/Taipei date +%F)
+            fi
+            case "$(date -d "$DAY" +%u)" in
+              6) DAY=$(date -d "$DAY -1 day" +%F) ;;
+              7) DAY=$(date -d "$DAY -2 days" +%F) ;;
+            esac
+          fi
           echo "DAY=$DAY" >> "$GITHUB_ENV"
           echo "FROM7=$(date -d "$DAY -7 days" +%F)" >> "$GITHUB_ENV"
 

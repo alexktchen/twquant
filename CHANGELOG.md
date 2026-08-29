@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-08-29 daily-pipeline 交易日解析修復＋8/27-28 補跑：GHA cron 於 8/27、8/28
+  延遲 7-10 小時跨過台北午夜，DAY 解析成隔日/週六 → 連 4 紅（runs #44-47），兩交易日
+  行情/訊號/供應層漏跑（margin_daily 因 T-1 回補步驟倖存）。修法：schedule 觸發改
+  「台北 17:00 前視為前一日、週末回退週五」（帶明確 date 的手動觸發不受影響）；
+  另以一次性 push workflow（backfill-0827-0828.yml，跑綠即刪）補齊兩日。
+
 - 2026-07-30 T-064 個股因子頁重新設計：元件抽出 src/stock/（T-034 遺留）＋共用層
   theme/fallback/hooks/ui/charts（App.tsx 2,968→1,546 行）；mobile-first（手機
   sticky 頂欄＋橫捲 chip 列＋響應式圖高＋ZBars 條圖）；終端風 TPanel。行為與
