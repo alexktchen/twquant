@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-08-29 ML 方向定案（D-036）＋SPEC-010-ml 草稿＋T-065~T-070 任務切分：
+  橫斷面 LightGBM 排序 meta-factor——訓練走研究軌離線 CLI、推論落地 ml_scores 表、
+  策略層以薄因子讀取；黃金規則與 IO 靜態閘門不鬆動，部署被 T-069 評估階梯
+  （OOS RankIC→分位單調→成本後回測→DSR→金庫期）裁決擋住。研究藍圖見 artifact 報告。
+
 - 2026-08-29 daily-pipeline 交易日解析修復＋8/27-28 補跑：GHA cron 於 8/27、8/28
   延遲 7-10 小時跨過台北午夜，DAY 解析成隔日/週六 → 連 4 紅（runs #44-47），兩交易日
   行情/訊號/供應層漏跑（margin_daily 因 T-1 回補步驟倖存）。修法：schedule 觸發改

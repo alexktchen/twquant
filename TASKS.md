@@ -74,6 +74,17 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-061 | 【雲端 Phase 2】回測端點雲端化（依 D-031 裁決）：暫按選項 A——區間超出窗口回 400 + 前端提示文案；`/api/backtest` 在 serverless 時限內完成（超時則預先縮範圍或降級） | D-031 | T-059 | B | blocked（D-031） |
 | T-062 | 【雲端 Phase 3】切換與本機退場：驗收清單（T-058 對帳綠、Vercel 端點全通、歸檔鏈連續無斷日、Supabase 保活 job 就位含長假情境）→ 停本機 compose；本機 Docker volume 與 dump 保留 ≥1 個月；memory/文件同步（deploy 佈局說明改雲端版） | D-030 | T-058, T-060, T-061 | B | todo |
 | T-064 | 前端個股因子頁重新設計：元件抽出 `frontend/src/stock/`（T-034 遺留）＋跨頁共用層（theme/fallback/hooks/ui/charts）＋mobile-first 響應式（手機頂欄、橫捲 chip 列、響應式圖高、ZBars）＋終端風精煉（TPanel/方角 chip） | PRD-001 §3 | T-034 | — | done |
+| T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | todo |
+| T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | todo |
+| T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | todo |
+| T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | todo |
+| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | todo |
+| T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
+
+> ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
+> 規格見 [SPEC-010](docs/specs/SPEC-010-ml.md)、研究依據見研究報告「台股 ML 研究藍圖」
+> （artifact，2026-08-29）。T-065~T-069 純研究軌不動生產路徑；T-070（接入每日
+> pipeline）被 T-069 的部署裁決擋住，評估階梯任一級輸給既有線性基準即整包止步。
 
 > 雲端搬遷任務（T-053~T-062）源自 [D-030](DECISIONS.md)（GHA cron + Supabase Free
 > 滾動窗口 + Drive raw 歸檔 + Vercel）。分四期：Phase 0（T-053/054，歸檔保命線——
