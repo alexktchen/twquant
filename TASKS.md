@@ -78,7 +78,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
-| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-3 級通過；第 3 級保留：周轉 1820%＋smoke 0 成交待查。DSR/金庫期未做） |
+| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-3 級通過但第 3 級數字待重跑：D-037 死區吃掉 58/233 天。DSR/金庫期未做） |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
@@ -101,6 +101,25 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-069 未結項查明：smoke 0 成交＝衛生濾網誤判農曆年休市**（2026-08-29）
+  根因在 `strategy/universe.py:46`——日曆缺口條件用**曆日**判斷
+  （`max_gap_days` 預設 10）。台股農曆年封關是全市場休市（2025 最後交易日 1/22
+  → 開紅盤 2/3，間隔 **12 曆日 > 10**），使**每檔股票同一列同時**被標 `bad`；
+  再經 `:47-54` 的 `cum_sum` − `shift(60)` 黏 60 個交易列，`:60` 的
+  `filter(~_badw)` 讓整個宇宙連續 60 個交易日為空。
+  量化（以 oos_scores 的 233 個交易日實算）：死區＝**前 58 個交易日（24.9%）**、
+  首個乾淨日 **2025-05-02**、有效交易日 **175**、50 個訊號日只剩 **38 個**有效
+  （38 × 20 ≈ 760，與回報 814 筆成交吻合）；smoke 的 25 天整段落在死區內，
+  故成交 0／未成交 0。
+  **對第 3 級數字的修正**：CAGR +23.71% 實際在 175 個有效日內取得；年化周轉
+  1820% 以 `n_days=233` 計，**有效期重算約 2423%**；對照組同樣受影響，
+  故 ML vs 對照仍同基準、**結論方向不變**。若部署，每年春節後會靜默空手約 3 個月。
+  **所有 PG 回測共通，非 ML 專屬**；依 §6 不夾帶在 T-069 修，已開 **D-037** 待裁決
+  （建議改用交易日曆判缺口，修完重跑第 3 級再進 DSR，重跑算一次新 trial）。
+  附帶發現：`backtest/engine.py` 的 `_execute` 對「查無價格」與「未達整股」
+  的訂單**靜默丟棄**（既不記成交也不記未成交），違反黃金規則 5、現有測試未覆蓋
+  ——獨立的真 bug，應補 `Unfilled(reason=...)`，另立任務。
 
 - **T-069 第 3 級的回測資料修剪：正確性分析**（2026-08-29，供後續接手）
   為繞過 `universe_ids` 逐訊號日全表重算的效能問題，回測前把 PG `prices_daily`
