@@ -78,7 +78,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
-| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | todo |
+| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-2 級工具與首訓實測完成；基準對照/回測/DSR 未做） |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
@@ -101,6 +101,17 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-067 首訓實測**（2026-08-29）`ml train` 首次真實資料訓練成功（GHA run #5，Drive
+  base dump 還原 → walk-forward）。模型 lgbm_h10_20260112_2f5a21a9：訓練 2023-01-03~
+  2026-07-29、25 特徵、4 窗、train_end 2026-01-12（金庫期未動）。**樣本外實測**：
+  RankIC +0.0814（233 日、每日約 1,882 檔、43.9 萬筆）、逐日勝率 87.6%、月勝率 12/12、
+  逐窗 IC 全正（+0.118/+0.055/+0.090/+0.054）、十分位嚴格單調（頭尾 +0.086）。
+  誠實標註：樸素 t=14.87 但 10 日標籤重疊（lag1 自相關 0.72），**Newey-West t=6.76**
+  為準。**尚未對照 zscore_weighted 基準**（階梯第 1 級未完整通過），成本後回測與
+  DSR 未做——不得據此宣稱模型有效。五次重跑的教訓依序為：整表拉 2,300 萬列 OOM →
+  逐因子 server 端過濾；標籤宇宙含權證 → 四碼過濾；factor_values 歷史洞 → 逐月密度
+  判定；判洞閾值誤殺春節月 → 閾值改 <10。視覺化報告見 artifact「首訓成績單」。
 
 - **T-065**（2026-08-29）資料深度審計（SPEC-010 §2 回填）。方法：一次性 GHA workflow
   ——Drive base dump（twquant-full-20260729，1.4 GB）還原拋棄式 PG（免索引、排除可
