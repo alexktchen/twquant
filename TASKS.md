@@ -74,7 +74,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-061 | 【雲端 Phase 2】回測端點雲端化（依 D-031 裁決）：暫按選項 A——區間超出窗口回 400 + 前端提示文案；`/api/backtest` 在 serverless 時限內完成（超時則預先縮範圍或降級） | D-031 | T-059 | B | blocked（D-031） |
 | T-062 | 【雲端 Phase 3】切換與本機退場：驗收清單（T-058 對帳綠、Vercel 端點全通、歸檔鏈連續無斷日、Supabase 保活 job 就位含長假情境）→ 停本機 compose；本機 Docker volume 與 dump 保留 ≥1 個月；memory/文件同步（deploy 佈局說明改雲端版） | D-030 | T-058, T-060, T-061 | B | todo |
 | T-064 | 前端個股因子頁重新設計：元件抽出 `frontend/src/stock/`（T-034 遺留）＋跨頁共用層（theme/fallback/hooks/ui/charts）＋mobile-first 響應式（手機頂欄、橫捲 chip 列、響應式圖高、ZBars）＋終端風精煉（TPanel/方角 chip） | PRD-001 §3 | T-034 | — | done |
-| T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | in_progress |
+| T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | done |
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
@@ -101,6 +101,17 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-065**（2026-08-29）資料深度審計（SPEC-010 §2 回填）。方法：一次性 GHA workflow
+  ——Drive base dump（twquant-full-20260729，1.4 GB）還原拋棄式 PG（免索引、排除可
+  重算表）→ scripts/audit_data_depth.py 盤點 → 報告 artifact。發現：訓練期定案
+  2020~今 6.5 年（prices 1,592 交易日；train_min_years=2.0 維持）；特徵覆蓋分層
+  （價量/營收 6.5 年全覆蓋、法人系 2024~2025 起、富邦分點系僅 2026 起——raw
+  broker_trades 有 2022 起 4.5 年，物化未回跑，歷史 chip 回補另立任務）；
+  stock_meta 無已下市股票（生存者偏誤——訓練宇宙改以 as-of 行情+流動性建構，
+  不依賴主檔）；Drive 歸檔鏈完整（base 1 + daily 29 日無缺）。首跑磁碟爆滿
+  （broker_trades 55M 列建 PK）→ 清預裝包＋--section 免索引修復。審計 workflow
+  用畢已刪；腳本留 scripts/ 供再用。
 
 - **T-068**（2026-08-29）ml_scores 資料合約＋薄因子（SPEC-010 §5/§6）。schemas.ML_SCORES
   （pandera，17 表普查同步）＋serving DDL（PK (model_id, stock_id, date)）＋

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+- 2026-08-29 T-065 資料深度審計完成：訓練期定案 2020~今 6.5 年、特徵覆蓋分層實測
+  （分點系因子物化僅 2026 起，raw 有 2022 起——歷史回補另立任務）、stock_meta 生存者
+  偏誤確認（宇宙改 as-of 行情建構）→ 回填 SPEC-010 §2。ml train 讀取改逐因子
+  server 端過濾（首訓 run 遭 runner OOM 教訓）、LightGBM 執行緒固定 4（同 config
+  仍決定性）。
+
 - 2026-08-29 T-068 ml_scores 資料合約＋薄因子：pandera schema＋serving DDL＋滾動窗、
   factors/ml.py `ml.lgbm_rank_10d`（registry 加 ml 類別、過 assert_no_lookahead）、
   `ml score --pg` 直寫（寫前驗證＋冪等 upsert）；並修 ML 特徵解析排除 ml.* 自身

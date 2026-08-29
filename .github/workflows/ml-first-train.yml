@@ -1,4 +1,6 @@
 # 一次性：T-067 `ml train` 首次真實資料訓練煙霧（研究軌，SPEC-010 §4）。
+# 重跑 #2：run #1 於 ml train 載入特徵時遭 runner shutdown（疑整表拉 2,300 萬列
+# factor_values OOM）——已改逐因子 server 端過濾讀取（ml_store.read_factor_frames）。
 # Drive base dump（含 factor_values 特徵）→ 拋棄式 PG → 逐因子覆蓋盤點 →
 # walk-forward 訓練 → 模型/OOS 分數/research_log 上傳 artifact。跑綠取結果後即刪。
 # push 觸發（整合權限無 actions:write）；服務 PG 帳密為拋棄式本機容器，非真實秘密。

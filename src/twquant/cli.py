@@ -1916,28 +1916,13 @@ def _ml_features_resolved(cfg: MlConfig) -> list[str]:
 
 
 def _ml_feature_frames(
-    source: object, features: list[str], start: dt.date, end: dt.date
+    conn: object, schema: str, features: list[str], start: dt.date, end: dt.date
 ) -> dict[str, pl.DataFrame]:
-    """factor_values.z 切片 → {因子: (date, stock_id, value)}。
+    """factor_values.z 切片 → {因子: (date, stock_id, value)}（逐因子 server 端過濾，
+    見 ml_store.read_factor_frames 的 OOM 教訓）。"""
+    from twquant.data.serving.ml_store import read_factor_frames
 
-    無資料的因子給空表——組裝後整欄 null（缺值語意由 assemble 保留，禁填 0）。
-    """
-    import polars as pl
-
-    from twquant.data.serving.pg_view import PgTableSource
-
-    assert isinstance(source, PgTableSource)
-    fv = (
-        source.scan("factor_values")
-        .filter(pl.col("date").is_between(start, end) & pl.col("factor").is_in(features))
-        .select("factor", "date", "stock_id", pl.col("z").alias("value"))
-        .collect()
-    )
-    empty = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "value": pl.Float64})
-    parts = {
-        str(k[0]): v.drop("factor") for k, v in fv.partition_by("factor", as_dict=True).items()
-    }
-    return {name: parts.get(name, empty) for name in features}
+    return read_factor_frames(conn, schema, features, start, end)
 
 
 @ml_app.command("train")
@@ -1956,7 +1941,7 @@ def ml_train(
 
     from twquant.config import config_hash
     from twquant.data.serving import store
-    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.data.serving.ml_store import read_prices_open
     from twquant.ml import train as mlt
     from twquant.ml.dataset import assemble, excess_rank_labels, forward_open_returns
     from twquant.ml.splits import walk_forward_splits
@@ -1967,15 +1952,9 @@ def ml_train(
     scfg = _load_serving()
     conn = store.connect(scfg)
     try:
-        source = PgTableSource(conn, scfg.pg_schema)
         features = _ml_features_resolved(cfg)
-        feats = _ml_feature_frames(source, features, start, end)
-        px = (
-            source.scan("prices_daily")
-            .filter(pl.col("date").is_between(start, end))
-            .select("date", "stock_id", "open")
-            .collect()
-        )
+        feats = _ml_feature_frames(conn, scfg.pg_schema, features, start, end)
+        px = read_prices_open(conn, scfg.pg_schema, start, end)
     finally:
         conn.close()
     labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
@@ -2033,7 +2012,6 @@ def ml_score(
 
     from twquant.conventions import now_tw
     from twquant.data.serving import store
-    from twquant.data.serving.pg_view import PgTableSource
     from twquant.ml import score as mls
     from twquant.ml import train as mlt
     from twquant.ml.dataset import assemble, cross_rank_pct
@@ -2050,7 +2028,7 @@ def ml_score(
     scfg = _load_serving()
     conn = store.connect(scfg)
     try:
-        feats = _ml_feature_frames(PgTableSource(conn, scfg.pg_schema), features, day, day)
+        feats = _ml_feature_frames(conn, scfg.pg_schema, features, day, day)
         no_labels = pl.DataFrame(
             schema={"date": pl.Date, "stock_id": pl.String, "label": pl.Float64}
         )

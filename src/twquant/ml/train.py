@@ -20,11 +20,13 @@ from twquant.conventions import now_tw
 from twquant.ml.splits import WalkSplit
 from twquant.reporting.research_log import append_research_log
 
-# 決定性旗標（SPEC-010 §0：同 config 同輸入 bit-identical）——非調參對象，故為常數非配置
+# 決定性旗標（SPEC-010 §0：同 config 同輸入 bit-identical）——非調參對象，故為常數非配置。
+# num_threads 固定 4：LightGBM 在 deterministic+force_row_wise 下同執行緒數即可重現；
+# 單執行緒對全史 walk-forward（百萬列 × 15+ 窗）慢到不可用，4 為固定值非調參。
 _DETERMINISM: dict[str, object] = {
     "deterministic": True,
     "force_row_wise": True,
-    "num_threads": 1,
+    "num_threads": 4,
     "verbosity": -1,
 }
 

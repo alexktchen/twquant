@@ -55,8 +55,25 @@ CLAUDE.md 黃金規則。
 - **標籤**：`open(t+1) → open(t+1+h)` 報酬 − 同日宇宙均值 → 當日橫斷面百分位。
   標籤計算只存在於訓練組裝路徑（研究軌）；推論路徑（`score`）禁止 import 標籤模組。
 - **宇宙**：as-of 當日濾網，與策略層同套；訓練/評估/回測三處宇宙一致。
-- 訓練可用期間：由 T-065 資料深度審計定案後回填本節
-  （含生存者偏誤檢查：`stock_meta` 是否保留已下市股票）。
+- **訓練可用期間（T-065 審計定案，2026-08-29）**：`2020-01 ~ 今`，約 6.5 年
+  （prices_daily 1,592 交易日、缺日≈國定假日；labels 無虞）。`train_min_years: 2.0`
+  可行，**定案**。特徵覆蓋分層（factor_values 實測，缺值留 null 由 LightGBM 原生處理）：
+  - 6.5 年全覆蓋：價量核心（mom/reversal/vol/turnover/overnight/intraday）、
+    fundamental.revenue_yoy/accel、volume.*
+  - 2023-09 起：price.high_52w；2024-01 起：chip.foreign_streak/trust_streak；
+    2025-07 起：chip.foreign_net/trust_net/inst_net_10d
+  - 2026-01 起：富邦分點系（concentration/main_force/broker_count/stability/
+    main_cost）——raw `broker_trades` 有 2022-01 起 4.5 年完整明細，是**物化未回跑**；
+    歷史 chip 因子回補（`serving materialize` 過 2022~2025）另立任務，Phase 2 前做
+  - 型態因子：2026-07 起（事件稀疏，本就非主力特徵）
+- **生存者偏誤（審計實測）**：`stock_meta` 2,010 檔、`delist_date` 全空——主檔
+  **只有現存股票**。緩解：prices_daily 逐年檔數含當年有交易的全部代號（後來下市者
+  的行情仍在），訓練/評估宇宙一律以「as-of 當日有行情＋流動性門檻」建構，
+  不依賴 stock_meta 判在市；產業/市值情境特徵對已下市股票缺值＝null。
+- 其他資料事實（審計）：institutional_daily/margin_daily 原始表僅 2025 起較完整
+  （200/173 日）——法人/融資券「原始表」歷史殘缺，但對 ML 無礙（特徵走 factor_values）；
+  shareholding_dispersion 僅 2 日（Phase 2 用前須回補）；fubon_fetch_log 有未來日期
+  異常列（2026-11-11，帳本表、不入特徵，記錄備查）。
 
 ## 3. 切分器（`ml/splits.py`，純函數）
 

@@ -9,7 +9,7 @@ label:
   excess: market_mean # 超額化基準＝同日宇宙均值
   transform: rank_pct # 當日橫斷面百分位（漲跌停截斷肥尾在 rank 下免疫）
 split:
-  train_min_years: 2.0 # 首窗最短年數；待 T-065 審計定案後回填
+  train_min_years: 2.0 # 首窗最短年數；T-065 審計定案（訓練期 2020~ 今 6.5 年，SPEC-010 §2）
   test_months: 3
   embargo_days: 10 # 須 ≥ horizon_days（MlConfig 驗證）
   vault_months: 6 # 金庫期：最後 N 個月凍結，僅最終定案時評估一次
