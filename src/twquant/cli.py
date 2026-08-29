@@ -11,7 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
 
@@ -1960,7 +1960,11 @@ def ml_train(
     # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
     # 數萬檔權證/ETF，混入會稀釋橫斷面排名的意義
     px = px.filter(pl.col("stock_id").str.contains(scfg.cloud.stock_pattern))
-    typer.echo(f"prices {px.height} 列（{px['date'].min()} ~ {px['date'].max()}）")
+    px_lo, px_hi = (
+        cast("dt.date | None", px["date"].min()),
+        cast("dt.date | None", px["date"].max()),
+    )
+    typer.echo(f"prices {px.height} 列（{px_lo} ~ {px_hi}）")
     labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
     frame = assemble(feats, labels)
     labeled = frame.filter(pl.col("label").is_not_null())
@@ -1974,7 +1978,8 @@ def ml_train(
     )
     typer.echo(
         f"資料 {len(days)} 交易日、{len(features)} 特徵、{frame.height} 列"
-        f"（label 非 null {labeled.height} 列，{labeled['date'].min()} ~ {labeled['date'].max()}）、"
+        f"（label 非 null {labeled.height} 列，{cast('dt.date | None', labeled['date'].min())}"
+        f" ~ {cast('dt.date | None', labeled['date'].max())}）、"
         f"{len(splits)} 窗"
     )
     result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm, progress=typer.echo)
