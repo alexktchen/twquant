@@ -80,6 +80,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
 | T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-3 級通過但第 3 級數字待重跑：D-037 死區吃掉 58/233 天。DSR/金庫期未做） |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
+| T-071 | 【回測正確性】D-037 修正：衛生濾網缺口判準改用交易日（`prices_daily` 日期聯集為市場日曆，全市場休市不算缺口）＋宇宙為空時 `build_targets` 明確 raise（禁靜默回零、禁把無效試驗寫進 research_log）；`UniverseConfig.max_gap_days`→`max_gap_sessions` | D-037 | — | B | done（閘門全綠：ruff/format/mypy 152 檔無誤、pytest 409 passed；AC-1/2/3 對應 test_ac1_market_wide_holiday_is_not_a_gap／test_ac2_single_stock_suspension_still_excluded／test_ac3_empty_universe_raises_instead_of_silent_zero，先寫測試確認三條皆紅再實作） |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
 > 規格見 [SPEC-010](docs/specs/SPEC-010-ml.md)、研究依據見研究報告「台股 ML 研究藍圖」

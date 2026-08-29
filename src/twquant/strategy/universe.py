@@ -34,16 +34,22 @@ def universe_ids(view: PitView, signal_date: dt.date, cfg: UniverseConfig) -> li
     )
     # 20 日成交金額中位數（截至 signal_date）；不足 20 日 → null → 淘汰（流動性歷史不足）
     lf = lf.with_columns(_adv=pl.col("amount").rolling_median(20).over("stock_id"))
-    # D-029 衛生濾網：近 hygiene_lookback 列內出現非漲跌停可解釋的跳價或日曆缺口
-    # （停牌復牌/減資/資料缺段）→ 排除，避免買進即將/剛剛經歷資料事件的股票
-    if cfg.max_jump_ratio is not None or cfg.max_gap_days is not None:
+    # D-029 衛生濾網：近 hygiene_lookback 列內出現非漲跌停可解釋的跳價或交易日缺口
+    # （停牌復牌/減資/資料缺段）→ 排除，避免買進即將/剛剛經歷資料事件的股票。
+    # D-037：缺口一律以「漏掉的開市日數」判斷。全市場休市（農曆年封關可達 12 曆日）
+    # 不漏任何開市日，故不算缺口；市場日曆＝prices_daily 的日期聯集，與
+    # data/calendar.py 的交易日定義同源（該處亦註明禁用 weekday() 推算）。
+    if cfg.max_jump_ratio is not None or cfg.max_gap_sessions is not None:
+        market = lf.select("date").unique().sort("date").with_row_index("_sidx")
+        lf = lf.join(market, on="date", how="left").sort(["stock_id", "date"])
         prev_c = pl.col("close").shift(1).over("stock_id")
-        prev_d = pl.col("date").shift(1).over("stock_id")
+        sidx = pl.col("_sidx").cast(pl.Int64)
         bad = pl.lit(False)
         if cfg.max_jump_ratio is not None:
             bad = bad | ((pl.col("close") / prev_c - 1.0).abs() > cfg.max_jump_ratio)
-        if cfg.max_gap_days is not None:
-            bad = bad | ((pl.col("date") - prev_d).dt.total_days() > cfg.max_gap_days)
+        if cfg.max_gap_sessions is not None:
+            missed = sidx - sidx.shift(1).over("stock_id") - 1
+            bad = bad | (missed > cfg.max_gap_sessions)
         lf = lf.with_columns(_cum=bad.cast(pl.Int32).fill_null(0).cum_sum().over("stock_id"))
         lf = lf.with_columns(
             _badw=(

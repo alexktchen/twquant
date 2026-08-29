@@ -26,9 +26,12 @@ class UniverseConfig(BaseConfig):
     exclude_recent_ipo_days: int = 60
     min_adv_twd: float | None = 30_000_000  # 20 日成交金額中位數下限
     min_price: float | None = None
-    # D-029 衛生濾網：近窗出現跳價/日曆缺口（停牌復牌、減資、資料缺段）→ 排除
+    # D-029 衛生濾網：近窗出現跳價/交易日缺口（停牌復牌、減資、資料缺段）→ 排除
     max_jump_ratio: float | None = 0.35  # 相鄰列 |Δclose| 上限；None 停用
-    max_gap_days: int | None = 10  # 相鄰列日曆間隔上限；None 停用
+    # D-037：缺口以「相鄰兩列之間漏掉的開市日數」計，不用曆日——農曆年封關是全市場
+    # 休市（2025 年 1/22→2/03 隔 12 曆日、0 個漏掉的開市日），用曆日會把整個宇宙同時
+    # 判為資料事件。門檻 5 由舊值等效換算（10 曆日跨週末約當 6~7 個開市日）。
+    max_gap_sessions: int | None = 5  # 相鄰列漏掉的開市日數上限；None 停用
     hygiene_lookback: int = 60  # 衛生濾網回看列數
 
 

@@ -19,6 +19,7 @@ from twquant.strategy.config import (
     RebalanceConfig,
     SignalConfig,
     StrategyConfig,
+    UniverseConfig,
     load_strategy,
 )
 from twquant.strategy.overlays import breadth_regime_filter, market_breadth
@@ -200,3 +201,77 @@ def test_breadth_overlay_bear_floor(tmp_path: Path) -> None:
     weights = pl.DataFrame({"date": [d], "stock_id": ["1101"], "target_weight": [0.5]})
     out = breadth_regime_filter(d, weights, view, {"ma_window": 10, "exposure_floor": 0.5})
     assert out["target_weight"][0] == pytest.approx(0.25)  # 0.5 原曝險 × floor 0.5
+
+
+# ── D-037：衛生濾網缺口判準改用交易日（T-071）──────────────────────────
+def _holiday_wh(
+    tmp_path: Path, missing: dict[str, set[dt.date]] | None = None
+) -> tuple[Warehouse, list[dt.date]]:
+    """農曆年封關情境：1/06~1/22 開市、1/23~2/02 全市場休市、2/03~2/14 復市。
+
+    `missing` 指定個股缺席的開市日（模擬個股停牌），未指定者全數present。
+    """
+    sessions = [dt.date(2025, 1, d) for d in (6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 20, 21, 22)]
+    sessions += [dt.date(2025, 2, d) for d in (3, 4, 5, 6, 7, 10, 11, 12, 13, 14)]
+    skip = missing or {}
+    rows = []
+    for i, d in enumerate(sessions):
+        for sid, slope in {"1101": 1.0, "2330": 2.0, "2454": 0.5}.items():
+            if d in skip.get(sid, set()):
+                continue
+            c = 100.0 + slope * i
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 1000,
+                    "amount": 1e8,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime(d.year, d.month, d.day, 18, tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df, source="twse")
+    return wh, sessions
+
+
+def test_ac1_market_wide_holiday_is_not_a_gap(tmp_path: Path) -> None:
+    # D-037：全市場休市（1/22 → 2/03 隔 12 曆日、0 個漏掉的開市日）不得判為資料缺口
+    from twquant.strategy.universe import universe_ids
+
+    wh, _ = _holiday_wh(tmp_path)
+    d = dt.date(2025, 2, 14)
+    ids = universe_ids(wh.view(d), d, UniverseConfig(min_adv_twd=None, min_price=None))
+    assert ids == ["1101", "2330", "2454"]
+
+
+def test_ac2_single_stock_suspension_still_excluded(tmp_path: Path) -> None:
+    # D-037 修正不得放寬個股偵測力：2454 停牌 7 個開市日（> max_gap_sessions）→ 排除
+    from twquant.strategy.universe import universe_ids
+
+    halted = {dt.date(2025, 2, d) for d in (4, 5, 6, 7, 10, 11, 12)}
+    wh, _ = _holiday_wh(tmp_path, missing={"2454": halted})
+    d = dt.date(2025, 2, 14)
+    ids = universe_ids(wh.view(d), d, UniverseConfig(min_adv_twd=None, min_price=None))
+    assert "2454" not in ids
+    assert ids == ["1101", "2330"]
+
+
+def test_ac3_empty_universe_raises_instead_of_silent_zero(tmp_path: Path) -> None:
+    # D-037/黃金規則 5：宇宙全空必須 raise（含訊號日上下文），不得靜默回空表
+    from twquant.errors import DataError
+
+    wh, _ = _holiday_wh(tmp_path)
+    cfg = _mom_cfg(universe={"min_adv_twd": 1e12, "min_price": None})
+    with pytest.raises(DataError, match="2025-02-14"):
+        build.build_targets(cfg, wh, dt.date(2025, 2, 14))
