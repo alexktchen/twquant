@@ -54,6 +54,16 @@ def excess_rank_labels(fwd: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def cross_rank_pct(frame: pl.DataFrame, value_col: str, out_col: str) -> pl.DataFrame:
+    """同日橫斷面百分位 (0,1]；null 傳遞、不丟列（`ml score` 寫 rank_pct 用，SPEC-010 §5）。"""
+    return frame.with_columns(
+        (
+            pl.col(value_col).rank(method="average").over("date")
+            / pl.col(value_col).count().over("date")
+        ).alias(out_col)
+    )
+
+
 def assemble(features: Mapping[str, pl.DataFrame], labels: pl.DataFrame) -> pl.DataFrame:
     """特徵長表（各為 (date, stock_id, value)）outer join 成寬表，label 以 left join 掛上。
 

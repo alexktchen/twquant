@@ -35,3 +35,4 @@ cloud:
     composite_daily: 120            # D-034 過渡：250 → 120（P8 趨勢縮短，待裁決長期方案）
     screener_daily: 250
     broker_flow_daily: 250         # 券商母公司日聚合（P6 折線的雲端資料源）
+    ml_scores: 250                 # ML 排序分數（SPEC-010 §5；~2k 列/日，量小）

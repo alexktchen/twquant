@@ -1905,13 +1905,14 @@ def _load_ml() -> MlConfig:
 
 
 def _ml_features_resolved(cfg: MlConfig) -> list[str]:
-    """features 空＝全部註冊因子（SPEC-010 §1）；排序保證欄序決定性。"""
+    """features 空＝全部註冊因子（SPEC-010 §1），但排除 ml.* 自身——模型分數
+    餵回自己的特徵是自我參照洩漏。排序保證欄序決定性。"""
     if cfg.features:
         return list(cfg.features)
     import twquant.factors.builtins  # noqa: F401  # 副作用：註冊全因子
     from twquant.factors import registry
 
-    return sorted(registry.list_factors())
+    return sorted(n for n in registry.list_factors() if not n.startswith("ml."))
 
 
 def _ml_feature_frames(
@@ -2025,15 +2026,17 @@ def ml_score(
     date: str = typer.Option(..., help="推論日 YYYY-MM-DD（取 train_end < 該日的最新模型）"),
     models: str = typer.Option("", help="模型根目錄；空＝<data_dir>/models"),
     out: str = typer.Option("", help="輸出 parquet；空＝<模型目錄>/scores_<date>.parquet"),
+    pg: bool = typer.Option(False, "--pg", help="同時 upsert serving.ml_scores（T-068）"),
 ) -> None:
-    """對單日全宇宙推論（SPEC-010 §4）。ml_scores 表落地與薄因子在 T-068。"""
+    """對單日全宇宙推論 → parquet（＋選擇性 upsert ml_scores 表，SPEC-010 §4/§5）。"""
     import polars as pl
 
+    from twquant.conventions import now_tw
     from twquant.data.serving import store
     from twquant.data.serving.pg_view import PgTableSource
     from twquant.ml import score as mls
     from twquant.ml import train as mlt
-    from twquant.ml.dataset import assemble
+    from twquant.ml.dataset import assemble, cross_rank_pct
 
     day = dt.date.fromisoformat(date)
     sys_cfg = _load_system()
@@ -2048,17 +2051,35 @@ def ml_score(
     conn = store.connect(scfg)
     try:
         feats = _ml_feature_frames(PgTableSource(conn, scfg.pg_schema), features, day, day)
+        no_labels = pl.DataFrame(
+            schema={"date": pl.Date, "stock_id": pl.String, "label": pl.Float64}
+        )
+        frame = assemble(feats, no_labels).drop("label")
+        if frame.is_empty():
+            raise ValueError(
+                f"{day} 無特徵資料：factor_values 該日為空（先跑 serving materialize）"
+            )
+        scored = cross_rank_pct(
+            mlt.predict_scores(booster, frame, features), "score", "rank_pct"
+        ).with_columns(
+            pl.lit(mdir.name).alias("model_id"),
+            pl.lit(now_tw()).alias("available_at"),
+        )
+        inserted = 0
+        if pg:
+            from twquant.data.serving.ml_store import upsert_ml_scores
+            from twquant.data.serving.schema import ensure_schema
+
+            ensure_schema(conn, scfg.pg_schema)  # ml_scores 首寫時可能尚未建表（冪等）
+            inserted = upsert_ml_scores(conn, scfg.pg_schema, scored)
     finally:
         conn.close()
-    no_labels = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "label": pl.Float64})
-    frame = assemble(feats, no_labels).drop("label")
-    if frame.is_empty():
-        raise ValueError(f"{day} 無特徵資料：factor_values 該日為空（先跑 serving materialize）")
-    scored = mlt.predict_scores(booster, frame, features)
     out_path = Path(out) if out else mdir / f"scores_{day}.parquet"
     scored.write_parquet(out_path)
+    pg_note = f"、PG +{inserted} 列" if pg else ""
     typer.secho(
-        f"[OK] {day}：{scored.height} 檔 → {out_path}（模型 {mdir.name}）", fg=typer.colors.GREEN
+        f"[OK] {day}：{scored.height} 檔 → {out_path}（模型 {mdir.name}）{pg_note}",
+        fg=typer.colors.GREEN,
     )
 
 

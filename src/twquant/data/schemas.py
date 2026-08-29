@@ -245,6 +245,19 @@ STRUCTURAL_BREAKS = _schema(
     },
 )
 
+ML_SCORES = _schema(
+    "ml_scores",
+    1,
+    {
+        "date": _col(pl.Date),
+        "stock_id": _col(pl.String),
+        "model_id": _col(pl.String),  # lgbm_h{h}_{train_end}_{cfg_hash8}（SPEC-010 §4）
+        "score": _col(pl.Float64),  # 模型原始輸出
+        "rank_pct": _col(pl.Float64, nullable=True),  # 同日橫斷面百分位 (0,1]
+        "available_at": _col(TW_DT),  # 推論寫入時刻（PIT 邊界）
+    },
+)
+
 # 表名 → schema 的註冊表（唯一入口）
 SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "prices_daily": PRICES_DAILY,
@@ -263,6 +276,7 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "market_holidays": MARKET_HOLIDAYS,
     "ingest_log": INGEST_LOG,
     "structural_breaks": STRUCTURAL_BREAKS,
+    "ml_scores": ML_SCORES,
 }
 
 

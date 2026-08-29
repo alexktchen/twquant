@@ -77,7 +77,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | in_progress |
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
-| T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | todo |
+| T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
 | T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | todo |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
 
@@ -101,6 +101,16 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-068**（2026-08-29）ml_scores 資料合約＋薄因子（SPEC-010 §5/§6）。schemas.ML_SCORES
+  （pandera，17 表普查同步）＋serving DDL（PK (model_id, stock_id, date)）＋
+  serving.yaml cloud.windows ml_scores:250；factors/ml.py `ml.lgbm_rank_10d`
+  （registry 新增 ml 類別；前綴過濾＋同 (date,stock) 取字典序最新模型；過
+  assert_no_lookahead）；dataset.cross_rank_pct（null 傳遞）；data/serving/
+  ml_store.upsert_ml_scores（寫前 pandera 驗證、ON CONFLICT DO NOTHING 冪等）；
+  CLI `ml score` 補 rank_pct/model_id/available_at＋`--pg` 直寫。修正
+  `_ml_features_resolved` 排除 ml.* 自身（自我參照洩漏）。測試 7 條
+  （AC-6/7/9＋前綴去重＋rank_pct 手算）。閘門：374 passed / ruff / mypy 全綠。
 
 - **T-067**（2026-08-29）ML 訓練/推論 CLI（SPEC-010 §1/§4）。configs/ml.yaml＋
   MlConfig（extra=forbid；embargo≥horizon 驗證；年/月→交易日換算入配置）；

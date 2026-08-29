@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-08-29 T-068 ml_scores 資料合約＋薄因子：pandera schema＋serving DDL＋滾動窗、
+  factors/ml.py `ml.lgbm_rank_10d`（registry 加 ml 類別、過 assert_no_lookahead）、
+  `ml score --pg` 直寫（寫前驗證＋冪等 upsert）；並修 ML 特徵解析排除 ml.* 自身
+  （自我參照洩漏）。7 測試、閘門全綠（374 passed）。
+
 - 2026-08-29 T-067 ML 訓練/推論 CLI：configs/ml.yaml＋MlConfig、ml/train.py＋
   ml/score.py（決定性訓練、meta 反前視斷言、research_log 登記）、CLI `ml train`/
   `ml score`（PG serving 源）；lightgbm 入依賴。12 測試、閘門全綠。
