@@ -113,7 +113,7 @@ def test_ac1_bad_params_raise() -> None:
         {"train_min_days": 10, "test_days": 5, "embargo_days": 0, "vault_days": -1},
     ):
         with pytest.raises(ValueError):
-            walk_forward_splits(days, **kw)  # type: ignore[arg-type]
+            walk_forward_splits(days, **kw)
 
 
 @settings(max_examples=50, deadline=None)

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 
 import polars as pl
 import pytest
@@ -76,7 +77,7 @@ def test_ac2_bad_horizon_raises() -> None:
 # ── AC-2：超額＋秩轉換 ───────────────────────────────────────────────
 
 
-def _fwd(rows: list[tuple[dt.date, str, float | None]]) -> pl.DataFrame:
+def _fwd(rows: Sequence[tuple[dt.date, str, float | None]]) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "date": [r[0] for r in rows],
