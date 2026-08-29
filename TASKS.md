@@ -102,6 +102,22 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 ## 完成紀錄
 
+- **T-069 第 3 級的回測資料修剪：正確性分析**（2026-08-29，供後續接手）
+  為繞過 `universe_ids` 逐訊號日全表重算的效能問題，回測前把 PG `prices_daily`
+  修剪到「回測起日 −120 曆日」。逐一追過依賴後確認**不影響回測準確度**：
+  - `ml.lgbm_rank_10d`（受測策略唯一訊號）`lookback_days=0`、只讀 ml_scores，不碰 prices。
+  - `fundamental.revenue_yoy` 雖宣告 `lookback_days=430`，但 YoY 值直接取自
+    `monthly_revenue.yoy`（該表未修剪），price spine 僅決定輸出日期集合 → 不受影響。
+  - 硬約束是 `universe_ids` 的衛生濾網 60 個交易日（＋20 日 ADV）。實測 120 曆日窗
+    （2024-10-08~2025-02-05）＝ 87 平日 − 國慶/元旦/農曆年 ≈ **78 個交易日**，
+    邊際 18 天；rolling_median(20) 與 shift(60) 的取值皆落在保留範圍內，
+    結果與完整表相同。
+  ⚠ **脆弱之處**：以曆日換算交易日是不穩的假設，遇長年假或補班會使邊際趨近 60。
+  若日後重用此修剪手法，應改為交易日精確定界：
+  `SELECT min(date) FROM (SELECT DISTINCT date FROM serving.prices_daily
+   WHERE date < :bt_from ORDER BY date DESC LIMIT 90) t`。
+  根治仍是讓 `universe_ids` 只取 `signal_date − 回看窗` 的切片（所有 PG 回測共通，另立任務）。
+
 - **T-069 階梯第 1-2 級（部分）**（2026-08-29）ML vs 基準對照＋決定性實測。
   `ml/evaluate.py`（daily_rank_ic / ic_summary 含 Newey-West / decile_table /
   equal_weight_signed，12 測試）＋ CLI `ml eval --model`。**實測（同 43.9 萬筆、
