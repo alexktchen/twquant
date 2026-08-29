@@ -1,0 +1,100 @@
+# 一次性（第二輪）：T-069 階梯第 1 級——ML vs 雙基準對照（SPEC-010 §7）。
+# 首輪只比全因子等權，而那正是 D-020 已裁決「無預測力」的 composite（IC −0.018），
+# 打贏它不算數。本輪加 D-020 實證有效子集（serving.yaml composite_factors）為基準B，
+# 判定取最強基準。重跑 ml train 同時再驗一次決定性。跑綠取結果後即刪。
+name: ml-eval-baseline
+
+on:
+  push:
+    branches: [claude/data-running-check-8b2zil]
+    paths: [".github/workflows/ml-eval-baseline.yml"]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: twquant
+          POSTGRES_PASSWORD: twquant
+          POSTGRES_DB: twquant
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U twquant"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TWQUANT_PG_DSN: postgresql://twquant:twquant@localhost:5432/twquant
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 釋放 runner 磁碟
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync deps
+        run: uv sync --dev --all-groups
+
+      - name: Install rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+
+      - name: rclone config（Drive 憑證，Secret 注入）
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+
+      - name: 下載最新 base dump
+        run: |
+          BASE=$(rclone lsf gdrive:twquant-archive/base --files-only | sort | tail -1)
+          test -n "$BASE" || { echo "::error::Drive base/ 無 dump 檔"; exit 1; }
+          rclone copy "gdrive:twquant-archive/base/$BASE" . --transfers 4
+          mv "$BASE" full.dump
+
+      - name: pg_restore（含 factor_values；不建索引）
+        run: |
+          pg_restore -l full.dump > full.list
+          grep -vE 'TABLE DATA serving (composite_daily|factor_cross_stats) ' full.list > filtered.list
+          pg_restore --no-owner -j 4 --section=pre-data --section=data \
+            -L filtered.list -d "$TWQUANT_PG_DSN" full.dump
+          rm full.dump
+
+      - name: 訓練區間判定（同首訓：洞＝月資料日 < 10）
+        run: |
+          FV_FROM=$(psql "$TWQUANT_PG_DSN" -tAc "
+            WITH b AS (SELECT date_trunc('month', min(date))::date lo, date_trunc('month', max(date))::date hi FROM serving.factor_values),
+            months AS (SELECT generate_series((SELECT lo FROM b), (SELECT hi FROM b), '1 month')::date mo),
+            cov AS (SELECT date_trunc('month', date)::date mo, count(DISTINCT date) d FROM serving.factor_values GROUP BY 1),
+            holes AS (SELECT m.mo FROM months m LEFT JOIN cov c USING (mo) WHERE coalesce(c.d, 0) < 10 AND m.mo < (SELECT hi FROM b))
+            SELECT CASE WHEN (SELECT count(*) FROM holes) = 0 THEN (SELECT min(date) FROM serving.factor_values)
+                   ELSE (SELECT min(date) FROM serving.factor_values WHERE date >= (SELECT max(mo) FROM holes) + interval '1 month') END")
+          echo "FV_FROM=$FV_FROM" >> "$GITHUB_ENV"
+          echo "FV_TO=$(psql "$TWQUANT_PG_DSN" -tAc 'SELECT max(date) FROM serving.factor_values')" >> "$GITHUB_ENV"
+
+      - name: ml train（決定性驗證：應重現首訓的 lgbm_h10_20260112_2f5a21a9 與 IC +0.0814）
+        run: uv run python -m twquant ml train --from "$FV_FROM" --to "$FV_TO" --out models_out
+
+      - name: ml eval（階梯第 1-2 級：ML vs 全因子等權 vs D-020 有效子集）
+        run: |
+          MDIR=$(ls -d models_out/*/ | head -1)
+          echo "模型目錄：$MDIR"
+          uv run python -m twquant ml eval --model "$MDIR" | tee eval_report.txt
+
+      - name: 上傳結果
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-eval-baseline
+          path: |
+            eval_report.txt
+            models_out
+            data/research_log

@@ -2110,29 +2110,42 @@ def ml_eval(
         long = read_factor_long(conn, scfg.pg_schema, features, lo, hi)
     finally:
         conn.close()
-    weights = ev.equal_weight_signed({f: registry.get(f).direction for f in features})
-    base = zscore_weighted(long, weights).rename({"score": "base_score"})
-    # inner join：兩者必須在完全相同的 (date, stock) 上比較，否則宇宙差異冒充成績差異
-    both = oos.join(base, on=["date", "stock_id"], how="inner")
-    typer.echo(f"共同樣本 {both.height} 筆（模型 {oos.height}、基準 {base.height}）")
+    # 兩組基準：全因子等權，以及 D-020 裁決的實證有效子集等權。前者是 D-020 已證實
+    # 無預測力的 composite，只打贏它不足以宣稱增值；後者才是真正該跨過的門檻。
+    subset = [f for f in scfg.composite_factors if f in features]
+    specs = [("base_all", "基準A 全因子等權", features)]
+    if subset:
+        specs.append(("base_d020", "基準B D-020 有效子集", subset))
+    both = oos
+    for col, _, feats in specs:
+        w = ev.equal_weight_signed({f: registry.get(f).direction for f in feats})
+        b = zscore_weighted(long.filter(pl.col("factor").is_in(feats)), w).rename({"score": col})
+        # inner join：三者必須在完全相同的 (date, stock) 上比較，否則宇宙差異冒充成績差異
+        both = both.join(b, on=["date", "stock_id"], how="inner")
+    typer.echo(
+        f"共同樣本 {both.height} 筆｜基準A 全因子等權 {len(features)} 個"
+        + (f"；基準B D-020 有效子集 {len(subset)} 個（{', '.join(subset)}）" if subset else "")
+    )
 
-    rows = []
-    for name, col in (("ML（LightGBM）", "score"), ("基準（等權 zscore）", "base_score")):
+    rows: list[tuple[str, str, ev.IcSummary, float, bool]] = []
+    for col, name in [("score", "ML（LightGBM）")] + [(c, n) for c, n, _ in specs]:
         ic = ev.daily_rank_ic(both, col, "label")
         s = ev.ic_summary(ic, nw_lag=cfg.horizon_days)
         tbl = ev.decile_table(both, col, "label", k=buckets)
-        rows.append((name, s, ev.spread(tbl), ev.is_monotonic(tbl)))
+        rows.append((col, name, s, ev.spread(tbl), ev.is_monotonic(tbl)))
         typer.echo(
             f"\n{name}\n  RankIC {s.mean:+.4f}｜IR {s.ir:.3f}｜勝率 {s.hit_rate:.1%}"
             f"｜t(NW,{cfg.horizon_days}) {s.t_newey_west:.2f}（樸素 {s.t_naive:.2f}）"
             f"\n  分位頭尾 {ev.spread(tbl):+.4f}｜嚴格單調 {'是' if ev.is_monotonic(tbl) else '否'}"
         )
-    (_, ml_s, ml_sp, _), (_, bs_s, bs_sp, _) = rows
-    lift = ml_s.mean - bs_s.mean
+    ml = rows[0]
+    # 判定對「最強基準」（IC 最高者）——打贏最弱的那個不算數，避免挑軟柿子宣布勝利
+    tough = max(rows[1:], key=lambda r: r[2].mean)
+    lift = ml[2].mean - tough[2].mean
     verdict = "ML 勝出" if lift > 0 else "ML 未勝出"
     typer.secho(
-        f"\n=== 階梯第 1 級：{verdict}｜RankIC 差 {lift:+.4f}"
-        f"（ML {ml_s.mean:+.4f} vs 基準 {bs_s.mean:+.4f}）、分位頭尾差 {ml_sp - bs_sp:+.4f} ===",
+        f"\n=== 階梯第 1 級：{verdict}（對最強基準「{tough[1]}」）｜RankIC 差 {lift:+.4f}"
+        f"（ML {ml[2].mean:+.4f} vs {tough[2].mean:+.4f}）、分位頭尾差 {ml[3] - tough[3]:+.4f} ===",
         fg=typer.colors.GREEN if lift > 0 else typer.colors.RED,
         bold=True,
     )
@@ -2142,14 +2155,14 @@ def ml_eval(
             {
                 "entry_type": "ml_eval",
                 "strategy": meta["model_id"],
-                "factor": f,
+                "factor": "ml" if col == "score" else col,
                 "params_hash": str(meta.get("config_hash", "")),
                 "date": str(hi),
                 "metric_name": "oos_rank_ic",
-                "metric_value": v,
+                "metric_value": s.mean,
                 "trial_scope": f"ml:h{cfg.horizon_days}",
             }
-            for f, v in (("ml", ml_s.mean), ("baseline_equal_zscore", bs_s.mean))
+            for col, _, s, _, _ in rows
         ],
     )
 
