@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-08-29 T-067 ML 訓練/推論 CLI：configs/ml.yaml＋MlConfig、ml/train.py＋
+  ml/score.py（決定性訓練、meta 反前視斷言、research_log 登記）、CLI `ml train`/
+  `ml score`（PG serving 源）；lightgbm 入依賴。12 測試、閘門全綠。
+
 - 2026-08-29 T-066 ML 資料集組裝＋切分器：src/twquant/ml/（dataset/splits 純函數，
   入 IO 靜態閘門）；open-to-open 標籤、橫斷面百分位、purged walk-forward（embargo/
   金庫期）。A 級測試先行，19 測試（含 hypothesis 屬性）先凍結後實作，閘門全綠。

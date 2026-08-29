@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     import polars as pl
 
-    from twquant.config import ServingConfig, SystemConfig
+    from twquant.config import MlConfig, ServingConfig, SystemConfig
     from twquant.data.http import HttpClient
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
@@ -1890,6 +1890,176 @@ def archive_restore(
     for r in results:
         typer.echo(f"  {r.table:<24} +{r.rows} 列")
     typer.secho(f"[OK] {day} 還原完成（既有主鍵不覆寫）", fg=typer.colors.GREEN)
+
+
+# ── ML 排序層（SPEC-010，T-067）──────────────────────────────────────
+
+ml_app = typer.Typer(help="ML 排序層（SPEC-010）：研究軌訓練與每日推論")
+app.add_typer(ml_app, name="ml")
+
+
+def _load_ml() -> MlConfig:
+    from twquant.config import MlConfig, load_config
+
+    return load_config(_CONFIG_DIR / "ml.yaml", MlConfig)
+
+
+def _ml_features_resolved(cfg: MlConfig) -> list[str]:
+    """features 空＝全部註冊因子（SPEC-010 §1）；排序保證欄序決定性。"""
+    if cfg.features:
+        return list(cfg.features)
+    import twquant.factors.builtins  # noqa: F401  # 副作用：註冊全因子
+    from twquant.factors import registry
+
+    return sorted(registry.list_factors())
+
+
+def _ml_feature_frames(
+    source: object, features: list[str], start: dt.date, end: dt.date
+) -> dict[str, pl.DataFrame]:
+    """factor_values.z 切片 → {因子: (date, stock_id, value)}。
+
+    無資料的因子給空表——組裝後整欄 null（缺值語意由 assemble 保留，禁填 0）。
+    """
+    import polars as pl
+
+    from twquant.data.serving.pg_view import PgTableSource
+
+    assert isinstance(source, PgTableSource)
+    fv = (
+        source.scan("factor_values")
+        .filter(pl.col("date").is_between(start, end) & pl.col("factor").is_in(features))
+        .select("factor", "date", "stock_id", pl.col("z").alias("value"))
+        .collect()
+    )
+    empty = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "value": pl.Float64})
+    parts = {
+        str(k[0]): v.drop("factor") for k, v in fv.partition_by("factor", as_dict=True).items()
+    }
+    return {name: parts.get(name, empty) for name in features}
+
+
+@ml_app.command("train")
+def ml_train(
+    from_: str = typer.Option(..., "--from", help="訓練資料起日（含）YYYY-MM-DD"),
+    to: str = typer.Option(..., "--to", help="訓練資料迄日（含，含金庫期）YYYY-MM-DD"),
+    out: str = typer.Option("", help="模型輸出根目錄；空＝<data_dir>/models"),
+) -> None:
+    """walk-forward 訓練＋部署模型落地＋research_log 登記（SPEC-010 §4）。
+
+    資料源＝PG serving（factor_values.z 特徵、prices_daily.open 標籤）。訓練需完整
+    歷史庫（本機/還原庫）；Supabase 滾動窗口禁作訓練源（SPEC-010 §0）。
+    """
+    import lightgbm
+    import polars as pl
+
+    from twquant.config import config_hash
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.ml import train as mlt
+    from twquant.ml.dataset import assemble, excess_rank_labels, forward_open_returns
+    from twquant.ml.splits import walk_forward_splits
+
+    cfg = _load_ml()
+    sys_cfg = _load_system()
+    start, end = dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        source = PgTableSource(conn, scfg.pg_schema)
+        features = _ml_features_resolved(cfg)
+        feats = _ml_feature_frames(source, features, start, end)
+        px = (
+            source.scan("prices_daily")
+            .filter(pl.col("date").is_between(start, end))
+            .select("date", "stock_id", "open")
+            .collect()
+        )
+    finally:
+        conn.close()
+    labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
+    frame = assemble(feats, labels)
+    days: list[dt.date] = sorted(px["date"].unique().to_list())
+    splits = walk_forward_splits(
+        days,
+        train_min_days=cfg.split.train_min_days,
+        test_days=cfg.split.test_days,
+        embargo_days=cfg.split.embargo_days,
+        vault_days=cfg.split.vault_days,
+    )
+    typer.echo(
+        f"資料 {len(days)} 交易日、{len(features)} 特徵、{frame.height} 列、{len(splits)} 窗"
+    )
+    result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm)
+    ic = mlt.oos_rank_ic(result.oos_scores)
+    train_end = days[-cfg.split.vault_days - 1] if cfg.split.vault_days else days[-1]
+    deploy = mlt.fit_ranker(frame.filter(pl.col("date") <= train_end), features, cfg.lgbm)
+    model_id = mlt.make_model_id(train_end, cfg)
+    mdir = (Path(out) if out else Path(sys_cfg.data_dir) / "models") / model_id
+    mlt.save_model(
+        mdir,
+        deploy,
+        {
+            "model_id": model_id,
+            "train_end": train_end.isoformat(),
+            "features": features,
+            "config_hash": config_hash(cfg),
+            "horizon_days": cfg.horizon_days,
+            "lightgbm_version": lightgbm.__version__,
+            "oos_rank_ic": ic,
+            "window_ics": result.window_ics,
+            "data_from": from_,
+            "data_to": to,
+        },
+    )
+    result.oos_scores.write_parquet(mdir / "oos_scores.parquet")
+    mlt.log_training_run(sys_cfg.data_dir, cfg, model_id, ic)
+    typer.secho(
+        f"[OK] {model_id}：OOS RankIC {ic:+.4f}（{len(splits)} 窗）→ {mdir}",
+        fg=typer.colors.GREEN,
+    )
+
+
+@ml_app.command("score")
+def ml_score(
+    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（取 train_end < 該日的最新模型）"),
+    models: str = typer.Option("", help="模型根目錄；空＝<data_dir>/models"),
+    out: str = typer.Option("", help="輸出 parquet；空＝<模型目錄>/scores_<date>.parquet"),
+) -> None:
+    """對單日全宇宙推論（SPEC-010 §4）。ml_scores 表落地與薄因子在 T-068。"""
+    import polars as pl
+
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.ml import score as mls
+    from twquant.ml import train as mlt
+    from twquant.ml.dataset import assemble
+
+    day = dt.date.fromisoformat(date)
+    sys_cfg = _load_system()
+    root = Path(models) if models else Path(sys_cfg.data_dir) / "models"
+    mdir = mls.latest_model_dir(root, day)
+    booster, meta = mls.load_model(mdir, day)
+    raw_feats = meta.get("features")
+    if not isinstance(raw_feats, list) or not raw_feats:
+        raise ValueError(f"{mdir} meta.json 缺 features：模型不可推論，拒用")
+    features = [str(f) for f in raw_feats]
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        feats = _ml_feature_frames(PgTableSource(conn, scfg.pg_schema), features, day, day)
+    finally:
+        conn.close()
+    no_labels = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "label": pl.Float64})
+    frame = assemble(feats, no_labels).drop("label")
+    if frame.is_empty():
+        raise ValueError(f"{day} 無特徵資料：factor_values 該日為空（先跑 serving materialize）")
+    scored = mlt.predict_scores(booster, frame, features)
+    out_path = Path(out) if out else mdir / f"scores_{day}.parquet"
+    scored.write_parquet(out_path)
+    typer.secho(
+        f"[OK] {day}：{scored.height} 檔 → {out_path}（模型 {mdir.name}）", fg=typer.colors.GREEN
+    )
 
 
 def pl_config() -> pl.Config:

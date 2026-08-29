@@ -76,7 +76,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-064 | 前端個股因子頁重新設計：元件抽出 `frontend/src/stock/`（T-034 遺留）＋跨頁共用層（theme/fallback/hooks/ui/charts）＋mobile-first 響應式（手機頂欄、橫捲 chip 列、響應式圖高、ZBars）＋終端風精煉（TPanel/方角 chip） | PRD-001 §3 | T-034 | — | done |
 | T-065 | 【ML Phase 1】資料深度審計：本機湖/Drive 歸檔各表連續歷史盤點（分點/股權分散/月營收起點）、生存者偏誤檢查（stock_meta 是否含已下市）、訓練可用期間定案 → 回填 SPEC-010 §2 與 `split.train_min_years` | SPEC-010 §2 | — | B | in_progress |
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
-| T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | todo |
+| T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | todo |
 | T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | todo |
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
@@ -101,6 +101,15 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
 ## 完成紀錄
+
+- **T-067**（2026-08-29）ML 訓練/推論 CLI（SPEC-010 §1/§4）。configs/ml.yaml＋
+  MlConfig（extra=forbid；embargo≥horizon 驗證；年/月→交易日換算入配置）；
+  ml/train.py（fit_ranker 決定性旗標固定注入、walk_forward_train、oos_rank_ic、
+  save_model model.txt+meta.json、log_training_run→research_log）；ml/score.py
+  （load_model 斷言 train_end<as_of、latest_model_dir）；CLI `ml train`/`ml score`
+  （PG serving 源：factor_values.z 特徵＋prices_daily.open 標籤）。測試 12 條
+  （AC-4 決定性/AC-5 反前視/AC-8 登記/配置驗證）。閘門：367 passed / ruff / mypy
+  全綠。SPEC-010 §1 同步 days_per_year/days_per_month 欄。
 
 - **T-066**（2026-08-29）ML 資料集組裝＋purged walk-forward 切分器（SPEC-010 §2/§3）。
   `src/twquant/ml/`：splits.walk_forward_splits（擴張窗、embargo、金庫期、壞輸入

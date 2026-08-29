@@ -38,6 +38,8 @@ CLAUDE.md 黃金規則。
 | `split.test_months` | int | `3` | 每段測試期長度；逐段前進、擴張訓練窗 |
 | `split.embargo_days` | int | `10` | 訓練/測試間清除天數，須 ≥ `horizon_days` |
 | `split.vault_months` | int | `6` | 金庫期：最後 N 個月凍結，僅最終定案時評估一次 |
+| `split.days_per_year` | int | `244` | 年→交易日換算基數（`train_min_days` property 用；無魔術數字） |
+| `split.days_per_month` | int | `21` | 月→交易日換算基數（`test_days`/`vault_days` property 用） |
 | `lgbm` | dict | 見下 | LightGBM 參數；只暴露 `num_leaves`、`learning_rate`、`min_data_in_leaf`、`feature_fraction`、`n_estimators`、`seed`（其餘鎖預設） |
 | `refit.schedule` | str | `monthly` | 生產期重訓頻率 |
 | `universe` | — | 沿用策略層 | 與 `strategy/universe.py` 同一套濾網配置（處置/全額交割/最低 ADV） |
