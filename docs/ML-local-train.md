@@ -35,21 +35,22 @@ $env:TWQUANT_PG_DSN = "postgresql://twquant:twquant@localhost:5432/twquant"
 
 ## 2. 確認訓練區間（factor_values 有歷史洞，先看再訓）
 
-首訓 CI（run #3，2026-08-29）實測：**2022Q1 整段 0 列、2020-21 僅 ~330 檔/日**
-（早期物化用小宇宙）——逐因子 min/max 會騙人，訓練起點必須避開最後一個洞。逐月盤點：
+首訓 CI（run #3/#4，2026-08-29）實測：factor_values **連續段＝2023-01 起**；
+2020-05~2020-12、2021-03~2022-12 整段缺失（2020-21 僅零星月＋小宇宙）——逐因子
+min/max 會騙人，訓練起點必須在最後一個洞之後。注意春節月正常只有 12~13 個
+交易日，判洞閾值用「月資料日 < 10」。逐月盤點：
 
 ```powershell
 psql $env:TWQUANT_PG_DSN -c "SELECT date_trunc('month', date)::date AS mo, count(DISTINCT date) AS days, count(*)/count(DISTINCT date) AS rows_per_day FROM serving.factor_values GROUP BY 1 ORDER BY 1"
 ```
 
-取「最後一個 days < 15 的月份」的下一個月當 `--from`（洞未確認前 `2022-05-01`
-是安全猜測）。長期解＝補洞：`serving materialize --from ... --to ...` 回跑缺段
-（歷史 chip 因子回補另列任務）。
+實測結論：`--from 2023-01-01`。長期解＝補洞：`serving materialize --from ...
+--to ...` 回跑 2020~2022 缺段（與歷史 chip 因子回補併同另列任務）。
 
 ## 3. 訓練與推論
 
 ```powershell
-uv run python -m twquant ml train --from 2022-05-01 --to 2026-07-29
+uv run python -m twquant ml train --from 2023-01-01 --to 2026-07-29
 # 過程逐窗印 OOS RankIC；產出 data/models/lgbm_h10_<train_end>_<cfg8>/
 #   model.txt / meta.json（train_end、config_hash、oos_rank_ic、window_ics）
 #   oos_scores.parquet（全部樣本外分數，T-069 評估階梯的輸入）

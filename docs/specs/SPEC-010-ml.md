@@ -55,9 +55,15 @@ CLAUDE.md 黃金規則。
 - **標籤**：`open(t+1) → open(t+1+h)` 報酬 − 同日宇宙均值 → 當日橫斷面百分位。
   標籤計算只存在於訓練組裝路徑（研究軌）；推論路徑（`score`）禁止 import 標籤模組。
 - **宇宙**：as-of 當日濾網，與策略層同套；訓練/評估/回測三處宇宙一致。
-- **訓練可用期間（T-065 審計定案，2026-08-29）**：`2020-01 ~ 今`，約 6.5 年
-  （prices_daily 1,592 交易日、缺日≈國定假日；labels 無虞）。`train_min_years: 2.0`
-  可行，**定案**。特徵覆蓋分層（factor_values 實測，缺值留 null 由 LightGBM 原生處理）：
+- **訓練可用期間（T-065 審計＋首訓逐月密度實測定案，2026-08-29）**：
+  標籤（prices_daily）覆蓋 `2020-01 ~ 今` 6.5 年無虞；但特徵倉（factor_values）
+  **連續可用段為 `2023-01 ~ 今` 約 3.5 年**——2020-05~2020-12、2021-03~2022-12
+  整段缺失（2020-21 僅零星月、~330 檔/日小宇宙），逐因子 min/max 會掩蓋洞，
+  判洞須看逐月資料日數（注意春節月正常僅 12~13 交易日，洞閾值 <10 日）。
+  故現況訓練區間＝`2023-01 ~ 今`；`train_min_years: 2.0` 仍可行（3.5 年 >
+  首窗 2 年＋embargo＋金庫期），**定案**。補洞（`serving materialize` 回跑
+  2020~2022）後訓練期可擴至 6.5 年——與歷史 chip 回補併同另立任務。
+  特徵覆蓋分層（factor_values 實測，缺值留 null 由 LightGBM 原生處理）：
   - 6.5 年全覆蓋：價量核心（mom/reversal/vol/turnover/overnight/intraday）、
     fundamental.revenue_yoy/accel、volume.*
   - 2023-09 起：price.high_52w；2024-01 起：chip.foreign_streak/trust_streak；

@@ -73,9 +73,9 @@ jobs:
             -L filtered.list -d "$TWQUANT_PG_DSN" full.dump
           rm full.dump && df -h / | tail -1
 
-      # run #3 發現：factor_values 有歷史洞（2022Q1 整段 0 列、2020-21 僅 ~330 檔/日），
-      # 逐因子 min/max 會騙人。訓練區間改「最後一個洞之後」：洞＝該月有資料日 < 15
-      # （含整月缺失），由 SQL 對月序列判定；逐月密度表全印供 T-065 追加紀錄。
+      # run #3/#4 實測：factor_values 連續段＝2023-01 起；2020-05~12、2021-03~2022-12
+      # 整段缺失（2020-21 僅零星月）。洞閾值 <15 會誤殺春節月（2026-02 僅 12 交易日、
+      # 2024-02 僅 13 天，皆正常）→ 改 <10（真洞是 0 或 5 天）。
       - name: 特徵覆蓋盤點（逐因子起迄＋逐月密度＋訓練區間判定）
         run: |
           psql "$TWQUANT_PG_DSN" -c "SELECT factor, min(date), max(date), count(*) FROM serving.factor_values GROUP BY 1 ORDER BY 1"
@@ -84,7 +84,7 @@ jobs:
             WITH b AS (SELECT date_trunc('month', min(date))::date lo, date_trunc('month', max(date))::date hi FROM serving.factor_values),
             months AS (SELECT generate_series((SELECT lo FROM b), (SELECT hi FROM b), '1 month')::date mo),
             cov AS (SELECT date_trunc('month', date)::date mo, count(DISTINCT date) d FROM serving.factor_values GROUP BY 1),
-            holes AS (SELECT m.mo FROM months m LEFT JOIN cov c USING (mo) WHERE coalesce(c.d, 0) < 15 AND m.mo < (SELECT hi FROM b))
+            holes AS (SELECT m.mo FROM months m LEFT JOIN cov c USING (mo) WHERE coalesce(c.d, 0) < 10 AND m.mo < (SELECT hi FROM b))
             SELECT CASE WHEN (SELECT count(*) FROM holes) = 0 THEN (SELECT min(date) FROM serving.factor_values)
                    ELSE (SELECT min(date) FROM serving.factor_values WHERE date >= (SELECT max(mo) FROM holes) + interval '1 month') END")
           FV_TO=$(psql "$TWQUANT_PG_DSN" -tAc 'SELECT max(date) FROM serving.factor_values')
