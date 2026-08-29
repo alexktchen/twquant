@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-08-29 T-066 ML 資料集組裝＋切分器：src/twquant/ml/（dataset/splits 純函數，
+  入 IO 靜態閘門）；open-to-open 標籤、橫斷面百分位、purged walk-forward（embargo/
+  金庫期）。A 級測試先行，19 測試（含 hypothesis 屬性）先凍結後實作，閘門全綠。
+
 - 2026-08-29 ML 方向定案（D-036）＋SPEC-010-ml 草稿＋T-065~T-070 任務切分：
   橫斷面 LightGBM 排序 meta-factor——訓練走研究軌離線 CLI、推論落地 ml_scores 表、
   策略層以薄因子讀取；黃金規則與 IO 靜態閘門不鬆動，部署被 T-069 評估階梯
