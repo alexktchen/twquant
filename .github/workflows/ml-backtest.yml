@@ -5,6 +5,12 @@
 # 跑 ml_rank 策略回測，並以既有 reversal_revenue 策略為對照。
 # 觀察重點是 turnover（年化單邊）：ML 分數波動高於線性組合，來回成本含 0.3%
 # 證交稅可能吃掉 IC 優勢。跑綠取結果後即刪。
+#
+# 重跑 #2：首輪回測 46 分鐘未完成、runner 於 60 分被砍（log 404，OOM 徵狀）。
+# 根因是既有架構特性——universe_ids 每個訊號日都對**整張** prices_daily（907 萬列）
+# 排序＋rolling_median＋兩輪 cum_sum window，48 個訊號日重複 48 次。繞法：訓練完成後
+# 把 PG 的 prices 砍到「回測期間 + 120 日回看」（涵蓋 20 日 ADV 與 60 列衛生濾網），
+# 約 907 萬 → 60 萬列；並先跑 1 個月 smoke 確認鏈路，再跑全期。
 name: ml-backtest
 
 on:
@@ -99,21 +105,39 @@ jobs:
           echo "BT_FROM=$(psql "$TWQUANT_PG_DSN" -tAc 'SELECT min(date) FROM serving.ml_scores')" >> "$GITHUB_ENV"
           echo "BT_TO=$(psql "$TWQUANT_PG_DSN" -tAc 'SELECT max(date) FROM serving.ml_scores')" >> "$GITHUB_ENV"
 
+      # 回測只需「回測期間 + 回看窗」的價格：20 日 ADV + 60 列衛生濾網 → 120 曆日足夠。
+      # 必須在 ml train 之後（訓練標籤需要完整歷史），砍完 VACUUM 讓查詢真的變快。
+      - name: 修剪 prices_daily 至回測所需窗口（繞過 universe_ids 全表重算）
+        run: |
+          psql "$TWQUANT_PG_DSN" -c "SELECT count(*) AS before_rows FROM serving.prices_daily"
+          psql "$TWQUANT_PG_DSN" -c "DELETE FROM serving.prices_daily WHERE date < DATE '$BT_FROM' - INTERVAL '120 days'"
+          psql "$TWQUANT_PG_DSN" -c "VACUUM ANALYZE serving.prices_daily"
+          psql "$TWQUANT_PG_DSN" -c "SELECT count(*) AS after_rows, min(date), max(date) FROM serving.prices_daily"
+
+      - name: 回測 smoke（首月，先確認鏈路與速度）
+        run: |
+          SMOKE_END=$(date -d "$BT_FROM +35 days" +%F)
+          echo "smoke 區間 $BT_FROM ~ $SMOKE_END"
+          timeout 900 uv run python -m twquant backtest --strategy configs/strategies/ml_rank.yaml \
+            --start "$BT_FROM" --end "$SMOKE_END" --pg | tee bt_smoke.txt
+
       - name: 回測 ml_rank（受測）
         run: |
-          uv run python -m twquant backtest --strategy configs/strategies/ml_rank.yaml \
+          timeout 2100 uv run python -m twquant backtest --strategy configs/strategies/ml_rank.yaml \
             --start "$BT_FROM" --end "$BT_TO" --pg | tee bt_ml.txt
 
       - name: 回測 reversal_revenue（既有策略對照，同期間同成本）
         run: |
-          uv run python -m twquant backtest --strategy configs/strategies/reversal_revenue.yaml \
+          timeout 2100 uv run python -m twquant backtest --strategy configs/strategies/reversal_revenue.yaml \
             --start "$BT_FROM" --end "$BT_TO" --pg | tee bt_base.txt || true
 
       - name: 上傳結果
+        if: always() # 全期若再度超時，至少保住 smoke 結果
         uses: actions/upload-artifact@v4
         with:
           name: ml-backtest
           path: |
+            bt_smoke.txt
             bt_ml.txt
             bt_base.txt
             models_out
