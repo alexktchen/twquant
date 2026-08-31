@@ -6,6 +6,7 @@
 # 換股規則——但那些參數需另行驗證並計入 DSR trials，不得在此偷改。
 name: ml_rank
 description: 純 ML 橫斷面排序（T-069 第 3 級受測；未經部署裁決，勿用於實盤）
+trial_scope: ml_rank_h10
 
 universe:
   markets: [TWSE, TPEX]
@@ -15,6 +16,8 @@ universe:
 signals:
   - factor: ml.lgbm_rank_10d # direction=1：rank_pct 越高越看多
     weight: 1.0
+    params:
+      model_id: lgbm_h10_20260225_2f5a21a9 # D-038：歷史回測精確綁定 artifact
 
 combine: zscore_weighted
 selection:

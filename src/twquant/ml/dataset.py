@@ -10,6 +10,8 @@ from collections.abc import Mapping
 
 import polars as pl
 
+from twquant.backtest.costs import CostConfig, trade_cost
+
 
 def forward_open_returns(prices: pl.DataFrame, horizon: int) -> pl.DataFrame:
     """open(t+1) → open(t+1+h) 前向報酬。輸入需含 (date, stock_id, open)。
@@ -48,6 +50,79 @@ def excess_rank_labels(fwd: pl.DataFrame) -> pl.DataFrame:
                 pl.col("_excess").rank(method="average").over("date")
                 / pl.col("_excess").count().over("date")
             ).alias("label")
+        )
+        .select("date", "stock_id", "label")
+        .sort("date", "stock_id")
+    )
+
+
+def cost_adjusted_return_labels(
+    prices: pl.DataFrame,
+    *,
+    horizon: int,
+    adv_window_sessions: int,
+    position_notional_twd: float,
+    downside_penalty: float,
+    cost_cfg: CostConfig,
+) -> pl.DataFrame:
+    """建立 H 日成本後超額報酬標籤；ADV 僅含訊號日及以前資料。"""
+    required = {"date", "stock_id", "open", "amount"}
+    missing = sorted(required - set(prices.columns))
+    if missing:
+        raise ValueError(f"成本感知標籤缺行情欄位：{', '.join(missing)}")
+    if horizon < 1:
+        raise ValueError(f"horizon 須 >= 1，得到 {horizon}")
+    if adv_window_sessions < 1:
+        raise ValueError(f"adv_window_sessions 須 >= 1，得到 {adv_window_sessions}")
+    if position_notional_twd <= 0:
+        raise ValueError(f"position_notional_twd 須 > 0，得到 {position_notional_twd}")
+    if downside_penalty < 0:
+        raise ValueError(f"downside_penalty 須 >= 0，得到 {downside_penalty}")
+
+    def estimated_cost_rate(row: dict[str, float | None]) -> float | None:
+        entry_raw, exit_raw, adv_raw = row["_entry"], row["_exit"], row["_adv"]
+        if entry_raw is None or exit_raw is None or adv_raw is None:
+            return None
+        entry, exit_, adv = float(entry_raw), float(exit_raw), float(adv_raw)
+        if entry <= 0.0 or exit_ <= 0.0 or adv <= 0.0:
+            return None
+        shares = int(position_notional_twd // entry)
+        if shares < 1:
+            return None
+        participation = position_notional_twd / adv
+        buy = trade_cost(
+            side="buy", price=entry, shares=shares, participation=participation, cfg=cost_cfg
+        )
+        sell = trade_cost(
+            side="sell", price=exit_, shares=shares, participation=participation, cfg=cost_cfg
+        )
+        return (buy.total + sell.total) / (entry * shares)
+
+    prepared = (
+        prices.sort("stock_id", "date")
+        .with_columns(
+            pl.col("open").shift(-1).over("stock_id").alias("_entry"),
+            pl.col("open").shift(-(1 + horizon)).over("stock_id").alias("_exit"),
+            pl.col("amount")
+            .rolling_median(window_size=adv_window_sessions, min_samples=adv_window_sessions)
+            .over("stock_id")
+            .alias("_adv"),
+        )
+        .with_columns(
+            (pl.col("_exit") / pl.col("_entry") - 1.0).alias("_gross"),
+            pl.struct("_entry", "_exit", "_adv")
+            .map_elements(estimated_cost_rate, return_dtype=pl.Float64)
+            .alias("_cost"),
+        )
+        .with_columns((pl.col("_gross") - pl.col("_gross").mean().over("date")).alias("_excess"))
+        .with_columns((pl.col("_excess") - pl.col("_cost")).alias("_net"))
+    )
+    return (
+        prepared.with_columns(
+            pl.when(pl.col("_net") < 0.0)
+            .then(pl.col("_net") * (1.0 + downside_penalty))
+            .otherwise(pl.col("_net"))
+            .alias("label")
         )
         .select("date", "stock_id", "label")
         .sort("date", "stock_id")

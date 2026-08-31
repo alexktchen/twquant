@@ -1,0 +1,27 @@
+# T-072 零成本可交易性診斷；D-039 未過前禁止部署。
+name: ml_net_h20
+description: H20 成本感知報酬模型的純訊號研究策略（未經部署裁決）
+trial_scope: ml_net_h20
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000
+  min_price: 10.0
+
+signals:
+  - factor: ml.lgbm_net_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_net_h20_20260225_9a575e97
+
+combine: zscore_weighted
+selection:
+  method: top_n
+  top_n: 20
+weighting: equal
+rebalance:
+  schedule: weekly
+  day: MON
+  execution: next_open
+overlays: []
+max_weight_per_stock: 0.05

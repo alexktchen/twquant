@@ -24,6 +24,7 @@ commission_rate: 0.001425
 commission_discount: 0.35        # 折讓後 = rate × discount
 commission_min_twd: 20
 tax_rate_sell: 0.003             # 現股賣出證交稅
+cost_scale: 1.0                  # 診斷/壓測倍率；0=零成本反事實，預設行為不變
 slippage:
   model: adv_impact              # cost = half_spread + k * sqrt(participation)
   half_spread_bps: 5             # 半價差下限（bps），實際取 max(檔位半價差, 此值)
@@ -31,6 +32,8 @@ slippage:
 ```
 
 - 買進成本 = 手續費；賣出成本 = 手續費 + 證交稅；雙邊都加滑價
+- 費、稅、滑價各先依下列模型計算後同乘 `cost_scale`；倍率須 >=0。倍率是診斷情境的一部分，
+  必須進 canonical params hash 與 research_log，不得當成未登記的「免費查看」。
 - **半價差須價格相依（REVIEW M1）**：half_spread = max(0.5 × tick(price)/price,
   half_spread_bps)。低價股 tick 造成的最小價差遠大於 5bps（15 元股 tick=0.05 →
   ≥16.7bps），固定 5bps 會系統性低估中小型股成本、讓高周轉 sleeve 假性過閘。
@@ -65,6 +68,12 @@ slippage:
   （單邊，Σ|Δw|/2）、勝率、平均持有天數、成本佔比分解（費/稅/滑價）
 - HTML 報告 + parquet 落地 + metadata（git hash、config hash）
 - 自動 append 到 research_log.parquet
+- 診斷摘要須含：費/稅/滑價逐項與合計、成本占初始資金、同成交路徑 gross curve
+  （`gross_t = net_t + 累計已扣成本_t`，明確標示非零成本反事實）、gross 指標、平均持有
+  交易日。嚴格零成本反事實另以 `cost_scale=0` 重跑，兩者不可混稱。
+- research_log 的 `params_hash` 必須由 resolved strategy 的經濟欄位（排除 name、description、
+  trial_scope 等 metadata）、有效 cost config、日期、初始資金、max participation、資料源
+  共同 canonical hash；`trial_scope` 由策略研究家族決定，不得用變體名稱把同族試驗拆散。
 
 ## 5. 驗證協議工具（`backtest/validation.py`）
 
@@ -96,6 +105,10 @@ slippage:
   滑價為 2 倍
 - AC-8（決定性）：同輸入重跑，BacktestResult 全欄位 bit-identical
 - AC-9（walk-forward）：切割邊界無重疊、無遺漏，train/test 日期集合互斥
+- AC-10（診斷恆等）：費/稅/滑價逐項合計與 ledger 完全一致；每個交易日
+  `same_path_gross = net_equity + cumulative_cost`；新增診斷不得改變既有 equity/ledger。
+- AC-11（試驗身分）：canonical hash 對 key/輸入順序與純 metadata 不敏感，但策略經濟欄位、cost_scale、
+  model_id、期間、資金、participation、資料源任一改變時必須改變；同族變體共用 scope。
 
 ## 範圍外
 

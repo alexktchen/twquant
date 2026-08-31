@@ -57,6 +57,15 @@ def test_commission_minimum() -> None:
     assert c.commission == pytest.approx(20.0)
 
 
+def test_ac10_cost_scale_zero_removes_all_explicit_costs() -> None:
+    cfg = ct.CostConfig(cost_scale=0.0)
+    for side in ("buy", "sell"):
+        c = ct.trade_cost(side=side, price=37.5, shares=3000, participation=0.04, cfg=cfg)
+        assert c.commission == 0.0
+        assert c.tax == 0.0
+        assert c.slippage == 0.0
+
+
 # ── _fill 分支（AC-3 漲停、參與率、現金）─────────────────────────────
 def test_fill_limit_up_unfilled() -> None:
     st = _State(cash=1e7)

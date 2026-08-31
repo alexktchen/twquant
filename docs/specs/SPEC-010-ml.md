@@ -134,6 +134,9 @@ Asia/Taipei（寫入時刻）。PG 鏡射比照 SPEC-009 §2.1（PK `(model_id, 
 
 **實驗登記簿**：每次訓練/評估寫 research_log 一列（config hash、資料期間、seed、
 OOS 指標）；未登記的實驗視同不存在，trials 計數以登記簿為準。
+成本後執行研究依 D-038：正常成本、零成本與壓測皆須以完整 canonical hash 登記；
+同一模型/標籤的 EMA、buffer 等執行變體共用 trial family scope，失敗結果不得刪除。
+策略必須精確 pin `model_id`，禁止因供應表新增模型而自動改變歷史回測。
 **部署閘門**：階梯全過 + 金庫期最終評估 → DECISIONS.md 裁決（T-069）通過後，
 才允許 T-070 接入每日 pipeline。
 
@@ -149,7 +152,10 @@ OOS 指標）；未登記的實驗視同不存在，trials 計數以登記簿為
 - AC-7：`ml_scores` schema 驗證失敗即 raise（不靜默丟列）。
 - AC-8：每次 `ml train` 在 research_log 產生一列登記，config hash 可回溯到 yaml。
 - AC-9：IC 對照報告可產出：模型分數 vs 基準組合，同期間同宇宙。
-- AC-10：DSR 報告含 trials 數且 trials ＝ 登記簿列數。
+- AC-10：DSR 報告含 trials 數，且 trials ＝同一 `trial_scope` 下 distinct `params_hash`
+  數；同一試驗的多個 metric 列只算一次。
+- AC-11：成本後執行變體的 canonical hash 覆蓋完整策略、成本、model_id、期間、資金、
+  participation 與資料源；同族變體落在同一 trial scope，distinct hash 數等於實際嘗試數。
 
 ## 範圍外
 

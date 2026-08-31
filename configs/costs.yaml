@@ -3,6 +3,7 @@ commission_rate: 0.001425
 commission_discount: 0.35        # 折讓後 = rate × discount
 commission_min_twd: 20.0
 tax_rate_sell: 0.003             # 現股賣出證交稅
+cost_scale: 1.0                  # 診斷/壓測倍率；0=零成本反事實，1.5=成本壓測
 slippage:
   model: adv_impact              # cost = half_spread + k × sqrt(participation)
   half_spread_bps: 5.0           # 半價差下限（bps）；實際取 max(檔位半價差, 此值)

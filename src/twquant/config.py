@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from twquant.errors import ConfigError
 
@@ -115,12 +115,14 @@ class ScreenerConfig(BaseConfig):
 
 
 class MlLabelConfig(BaseConfig):
-    """標籤定義（SPEC-010 §1/§2）。目前各欄位僅一種合法值——寫成配置是為了讓
-    語意顯式可查、日後擴充不改介面；新增選項時在 dataset.py 分支。"""
+    """標籤定義（SPEC-010 §1/§2、SPEC-011 §1）。"""
 
     execution: Literal["next_open"] = "next_open"
     excess: Literal["market_mean"] = "market_mean"
-    transform: Literal["rank_pct"] = "rank_pct"
+    transform: Literal["rank_pct", "cost_adjusted_return"] = "rank_pct"
+    adv_window_sessions: int = Field(default=20, ge=1)
+    position_notional_twd: float = Field(default=500_000.0, gt=0.0)
+    downside_penalty: float = Field(default=0.25, ge=0.0)
 
 
 class MlSplitConfig(BaseConfig):

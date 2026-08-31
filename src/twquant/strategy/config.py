@@ -65,6 +65,7 @@ class StrategyConfig(BaseConfig):
 
     name: str
     description: str = ""
+    trial_scope: str | None = None
     universe: UniverseConfig = UniverseConfig()
     signals: list[SignalConfig]
     combine: Literal["zscore_weighted", "rank_avg", "ic_weighted"] = "zscore_weighted"

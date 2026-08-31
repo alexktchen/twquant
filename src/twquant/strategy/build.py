@@ -81,7 +81,10 @@ def build_targets(cfg: StrategyConfig, wh: TableSource, signal_date: dt.date) ->
         )
 
     names = [s.factor for s in cfg.signals]
-    fdf = compute(names, view, dates=[signal_date]).filter(pl.col("stock_id").is_in(uni))
+    params = {s.factor: dict(s.params) for s in cfg.signals}
+    fdf = compute(names, view, dates=[signal_date], params=params).filter(
+        pl.col("stock_id").is_in(uni)
+    )
     if fdf.is_empty():
         return _empty()
 

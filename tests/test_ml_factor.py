@@ -142,6 +142,28 @@ def test_factor_filters_prefix_and_dedups_latest_model(tmp_path: Path) -> None:
     assert got == {"1101": pytest.approx(0.90), "2330": pytest.approx(0.50)}
 
 
+def test_ac6_factor_can_pin_exact_model_id(tmp_path: Path) -> None:
+    d = _DAYS[0]
+    old = "lgbm_h10_20260430_aaaaaaaa"
+    new = "lgbm_h10_20260531_aaaaaaaa"
+    scores = _scores(
+        [
+            (d, "1101", old, 0.1, 0.10),
+            (d, "1101", new, 0.9, 0.90),
+            (d, "2330", old, 0.5, 0.50),
+            (d, "2330", new, 0.6, 0.60),
+        ]
+    )
+    wh = _lake(tmp_path, scores)
+    fdef = get("ml.lgbm_rank_10d")
+    assert fdef.fn is not None
+    out = fdef.fn(wh.view(_DAYS[-1]), {**fdef.params, "model_id": old})
+    if isinstance(out, pl.LazyFrame):
+        out = out.collect()
+    got = {r["stock_id"]: r["value"] for r in out.to_dicts()}
+    assert got == {"1101": pytest.approx(0.10), "2330": pytest.approx(0.50)}
+
+
 # ── cross_rank_pct（ml score 寫 rank_pct 用）─────────────────────────
 
 

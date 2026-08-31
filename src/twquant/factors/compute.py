@@ -36,14 +36,18 @@ def compute(
     names: list[str],
     view: PitView,
     dates: list[dt.date] | None = None,
+    params: dict[str, dict[str, object]] | None = None,
 ) -> pl.DataFrame:
-    """計算因子，回傳 (date, stock_id, factor, value)。dates 給定時只保留這些日期。"""
+    """計算因子；params 依因子名覆寫 registry 預設，不修改註冊內容。"""
     frames: list[pl.DataFrame] = []
+    overrides = params or {}
     for name in names:
         fdef = get(name)
         if fdef.fn is None:
             raise TwquantError(f"因子 {name} 無實作函數")
-        df = _as_df(fdef.fn(view, fdef.params), name)
+        effective = dict(fdef.params)
+        effective.update(overrides.get(name, {}))
+        df = _as_df(fdef.fn(view, effective), name)
         df = df.with_columns(pl.lit(name).alias("factor")).select(_OUT_COLS)
         frames.append(df)
 

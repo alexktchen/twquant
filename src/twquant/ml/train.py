@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from pathlib import Path
 import lightgbm as lgb
 import polars as pl
 
+from twquant.backtest.costs import CostConfig
 from twquant.config import MlConfig, MlLgbmConfig, config_hash
 from twquant.conventions import now_tw
 from twquant.ml.splits import WalkSplit
@@ -123,9 +125,24 @@ def walk_forward_train(
     return MlTrainResult(oos_scores=pl.concat(outs).sort("date", "stock_id"), window_ics=ics)
 
 
-def make_model_id(train_end: dt.date, cfg: MlConfig) -> str:
+def training_config_hash(cfg: MlConfig, cost_cfg: CostConfig | None = None) -> str:
+    """訓練 fingerprint；成本感知模型同時綁定 ML 與成本配置。"""
+    if cfg.label.transform == "rank_pct":
+        return config_hash(cfg)
+    payload: dict[str, object] = {"ml": cfg.model_dump(mode="json")}
+    if cost_cfg is None:
+        raise ValueError("cost_adjusted_return 模型缺 CostConfig，無法建立 fingerprint")
+    payload["cost"] = cost_cfg.model_dump(mode="json")
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def make_model_id(train_end: dt.date, cfg: MlConfig, *, cost_cfg: CostConfig | None = None) -> str:
     """模型 id：演算法_h視窗_訓練截止_配置hash8——可回溯到 configs/ml.yaml（SPEC-010 §4）。"""
-    return f"lgbm_h{cfg.horizon_days}_{train_end:%Y%m%d}_{config_hash(cfg)[:8]}"
+    if cfg.label.transform == "rank_pct":
+        return f"lgbm_h{cfg.horizon_days}_{train_end:%Y%m%d}_{config_hash(cfg)[:8]}"
+    fingerprint = training_config_hash(cfg, cost_cfg)
+    return f"lgbm_net_h{cfg.horizon_days}_{train_end:%Y%m%d}_{fingerprint[:8]}"
 
 
 def save_model(out_dir: Path, booster: lgb.Booster, meta: Mapping[str, object]) -> None:
@@ -137,8 +154,16 @@ def save_model(out_dir: Path, booster: lgb.Booster, meta: Mapping[str, object]) 
     )
 
 
-def log_training_run(data_dir: str | Path, cfg: MlConfig, model_id: str, oos_ic: float) -> None:
+def log_training_run(
+    data_dir: str | Path,
+    cfg: MlConfig,
+    model_id: str,
+    oos_ic: float,
+    *,
+    cost_cfg: CostConfig | None = None,
+) -> None:
     """research_log 登記一列（AC-8）；trial_scope 綁 horizon，trials 計數供 DSR。"""
+    net = cfg.label.transform == "cost_adjusted_return"
     append_research_log(
         data_dir,
         [
@@ -146,11 +171,11 @@ def log_training_run(data_dir: str | Path, cfg: MlConfig, model_id: str, oos_ic:
                 "entry_type": "ml_train",
                 "strategy": model_id,
                 "factor": "ml",
-                "params_hash": config_hash(cfg),
+                "params_hash": training_config_hash(cfg, cost_cfg),
                 "date": now_tw().date().isoformat(),
                 "metric_name": "oos_rank_ic",
                 "metric_value": oos_ic,
-                "trial_scope": f"ml:h{cfg.horizon_days}",
+                "trial_scope": f"ml:net_h{cfg.horizon_days}" if net else f"ml:h{cfg.horizon_days}",
             }
         ],
     )

@@ -102,6 +102,64 @@
 
 ## 已裁決
 
+### D-039（2026-08-31，已裁決）ML Phase 2 首個候選採 H20 成本感知報酬標籤
+
+- 問題：Phase 1 H10 的 OOS RankIC/分位單調雖佳，但零成本回測僅 CAGR +1.23%、
+  Sharpe +0.22、MDD -51.84%；Top-20 平均目標排名僅 0.5276。`rank_pct` 迴歸不區分
+  報酬幅度，也不把流動性成本與下檔放入學習目標，且 10 日標籤與平均 7.5 日持有錯位。
+- 裁決（使用者 2026-08-31 核可「好，幫我開始新的模型」）：
+  1. 另立 T-072 / SPEC-011，不修改或救援 Phase 1 artifact；金庫期
+     2026-02-26~2026-08-28 維持封存。
+  2. 首個候選固定為 H20、連續成本後超額報酬標籤。估計成本共用
+     `configs/costs.yaml`，交易金額與 ADV 回看窗明列於候選配置；ADV 僅能使用訊號日
+     及以前資料。負的成本後超額報酬依配置加重，缺值保留 null。
+  3. 特徵固定為歷史較穩定的價量/營收核心子集，不掃 LightGBM 超參數；本候選只算
+     一個 `ml:net_h20` trial。模型 artifact hash 同時綁定 ML 與成本配置。
+  4. 先跑 purged walk-forward 與零成本可交易性診斷。OOS gross Sharpe < 0.5 即早停，
+     不做 buffer/平滑/成本後救援；通過才另立後續任務研究雙週再平衡與 no-trade buffer。
+  5. 既有 OOS 已成開發資料，不再宣稱新模型的最終樣本外；僅凍結候選後可開 vault
+     一次，且不得依 vault 結果調參。
+- 影響範圍：T-072、SPEC-011、`configs/ml_h20_cost_aware.yaml`、`config.py`、
+  `ml/dataset.py`、`ml/train.py`、`data/serving/ml_store.py`、ML CLI 與研究報告。
+
+### D-038（2026-08-31，已裁決）T-069 成本後失敗的早停、試驗家族與唯一救援額度
+
+- 問題：修正 D-037 後，以完整 OOS 分數回測 `ml_rank`（2022-07-01~2026-02-28，
+  886 日）得到 CAGR -14.29%、Sharpe -0.36、MDD -56.19%、年化單邊周轉 2874%；
+  `reversal_revenue` 對照更差，但 ML 仍輸給現金，故 SPEC-010 §7 第 3 級未通過。
+  同時發現回測登記的 `params_hash` 只含策略名稱與日期，`trial_scope` 又按策略名稱拆分；
+  以及策略 `signals.params` 未傳入因子、ML 薄因子會依字典序自動挑最新模型。這三點會使
+  執行變體漏算 trials、相同 YAML 悄悄換模型，DSR 與重現性均不可信。
+- 裁決（使用者 2026-08-31 核可「好，開始」）：
+  1. 現有純 Top-20 候選判定第 3 級失敗；T-070 維持 blocked，金庫期
+     2026-02-26~2026-08-28 不開封。
+  2. 先完成不改預設交易結果的研究基礎：精確 model_id pin、完整策略/成本/期間/資金/
+     participation/資料源的 canonical hash（排除 name/description/trial_scope 等純 metadata）、
+     同一 ML 執行家族共用 trial scope，以及逐筆
+     費/稅/滑價、同成交路徑 gross、平均持有交易日等診斷。正常成本與 0× 成本反事實都
+     登記為 trial（保守計入 DSR）。
+  3. 早停門檻：0× 成本反事實須 CAGR > 0、Sharpe >= 0.5，且 H2-2022、2023、2024、
+     2025 四段至少三段報酬為正；任一不符即結束 Phase 1，不做 EMA/buffer/DSR/金庫。
+  4. 只有早停通過，才允許一次事前登記的 5-trial 降周轉研究：EMA5、EMA10、
+     buffer exit-rank 30、buffer exit-rank 40、EMA10+buffer30；不得補名額、改模型、
+     加特徵或另掃參數。
+  5. 成本後候選須同時 CAGR > 0、Sharpe >= 0.5、MDD <= 30%、年化單邊周轉 <=1500%、
+     對最強線性基準 Delta Sharpe >=0.25、1.5× 成本後 CAGR/Sharpe 仍 >0，且四段至少
+     三段正報酬、median fold Sharpe >0。DSR 須 >=0.95，母體含所有歷史與新 trial。
+  6. 只允許一個凍結候選開金庫一次；失敗不得依金庫結果調參。若早停、救援、DSR 或
+     金庫任一失敗，正式裁決 Phase 1 不部署；下一代須另立成本感知/較長 horizon SPEC。
+- 影響範圍：T-069/T-070、SPEC-003 §1、SPEC-004 §2/§4、SPEC-010 §7、
+  `strategy/config.py`、`factors/compute.py`、`factors/ml.py`、`backtest/`、
+  `reporting/research_log.py`、CLI 與研究 HTML。
+- **執行結果（2026-08-31）**：固定 `lgbm_h10_20260225_2f5a21a9` 後，1× 成本重跑
+  完全重現 CAGR -14.29%／Sharpe -0.36／MDD -56.19%；顯式成本 5,849,944 TWD
+  （初始資金 58.50%），同成交路徑 gross CAGR +4.49%／Sharpe +0.33。嚴格 0× 成本
+  反事實為 CAGR +1.23%／Sharpe +0.22／MDD -51.84%／周轉 2990%，未達 Sharpe >=0.5
+  早停門檻，故不需再判四段年度條件，立即停止 5 個救援 trial、DSR 與金庫評估。
+  兩次 run 已以 distinct hashes `ff18453792d14cc4`／`eee0385e99fd11df` 登記在同一
+  `bt:ml_rank_h10` scope。**最終裁決：ML Phase 1 研究完成但不部署，T-070 維持 blocked；
+  金庫期保持未開封。**
+
 ### D-037（2026-08-29，已裁決）衛生濾網把全市場休市誤判為資料事件——所有 PG 回測每年春節後靜默停手約 60 個交易日
 
 - 問題：`strategy/universe.py:46` 的日曆缺口條件用**曆日**判斷

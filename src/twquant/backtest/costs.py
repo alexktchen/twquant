@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from pydantic import Field
+
 from twquant.config import BaseConfig
 
 # 檔位表（SPEC-004 §3）：價格區間 → 最小跳動
@@ -70,6 +72,7 @@ class CostConfig(BaseConfig):
     commission_discount: float = 0.35
     commission_min_twd: float = 20.0
     tax_rate_sell: float = 0.003
+    cost_scale: float = Field(default=1.0, ge=0.0)
     slippage: SlippageConfig = SlippageConfig()
     data_guard: DataGuardConfig = DataGuardConfig()
 
@@ -103,4 +106,9 @@ def trade_cost(
     part = max(participation, 0.0)
     slip_frac = _half_spread_frac(price, cfg) + cfg.slippage.k_bps / 1e4 * math.sqrt(part)
     slippage = notional * slip_frac
-    return TradeCost(commission=commission, tax=tax, slippage=slippage)
+    scale = cfg.cost_scale
+    return TradeCost(
+        commission=commission * scale,
+        tax=tax * scale,
+        slippage=slippage * scale,
+    )

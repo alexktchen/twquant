@@ -8,6 +8,7 @@
 ```yaml
 name: chip_momentum_weekly
 description: 籌碼確認的 52 週高點動能
+trial_scope: null                    # 可選；同一研究家族的執行變體共用，供 DSR
 universe:
   markets: [TWSE, TPEX]
   exclude_disposition: true          # 處置股（含生效區間內）
@@ -36,6 +37,9 @@ max_weight_per_stock: 0.05
 
 - `extra="forbid"`；載入時驗證 factor 名存在於註冊表、weight 加總 = 1（±1e-9）
 - 同一份 YAML 是回測與生產的唯一輸入（兩軌共用）
+- `signals[].params` 必須覆寫該因子 registry 預設 params；未傳入不得靜默忽略。
+  需要重現特定 ML artifact 時以 `model_id` 精確綁定，不得自動漂移到較新模型。
+- `trial_scope` 僅定義研究家族；同 scope 下每個完整配置仍須產生不同 canonical hash。
 
 ## 2. 宇宙過濾（`strategy/universe.py`）
 
@@ -90,6 +94,8 @@ Overlay 是 `(date, weights: DataFrame, view: PitView) -> weights` 的註冊函�
 - AC-6：`breadth_regime_filter` 在 fixture 的空頭段（寬度 < 下閾值）輸出
   曝險 = exposure_floor × 原曝險，誤差 < 1e-9
 - AC-7：同一 YAML + 同一資料，重跑輸出 bit-identical
+- AC-8：`signals[].params` 確實覆寫因子預設且不影響其他 signal；精確 `model_id` 只讀取
+  該模型分數。
 
 ## 範圍外
 

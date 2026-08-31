@@ -1,5 +1,12 @@
 # CHANGELOG
 
+- 2026-08-31 T-069／D-038 最終裁決不部署：回測新增精確 model_id pin、signal params 覆寫、
+  完整經濟配置 canonical hash、同族 trial scope、`cost_scale` 反事實與純成本診斷（費/稅/
+  滑價、same-path gross、平均持有期）。完整 OOS 1× 成本重現 CAGR -14.29%／Sharpe -0.36，
+  成本 584.99 萬（初始資金 58.5%）；0× 成本仍僅 CAGR +1.23%／Sharpe +0.22／MDD
+  -51.84%，未達事前 gross Sharpe 0.5 門檻，故早停 EMA/buffer/DSR，金庫期未開。
+  兩 run 以 2 個 distinct hashes 登記於 `bt:ml_rank_h10`；401 passed、22 skipped，完整閘門綠。
+
 - 2026-08-29 T-071（D-037 已裁決，選項 A）衛生濾網缺口判準改用**交易日**：市場日曆＝
   `prices_daily` 日期聯集，缺口＝相鄰兩列之間漏掉的開市日數（`UniverseConfig`
   `max_gap_days` 10 曆日 → `max_gap_sessions` 5 開市日），農曆年全市場休市不再被誤判為

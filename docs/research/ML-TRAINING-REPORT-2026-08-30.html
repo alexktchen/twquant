@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>台股 LightGBM 橫斷面排序模型報告｜2026-08-31 最終裁決</title>
+  <style>
+    :root {
+      --navy: #15263d;
+      --navy-2: #203a5c;
+      --blue: #4c78a8;
+      --orange: #f58518;
+      --gray: #7f7f7f;
+      --green: #16794f;
+      --red: #b42318;
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d9e0e8;
+      --panel: #ffffff;
+      --canvas: #f4f7fa;
+      --shadow: 0 8px 28px rgba(21, 38, 61, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", Arial, sans-serif;
+      line-height: 1.55;
+    }
+    .shell { max-width: 1420px; margin: 0 auto; padding: 24px; }
+    .hero {
+      color: #fff;
+      background: linear-gradient(135deg, var(--navy), var(--navy-2));
+      border-radius: 18px;
+      padding: 32px 36px;
+      box-shadow: var(--shadow);
+    }
+    .hero-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    h1 { margin: 0 0 8px; font-size: clamp(26px, 3vw, 42px); line-height: 1.2; }
+    .subtitle { margin: 0; color: #cdd8e6; font-size: 16px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .badge { border-radius: 999px; padding: 7px 12px; font-size: 13px; font-weight: 700; }
+    .pass { background: #dff5e9; color: #11653f; }
+    .fail { background: #fee4e2; color: #912018; }
+    .pending { background: #fff1d6; color: #875300; }
+    .controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .control label { display: block; font-size: 12px; color: #cdd8e6; margin-bottom: 5px; }
+    select, button {
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 8px;
+      background: rgba(255,255,255,.1);
+      color: #fff;
+      padding: 9px 12px;
+      font: inherit;
+    }
+    select option { color: #111827; background: #fff; }
+    button { cursor: pointer; font-weight: 700; }
+    button:hover { background: rgba(255,255,255,.18); }
+    .callout {
+      margin-top: 18px;
+      border-left: 4px solid #63d6a2;
+      background: rgba(255,255,255,.08);
+      padding: 13px 16px;
+      border-radius: 0 10px 10px 0;
+    }
+    .callout strong { color: #a8f0cb; }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(170px, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .kpi, .panel {
+      background: var(--panel);
+      border: 1px solid #e6ebf1;
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    .kpi { padding: 19px 20px; }
+    .kpi-label { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 700; }
+    .kpi-value { margin: 6px 0 1px; font-size: 31px; font-weight: 800; color: var(--navy); }
+    .kpi-note { color: var(--muted); font-size: 12px; }
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .section-title { margin: 30px 0 12px; font-size: 22px; }
+    .section-lead { color: var(--muted); margin: -7px 0 15px; }
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .panel { padding: 20px 22px; overflow: hidden; }
+    .panel.full { grid-column: 1 / -1; }
+    .panel h3 { margin: 0; font-size: 17px; }
+    .panel .caption { margin: 4px 0 12px; color: var(--muted); font-size: 13px; }
+    .chart-svg { width: 100%; min-height: 330px; display: block; }
+    .chart-svg text { font-family: inherit; fill: var(--muted); font-size: 12px; }
+    .grid-line { stroke: var(--line); stroke-width: 1; }
+    .zero-line { stroke: #98a2b3; stroke-width: 1.5; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 11px; border-bottom: 1px solid #edf0f4; text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    tbody tr:hover { background: #f7f9fb; }
+    th.sortable { cursor: pointer; user-select: none; }
+    .status-pass { color: var(--green); font-weight: 800; }
+    .status-fail { color: var(--red); font-weight: 800; }
+    .insights { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .insight { padding: 16px 18px; border-radius: 12px; background: #f8fafc; border: 1px solid #e8edf3; }
+    .insight b { display: block; color: var(--navy); margin-bottom: 5px; }
+    .method-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .method-grid ul { margin: 8px 0 0; padding-left: 20px; }
+    .warning { border-left: 4px solid var(--orange); background: #fff8eb; }
+    .meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 22px; font-size: 13px; }
+    .meta div { display: flex; gap: 8px; border-bottom: 1px dashed var(--line); padding: 6px 0; }
+    .meta dt { color: var(--muted); min-width: 145px; }
+    .meta dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; }
+    details { margin-top: 14px; }
+    summary { cursor: pointer; font-weight: 700; color: var(--navy); }
+    .feature-list { columns: 2; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    a { color: #265f9e; }
+    footer { color: var(--muted); text-align: center; font-size: 12px; padding: 26px 0 8px; }
+    @media (max-width: 1050px) {
+      .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+      .chart-grid, .method-grid { grid-template-columns: 1fr; }
+      .panel.full { grid-column: auto; }
+    }
+    @media (max-width: 700px) {
+      .shell { padding: 12px; }
+      .hero { padding: 24px 20px; }
+      .kpi-grid, .insights { grid-template-columns: 1fr 1fr; }
+      .meta { grid-template-columns: 1fr; }
+      .feature-list { columns: 1; }
+    }
+    @media print {
+      body { background: #fff; }
+      .shell { max-width: none; padding: 0; }
+      .hero { box-shadow: none; border-radius: 0; }
+      .controls { display: none; }
+      .panel, .kpi { box-shadow: none; break-inside: avoid; }
+      .chart-svg { min-height: 280px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="hero-top">
+        <div>
+          <h1>台股 LightGBM 橫斷面排序模型報告</h1>
+          <p class="subtitle">模型 lgbm_h10_20260225_2f5a21a9｜OOS 2022-01-14～2026-02-25｜最終裁決 2026-08-31</p>
+          <div class="badges">
+            <span class="badge pass">階梯 1：RankIC 勝出</span>
+            <span class="badge pass">階梯 2：十分位嚴格單調</span>
+            <span class="badge fail">階梯 3：成本後／零成本皆未通過</span>
+            <span class="badge pending">早停：不進 DSR／金庫期未開封</span>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="control">
+            <label for="year-filter">KPI 年度</label>
+            <select id="year-filter" aria-label="選擇年度">
+              <option value="all">全部 OOS</option>
+              <option value="2022">2022</option>
+              <option value="2023">2023</option>
+              <option value="2024">2024</option>
+              <option value="2025">2025</option>
+              <option value="2026">2026（32 日）</option>
+            </select>
+          </div>
+          <button type="button" onclick="window.print()">列印／另存 PDF</button>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>最終結論：</strong>ML 的 OOS RankIC +0.0680、每日 IC 勝率 77.4%，但純 Top 20 週調倉在正常成本後 CAGR -14.29%、Sharpe -0.36；嚴格 0× 成本反事實也只有 CAGR +1.23%、Sharpe +0.22、MDD -51.84%。依 D-038 毛績效 Sharpe ≥0.5 的事前門檻早停：Phase 1 不部署、不做 EMA／buffer／DSR，金庫期保持未開封。
+      </div>
+    </header>
+
+    <section class="kpi-grid" aria-label="關鍵指標">
+      <article class="kpi"><div class="kpi-label">OOS RankIC</div><div class="kpi-value" id="kpi-ic">+0.0680</div><div class="kpi-note" id="kpi-ic-note">對最強基準 +0.0397</div></article>
+      <article class="kpi"><div class="kpi-label">勝率</div><div class="kpi-value positive" id="kpi-hit">77.4%</div><div class="kpi-note">每日 RankIC &gt; 0 的比例</div></article>
+      <article class="kpi"><div class="kpi-label">ICIR</div><div class="kpi-value" id="kpi-ir">0.654</div><div class="kpi-note">平均 IC ÷ 日 IC 標準差</div></article>
+      <article class="kpi"><div class="kpi-label">Newey–West t</div><div class="kpi-value" id="kpi-t">8.54</div><div class="kpi-note">lag=10，校正重疊標籤</div></article>
+      <article class="kpi"><div class="kpi-label">有效交易日</div><div class="kpi-value" id="kpi-days">993</div><div class="kpi-note" id="kpi-days-note">993/993，無日期缺口</div></article>
+    </section>
+
+    <h2 class="section-title">核心證據</h2>
+    <p class="section-lead">所有圖表均以同一批 OOS 資料計算；滑鼠停留於圖形可查看精確值。</p>
+    <section class="chart-grid">
+      <article class="panel">
+        <h3>年度 RankIC：ML 每年皆為正</h3>
+        <p class="caption">與全因子等權、D-020 有效子集基準比較；2026 僅 32 個交易日。</p>
+        <svg id="annual-chart" class="chart-svg" viewBox="0 0 820 360" role="img" aria-label="2022至2026年度RankIC比較圖"></svg>
+      </article>
+      <article class="panel">
+        <h3>逐窗 RankIC：16/16 全數為正</h3>
+        <p class="caption">橘色為低於 +0.03 的弱窗；虛線為整體平均 +0.0680。</p>
+        <svg id="window-chart" class="chart-svg" viewBox="0 0 820 360" role="img" aria-label="十六個walk-forward視窗RankIC長條圖"></svg>
+      </article>
+      <article class="panel full">
+        <h3>十分位單調性：只有 ML 嚴格遞增</h3>
+        <p class="caption">縱軸是未來超額報酬的橫斷面百分位 label，不是實現報酬率。</p>
+        <svg id="decile-chart" class="chart-svg" viewBox="0 0 1180 390" role="img" aria-label="模型與兩種基準的十分位平均label比較圖"></svg>
+      </article>
+    </section>
+
+    <h2 class="section-title">基準比較與勝率</h2>
+    <section class="panel">
+      <div class="table-wrap"><table id="comparison-table">
+        <thead><tr><th>方法</th><th>RankIC</th><th>ICIR</th><th>勝率</th><th>NW t</th><th>十分位頭尾差</th><th>嚴格單調</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="caption">勝率定義：993 個 OOS 交易日中，每日橫斷面 RankIC &gt; 0 的比例。不是回測交易勝率。</p>
+    </section>
+
+    <h2 class="section-title">成本後、毛利歸因與交易勝率</h2>
+    <section class="panel warning">
+      <h3>固定模型、相同期間：成本不是唯一問題，毛訊號本身也不足</h3>
+      <p class="caption">期間 2022-07-01～2026-02-28，共 886 個交易日；模型精確綁定 lgbm_h10_20260225_2f5a21a9。Top 20 等權、週一調倉、次日開盤成交；0× 情境只移除手續費、稅與滑價，交易限制及 participation 不變。</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>策略</th><th>總報酬</th><th>CAGR</th><th>Sharpe</th><th>Sortino</th><th>Calmar</th><th>MDD</th><th>每日勝率</th><th>年化單邊周轉</th><th>成交</th><th>未成交</th></tr></thead>
+        <tbody>
+          <tr><td>ML 純排序</td><td class="status-fail">-41.81%</td><td class="status-fail">-14.29%</td><td>-0.36</td><td>-0.32</td><td>-0.25</td><td>-56.19%</td><td>53.7%</td><td>2,874%</td><td>4,619</td><td>135</td></tr>
+          <tr><td>ML 0× 成本反事實</td><td>+4.39%</td><td class="status-fail">+1.23%</td><td class="status-fail">+0.22</td><td>+0.19</td><td>+0.02</td><td>-51.84%</td><td>57.3%</td><td>2,990%</td><td>4,840</td><td>143</td></tr>
+          <tr><td>反轉 × 營收對照</td><td class="status-fail">-53.72%</td><td class="status-fail">-19.70%</td><td>-0.72</td><td>-0.83</td><td>-0.31</td><td>-62.89%</td><td>51.4%</td><td>3,457%</td><td>5,529</td><td>158</td></tr>
+        </tbody>
+      </table></div>
+      <p class="caption"><strong>勝率定義：</strong>每日收盤權益報酬 &gt; 0 的比例，不是逐筆已平倉交易勝率。引擎的 ledger 是成交明細，沒有把買賣配對成 round-trip，因此不虛構逐筆勝率。</p>
+      <p class="caption"><strong>相對結果：</strong>ML 的 CAGR 比對照高 5.41 個百分點、Sharpe 高 0.36、回撤少 6.70 個百分點，周轉少 583 個百分點；但絕對 CAGR 與 Sharpe 仍為負，且周轉過高，因此不能判定可部署。</p>
+      <p class="caption"><strong>成本歸因：</strong>正常成本合計 5,849,944 TWD（手續費 905,388／證交稅 2,716,049／滑價 2,228,507），相當於初始資金 58.50%。把成本加回原成交路徑為 CAGR +4.49%、Sharpe +0.33；嚴格 0× 重跑為 +1.23%、+0.22。兩者不同是因成本會改變可用現金、成交股數與後續路徑。平均持有僅 7.5 個交易日。</p>
+      <p class="caption"><strong>D-038 早停：</strong>0× Sharpe +0.22 &lt; 事前門檻 +0.50，因此不再測 5 個 EMA／buffer 候選；這不是「成本調低就能救回」的策略。</p>
+    </section>
+
+    <h2 class="section-title">年度穩定性</h2>
+    <section class="panel">
+      <div class="table-wrap"><table id="annual-table">
+        <thead><tr><th>年度</th><th>日數</th><th>ML RankIC</th><th>ML 勝率</th><th>ML ICIR</th><th>ML NW t</th><th>D-020 RankIC</th><th>D-020 勝率</th><th>全因子 RankIC</th><th>全因子勝率</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <h2 class="section-title">逐窗明細</h2>
+    <section class="panel">
+      <div class="table-wrap"><table id="window-table">
+        <thead><tr><th class="sortable" data-key="window">視窗 ↕</th><th>訓練截止</th><th>測試起日</th><th>測試迄日</th><th class="sortable" data-key="rank_ic">RankIC ↕</th><th>判定</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <h2 class="section-title">判讀重點</h2>
+    <section class="insights">
+      <article class="insight"><b>顯著優於最強基準</b>ML +0.0680 對 D-020 +0.0283，絕對差 +0.0397；ML 的 NW t=8.54。</article>
+      <article class="insight"><b>跨年度方向一致</b>2022～2025 的 ML 年度 RankIC 介於 +0.0491～+0.0830；2026 +0.1127 只有 32 日，不能直接年化外推。</article>
+      <article class="insight"><b>日頻仍有失誤尾部</b>日 IC 中位數 +0.0594、P10 -0.0432、P90 +0.1961；最差日為 2022-10-27（-0.3461）。</article>
+      <article class="insight"><b>弱窗值得追蹤</b>W4 +0.0235、W5 +0.0080，顯示 2022Q4～2023Q2 的 regime 適應較弱，但未轉負。</article>
+      <article class="insight"><b>樣本品質通過</b>OOS 1,737,542 筆、2,034 檔、score null=0；993/993 個預期交易日完整。</article>
+      <article class="insight"><b>比較樣本差異極小</b>基準 inner join 後為 1,737,160 筆，只少 382 筆（0.022%），不足以解釋 ML 的領先幅度。</article>
+      <article class="insight"><b>成本後階梯未通過</b>ML 雖勝過對照，CAGR 仍為 -14.29%、Sharpe -0.36、MDD -56.19%；排序訊號尚未成為可交易策略。</article>
+      <article class="insight"><b>勝率不能單獨判讀</b>ML 每日投資組合勝率 53.7%，但大虧日與成本仍使長期報酬為負；須與報酬幅度、回撤和周轉一起看。</article>
+      <article class="insight"><b>換手是主要警訊</b>純 ML 年化單邊周轉 2,874%，即使低於對照的 3,457% 仍遠高於可直接接受的水準。</article>
+      <article class="insight"><b>顯式成本極重</b>費、稅、滑價合計 584.99 萬，為初始資金 58.5%；其中證交稅 271.60 萬最大。</article>
+      <article class="insight"><b>但不只成本</b>0× 成本仍只有 Sharpe +0.22、MDD -51.84%，未達事前 +0.50 門檻，毛訊號風險報酬不足。</article>
+      <article class="insight"><b>研究已按規則早停</b>正常與 0× 成本為同 family 的 2 個 distinct trials；EMA／buffer、DSR、金庫均未執行。</article>
+    </section>
+
+    <h2 class="section-title">方法與限制</h2>
+    <section class="method-grid">
+      <article class="panel">
+        <h3>方法</h3>
+        <ul>
+          <li>25 個既有因子輸入 LightGBM，缺值保留 null，由模型原生處理。</li>
+          <li>標籤為 t+1 開盤到 t+11 開盤的市場均值超額報酬，再轉成每日橫斷面百分位。</li>
+          <li>擴張式 purged walk-forward：16 個測試窗、10 交易日 embargo。</li>
+          <li>顯著性使用 Newey–West lag=10，避免重疊標籤高估 t 值。</li>
+          <li>基準使用同日期、同股票共同樣本；最強基準為三因子 D-020 有效子集。</li>
+        </ul>
+      </article>
+      <article class="panel warning">
+        <h3>經濟驗證結果與剩餘限制</h3>
+        <ul>
+          <li><strong>已完成成本與毛利拆解：</strong>正常成本 Sharpe -0.36；同成交路徑 gross +0.33；嚴格 0× 成本 +0.22，皆不足以支持部署。</li>
+          <li>依 D-038 事前早停，刻意不驗證 EMA 或 buffer-zone，避免在已看過的 OOS 上繼續尋參。</li>
+          <li>2026-02-26～2026-08-28 為六個月金庫期，本報告未開封評估。</li>
+          <li>部分因子歷史起點較晚；缺值模式可能被模型利用，後續應配合 SHAP／漂移檢查。</li>
+          <li>stock_meta 只有現存股票；行情宇宙採 as-of 當日有交易股票緩解，但生存者偏誤仍需持續監控。</li>
+        </ul>
+      </article>
+    </section>
+
+    <h2 class="section-title">下一步</h2>
+    <section class="panel">
+      <ol>
+        <li><strong>Phase 1 結案：</strong>凍結「不部署」結果；T-070 維持 blocked，2026-02-26～2026-08-28 金庫期不開封。</li>
+        <li>不再針對 10 日 Top-20 模型測 EMA、buffer 或更多 LightGBM 參數；這些已被 D-038 早停。</li>
+        <li>若未來重啟 ML，須另立成本感知／較長 horizon 的新經濟假設與 SPEC，並把本輪 trials 納入多重測試紀錄。</li>
+      </ol>
+    </section>
+
+    <h2 class="section-title">可重現性與產物</h2>
+    <section class="panel">
+      <dl class="meta">
+        <div><dt>Model ID</dt><dd>lgbm_h10_20260225_2f5a21a9</dd></div>
+        <div><dt>Config hash</dt><dd>2f5a21a9b7a2f4c1</dd></div>
+        <div><dt>Git commit</dt><dd>856fcd7ca63acd955806a9b34ca010e2e1c32911</dd></div>
+        <div><dt>Branch</dt><dd>main</dd></div>
+        <div><dt>LightGBM</dt><dd>4.7.0</dd></div>
+        <div><dt>資料範圍</dt><dd>2020-01-01～2026-08-28</dd></div>
+        <div><dt>部署模型 train_end</dt><dd>2026-02-25（後段為 vault）</dd></div>
+        <div><dt>報告更新時間</dt><dd>2026-08-31 08:45:07 +08:00</dd></div>
+        <div><dt>回測 trial scope</dt><dd>bt:ml_rank_h10（2 distinct hashes）</dd></div>
+        <div><dt>正常成本登記</dt><dd><a href="../../data/research_log/part-20260831T083914834389.parquet">ff18453792d14cc4</a></dd></div>
+        <div><dt>0× 成本登記</dt><dd><a href="../../data/research_log/part-20260831T084507850770.parquet">eee0385e99fd11df</a></dd></div>
+        <div><dt>ML 回測日誌</dt><dd><a href="../../data/logs/backtest-ml-rank-full-20260830-232913.out.log">stdout</a></dd></div>
+        <div><dt>對照回測日誌</dt><dd><a href="../../data/logs/backtest-reversal-revenue-full-20260830-233525.out.log">stdout</a></dd></div>
+        <div><dt>模型 metadata</dt><dd><a href="../../data/models/lgbm_h10_20260225_2f5a21a9/meta.json">meta.json</a></dd></div>
+        <div><dt>OOS scores</dt><dd><a href="../../data/models/lgbm_h10_20260225_2f5a21a9/oos_scores.parquet">oos_scores.parquet</a></dd></div>
+      </dl>
+      <details><summary>25 個模型特徵</summary><ol id="feature-list" class="feature-list"></ol></details>
+    </section>
+    <footer>本報告為研究軌快照；不構成投資建議。所有百分比與統計均來自指定 OOS 樣本。</footer>
+  </main>
+
+  <script>
+    const DATA = {
+      overall: {
+        ml: {name:'ML（LightGBM）', mean:0.0680240607, ir:0.6536628839, hit:0.7744209466, t:8.5360668652, days:993, spread:0.0700413645, monotonic:true},
+        d020: {name:'D-020 有效子集', mean:0.0282963736, ir:0.2792495404, hit:0.6253776435, t:4.7545796280, days:993, spread:0.0319484699, monotonic:false},
+        all: {name:'全因子等權', mean:0.0033313222, ir:0.0259963911, hit:0.5045317221, t:0.3202385965, days:993, spread:-0.0016671391, monotonic:false}
+      },
+      annual: [
+        {year:2022, days:237, ml:{mean:.0830213448,ir:.5926081163,hit:.7510548523,t:3.5908731408}, d020:{mean:.0133095827,hit:.5063291139}, all:{mean:.0190707555,hit:.5654008439}},
+        {year:2023, days:239, ml:{mean:.0491016661,ir:.6809750607,hit:.7489539749,t:4.4313076939}, d020:{mean:.0360671656,hit:.6652719665}, all:{mean:.0076905614,hit:.5230125523}},
+        {year:2024, days:242, ml:{mean:.0597144894,ir:.6979141800,hit:.7603305785,t:4.9731470597}, d020:{mean:.0275385830,hit:.6198347107}, all:{mean:.0094015373,hit:.5123966942}},
+        {year:2025, days:243, ml:{mean:.0743969763,ir:.7187496566,hit:.8189300412,t:4.9015375467}, d020:{mean:.0370860795,hit:.7037037037}, all:{mean:-.0206861915,hit:.4156378601}},
+        {year:2026, days:32, ml:{mean:.1127238652,ir:1.1708867022,hit:.90625,t:3.5905536813}, d020:{mean:.0202381543,hit:.65625}, all:{mean:-.0093199320,hit:.53125}}
+      ],
+      windows: [
+        {window:1,train_end:'2021-12-29',test_start:'2022-01-14',test_end:'2022-04-26',rank_ic:.0950817213},
+        {window:2,train_end:'2022-04-12',test_start:'2022-04-27',test_end:'2022-07-26',rank_ic:.0949145089},
+        {window:3,train_end:'2022-07-12',test_start:'2022-07-27',test_end:'2022-10-25',rank_ic:.1025060257},
+        {window:4,train_end:'2022-10-11',test_start:'2022-10-26',test_end:'2023-02-02',rank_ic:.0234889939},
+        {window:5,train_end:'2023-01-09',test_start:'2023-02-03',test_end:'2023-05-10',rank_ic:.0079519755},
+        {window:6,train_end:'2023-04-25',test_start:'2023-05-11',test_end:'2023-08-10',rank_ic:.0586888803},
+        {window:7,train_end:'2023-07-26',test_start:'2023-08-11',test_end:'2023-11-10',rank_ic:.0523583692},
+        {window:8,train_end:'2023-10-27',test_start:'2023-11-13',test_end:'2024-02-19',rank_ic:.0588630717},
+        {window:9,train_end:'2024-01-25',test_start:'2024-02-20',test_end:'2024-05-22',rank_ic:.0718708584},
+        {window:10,train_end:'2024-05-08',test_start:'2024-05-23',test_end:'2024-08-22',rank_ic:.0874502714},
+        {window:11,train_end:'2024-08-08',test_start:'2024-08-23',test_end:'2024-11-26',rank_ic:.0622200177},
+        {window:12,train_end:'2024-11-12',test_start:'2024-11-27',test_end:'2025-03-06',rank_ic:.0833011315},
+        {window:13,train_end:'2025-02-19',test_start:'2025-03-07',test_end:'2025-06-09',rank_ic:.1037692319},
+        {window:14,train_end:'2025-05-23',test_start:'2025-06-10',test_end:'2025-09-04',rank_ic:.0371785932},
+        {window:15,train_end:'2025-08-21',test_start:'2025-09-05',test_end:'2025-12-08',rank_ic:.0526958260},
+        {window:16,train_end:'2025-11-24',test_start:'2025-12-09',test_end:'2026-02-25',rank_ic:.1051848576}
+      ],
+      deciles: {
+        ml:[.45599385,.47761767,.48748481,.49557407,.50074816,.50738252,.51245470,.51707558,.52273436,.52603522],
+        d020:[.46488611,.48852138,.49978156,.50657581,.50956678,.51277475,.51199113,.50829716,.50378257,.49683458],
+        all:[.48840115,.49771695,.50019586,.50400426,.50571476,.50792218,.50754871,.50517859,.49951404,.48673401]
+      },
+      features: ['chip.foreign_net_10d','chip.foreign_streak','chip.inst_net_10d','chip.margin_velocity_5d','chip.short_margin_ratio','chip.trust_net_10d','chip.trust_streak','fundamental.revenue_accel','fundamental.revenue_yoy','price.box_breakout_60d','price.double_bottom_120d','price.flag_hold_50d','price.high_52w','price.hs_top_120d','price.intraday_ret_20d','price.mom_1d','price.mom_20d','price.mom_60d','price.overnight_ret_20d','price.residual_reversal_5d','price.reversal_5d','price.rs_market_20d','price.vol_20d','volume.turnover_z_20d','volume.vol_ratio_5d']
+    };
+
+    const COLORS = {ml:'#4c78a8', d020:'#f58518', all:'#7f7f7f', grid:'#d9e0e8', muted:'#667085', weak:'#f58518'};
+    const NS = 'http://www.w3.org/2000/svg';
+    function el(name, attrs, text) {
+      const node = document.createElementNS(NS, name);
+      Object.entries(attrs || {}).forEach(function(pair) { node.setAttribute(pair[0], pair[1]); });
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+    function addTitle(node, value) { node.appendChild(el('title', {}, value)); }
+    function fmtIC(v) { return (v >= 0 ? '+' : '') + v.toFixed(4); }
+    function fmtPct(v) { return (v * 100).toFixed(1) + '%'; }
+    function renderAnnualChart() {
+      const svg = document.getElementById('annual-chart'); svg.replaceChildren();
+      const W=820,H=360,m={l:55,r:18,t:20,b:62}, min=-.03,max=.13;
+      const y=function(v){return m.t+(max-v)/(max-min)*(H-m.t-m.b);};
+      [-.02,0,.02,.04,.06,.08,.10,.12].forEach(function(tick){
+        svg.appendChild(el('line',{x1:m.l,y1:y(tick),x2:W-m.r,y2:y(tick),class:tick===0?'zero-line':'grid-line'}));
+        svg.appendChild(el('text',{x:m.l-8,y:y(tick)+4,'text-anchor':'end'},(tick>=0?'+':'')+tick.toFixed(2)));
+      });
+      const keys=['ml','d020','all'], labels=['ML','D-020','全因子'], group=(W-m.l-m.r)/DATA.annual.length, bw=24;
+      DATA.annual.forEach(function(row,i){
+        const cx=m.l+group*(i+.5);
+        keys.forEach(function(key,j){
+          const v=row[key].mean,x=cx+(j-1)*30-bw/2,y0=y(0),yv=y(v);
+          const bar=el('rect',{x:x,y:Math.min(y0,yv),width:bw,height:Math.max(1,Math.abs(y0-yv)),rx:3,fill:COLORS[key]});
+          addTitle(bar,labels[j]+' '+row.year+' RankIC '+fmtIC(v)); svg.appendChild(bar);
+        });
+        svg.appendChild(el('text',{x:cx,y:H-35,'text-anchor':'middle','font-weight':'700'},String(row.year)));
+        svg.appendChild(el('text',{x:cx,y:H-17,'text-anchor':'middle'},'n='+row.days));
+      });
+      keys.forEach(function(key,i){
+        const x=235+i*145; svg.appendChild(el('rect',{x:x,y:6,width:16,height:9,fill:COLORS[key]}));
+        svg.appendChild(el('text',{x:x+22,y:15},labels[i]));
+      });
+    }
+    function renderWindowChart() {
+      const svg=document.getElementById('window-chart'); svg.replaceChildren();
+      const W=820,H=360,m={l:48,r:15,t:18,b:45},max=.12;
+      const y=function(v){return m.t+(max-v)/max*(H-m.t-m.b);};
+      [0,.02,.04,.06,.08,.10,.12].forEach(function(tick){
+        svg.appendChild(el('line',{x1:m.l,y1:y(tick),x2:W-m.r,y2:y(tick),class:'grid-line'}));
+        svg.appendChild(el('text',{x:m.l-7,y:y(tick)+4,'text-anchor':'end'},tick.toFixed(2)));
+      });
+      const avg=.0680240607;
+      svg.appendChild(el('line',{x1:m.l,y1:y(avg),x2:W-m.r,y2:y(avg),stroke:COLORS.d020,'stroke-width':2,'stroke-dasharray':'7 5'}));
+      const area=W-m.l-m.r,gap=4,bw=(area-gap*15)/16;
+      DATA.windows.forEach(function(row,i){
+        const x=m.l+i*(bw+gap),yv=y(row.rank_ic),color=row.rank_ic<.03?COLORS.weak:COLORS.ml;
+        const bar=el('rect',{x:x,y:yv,width:bw,height:y(0)-yv,rx:3,fill:color});
+        addTitle(bar,'W'+row.window+' '+row.test_start+'～'+row.test_end+' RankIC '+fmtIC(row.rank_ic)); svg.appendChild(bar);
+        svg.appendChild(el('text',{x:x+bw/2,y:H-18,'text-anchor':'middle'},'W'+row.window));
+      });
+    }
+    function renderDecileChart() {
+      const svg=document.getElementById('decile-chart'); svg.replaceChildren();
+      const W=1180,H=390,m={l:65,r:25,t:28,b:55},min=.45,max=.535;
+      const x=function(i){return m.l+i*(W-m.l-m.r)/9;};
+      const y=function(v){return m.t+(max-v)/(max-min)*(H-m.t-m.b);};
+      [.45,.46,.47,.48,.49,.50,.51,.52,.53].forEach(function(tick){
+        svg.appendChild(el('line',{x1:m.l,y1:y(tick),x2:W-m.r,y2:y(tick),class:'grid-line'}));
+        svg.appendChild(el('text',{x:m.l-8,y:y(tick)+4,'text-anchor':'end'},tick.toFixed(2)));
+      });
+      const configs=[['ml','ML',''],['d020','D-020','8 5'],['all','全因子','3 5']];
+      configs.forEach(function(cfg,idx){
+        const key=cfg[0],pts=DATA.deciles[key].map(function(v,i){return x(i)+','+y(v);}).join(' ');
+        svg.appendChild(el('polyline',{points:pts,fill:'none',stroke:COLORS[key],'stroke-width':4,'stroke-dasharray':cfg[2]}));
+        DATA.deciles[key].forEach(function(v,i){
+          const point=el('circle',{cx:x(i),cy:y(v),r:5,fill:COLORS[key]}); addTitle(point,cfg[1]+' D'+(i+1)+' '+v.toFixed(4)); svg.appendChild(point);
+        });
+        const lx=430+idx*155; svg.appendChild(el('line',{x1:lx,y1:13,x2:lx+28,y2:13,stroke:COLORS[key],'stroke-width':4,'stroke-dasharray':cfg[2]}));
+        svg.appendChild(el('text',{x:lx+35,y:17},cfg[1]));
+      });
+      for(let i=0;i<10;i++) svg.appendChild(el('text',{x:x(i),y:H-22,'text-anchor':'middle','font-weight':'700'},'D'+(i+1)));
+    }
+    function renderTables() {
+      const cmpBody=document.querySelector('#comparison-table tbody');
+      [['ml',DATA.overall.ml],['d020',DATA.overall.d020],['all',DATA.overall.all]].forEach(function(pair){
+        const r=pair[1],tr=document.createElement('tr');
+        tr.innerHTML='<td>'+r.name+'</td><td>'+fmtIC(r.mean)+'</td><td>'+r.ir.toFixed(3)+'</td><td><strong>'+fmtPct(r.hit)+'</strong></td><td>'+r.t.toFixed(2)+'</td><td>'+fmtIC(r.spread)+'</td><td class="'+(r.monotonic?'status-pass':'status-fail')+'">'+(r.monotonic?'是':'否')+'</td>';
+        cmpBody.appendChild(tr);
+      });
+      const annualBody=document.querySelector('#annual-table tbody');
+      DATA.annual.forEach(function(r){
+        const tr=document.createElement('tr');
+        tr.innerHTML='<td>'+r.year+(r.year===2026?'*':'')+'</td><td>'+r.days+'</td><td>'+fmtIC(r.ml.mean)+'</td><td><strong>'+fmtPct(r.ml.hit)+'</strong></td><td>'+r.ml.ir.toFixed(3)+'</td><td>'+r.ml.t.toFixed(2)+'</td><td>'+fmtIC(r.d020.mean)+'</td><td>'+fmtPct(r.d020.hit)+'</td><td>'+fmtIC(r.all.mean)+'</td><td>'+fmtPct(r.all.hit)+'</td>';
+        annualBody.appendChild(tr);
+      });
+    }
+    let sortKey='window', sortDir=1;
+    function renderWindowTable() {
+      const body=document.querySelector('#window-table tbody'); body.replaceChildren();
+      const rows=DATA.windows.slice().sort(function(a,b){return (a[sortKey]-b[sortKey])*sortDir;});
+      rows.forEach(function(r){
+        const tr=document.createElement('tr'),ok=r.rank_ic>0;
+        tr.innerHTML='<td>W'+r.window+'</td><td>'+r.train_end+'</td><td>'+r.test_start+'</td><td>'+r.test_end+'</td><td>'+fmtIC(r.rank_ic)+'</td><td class="'+(ok?'status-pass':'status-fail')+'">'+(ok?'正值':'負值')+'</td>';
+        body.appendChild(tr);
+      });
+    }
+    function updateKpis() {
+      const val=document.getElementById('year-filter').value;
+      let r=DATA.overall.ml, note='993/993，無日期缺口', lift=DATA.overall.ml.mean-DATA.overall.d020.mean;
+      if(val!=='all') { const row=DATA.annual.find(function(x){return String(x.year)===val;}); r=Object.assign({days:row.days},row.ml); note=(val==='2026'?'部分年度，':'')+row.days+' 個交易日'; lift=r.mean-(row.d020.mean); }
+      document.getElementById('kpi-ic').textContent=fmtIC(r.mean);
+      document.getElementById('kpi-ic-note').textContent='對同年度 D-020 '+fmtIC(lift);
+      document.getElementById('kpi-hit').textContent=fmtPct(r.hit);
+      document.getElementById('kpi-ir').textContent=r.ir.toFixed(3);
+      document.getElementById('kpi-t').textContent=r.t.toFixed(2);
+      document.getElementById('kpi-days').textContent=String(r.days);
+      document.getElementById('kpi-days-note').textContent=note;
+    }
+    document.getElementById('year-filter').addEventListener('change',updateKpis);
+    document.querySelectorAll('#window-table th.sortable').forEach(function(th){
+      th.addEventListener('click',function(){ const key=th.dataset.key; if(sortKey===key) sortDir*=-1; else {sortKey=key;sortDir=1;} renderWindowTable(); });
+    });
+    DATA.features.forEach(function(f){ const li=document.createElement('li'); li.textContent=f; document.getElementById('feature-list').appendChild(li); });
+    renderAnnualChart(); renderWindowChart(); renderDecileChart(); renderTables(); renderWindowTable(); updateKpis();
+  </script>
+</body>
+</html>

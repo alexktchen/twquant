@@ -78,9 +78,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-066 | 【ML Phase 1】資料集組裝＋切分器（純函數）：open-to-open 超額標籤＋rank_pct 轉換、特徵×標籤 PIT 對齊（缺值留 null）、purged walk-forward（embargo/金庫期）＋hypothesis 屬性測試 | SPEC-010 §2/§3 AC-1~3 | T-065 | A | done |
 | T-067 | 【ML Phase 1】訓練/推論 CLI：`ml train`/`ml score`、`configs/ml.yaml`（MlConfig）、`data/models/` 佈局＋meta.json、決定性測試、research_log 實驗登記；`uv add lightgbm` | SPEC-010 §1/§4 AC-4/5/8 | T-066 | B | done |
 | T-068 | 【ML Phase 1】ml_scores 資料合約＋薄因子：pandera schema、PG 鏡射窗口（serving.yaml）、`ml.lgbm_rank_10d` 註冊＋`assert_no_lookahead`＋IC 對照報告（vs zscore_weighted 基準） | SPEC-010 §5/§6 AC-6/7/9 | T-067 | B | done |
-| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10 | T-068 | B | in_progress（第 1-3 級通過但第 3 級數字待重跑：D-037 死區吃掉 58/233 天。DSR/金庫期未做） |
-| T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（T-069 裁決） |
+| T-069 | 【ML Phase 1】評估階梯與部署裁決：OOS RankIC → 分位單調 → 成本後回測（換手率/平滑）→ deflated Sharpe（trials=登記簿）→ 金庫期最終評估 → DECISIONS.md 裁決是否部署 | SPEC-010 §7 AC-10/11 + D-038 | T-068 | B | done（研究失敗為合法產出：第 1-2 級通過；第 3 級 1× CAGR -14.29%／Sharpe -0.36，0× 也僅 +1.23%／+0.22，未達 D-038 gross Sharpe 0.5 早停。未做 EMA/buffer/DSR、金庫未開、不部署。canonical hash/family scope/model pin/成本診斷落地；完整閘門 ruff+format+mypy 綠、pytest 401 passed/22 skipped） |
+| T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（D-038：T-069 第 3 級早停，Phase 1 不部署） |
 | T-071 | 【回測正確性】D-037 修正：衛生濾網缺口判準改用交易日（`prices_daily` 日期聯集為市場日曆，全市場休市不算缺口）＋宇宙為空時 `build_targets` 明確 raise（禁靜默回零、禁把無效試驗寫進 research_log）；`UniverseConfig.max_gap_days`→`max_gap_sessions` | D-037 | — | B | done（閘門全綠：ruff/format/mypy 152 檔無誤、pytest 409 passed；AC-1/2/3 對應 test_ac1_market_wide_holiday_is_not_a_gap／test_ac2_single_stock_suspension_still_excluded／test_ac3_empty_universe_raises_instead_of_silent_zero，先寫測試確認三條皆紅再實作） |
+| T-072 | 【ML Phase 2】首個成本感知長週期候選：H20 open-to-open 超額報酬扣同成本模型的估計進出成本、下檔懲罰、穩定核心特徵、獨立 config/model family；purged walk-forward 僅跑既有開發期，vault 不開。AC：手算標籤/PIT ADV/缺值/決定性/config hash/舊 H10 相容性測試；產出 OOS 報告並依 D-039 早停 | SPEC-011 AC-1~8 + D-039 | T-069, T-071 | B | in_progress |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
 > 規格見 [SPEC-010](docs/specs/SPEC-010-ml.md)、研究依據見研究報告「台股 ML 研究藍圖」

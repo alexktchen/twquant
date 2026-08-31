@@ -71,6 +71,8 @@
 | `configs/overlays.yaml` | SPEC-003 §4 |
 | `configs/costs.yaml` | SPEC-004 §2 |
 | `configs/risk.yaml` | SPEC-005 §2（kill-switch 數字）、IC 門檻 `ic_tstat_screen/promote` |
+| `configs/ml.yaml` | SPEC-010（Phase 1 H10 排名模型；歷史 artifact 相容） |
+| `configs/ml_h20_cost_aware.yaml` | SPEC-011（Phase 2 H20 成本感知候選） |
 | `configs/llm.yaml` | MODEL-POLICY §3、SPEC-008（含 pricing 與 usd_twd） |
 | `configs/serving.yaml` | SPEC-009 §1（PG 供應層；DSN 本體在 .env） |
 

@@ -1418,18 +1418,21 @@ def backtest(
     start: str = typer.Option(..., help="回測起 YYYY-MM-DD"),
     end: str = typer.Option(..., help="回測迄 YYYY-MM-DD"),
     capital: float = typer.Option(10_000_000.0, help="初始資金"),
+    participation: float = typer.Option(0.05, min=0.0, max=1.0, help="單股 ADV 參與率上限"),
+    cost_scale: float | None = typer.Option(
+        None, "--cost-scale", min=0.0, help="成本倍率覆寫；0=零成本反事實"
+    ),
     pg: bool = typer.Option(
         True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
     ),
 ) -> None:
     """跑回測，印績效指標並記入 research_log（純量化，不需 LLM）。"""
-    import hashlib
-
     from twquant.backtest.costs import CostConfig
+    from twquant.backtest.diagnostics import summarize_backtest
     from twquant.backtest.engine import run_backtest
     from twquant.config import load_config
     from twquant.data.warehouse import TableSource, Warehouse
-    from twquant.reporting.research_log import append_research_log
+    from twquant.reporting.research_log import append_research_log, backtest_log_entries
     from twquant.strategy.config import load_strategy
 
     cfg = _load_system()
@@ -1446,14 +1449,25 @@ def backtest(
         wh = Warehouse(cfg.data_dir)
     strat = load_strategy(strategy)
     cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    if cost_scale is not None:
+        cost = cost.model_copy(update={"cost_scale": cost_scale})
     s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
 
     try:
-        res = run_backtest(strat, cost, s, e, wh, initial_capital=capital)
+        res = run_backtest(
+            strat,
+            cost,
+            s,
+            e,
+            wh,
+            initial_capital=capital,
+            max_participation=participation,
+        )
     finally:
         if pg_conn is not None:
             pg_conn.close()
     m = res.metrics
+    diag = summarize_backtest(res)
     total_ret = res.final_equity / res.initial_capital - 1.0
     typer.secho(
         f"回測 {strat.name} · {s} ~ {e} · {m.n_days} 交易日", fg=typer.colors.CYAN, bold=True
@@ -1464,23 +1478,39 @@ def backtest(
     typer.echo(
         f"  年化周轉 {m.turnover * 100:.0f}%　成交 {len(res.ledger)} 筆　未成交 {len(res.unfilled)} 筆"
     )
+    typer.echo(
+        f"  成本 {diag.total_cost:,.0f} TWD（手續費 {diag.commission:,.0f}／"
+        f"稅 {diag.tax:,.0f}／滑價 {diag.slippage:,.0f}；初始資金 {diag.cost_to_initial:.2%}）"
+    )
+    gm = diag.same_path_gross_metrics
+    typer.echo(
+        f"  同成交路徑 gross CAGR {gm.cagr * 100:+.2f}%　Sharpe {gm.sharpe:+.2f}　"
+        f"平均持有 {diag.average_holding_sessions:.1f} 交易日"
+    )
 
-    phash = hashlib.sha256(f"{strat.name}|{start}|{end}".encode()).hexdigest()[:12]
+    source = "pg" if pg else "lake"
+    log_metrics = {
+        "sharpe": m.sharpe,
+        "cagr": m.cagr,
+        "mdd": m.mdd,
+        "turnover": m.turnover,
+        "win_rate": m.win_rate,
+        "total_cost": diag.total_cost,
+        "same_path_gross_sharpe": gm.sharpe,
+        "same_path_gross_cagr": gm.cagr,
+    }
     append_research_log(
         cfg.data_dir,
-        [
-            {
-                "entry_type": "backtest",
-                "strategy": strat.name,
-                "factor": "",
-                "params_hash": phash,
-                "date": e.isoformat(),
-                "metric_name": name,
-                "metric_value": float(val),
-                "trial_scope": f"bt:{strat.name}",
-            }
-            for name, val in [("sharpe", m.sharpe), ("cagr", m.cagr), ("mdd", m.mdd)]
-        ],
+        backtest_log_entries(
+            strategy=strat,
+            cost=cost,
+            start=s,
+            end=e,
+            initial_capital=capital,
+            max_participation=participation,
+            source=source,
+            metrics=log_metrics,
+        ),
     )
     typer.secho("已記入 research_log。", fg=typer.colors.GREEN)
 
@@ -1898,10 +1928,12 @@ ml_app = typer.Typer(help="ML 排序層（SPEC-010）：研究軌訓練與每日
 app.add_typer(ml_app, name="ml")
 
 
-def _load_ml() -> MlConfig:
+def _load_ml(config_path: str = "") -> MlConfig:
+    """載入指定 ML 配置；空字串維持 Phase 1 的 configs/ml.yaml 相容路徑。"""
     from twquant.config import MlConfig, load_config
 
-    return load_config(_CONFIG_DIR / "ml.yaml", MlConfig)
+    path = Path(config_path) if config_path else _CONFIG_DIR / "ml.yaml"
+    return load_config(path, MlConfig)
 
 
 def _ml_features_resolved(cfg: MlConfig) -> list[str]:
@@ -1930,6 +1962,7 @@ def ml_train(
     from_: str = typer.Option(..., "--from", help="訓練資料起日（含）YYYY-MM-DD"),
     to: str = typer.Option(..., "--to", help="訓練資料迄日（含，含金庫期）YYYY-MM-DD"),
     out: str = typer.Option("", help="模型輸出根目錄；空＝<data_dir>/models"),
+    config: str = typer.Option("", "--config", help="ML YAML；空＝configs/ml.yaml"),
 ) -> None:
     """walk-forward 訓練＋部署模型落地＋research_log 登記（SPEC-010 §4）。
 
@@ -1939,14 +1972,20 @@ def ml_train(
     import lightgbm
     import polars as pl
 
-    from twquant.config import config_hash
+    from twquant.backtest.costs import CostConfig
+    from twquant.config import config_hash, load_config
     from twquant.data.serving import store
-    from twquant.data.serving.ml_store import read_prices_open
+    from twquant.data.serving.ml_store import read_prices_open, read_prices_training
     from twquant.ml import train as mlt
-    from twquant.ml.dataset import assemble, excess_rank_labels, forward_open_returns
+    from twquant.ml.dataset import (
+        assemble,
+        cost_adjusted_return_labels,
+        excess_rank_labels,
+        forward_open_returns,
+    )
     from twquant.ml.splits import walk_forward_splits
 
-    cfg = _load_ml()
+    cfg = _load_ml(config)
     sys_cfg = _load_system()
     start, end = dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
     scfg = _load_serving()
@@ -1954,7 +1993,11 @@ def ml_train(
     try:
         features = _ml_features_resolved(cfg)
         feats = _ml_feature_frames(conn, scfg.pg_schema, features, start, end)
-        px = read_prices_open(conn, scfg.pg_schema, start, end)
+        px = (
+            read_prices_training(conn, scfg.pg_schema, start, end)
+            if cfg.label.transform == "cost_adjusted_return"
+            else read_prices_open(conn, scfg.pg_schema, start, end)
+        )
     finally:
         conn.close()
     # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
@@ -1965,7 +2008,19 @@ def ml_train(
         cast("dt.date | None", px["date"].max()),
     )
     typer.echo(f"prices {px.height} 列（{px_lo} ~ {px_hi}）")
-    labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
+    cost_cfg: CostConfig | None = None
+    if cfg.label.transform == "cost_adjusted_return":
+        cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+        labels = cost_adjusted_return_labels(
+            px,
+            horizon=cfg.horizon_days,
+            adv_window_sessions=cfg.label.adv_window_sessions,
+            position_notional_twd=cfg.label.position_notional_twd,
+            downside_penalty=cfg.label.downside_penalty,
+            cost_cfg=cost_cfg,
+        )
+    else:
+        labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
     frame = assemble(feats, labels)
     labeled = frame.filter(pl.col("label").is_not_null())
     days: list[dt.date] = sorted(px["date"].unique().to_list())
@@ -1986,7 +2041,7 @@ def ml_train(
     ic = mlt.oos_rank_ic(result.oos_scores)
     train_end = days[-cfg.split.vault_days - 1] if cfg.split.vault_days else days[-1]
     deploy = mlt.fit_ranker(frame.filter(pl.col("date") <= train_end), features, cfg.lgbm)
-    model_id = mlt.make_model_id(train_end, cfg)
+    model_id = mlt.make_model_id(train_end, cfg, cost_cfg=cost_cfg)
     mdir = (Path(out) if out else Path(sys_cfg.data_dir) / "models") / model_id
     mlt.save_model(
         mdir,
@@ -1995,7 +2050,10 @@ def ml_train(
             "model_id": model_id,
             "train_end": train_end.isoformat(),
             "features": features,
-            "config_hash": config_hash(cfg),
+            "config_hash": mlt.training_config_hash(cfg, cost_cfg),
+            "ml_config_hash": config_hash(cfg),
+            "cost_config_hash": config_hash(cost_cfg) if cost_cfg is not None else None,
+            "label": cfg.label.model_dump(mode="json"),
             "horizon_days": cfg.horizon_days,
             "lightgbm_version": lightgbm.__version__,
             "oos_rank_ic": ic,
@@ -2005,7 +2063,7 @@ def ml_train(
         },
     )
     result.oos_scores.write_parquet(mdir / "oos_scores.parquet")
-    mlt.log_training_run(sys_cfg.data_dir, cfg, model_id, ic)
+    mlt.log_training_run(sys_cfg.data_dir, cfg, model_id, ic, cost_cfg=cost_cfg)
     typer.secho(
         f"[OK] {model_id}：OOS RankIC {ic:+.4f}（{len(splits)} 窗）→ {mdir}",
         fg=typer.colors.GREEN,

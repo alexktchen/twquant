@@ -107,6 +107,38 @@ def test_compute_dates_filter(tmp_path: Path) -> None:
     assert set(out["date"].to_list()) == {d}
 
 
+def test_ac8_compute_params_override_registry_defaults(tmp_path: Path) -> None:
+    wh = _warehouse(tmp_path, days=25)
+    seen: list[dict[str, object]] = []
+
+    @factor(
+        name="price.params_probe",
+        category="price",
+        tables=["prices_daily"],
+        lookback_days=0,
+        params={"window": 20, "keep": "default"},
+    )
+    def _probe(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+        seen.append(params)
+        window = params["window"]
+        assert isinstance(window, (int, float))
+        return pl.DataFrame(
+            {
+                "date": [dt.date(2026, 6, 25)],
+                "stock_id": ["0001"],
+                "value": [float(window)],
+            }
+        )
+
+    out = fc.compute(
+        ["price.params_probe"],
+        wh.view(dt.date(2026, 6, 25)),
+        params={"price.params_probe": {"window": 5}},
+    )
+    assert out["value"].to_list() == [5.0]
+    assert seen == [{"window": 5, "keep": "default"}]
+
+
 # ── 標準化（AC-4）─────────────────────────────────────────────────
 
 

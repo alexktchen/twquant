@@ -16,6 +16,26 @@ if TYPE_CHECKING:
     from twquant.data.warehouse import PitView
 
 
+def _scores_for_model(
+    view: PitView, params: dict[str, object], default_prefix: str
+) -> pl.DataFrame:
+    """從 PIT-safe ml_scores 取精確模型或同系列最新分數。"""
+    prefix = str(params.get("model_prefix", default_prefix))
+    model_id = params.get("model_id")
+    scores = view.table("ml_scores")
+    if model_id is not None:
+        scores = scores.filter(pl.col("model_id") == str(model_id))
+    else:
+        scores = scores.filter(pl.col("model_id").str.starts_with(prefix))
+    return (
+        scores.sort(["date", "stock_id", "model_id"], descending=[False, False, True])
+        .unique(subset=["date", "stock_id"], keep="first", maintain_order=True)
+        .select("date", "stock_id", pl.col("rank_pct").alias("value"))
+        .collect()
+        .sort(["date", "stock_id"])
+    )
+
+
 @factor(
     name="ml.lgbm_rank_10d",
     category="ml",
@@ -25,19 +45,23 @@ if TYPE_CHECKING:
     params={"model_prefix": "lgbm_h10_"},
 )
 def lgbm_rank_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
-    """LightGBM 10 日排序分數（rank_pct）。同 (date, stock) 多模型並存時取最新。
+    """LightGBM 10 日排序分數；model_id 可精確 pin，否則同系列取最新。
 
     model_id 格式 lgbm_h{h}_{train_end}_{hash}（SPEC-010 §4）——同前綴下字典序
     即新舊序，故以 model_id 降冪去重。前綴綁定 horizon，屬因子身分（如 mom_20d
     的 20），非調參對象。
     """
-    prefix = str(params.get("model_prefix", "lgbm_h10_"))
-    return (
-        view.table("ml_scores")
-        .filter(pl.col("model_id").str.starts_with(prefix))
-        .sort(["date", "stock_id", "model_id"], descending=[False, False, True])
-        .unique(subset=["date", "stock_id"], keep="first", maintain_order=True)
-        .select("date", "stock_id", pl.col("rank_pct").alias("value"))
-        .collect()
-        .sort(["date", "stock_id"])
-    )
+    return _scores_for_model(view, params, "lgbm_h10_")
+
+
+@factor(
+    name="ml.lgbm_net_20d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_net_h20_"},
+)
+def lgbm_net_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """LightGBM H20 成本感知連續報酬分數；只讀 PIT-safe ml_scores。"""
+    return _scores_for_model(view, params, "lgbm_net_h20_")

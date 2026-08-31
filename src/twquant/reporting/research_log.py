@@ -6,11 +6,20 @@ append-only 分片寫入（SPEC-001 §7）：每次寫一個新小檔，禁止�
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
+import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 
 from twquant.conventions import now_tw
+
+if TYPE_CHECKING:
+    from twquant.backtest.costs import CostConfig
+    from twquant.strategy.config import StrategyConfig
 
 COLUMNS = [
     "entry_type",  # ic_test | backtest
@@ -66,3 +75,75 @@ def trials_count(data_dir: str | Path, trial_scope: str) -> int:
     if log.is_empty():
         return 0
     return log.filter(pl.col("trial_scope") == trial_scope)["params_hash"].n_unique()
+
+
+def backtest_trial_scope(strategy: StrategyConfig) -> str:
+    """回測試驗家族；明示 scope 讓同族變體不被策略顯示名稱拆散。"""
+    family = strategy.trial_scope or strategy.name
+    return f"bt:{family}"
+
+
+def backtest_params_hash(
+    *,
+    strategy: StrategyConfig,
+    cost: CostConfig,
+    start: dt.date,
+    end: dt.date,
+    initial_capital: float,
+    max_participation: float,
+    source: str,
+) -> str:
+    """完整回測經濟配置的 canonical hash（排除顯示/家族 metadata）。"""
+    strategy_payload = strategy.model_dump(
+        mode="json", exclude={"name", "description", "trial_scope"}
+    )
+    payload = {
+        "strategy": strategy_payload,
+        "cost": cost.model_dump(mode="json"),
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "initial_capital": initial_capital,
+        "max_participation": max_participation,
+        "source": source,
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def backtest_log_entries(
+    *,
+    strategy: StrategyConfig,
+    cost: CostConfig,
+    start: dt.date,
+    end: dt.date,
+    initial_capital: float,
+    max_participation: float,
+    source: str,
+    metrics: Mapping[str, float],
+) -> list[dict[str, object]]:
+    """以單一 canonical 身分建立回測 metrics 登記列。"""
+    params_hash = backtest_params_hash(
+        strategy=strategy,
+        cost=cost,
+        start=start,
+        end=end,
+        initial_capital=initial_capital,
+        max_participation=max_participation,
+        source=source,
+    )
+    scope = backtest_trial_scope(strategy)
+    return [
+        {
+            "entry_type": "backtest",
+            "strategy": strategy.name,
+            "factor": "",
+            "params_hash": params_hash,
+            "date": end.isoformat(),
+            "metric_name": name,
+            "metric_value": float(value),
+            "trial_scope": scope,
+        }
+        for name, value in sorted(metrics.items())
+    ]

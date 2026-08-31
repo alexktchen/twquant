@@ -80,6 +80,24 @@ def read_prices_open(conn: Any, schema: str, start: object, end: object) -> pl.D
     return pl.DataFrame(rows, schema=schema_, orient="row")
 
 
+def read_prices_training(conn: Any, schema: str, start: object, end: object) -> pl.DataFrame:
+    """讀取成本感知標籤所需的行情欄位；期間在 PG server-side 過濾。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, stock_id, open, amount FROM "{schema}"."prices_daily" '
+            "WHERE date BETWEEN %s AND %s AND open IS NOT NULL",
+            (start, end),
+        )
+        rows = cur.fetchall()
+    schema_ = {
+        "date": pl.Date,
+        "stock_id": pl.String,
+        "open": pl.Float64,
+        "amount": pl.Float64,
+    }
+    return pl.DataFrame(rows, schema=schema_, orient="row")
+
+
 def upsert_ml_scores(conn: Any, schema: str, frame: pl.DataFrame) -> int:
     """驗證後批次寫入；回傳實際新增列數（衝突略過不計）。"""
     df = schemas.validate("ml_scores", frame.select(_COLS))
