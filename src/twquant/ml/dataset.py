@@ -109,11 +109,18 @@ def cost_adjusted_return_labels(
             .alias("_adv"),
         )
         .with_columns(
-            (pl.col("_exit") / pl.col("_entry") - 1.0).alias("_gross"),
+            # schema 允許 open >= 0，故 0 是合法值；但 SPEC-011 §2 要求「價格無效」時
+            # label 為 null。少了這道防護，除以 0 會得到 inf，再被下一步的當日均值
+            # 擴散到整個橫斷面（成本路徑早已有相同判斷，見 estimated_cost_rate）。
+            pl.when((pl.col("_entry") > 0.0) & (pl.col("_exit") > 0.0))
+            .then(pl.col("_exit") / pl.col("_entry") - 1.0)
+            .otherwise(pl.lit(None, dtype=pl.Float64))
+            .alias("_gross"),
             pl.struct("_entry", "_exit", "_adv")
             .map_elements(estimated_cost_rate, return_dtype=pl.Float64)
             .alias("_cost"),
         )
+        # mean() 略過 null，故均值即 SPEC-011 §2 的「當日有效宇宙」平均。
         .with_columns((pl.col("_gross") - pl.col("_gross").mean().over("date")).alias("_excess"))
         .with_columns((pl.col("_excess") - pl.col("_cost")).alias("_net"))
     )

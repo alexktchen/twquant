@@ -1,5 +1,16 @@
 # CHANGELOG
 
+- 2026-08-31 T-072／D-040（已裁決）成本感知標籤缺陷修正：`ml/dataset.py` 的 `_gross`
+  除法補上正值防護（成本路徑早已有，報酬路徑漏掉）。`open = 0` 是 schema 合法值
+  （`_nonneg` = ge(0)），除法產生 `inf` 後被 `mean().over("date")` 擴散到整個橫斷面，
+  使 2021-01-04~2021-02-26 共 33 個交易日的全部標籤變成 `-inf`；`train.py` 只濾
+  `is_not_null()`，`-inf` 直接進 LightGBM，葉節點達 -5.99e36，1,719,847 列分數
+  100% 落在 |score| > 1e10。修正依 SPEC-011 §2「價格無效時 label 為 null」與 AC-3；
+  `mean()` 略過 null，故均值即規格所稱「當日有效宇宙」平均。
+  新測試 `test_ac3_invalid_entry_price_yields_null_and_does_not_poison_cross_section`
+  先確認為紅再實作。缺陷 artifact 保存於 `data/models/_archive/`（D-039 不得刪除失敗結果）。
+  閘門全綠：ruff／format／mypy 156 檔／pytest 432 passed。
+
 - 2026-08-31 T-069／D-038 最終裁決不部署：回測新增精確 model_id pin、signal params 覆寫、
   完整經濟配置 canonical hash、同族 trial scope、`cost_scale` 反事實與純成本診斷（費/稅/
   滑價、same-path gross、平均持有期）。完整 OOS 1× 成本重現 CAGR -14.29%／Sharpe -0.36，
