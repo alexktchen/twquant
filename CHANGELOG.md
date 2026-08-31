@@ -10,6 +10,12 @@
   新測試 `test_ac3_invalid_entry_price_yields_null_and_does_not_poison_cross_section`
   先確認為紅再實作。缺陷 artifact 保存於 `data/models/_archive/`（D-039 不得刪除失敗結果）。
   閘門全綠：ruff／format／mypy 156 檔／pytest 432 passed。
+  **重跑結果**：OOS RankIC −0.0188 → **+0.0193**、為正的窗 0/16 → 11/16、
+  葉節點 |max| 5.99e36 → 0.091、|score|>1e10 由 100% → 0%，根因診斷完全證實。
+  但**階梯第 1 級未通過**：ML +0.0193 對最強基準 B（D-020 子集）+0.0282 差 −0.0089
+  （ML 在分位頭尾 +0.0222 與嚴格單調勝出）。依 SPEC-010 §7 不進第 3 級，
+  未執行 backfill-scores 與零成本回測。另發現 `ml eval` 缺 `--config`，
+  導致 trial_scope 誤記為 `ml:h10`、NW lag 用 10 而非 20（均另立任務）。
 
 - 2026-08-31 T-069／D-038 最終裁決不部署：回測新增精確 model_id pin、signal params 覆寫、
   完整經濟配置 canonical hash、同族 trial scope、`cost_scale` 反事實與純成本診斷（費/稅/
