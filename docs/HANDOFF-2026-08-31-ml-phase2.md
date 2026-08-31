@@ -50,24 +50,28 @@ $env:TWQUANT_PG_DSN = <從 .env 載入，勿輸出>
   -0.0004, -0.0039]`。
 - 這是一個已登記的 `ml:net_h20` trial，不得刪除失敗結果或補掃參數。
 
-## 交接當下正在執行
+## 已停止的 OOS 分數寫入
 
-正在把約 173 萬列 walk-forward OOS 分數 upsert 到 PG `serving.ml_scores`：
+曾嘗試把約 173 萬列 walk-forward OOS 分數 upsert 到 PG `serving.ml_scores`：
 
 ```powershell
 .\.venv\Scripts\python.exe -m twquant ml backfill-scores `
   --model data/models/lgbm_net_h20_20260225_9a575e97
 ```
 
-- Codex unified exec session 曾為 `46517`；Windows Python 約於 21:32 啟動。
-- PG 狀態最後確認為 active / ClientRead，非 lock；現有 `executemany` 逐列傳輸很慢。
-- **先檢查程序/PG 狀態，不要直接重跑第二份。** 若程序已不在，查 model id 列數確認
-  是否 commit 成功；未成功才重跑。中斷會整批 rollback。
+- 現有 `executemany` 逐列傳輸過慢；依使用者要求已中止，孤兒 PG backend `36830`
+  亦已精確終止。
+- 交易完整 rollback；`model_id = lgbm_net_h20_20260225_9a575e97` 的 committed rows
+  已確認為 **0**，沒有半套分數。
+- **目前沒有 writer 在跑，不要假設 backfill 已完成。** 若要續跑，先考慮把
+  `upsert_ml_scores` 改為 COPY staging + `INSERT ... ON CONFLICT` 的批次路徑並另立任務；
+  或接受現有逐列路徑需要很長時間。不得開第二個 trial 或重訓模型。
 - `.env` 不可顯示或 commit。
 
 ## 下一步（不要改候選）
 
-1. 等 backfill 完成，確認輸出日期應為 2022-02-08~2026-02-25。
+1. 先完成或另行核可大量 backfill 的批次寫入方式，再寫入本模型 OOS 分數；完成後確認
+   日期應為 2022-02-08~2026-02-25。
 2. 跑唯一一次固定的零成本回測：
 
 ```powershell
