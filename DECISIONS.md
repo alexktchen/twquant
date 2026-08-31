@@ -102,6 +102,26 @@
 
 ## 已裁決
 
+### D-040（2026-08-31，已裁決）daily-pipeline 以最近預定班次定日期並避開 cron 尖峰
+
+- 問題：2026-08-27/28 四次 scheduled run 均延遲約 7~10 小時跨過台北午夜；舊 workflow
+  以 runner 當下日期當 `DAY`，依序誤抓尚未開盤的 8/28 與週六 8/29，品質閘門正確以
+  `最新行情日 None != 今日` 失敗。四次皆在舊 SHA `a9c947b`；不是 ML/main 新變更。
+  另 8/31 的 19:05/22:05 班截至 22:32 尚未建立 run；兩個 cron 都排每小時第 5 分，
+  位於 GitHub 官方指出的排程高負載時段，可能延遲甚至被丟棄。
+- 裁決（使用者 2026-08-31 核可「好，你修」）：
+  1. cron 改為 UTC 11:23 / 14:43（台北 19:23 / 22:43），避開每小時起始尖峰。
+  2. scheduled run 不再用 runner 的日期或 17:00 heuristic；以 Asia/Taipei 的實際啟動
+     時刻，回推「不晚於現在的最近一個週一至週五預定班次」，取該班次日期為 DAY。
+     因 GitHub schedule 只會延遲、不會提早，此法可涵蓋跨日、跨週末與多日延遲。
+  3. 班次時間由 workflow 參數傳入；Python 不寫死。手動 `workflow_dispatch.date` 仍完全
+     優先，不經自動解析。
+  4. 此演算法解析的是 cron 班次日，不宣稱該日一定開市；平日國定假日仍由官方資料與
+     品質閘門大聲失敗，禁止靜默成功。
+  5. 修正推上 main 後，以 `workflow_dispatch date=2026-08-28` 跑完整鏈；成功才結案。
+- 影響範圍：T-073、SPEC-012、`.github/workflows/daily-pipeline.yml`、
+  `scheduling.py`、`scripts/resolve_pipeline_day.py` 與測試。
+
 ### D-039（2026-08-31，已裁決）ML Phase 2 首個候選採 H20 成本感知報酬標籤
 
 - 問題：Phase 1 H10 的 OOS RankIC/分位單調雖佳，但零成本回測僅 CAGR +1.23%、

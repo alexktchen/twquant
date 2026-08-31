@@ -82,6 +82,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-070 | 【ML Phase 1】每日 pipeline 推論步驟＋月頻 refit workflow：模型檔隨 Drive 歸檔遞送、`ml score` 排入 pipeline（供應層物化後）、refit 獨立 GHA workflow | SPEC-010 §4/§8 | T-069 | B | blocked（D-038：T-069 第 3 級早停，Phase 1 不部署） |
 | T-071 | 【回測正確性】D-037 修正：衛生濾網缺口判準改用交易日（`prices_daily` 日期聯集為市場日曆，全市場休市不算缺口）＋宇宙為空時 `build_targets` 明確 raise（禁靜默回零、禁把無效試驗寫進 research_log）；`UniverseConfig.max_gap_days`→`max_gap_sessions` | D-037 | — | B | done（閘門全綠：ruff/format/mypy 152 檔無誤、pytest 409 passed；AC-1/2/3 對應 test_ac1_market_wide_holiday_is_not_a_gap／test_ac2_single_stock_suspension_still_excluded／test_ac3_empty_universe_raises_instead_of_silent_zero，先寫測試確認三條皆紅再實作） |
 | T-072 | 【ML Phase 2】首個成本感知長週期候選：H20 open-to-open 超額報酬扣同成本模型的估計進出成本、下檔懲罰、穩定核心特徵、獨立 config/model family；purged walk-forward 僅跑既有開發期，vault 不開。AC：手算標籤/PIT ADV/缺值/決定性/config hash/舊 H10 相容性測試；產出 OOS 報告並依 D-039 早停 | SPEC-011 AC-1~8 + D-039 | T-069, T-071 | B | in_progress |
+| T-073 | 【雲端排程修復】daily-pipeline 避開每小時起始壅塞＋以最近預定班次解析交易日期，涵蓋 7~10 小時跨日、週末與多日延遲；手動 date 不變。修後手動補跑 2026-08-28 驗證全鏈 | SPEC-012 AC-1~6 + D-040 | T-056 | A | in_progress |
 
 > ML 任務（T-065~T-070）源自 [D-036](DECISIONS.md)（橫斷面 GBDT 排序 meta-factor），
 > 規格見 [SPEC-010](docs/specs/SPEC-010-ml.md)、研究依據見研究報告「台股 ML 研究藍圖」
