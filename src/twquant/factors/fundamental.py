@@ -83,3 +83,64 @@ def revenue_accel(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .sort(["stock_id", "_avail"])
     )
     return _asof_map(_daily_spine(view), rev, "_accel")
+
+
+def _valuation(view: PitView, col: str, *, positive_only: bool, reciprocal: bool) -> pl.DataFrame:
+    """`stock_valuation` 的單欄取值；PIT 由 view 保證（僅回 as_of 可見的列）。
+
+    positive_only：非正值先轉 null 再取倒數——少了這道防護，PBR=0 會產生 inf
+    （T-079 的教訓：`ml/dataset.py` 同樣的缺漏讓 open=0 毀掉整個模型）。
+    """
+    base = pl.col(col)
+    if positive_only:
+        base = pl.when(pl.col(col) > 0.0).then(pl.col(col)).otherwise(None)
+    expr = (1.0 / base) if reciprocal else base
+    return (
+        view.table("stock_valuation")
+        .select("date", "stock_id", expr.alias("value"))
+        .drop_nulls("value")
+        .collect()
+    )
+
+
+@factor(
+    name="fundamental.earnings_yield",
+    category="fundamental",
+    direction=1,
+    tables=["stock_valuation"],
+    lookback_days=1,
+    params={},
+)
+def earnings_yield(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """盈餘收益率 E/P ＝ 1/PER（正向：越便宜越看多）。
+
+    用倒數而非 PER 本身：實測 PER 最大 24,950、最小 −1.0，直接用會被極端值主導；
+    E/P 在 PER→∞ 時趨近 0、虧損時為負（有意義的方向）。負 PER 不轉 null。
+    """
+    return _valuation(view, "per", positive_only=False, reciprocal=True)
+
+
+@factor(
+    name="fundamental.book_yield",
+    category="fundamental",
+    direction=1,
+    tables=["stock_valuation"],
+    lookback_days=1,
+    params={},
+)
+def book_yield(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """淨值收益率 B/P ＝ 1/PBR（正向：越便宜越看多）。PBR <= 0 為無效值 → null。"""
+    return _valuation(view, "pbr", positive_only=True, reciprocal=True)
+
+
+@factor(
+    name="fundamental.dividend_yield",
+    category="fundamental",
+    direction=1,
+    tables=["stock_valuation"],
+    lookback_days=1,
+    params={},
+)
+def dividend_yield(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """現金殖利率（正向）。來源映射層已轉小數（黃金規則 3），此處不再換算。"""
+    return _valuation(view, "dividend_yield", positive_only=False, reciprocal=False)
