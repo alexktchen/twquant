@@ -149,8 +149,15 @@ print("label min/max", df["label"].min(), df["label"].max())
   沒有任何 guard，反向預測自身標籤的模型照樣 exit 0、印成功、存 artifact、登記 trial。
   這正是本次缺陷能一路走到交接文件的原因。
 
-被駁回的 3 項（不必再追）：「rank 轉換遺失導致單列汙染整個橫斷面」被更精確的
-§2 取代；「embargo 差一天」與「單一 null amount 毀掉 20 個 session」經查不成立。
+被駁回的 3 項：「rank 轉換遺失導致單列汙染整個橫斷面」被更精確的 §2 取代；
+「單一 null amount 毀掉 20 個 session」經查不成立。
+
+> **更正（2026-08-31 稍晚）**：第三項「embargo 差一天」當時被對抗驗證者駁回，
+> 但事後以解析方式重新推導，**該項成立**——見 §11.4 的 T-075。
+> 推導：`train_end` 索引 = `test_lo − embargo − 1`，標籤跨度為
+> `open(t+1) → open(t+1+h)`，故出場價索引 = `test_lo − embargo + h`；
+> 當 `embargo == horizon`（兩個配置皆取最小值）該索引 = `test_lo`，
+> 即測試期首日。影響約佔訓練列 0.06%，微小但真實。
 
 ## 7. 待裁決（D-040 草案，已寫入 DECISIONS.md）
 
