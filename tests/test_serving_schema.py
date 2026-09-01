@@ -18,6 +18,7 @@ _MIRROR = {
     "monthly_revenue",
     "shareholding_dispersion",
     "stock_meta",
+    "stock_valuation",  # T-010/D-044：FinMind 評價資料（PER/PBR/殖利率）
     "index_daily",  # T-082：先前遺漏，導致 price.rs_market_20d 因 PG 無指數而永遠算不出來
 }
 _ALL = _MIRROR | {"sync_state"}
@@ -141,3 +142,21 @@ def test_t082_index_daily_is_mirrored_so_rs_market_20d_can_compute() -> None:
         "close",
         "available_at",
     ), "欄位順序與名稱須與 clean 層 parquet 及既有 PG 表一致"
+
+
+def test_t010_stock_valuation_is_mirrored_with_decimal_yield() -> None:
+    """T-010／D-044：評價資料表須進鏡射清單，否則因子物化（讀 PG）取不到——
+    這正是 T-082 在 `index_daily` 上踩過的坑。"""
+    from twquant.data.serving import schema as sch
+
+    assert "stock_valuation" in sch.MIRROR_TABLES
+    spec = next(s for s in sch.MIRROR_SPECS if s.name == "stock_valuation")
+    assert spec.pk == ("date", "stock_id")
+    assert spec.column_names == (
+        "date",
+        "stock_id",
+        "per",
+        "pbr",
+        "dividend_yield",
+        "available_at",
+    )

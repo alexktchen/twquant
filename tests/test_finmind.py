@@ -124,3 +124,59 @@ def test_both_mappers_are_deterministic_and_sorted() -> None:
     ]
     got = [(r["date"], r["stock_id"]) for r in institutional_net(rows)]
     assert got == sorted(got), "未排序會讓兩次回補產生不同的 parquet"
+
+
+def test_valuation_rows_convert_yield_to_decimal_but_keep_multiples() -> None:
+    """殖利率是「率」→ 依黃金規則 3 存小數；PER/PBR 是倍數不是率 → 維持原值。
+
+    FinMind 的 dividend_yield 以百分比計（實測中位數 2.89 ＝ 2.89%）。
+    """
+    from twquant.data.sources.finmind import valuation_rows
+
+    rows = [
+        {
+            "date": "2020-01-02",
+            "stock_id": "1101",
+            "dividend_yield": 9.09,
+            "PER": 10.86,
+            "PBR": 1.36,
+        }
+    ]
+    assert valuation_rows(rows) == [
+        {
+            "date": dt.date(2020, 1, 2),
+            "stock_id": "1101",
+            "per": 10.86,
+            "pbr": 1.36,
+            "dividend_yield": 0.0909,
+        }
+    ]
+
+
+def test_valuation_rows_preserve_negative_per_as_null_free_value() -> None:
+    """PER 為負＝虧損公司（TWSE 慣例），是有意義的值，不得轉 null 或 0。"""
+    from twquant.data.sources.finmind import valuation_rows
+
+    rows = [
+        {"date": "2024-06-03", "stock_id": "2498", "dividend_yield": 0.0, "PER": -1.0, "PBR": 2.5}
+    ]
+    out = valuation_rows(rows)
+    assert out[0]["per"] == -1.0
+    assert out[0]["dividend_yield"] == 0.0
+
+
+def test_valuation_rows_missing_field_raises() -> None:
+    """來源改欄即 raise，不得靜默補 null（黃金規則 5）。"""
+    from twquant.data.sources.finmind import valuation_rows
+
+    with pytest.raises(DataError, match="PBR"):
+        valuation_rows(
+            [{"date": "2024-06-03", "stock_id": "2330", "PER": 20.0, "dividend_yield": 1.0}]
+        )
+
+
+def test_valuation_rows_skip_placeholder_rows_without_date() -> None:
+    """staging 對「無資料」的檔會寫一列只有 stock_id 的佔位列——須略過而非 raise。"""
+    from twquant.data.sources.finmind import valuation_rows
+
+    assert valuation_rows([{"stock_id": "9999"}]) == []

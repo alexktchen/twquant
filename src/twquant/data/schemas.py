@@ -135,6 +135,20 @@ MONTHLY_REVENUE = _schema(
     },
 )
 
+STOCK_VALUATION = _schema(
+    "stock_valuation",
+    1,
+    {
+        "date": _col(pl.Date),
+        "stock_id": _col(pl.String),
+        # 倍數（非率），不設 nonneg：PER 為負＝虧損公司，是 TWSE 慣例下有意義的值
+        "per": _col(pl.Float64),
+        "pbr": _col(pl.Float64),
+        "dividend_yield": _col(pl.Float64),  # 小數（0.0289 = 2.89%），黃金規則 3
+        "available_at": _col(TW_DT),
+    },
+)
+
 CORPORATE_EVENTS = _schema(
     "corporate_events",
     1,
@@ -268,6 +282,7 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "shareholding_dispersion": SHAREHOLDING_DISPERSION,
     "monthly_revenue": MONTHLY_REVENUE,
     "index_daily": INDEX_DAILY,
+    "stock_valuation": STOCK_VALUATION,
     "corporate_events": CORPORATE_EVENTS,
     "disposition_stocks": DISPOSITION_STOCKS,
     "taifex_institutional": TAIFEX_INSTITUTIONAL,

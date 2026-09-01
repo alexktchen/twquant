@@ -69,9 +69,9 @@ def test_unknown_table_raises() -> None:
 
 
 def test_all_tables_registered_with_version() -> None:
-    # 17 張 clean 層表都要有 schema 與版本（含 index_daily、market_holidays、
-    # ml_scores——T-068/SPEC-010 §5 新增）
-    assert len(schemas.SCHEMAS) == 17
+    # 18 張 clean 層表都要有 schema 與版本（含 index_daily、market_holidays、
+    # ml_scores、stock_valuation——T-068/SPEC-010 §5、T-010/D-044 新增）
+    assert len(schemas.SCHEMAS) == 18  # +stock_valuation（T-010／D-044）
     for name in schemas.SCHEMAS:
         assert schemas.schema_version(name) >= 1
 

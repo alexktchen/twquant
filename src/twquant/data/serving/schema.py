@@ -129,6 +129,21 @@ MIRROR_SPECS: tuple[TableSpec, ...] = (
         pk=("stock_id", "date", "level"),
     ),
     TableSpec(
+        # T-010／D-044：FinMind 評價資料。dividend_yield 存小數（黃金規則 3）；
+        # PER 可為負（虧損公司），故不加非負約束。
+        "stock_valuation",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("per", "double precision"),
+            ("pbr", "double precision"),
+            ("dividend_yield", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("date", "stock_id"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
         # T-082：先前遺漏於鏡射清單，導致 serving sync 不同步指數；而因子物化在 D-026
         # 之後改讀 PG，故 price.rs_market_20d 只能在 PG 恰好有的 52 天算出來
         # （Phase 1 模型中 split=0、gain=0.00%）。TPEx 僅提供收盤，OHL 可為 null。

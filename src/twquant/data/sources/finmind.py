@@ -22,6 +22,7 @@ API = "https://api.finmindtrade.com/api/v4/data"
 
 INSTITUTIONAL_DATASET = "TaiwanStockInstitutionalInvestorsBuySell"
 MARGIN_DATASET = "TaiwanStockMarginPurchaseShortSale"
+VALUATION_DATASET = "TaiwanStockPER"
 
 # clean.py:59 的定義：外資＝外陸資(不含自營)＋外資自營商；自營＝自行買賣＋避險。
 # 未列出的類別一律 raise——來源新增類別而靜默忽略，會讓某一欄悄悄少一條腿。
@@ -86,6 +87,37 @@ def margin_balances(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
                     f"FinMind 回應缺欄位 {src}（來源改版？）——缺欄當 0 會讓餘額憑空歸零。",
                 )
             vals[col] = int(row[src]) * _LOT_SHARES
+        out.append(vals)
+    out.sort(key=lambda r: (r["date"], r["stock_id"]))
+    return out
+
+
+# 殖利率是「率」→ 黃金規則 3 要求存小數；PER/PBR 是倍數（非率），維持原值。
+_VALUATION_FIELDS = {"per": "PER", "pbr": "PBR", "dividend_yield": "dividend_yield"}
+_PERCENT_FIELDS = frozenset({"dividend_yield"})
+
+
+def valuation_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanStockPER` → `stock_valuation`。
+
+    PER 可為負（虧損公司，TWSE 慣例）——是有意義的值，不轉 null 或 0。
+    無 `date` 的列是 staging 對「該檔無資料」寫的佔位列，略過。
+    """
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("date") is None:
+            continue
+        day = _date(row, "stock_valuation")
+        vals: dict[str, Any] = {"date": day, "stock_id": str(row["stock_id"])}
+        for col, src in _VALUATION_FIELDS.items():
+            if src not in row:
+                raise DataError(
+                    "stock_valuation",
+                    day,
+                    f"FinMind 回應缺欄位 {src}（來源改版？）——缺欄補 null 會讓評價因子悄悄失效。",
+                )
+            v = float(row[src])
+            vals[col] = v / 100.0 if col in _PERCENT_FIELDS else v
         out.append(vals)
     out.sort(key=lambda r: (r["date"], r["stock_id"]))
     return out
