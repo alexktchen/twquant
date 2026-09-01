@@ -44,11 +44,33 @@ class SignalConfig(BaseConfig):
 
 
 class SelectionConfig(BaseConfig):
-    """選股方法（SPEC-003 §1）。"""
+    """選股方法（SPEC-003 §1；banded_top_n 見 SPEC-012 §1）。"""
 
-    method: Literal["top_n", "threshold"] = "top_n"
+    method: Literal["top_n", "threshold", "banded_top_n"] = "top_n"
     top_n: int | None = 40
     threshold: float | None = None
+    # SPEC-012：遲滯門檻。刻意無預設——banded_top_n 必須顯式指定，
+    # 靜默套預設等於讓事前登記的純量憑空出現。
+    entry_rank_pct: float | None = None
+    exit_rank_pct: float | None = None
+
+    @model_validator(mode="after")
+    def _banded_thresholds(self) -> SelectionConfig:
+        if self.method != "banded_top_n":
+            return self
+        if self.entry_rank_pct is None or self.exit_rank_pct is None:
+            raise ValueError(
+                "method=banded_top_n 須同時指定 entry_rank_pct 與 exit_rank_pct"
+                f"（目前 entry_rank_pct={self.entry_rank_pct}、"
+                f"exit_rank_pct={self.exit_rank_pct}）"
+            )
+        if not 0.0 < self.exit_rank_pct < self.entry_rank_pct <= 1.0:
+            raise ValueError(
+                "banded_top_n 門檻須滿足 0 < exit_rank_pct < entry_rank_pct ≤ 1"
+                f"（得到 exit_rank_pct={self.exit_rank_pct}、"
+                f"entry_rank_pct={self.entry_rank_pct}）"
+            )
+        return self
 
 
 class RebalanceConfig(BaseConfig):

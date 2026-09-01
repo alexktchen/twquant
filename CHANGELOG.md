@@ -1,5 +1,17 @@
 # CHANGELOG
 
+- 2026-09-01 T-076／SPEC-012 buy/hold banding：**實作完成、候選失敗**。
+  新增 `strategy/banding.py`（純函數、狀態由引擎持有）、`SelectionConfig.banded_top_n`
+  （門檻無預設，須顯式指定）、`build_targets(..., held=)`、`configs/strategies/ml_rank_band.yaml`
+  （事前登記 entry 0.90／exit 0.70，不得掃描）。10 條測試涵蓋 AC-1~7，先確認紅燈再實作。
+  回測：周轉 2,874%→**1,519%**（−47.1%）、成本 58.50%→**34.59%** 資金、持有 7.5→**15.3** 日，
+  banding 的降周轉機制完全奏效；**但同路徑 gross CAGR +4.49%→−3.03%**，毛訊號掉幅大於
+  成本節省，淨 CAGR −14.29%→−15.57%、MDD 更差。兩個頭條指標皆未過（月周轉 126.6% vs <50%；
+  毛績效為負使 break-even ≤ 0）。**D-042 記錄關鍵教訓：落後 IC 支持的是降低再平衡頻率，
+  不是遲滯——banding 留住的是名次已衰退的股票，而預測力來自當前分數。**
+  AC-5 指標逐項重現 D-038 值，但 params_hash 因新增 optional 欄位而變動（另立 T-078）。
+  閘門：mypy 158 檔／pytest 442 passed；`api/index.py` 的既有 RUF100 另立 T-077。
+
 - 2026-09-01 T-072 結案（done）＋ D-041 開 Phase 3 主線。T-072：H20 成本感知候選
   依 SPEC-010 §7 第 1 級未過（ML +0.0193 對最強基準 D-020 子集 +0.0282 差 −0.0089），
   研究完成但不部署，比照 T-069／D-038；金庫期未開封。

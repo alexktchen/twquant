@@ -335,7 +335,8 @@ def run_backtest(
         )
 
         if day in sig_dates:
-            tdf = build_targets(strategy_cfg, warehouse, day)
+            # SPEC-012：banding 需要「昨天在不在裡面」；狀態留在引擎，build_targets 保持純函數
+            tdf = build_targets(strategy_cfg, warehouse, day, held=frozenset(state.holdings))
             pending = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
 
     equity_series = [e.equity for e in equity_curve]

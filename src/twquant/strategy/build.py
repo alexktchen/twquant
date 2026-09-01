@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from twquant.errors import DataError
+from twquant.strategy.banding import banded_selection
 from twquant.strategy.combine import combined_score
 from twquant.strategy.overlays import get_overlay
 from twquant.strategy.universe import universe_ids
@@ -58,8 +59,17 @@ def _empty() -> pl.DataFrame:
     return pl.DataFrame(schema=_OUT_SCHEMA)
 
 
-def build_targets(cfg: StrategyConfig, wh: TableSource, signal_date: dt.date) -> pl.DataFrame:
-    """對 signal_date 產出目標權重 (date, stock_id, target_weight)。空手日回空表。"""
+def build_targets(
+    cfg: StrategyConfig,
+    wh: TableSource,
+    signal_date: dt.date,
+    held: frozenset[str] = frozenset(),
+) -> pl.DataFrame:
+    """對 signal_date 產出目標權重 (date, stock_id, target_weight)。空手日回空表。
+
+    held 為呼叫端當下的持股（SPEC-012）：只有 selection.method=banded_top_n 會用到，
+    其餘方法忽略之，故既有策略的結果不受影響。本函數仍為純運算。
+    """
     import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.factors.compute import compute
     from twquant.factors.registry import get
@@ -94,7 +104,7 @@ def build_targets(cfg: StrategyConfig, wh: TableSource, signal_date: dt.date) ->
     if score.is_empty():
         return _empty()
 
-    picked = _select(score, cfg)
+    picked = _select(score, cfg, held=held)
     if picked.is_empty():
         return _empty()
 
@@ -110,8 +120,20 @@ def build_targets(cfg: StrategyConfig, wh: TableSource, signal_date: dt.date) ->
     return weights.select("date", "stock_id", "target_weight").sort("stock_id")
 
 
-def _select(score: pl.DataFrame, cfg: StrategyConfig) -> pl.DataFrame:
+def _select(
+    score: pl.DataFrame, cfg: StrategyConfig, *, held: frozenset[str] = frozenset()
+) -> pl.DataFrame:
     sel = cfg.selection
+    if sel.method == "banded_top_n":
+        # 門檻的存在與大小關係已由 SelectionConfig 驗證（SPEC-012 AC-2）
+        assert sel.entry_rank_pct is not None and sel.exit_rank_pct is not None
+        return banded_selection(
+            score,
+            held=held,
+            top_n=sel.top_n or 40,
+            entry_rank_pct=sel.entry_rank_pct,
+            exit_rank_pct=sel.exit_rank_pct,
+        )
     if sel.method == "top_n":
         n = sel.top_n or 40
         # 次序鍵 stock_id：分數同分時決定性挑選（避免跨程序 group_by 順序影響選股）
