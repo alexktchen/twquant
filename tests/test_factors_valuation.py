@@ -1,8 +1,12 @@
 """T-010／D-044：評價因子（E/P、B/P、殖利率）。
 
-為什麼用**倒數**而非 PER／PBR 本身：實測 PER 最大 24,950、最小 −1.0，PBR 最大 1,442.5。
-以 P/E 直接當因子，橫斷面分布會被少數極端值主導；取倒數後 E/P 在 PER→∞ 時趨近 0、
-在虧損時為負（有意義的方向），分布遠為良好。這是資產定價文獻的標準處理。
+為什麼用**倒數**而非 PER／PBR 本身：實測 PER 最大 24,950、PBR 最大 1,442.5。
+以 P/E 直接當因子，橫斷面分布會被少數極端值主導；取倒數後在 PER→∞ 時趨近 0，
+分布遠為良好。這是資產定價文獻的標準處理。
+
+**取倒數的代價是必須擋掉非正值**：PER=0（台股表示「本益比不適用」，佔 22.9%）
+與 PBR=0 都會讓 1/x 變成 `Infinity`。首次物化因為漏擋 PER 而寫入 177,887 個 inf 列，
+抽驗才發現——與 T-079 毀掉整個模型的是同一類缺陷。
 
 這三個是本專案**第一個評價因子家族**——先前 25 個特徵全是價量動能與月營收，
 沒有任何評價維度。
@@ -100,15 +104,29 @@ def test_directions_encode_cheap_is_bullish() -> None:
         assert get(n).direction == 1, f"{n} 方向錯"
 
 
-def test_earnings_yield_is_reciprocal_and_keeps_negative_per(tmp_path: Path) -> None:
-    """E/P = 1/PER。負 PER（虧損公司）→ 負收益率，是有意義的值，不得轉 null。"""
+def test_earnings_yield_nulls_non_positive_per(tmp_path: Path) -> None:
+    """E/P = 1/PER，且 **PER <= 0 → null**。
+
+    這條先前寫成「負 PER 應保留為負收益率」，是基於錯誤的資料假設。實測 292 萬列：
+    - `PER = 0` 有 **668,618 列（22.9%）**，且該些列的 PBR 正常（1.78/0.96/2.59）、
+      殖利率有時非零——故非整列缺值，而是**台股以 0 表示「本益比不適用」（虧損公司）**。
+    - `PER < 0` 全期僅 **2 列**（皆 −1.0），是雜訊而非訊號。
+
+    若不擋 0，1/0 會產生 `Infinity`——實測已寫入 177,887 個 inf 因子列。
+    那正是 T-079 毀掉整個模型的同一類缺陷（`ml/dataset.py` 的 open=0）。
+    """
     val = _valuation(
-        [(d, "1101", 20.0, 2.0, 0.03) for d in _DAYS]
-        + [(d, "2330", -4.0, 5.0, 0.01) for d in _DAYS]
+        [(d, "1101", 20.0, 2.0, 0.03) for d in _DAYS] + [(d, "2330", 0.0, 5.0, 0.01) for d in _DAYS]
     )
     got = _run(_warehouse(tmp_path, val), "fundamental.earnings_yield", _DAYS[-1])
     assert got["1101"] == pytest.approx(0.05)
-    assert got["2330"] == pytest.approx(-0.25), "虧損公司的 E/P 應為負，不是 null"
+    assert "2330" not in got, "PER=0（虧損）應為 null，不得產生 Infinity"
+
+
+def test_earnings_yield_nulls_negative_per(tmp_path: Path) -> None:
+    """負 PER 同樣視為無效（全期僅 2 列，且與 0 同屬「本益比不適用」語意）。"""
+    val = _valuation([(d, s, -4.0, 2.0, 0.03) for d in _DAYS for s in _STOCKS])
+    assert _run(_warehouse(tmp_path, val), "fundamental.earnings_yield", _DAYS[-1]) == {}
 
 
 def test_book_yield_nulls_non_positive_pbr(tmp_path: Path) -> None:

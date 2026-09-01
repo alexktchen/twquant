@@ -112,12 +112,16 @@ def _valuation(view: PitView, col: str, *, positive_only: bool, reciprocal: bool
     params={},
 )
 def earnings_yield(view: PitView, params: dict[str, object]) -> pl.DataFrame:
-    """盈餘收益率 E/P ＝ 1/PER（正向：越便宜越看多）。
+    """盈餘收益率 E/P ＝ 1/PER（正向：越便宜越看多）。PER <= 0 為無效值 → null。
 
-    用倒數而非 PER 本身：實測 PER 最大 24,950、最小 −1.0，直接用會被極端值主導；
-    E/P 在 PER→∞ 時趨近 0、虧損時為負（有意義的方向）。負 PER 不轉 null。
+    用倒數而非 PER 本身：實測 PER 最大 24,950，直接用會被極端值主導；
+    E/P 在 PER→∞ 時趨近 0，分布良好。
+
+    PER <= 0 必須擋：實測 292 萬列中 `PER = 0` 佔 **22.9%**——台股以 0 表示
+    「本益比不適用」（虧損公司），非缺值（該些列 PBR 正常）；`PER < 0` 全期僅 2 列。
+    不擋則 1/0 產生 Infinity（首次物化已寫入 177,887 個 inf 列才被抽驗發現）。
     """
-    return _valuation(view, "per", positive_only=False, reciprocal=True)
+    return _valuation(view, "per", positive_only=True, reciprocal=True)
 
 
 @factor(
