@@ -146,6 +146,35 @@ def cross_rank_pct(frame: pl.DataFrame, value_col: str, out_col: str) -> pl.Data
     )
 
 
+def assert_feature_coverage(
+    features: Mapping[str, pl.DataFrame], *, min_non_null_share: float = 0.0
+) -> dict[str, float]:
+    """訓練前的特徵覆蓋閘門（T-088 AC-3）：任一特徵無列或非空比例 ≤ 門檻即 raise，回傳各特徵非空比例。
+
+    Phase 1 的 25 個 pin 特徵裡有 2 個在 factor_values 從未有值（D-045）、1 個全 null（T-082），
+    LightGBM 照樣「成功」訓練——全空特徵在模型裡是白佔的欄位，而沒有任何一關報錯。
+    只掛在訓練路徑；生產 `ml score` 單日缺某因子屬正常，不得套用。
+    """
+    if not 0.0 <= min_non_null_share < 1.0:
+        raise ValueError(f"min_non_null_share 須介於 [0, 1)，得到 {min_non_null_share}")
+    shares: dict[str, float] = {}
+    dead: list[str] = []
+    for name, df in features.items():
+        n = df.height
+        share = float(df["value"].is_not_null().sum() / n) if n else 0.0
+        shares[name] = share
+        if n == 0 or share <= min_non_null_share:
+            dead.append(f"{name}（{n:,} 列、非空 {share:.1%}）")
+    if dead:
+        raise ValueError(
+            "特徵覆蓋不足，拒絕訓練："
+            + "；".join(dead)
+            + f"。門檻 non-null > {min_non_null_share:.0%}。全空或近空的特徵在模型裡是白佔的欄位"
+            "（Phase 1 曾以 3 個空特徵訓練並回報成功）——先補資料或從配置移除，不得靜默訓練。"
+        )
+    return shares
+
+
 def assemble(features: Mapping[str, pl.DataFrame], labels: pl.DataFrame) -> pl.DataFrame:
     """特徵長表（各為 (date, stock_id, value)）outer join 成寬表，label 以 left join 掛上。
 

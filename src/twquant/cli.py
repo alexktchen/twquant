@@ -1979,6 +1979,7 @@ def ml_train(
     from twquant.ml import train as mlt
     from twquant.ml.dataset import (
         assemble,
+        assert_feature_coverage,
         cost_adjusted_return_labels,
         excess_rank_labels,
         forward_open_returns,
@@ -2021,6 +2022,10 @@ def ml_train(
         )
     else:
         labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
+    # T-088 AC-3：任一 pin 特徵在 factor_values 全空即拒絕訓練（Phase 1 曾以 3 個空特徵訓練並回報成功）
+    shares = assert_feature_coverage(feats)
+    sparsest = sorted(shares.items(), key=lambda kv: kv[1])[:5]
+    typer.echo("特徵覆蓋最低 5 個：" + "、".join(f"{n} {v:.0%}" for n, v in sparsest))
     frame = assemble(feats, labels)
     labeled = frame.filter(pl.col("label").is_not_null())
     days: list[dt.date] = sorted(px["date"].unique().to_list())

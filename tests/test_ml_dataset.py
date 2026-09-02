@@ -19,7 +19,12 @@ from collections.abc import Sequence
 import polars as pl
 import pytest
 
-from twquant.ml.dataset import assemble, excess_rank_labels, forward_open_returns
+from twquant.ml.dataset import (
+    assemble,
+    assert_feature_coverage,
+    excess_rank_labels,
+    forward_open_returns,
+)
 
 _D = [dt.date(2026, 3, 2 + i) for i in range(6)]  # 連續 6 個曆日；純函數只依列序，不依交易日曆
 
@@ -179,3 +184,59 @@ def test_ac3_assemble_deterministic() -> None:
 def test_ac3_assemble_empty_features_raises() -> None:
     with pytest.raises(ValueError):
         assemble({}, excess_rank_labels(_fwd([(_D[0], "A", 0.01)])))
+
+
+# ── T-088 AC-3：訓練前的特徵覆蓋閘門 ─────────────────────────────────────────
+# Phase 1 的 25 個 pin 特徵裡有 2 個在 factor_values 從未有值（D-045）、1 個全 null（T-082），
+# 訓練照樣「成功」。訓練路徑須在 assemble 前 raise；生產 ml score 不掛此閘門（單日缺某因子屬正常）。
+
+
+def _feat(rows: list[tuple[dt.date, str, float | None]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": [r[0] for r in rows],
+            "stock_id": [r[1] for r in rows],
+            "value": [r[2] for r in rows],
+        },
+        schema={"date": pl.Date, "stock_id": pl.String, "value": pl.Float64},
+    )
+
+
+def test_t088_ac3_empty_feature_raises_with_name() -> None:
+    d = dt.date(2026, 6, 1)
+    feats = {"price.mom_20d": _feat([(d, "1101", 0.1)]), "chip.short_margin_ratio": _feat([])}
+    with pytest.raises(ValueError, match="chip.short_margin_ratio"):
+        assert_feature_coverage(feats)
+
+
+def test_t088_ac3_all_null_feature_raises() -> None:
+    d = dt.date(2026, 6, 1)
+    feats = {
+        "price.mom_20d": _feat([(d, "1101", 0.1)]),
+        "price.rs_market_20d": _feat([(d, "1101", None), (d, "2330", None)]),
+    }
+    with pytest.raises(ValueError, match="price.rs_market_20d"):
+        assert_feature_coverage(feats)
+
+
+def test_t088_ac3_min_share_threshold_catches_near_empty_feature() -> None:
+    """覆蓋率低於門檻也要抓（Phase 1 的籌碼因子只有 14%）。門檻由呼叫端傳入，不寫死。"""
+    d = dt.date(2026, 6, 1)
+    sparse = _feat([(d, "1101", 0.2)] + [(d, f"{2000 + i}", None) for i in range(9)])
+    feats = {
+        "price.mom_20d": _feat([(d, f"{2000 + i}", 0.1) for i in range(10)]),
+        "chip.foreign_net_10d": sparse,
+    }
+    with pytest.raises(ValueError, match="chip.foreign_net_10d"):
+        assert_feature_coverage(feats, min_non_null_share=0.5)
+    assert_feature_coverage(feats, min_non_null_share=0.05)  # 門檻放低即通過
+
+
+def test_t088_ac3_healthy_features_pass_and_report_shares() -> None:
+    d = dt.date(2026, 6, 1)
+    feats = {
+        "a": _feat([(d, "1101", 0.1), (d, "2330", None)]),
+        "b": _feat([(d, "1101", 0.3), (d, "2330", 0.4)]),
+    }
+    shares = assert_feature_coverage(feats)
+    assert shares == {"a": pytest.approx(0.5), "b": pytest.approx(1.0)}
