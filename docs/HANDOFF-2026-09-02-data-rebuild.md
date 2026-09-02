@@ -366,3 +366,22 @@ T-016 設計收斂為三因子 + 隔日沖分點屬性表（清潔劑，非因�
   |t| 過門檻但**方向與先驗相反、IC 與價差不同號（U 型）**——富邦 top-15 買超偏散戶，20 日集中買超在 5~20 日是反向。
   可進 LightGBM，不得以 +1 進線性組合。
 
+
+### 13.9 02:43 記憶體耗盡 → Docker 引擎倒地 → 03:37 復原、夜間鏈重組（09-03 03:50）
+- **事故**：我同時開了分點 IC（5.9 GB）＋全套閘門＋pg_dump＋FinMind 抓取＋Docker VM → 實體記憶體用盡。後果：FinMind 法人抓到 2,040/2,064 檔時
+  `MemoryError`；融資抓取程序掛住（0 檔、無 ingest_log）；Docker Desktop 渲染程序崩潰、WSL 引擎停止；閘門 532 passed／1 failed（PG 連線逾時，非程式錯）；
+  分點 count_diff／persistence 與產業兩因子的 IC 全部在 PG 逾時上失敗。
+- **根因（引擎起不來）**：`com.docker.backend.exe.log`：`running OTel manager: removing stale socket: remove %LOCALAPPDATA%\Docker\run\userAnalyticsOtlpHttp.sock:
+  The file cannot be accessed by the system`——崩潰留下的 AF_UNIX socket reparse point（0 B、Windows 錯誤 1920），`Remove-Item`／`fsutil reparsepoint delete` 都碰不到。
+  **不是**磁碟損毀（`e2fsck` 乾淨；`disk/docker_data.vhdx` 72.5 GB 完好）、不是埠衝突、不是設定檔。
+- **修法**：停光 Docker 程序 + `wsl --shutdown` → 把整個 `%LOCALAPPDATA%\Docker\run` **改名**為 `run.stale-<時間>`、新建空 `run` → 啟動 Docker Desktop，10 秒內五個容器全起。
+  PG 自動復原（redo 僅數 KB）；18 張表俱在；`twquant_pgdata` 卷無損。舊 `run.stale-033639` 之後可刪（若仍刪不掉就留著，無害）。
+- **夜間鏈重組**：舊的四條等待鏈全部殺掉（它們的觸發條件是「沒有 backfill_finmind 程序」，殺掉卡住的融資程序會讓它們拿半套資料去物化）。
+  改成兩支腳本、以**標記檔**串接，不再看程序有無：
+  1. `scratchpad/overnight_finmind.sh`（b9cetv77t）：法人續抓 24 檔 → 融資全抓（2,064 檔，≈3.6 h）→ 兩者各 ≥ 2,000 檔才寫 `chip_staging_done`
+     → 財報三表＋除權息（各 2,064 檔，≈14 h）→ `load_finmind_statements.py --check/--write` → `verify_statements.py` → `statements_done`。
+  2. `scratchpad/overnight_compute.sh`（bbmifrpkc）：等 `chip_staging_done` → 載入法人／融資（check→write）→ `check_chip_lake.py`（覆蓋 ≥ 1,600 日、sparse_dates）
+     → 7 個籌碼因子 6 分片子集物化 → 覆蓋門檻**逐名** ≥ 1,300 日（舊鏈用 `LIKE 'chip.%'` 會被 127 日的殘留舊因子誤擋）→ `run_t096.sh`
+     → 全套閘門（`gate_<時間>.log`）→ 分點 count_diff／persistence ＋ 產業兩因子 IC 重跑（`ic_rerun.log`）→ `compute_done`。
+  任何一步失敗即停在該步，輸出在 `tasks/<id>.output`；FinMind 逐檔日誌在 `scratchpad/finmind_<dir>.log`。
+- **教訓**（已記憶）：本機 32 GB 只能容納「一個重運算 + 抓取」；IC（5.9 GB）、閘門、pg_dump、物化 6 分片不可同時開。
