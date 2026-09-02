@@ -15,8 +15,10 @@ import pytest
 
 from twquant.data.quality import (
     assert_no_duplicate_snapshots,
+    assert_no_sparse_dates,
     duplicate_snapshot_dates,
     phantom_dates,
+    sparse_dates,
 )
 from twquant.errors import QualityGateError
 
@@ -127,3 +129,66 @@ def test_ac2_duplicate_rate_is_relative_to_that_days_row_count() -> None:
     }
     assert hits[_D[0]] == pytest.approx(1.0), "小日子被全數複製 → 重複率 100%"
     assert hits[_D[1]] == pytest.approx(10 / 110), "大日子的分母是它自己的列數"
+
+
+# ── 稀疏日偵測（2026-09-02 事故）─────────────────────────────────────────────
+# 重複快照偵測器抓「多出來的列」，抓不到「少掉的列」。實際踩到：8 個交易日只有
+# TWSE 一條腿、整個 TPEX（上櫃 774~839 檔）完全缺席，而該日仍被記為擷取成功，
+# 三年間沒有任何一關發現。那 8 天列數 1,189~1,308，鄰近正常日 5,537——差 4 倍以上。
+
+
+def _counts_panel(counts: dict[str, int]) -> pl.DataFrame:
+    """依 {日期: 列數} 造一張只有 date/stock_id 的面板。"""
+    rows = [
+        {"date": dt.date.fromisoformat(d), "stock_id": f"{1000 + i}"}
+        for d, n in counts.items()
+        for i in range(n)
+    ]
+    return pl.DataFrame(rows)
+
+
+def test_ac2_detects_date_missing_one_source_leg() -> None:
+    """單一來源缺席＝列數塌陷到鄰近日的一小部分，須被抓出。
+
+    數字取自真實事故：正常 5,537 列、壞日 1,189 列（只剩 TWSE，TPEX 全缺）。
+    """
+    counts = {f"2024-06-{d:02d}": 5537 for d in range(3, 15)}
+    counts["2024-06-10"] = 1189
+    hits = sparse_dates(_counts_panel(counts), min_ratio=0.5, window=5)
+    assert [h.date for h in hits] == [dt.date(2024, 6, 10)]
+    assert hits[0].n_rows == 1189
+    assert hits[0].expected == pytest.approx(5537)
+
+
+def test_ac2_normal_daily_variation_is_not_flagged() -> None:
+    """正常日列數會小幅浮動（新上市／下市／暫停交易），不得誤報。"""
+    counts = {f"2024-06-{d:02d}": n for d, n in zip(range(3, 15), range(5500, 5512), strict=True)}
+    assert sparse_dates(_counts_panel(counts), min_ratio=0.5, window=5) == []
+
+
+def test_ac2_sparse_uses_local_window_not_global_median() -> None:
+    """比較基準必須是**鄰近日**：宇宙隨年份成長，用全期中位數會把早期整段誤報。
+
+    此處前段 2,000 列、後段 6,000 列都屬正常，只有中間插入的塌陷日該被抓。
+    """
+    counts = {f"2020-06-{d:02d}": 2000 for d in range(1, 13)}
+    counts.update({f"2026-06-{d:02d}": 6000 for d in range(1, 13)})
+    counts["2026-06-07"] = 1200
+    hits = sparse_dates(_counts_panel(counts), min_ratio=0.5, window=5)
+    assert [h.date for h in hits] == [dt.date(2026, 6, 7)], "早期低列數日不得被誤報"
+
+
+def test_ac2_assert_sparse_raises_with_actionable_context() -> None:
+    """訊息要指出哪一天、幾列、鄰近日幾列——否則使用者無從判斷該重抓哪一天。"""
+    counts = {f"2024-06-{d:02d}": 5537 for d in range(3, 15)}
+    counts["2024-06-10"] = 1189
+    with pytest.raises(QualityGateError) as exc:
+        assert_no_sparse_dates(_counts_panel(counts), table="prices_daily", min_ratio=0.5, window=5)
+    msg = str(exc.value)
+    assert "2024-06-10" in msg and "1,189" in msg
+
+
+def test_ac2_short_history_is_not_flagged() -> None:
+    """鄰近窗不足時寧可不報也不誤報（首次回補的頭幾天）。"""
+    panel = _counts_panel({"2024-06-03": 100, "2024-06-04": 5000})
+    assert sparse_dates(panel, min_ratio=0.5, window=5) == []
