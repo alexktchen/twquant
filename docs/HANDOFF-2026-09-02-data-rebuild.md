@@ -344,7 +344,7 @@ T-016 設計收斂為三因子 + 隔日沖分點屬性表（清潔劑，非因�
   執行期強制（GHA 對雲端 DSN 跑 `pipeline` 時跳過）**未做**——T-100。
 - **方向變更（待確認範圍）**：使用者 02:30「應該都要改地端了」。事實基礎：本機 PG **27 GB**（factor_values 14 GB、broker_trades 9.2 GB、
   prices 1.5 GB、ml_scores 1.1 GB）是唯一的研究資料庫；雲端只有滾動窗口；`data/` 無任何 pg_dump。
-- **備份已啟動**（背景 bf7028337）：`pg_dump -n serving -Fc -Z 6` → `D:/project/twquant/data/backup/twquant_serving_20260903.dump`
+- **備份已完成**（02:26→02:34，**2.40 GB**，18 張表，`pg_restore --list` 驗過）：`pg_dump -n serving -Fc -Z 6` → `D:/project/twquant/data/backup/twquant_serving_20260903.dump`
   （用同一 postgres 映像、`--network container:twquant-pg-1`）。還原：`pg_restore -d twquant -n serving <dump>`。
   **建議之後**：每日增量或每週全量，並 rclone 到 Drive（docs/OPS-archive.md 已有 raw 歸檔流程）。
 - 富邦缺的兩天（2024-02-29、2026-06-30）補抓中（背景 b491vpu2c，互動確認以管線餵 y）。
