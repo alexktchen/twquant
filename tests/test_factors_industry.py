@@ -29,7 +29,8 @@ _TAIEX_G = 0.0015
 
 
 def _days(n: int, start: dt.date = dt.date(2025, 1, 2)) -> list[dt.date]:
-    out, d = [], start
+    out: list[dt.date] = []
+    d = start
     while len(out) < n:
         if d.weekday() < 5:
             out.append(d)
