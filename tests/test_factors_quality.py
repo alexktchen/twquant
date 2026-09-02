@@ -215,7 +215,10 @@ def test_sue_requires_eight_prior_yoy_diffs_else_null(tmp_path: Path) -> None:
     days = [dt.date(2025, 4, d) for d in (1, 2, 3)]  # 2024Q4 於 2025-03-31 22:00 可見 → k=15
     got = _vals(_wh(tmp_path, days, _statements(q16, eps16)), "fundamental.sue", days[-1])
     e = eps16["1101"]
-    diff = lambda j: e[j] - e[j - 4]  # noqa: E731
+
+    def diff(j: int) -> float:
+        return e[j] - e[j - 4]
+
     cur = diff(15)
     prior = [diff(j) for j in range(7, 15)]  # 前 8 個：j=7..14
     assert got["1101"] == pytest.approx(cur / statistics.stdev(prior))

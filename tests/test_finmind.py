@@ -246,7 +246,7 @@ def test_t097_missing_value_raises_not_zero() -> None:
 def test_t097_placeholder_rows_without_date_are_skipped_and_output_sorted() -> None:
     from twquant.data.sources.finmind import statement_rows
 
-    rows = [
+    rows: list[dict[str, object]] = [
         {"stock_id": "9999"},
         _st("2024-06-30", "Revenue", 2.0, "2454"),
         _st("2024-03-31", "Revenue", 1.0, "2454"),
