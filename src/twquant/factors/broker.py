@@ -119,10 +119,11 @@ def _clean_daily(view: PitView, params: dict[str, object]) -> pl.LazyFrame:
         )
         .filter(~pl.col("_dt"))
     )
+    # 分點數用 Int64：布林 sum 是 UInt32，`_ns − _nb` 在買方多於賣方時會下溢（真實資料跑 IC 時整個因子崩掉）
     return flagged.group_by(["date", "stock_id"]).agg(
         pl.col("_net").sum().alias("_net"),
-        (pl.col("_net") > 0).sum().alias("_nb"),
-        (pl.col("_net") < 0).sum().alias("_ns"),
+        (pl.col("_net") > 0).sum().cast(pl.Int64).alias("_nb"),
+        (pl.col("_net") < 0).sum().cast(pl.Int64).alias("_ns"),
     )
 
 

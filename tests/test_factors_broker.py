@@ -136,6 +136,21 @@ def test_count_diff_is_sellers_minus_buyers_share(tmp_path: Path) -> None:
     assert got["1101"] == pytest.approx(0.0) and got["2330"] == pytest.approx(1 / 3)
 
 
+def test_count_diff_negative_when_buyers_outnumber_sellers(tmp_path: Path) -> None:
+    """買方分點數 > 賣方 → 值為負。分點數是布林 sum（無號整數），相減不得下溢。
+    真實資料跑 IC 時整個因子崩掉才發現：夾具兩檔都剛好賣 ≥ 買。"""
+    rows = []
+    for d in _DAYS:
+        rows += [
+            (d, "1101", "A", 500, 0),
+            (d, "1101", "B", 300, 0),
+            (d, "1101", "C", 0, 100),
+        ]  # 買 2 賣 1
+        rows += [(d, "2330", "D", 0, 500), (d, "2330", "E", 200, 0)]
+    got = _vals(_wh(tmp_path, _bt(rows)), "chip.broker_count_diff_5d", _DAYS[-1])
+    assert got["1101"] == pytest.approx((1 - 2) / 3)
+
+
 def test_persistence_is_share_of_positive_net_days(tmp_path: Path) -> None:
     """1101 每日淨買 → 1.0；2330 每日淨賣 → 0.0；把 1101 最近 3 天改成淨賣 → 0.7。"""
     rows = _steady(_DAYS)
