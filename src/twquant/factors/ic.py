@@ -34,11 +34,21 @@ class IcReport:
 
 
 def forward_returns(prices: pl.DataFrame, horizon: int) -> pl.DataFrame:
-    """每 (date, stock_id) 的 horizon 日前向報酬 close(t+h)/close(t)−1。"""
+    """每 (date, stock_id) 的 horizon 日前向報酬 close(t+h)/close(t)−1。
+
+    分母與分子都必須 > 0，否則為 null（T-095）：`close=0` 是 FinMind 對「無交易」的編碼（T-085），
+    不是價格。0 當分母得 inf、當分子得 −100%，兩者都不是 null，`drop_nulls` 濾不掉——
+    RankIC 走 rank 僥倖存活，但五分位多空價差對含 inf 的分位取均值就被毒成 NaN。
+    """
     fut = pl.col("close").shift(-horizon).over("stock_id", order_by="date")
     return (
         prices.sort(["stock_id", "date"])
-        .with_columns((fut / pl.col("close") - 1.0).alias("fwd"))
+        .with_columns(
+            pl.when((pl.col("close") > 0) & (fut > 0))
+            .then(fut / pl.col("close") - 1.0)
+            .otherwise(None)
+            .alias("fwd")
+        )
         .select("date", "stock_id", "fwd")
         .drop_nulls("fwd")
     )

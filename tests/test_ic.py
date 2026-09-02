@@ -39,6 +39,41 @@ def test_forward_returns() -> None:
     assert fwd["fwd"].to_list() == pytest.approx([0.1, 0.1])
 
 
+def test_t095_zero_close_does_not_produce_inf_or_nan() -> None:
+    """T-095：close=0（FinMind 以 0 表示無交易，T-085）不得產生 ±inf／NaN 前向報酬。
+
+    `drop_nulls` 濾不掉 inf／NaN：RankIC 走 rank 所以僥倖存活，但 `_quintile_spread`
+    對分位取均值會被一列 inf 毒成 NaN——實測 ic-report 對評價因子印出「多空價差 +nan」。
+    這是本 repo 第四次踩同一類除以零（H20 標籤、6 個價格因子、earnings_yield、此處）。
+    """
+    prices = _prices(4, {"a": [100.0, 0.0, 110.0, 121.0], "b": [50.0, 55.0, 0.0, 60.5]})
+    fwd = forward_returns(prices, 1)
+    vals = fwd["fwd"].to_list()
+    assert all(math.isfinite(v) for v in vals), f"出現非有限值：{vals}"
+    # a: t0→t1 分母 100、分子 0 → 不得算成 −100%；t1→t2 分母 0 → 不得算成 inf；t2→t3 正常
+    got = {(r["stock_id"], r["date"].day): r["fwd"] for r in fwd.to_dicts()}
+    assert ("a", 1) not in got and ("a", 2) not in got, "0 價位的前後兩段都應剔除"
+    assert got[("a", 3)] == pytest.approx(0.1)
+    assert got[("b", 1)] == pytest.approx(0.1)
+    assert ("b", 2) not in got and ("b", 3) not in got
+
+
+def test_t095_quintile_spread_stays_finite_with_zero_close() -> None:
+    """有 0 價位列時，ic 報告的多空價差仍須是有限數。"""
+    days = 6
+    series = {f"s{i}": [10.0 + i + 0.5 * t for t in range(days)] for i in range(10)}
+    series["s3"][2] = 0.0  # 中間插一個 0 價位
+    prices = _prices(days, series)
+    rows = [
+        {"date": dt.date(2026, 6, 1) + dt.timedelta(days=t), "stock_id": f"s{i}", "value": float(i)}
+        for t in range(days)
+        for i in range(10)
+    ]
+    factor_df = pl.DataFrame(rows)
+    report = compute_ic_report("f", factor_df, prices, [1])
+    assert math.isfinite(report.horizons[0].ls_spread), "多空價差被 0 價位毒成非有限值"
+
+
 def test_rank_ic_perfect_positive() -> None:
     # 因子值與前向報酬完全同序 → RankIC = 1
     d = dt.date(2026, 6, 30)

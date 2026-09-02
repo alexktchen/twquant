@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- 2026-09-02 T-095 `forward_returns` 加正值防護（分母分子皆 > 0 否則 null）。`close=0` 列讓前向報酬出現 `−1.0`／`inf`，`drop_nulls` 濾不掉，五分位多空價差被毒成 NaN——本 repo 第四次踩同一類除以零。
 - 2026-09-02 D-046 **撤銷 D-038、重新事前登記降周轉 4 候選**（monthly／biweekly／EMA10／EMA10+biweekly，
   scope `bt:ml_rank_h10_turnover`，晉升門檻沿用 D-038 §5）。依據是三個免費診斷：IC 隨 horizon
   單調上升到 h=20（0.048→0.062）；前 20 名週留存僅 36%、離開者 39% 掉到 100 名外；往返成本
