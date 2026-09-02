@@ -171,7 +171,7 @@ def test_t094_subset_rejects_unknown_factor(tmp_path: Path) -> None:
 
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", _prices(25, _STOCKS))
-    with pytest.raises(TwquantError, match="chip.no_such_factor"):
+    with pytest.raises(TwquantError, match=r"chip\.no_such_factor"):
         smat._compute_universe(wh, dt.date(2026, 6, 24), factors=["chip.no_such_factor"])
 
 
@@ -208,7 +208,7 @@ def test_t094_subset_mode_writes_only_factor_tables(
         )
 
     class _Cur:
-        def __enter__(self) -> "_Cur":
+        def __enter__(self) -> _Cur:
             return self
 
         def __exit__(self, *a: Any) -> None:
