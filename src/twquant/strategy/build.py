@@ -36,13 +36,17 @@ def signal_dates(
     sessions = calendar.between(start, end)
     if rb.schedule == "daily":
         return sessions
-    if rb.schedule == "weekly":
+    if rb.schedule in ("weekly", "biweekly"):
         target = _WEEKDAY[rb.day]
         picked: dict[tuple[int, int], dt.date] = {}
         for d in sessions:
             key = d.isocalendar()[:2]  # (ISO 年, ISO 週)
             if d.weekday() >= target and key not in picked:
                 picked[key] = d  # 該週第一個「星期>=目標」的開市日（週一休市則順延）
+        if rb.schedule == "biweekly":
+            # 取 ISO 偶數週而非「從 start 起每隔一週」：讓不同起日的回測共用同一套再平衡
+            # 日曆，否則兩次回測的差異會混進日曆相位（D-046 候選 2、4）。
+            picked = {k: v for k, v in picked.items() if k[1] % 2 == 0}
         return sorted(picked.values())
     if rb.schedule == "monthly":
         dom = rb.day_of_month or 1

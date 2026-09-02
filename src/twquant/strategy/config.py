@@ -76,8 +76,8 @@ class SelectionConfig(BaseConfig):
 class RebalanceConfig(BaseConfig):
     """再平衡排程（SPEC-003 §1）。"""
 
-    schedule: Literal["daily", "weekly", "monthly"] = "weekly"
-    day: str = "MON"  # weekly 用（星期）
+    schedule: Literal["daily", "weekly", "biweekly", "monthly"] = "weekly"
+    day: str = "MON"  # weekly / biweekly 用（星期）
     day_of_month: int | None = None  # monthly 用
     execution: Literal["next_open", "close"] = "next_open"
 
