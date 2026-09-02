@@ -16,6 +16,7 @@ import datetime as dt
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from twquant.conventions import TZ
 from twquant.errors import DataError
 
 API = "https://api.finmindtrade.com/api/v4/data"
@@ -23,6 +24,11 @@ API = "https://api.finmindtrade.com/api/v4/data"
 INSTITUTIONAL_DATASET = "TaiwanStockInstitutionalInvestorsBuySell"
 MARGIN_DATASET = "TaiwanStockMarginPurchaseShortSale"
 VALUATION_DATASET = "TaiwanStockPER"
+STATEMENT_DATASETS = {
+    "income": "TaiwanStockFinancialStatements",
+    "balance": "TaiwanStockBalanceSheet",
+    "cashflow": "TaiwanStockCashFlowsStatement",
+}
 
 # clean.py:59 的定義：外資＝外陸資(不含自營)＋外資自營商；自營＝自行買賣＋避險。
 # 未列出的類別一律 raise——來源新增類別而靜默忽略，會讓某一欄悄悄少一條腿。
@@ -120,4 +126,69 @@ def valuation_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
             vals[col] = v / 100.0 if col in _PERCENT_FIELDS else v
         out.append(vals)
     out.sort(key=lambda r: (r["date"], r["stock_id"]))
+    return out
+
+
+# 法定申報期限（金管會）：Q1 5/15、Q2 8/14、Q3 11/14、年報次年 3/31。available_at 用期限而非季底
+# ——季底當可見日就是前視（財報要 1.5～3 個月後才公告）。用期限而非實際公告日是保守估計，
+# 標 available_at_estimated=True（比照 monthly_revenue）。
+_FILING_DEADLINE: dict[int, tuple[int, int, int]] = {
+    3: (0, 5, 15),
+    6: (0, 8, 14),
+    9: (0, 11, 14),
+    12: (1, 3, 31),
+}
+_FILING_HOUR = 22
+
+
+def _filing_available_at(period_end: dt.date) -> dt.datetime:
+    try:
+        year_offset, month, day = _FILING_DEADLINE[period_end.month]
+    except KeyError as exc:
+        raise DataError(
+            "financial_statements",
+            period_end,
+            f"財報期間末日 {period_end} 不是季底（3/6/9/12 月）——來源改版或資料錯位，不得猜期限。",
+        ) from exc
+    return dt.datetime(period_end.year + year_offset, month, day, _FILING_HOUR, 0, tzinfo=TZ)
+
+
+def statement_rows(rows: Iterable[Mapping[str, Any]], statement: str) -> list[dict[str, Any]]:
+    """FinMind 三表（`TaiwanStockFinancialStatements`／`BalanceSheet`／`CashFlowsStatement`）
+    → `financial_statements` 長表。
+
+    - `_per` 後綴的百分比列剔除（資產負債表附帶的佔比欄，不是金額）。
+    - 值一律 float（元）；缺 `value` 即 raise，不當 0（黃金規則 5）。
+    - 無 `date` 的列是 staging 的佔位列，略過。
+    """
+    if statement not in STATEMENT_DATASETS:
+        raise ValueError(f"statement 須為 {sorted(STATEMENT_DATASETS)} 之一，得到 {statement!r}")
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("date") is None:
+            continue
+        typ = row.get("type")
+        if not isinstance(typ, str) or not typ:
+            raise DataError("financial_statements", None, f"FinMind 回應缺 type 欄：{dict(row)!r}")
+        if typ.endswith("_per"):
+            continue
+        day = _date(row, "financial_statements")
+        if "value" not in row or row["value"] is None:
+            raise DataError(
+                "financial_statements",
+                day,
+                f"FinMind 回應缺 value（{typ}）——缺值補 0 會讓比率因子悄悄失真。",
+            )
+        out.append(
+            {
+                "date": day,
+                "stock_id": str(row["stock_id"]),
+                "statement": statement,
+                "type": typ,
+                "value": float(row["value"]),
+                "available_at": _filing_available_at(day),
+                "available_at_estimated": True,
+            }
+        )
+    out.sort(key=lambda r: (r["date"], r["stock_id"], r["type"]))
     return out

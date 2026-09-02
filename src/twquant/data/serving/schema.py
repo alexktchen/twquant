@@ -144,6 +144,22 @@ MIRROR_SPECS: tuple[TableSpec, ...] = (
         indexes=(("date",),),
     ),
     TableSpec(
+        # T-097：財報三表長表（FinMind 免費層）。PK 含 statement——損益表與資產負債表
+        # 有同名科目 EquityAttributableToOwnersOfParent（淨利 vs 權益）。
+        "financial_statements",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("statement", "text"),
+            ("type", "text"),
+            ("value", "double precision"),
+            ("available_at", "timestamptz"),
+            ("available_at_estimated", "boolean"),
+        ),
+        pk=("date", "stock_id", "statement", "type"),
+        indexes=(("date",), ("stock_id",)),
+    ),
+    TableSpec(
         # T-082：先前遺漏於鏡射清單，導致 serving sync 不同步指數；而因子物化在 D-026
         # 之後改讀 PG，故 price.rs_market_20d 只能在 PG 恰好有的 52 天算出來
         # （Phase 1 模型中 split=0、gain=0.00%）。TPEx 僅提供收盤，OHL 可為 null。

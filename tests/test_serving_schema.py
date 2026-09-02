@@ -20,6 +20,7 @@ _MIRROR = {
     "stock_meta",
     "stock_valuation",  # T-010/D-044：FinMind 評價資料（PER/PBR/殖利率）
     "index_daily",  # T-082：先前遺漏，導致 price.rs_market_20d 因 PG 無指數而永遠算不出來
+    "financial_statements",  # T-097：財報三表長表（FinMind 免費層）
 }
 _ALL = _MIRROR | {"sync_state"}
 

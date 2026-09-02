@@ -149,6 +149,26 @@ STOCK_VALUATION = _schema(
     },
 )
 
+FINANCIAL_STATEMENTS = _schema(
+    "financial_statements",
+    1,
+    {
+        # T-097：財報三表長表。date = 季底（所屬期間末日），**不是**公布日。
+        "date": _col(pl.Date),
+        "stock_id": _col(pl.String),
+        # income | balance | cashflow。損益表與資產負債表都有 EquityAttributableToOwnersOfParent
+        # （一個是歸屬母公司淨利、一個是歸屬母公司權益），只能靠這欄區分，不能靠 type 名。
+        "statement": _col(pl.String),
+        "type": _col(
+            pl.String
+        ),  # FinMind 科目代碼（如 Revenue、TotalAssets）；_per 百分比列已在映射層剔除
+        "value": _col(pl.Float64),  # 元；損益表為單季值、現金流量表為累計 YTD、資產負債表為時點值
+        # PIT：法定申報期限 22:00（Q1 5/15、Q2 8/14、Q3 11/14、年報次年 3/31），非實際公告日
+        "available_at": _col(TW_DT),
+        "available_at_estimated": _col(pl.Boolean),
+    },
+)
+
 CORPORATE_EVENTS = _schema(
     "corporate_events",
     1,
@@ -283,6 +303,7 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "monthly_revenue": MONTHLY_REVENUE,
     "index_daily": INDEX_DAILY,
     "stock_valuation": STOCK_VALUATION,
+    "financial_statements": FINANCIAL_STATEMENTS,
     "corporate_events": CORPORATE_EVENTS,
     "disposition_stocks": DISPOSITION_STOCKS,
     "taifex_institutional": TAIFEX_INSTITUTIONAL,

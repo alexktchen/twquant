@@ -14,6 +14,7 @@ import datetime as dt
 
 import pytest
 
+from twquant.conventions import TZ
 from twquant.data.sources.finmind import institutional_net, margin_balances
 from twquant.errors import DataError
 
@@ -180,3 +181,76 @@ def test_valuation_rows_skip_placeholder_rows_without_date() -> None:
     from twquant.data.sources.finmind import valuation_rows
 
     assert valuation_rows([{"stock_id": "9999"}]) == []
+
+
+# ── T-097：財報三表映射（FinMind 三個 dataset → financial_statements 長表）──────────
+# 兩個容易錯的點：(1) available_at 必須是**法定申報期限**而非季底——用季底就是前視；
+# (2) 損益表與資產負債表都有 `EquityAttributableToOwnersOfParent`，一個是淨利一個是權益，
+#     靠 `statement` 欄區分，不能靠 type 名。
+
+
+def _st(date: str, typ: str, value: float, sid: str = "2330") -> dict[str, object]:
+    return {"date": date, "stock_id": sid, "type": typ, "value": value, "origin_name": "x"}
+
+
+def test_t097_available_at_is_statutory_filing_deadline() -> None:
+    from twquant.data.sources.finmind import statement_rows
+
+    rows = [
+        _st("2024-03-31", "Revenue", 1.0),
+        _st("2024-06-30", "Revenue", 2.0),
+        _st("2024-09-30", "Revenue", 3.0),
+        _st("2024-12-31", "Revenue", 4.0),
+    ]
+    out = statement_rows(rows, "income")
+    got = {r["date"]: r["available_at"] for r in out}
+    assert got[dt.date(2024, 3, 31)] == dt.datetime(2024, 5, 15, 22, 0, tzinfo=TZ)  # Q1 → 5/15
+    assert got[dt.date(2024, 6, 30)] == dt.datetime(2024, 8, 14, 22, 0, tzinfo=TZ)  # Q2 → 8/14
+    assert got[dt.date(2024, 9, 30)] == dt.datetime(2024, 11, 14, 22, 0, tzinfo=TZ)  # Q3 → 11/14
+    assert got[dt.date(2024, 12, 31)] == dt.datetime(
+        2025, 3, 31, 22, 0, tzinfo=TZ
+    )  # 年報 → 次年 3/31
+    assert all(r["available_at_estimated"] is True for r in out)
+    assert all(r["statement"] == "income" for r in out)
+
+
+def test_t097_percent_rows_are_dropped() -> None:
+    from twquant.data.sources.finmind import statement_rows
+
+    rows = [_st("2024-12-31", "TotalAssets", 100.0), _st("2024-12-31", "TotalAssets_per", 100.0)]
+    out = statement_rows(rows, "balance")
+    assert [r["type"] for r in out] == ["TotalAssets"]
+
+
+def test_t097_non_quarter_end_date_raises() -> None:
+    from twquant.data.sources.finmind import statement_rows
+
+    with pytest.raises(DataError, match="2024-02-29"):
+        statement_rows([_st("2024-02-29", "Revenue", 1.0)], "income")
+
+
+def test_t097_unknown_statement_tag_raises() -> None:
+    from twquant.data.sources.finmind import statement_rows
+
+    with pytest.raises(ValueError, match="statement"):
+        statement_rows([_st("2024-03-31", "Revenue", 1.0)], "profit")
+
+
+def test_t097_missing_value_raises_not_zero() -> None:
+    from twquant.data.sources.finmind import statement_rows
+
+    with pytest.raises(DataError, match="value"):
+        statement_rows([{"date": "2024-03-31", "stock_id": "2330", "type": "Revenue"}], "income")
+
+
+def test_t097_placeholder_rows_without_date_are_skipped_and_output_sorted() -> None:
+    from twquant.data.sources.finmind import statement_rows
+
+    rows = [
+        {"stock_id": "9999"},
+        _st("2024-06-30", "Revenue", 2.0, "2454"),
+        _st("2024-03-31", "Revenue", 1.0, "2454"),
+        _st("2024-03-31", "Revenue", 9.0, "1101"),
+    ]
+    got = [(r["date"], r["stock_id"]) for r in statement_rows(rows, "income")]
+    assert got == sorted(got) and len(got) == 3
