@@ -1,5 +1,10 @@
 # CHANGELOG
 
+- 2026-09-02 D-046 **撤銷 D-038、重新事前登記降周轉 4 候選**（monthly／biweekly／EMA10／EMA10+biweekly，
+  scope `bt:ml_rank_h10_turnover`，晉升門檻沿用 D-038 §5）。依據是三個免費診斷：IC 隨 horizon
+  單調上升到 h=20（0.048→0.062）；前 20 名週留存僅 36%、離開者 39% 掉到 100 名外；往返成本
+  由 tick 下限＋證交稅主導、與 ADV 無關。T-089 `rebalance.schedule: biweekly`（ISO 偶數週）、
+  T-090 ml 分數 `smooth_days` 列基 EMA（預設 0 逐位元不變）、`assert_no_lookahead` 接受 params。
 - 2026-09-02 T-080 **修復後重建完成：訊號有效性成立，瓶頸轉為周轉**。因子全期重物化
   （6 分片、1,620 日）後重訓 `lgbm_h10_20260225_b2348c46`：OOS RankIC **+0.0680 → +0.0796**
   （16 窗全正）、分位**嚴格單調**、t(NW,10) 9.13、對最強基準勝出 +0.0457。
