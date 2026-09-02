@@ -257,6 +257,9 @@ EMA10 0.16 > 週頻 0.09 > H20 0.13；**無一過 0.5**。候選 4（EMA10+雙�
 - **T-094**：`materialize_day(..., factors=[...])` 因子子集物化；子集含 composite 因子或未註冊名字即 raise；
   只寫 factor_values／factor_cross_stats。`scripts/backfill_factors.py` 第 4 個位置參數。
 - **T-095**：`forward_returns` 擋 `close<=0`（第四次除以零）；六因子 IC 重跑後才拿到乾淨的多空價差。
+- **T-088 AC-3**：`ml.dataset.assert_feature_coverage` 接在 `ml train` 的 assemble 之前——任一 pin 特徵全空即拒絕訓練，並印出覆蓋最低 5 個特徵。預設門檻 0；刻意不加 MlConfig 欄位（會改 params_hash 與已登記的 model_id，T-078）。
+- 閘門：**498 passed**（ruff／format／mypy 全綠）。
+- **自動管線（背景 bceuu9rub）**：等 FinMind 兩個 dataset 結束 → 載入 check/write → sparse_dates 與覆蓋 ≥1,600 日 → 6 分片只重算 7 個籌碼因子（日誌 `data/logs/chip_<起>.log`）→ verify_rebuild 印籌碼因子覆蓋。**到驗收為止就停**，訓練用 `scratchpad/run_t096.sh`（或 §12.3 手冊）手動發。
 - **D-048 配置**：`configs/ml_h10_v2.yaml`（28 特徵，model_id `lgbm_h10_20260225_5526f2c2`）、
   `configs/strategies/ml_rank_v2.yaml`（只換 model_id，週頻 top-20，scope `ml_rank_h10`）。
 - **載入器**：`scripts/load_finmind_chip.py institutional|margin <staging> --check|--write`——重疊日期只比對、
