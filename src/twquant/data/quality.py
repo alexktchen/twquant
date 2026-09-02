@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -142,4 +143,78 @@ def assert_no_phantom_dates(
         f"{table} 幽靈日期",
         f"下列日期不在交易日曆上卻有資料：{shown}{more}。"
         "非交易日有資料代表擷取層寫入了錯誤日期（實例：農曆年封關期間被寫入前一年的快照）。",
+    )
+
+
+@dataclass(frozen=True)
+class SparseDate:
+    """一個列數塌陷的日期：`expected` 是鄰近日的列數中位數。"""
+
+    date: dt.date
+    n_rows: int
+    expected: float
+
+
+def sparse_dates(
+    frame: pl.DataFrame,
+    *,
+    min_ratio: float,
+    window: int,
+    date_col: str = _DATE,
+) -> list[SparseDate]:
+    """找出列數遠低於鄰近日的日期，依塌陷程度由重至輕排序。
+
+    `duplicate_snapshot_dates` 抓的是「多出來的列」（同一份快照被寫兩次），
+    抓不到「少掉的列」。2026-09-02 實際踩到的是後者：8 個交易日只有 TWSE 一條腿、
+    整個 TPEX 缺席，擷取仍回報成功。
+
+    基準取**鄰近 ±window 日（含當日）的列數中位數**而非全期中位數——股票宇宙會隨
+    年份成長（2020 約 2,000 檔、2026 約 6,000 檔），用全期基準會把早期整段誤報。
+    含當日是為了讓宇宙規模跳階處的中位數不被前後兩種水位對半拉扯。
+    """
+    if not 0.0 < min_ratio < 1.0:
+        raise ValueError(f"min_ratio 須介於 0 與 1 之間，得到 {min_ratio}")
+    if window < 1:
+        raise ValueError(f"window 須 >= 1，得到 {window}")
+    if date_col not in frame.columns:
+        raise ValueError(f"缺少欄位：{date_col}")
+    if frame.is_empty():
+        return []
+
+    counts = frame.group_by(date_col).len().sort(date_col)
+    days: list[dt.date] = counts[date_col].to_list()
+    rows: list[int] = counts["len"].to_list()
+    # 鄰近日不足以構成基準時不判定——回補初期的頭幾天本來就孤立，誤報比漏報更糟
+    if len(days) < window + 1:
+        return []
+
+    hits: list[SparseDate] = []
+    for i, (day, n) in enumerate(zip(days, rows, strict=True)):
+        lo, hi = max(0, i - window), min(len(rows), i + window + 1)
+        expected = float(statistics.median(rows[lo:hi]))
+        if expected > 0 and n < expected * min_ratio:
+            hits.append(SparseDate(date=day, n_rows=n, expected=expected))
+    hits.sort(key=lambda h: h.n_rows / h.expected)
+    return hits
+
+
+def assert_no_sparse_dates(
+    frame: pl.DataFrame,
+    *,
+    table: str,
+    min_ratio: float,
+    window: int,
+    date_col: str = _DATE,
+) -> None:
+    """檢出列數塌陷的日期即 raise（黃金規則 5）。"""
+    hits = sparse_dates(frame, min_ratio=min_ratio, window=window, date_col=date_col)
+    if not hits:
+        return
+    lines = [f"{h.date}（{h.n_rows:,} 列，鄰近日 {h.expected:,.0f} 列）" for h in hits[:10]]
+    more = f"，另有 {len(hits) - 10} 天" if len(hits) > 10 else ""
+    raise QualityGateError(
+        f"{table} 列數塌陷",
+        f"下列日期的列數低於鄰近日的 {min_ratio * 100:.0f}%：{'；'.join(lines)}{more}。"
+        "這通常代表某一個來源整條腿缺席（實例：只抓到上市、整個上櫃沒進來），"
+        "而該日仍被記為擷取成功——請補抓缺的來源，不要略過。",
     )
