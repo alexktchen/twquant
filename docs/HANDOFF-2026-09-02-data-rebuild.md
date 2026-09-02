@@ -336,3 +336,15 @@ uv run --all-groups python -m twquant backtest --strategy configs/strategies/ml_
 兩天以 `backfill-fubon-chip --from D --to D --data-dir D:/project/twquant/data` 補抓中（帳本無該兩日記錄，續傳不會跳過）。
 稽核方法＝`quality.sparse_dates` 對每日檔數 + 行情交易日左外連接找缺日——與 T-087 同一套。
 T-016 設計收斂為三因子 + 隔日沖分點屬性表（清潔劑，非因子）。
+
+### 13.7 分點因子落地、雲端排除、方向變更、備份（09-03 02:40）
+- **T-016 程式已落地**（`factors/broker.py`，11 條測試，閘門 542 passed）：集中度／家數差／持續性三因子 + `daytrade_ratio` 屬性表
+  （expanding、事件記在賣出日）。IC 階梯以 PG 5,690 萬列執行中（背景 bm14p5y52）。
+- **雲端不算這三個因子**：`cloud.exclude_factors`（`CloudConfig` 新欄位）+ 反向測試「清單裡每個都真的超窗」。
+  執行期強制（GHA 對雲端 DSN 跑 `pipeline` 時跳過）**未做**——T-100。
+- **方向變更（待確認範圍）**：使用者 02:30「應該都要改地端了」。事實基礎：本機 PG **27 GB**（factor_values 14 GB、broker_trades 9.2 GB、
+  prices 1.5 GB、ml_scores 1.1 GB）是唯一的研究資料庫；雲端只有滾動窗口；`data/` 無任何 pg_dump。
+- **備份已啟動**（背景 bf7028337）：`pg_dump -n serving -Fc -Z 6` → `D:/project/twquant/data/backup/twquant_serving_20260903.dump`
+  （用同一 postgres 映像、`--network container:twquant-pg-1`）。還原：`pg_restore -d twquant -n serving <dump>`。
+  **建議之後**：每日增量或每週全量，並 rclone 到 Drive（docs/OPS-archive.md 已有 raw 歸檔流程）。
+- 富邦缺的兩天（2024-02-29、2026-06-30）補抓中（背景 b491vpu2c，互動確認以管線餵 y）。
