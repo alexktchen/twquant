@@ -329,4 +329,4 @@ uv run --all-groups python -m twquant backtest --strategy configs/strategies/ml_
 
 ### 13.5 下一個：T-099 產業因子
 `price.industry_mom_6m`（Moskowitz–Grinblatt）、`price.industry_rs_20d` 資料現成；`chip.industry_foreign_flow_10d`（Choi–Sias）待 T-092。
-分點層因子曾做過（T-086 殘留的 concentration／main_force／broker_count_diff 等）但只有 127 天資料而被註銷；FinMind 分點表為付費。
+**更正**：富邦 `broker_trades` 在 PG 有 **2022-01-03～2026-09-02、1,130 個交易日、5,690 萬列**（逐年 246/239/241/243/161 天，近乎完整；最後一次抓取 2026-09-02 19:12）。T-086 殘留的 concentration／main_force 等 127 天是當時**實驗性物化的範圍**，不是資料範圍；分點因子任務 T-016／T-036 從未正式完成。富邦來源是**母公司層級** top-15 買賣超（無分點、無均價），`backfill-fubon-chip` 為專屬指令、不在每日迴圈。`broker_flow_daily` 衍生表只從 2025-07-01 起（287 日）。FinMind 分點表（真正分點層）為付費。
