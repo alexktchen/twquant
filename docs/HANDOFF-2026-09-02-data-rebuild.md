@@ -246,3 +246,53 @@ EMA10 0.16 > 週頻 0.09 > H20 0.13；**無一過 0.5**。候選 4（EMA10+雙�
 ### 11.5 待使用者裁決
 - **D-045**：融資因子的 PIT 修法（建議 A：因子輸出日期前移一日）——T-092 資料進來後才有意義。
 - 是否訂 FinMind 付費層（還原股價、市值）——與 T-009／T-011 相關。
+
+---
+
+## 12. D-048 管線已建好、只等資料（09-03 凌晨）
+
+### 12.1 已落地（閘門 494 passed）
+- **T-088**：融資因子依 D-008 把值標到下一交易日（`chip._to_next_session`，join_asof forward）。
+  兩個融資因子首次能產出值；`short_margin_ratio` tables 加 prices_daily 供日曆。
+- **T-094**：`materialize_day(..., factors=[...])` 因子子集物化；子集含 composite 因子或未註冊名字即 raise；
+  只寫 factor_values／factor_cross_stats。`scripts/backfill_factors.py` 第 4 個位置參數。
+- **T-095**：`forward_returns` 擋 `close<=0`（第四次除以零）；六因子 IC 重跑後才拿到乾淨的多空價差。
+- **D-048 配置**：`configs/ml_h10_v2.yaml`（28 特徵，model_id `lgbm_h10_20260225_5526f2c2`）、
+  `configs/strategies/ml_rank_v2.yaml`（只換 model_id，週頻 top-20，scope `ml_rank_h10`）。
+- **載入器**：`scripts/load_finmind_chip.py institutional|margin <staging> --check|--write`——重疊日期只比對、
+  任何值不一致即 raise、只寫湖與 PG 都沒有的日期。
+
+### 12.2 T-093 結果（全樣本 1,471–1,486 日；OOS 期 2022-01-14 起同號同量級）
+| 因子 | RankIC 5/10/20 日 | t | 五分位多空價差 5/10/20 日 |
+|---|---|---|---|
+| earnings_yield | +.034/+.036/+.036 | 15/15/13 | **−0.10/−0.25/−0.60%** |
+| book_yield | +.038/+.048/**+.061** | 14/18/**22** | +0.07/+0.15/+0.32% |
+| dividend_yield | +.040/+.039/+.034 | 17/15/12 | **−0.41/−0.82/−1.70%** |
+| residual_reversal_5d（對照，−1） | −.047/−.033/−.029 | −20/−15/−14 | −0.23/−0.16/−0.11% |
+| reversal_5d（對照，−1） | −.045/−.026/−.023 | −14/−9/−8 | −0.08/+0.13/+0.28% |
+| revenue_yoy（對照） | +.022/+.025/+.024 | 11/13/12 | **+0.51/+0.89/+1.47%** |
+
+**E/P 與殖利率：RankIC 正、價差負**——最便宜一組跑輸最貴一組（價值陷阱形狀）。可進 LightGBM（非線性），
+不得進線性 composite 或單獨當訊號。B/P 是唯一 IC 與價差同向且隨 horizon 上升的。
+
+### 12.3 籌碼落地後的執行手冊（依序；每步的失敗都要停）
+```
+# 0. 確認兩個 staging 都完成（ingest_log 有「完成」；finmind_institutional 與 finmind_margin 各 ~2,064 檔）
+# 1. 載入（先 --check 看重疊一致性，再 --write）
+uv run --all-groups python scripts/load_finmind_chip.py institutional D:/project/twquant/data/staging/finmind_institutional --check
+uv run --all-groups python scripts/load_finmind_chip.py institutional D:/project/twquant/data/staging/finmind_institutional --write
+uv run --all-groups python scripts/load_finmind_chip.py margin        D:/project/twquant/data/staging/finmind_margin --check
+uv run --all-groups python scripts/load_finmind_chip.py margin        D:/project/twquant/data/staging/finmind_margin --write
+# 2. 品質：quality.sparse_dates 對兩表；覆蓋 ≥ 1,600 日
+# 3. 只重算 7 個籌碼因子（T-094；可照成本分 6 片並行，分片見 §9.4）
+uv run --all-groups python scripts/backfill_factors.py D:/project/twquant/data/lake_rebuild 2020-01-02 2026-09-01   chip.foreign_net_10d,chip.inst_net_10d,chip.trust_net_10d,chip.foreign_streak,chip.trust_streak,chip.margin_velocity_5d,chip.short_margin_ratio
+# 4. 驗收：verify_rebuild.py（7 個籌碼因子覆蓋 ≥ 90%；融資兩個 > 0）
+# 5. T-096：訓練 → backfill-scores → ml eval → 回測 1×/0×（scope bt:ml_rank_h10）
+uv run --all-groups python -m twquant ml train --from 2020-01-01 --to 2026-08-28 --config configs/ml_h10_v2.yaml --out D:/project/twquant/data/models
+uv run --all-groups python -m twquant ml backfill-scores --model D:/project/twquant/data/models/lgbm_h10_20260225_5526f2c2
+uv run --all-groups python -m twquant ml eval --model D:/project/twquant/data/models/lgbm_h10_20260225_5526f2c2
+uv run --all-groups python -m twquant backtest --strategy configs/strategies/ml_rank_v2.yaml --start 2022-07-01 --end 2026-02-28 --pg
+uv run --all-groups python -m twquant backtest --strategy configs/strategies/ml_rank_v2.yaml --start 2022-07-01 --end 2026-02-28 --pg --cost-scale 0
+# 6. research_log 從 worktree data/ 併回主庫；對照 ml_rank_repaired 記入 D-048
+```
+全部指令都需要 `TWQUANT_PG_DSN` 與 `PYTHONIOENCODING=utf-8`；訓練與回測的 research_log 會落在 worktree `data/`（T-084）。
