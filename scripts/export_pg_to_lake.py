@@ -23,13 +23,20 @@ import psycopg
 
 _DSN = "postgresql://twquant:twquant@localhost:5433/twquant"
 
-# 因子實際會讀的表（見各 @factor 的 tables=）
+# 因子實際會讀的表（見各 @factor 的 tables=）。
+# **這份清單漏一張表 = 該表的因子在整批物化中被靜默略過**：`_compute_universe` 對
+# DataError 只記 DEBUG 後繼續，物化仍回報成功。實際踩過：漏 stock_meta 讓
+# price.residual_reversal_5d（25 個 pin 特徵之一、且是僅 3 個 composite 因子之一）
+# 在 796 個已跑日期中全數缺席，整批作廢重跑。
+# ml_scores 不在此列——它由 `ml backfill-scores` 在模型訓練後才產生。
 _DEFAULT_TABLES = (
     "prices_daily",
     "index_daily",
     "monthly_revenue",
     "institutional_daily",
     "margin_daily",
+    "stock_valuation",
+    "stock_meta",
 )
 
 
@@ -60,6 +67,14 @@ def _export(conn: psycopg.Connection, schema: str, table: str, root: pathlib.Pat
         df = df.with_columns([pl.col(c).dt.convert_time_zone("Asia/Taipei") for c in tz_cols])
     out = root / "clean" / table
     n = 0
+    if "date" not in df.columns:
+        # 緩變表（stock_meta 等）無 date 欄，Warehouse.write 存成單一 date=_all 分區；
+        # 這裡必須比照，否則 partition_by("date") 直接 raise，該表就永遠不會被匯出。
+        d = out / "date=_all"
+        d.mkdir(parents=True, exist_ok=True)
+        df.write_parquet(d / "part-pg.parquet")
+        print(f"  {table}: {df.height:,} 列 → date=_all（緩變表）", flush=True)
+        return 1
     for (day,), part in df.partition_by("date", as_dict=True).items():
         d = out / f"date={day}"
         d.mkdir(parents=True, exist_ok=True)
