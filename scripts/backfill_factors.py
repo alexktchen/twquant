@@ -10,6 +10,9 @@
 
   # 指定範圍（省略則全歷史）
   uv run --group serving python scripts/backfill_factors.py D:/project/twquant/data 2021-01-04 2026-07-08
+
+  # 只重算因子子集（T-094；不得含 composite 因子）
+  uv run --group serving python scripts/backfill_factors.py D:/project/twquant/data 2020-01-02 2026-09-01 chip.foreign_net_10d,chip.trust_net_10d
 """
 
 from __future__ import annotations
@@ -34,11 +37,16 @@ def main() -> None:
     start = dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else all_days[0]
     end = dt.date.fromisoformat(sys.argv[3]) if len(sys.argv) > 3 else all_days[-1]
     days = [d for d in all_days if start <= d <= end]
+    # T-094：第 4 個參數為逗號分隔的因子子集（如籌碼回補後只重算 7 個籌碼因子）
+    factors = [f for f in sys.argv[4].split(",") if f] if len(sys.argv) > 4 else None
 
-    print(f"物化 {len(days)} 個交易日 {start} → {end} → serving（{cfg.dsn_env}）", flush=True)
+    what = f"{len(factors)} 個因子子集" if factors else "全部因子"
+    print(
+        f"物化 {len(days)} 個交易日 {start} → {end}（{what}）→ serving（{cfg.dsn_env}）", flush=True
+    )
     t0 = time.perf_counter()
     for i, day in enumerate(days, 1):
-        r = m.materialize_day(wh, cfg, day)
+        r = m.materialize_day(wh, cfg, day, factors)
         elapsed = time.perf_counter() - t0
         eta = elapsed / i * (len(days) - i)
         print(
