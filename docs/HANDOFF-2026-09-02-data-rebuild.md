@@ -348,3 +348,17 @@ T-016 設計收斂為三因子 + 隔日沖分點屬性表（清潔劑，非因�
   （用同一 postgres 映像、`--network container:twquant-pg-1`）。還原：`pg_restore -d twquant -n serving <dump>`。
   **建議之後**：每日增量或每週全量，並 rclone 到 Drive（docs/OPS-archive.md 已有 raw 歸檔流程）。
 - 富邦缺的兩天（2024-02-29、2026-06-30）補抓中（背景 b491vpu2c，互動確認以管線餵 y）。
+
+### 13.8 夜間自動化（09-03 03:00；使用者：「訓練完模型再跑回測」）
+兩條背景等待鏈（Claude Code 背景任務；主機關機即中斷，重跑指令見下）：
+1. **籌碼 → 訓練 → 回測**（byefkb9om）：等籌碼自動鏈印「管線到驗收為止完成」→ 覆蓋門檻：7 個 `chip.*`（非 broker）因子各 ≥ 1,300 日
+   （寫 `scratchpad/chip_coverage.txt`）→ 過則 `bash scratchpad/run_t096.sh`（訓練 `ml_h10_v2` → backfill-scores → ml eval →
+   回測 1×/0× → research_log 併回 → 特徵重要度），日誌 `scratchpad/run_t096.log`。任一門檻未過即停、不訓練。
+2. **財報載入與驗證**（bb3u4q6v8）：等三表＋除權息回補結束 → `load_finmind_statements.py --check → --write` → `verify_statements.py`
+   → **停**（物化與 IC 待人工看驗證結果）。
+其他仍在跑：PG 備份（bf7028337）、分點三因子 IC（bm14p5y52）→ 產業兩因子 IC（bjw8q18n0）、富邦缺日補抓（b491vpu2c）。
+
+**早上要看的**（依序）：`chip_coverage.txt`／`run_t096.log`（v2 vs `ml_rank_repaired` 逐項）→ 分點與產業 IC → `data/backup/` 檔案大小
+→ 財報驗證六項 → 若都過：`backfill_factors.py … <13 個新因子子集>`（分點三因子需先把 `broker_trades` 匯出到 lake_rebuild）→ `ic-report` 品質七因子
+→ `factor_corr.py` 剔重複 → 登記 v3。
+若主機曾關機：`docker start`、重跑對應指令即可，所有回補與物化皆可續傳。
