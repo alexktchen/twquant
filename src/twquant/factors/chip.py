@@ -104,6 +104,25 @@ def trust_streak(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     )
 
 
+def _to_next_session(df: pl.LazyFrame, view: PitView) -> pl.LazyFrame:
+    """把每列的 date 前移到**下一個交易日**（D-008：融資 available_at 21:00 晚於 20:00 截點，
+    故融資以 T-1 進當日訊號）。交易日序列取自 PitView 內的 prices_daily（已按截點過濾，PIT-safe）。
+    沒有下一個交易日的列（最新一列之後）會被丟掉——那筆資料在任何 as_of 都還不能用。
+
+    T-088／D-045：舊實作把值標成融資列自己的日期，materialize 只留 dates=[as_of]，
+    於是兩個融資因子在 factor_values 整張表歷史中從未產出任何一列。
+    """
+    sessions = view.table("prices_daily").select(pl.col("date").alias("_s")).unique().sort("_s")
+    return (
+        df.with_columns(pl.col("date").dt.offset_by("1d").alias("_after"))
+        .sort("_after")
+        .join_asof(sessions, left_on="_after", right_on="_s", strategy="forward")
+        .drop_nulls("_s")
+        .drop("date", "_after")
+        .rename({"_s": "date"})
+    )
+
+
 @factor(
     name="chip.margin_velocity_5d",
     category="chip",
@@ -121,7 +140,7 @@ def margin_velocity_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame
     window = int(raw) if isinstance(raw, int | float | str) else 5
     m = view.table("margin_daily").select("date", "stock_id", "margin_balance")
     px = view.table("prices_daily").select("date", "stock_id", "volume")
-    return (
+    out = (
         m.join(px, on=["date", "stock_id"], how="inner")
         .sort(["stock_id", "date"])
         .with_columns(
@@ -136,8 +155,9 @@ def margin_velocity_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame
         )
         .select("date", "stock_id", "value")
         .drop_nulls("value")
-        .collect()
     )
+    # 計算在融資自己的日期序列上完成後，才把標籤前移到下一交易日（D-008）
+    return _to_next_session(out, view).select("date", "stock_id", "value").collect()
 
 
 @factor(
@@ -200,14 +220,14 @@ def inst_net_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     name="chip.short_margin_ratio",
     category="chip",
     direction=1,
-    tables=["margin_daily"],
+    tables=["margin_daily", "prices_daily"],  # prices_daily 供交易日序列（_to_next_session）
     lookback_days=3,
     params={},
 )
 def short_margin_ratio(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """券資比 = 融券餘額 / 融資餘額（當日）。先驗 +1（高券資比＝軋空燃料），實際符號待 IC。"""
     m = view.table("margin_daily").select("date", "stock_id", "margin_balance", "short_balance")
-    return (
+    out = (
         m.with_columns(
             value=pl.when(pl.col("margin_balance") > 0)
             .then(pl.col("short_balance") / pl.col("margin_balance"))
@@ -215,5 +235,5 @@ def short_margin_ratio(view: PitView, params: dict[str, object]) -> pl.DataFrame
         )
         .select("date", "stock_id", "value")
         .drop_nulls("value")
-        .collect()
     )
+    return _to_next_session(out, view).select("date", "stock_id", "value").collect()
