@@ -191,21 +191,10 @@ def test_ac3_assemble_empty_features_raises() -> None:
 # 訓練照樣「成功」。訓練路徑須在 assemble 前 raise；生產 ml score 不掛此閘門（單日缺某因子屬正常）。
 
 
-def _feat(rows: list[tuple[dt.date, str, float | None]]) -> pl.DataFrame:
-    return pl.DataFrame(
-        {
-            "date": [r[0] for r in rows],
-            "stock_id": [r[1] for r in rows],
-            "value": [r[2] for r in rows],
-        },
-        schema={"date": pl.Date, "stock_id": pl.String, "value": pl.Float64},
-    )
-
-
 def test_t088_ac3_empty_feature_raises_with_name() -> None:
     d = dt.date(2026, 6, 1)
     feats = {"price.mom_20d": _feat([(d, "1101", 0.1)]), "chip.short_margin_ratio": _feat([])}
-    with pytest.raises(ValueError, match="chip.short_margin_ratio"):
+    with pytest.raises(ValueError, match=r"chip\.short_margin_ratio"):
         assert_feature_coverage(feats)
 
 
@@ -215,7 +204,7 @@ def test_t088_ac3_all_null_feature_raises() -> None:
         "price.mom_20d": _feat([(d, "1101", 0.1)]),
         "price.rs_market_20d": _feat([(d, "1101", None), (d, "2330", None)]),
     }
-    with pytest.raises(ValueError, match="price.rs_market_20d"):
+    with pytest.raises(ValueError, match=r"price\.rs_market_20d"):
         assert_feature_coverage(feats)
 
 
@@ -227,7 +216,7 @@ def test_t088_ac3_min_share_threshold_catches_near_empty_feature() -> None:
         "price.mom_20d": _feat([(d, f"{2000 + i}", 0.1) for i in range(10)]),
         "chip.foreign_net_10d": sparse,
     }
-    with pytest.raises(ValueError, match="chip.foreign_net_10d"):
+    with pytest.raises(ValueError, match=r"chip\.foreign_net_10d"):
         assert_feature_coverage(feats, min_non_null_share=0.5)
     assert_feature_coverage(feats, min_non_null_share=0.05)  # 門檻放低即通過
 
