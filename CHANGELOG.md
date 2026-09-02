@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- 2026-09-03 T-092 FinMind 法人映射補上興櫃日的合併 `Dealer` 類別（→ `dealer_net`；同鍵與拆分類別並存即 raise）。全期載入在 2023-04-13 被未知類別護欄擋下：27,562 列、280 檔只有 Dealer＋外資＋投信三列，從未與拆分並存。
 - 2026-09-02 T-095 `forward_returns` 加正值防護（分母分子皆 > 0 否則 null）。`close=0` 列讓前向報酬出現 `−1.0`／`inf`，`drop_nulls` 濾不掉，五分位多空價差被毒成 NaN——本 repo 第四次踩同一類除以零。
 - 2026-09-02 D-046 **撤銷 D-038、重新事前登記降周轉 4 候選**（monthly／biweekly／EMA10／EMA10+biweekly，
   scope `bt:ml_rank_h10_turnover`，晉升門檻沿用 D-038 §5）。依據是三個免費診斷：IC 隨 horizon
