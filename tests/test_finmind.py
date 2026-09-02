@@ -80,6 +80,39 @@ def test_institutional_unknown_category_raises() -> None:
         institutional_net(rows)
 
 
+def test_institutional_combined_dealer_maps_to_dealer_net() -> None:
+    """興櫃日只有合併的 "Dealer"（無拆分、無外資自營）——是自營商總額，記進 dealer_net，不得當未知類別中止。
+
+    真實型態（1294 @ 2023-04-28：Dealer 買 26,000／賣 0，只配外資與投信兩列）。
+    """
+    rows = _inst(
+        [
+            ("Foreign_Investor", 5_000, 1_000),
+            ("Investment_Trust", 0, 2_000),
+            ("Dealer", 26_000, 0),
+        ]
+    )
+    assert institutional_net(rows) == [
+        {
+            "date": _D,
+            "stock_id": "2330",
+            "foreign_net": 4_000,
+            "trust_net": -2_000,
+            "dealer_net": 26_000,
+        }
+    ]
+
+
+def test_institutional_combined_and_split_dealer_on_same_key_raises() -> None:
+    """同 (日, 股) 同時有合併 "Dealer" 與拆分類別＝無法判斷是否重複計算，必須中止而非加總。"""
+    rows = _inst([("Dealer", 1_000, 0), ("Dealer_self", 1_000, 0)])
+    with pytest.raises(DataError, match="合併"):
+        institutional_net(rows)
+    rows = _inst([("Dealer_Hedging", 0, 500), ("Dealer", 0, 500)])
+    with pytest.raises(DataError, match="合併"):
+        institutional_net(rows)
+
+
 def test_institutional_missing_category_is_treated_as_zero_not_null() -> None:
     """某日某檔沒有某類別的紀錄＝當日該類別無交易，記 0；不得整列丟棄。"""
     rows = _inst([("Foreign_Investor", 500, 100)])

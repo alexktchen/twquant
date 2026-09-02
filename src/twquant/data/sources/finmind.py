@@ -34,7 +34,10 @@ STATEMENT_DATASETS = {
 # 未列出的類別一律 raise——來源新增類別而靜默忽略，會讓某一欄悄悄少一條腿。
 _FOREIGN = ("Foreign_Investor", "Foreign_Dealer_Self")
 _TRUST = ("Investment_Trust",)
-_DEALER = ("Dealer_self", "Dealer_Hedging")
+# 興櫃／部分上櫃日的法人資料只有合併的 "Dealer"（無自行買賣／避險拆分、也無外資自營）——
+# 實測 2020–2026 staging：27,562 列、280 檔，同 (日, 股) 從未與拆分類別並存。並存時無法判斷是否重複計算，故 raise。
+_DEALER = ("Dealer_self", "Dealer_Hedging", "Dealer")
+_DEALER_COMBINED = "Dealer"
 _KNOWN = frozenset(_FOREIGN + _TRUST + _DEALER)
 
 _LOT_SHARES = 1_000  # FinMind 融資券餘額以「張」計；本專案一律「股」（黃金規則 3）
@@ -53,11 +56,13 @@ def _date(row: Mapping[str, Any], table: str) -> dt.date:
 
 
 def institutional_net(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """FinMind 五類投資人買賣股數 → `institutional_daily` 的三欄淨買賣超（股）。
+    """FinMind 投資人買賣股數 → `institutional_daily` 的三欄淨買賣超（股）。
 
     某 (日, 股) 缺某類別＝當日該類別無交易，記 0；不丟列。
+    自營商可為拆分（自行買賣＋避險）或合併（"Dealer"，興櫃日），同鍵兩者並存即 raise。
     """
     acc: dict[tuple[dt.date, str], dict[str, int]] = {}
+    dealer_kind: dict[tuple[dt.date, str], str] = {}
     for row in rows:
         name = row.get("name")
         if name not in _KNOWN:
@@ -75,6 +80,14 @@ def institutional_net(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
         elif name in _TRUST:
             bucket["trust_net"] += net
         else:
+            kind = "combined" if name == _DEALER_COMBINED else "split"
+            if dealer_kind.setdefault(key, kind) != kind:
+                raise DataError(
+                    "institutional_daily",
+                    key[0],
+                    f"{key[1]} 同日同時出現合併 {_DEALER_COMBINED!r} 與拆分自營商類別——"
+                    "無法判斷是否重複計算，故中止。",
+                )
             bucket["dealer_net"] += net
     return [{"date": d, "stock_id": sid, **vals} for (d, sid), vals in sorted(acc.items())]
 
