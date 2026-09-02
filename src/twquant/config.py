@@ -65,6 +65,10 @@ class CloudConfig(BaseConfig):
     pattern_tables: tuple[str, ...] = ("prices_daily", "broker_trades")
     # 滾動窗口（交易日數）；未列出的表全史保留（小表）。硬下限＝因子最大回看（有測試把關）
     windows: dict[str, int] = {}
+    # 雲端不算的因子：需要的歷史超過該表的滾動窗（含 expanding 統計）。列在這裡＝明確承認
+    # 「本機研究用、雲端沒有」，而非讓雲端在殘缺窗口上算出看似正常的數字。test_cloud 把關：
+    # 每個被排除的因子都必須真的超窗，清單不能拿來藏錯。
+    exclude_factors: tuple[str, ...] = ()
 
 
 class ServingConfig(BaseConfig):

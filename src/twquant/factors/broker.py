@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 _TABLES = ["broker_trades", "prices_daily"]
 _DEFAULTS: dict[str, object] = {"daytrade_min_ratio": 0.5, "daytrade_min_events": 30}
+# 隔日沖比率是 expanding 統計，需要 broker_trades 全歷史；lookback_days 以 1000 交易日（≈4 年）
+# 誠實宣告——這也是它們被列入 cloud.exclude_factors 的原因（雲端只留 10 日）。
+_LOOKBACK = 1000
 
 
 def _num(params: dict[str, object], key: str, default: float) -> float:
@@ -133,7 +136,7 @@ def _int(params: dict[str, object], key: str, default: int) -> int:
     category="chip",
     direction=1,
     tables=_TABLES,
-    lookback_days=25,
+    lookback_days=_LOOKBACK,
     params={"window": 20, **_DEFAULTS},
 )
 def broker_concentration_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
@@ -163,7 +166,7 @@ def broker_concentration_20d(view: PitView, params: dict[str, object]) -> pl.Dat
     category="chip",
     direction=1,
     tables=_TABLES,
-    lookback_days=10,
+    lookback_days=_LOOKBACK,
     params={"window": 5, **_DEFAULTS},
 )
 def broker_count_diff_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
@@ -191,7 +194,7 @@ def broker_count_diff_5d(view: PitView, params: dict[str, object]) -> pl.DataFra
     category="chip",
     direction=1,
     tables=_TABLES,
-    lookback_days=15,
+    lookback_days=_LOOKBACK,
     params={"window": 10, **_DEFAULTS},
 )
 def broker_persistence_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
