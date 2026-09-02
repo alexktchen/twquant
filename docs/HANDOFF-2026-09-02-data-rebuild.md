@@ -299,3 +299,34 @@ uv run --all-groups python -m twquant backtest --strategy configs/strategies/ml_
 # 6. research_log 從 worktree data/ 併回主庫；對照 ml_rank_repaired 記入 D-048
 ```
 全部指令都需要 `TWQUANT_PG_DSN` 與 `PYTHONIOENCODING=utf-8`；訓練與回測的 research_log 會落在 worktree `data/`（T-084）。
+
+---
+
+## 13. T-097 財報品質因子（程式已落地，資料排隊中；09-03 凌晨）
+
+### 13.1 使用者決定
+「先做這 6 個」：GP/A、ROE、Accruals(−)、資產成長(−)、SUE、負債比(−) + size 控制。FinMind 免費層三表實測可取；
+`減資恢復買賣參考價格` 為付費（T-098 只做除權息層）。三表 + 除權息結果表的回補（約 14 小時額度）排在籌碼之後
+自動接續（背景 byn0gq80k）。
+
+### 13.2 實測決定的三個公式細節（不憑名字猜）
+- 損益表是**單季值**（2330 2024 四季營收加總 = 全年 2.894 兆 ✓）→ TTM = 近四季相加。
+- 現金流量表是**累計 YTD**（營業現金流 436B → 814B → 1,206B → 1,826B）→ 單季 = 本期 − 上期，Q1 照抄，上期須同年前一季。
+- 損益表與資產負債表都有 `EquityAttributableToOwnersOfParent`：前者是歸屬母公司**淨利**、後者是**權益**。schema 以 `statement` 欄區分。
+- EPS 原始值有小數（8.7／9.56／12.55／14.45 對照公告 8.70／9.56／12.54／14.45）；`_per` 後綴列是百分比，映射層剔除。
+
+### 13.3 已落地（閘門 522 passed）
+- `financial_statements` 長表：clean 19 表 + PG 鏡射，PK (date, stock_id, statement, type)；`available_at` = 法定申報期限 22:00
+  （Q1 5/15、Q2 8/14、Q3 11/14、年報次年 3/31），estimated=True。
+- `finmind.statement_rows`；`scripts/load_finmind_statements.py --check|--write`（重疊鍵只比對不覆寫）。
+- `factors/quality.py` 七因子；17 條測試：PIT 邊界（年報 3/31 20:00 不可見、4/1 可見）、YTD 拆季、TTM 四季須連續、
+  **缺季不得回退到舊季**（`_map` 映射後才 drop null——否則過期數字冒充當期）、SUE 前 8 個同比差不足即 null、七因子反前視。
+
+### 13.4 財報資料到了以後的驗證清單（未過不進 IC）
+載入器自動：pandera 型別／時區、非季底日期 raise、重疊鍵一致。手動：全市場「值恰為 0」比例（FinMind 以 0 表缺值）、
+資產＝負債＋權益容差、Q4 累計現金流 vs 年度、EPS×股數 ≈ 淨利、每家季數覆蓋與缺季分布、非曆年制公司、抽 10 家對 MOPS。
+然後：`backfill_factors.py … <七因子子集>`（T-094）→ `ic-report` 七因子（全樣本 + 2022-01-14 起）→ 對照 D-020 子集。
+
+### 13.5 下一個：T-099 產業因子
+`price.industry_mom_6m`（Moskowitz–Grinblatt）、`price.industry_rs_20d` 資料現成；`chip.industry_foreign_flow_10d`（Choi–Sias）待 T-092。
+分點層因子曾做過（T-086 殘留的 concentration／main_force／broker_count_diff 等）但只有 127 天資料而被註銷；FinMind 分點表為付費。
