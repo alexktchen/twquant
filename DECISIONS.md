@@ -102,6 +102,18 @@
 
 ## 已裁決
 
+### D-049（2026-09-03，已裁決）研究留本機、雲端只當展示
+- 使用者裁決（02:45）：「研究留本機、雲端只當展示」。取代 2026-07 的「全雲端、本機關機」方向。
+- 事實基礎：本機 PG 27 GB（factor_values 14 GB、broker_trades 9.2 GB、prices 1.5 GB、ml_scores 1.1 GB）是**唯一**的研究資料庫，
+  訓練／回測／IC 全在本機；Supabase Free 只留滾動窗口（行情 260 日、分點 10 日、因子 20 日），且無法計算需要歷史的因子
+  （`cloud.exclude_factors`）。`data/` 先前無任何備份。
+- 後果：
+  1. 雲端每日管線（GHA）照常跑，但只算雲端算得對的因子——`pipeline`／`serving materialize` 加 `--target cloud`，
+     物化改用 `cloud_factor_subset(cfg)`（全部減掉 exclude_factors；排除清單不得碰 composite 因子）。T-100。
+  2. 本機是主資料庫 → 需常開跑長工，且要有備份例行（T-101：pg_dump 全量 + rclone Drive）。首份備份 09-03 02:40 啟動。
+  3. 雲端 UI 上排除的因子不顯示（不是顯示錯值）。
+- 影響範圍：CLAUDE.md 記憶、`cli.py` pipeline/materialize、`.github/workflows/daily-pipeline.yml`、docs/OPS。
+
 ### D-048（2026-09-02，已裁決）第二代候選：籌碼補齊 + 三個評價因子進模型（28 特徵）
 - 使用者裁決（2026-09-02 深夜）：「籌碼跑完跟其他三個因子再一起進去模型」。
 - **事前登記（回測前）**：
