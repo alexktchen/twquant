@@ -360,8 +360,7 @@ T-016 設計收斂為三因子 + 隔日沖分點屬性表（清潔劑，非因�
 其他仍在跑：PG 備份（bf7028337）、分點三因子 IC（bm14p5y52）→ 產業兩因子 IC（bjw8q18n0）、富邦缺日補抓（b491vpu2c）。
 
 **早上要看的**（依序）：`chip_coverage.txt`／`run_t096.log`（v2 vs `ml_rank_repaired` 逐項）→ 分點與產業 IC → `data/backup/` 檔案大小
-→ 財報驗證六項 → 若都過：`backfill_factors.py … <13 個新因子子集>`（分點三因子需先把 `broker_trades` 匯出到 lake_rebuild）→ `ic-report` 品質七因子
-→ `factor_corr.py` 剔重複 → 登記 v3。
+→ 財報驗證六項 → 若都過：`bash scratchpad/run_newfactors.sh materialize <因子清單>`（6 分片子集物化 + PG 覆蓋表；`broker_trades` 已於 02:40 起匯出到 lake_rebuild，背景 b0vscu55f）→ `bash scratchpad/run_newfactors.sh ic <因子清單>`（全樣本 + OOS 期，併回 research_log）→ `factor_corr.py <新因子清單>` 剔重複（|ρ|>0.7）→ 登記 v3。分點三因子與產業兩因子的 IC 已於 02:20 起自動跑（bm14p5y52 → bjw8q18n0）。
 若主機曾關機：`docker start`、重跑對應指令即可，所有回補與物化皆可續傳。
 - **分點 IC 第一個結果**：`broker_concentration_20d` RankIC −0.008／−0.011／−0.010（t −4.1／−6.0／−5.0）、五分位價差 +0.22／+0.35／+0.65%。
   |t| 過門檻但**方向與先驗相反、IC 與價差不同號（U 型）**——富邦 top-15 買超偏散戶，20 日集中買超在 5~20 日是反向。
