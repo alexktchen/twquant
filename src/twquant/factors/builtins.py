@@ -7,6 +7,14 @@
 
 from __future__ import annotations
 
-from twquant.factors import chip, fundamental, ml, patterns, price, volume  # 匯入觸發 @factor 註冊
+from twquant.factors import (  # 匯入觸發 @factor 註冊
+    chip,
+    fundamental,
+    ml,
+    patterns,
+    price,
+    quality,
+    volume,
+)
 
-__all__ = ["chip", "fundamental", "ml", "patterns", "price", "volume"]
+__all__ = ["chip", "fundamental", "ml", "patterns", "price", "quality", "volume"]

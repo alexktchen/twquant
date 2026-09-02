@@ -1,0 +1,267 @@
+"""T-097：財報品質因子（GP/A、ROE、應計項目、資產成長、SUE、負債比）+ size 控制。
+
+每條公式都有文獻出處（見 factors/quality.py），這裡把三個容易錯的地方鎖死：
+1. **PIT**：財報以法定申報期限為可見日（Q3 → 11/14 22:00、年報 → 次年 3/31 22:00），
+   在期限當天 20:00 截點仍不可見，隔天才可見。
+2. **現金流量表是累計 YTD**：單季 = 本期 YTD − 上期 YTD（Q1 照抄）；不拆的話 accruals 差四倍。
+3. **TTM 要四個連續季**：缺一季就 null，不得用三季充數。
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import math
+import statistics
+from pathlib import Path
+
+import polars as pl
+import pytest
+
+import twquant.factors.builtins  # noqa: F401  # 註冊全部因子
+from twquant.conventions import TZ
+from twquant.data import schemas
+from twquant.data.warehouse import Warehouse
+from twquant.factors import compute as fc
+from twquant.factors.registry import get, list_factors
+from twquant.factors.testing import assert_no_lookahead
+
+_STOCKS = ["1101", "2330"]
+_NAMES = [
+    "fundamental.gross_profitability",
+    "fundamental.roe",
+    "fundamental.accruals",
+    "fundamental.asset_growth",
+    "fundamental.sue",
+    "fundamental.leverage",
+    "fundamental.log_market_cap",
+]
+# 12 季：2021Q1 … 2023Q4（period_end）
+_Q = [
+    dt.date(y, m, d) for y in (2021, 2022, 2023) for m, d in ((3, 31), (6, 30), (9, 30), (12, 31))
+]
+# 評估用交易日：2024-01 上旬（2023Q3 已於 2023-11-14 可見；2023Q4 要到 2024-03-31 22:00）
+_DAYS = [dt.date(2024, 1, d) for d in (2, 3, 4, 5, 8, 9, 10)]
+_CLOSE = {"1101": 40.0, "2330": 600.0}
+
+
+def _at(d: dt.date, hour: int = 18) -> dt.datetime:
+    return dt.datetime(d.year, d.month, d.day, hour, tzinfo=TZ)
+
+
+def _deadline(pe: dt.date) -> dt.datetime:
+    m = {3: (0, 5, 15), 6: (0, 8, 14), 9: (0, 11, 14), 12: (1, 3, 31)}[pe.month]
+    return dt.datetime(pe.year + m[0], m[1], m[2], 22, tzinfo=TZ)
+
+
+# ── 合成財報：用簡單等差數列，讓手算可行 ────────────────────────────────
+# k = 季序（0..11）。1101：GP=100+10k、NI=40+2k、資產=1000+50k、權益=500+20k、股本=1000（→100 股）
+# 單季營業現金流 CFO=30+k（表內存 **YTD 累計**）。EPS 刻意非線性，讓 SUE 的分母不為 0。
+_EPS = {
+    "1101": [1.0, 1.1, 1.3, 1.2, 1.5, 1.4, 1.9, 1.6, 2.0, 1.7, 2.4, 2.1],
+    "2330": [5.0, 5.2, 5.1, 5.4, 5.6, 5.3, 5.9, 5.8, 6.1, 6.0, 6.7, 6.2],
+}
+
+
+def _gp(s: str, k: int) -> float:
+    return (100.0 if s == "1101" else 1000.0) + 10.0 * k
+
+
+def _ni(s: str, k: int) -> float:
+    return (40.0 if s == "1101" else 400.0) + 2.0 * k
+
+
+def _ta(s: str, k: int) -> float:
+    return (1000.0 if s == "1101" else 20000.0) + 50.0 * k
+
+
+def _eq(s: str, k: int) -> float:
+    return (500.0 if s == "1101" else 12000.0) + 20.0 * k
+
+
+def _cfo_q(s: str, k: int) -> float:
+    return (30.0 if s == "1101" else 300.0) + 1.0 * k
+
+
+def _shares_capital(s: str) -> float:
+    return 1000.0 if s == "1101" else 25_000.0  # 股本（元）；面額 10 → 股數 = /10
+
+
+def _statements(
+    quarters: list[dt.date] = _Q, eps: dict[str, list[float]] | None = None
+) -> pl.DataFrame:
+    eps = eps or _EPS
+    rows: list[dict[str, object]] = []
+    for s in _STOCKS:
+        ytd = 0.0
+        for k, pe in enumerate(quarters):
+            if pe.month == 3:
+                ytd = 0.0
+            ytd += _cfo_q(s, k)
+            at = _deadline(pe)
+            items = [
+                ("income", "GrossProfit", _gp(s, k)),
+                ("income", "EquityAttributableToOwnersOfParent", _ni(s, k)),
+                ("income", "EPS", eps[s][k]),
+                ("balance", "TotalAssets", _ta(s, k)),
+                ("balance", "Liabilities", _ta(s, k) - _eq(s, k)),
+                ("balance", "EquityAttributableToOwnersOfParent", _eq(s, k)),
+                ("balance", "OrdinaryShare", _shares_capital(s)),
+                ("cashflow", "CashFlowsFromOperatingActivities", ytd),  # 累計 YTD
+            ]
+            for st, typ, v in items:
+                rows.append(
+                    {
+                        "date": pe,
+                        "stock_id": s,
+                        "statement": st,
+                        "type": typ,
+                        "value": v,
+                        "available_at": at,
+                        "available_at_estimated": True,
+                    }
+                )
+    return pl.DataFrame(rows).with_columns(pl.col("available_at").cast(schemas.TW_DT))
+
+
+def _prices(days: list[dt.date]) -> pl.DataFrame:
+    rows = [
+        {
+            "date": d,
+            "stock_id": s,
+            "open": _CLOSE[s],
+            "high": _CLOSE[s],
+            "low": _CLOSE[s],
+            "close": _CLOSE[s],
+            "volume": 1000,
+            "amount": _CLOSE[s] * 1000,
+            "limit_up_price": None,
+            "limit_down_price": None,
+            "available_at": _at(d),
+        }
+        for d in days
+        for s in _STOCKS
+    ]
+    return pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+
+
+def _wh(tmp_path: Path, days: list[dt.date] = _DAYS, st: pl.DataFrame | None = None) -> Warehouse:
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(days), source="twse")
+    wh.write(
+        "clean", "financial_statements", st if st is not None else _statements(), source="finmind"
+    )
+    return wh
+
+
+def _vals(wh: Warehouse, name: str, day: dt.date) -> dict[str, float]:
+    out = fc.compute([name], wh.view(day), dates=[day])
+    return {r["stock_id"]: r["value"] for r in out.to_dicts()}
+
+
+# 2024-01 可見的最新季 = 2023Q3 → k=10；四季前 k=6；TTM = k 7..10
+_K, _K4 = 10, 6
+
+
+def test_all_seven_registered_with_literature_directions() -> None:
+    names = list_factors()
+    for n in _NAMES:
+        assert n in names, f"{n} 未註冊"
+    assert get("fundamental.gross_profitability").direction == 1  # Novy-Marx 2013
+    assert get("fundamental.roe").direction == 1  # FF 2015 RMW
+    assert get("fundamental.accruals").direction == -1  # Sloan 1996
+    assert get("fundamental.asset_growth").direction == -1  # Cooper–Gulen–Schill 2008
+    assert get("fundamental.sue").direction == 1  # Bernard–Thomas 1989
+    assert get("fundamental.leverage").direction == -1  # QMJ safety
+    assert get("fundamental.log_market_cap").direction == -1  # size
+
+
+def test_gross_profitability_is_ttm_gp_over_latest_assets(tmp_path: Path) -> None:
+    got = _vals(_wh(tmp_path), "fundamental.gross_profitability", _DAYS[-1])
+    ttm = sum(_gp("1101", k) for k in range(_K - 3, _K + 1))
+    assert got["1101"] == pytest.approx(ttm / _ta("1101", _K))
+
+
+def test_roe_uses_average_of_latest_and_four_quarters_ago_equity(tmp_path: Path) -> None:
+    got = _vals(_wh(tmp_path), "fundamental.roe", _DAYS[-1])
+    ttm = sum(_ni("2330", k) for k in range(_K - 3, _K + 1))
+    avg_eq = (_eq("2330", _K) + _eq("2330", _K4)) / 2
+    assert got["2330"] == pytest.approx(ttm / avg_eq)
+
+
+def test_accruals_decumulates_ytd_cashflow(tmp_path: Path) -> None:
+    """若把 YTD 直接當單季，TTM CFO 會被高估數倍、accruals 變成大負值——此測試鎖死拆季。"""
+    got = _vals(_wh(tmp_path), "fundamental.accruals", _DAYS[-1])
+    ttm_ni = sum(_ni("1101", k) for k in range(_K - 3, _K + 1))
+    ttm_cfo = sum(_cfo_q("1101", k) for k in range(_K - 3, _K + 1))
+    avg_ta = (_ta("1101", _K) + _ta("1101", _K4)) / 2
+    assert got["1101"] == pytest.approx((ttm_ni - ttm_cfo) / avg_ta)
+
+
+def test_asset_growth_is_yoy_of_total_assets(tmp_path: Path) -> None:
+    got = _vals(_wh(tmp_path), "fundamental.asset_growth", _DAYS[-1])
+    assert got["2330"] == pytest.approx(_ta("2330", _K) / _ta("2330", _K4) - 1.0)
+
+
+def test_sue_requires_eight_prior_yoy_diffs_else_null(tmp_path: Path) -> None:
+    """12 季資料下，最新季 k=10 的前 8 個同比差需要 j=2..9 → j<4 無法計算 → null。
+    延長到 16 季後才有值，且等於手算。"""
+    q16 = _Q + [dt.date(2024, m, d) for m, d in ((3, 31), (6, 30), (9, 30), (12, 31))]
+    eps16 = {s: _EPS[s] + [_EPS[s][-1] + 0.3 * (i + 1) for i in range(4)] for s in _STOCKS}
+
+    days = [dt.date(2025, 4, d) for d in (1, 2, 3)]  # 2024Q4 於 2025-03-31 22:00 可見 → k=15
+    got = _vals(_wh(tmp_path, days, _statements(q16, eps16)), "fundamental.sue", days[-1])
+    e = eps16["1101"]
+    diff = lambda j: e[j] - e[j - 4]  # noqa: E731
+    cur = diff(15)
+    prior = [diff(j) for j in range(7, 15)]  # 前 8 個：j=7..14
+    assert got["1101"] == pytest.approx(cur / statistics.stdev(prior))
+    # 12 季版本：k=10 時前 8 個需要 j=2..9，j<4 不存在 → null
+    assert "1101" not in _vals(_wh(tmp_path / "short"), "fundamental.sue", _DAYS[-1])
+
+
+def test_leverage_is_liabilities_over_assets(tmp_path: Path) -> None:
+    got = _vals(_wh(tmp_path), "fundamental.leverage", _DAYS[-1])
+    assert got["1101"] == pytest.approx((_ta("1101", _K) - _eq("1101", _K)) / _ta("1101", _K))
+
+
+def test_log_market_cap_uses_asof_close_and_par_value_shares(tmp_path: Path) -> None:
+    """市值 = 當日收盤 × (股本 ÷ 面額 10)。股本來自最新可見的資產負債表，收盤來自當日。"""
+    got = _vals(_wh(tmp_path), "fundamental.log_market_cap", _DAYS[-1])
+    assert got["2330"] == pytest.approx(math.log(600.0 * (25_000.0 / 10.0)))
+
+
+def test_pit_annual_report_visible_only_after_deadline(tmp_path: Path) -> None:
+    """2023Q4（年報）期限 2024-03-31 22:00：3/31 的 20:00 截點看不到，4/1 看得到。"""
+    days = [dt.date(2024, 3, 29), dt.date(2024, 4, 1), dt.date(2024, 4, 2)]
+    wh = _wh(tmp_path, days)
+    before = _vals(wh, "fundamental.leverage", dt.date(2024, 3, 29))  # 最新可見 = 2023Q3（k=10）
+    after = _vals(wh, "fundamental.leverage", dt.date(2024, 4, 1))  # 最新可見 = 2023Q4（k=11）
+    k10 = (_ta("1101", 10) - _eq("1101", 10)) / _ta("1101", 10)
+    k11 = (_ta("1101", 11) - _eq("1101", 11)) / _ta("1101", 11)
+    assert before["1101"] == pytest.approx(k10) and after["1101"] == pytest.approx(k11)
+
+
+def test_ttm_requires_four_consecutive_quarters(tmp_path: Path) -> None:
+    """缺一季（把 2023Q1 拿掉）→ 2024-01 的 TTM 因子必須是 null，不得用三季充數。"""
+    st = _statements().filter(pl.col("date") != dt.date(2023, 3, 31))
+    wh = _wh(tmp_path, _DAYS, st)
+    assert _vals(wh, "fundamental.gross_profitability", _DAYS[-1]) == {}
+    assert _vals(wh, "fundamental.accruals", _DAYS[-1]) == {}
+    # 時點值因子不受影響
+    assert set(_vals(wh, "fundamental.leverage", _DAYS[-1])) == set(_STOCKS)
+
+
+@pytest.mark.parametrize("name", _NAMES)
+def test_no_lookahead(tmp_path: Path, name: str) -> None:
+    days = [
+        dt.date(2024, 3, 27),
+        dt.date(2024, 3, 28),
+        dt.date(2024, 3, 29),
+        dt.date(2024, 4, 1),
+        dt.date(2024, 4, 2),
+    ]
+    assert_no_lookahead(name, _wh(tmp_path, days), days[1:])
