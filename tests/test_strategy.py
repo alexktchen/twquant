@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from itertools import pairwise
 from pathlib import Path
 
 import polars as pl
@@ -77,7 +78,6 @@ def test_signal_dates_monthly() -> None:
     assert got == [dt.date(2026, 5, 1), dt.date(2026, 6, 1)]
 
 
-
 # ── 雙週排程（T-089 / D-046 候選 2、4）──────────────────────────────
 # 定義：ISO 偶數週的週訊號日。用「偶數週」而非「從 start 起每隔一週」，是為了讓不同
 # 起日的回測落在同一套再平衡日曆上——否則兩次回測的差異會混進日曆相位。
@@ -93,10 +93,20 @@ def _weekday_sessions(start: dt.date, end: dt.date) -> list[dt.date]:
 def test_ac1_biweekly_is_every_other_weekly_signal_date() -> None:
     """AC-1：biweekly 是 weekly 訊號日的嚴格子集，且相鄰兩日恰隔兩週。"""
     cal = TradingCalendar(_weekday_sessions(dt.date(2025, 3, 3), dt.date(2025, 5, 30)))
-    weekly = build.signal_dates(RebalanceConfig(schedule="weekly", day="MON"), cal, dt.date(2025, 3, 3), dt.date(2025, 5, 30))
-    bi = build.signal_dates(RebalanceConfig(schedule="biweekly", day="MON"), cal, dt.date(2025, 3, 3), dt.date(2025, 5, 30))
+    weekly = build.signal_dates(
+        RebalanceConfig(schedule="weekly", day="MON"),
+        cal,
+        dt.date(2025, 3, 3),
+        dt.date(2025, 5, 30),
+    )
+    bi = build.signal_dates(
+        RebalanceConfig(schedule="biweekly", day="MON"),
+        cal,
+        dt.date(2025, 3, 3),
+        dt.date(2025, 5, 30),
+    )
     assert set(bi) < set(weekly), "biweekly 必須是 weekly 的嚴格子集"
-    assert all((b - a).days == 14 for a, b in zip(bi, bi[1:])), "相鄰訊號日須恰隔 14 天"
+    assert all((b - a).days == 14 for a, b in pairwise(bi)), "相鄰訊號日須恰隔 14 天"
     # 2025-03-03 是 ISO W10；偶數週 W10/12/14/16/18/20/22 共 7 個，週訊號日 13 個
     assert len(bi) == 7 and len(weekly) == 13
 
@@ -104,8 +114,15 @@ def test_ac1_biweekly_is_every_other_weekly_signal_date() -> None:
 def test_ac2_biweekly_iso_week_parity_is_continuous_across_new_year() -> None:
     """AC-2：跨年不重不漏——2024-12-30（週一）是 ISO 2025-W01（奇數），W52 與 W02 才是偶數週。"""
     cal = TradingCalendar(_weekday_sessions(dt.date(2024, 12, 16), dt.date(2025, 1, 17)))
-    got = build.signal_dates(RebalanceConfig(schedule="biweekly", day="MON"), cal, dt.date(2024, 12, 16), dt.date(2025, 1, 17))
-    assert got == [dt.date(2024, 12, 23), dt.date(2025, 1, 6)], "應取 W52 與 W02，跳過 W51／2025-W01／W03"
+    got = build.signal_dates(
+        RebalanceConfig(schedule="biweekly", day="MON"),
+        cal,
+        dt.date(2024, 12, 16),
+        dt.date(2025, 1, 17),
+    )
+    assert got == [dt.date(2024, 12, 23), dt.date(2025, 1, 6)], (
+        "應取 W52 與 W02，跳過 W51／2025-W01／W03"
+    )
 
 
 def test_ac2_biweekly_monday_holiday_rolls_forward_like_weekly() -> None:
@@ -114,7 +131,12 @@ def test_ac2_biweekly_monday_holiday_rolls_forward_like_weekly() -> None:
     sessions.remove(dt.date(2025, 3, 10))  # 2025-W11 週一休市（W11 為奇數；W10、W12 偶數）
     sessions.remove(dt.date(2025, 3, 17))  # 2025-W12 週一休市 → 應順延到 3/18
     cal = TradingCalendar(sessions)
-    got = build.signal_dates(RebalanceConfig(schedule="biweekly", day="MON"), cal, dt.date(2025, 3, 3), dt.date(2025, 3, 28))
+    got = build.signal_dates(
+        RebalanceConfig(schedule="biweekly", day="MON"),
+        cal,
+        dt.date(2025, 3, 3),
+        dt.date(2025, 3, 28),
+    )
     assert got == [dt.date(2025, 3, 3), dt.date(2025, 3, 18)]
 
 
@@ -128,7 +150,8 @@ def test_ac3_existing_schedules_unchanged_by_biweekly() -> None:
         d for d in sessions if d.weekday() == 0
     ]
     assert build.signal_dates(RebalanceConfig(schedule="monthly", day_of_month=1), cal, lo, hi) == [
-        dt.date(2025, 3, 3), dt.date(2025, 4, 1)
+        dt.date(2025, 3, 3),
+        dt.date(2025, 4, 1),
     ]
 
 
