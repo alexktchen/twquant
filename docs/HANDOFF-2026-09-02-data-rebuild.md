@@ -93,3 +93,64 @@ D-026 後改讀 PG，故 `price.rs_market_20d` 只能在 PG 恰好有的 52 天�
   `D:\project\twquant\.env`（gitignore，不得進 repo）。
 - 重建湖：`D:/project/twquant/data/lake_rebuild`（由 PG 匯出，含全部修復）。
 - 汙染資料備份：`D:/project/twquant/data/archive/corrupt_days_backup/`。
+
+---
+
+## 9. 09-02 中午的重建重啟（重要：前一輪 796 天全部作廢）
+
+### 9.1 為什麼作廢
+
+**`stock_meta` 從未被匯出到重建湖**（`export_pg_to_lake.py` 的 `_DEFAULT_TABLES` 沒有它，
+且它無 `date` 欄，`partition_by("date")` 會直接 raise）。而 `price.residual_reversal_5d`
+宣告 `tables=[prices_daily, stock_meta]`——缺表時 `materialize._compute_universe` 的
+`except DataError` 只記 **DEBUG** 就繼續，整天仍回報成功。
+
+後果：已跑的 796 天**全部缺這個因子**，而它同時是
+- `configs/ml_h10_repaired.yaml` 25 個 pin 特徵之一，且
+- `configs/serving.yaml` 僅 3 個 `composite_factors` 之一。
+
+已修：`_DEFAULT_TABLES` 補上 `stock_meta` 與 `stock_valuation`，並讓無 `date` 欄的
+緩變表寫成 `date=_all` 分區（比照 `Warehouse.write`）。修完實測三個年代皆算得出
+`residual_reversal_5d`（781~1,919 檔）。
+
+### 9.2 順帶查出的第二個汙染（T-087）
+
+發車前清點列數分布，發現 **8 個交易日只有 TWSE、整條 TPEX 缺席**（列數 1,189~1,308
+vs 鄰近 5,846~6,736）。已全數重抓並同步進湖與 PG，並新增 `quality.sparse_dates`
+偵測器（測試先行；真實資料驗收：修復前正好抓 8 天、修復後 0 天）。
+
+### 9.3 08:36 主機關機
+
+前一輪 6 個分片在 08:36 同時消失、日誌乾淨截斷無 traceback——事件記錄顯示
+**主機於 08:36:23 由 Start 選單發起關機**，11:46 才開機。不是程式崩潰，Docker 亦隨之停止。
+
+### 9.4 本輪配置
+
+6 個**按成本平衡**的分片（因子物化成本隨歷史長度增加，故早期分片給多天）：
+
+| 起 | 迄 | 天數 |
+|---|---|---|
+| 2020-01-02 | 2022-09-16 | 661 |
+| 2022-09-19 | 2023-11-06 | 274 |
+| 2023-11-07 | 2024-09-16 | 210 |
+| 2024-09-18 | 2025-06-16 | 177 |
+| 2025-06-17 | 2026-01-28 | 156 |
+| 2026-01-29 | 2026-09-01 | 141 |
+
+以 PowerShell `Start-Process` 啟動（脫離 bash session），日誌 `data/logs/mat_<起>.log`。
+CPU 85%、可用記憶體 3.4 GB——**不可再加分片**。實測 ETA 約 6~7 小時。
+
+### 9.5 每日只有 21 個因子（30 註冊 − 2 ml − 7 籌碼）
+
+`ml.*` 兩個要等模型訓練後 `backfill-scores` 才有，屬預期。
+**7 個籌碼因子完全算不出來**：`institutional_daily` 全期只有 **227 日**、`margin_daily`
+**205 日**（2020 與 2021 完全空白，2025 的 141 日還零散到整個 6 月都沒有）。
+故 25 個 pin 特徵中有 **7 個（28%）在絕大多數日期為 null**。
+這是既有狀態（非本次退化），但**重訓結果須據此解讀**——見 D-044 的籌碼回補優先序。
+
+### 9.6 T-083 不能照原案做（實測）
+
+原以為照 `lookback_days` 裁切視圖可加速 3~30 倍。實測：加速有（×2 邊際下 2.2~5.6 倍），
+**但會改變因子值**，因為因子用的是**列基**位移而非日期基，稀疏個股在窗內拿不到足夠列數。
+且 `volume.turnover_z_20d` 有 111~223 檔值不同，代表其 `lookback_days=25` 宣告不足。
+詳見 TASKS.md T-083 的實測註記。**本輪重建仍走原路徑，不套用裁切。**
