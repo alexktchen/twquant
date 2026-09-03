@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- 2026-09-03 T-103／T-104 開單（財報重編 vintage 前視假設未文件化；`quality.py` 的 lookback_days 宣告不足，T-083 落地後會靜默變 null）。
 - 2026-09-03 T-097 財報因子修正（物化前）：`quality.py` 加合併數回退（母公司數 = 合併數 − 少數股權），淨利覆蓋 90.9%→100%、母公司權益 90.7%→100%；`statement_rows` 把 origin_name 為「綜合損益」的母公司列改名，不讓它冒充淨利（235 個股票季）；`test_no_lookahead` 改用 16 季夾具並斷言非空轉。
 - 2026-09-03 T-016／T-099 IC 完成（閘門 545 passed）：分點三因子皆反向（`broker_count_diff_5d` t −11～−16 最強、concentration／persistence U 型）；產業兩因子在 5～20 日無訊號。皆記入 research_log。
 - 2026-09-03 T-096 v2（28 特徵、籌碼補齊）訓練與回測完成：OOS RankIC +0.0887（repaired +0.0796）但 1× CAGR −4.76%、0× +13.5%／Sharpe 0.77（repaired 0× +21.9%／1.21）、周轉 2,883%——**依 D-048 §5 不晉升**；籌碼 gain 13.8%、投信兩因子 0%。
