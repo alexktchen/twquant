@@ -39,6 +39,8 @@ _NAMES = [
 _Q = [
     dt.date(y, m, d) for y in (2021, 2022, 2023) for m, d in ((3, 31), (6, 30), (9, 30), (12, 31))
 ]
+# 16 季（2021Q1 … 2024Q4）：SUE 要 13 季才有值，反前視檢查用這份才不會空轉
+_Q16 = _Q + [dt.date(2024, m, d) for m, d in ((3, 31), (6, 30), (9, 30), (12, 31))]
 # 評估用交易日：2024-01 上旬（2023Q3 已於 2023-11-14 可見；2023Q4 要到 2024-03-31 22:00）
 _DAYS = [dt.date(2024, 1, d) for d in (2, 3, 4, 5, 8, 9, 10)]
 _CLOSE = {"1101": 40.0, "2330": 600.0}
@@ -60,6 +62,9 @@ _EPS = {
     "1101": [1.0, 1.1, 1.3, 1.2, 1.5, 1.4, 1.9, 1.6, 2.0, 1.7, 2.4, 2.1],
     "2330": [5.0, 5.2, 5.1, 5.4, 5.6, 5.3, 5.9, 5.8, 6.1, 6.0, 6.7, 6.2],
 }
+
+
+_EPS16 = {s: _EPS[s] + [_EPS[s][-1] + 0.3 * (i + 1) for i in range(4)] for s in _STOCKS}
 
 
 def _gp(s: str, k: int) -> float:
@@ -260,11 +265,61 @@ def test_ttm_requires_four_consecutive_quarters(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("name", _NAMES)
 def test_no_lookahead(tmp_path: Path, name: str) -> None:
-    days = [
-        dt.date(2024, 3, 27),
-        dt.date(2024, 3, 28),
-        dt.date(2024, 3, 29),
-        dt.date(2024, 4, 1),
-        dt.date(2024, 4, 2),
-    ]
-    assert_no_lookahead(name, _wh(tmp_path, days), days[1:])
+    """反前視必須是**非空轉**的：12 季夾具下 SUE 全 null，兩邊都空也會通過。
+    故用 16 季夾具，並先斷言該因子在切點真的有值。"""
+    days = [dt.date(2025, 3, 28), dt.date(2025, 3, 31), dt.date(2025, 4, 1), dt.date(2025, 4, 2)]
+    wh = _wh(tmp_path, days, _statements(_Q16, _EPS16))
+    assert _vals(wh, name, days[-1]), f"{name} 在切點無值——反前視檢查會空轉"
+    assert_no_lookahead(name, wh, days[1:])
+
+
+# ── 合併數回退（FinMind 9.1% 股票季不給「歸屬母公司」列）─────────────────────
+
+
+def _swap_parent_to_consolidated(
+    st: pl.DataFrame, *, nci: float = 0.0, stocks: tuple[str, ...] = ("1101",)
+) -> pl.DataFrame:
+    """把指定股票的「歸屬母公司」列換成合併數（＋少數股權），模擬金融業／無少數股權公司的格式。"""
+    parent = pl.col("type") == "EquityAttributableToOwnersOfParent"
+    mine = pl.col("stock_id").is_in(stocks)
+    keep = st.filter(~(parent & mine))
+    swapped = st.filter(parent & mine).with_columns(
+        type=pl.when(pl.col("statement") == "income")
+        .then(pl.lit("IncomeAfterTaxes"))
+        .otherwise(pl.lit("Equity")),
+        value=pl.col("value") + nci,
+    )
+    extra = (
+        swapped.with_columns(type=pl.lit("NoncontrollingInterests"), value=pl.lit(nci))
+        if nci
+        else swapped.clear()
+    )
+    return pl.concat([keep, swapped, extra])
+
+
+def test_consolidated_fallback_when_parent_line_missing(tmp_path: Path) -> None:
+    """只有合併數、沒有少數股權列時，合併數就是母公司數 → ROE 與有母公司列時完全相同。"""
+    base = _vals(_wh(tmp_path / "a"), "fundamental.roe", _DAYS[-1])
+    st = _swap_parent_to_consolidated(_statements())
+    got = _vals(_wh(tmp_path / "b", _DAYS, st), "fundamental.roe", _DAYS[-1])
+    assert got["1101"] == pytest.approx(base["1101"])
+    assert got["2330"] == pytest.approx(base["2330"])  # 2330 未換，不受影響
+
+
+def test_fallback_subtracts_noncontrolling_interests(tmp_path: Path) -> None:
+    """有少數股權列時，母公司數 = 合併數 − 少數股權；直接用合併數會高估。"""
+    base = _vals(_wh(tmp_path / "a"), "fundamental.roe", _DAYS[-1])
+    st = _swap_parent_to_consolidated(_statements(), nci=7.0)
+    got = _vals(_wh(tmp_path / "b", _DAYS, st), "fundamental.roe", _DAYS[-1])
+    assert got["1101"] == pytest.approx(base["1101"])
+
+
+def test_parent_line_wins_over_consolidated_fallback(tmp_path: Path) -> None:
+    """母公司列存在時，回退不得覆蓋它——加一條數值不同的合併數列，結果必須不變。"""
+    base = _vals(_wh(tmp_path / "a"), "fundamental.roe", _DAYS[-1])
+    st = _statements()
+    bogus = st.filter(
+        (pl.col("type") == "EquityAttributableToOwnersOfParent") & (pl.col("statement") == "income")
+    ).with_columns(type=pl.lit("IncomeAfterTaxes"), value=pl.col("value") * 3.0)
+    got = _vals(_wh(tmp_path / "b", _DAYS, pl.concat([st, bogus])), "fundamental.roe", _DAYS[-1])
+    assert got["1101"] == pytest.approx(base["1101"])

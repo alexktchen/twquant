@@ -29,6 +29,13 @@ STATEMENT_DATASETS = {
     "balance": "TaiwanStockBalanceSheet",
     "cashflow": "TaiwanStockCashFlowsStatement",
 }
+# 損益表的 `EquityAttributableToOwnersOfParent` 有一小群列（實測 2019–2026：235 個股票季、41 檔）
+# 的 `origin_name` 是「綜合損益總額歸屬於母公司業主」——那是**綜合損益**（含其他綜合損益），
+# 不是淨利。FinMind 只在 origin_name 分辨，映射進長表後就看不出來，會讓 ROE／應計冒用錯誤的分子。
+# 故在映射時改名保留（不丟列），讓它無法冒充淨利。這 41 檔同季沒有正常淨利列，故不會撞主鍵。
+_COMPREHENSIVE_MARK = "綜合損益"
+_PARENT_INCOME = "EquityAttributableToOwnersOfParent"
+_PARENT_COMPREHENSIVE = "ComprehensiveIncomeAttributableToOwnersOfParent"
 
 # clean.py:59 的定義：外資＝外陸資(不含自營)＋外資自營商；自營＝自行買賣＋避險。
 # 未列出的類別一律 raise——來源新增類別而靜默忽略，會讓某一欄悄悄少一條腿。
@@ -171,6 +178,8 @@ def statement_rows(rows: Iterable[Mapping[str, Any]], statement: str) -> list[di
     → `financial_statements` 長表。
 
     - `_per` 後綴的百分比列剔除（資產負債表附帶的佔比欄，不是金額）。
+    - 損益表中 origin_name 標示「綜合損益」的母公司列改名為
+      `ComprehensiveIncomeAttributableToOwnersOfParent`，不讓它冒充淨利。
     - 值一律 float（元）；缺 `value` 即 raise，不當 0（黃金規則 5）。
     - 無 `date` 的列是 staging 的佔位列，略過。
     """
@@ -185,6 +194,10 @@ def statement_rows(rows: Iterable[Mapping[str, Any]], statement: str) -> list[di
             raise DataError("financial_statements", None, f"FinMind 回應缺 type 欄：{dict(row)!r}")
         if typ.endswith("_per"):
             continue
+        if statement == "income" and typ == _PARENT_INCOME:
+            origin = row.get("origin_name")
+            if isinstance(origin, str) and _COMPREHENSIVE_MARK in origin:
+                typ = _PARENT_COMPREHENSIVE
         day = _date(row, "financial_statements")
         if "value" not in row or row["value"] is None:
             raise DataError(

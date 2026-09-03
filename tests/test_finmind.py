@@ -247,6 +247,48 @@ def test_t097_available_at_is_statutory_filing_deadline() -> None:
     assert all(r["statement"] == "income" for r in out)
 
 
+def test_t097_comprehensive_income_parent_row_is_retyped() -> None:
+    """損益表有一小群列的 origin_name 是「綜合損益總額歸屬於母公司業主」——那是綜合損益不是淨利。
+    實測 2019–2026：235 個股票季、41 檔，且同季沒有正常淨利列，直接吃下去會讓 ROE 用錯分子。"""
+    from twquant.data.sources.finmind import statement_rows
+
+    rows = [
+        {
+            "date": "2023-03-31",
+            "stock_id": "2358",
+            "type": "EquityAttributableToOwnersOfParent",
+            "value": 123.0,
+            "origin_name": "綜合損益總額歸屬於母公司業主",
+        },
+        {
+            "date": "2023-03-31",
+            "stock_id": "2330",
+            "type": "EquityAttributableToOwnersOfParent",
+            "value": 456.0,
+            "origin_name": "淨利（淨損）歸屬於母公司業主",
+        },
+    ]
+    out = {r["stock_id"]: r["type"] for r in statement_rows(rows, "income")}
+    assert out["2358"] == "ComprehensiveIncomeAttributableToOwnersOfParent"
+    assert out["2330"] == "EquityAttributableToOwnersOfParent"
+
+
+def test_t097_comprehensive_mark_only_applies_to_income_statement() -> None:
+    """資產負債表的母公司權益列不得被改名（那裡的 origin_name 是「歸屬於母公司業主之權益總計」）。"""
+    from twquant.data.sources.finmind import statement_rows
+
+    rows = [
+        {
+            "date": "2023-03-31",
+            "stock_id": "2330",
+            "type": "EquityAttributableToOwnersOfParent",
+            "value": 1.0,
+            "origin_name": "綜合損益總額歸屬於母公司業主",
+        }
+    ]
+    assert statement_rows(rows, "balance")[0]["type"] == "EquityAttributableToOwnersOfParent"
+
+
 def test_t097_percent_rows_are_dropped() -> None:
     from twquant.data.sources.finmind import statement_rows
 

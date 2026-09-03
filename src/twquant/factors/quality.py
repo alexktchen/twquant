@@ -42,7 +42,18 @@ _ACCOUNTS: dict[tuple[str, str], str] = {
     ("balance", "EquityAttributableToOwnersOfParent"): "eq",
     ("balance", "OrdinaryShare"): "cap",
     ("cashflow", "CashFlowsFromOperatingActivities"): "cfo_ytd",
+    # 合併數與少數股權：FinMind 有 9.1% 的股票季（287 檔）不給「歸屬母公司」列，只給合併數
+    # ——金融業與沒有少數股權的單一實體公司。母公司數 = 合併數 − 少數股權（實測三者並存時
+    # 誤差 <1% 佔損益 99.3%／權益 99.7%），故用來回退；沒有少數股權列時該值為 0。
+    ("income", "IncomeAfterTaxes"): "ni_all",
+    ("income", "IncomeAfterTax"): "ni_all_bank",
+    ("income", "NetIncome"): "ni_all_alt",
+    ("income", "NoncontrollingInterests"): "nci_inc",
+    ("balance", "Equity"): "eq_all",
+    ("balance", "NoncontrollingInterests"): "nci_bal",
 }
+# 回退順序：優先用合併稅後淨利，其次銀行業用語，最後 NetIncome。
+_NI_FALLBACKS = ("ni_all", "ni_all_bank", "ni_all_alt")
 _CUTOFF_HOUR = SIGNAL_CUTOFF_HOUR  # D-008 訊號截點
 _SUE_PRIOR = 8  # 文獻定義：分母用前 8 季的同比差
 
@@ -97,6 +108,14 @@ def _quarterly(view: PitView) -> pl.LazyFrame:
             if name in wide.collect_schema().names()
             else pl.lit(None, pl.Float64).alias(name)
         )
+    # 合併數回退（見 _ACCOUNTS 註解）：少數股權缺列即視為 0（實測缺母公司列的股票季
+    # 100% 沒有少數股權列）。母公司列存在時一律以它為準，回退不會覆蓋既有值。
+    wide = wide.with_columns(
+        _nci_i=pl.col("nci_inc").fill_null(0.0), _nci_b=pl.col("nci_bal").fill_null(0.0)
+    ).with_columns(
+        ni=pl.coalesce(pl.col("ni"), *[pl.col(c) - pl.col("_nci_i") for c in _NI_FALLBACKS]),
+        eq=pl.coalesce(pl.col("eq"), pl.col("eq_all") - pl.col("_nci_b")),
+    )
     # 可見起日：available_at 在截點（20:00）之後 → 隔日才可見
     avail = (
         pl.when(pl.col("available_at").dt.hour() >= _CUTOFF_HOUR)
