@@ -1,0 +1,28 @@
+# D-050／T-105：與 ml_rank_v2.yaml 逐字相同，只換 model_id 到 v3 模型。
+# 由 select_v3_features.py 產生；model_id 於訓練後由鏈 D 填入。
+
+name: ml_rank_v3
+description: D-050 第三代候選：v2 的 28 特徵 + 2 個財報品質因子；策略規格與 ml_rank_v2 逐字相同（未經部署裁決，勿用於實盤）
+trial_scope: ml_rank_h10
+universe:
+  markets:
+  - TWSE
+  - TPEX
+  min_adv_twd: 30000000
+  min_price: 10.0
+signals:
+- factor: ml.lgbm_rank_10d
+  weight: 1.0
+  params:
+    model_id: lgbm_h10_20260225_a48b262c
+combine: zscore_weighted
+selection:
+  method: top_n
+  top_n: 20
+weighting: equal
+rebalance:
+  schedule: weekly
+  day: MON
+  execution: next_open
+overlays: []
+max_weight_per_stock: 0.05
