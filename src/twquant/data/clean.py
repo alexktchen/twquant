@@ -325,6 +325,17 @@ def clean_stock_meta(raw: pl.DataFrame, market: str) -> pl.DataFrame:
         .alias("list_date"),
         pl.lit(None, dtype=pl.Date).alias("delist_date"),
     )
+    # T-117：中文名不得含替換字元 U+FFFD。這是解碼失敗留下的痕跡，只影響顯示但會出現在
+    # 每一份對外報表；閘門放在這裡是因為它是唯一能同時看到 stock_id 與 name 的地方。
+    broken = out.filter(pl.col("name").str.contains("\ufffd", literal=True))
+    if broken.height:
+        ids = broken["stock_id"].to_list()[:8]
+        raise DataError(
+            "stock_meta",
+            None,
+            f"中文名含替換字元 U+FFFD 的有 {broken.height} 檔（如 {', '.join(ids)}）"
+            "——來源解碼失敗。標準 Big5 缺「碁」等字，須用 cp950（T-117）。",
+        )
     # 上市日不合理（<1911，例如來源改回民國 3 碼年被誤解析為西元 115 年）→ 視為缺值，
     # 避免靜默寫入錯誤日期（ISIN 現況為西元 yyyy/mm/dd，此為防未來格式變動的防呆）。
     out = out.with_columns(

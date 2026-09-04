@@ -59,6 +59,11 @@ def main() -> None:
     ap.add_argument("--lake", default="D:/project/twquant/data/lake_rebuild")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--write", action="store_true")
+    ap.add_argument(
+        "--repair-names",
+        action="store_true",
+        help="以 FinMind 的名稱修補含替換字元 U+FFFD 的中文名（T-117）",
+    )
     args = ap.parse_args()
     if not (args.check or args.write):
         raise SystemExit("請指定 --check 或 --write")
@@ -91,6 +96,32 @@ def main() -> None:
     )
 
     out = reconcile_stock_meta(existing, present_ids=present, info=info, delistings=delistings)
+
+    if args.repair_names:
+        # T-117：ISIN 曾以標準 Big5 解碼，「碁」等字被靜默換成 U+FFFD（14 檔，含 2353 宏碁）。
+        # `reconcile_stock_meta` 刻意不覆蓋既有列，故名稱要單獨修。FinMind 的名稱已於 T-111 驗證。
+        fm = {str(r["stock_id"]): r.get("name") for r in info}
+        broken = out.filter(pl.col("name").str.contains("�", literal=True))
+        fixed, unfixable = [], []
+        for sid in broken["stock_id"].to_list():
+            new_name = fm.get(sid)
+            if isinstance(new_name, str) and "�" not in new_name:
+                fixed.append((sid, new_name))
+            else:
+                unfixable.append(sid)
+        print("", f"中文名含 U+FFFD：{broken.height} 檔　可修 {len(fixed)} 檔", flush=True)
+        for sid, nm in fixed:
+            print(f"  {sid}  {broken.filter(pl.col('stock_id') == sid)['name'][0]!r} → {nm!r}")
+        if unfixable:
+            # 不靜默留著壞名字，也不偽造：明確列出待處理者（黃金規則 5）
+            print(f"  無法修（FinMind 也沒有乾淨名稱）：{', '.join(unfixable)}", flush=True)
+        if fixed:
+            m = pl.DataFrame({"stock_id": [s for s, _ in fixed], "_nm": [n for _, n in fixed]})
+            out = (
+                out.join(m, on="stock_id", how="left")
+                .with_columns(name=pl.coalesce("_nm", "name"))
+                .drop("_nm")
+            )
 
     have = set(existing["stock_id"].to_list())
     added = out.filter(~pl.col("stock_id").is_in(list(have)))

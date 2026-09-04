@@ -361,3 +361,56 @@ def test_ac3_reconcile_fills_delist_date_for_existing_rows() -> None:
         delistings=[{"stock_id": "2456", "delist_date": dt.date(2022, 1, 5)}],
     )
     assert out.to_dicts()[0]["delist_date"] == dt.date(2022, 1, 5)
+
+
+# ── T-117：中文名的 Big5 解碼 ─────────────────────────────────────────
+#
+# `stock_meta.name` 有 14 檔含替換字元 U+FFFD，全部都是含「碁」（U+7881）的名稱，
+# 包括 **2353 宏碁**。根因：`twse_isin.py` 用 `decode("big5", errors="replace")`，
+# 而「碁」不在標準 Big5 的映射內（在 CP950／Big5-HKSCS 擴充裡），errors="replace"
+# 於是把它靜默換成 U+FFFD。只影響顯示（分析一律以 stock_id 為鍵），但任何對外報表都會出亂碼。
+
+
+def test_ac2_isin_decodes_cp950_extension_characters() -> None:
+    """「碁」不在標準 Big5——用 big5 解會得到替換字元，用 cp950 才正確。"""
+    from twquant.data.sources.twse_isin import decode_isin_html
+
+    raw = "宏碁".encode("cp950")  # a7bb f9d6
+    assert raw.decode("big5", errors="replace") == "宏\ufffd\ufffd"  # 舊行為（缺陷）
+    assert decode_isin_html(raw) == "宏碁"
+
+
+def test_ac2_isin_decode_raises_instead_of_replacing() -> None:
+    """無法對映的位元組必須 raise，不得靜默換成 U+FFFD。
+
+    靜默替換正是這個缺陷存活四年的原因：名字壞了但沒有任何錯誤，
+    而 `reconcile_stock_meta`（T-111）刻意不覆蓋既有列，於是被一路保留。
+    """
+    from twquant.data.sources.twse_isin import decode_isin_html
+    from twquant.errors import DataError
+
+    with pytest.raises(DataError, match="解碼"):
+        decode_isin_html(b"\xff\xfe\xff\xfe")
+
+
+def test_ac4_stock_meta_names_have_no_replacement_char() -> None:
+    """閘門：清洗後的中文名不得含 U+FFFD。"""
+    from twquant.data.clean import clean_stock_meta
+    from twquant.errors import DataError
+
+    good = pl.DataFrame(
+        {
+            "code_name": ["2353　宏碁"],
+            "isin": ["x"],
+            "list_date": ["1996/11/11"],
+            "market": ["上市"],
+            "industry": ["電腦及週邊設備業"],
+            "cfi": ["ESVUFR"],
+            "note": [""],
+        }
+    )
+    assert clean_stock_meta(good, "TWSE")["name"].to_list() == ["宏碁"]
+
+    bad = good.with_columns(pl.lit("2353　宏\ufffd\ufffd").alias("code_name"))
+    with pytest.raises(DataError, match="替換字元"):
+        clean_stock_meta(bad, "TWSE")
