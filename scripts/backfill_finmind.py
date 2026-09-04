@@ -38,6 +38,24 @@ _DSN = "postgresql://twquant:twquant@localhost:5433/twquant"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
 
 
+def _stocks_from_file(path: str) -> list[str]:
+    """從檔案讀宇宙清單（每行一個代號，# 開頭為註解）。
+
+    為什麼需要這個：`_stocks()` 從 `prices_daily WHERE date >= 2020` 取清單，那只含
+    **活到 2020 年**的公司。拿它回補 2005~2020 的歷史，整段期間就只有存活者——
+    實測會漏 951 檔，其中 563 檔在 2020 年前就已下市。與 T-111 同型但影響大得多。
+    完整歷史宇宙＝TaiwanStockInfo ∪ TaiwanStockDelisting（見 universe_historical.txt）。
+    """
+    ids = [
+        ln.strip()
+        for ln in pathlib.Path(path).read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
+    if not ids:
+        raise SystemExit(f"宇宙清單為空：{path}")
+    return sorted(set(ids))
+
+
 def _stocks() -> list[str]:
     """四位數普通股清單（本專案的因子宇宙）。"""
     with psycopg.connect(os.environ.get("TWQUANT_PG_DSN", _DSN)) as conn:
@@ -52,6 +70,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("dataset")
     ap.add_argument("out_dir")
+    ap.add_argument(
+        "--universe-file",
+        default=None,
+        help="宇宙清單檔（每行一代號）；省略則用 prices_daily 2020 起的清單（含存活者偏誤）",
+    )
     ap.add_argument("--start", default="2020-01-01")
     ap.add_argument("--end", default="2026-09-01")
     ap.add_argument("--sleep", type=float, default=6.2, help="每請求間隔秒（600/hr 留餘裕）")
@@ -68,7 +91,7 @@ def main() -> None:
 
     out = pathlib.Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    ids = _stocks()
+    ids = _stocks_from_file(args.universe_file) if args.universe_file else _stocks()
     todo = [s for s in ids if not (out / f"{s}.parquet").exists()]
     print(f"{args.dataset}: 共 {len(ids):,} 檔，待抓 {len(todo):,} 檔", flush=True)
 
