@@ -176,8 +176,11 @@ def test_t094_subset_rejects_unknown_factor(tmp_path: Path) -> None:
 
 
 def test_t094_subset_intersecting_composite_is_refused(tmp_path: Path) -> None:
-    """AC-2：子集若含 composite 因子 → raise。子集模式不重算 composite_daily，
-    若允許就會讓 factor_values 與 composite_daily 對同一因子出現兩個版本。"""
+    """D-057：子集與 composite 集合**部分重疊** → raise。
+
+    此時 `merged` 缺了部分 composite 因子，重算 composite_daily 會得到與全因子模式不同的
+    綜合分；不重算則 factor_values 與 composite_daily 對同一因子出現兩個版本。兩害皆不可取。
+    （**完整包含**的情形已改為允許，見下一條測試。）"""
     import twquant.factors.builtins  # noqa: F401
     from twquant.config import ServingConfig
     from twquant.data.serving import materialize as smat
@@ -185,9 +188,38 @@ def test_t094_subset_intersecting_composite_is_refused(tmp_path: Path) -> None:
 
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", _prices(25, _STOCKS))
-    cfg = ServingConfig(pg_schema=_SCHEMA, composite_factors=("price.reversal_5d",))
+    cfg = ServingConfig(
+        pg_schema=_SCHEMA,
+        composite_factors=("price.reversal_5d", "price.mom_20d"),
+    )
     with pytest.raises(TwquantError, match="composite"):
         smat._materialize_on(wh, None, cfg, dt.date(2026, 6, 24), factors=["price.reversal_5d"])
+
+
+def test_d057_subset_containing_all_composite_factors_is_allowed(tmp_path: Path) -> None:
+    """D-057：子集 ⊇ composite 集合 → 准算，且 composite_daily 照常重算。
+
+    T-111 修好 stock_meta 後只需重算 3 個 composite 因子；舊規則會逼人做全 45 因子 ×
+    1,619 日的物化（實測會 OOM）來換 1 個因子的更新。
+    """
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.config import ServingConfig
+    from twquant.data.serving import materialize as smat
+
+    conn = _connect_or_skip()
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    cfg = ServingConfig(pg_schema=_SCHEMA, composite_factors=("price.reversal_5d",))
+    try:
+        _drop(conn)
+        r = smat.materialize_day(
+            wh, cfg, dt.date(2026, 6, 24), ["price.reversal_5d", "price.mom_20d"]
+        )
+        assert r.factors == 2
+        assert r.composite_rows > 0, "完整包含 composite 集合時，composite_daily 必須被重算"
+    finally:
+        _drop(conn)
+        conn.close()
 
 
 def test_t094_subset_mode_writes_only_factor_tables(

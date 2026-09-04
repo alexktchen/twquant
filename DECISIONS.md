@@ -124,6 +124,29 @@
 
 ## 已裁決
 
+### D-057（2026-09-04，已裁決）子集物化的 composite 規則：**完整包含即准算，部分重疊仍拒絕**
+
+- **現況**（T-094，`materialize.py:111-117`）：子集只要與 `composite_factors` 有**任何**交集就 raise。
+  理由正確——子集模式不重算 `composite_daily`，允許的話 `factor_values` 與 `composite_daily`
+  會對同一因子出現兩個版本。
+- **問題**：這個守衛對「子集 ⊇ composite 集合」的情形是**過度保守**。此時 `merged` 已含全部
+  composite 因子，`composite_from_signed` 能算出與全因子模式**完全相同**的結果，不存在版本分歧。
+- **為什麼現在要改**：T-111 修好 `stock_meta` 後需要重算 `price.residual_reversal_5d`，
+  而它正是 3 個 composite 因子之一。現行規則逼人做**全 45 因子 × 1,619 日**的物化
+  （8,372 萬列、十幾小時、實測會 OOM）來換 1 個因子的更新。
+- **裁決**：規則改為
+  - 子集 **⊇** `composite_factors` → 准，且**照常重算** `composite_daily`（與全因子模式同結果）；
+  - 子集與 `composite_factors` **部分重疊** → 仍 raise（版本分歧的風險原封不動）；
+  - 子集與 `composite_factors` **無交集** → 維持現狀（只寫因子表，不碰 composite_daily）。
+- **這是契約變更，故既有測試須改**：`test_t094_subset_intersecting_composite_is_refused` 原本
+  用的正是「完整包含」的例子（`composite_factors=("price.reversal_5d",)`、子集也是它），
+  在新規則下應為**允許**。改為以真正的部分重疊（composite 兩個、子集只給一個）驗證拒絕，
+  並新增一條驗證完整包含時 `composite_daily` 有被寫入。**這不是放寬測試遷就實作**
+  （黃金規則 7），是契約本身依本裁決變更，測試隨之更新。
+- **設計來源**：T-100 已寫下同一規則（「完整包含 composite → 照算、部分包含 → 拒絕」），
+  但該任務因雲端 `--target` 那半邊被使用者暫停。本次只實作子集規則這一半，雲端半邊維持暫停。
+
+
 ### D-056（2026-09-04，已裁決）避雷機制的**容量上界**：10% 劑量下，連完美預言家都達不到 MDD ≤ 30%
 
 - **為什麼先算這個**：下一代「模型只取否決權」的設計，其價值上限**不需要訓練任何模型**就能算——

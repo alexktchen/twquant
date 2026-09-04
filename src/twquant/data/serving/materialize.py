@@ -107,14 +107,18 @@ def _materialize_on(
     as_of: dt.date,
     factors: Sequence[str] | None = None,
 ) -> MaterializeResult:
-    if factors is not None:
-        clash = sorted(set(factors) & set(cfg.composite_factors))
+    # D-057：子集 ⊇ composite 集合時照常重算 composite_daily（與全因子模式同結果）；
+    # 部分重疊則兩害皆有——重算會得到不同的綜合分，不重算則兩張表對同一因子有兩個版本。
+    comp_set = set(cfg.composite_factors)
+    recompute_composite = factors is None or comp_set <= set(factors)
+    if factors is not None and not recompute_composite:
+        clash = sorted(comp_set & set(factors))
         if clash:
-            # 子集模式不重算 composite_daily；若允許含 composite 因子，factor_values 與
-            # composite_daily 就會對同一因子出現兩個版本（T-094 AC-2）。
             raise TwquantError(
-                f"因子子集物化不得含 composite 因子：{', '.join(clash)}"
-                "——composite_daily 不在子集模式重算範圍，請改用全因子物化。"
+                f"因子子集與 composite 集合部分重疊：{', '.join(clash)}"
+                f"——缺少 {', '.join(sorted(comp_set - set(factors)))}。"
+                "請把 composite 因子補齊（子集完整包含即可重算 composite_daily），"
+                "或改用全因子物化。"
             )
     merged = _compute_universe(source, as_of, factors)
     if merged is None:
@@ -126,8 +130,8 @@ def _materialize_on(
         pl.col("value").std().alias("std"),
         pl.len().cast(pl.Int32).alias("n_universe"),
     )
-    if factors is not None:
-        # 子集模式：只寫因子表；composite_daily 維持既有值（子集已保證不含 composite 因子）
+    if not recompute_composite:
+        # 子集模式且與 composite 集合無交集：只寫因子表，composite_daily 維持既有值
         with conn.cursor() as cur:
             upsert(cur, cfg.pg_schema, sch.spec_of("factor_values"), factor_values)
             upsert(cur, cfg.pg_schema, sch.spec_of("factor_cross_stats"), cross)
