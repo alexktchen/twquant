@@ -361,3 +361,77 @@ def delisting_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
         out.append({"stock_id": sid, "delist_date": _date(row, "stock_meta")})
     out.sort(key=lambda r: r["stock_id"])
     return out
+
+
+# ── 除權息事件 → corporate_events（T-098 / D-054）──────────────────────────
+# 為什麼需要：回測與 ML 標籤都用未還原價，除息當天的機械跌幅會被當成虧損。實測
+# 2022-07 之後 77.7% 的事件落在 6~8 月，h=20 標籤在那三個月有 38.2% 的樣本換分位、
+# 原「最差一成」有 17.9% 是除息假象——模型會學到「預測誰要除息」而非預測虧損。
+DIVIDEND_RESULT_DATASET = "TaiwanStockDividendResult"
+
+# 上市與上櫃用**兩套**詞彙指同一件事。只比對一套會靜默丟掉 4,175 筆上櫃現金事件。
+_EVENT_TYPES = {
+    "息": "cash_dividend",
+    "除息": "cash_dividend",
+    "權": "stock_dividend",
+    "除權": "stock_dividend",
+    "權息": "cash_and_stock_dividend",
+    "除權息": "cash_and_stock_dividend",
+}
+# 除權息資訊事先數週公告，故同日 18:00 對 PIT 而言是保守設定（與 stock_valuation 一致）。
+_EVENT_AVAILABLE_HOUR = 18
+
+
+def dividend_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanStockDividendResult` → `corporate_events` 六欄。
+
+    還原因子一律 `after_price / before_price`。**不用** `stock_and_cache_dividend`
+    ——它是除權息**價格落差**，只有現金事件（息／除息）時才等於每股現金；權／權息
+    共 1,933 筆是含配股的合併值（最大殘差 26.78 元）。也**不用** `reference_price`
+    ——它對 651 筆股票股利事件只是複製 `before_price`（未還原）。
+
+    `after = before − stock_and_cache_dividend` 對全部 12,149 筆事件成立（殘差 ≤ 0.01），
+    故 after/before 是唯一不需拆分現金與配股、且對所有事件型別都有定義的推導。
+    """
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        sid = row.get("stock_id")
+        if not isinstance(sid, str) or not sid:
+            continue
+        day = _date(row, "corporate_events")
+        raw_type = row.get("stock_or_cache_dividend")
+        kind = raw_type.strip() if isinstance(raw_type, str) else ""
+        if kind not in _EVENT_TYPES:
+            raise DataError(
+                "corporate_events",
+                day,
+                f"FinMind 出現未知除權息類別 {kind!r}（{sid}）——需先確認它的參考價公式，"
+                "靜默歸類會讓還原因子套錯一整類事件。",
+            )
+        before, after = row.get("before_price"), row.get("after_price")
+        if not isinstance(before, (int, float)) or not isinstance(after, (int, float)):
+            raise DataError(
+                "corporate_events", day, f"除權息價格欄型別非數值（{sid}）：{before!r} / {after!r}"
+            )
+        if before <= 0.0 or after <= 0.0:
+            raise DataError(
+                "corporate_events",
+                day,
+                f"除權息價格須 > 0（{sid}）：before={before} after={after}"
+                "——0 或負值會讓還原因子變成 0／inf／負數，並經累乘污染該股全部歷史。",
+            )
+        out.append(
+            {
+                "date": day,
+                "stock_id": sid,
+                "event_type": _EVENT_TYPES[kind],
+                # 增資價高於市價時 after > before（實測 5 筆），adj_factor > 1 是合法值。
+                "adj_factor": float(after) / float(before),
+                "ref_price": float(after),
+                "available_at": dt.datetime(
+                    day.year, day.month, day.day, _EVENT_AVAILABLE_HOUR, tzinfo=TZ
+                ),
+            }
+        )
+    out.sort(key=lambda r: (r["date"], r["stock_id"]))
+    return out

@@ -177,6 +177,21 @@ MIRROR_SPECS: tuple[TableSpec, ...] = (
         indexes=(("date",),),
     ),
     TableSpec(
+        # T-098／D-054：除權息還原因子。因子與標籤讀它算總報酬；回測引擎**不**讀它
+        # （成交要用可成交的真實價格），改以現金入帳處理（T-113）。
+        "corporate_events",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("event_type", "text"),
+            ("adj_factor", "double precision"),
+            ("ref_price", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("date", "stock_id"),
+        indexes=(("stock_id",),),
+    ),
+    TableSpec(
         "stock_meta",
         (
             ("stock_id", "text"),

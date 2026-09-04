@@ -22,6 +22,7 @@ label:
   adv_window_sessions: 20
   position_notional_twd: 500_000.0
   downside_penalty: 0.25
+  total_return: false # D-054：凍結模型的原始配方＝未含股利；新配置一律 true
 split:
   train_min_years: 2.0
   test_months: 3

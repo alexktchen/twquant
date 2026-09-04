@@ -1975,11 +1975,16 @@ def ml_train(
     from twquant.backtest.costs import CostConfig
     from twquant.config import config_hash, load_config
     from twquant.data.serving import store
-    from twquant.data.serving.ml_store import read_prices_open, read_prices_training
+    from twquant.data.serving.ml_store import (
+        read_corporate_events,
+        read_prices_open,
+        read_prices_training,
+    )
     from twquant.ml import train as mlt
     from twquant.ml.dataset import (
         assemble,
         assert_feature_coverage,
+        attach_adjustment,
         cost_adjusted_return_labels,
         excess_rank_labels,
         forward_open_returns,
@@ -1987,6 +1992,14 @@ def ml_train(
     from twquant.ml.splits import walk_forward_splits
 
     cfg = _load_ml(config)
+    if cfg.label.total_return is None:
+        # D-054：不給預設值是刻意的。未還原的標籤在 6~8 月有近兩成「輸家」是除息
+        # 假象，而除息日事先公告 → 模型會學到「預測誰要除息」且驗收看起來會過關。
+        raise typer.BadParameter(
+            f"{config} 的 label 未指定 total_return（D-054）。"
+            "含股利的總報酬標籤請寫 `total_return: true`；"
+            "要重現舊模型的訓練配方請明寫 `total_return: false`。"
+        )
     sys_cfg = _load_system()
     start, end = dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
     scfg = _load_serving()
@@ -1999,6 +2012,9 @@ def ml_train(
             if cfg.label.transform == "cost_adjusted_return"
             else read_prices_open(conn, scfg.pg_schema, start, end)
         )
+        events = (
+            read_corporate_events(conn, scfg.pg_schema, end) if cfg.label.total_return else None
+        )
     finally:
         conn.close()
     # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
@@ -2009,6 +2025,9 @@ def ml_train(
         cast("dt.date | None", px["date"].max()),
     )
     typer.echo(f"prices {px.height} 列（{px_lo} ~ {px_hi}）")
+    if events is not None:
+        px = attach_adjustment(px, events)
+        typer.echo(f"除權息事件 {events.height} 筆 → 標籤改用總報酬（D-054）")
     cost_cfg: CostConfig | None = None
     if cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
@@ -2019,9 +2038,12 @@ def ml_train(
             position_notional_twd=cfg.label.position_notional_twd,
             downside_penalty=cfg.label.downside_penalty,
             cost_cfg=cost_cfg,
+            adjusted=cfg.label.total_return,
         )
     else:
-        labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
+        labels = excess_rank_labels(
+            forward_open_returns(px, cfg.horizon_days, adjusted=cfg.label.total_return)
+        )
     # T-088 AC-3：任一 pin 特徵在 factor_values 全空即拒絕訓練（Phase 1 曾以 3 個空特徵訓練並回報成功）
     shares = assert_feature_coverage(feats)
     sparsest = sorted(shares.items(), key=lambda kv: kv[1])[:5]

@@ -6,29 +6,81 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
 
 
-def forward_open_returns(prices: pl.DataFrame, horizon: int) -> pl.DataFrame:
+def attach_adjustment(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
+    """為 prices 掛上累積除權息還原因子 `adj`（T-098／D-054）。純函數。
+
+    `adj(t) = Π{ adj_factor(e) : ex_date(e) ≤ t }`——**固定過去錨**，只依賴 t 以前的
+    事件，故與 as_of 無關。錨之前的事件對報酬比值 `adj(t1)/adj(t2)` 恆等抵銷，
+    所以只載入所需期間的事件即可。
+
+    以 as-of join（backward）而非等值 join：實測約 5.75% 的除權息日在 `prices_daily`
+    沒有對應列（颱風休市、停牌），等值 join 會**靜默**丟掉那些調整。
+    """
+    if events.is_empty():
+        return prices.with_columns(adj=pl.lit(1.0, dtype=pl.Float64))
+    bad = events.filter(pl.col("adj_factor").is_null() | (pl.col("adj_factor") <= 0.0))
+    if bad.height:
+        raise ValueError(
+            f"adj_factor 須 > 0 且非 null，違規 {bad.height} 列（首列：{bad.row(0)}）"
+            "——0 或負值會經累乘污染該股全部歷史"
+        )
+    cum = (
+        events.select("date", "stock_id", "adj_factor")
+        .sort("stock_id", "date")
+        .with_columns(adj=pl.col("adj_factor").cum_prod().over("stock_id"))
+        .select("stock_id", "date", "adj")
+        .sort("date")
+    )
+    return (
+        prices.sort("date")
+        .join_asof(cum, on="date", by="stock_id", strategy="backward")
+        .with_columns(adj=pl.col("adj").fill_null(1.0))
+    )
+
+
+def _return_price(adjusted: bool, columns: Sequence[str]) -> pl.Expr:
+    """報酬用價格：`adjusted` 時除以累積還原因子 `adj`（T-098／D-054）。
+
+    `adj` 是固定過去錨的累乘（只含 ex_date ≤ 該列日期的事件），故與 as_of 無關。
+    缺欄卻要求還原 → raise：靜默回退成價格報酬正是 D-054 要消滅的失效模式。
+    """
+    if not adjusted:
+        return pl.col("open")
+    if "adj" not in columns:
+        raise ValueError(
+            "adjusted=True 需要 adj 欄（固定過去錨的累積除權息還原因子）；"
+            "缺欄時不得回退成未還原價格——6~8 月的標籤會有近兩成是除息假象（D-054）"
+        )
+    return pl.col("open") / pl.col("adj")
+
+
+def forward_open_returns(
+    prices: pl.DataFrame, horizon: int, *, adjusted: bool = False
+) -> pl.DataFrame:
     """open(t+1) → open(t+1+h) 前向報酬。輸入需含 (date, stock_id, open)。
 
     「t+1」是各股票自身的下一個有行情列——停牌期間不可成交，進出場順延（與回測
     引擎的可成交語意一致）。未來列不足者 fwd_ret 為 null（保留列，不靜默丟棄）。
+
+    `adjusted=True` 時改算**總報酬**（含股利），需另含 `adj` 欄。標籤是前瞻構造，
+    不受 `assert_no_lookahead` 與還原價錨定規則（D-055）約束。
     """
     if horizon < 1:
         raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
+    px = _return_price(adjusted, prices.columns)
     return (
         prices.sort("stock_id", "date")
         .with_columns(
-            (
-                pl.col("open").shift(-(1 + horizon)).over("stock_id")
-                / pl.col("open").shift(-1).over("stock_id")
-                - 1.0
-            ).alias("fwd_ret")
+            (px.shift(-(1 + horizon)).over("stock_id") / px.shift(-1).over("stock_id") - 1.0).alias(
+                "fwd_ret"
+            )
         )
         .select("date", "stock_id", "fwd_ret")
         .sort("date", "stock_id")
@@ -64,8 +116,14 @@ def cost_adjusted_return_labels(
     position_notional_twd: float,
     downside_penalty: float,
     cost_cfg: CostConfig,
+    adjusted: bool = False,
 ) -> pl.DataFrame:
-    """建立 H 日成本後超額報酬標籤；ADV 僅含訊號日及以前資料。"""
+    """建立 H 日成本後超額報酬標籤；ADV 僅含訊號日及以前資料。
+
+    `adjusted=True` 時毛報酬改用還原價（總報酬，T-098／D-054），但**成本仍用真實
+    成交價**——滑價的半價差是價格相依的（`costs.py:_half_spread_frac`），股數也由
+    真實價決定；用還原價會同時算錯這兩項。
+    """
     required = {"date", "stock_id", "open", "amount"}
     missing = sorted(required - set(prices.columns))
     if missing:
@@ -98,11 +156,15 @@ def cost_adjusted_return_labels(
         )
         return (buy.total + sell.total) / (entry * shares)
 
+    px_ret = _return_price(adjusted, prices.columns)
     prepared = (
         prices.sort("stock_id", "date")
         .with_columns(
             pl.col("open").shift(-1).over("stock_id").alias("_entry"),
             pl.col("open").shift(-(1 + horizon)).over("stock_id").alias("_exit"),
+            # 報酬基準價：adjusted 時為還原價，否則與 _entry/_exit 同值
+            px_ret.shift(-1).over("stock_id").alias("_entry_r"),
+            px_ret.shift(-(1 + horizon)).over("stock_id").alias("_exit_r"),
             pl.col("amount")
             .rolling_median(window_size=adv_window_sessions, min_samples=adv_window_sessions)
             .over("stock_id")
@@ -112,8 +174,13 @@ def cost_adjusted_return_labels(
             # schema 允許 open >= 0，故 0 是合法值；但 SPEC-011 §2 要求「價格無效」時
             # label 為 null。少了這道防護，除以 0 會得到 inf，再被下一步的當日均值
             # 擴散到整個橫斷面（成本路徑早已有相同判斷，見 estimated_cost_rate）。
-            pl.when((pl.col("_entry") > 0.0) & (pl.col("_exit") > 0.0))
-            .then(pl.col("_exit") / pl.col("_entry") - 1.0)
+            pl.when(
+                (pl.col("_entry") > 0.0)
+                & (pl.col("_exit") > 0.0)
+                & (pl.col("_entry_r") > 0.0)
+                & (pl.col("_exit_r") > 0.0)
+            )
+            .then(pl.col("_exit_r") / pl.col("_entry_r") - 1.0)
             .otherwise(pl.lit(None, dtype=pl.Float64))
             .alias("_gross"),
             pl.struct("_entry", "_exit", "_adv")

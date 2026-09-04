@@ -229,3 +229,172 @@ def test_t088_ac3_healthy_features_pass_and_report_shares() -> None:
     }
     shares = assert_feature_coverage(feats)
     assert shares == {"a": pytest.approx(0.5), "b": pytest.approx(1.0)}
+
+
+# ── T-098／D-054：股利還原後的總報酬標籤 ────────────────────────────────
+#
+# 實測（DECISIONS.md D-054）：未還原時 6–8 月有 38.2% 的樣本換分位、原「最差一成」
+# 有 17.9% 是除息假象。標籤是前瞻構造，不受 assert_no_lookahead 與還原價錨定規則
+# （D-055）約束，故可獨立於因子端先行。
+
+
+def _px_with_adj() -> pl.DataFrame:
+    """1101 在 D4 除息（價格 100 → 90，adj_factor 0.9）；1102 全程平盤無事件。
+
+    `adj` 是**固定過去錨**的累積還原因子：只含 ex_date <= 該列日期的事件，
+    故與 as_of 無關（這正是它能通過 bit-exact 比較的原因）。
+    """
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3, 4, 5, 8, 9, 10)]
+    rows = []
+    for i, d in enumerate(days):
+        ex_passed = i >= 3
+        rows.append(
+            {
+                "date": d,
+                "stock_id": "1101",
+                "open": 90.0 if ex_passed else 100.0,
+                "adj": 0.9 if ex_passed else 1.0,
+                "amount": 5.0e8,
+            }
+        )
+        rows.append({"date": d, "stock_id": "1102", "open": 100.0, "adj": 1.0, "amount": 5.0e8})
+    return pl.DataFrame(rows)
+
+
+def test_ac3_forward_open_returns_total_return_removes_ex_dividend_drop() -> None:
+    """除息造成的機械跌幅不是虧損。未還原時 1101 看起來 −10%，還原後應為 0%。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    px = _px_with_adj()
+    d0 = dt.date(2024, 7, 1)  # entry = open(D2)=100 / 100，exit = open(D4)=90 / 100
+    raw = forward_open_returns(px.drop("adj"), 2)
+    adj = forward_open_returns(px, 2, adjusted=True)
+
+    def at(f: pl.DataFrame, sid: str) -> float:
+        return float(f.filter((pl.col("date") == d0) & (pl.col("stock_id") == sid))["fwd_ret"][0])
+
+    assert at(raw, "1101") == pytest.approx(-0.1)
+    assert at(raw, "1102") == pytest.approx(0.0)
+    assert at(adj, "1101") == pytest.approx(0.0)
+    assert at(adj, "1102") == pytest.approx(0.0)
+
+
+def test_ac3_total_return_label_no_longer_ranks_ex_dividend_stock_last() -> None:
+    """這條是 D-054 的核心：未還原時除息股被標成當日最差，還原後與同儕並列。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    px = _px_with_adj()
+    d0 = dt.date(2024, 7, 1)
+    raw = excess_rank_labels(forward_open_returns(px.drop("adj"), 2))
+    adj = excess_rank_labels(forward_open_returns(px, 2, adjusted=True))
+
+    def lab(f: pl.DataFrame, sid: str) -> float:
+        return float(f.filter((pl.col("date") == d0) & (pl.col("stock_id") == sid))["label"][0])
+
+    assert lab(raw, "1101") < lab(raw, "1102")  # 除息股被判為輸家
+    assert lab(adj, "1101") == lab(adj, "1102")  # 還原後打平
+
+
+def test_ac3_adjusted_requires_adj_column() -> None:
+    """缺 adj 欄卻要求還原＝靜默回退成價格報酬，正是 D-054 要消滅的失效模式。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    with pytest.raises(ValueError, match="adj"):
+        forward_open_returns(_px_with_adj().drop("adj"), 2, adjusted=True)
+
+
+def test_ac3_adjusted_is_identity_when_no_events() -> None:
+    """adj 恆為 1（該股全期無除權息）時，還原版必須與原版 bit-identical。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    px = _px_with_adj().filter(pl.col("stock_id") == "1102")
+    assert forward_open_returns(px, 2, adjusted=True).equals(
+        forward_open_returns(px.drop("adj"), 2)
+    )
+
+
+def test_ac3_cost_model_uses_raw_price_not_adjusted() -> None:
+    """成本必須用**可成交的真實價格**算：滑價的半價差是價格相依的
+    （`costs.py:_half_spread_frac` = max(0.5×tick/price, 5bps)），股數也由真實價決定。
+
+    兩檔股票的**還原後**價格序列完全相同（皆 100），但真實價分別是 11 與 99。
+    毛報酬因此相同、超額為 0，label 只剩成本項——若成本誤用還原價，兩者會相等。
+    """
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3, 4, 5, 8)]
+    rows = []
+    for d in days:
+        rows.append({"date": d, "stock_id": "1101", "open": 11.0, "adj": 0.11, "amount": 5.0e8})
+        rows.append({"date": d, "stock_id": "1102", "open": 99.0, "adj": 0.99, "amount": 5.0e8})
+    px = pl.DataFrame(rows)
+    out = cost_adjusted_return_labels(
+        px,
+        horizon=2,
+        adv_window_sessions=2,
+        position_notional_twd=500_000.0,
+        downside_penalty=0.0,
+        cost_cfg=CostConfig(),
+        adjusted=True,
+        # 取第二列：adv_window_sessions=2 需要兩列才有 ADV，首列的成本必為 null
+    ).filter(pl.col("date") == dt.date(2024, 7, 2))
+    by = {r["stock_id"]: r["label"] for r in out.to_dicts()}
+    assert by["1101"] is not None and by["1102"] is not None
+    assert by["1101"] < 0.0 and by["1102"] < 0.0  # 毛報酬 0 → label 純成本
+    assert by["1101"] != by["1102"], "成本未反映真實價格水準（疑似誤用還原價）"
+
+
+def test_ac3_attach_adjustment_is_cumulative_and_asof() -> None:
+    """累積還原因子：固定過去錨（只含 ex_date ≤ 該列日期的事件）。
+
+    實測約 5.75% 的除息日在 prices_daily 沒有對應列（颱風休市、停牌）。內連接會
+    靜默丟掉那些事件的調整，故必須 as-of：調整從**下一個有行情的交易日**起生效。
+    """
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, d), "stock_id": "1101", "open": 100.0}
+            for d in (1, 2, 4, 5, 8)
+        ]  # 7/3 無行情列
+    )
+    ev = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, 2), "stock_id": "1101", "adj_factor": 0.9},
+            {"date": dt.date(2024, 7, 3), "stock_id": "1101", "adj_factor": 0.5},  # 該日無行情
+        ]
+    )
+    got = {r["date"]: r["adj"] for r in attach_adjustment(px, ev).to_dicts()}
+    assert got[dt.date(2024, 7, 1)] == pytest.approx(1.0)
+    assert got[dt.date(2024, 7, 2)] == pytest.approx(0.9)
+    # 7/3 的事件沒有行情列，但不得遺失：從 7/4 起併入累積
+    assert got[dt.date(2024, 7, 4)] == pytest.approx(0.45)
+    assert got[dt.date(2024, 7, 8)] == pytest.approx(0.45)
+
+
+def test_ac3_attach_adjustment_leaves_eventless_stocks_at_one() -> None:
+    """無事件的股票 adj 恆為 1.0，且不得因 join 丟列。"""
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, d), "stock_id": s, "open": 100.0}
+            for d in (1, 2)
+            for s in ("1101", "1102")
+        ]
+    )
+    ev = pl.DataFrame([{"date": dt.date(2024, 7, 2), "stock_id": "1101", "adj_factor": 0.9}])
+    out = attach_adjustment(px, ev)
+    assert out.height == px.height
+    assert out.filter(pl.col("stock_id") == "1102")["adj"].to_list() == [1.0, 1.0]
+
+
+def test_ac3_attach_adjustment_rejects_nonpositive_factor() -> None:
+    """adj ≤ 0 會讓還原價變成 0／負數，並經累乘污染該股全部歷史（黃金規則 5）。"""
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "open": 100.0}])
+    ev = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "adj_factor": 0.0}])
+    with pytest.raises(ValueError, match="adj_factor"):
+        attach_adjustment(px, ev)

@@ -44,6 +44,7 @@ label:
   execution: next_open
   excess: market_mean
   transform: rank_pct
+  total_return: false # D-054：凍結模型的原始配方＝未含股利；新配置一律 true
 split:
   train_min_years: 2.0
   test_months: 3

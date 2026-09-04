@@ -127,6 +127,10 @@ class MlLabelConfig(BaseConfig):
     adv_window_sessions: int = Field(default=20, ge=1)
     position_notional_twd: float = Field(default=500_000.0, gt=0.0)
     downside_penalty: float = Field(default=0.25, ge=0.0)
+    # T-098／D-054：標籤是否含股利（總報酬）。**None ＝ 未表態，`ml train` 拒絕執行**
+    # ——未還原時 6~8 月的 h=20 標籤有 38.2% 樣本換分位、原「最差一成」17.9% 是除息
+    # 假象；若給預設值，忘了寫的配置會靜默沿用被污染的標籤（黃金規則 5）。
+    total_return: bool | None = None
 
 
 class MlSplitConfig(BaseConfig):
