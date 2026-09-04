@@ -2078,6 +2078,16 @@ def ml_train(
             "train_end": train_end.isoformat(),
             "features": features,
             "config_hash": mlt.training_config_hash(cfg, cost_cfg),
+            # T-073：artifact 的身分＝配置 × 程式碼 × 資料。三者任一變了就是不同的模型，
+            # save_model 會據此拒絕「同 id 不同內容」的覆寫。
+            "artifact_fingerprint": mlt.artifact_fingerprint(
+                config=mlt.training_config_hash(cfg, cost_cfg),
+                code=mlt.training_code_hash(),
+                data=mlt.training_data_hash(frame),
+            ),
+            "code_hash": mlt.training_code_hash(),
+            "data_hash": mlt.training_data_hash(frame),
+            "data_rows": frame.height,
             "ml_config_hash": config_hash(cfg),
             "cost_config_hash": config_hash(cost_cfg) if cost_cfg is not None else None,
             "label": cfg.label.model_dump(mode="json"),
