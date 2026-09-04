@@ -11,13 +11,12 @@ STRATEGY/TASKS 標註，接上後於此啟用。
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import TYPE_CHECKING
 
 import polars as pl
 
 if TYPE_CHECKING:
-    import datetime as dt
-
     from twquant.data.warehouse import PitView
     from twquant.strategy.config import UniverseConfig
 
@@ -68,4 +67,28 @@ def universe_ids(view: PitView, signal_date: dt.date, cfg: UniverseConfig) -> li
         at = at.filter(pl.col("_adv") >= cfg.min_adv_twd)
     if cfg.min_price is not None:
         at = at.filter(pl.col("close") >= cfg.min_price)
-    return sorted(at.select("stock_id").collect()["stock_id"].to_list())
+    ids = sorted(at.select("stock_id").collect()["stock_id"].to_list())
+    if cfg.min_roe is not None:
+        ids = _quality_gate(view, signal_date, ids, cfg.min_roe)
+    return ids
+
+
+def _quality_gate(view: PitView, signal_date: dt.date, ids: list[str], min_roe: float) -> list[str]:
+    """D-059／T-119：TTM ROE 低於門檻者移出宇宙，**null 一律排除**。
+
+    走與因子同一條 `compute`（因而同一條 PitView），故 PIT 語意一致、不另開讀取路徑。
+    濾網必須在因子的橫斷面標準化**之前**作用——否則被剔除的股票仍會影響 z 分數。
+
+    為什麼 null 要排除：「不知道它是不是品質股」不等於「它是品質股」。把缺值當成通過，
+    等於讓沒有財報的新股與非標準公司整批繞過濾網，是靜默放行（黃金規則 5 的精神）。
+    """
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發因子註冊
+    from twquant.factors.compute import compute
+
+    roe = compute(["fundamental.roe"], view, dates=[signal_date])
+    keep = set(
+        roe.filter(pl.col("value").is_not_null() & (pl.col("value") >= min_roe))[
+            "stock_id"
+        ].to_list()
+    )
+    return [s for s in ids if s in keep]

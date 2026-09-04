@@ -32,6 +32,10 @@ class UniverseConfig(BaseConfig):
     # 休市（2025 年 1/22→2/03 隔 12 曆日、0 個漏掉的開市日），用曆日會把整個宇宙同時
     # 判為資料事件。門檻 5 由舊值等效換算（10 曆日跨週末約當 6~7 個開市日）。
     max_gap_sessions: int | None = 5  # 相鄰列漏掉的開市日數上限；None 停用
+    # D-059／T-119：品質硬濾網。TTM ROE 低於此值者在**排序之前**移出宇宙；
+    # None（預設）＝停用，輸出與加入本欄位之前逐位元相同。
+    # 事前寫定：ROE 為 null 一律排除——「不知道是不是品質股」不等於「是品質股」。
+    min_roe: float | None = None
     hygiene_lookback: int = 60  # 衛生濾網回看列數
 
 

@@ -323,3 +323,84 @@ def test_parent_line_wins_over_consolidated_fallback(tmp_path: Path) -> None:
     ).with_columns(type=pl.lit("IncomeAfterTaxes"), value=pl.col("value") * 3.0)
     got = _vals(_wh(tmp_path / "b", _DAYS, pl.concat([st, bogus])), "fundamental.roe", _DAYS[-1])
     assert got["1101"] == pytest.approx(base["1101"])
+
+
+# ── T-119／D-059：宇宙層的品質硬濾網 ────────────────────────────────
+#
+# 測試放在本檔而非 test_strategy.py，是因為財報 fixture（`_statements`／`_wh`）在這裡；
+# 受測對象是 `strategy.universe.universe_ids`。
+
+
+def test_ac1_min_roe_filters_universe_by_quality(tmp_path: Path) -> None:
+    """`min_roe` 在**排序之前**把低 ROE 的股票移出池子（D-059 的機轉）。"""
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    day = _DAYS[-1]
+    roe = _vals(wh, "fundamental.roe", day)
+    assert len(roe) == 2, f"fixture 應有兩檔 ROE，得到 {roe}"
+    lo_id, hi_id = sorted(roe, key=lambda s: roe[s])
+    mid = (roe[lo_id] + roe[hi_id]) / 2
+
+    base = UniverseConfig(
+        min_adv_twd=None, min_price=None, max_jump_ratio=None, max_gap_sessions=None
+    )
+    assert set(universe_ids(wh.view(day), day, base)) == {lo_id, hi_id}
+    kept = universe_ids(wh.view(day), day, base.model_copy(update={"min_roe": mid}))
+    assert kept == [hi_id], f"門檻 {mid:.4f} 應只留 {hi_id}（ROE {roe}）"
+
+
+def test_ac1_min_roe_none_is_bit_identical(tmp_path: Path) -> None:
+    """未啟用時輸出必須與加此功能之前逐位元相同——既有 12 個策略配置都沒有這個欄位。"""
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    day = _DAYS[-1]
+    cfg = UniverseConfig(min_adv_twd=None, min_price=None)
+    assert cfg.min_roe is None
+    assert universe_ids(wh.view(day), day, cfg) == universe_ids(
+        wh.view(day), day, cfg.model_copy(update={"min_roe": None})
+    )
+
+
+def test_ac1_null_roe_is_excluded_not_kept(tmp_path: Path) -> None:
+    """D-059 事前寫定：ROE 為 null 一律排除。
+
+    「不知道它是不是品質股」不等於「它是品質股」。把缺值當成通過，等於讓沒有財報的
+    新股與非標準公司整批繞過濾網——那是靜默放行（黃金規則 5 的精神）。
+    """
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    # 只給 1101 財報；2330 無財報 → ROE null
+    st = _statements().filter(pl.col("stock_id") == "1101")
+    wh = _wh(tmp_path, st=st)
+    day = _DAYS[-1]
+    base = UniverseConfig(
+        min_adv_twd=None, min_price=None, max_jump_ratio=None, max_gap_sessions=None
+    )
+    assert set(universe_ids(wh.view(day), day, base)) == {"1101", "2330"}
+    kept = universe_ids(wh.view(day), day, base.model_copy(update={"min_roe": -1e9}))
+    assert kept == ["1101"], "ROE 為 null 的 2330 不得因門檻極低而被放行"
+
+
+def test_ac1_min_roe_respects_pit_cutoff(tmp_path: Path) -> None:
+    """濾網只能看訊號日**當下可得**的財報——與因子走同一條 PitView，不得繞過。
+
+    以年報法定申報期限為界：期限當日 20:00 的 as_of 看不到，隔日看得到（同 test_ac_*_pit）。
+    """
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    base = UniverseConfig(
+        min_adv_twd=None, min_price=None, max_jump_ratio=None, max_gap_sessions=None
+    )
+    day = _DAYS[-1]
+    roe = _vals(wh, "fundamental.roe", day)
+    hi = max(roe, key=lambda s: roe[s])
+    # 門檻設在兩檔之間 → 只留高的那檔；濾網若讀到未來財報，留下的集合會改變
+    mid = sum(roe.values()) / 2
+    assert universe_ids(wh.view(day), day, base.model_copy(update={"min_roe": mid})) == [hi]
