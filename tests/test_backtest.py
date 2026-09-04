@@ -298,3 +298,34 @@ def test_backtest_deterministic_across_processes(tmp_path: Path) -> None:
 
     a, b = _run("0"), _run("1")
     assert a == b and a != ""
+
+
+def test_slippage_model_none_removes_only_slippage() -> None:
+    """`slippage.model: none` 關掉滑價，手續費與稅照算。
+
+    為什麼需要：`half_spread_bps` 只是**下限**——跳動點半價差
+    `max(0.5×tick/價, half_spread_bps)` 恆常套用，把 bps 設 0 也關不掉滑價。
+    要與「未假設滑價」的外部回測（如 finlab `sim()`）同口徑比較，就需要一個明確的關閉開關；
+    `slippage.model` 這個欄位本來就是為此存在（既有值 `adv_impact`）。
+    """
+    off = ct.CostConfig(slippage=ct.SlippageConfig(model="none"))
+    buy = ct.trade_cost(side="buy", price=500.0, shares=1000, participation=0.5, cfg=off)
+    sell = ct.trade_cost(side="sell", price=500.0, shares=1000, participation=0.5, cfg=off)
+    assert buy.slippage == 0.0 and sell.slippage == 0.0
+    assert buy.commission == pytest.approx(500_000 * 0.001425 * 0.35)
+    assert sell.tax == pytest.approx(500_000 * 0.003)
+    # 預設模型仍照算（不得因新增選項而改變既有行為）
+    on = ct.trade_cost(side="buy", price=500.0, shares=1000, participation=0.5, cfg=_CC)
+    assert on.slippage > 0.0
+
+
+def test_unknown_slippage_model_raises() -> None:
+    """未知模型名不得靜默當成無滑價——那會讓成本悄悄少算（黃金規則 5）。"""
+    with pytest.raises(ValueError, match="slippage"):
+        ct.trade_cost(
+            side="buy",
+            price=100.0,
+            shares=1000,
+            participation=0.0,
+            cfg=ct.CostConfig(slippage=ct.SlippageConfig(model="bogus")),
+        )

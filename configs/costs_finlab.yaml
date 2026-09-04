@@ -1,0 +1,21 @@
+# FinLab `sim()` 口徑的成本設定（僅供對照，不用於本專案的晉升判定）。
+#
+# 依 finlab.finance 公開的方法表：「手續費 0.1425% + 賣出證交稅 0.3%」、
+# 「未額外假設滑價；未估算策略容量」。故此處：
+#   - 手續費不打折（discount = 1.0），與本專案預設的 0.35 折不同
+#   - 滑價全部歸零（本專案預設含價格相依半價差與 √參與率 衝擊）
+#
+# 兩者來回成本量級接近但組成不同：
+#   本專案 0.0499%×2 + 0.30% + 約 0.25% 滑價 ≈ 0.648%
+#   本設定 0.1425%×2 + 0.30% + 0                = 0.585%
+commission_rate: 0.001425
+commission_discount: 1.0
+commission_min_twd: 20.0
+tax_rate_sell: 0.003
+cost_scale: 1.0
+slippage:
+  model: none # 完全無滑價，對齊 finlab 的「未額外假設滑價」
+  half_spread_bps: 0.0
+  k_bps: 0.0
+data_guard:
+  jump_ratio: 0.35
