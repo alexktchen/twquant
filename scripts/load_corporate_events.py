@@ -24,6 +24,7 @@ import polars as pl
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from twquant.config import ServingConfig
 from twquant.data import schemas
+from twquant.data.clean import inconsistent_events
 from twquant.data.serving import schema as sch
 from twquant.data.serving import store
 from twquant.data.serving.sync import upsert
@@ -41,9 +42,18 @@ def main() -> None:
     ap.add_argument("--lake", default="D:/project/twquant/data/lake_rebuild")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--write", action="store_true")
+    # 台股單日漲跌幅上限。除權息當日的成交價必須落在「參考價 ± 漲跌幅」內，
+    # 超出即代表該還原因子不可能是對的（複查實測 6 筆，其中 3 筆當日其實是漲停）。
+    ap.add_argument("--max-deviation", type=float, default=0.10)
+    ap.add_argument(
+        "--drop-inconsistent",
+        action="store_true",
+        help="與行情矛盾的事件改為排除（逐筆列出）；不給此旗標則直接中止。",
+    )
     args = ap.parse_args()
     if not (args.check or args.write):
         raise SystemExit("請指定 --check 或 --write")
+    excluded: list[tuple[object, str]] = []
 
     staging = pathlib.Path(args.staging)
     if not staging.exists():
@@ -78,6 +88,43 @@ def main() -> None:
         flush=True,
     )
 
+    # 與行情交叉驗證：假事件會讓累積因子憑空縮小，把該股連續 h 個訊號日推到
+    # 橫斷面前段——與 D-054 方向相反、性質相同的「公司行動日曆」洩漏。
+    cfg0 = ServingConfig(pg_schema="serving")
+    with store.connect(cfg0) as conn, conn.cursor() as cur:
+        cur.execute(f'SELECT date, stock_id, open, close FROM "{cfg0.pg_schema}"."prices_daily"')
+        px = pl.DataFrame(
+            cur.fetchall(),
+            schema={
+                "date": pl.Date,
+                "stock_id": pl.String,
+                "open": pl.Float64,
+                "close": pl.Float64,
+            },
+            orient="row",
+        )
+    bad = inconsistent_events(out, px, max_deviation=args.max_deviation)
+    if bad.height:
+        print(
+            "",
+            f"與行情矛盾 {bad.height} 筆"
+            f"（|open ÷ (adj_factor × 前收) − 1| > {args.max_deviation:.0%}）：",
+            flush=True,
+        )
+        print(
+            bad.select(
+                "date", "stock_id", "event_type", "adj_factor", "open", "prev_close", "deviation"
+            )
+        )
+        if not args.drop_inconsistent:
+            raise SystemExit(
+                "還原因子與行情矛盾——不得靜默載入（黃金規則 5）。逐筆確認後，"
+                "以 --drop-inconsistent 排除，或修正來源對映。"
+            )
+        out = out.join(bad.select("date", "stock_id"), on=["date", "stock_id"], how="anti")
+        print(f"已排除 → 保留 {out.height:,} 筆", flush=True)
+        excluded = [(r["date"], r["stock_id"]) for r in bad.to_dicts()]
+
     if args.check:
         print("\n--check 完成，未寫入。", flush=True)
         return
@@ -89,6 +136,13 @@ def main() -> None:
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
         with conn.cursor() as cur:
+            # upsert 不會刪列：先前載入過的矛盾事件必須明確移除，否則它們留在表中
+            # 繼續污染累積因子（--drop-inconsistent 的語意是「不要這些事件」）。
+            for day, sid in excluded:
+                cur.execute(
+                    f'DELETE FROM "{cfg.pg_schema}"."{TABLE}" WHERE date = %s AND stock_id = %s',
+                    (day, sid),
+                )
             upsert(cur, cfg.pg_schema, spec, out.select([c for c, _ in spec.columns]))
         conn.commit()
     print(f"\n已寫入湖與 PG：{out.height:,} 筆", flush=True)

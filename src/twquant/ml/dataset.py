@@ -24,7 +24,14 @@ def attach_adjustment(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFram
     沒有對應列（颱風休市、停牌），等值 join 會**靜默**丟掉那些調整。
     """
     if events.is_empty():
-        return prices.with_columns(adj=pl.lit(1.0, dtype=pl.Float64))
+        # 靜默回傳 adj=1.0 會讓 total_return=True 的訓練**原樣退回未還原標籤**，
+        # 而呼叫端仍會印「標籤改用總報酬」——正是 D-054 要消滅的失效模式。
+        # 本函數只在呼叫端已選擇 total_return 時才被呼叫，故空表一定是錯誤狀態。
+        raise ValueError(
+            "corporate_events 讀到 0 筆事件，但標籤已要求總報酬（D-054）。"
+            "空事件表會靜默退回未還原標籤——6~8 月近兩成的「最差一成」是除息假象。"
+            "請先確認供應層 corporate_events 已載入（scripts/load_corporate_events.py）。"
+        )
     bad = events.filter(pl.col("adj_factor").is_null() | (pl.col("adj_factor") <= 0.0))
     if bad.height:
         raise ValueError(
@@ -75,12 +82,18 @@ def forward_open_returns(
     if horizon < 1:
         raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
     px = _return_price(adjusted, prices.columns)
+    entry = px.shift(-1).over("stock_id")
+    exit_ = px.shift(-(1 + horizon)).over("stock_id")
     return (
         prices.sort("stock_id", "date")
         .with_columns(
-            (px.shift(-(1 + horizon)).over("stock_id") / px.shift(-1).over("stock_id") - 1.0).alias(
-                "fwd_ret"
-            )
+            # schema 允許 open >= 0，故 0 是合法值。未防護時 open(t+1)=0 → +inf，
+            # 而 excess_rank_labels 的 mean().over("date") 會把 inf 擴散到整個橫斷面，
+            # 讓當日所有 label 塌成同一個常數。成本感知路徑早有同一道防護。
+            pl.when((entry > 0.0) & (exit_ > 0.0))
+            .then(exit_ / entry - 1.0)
+            .otherwise(pl.lit(None, dtype=pl.Float64))
+            .alias("fwd_ret")
         )
         .select("date", "stock_id", "fwd_ret")
         .sort("date", "stock_id")

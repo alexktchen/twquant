@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import polars as pl
 import pytest
 
 from twquant.conventions import TZ
@@ -185,3 +186,74 @@ def test_ac2_corporate_events_is_a_mirror_table() -> None:
     spec = next(s for s in sch.MIRROR_SPECS if s.name == "corporate_events")
     assert spec.pk == ("date", "stock_id")
     assert dict(spec.columns)["adj_factor"] == "double precision"
+
+
+# ── 複查發現的四個缺口（2026-09-04 對抗式複查，8/19 通過驗證）──────────────
+
+
+def test_ac2_inconsistent_events_flags_factor_contradicted_by_prices() -> None:
+    """還原因子若與行情矛盾，會製造反向的「公司行動日曆」洩漏——正是 D-054 要消滅的東西。
+
+    實測 6 筆（6225／2429／1475／9105／3321／2718）如此，其中 3 筆在宣稱的除權日
+    其實是**漲停**。單筆的假影響 = 1/adj_factor（6225 為 +47.8%），會讓該股連續 h 個
+    訊號日排在約 1,800 檔橫斷面的前 3%。
+    """
+    import datetime as dt
+
+    from twquant.data.clean import inconsistent_events
+
+    ev = pl.DataFrame(
+        [
+            # 6225：宣稱 44.4 → 30.04（−32%），但當日其實漲停到 48.8
+            {"date": dt.date(2026, 8, 18), "stock_id": "6225", "adj_factor": 30.04 / 44.4},
+            # 正常現金除息：前收 125.5 → 開盤 119（參考價 120.74，落在漲跌幅內）
+            {"date": dt.date(2024, 7, 4), "stock_id": "2412", "adj_factor": 120.74 / 125.5},
+        ]
+    )
+    px = pl.DataFrame(
+        [
+            {"date": dt.date(2026, 8, 17), "stock_id": "6225", "open": 44.4, "close": 44.4},
+            {"date": dt.date(2026, 8, 18), "stock_id": "6225", "open": 48.8, "close": 48.8},
+            {"date": dt.date(2024, 7, 3), "stock_id": "2412", "open": 125.0, "close": 125.5},
+            {"date": dt.date(2024, 7, 4), "stock_id": "2412", "open": 119.0, "close": 118.5},
+        ]
+    )
+    bad = inconsistent_events(ev, px, max_deviation=0.10)
+    assert bad["stock_id"].to_list() == ["6225"]
+    assert abs(bad["deviation"][0]) > 0.10
+
+
+def test_ac2_inconsistent_events_keeps_events_without_price_rows() -> None:
+    """約 5.75% 的除權息日在 prices_daily 無對應列（颱風休市、停牌）。
+    無從比對 ≠ 有問題——不得把它們判為矛盾而丟掉。"""
+    import datetime as dt
+
+    from twquant.data.clean import inconsistent_events
+
+    ev = pl.DataFrame([{"date": dt.date(2024, 7, 4), "stock_id": "2412", "adj_factor": 0.96}])
+    px = pl.DataFrame(
+        [{"date": dt.date(2024, 7, 3), "stock_id": "2412", "open": 125.0, "close": 125.5}]
+    )  # 除權息當日無行情列
+    assert inconsistent_events(ev, px, max_deviation=0.10).is_empty()
+
+
+def test_ac2_inconsistent_events_allows_limit_move_exactly_on_the_band() -> None:
+    """漲跌停價恰好落在帶寬邊界上，是合法的，不得誤判為資料錯誤。
+
+    實測 6791 於 2026-04-16 除息（前收 123.5 → 參考價 120.0），當日自參考價
+    **漲停**開在 132.0，偏離正好 +10.0%。adj_factor 是浮點往返值，乘回去有末位誤差。
+    """
+    import datetime as dt
+
+    from twquant.data.clean import inconsistent_events
+
+    ev = pl.DataFrame(
+        [{"date": dt.date(2026, 4, 16), "stock_id": "6791", "adj_factor": 120.0 / 123.5}]
+    )
+    px = pl.DataFrame(
+        [
+            {"date": dt.date(2026, 4, 15), "stock_id": "6791", "open": 123.0, "close": 123.5},
+            {"date": dt.date(2026, 4, 16), "stock_id": "6791", "open": 132.0, "close": 132.0},
+        ]
+    )
+    assert inconsistent_events(ev, px, max_deviation=0.10).is_empty()

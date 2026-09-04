@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from collections.abc import Sequence
 
 import polars as pl
@@ -398,3 +399,58 @@ def test_ac3_attach_adjustment_rejects_nonpositive_factor() -> None:
     ev = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "adj_factor": 0.0}])
     with pytest.raises(ValueError, match="adj_factor"):
         attach_adjustment(px, ev)
+
+
+def test_ac3_attach_adjustment_refuses_empty_events() -> None:
+    """空事件表必須 raise，不得回傳 adj=1.0。
+
+    這是複查抓到的 critical：`attach_adjustment` 只在呼叫端已選擇 total_return 時
+    才會被呼叫，此時空表**一定**是錯誤狀態。原本靜默回 1.0 會讓 cli 照樣印
+    「標籤改用總報酬」然後用未還原標籤訓練——把 D-054 要消滅的東西原樣復活。
+    """
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "open": 100.0}])
+    empty = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "adj_factor": pl.Float64})
+    with pytest.raises(ValueError, match="0 筆"):
+        attach_adjustment(px, empty)
+
+
+def test_ac3_attach_adjustment_accumulates_per_stock_not_globally() -> None:
+    """累乘必須 .over("stock_id")。複查用突變測試證明：拿掉它，全套 572 測試仍全綠
+    ——因為兩個既有 fixture 都只有**一檔**股票有事件。"""
+    from twquant.ml.dataset import attach_adjustment
+
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3)]
+    px = pl.DataFrame(
+        [{"date": d, "stock_id": s, "open": 100.0} for d in days for s in ("1101", "1102")]
+    )
+    ev = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, 2), "stock_id": "1101", "adj_factor": 0.5},
+            {"date": dt.date(2024, 7, 2), "stock_id": "1102", "adj_factor": 0.8},
+        ]
+    )
+    out = attach_adjustment(px, ev)
+    got = {(r["stock_id"], r["date"]): r["adj"] for r in out.to_dicts()}
+    # 逐股票累乘：各自 0.5 與 0.8。全域累乘會得到 0.5 與 0.4（或 0.8 與 0.4，視排序）
+    assert got[("1101", dt.date(2024, 7, 3))] == pytest.approx(0.5)
+    assert got[("1102", dt.date(2024, 7, 3))] == pytest.approx(0.8)
+
+
+def test_ac3_forward_open_returns_zero_price_yields_null_not_inf() -> None:
+    """schema 允許 open >= 0，故 0 是合法值。未防護時 open(t+1)=0 → +inf，
+    而 `excess_rank_labels` 的 mean().over("date") 會把 inf 擴散到整個橫斷面，
+    讓當日所有 label 變成同一個常數。成本感知路徑早已有這道防護，此路徑先前沒有。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3, 4)]
+    px = pl.DataFrame(
+        [{"date": d, "stock_id": "1101", "open": 0.0 if d == days[1] else 100.0} for d in days]
+        + [{"date": d, "stock_id": "1102", "open": 100.0} for d in days]
+    )
+    fwd = forward_open_returns(px, 1)
+    vals = fwd.filter(pl.col("stock_id") == "1101")["fwd_ret"].to_list()
+    assert all(v is None or math.isfinite(v) for v in vals), f"出現 inf：{vals}"
+    lab = excess_rank_labels(fwd).filter(pl.col("date") == days[0])["label"].to_list()
+    assert len({v for v in lab if v is not None}) > 0

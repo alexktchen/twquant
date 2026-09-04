@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- 2026-09-04 T-098 複查修補（對抗式複查 19 → 8 確認）：**空事件表會靜默退回未還原標籤**（critical，已改為 raise）；`forward_open_returns` 補 `open > 0` 防護（0 → +inf 會被日均值擴散到整個橫斷面）；逐股票累乘補上測試（突變測試證明拿掉 `.over("stock_id")` 全套仍全綠）；漏改的 `configs/ml.yaml` 補上；新增 `clean.inconsistent_events` 與行情交叉驗證，排除 6 筆與價格矛盾的假除權事件（全為 `reference_price == before_price` 且當日漲跌幅由未調整價計算，6225 甚至是漲停），表由 12,149 → 12,143 筆。事件表的更新路徑與新鮮度檢查另立 T-114。閘門 578 passed。
 - 2026-09-04 T-098／D-054 完成：股利還原是 ML 標籤的**前提**而非報表註腳——實測 h=20 標籤在 6~8 月有 38.2% 樣本換分位、原「最差一成」有 17.9%（全年 6.8%）是除息假象，而除息日事先公告，模型會學到「預測誰要除息」且驗收看起來會過關。資料無需再抓（12,149 筆事件已閒置於 staging）；`corporate_events` 落地、`dividend_rows` 對映（兩套市場詞彙、未知類別 raise）、`attach_adjustment` 固定過去錨累乘 + as-of join（~5.75% 除息日無行情列，內連接會靜默丟失）、標籤兩函數加 `adjusted` 但**成本仍用真實成交價**。`total_return` 刻意無預設值，未表態即拒絕訓練。
 - 2026-09-04 T-111 完成：`stock_meta` 補回 75 檔已下市股（2,010 → 2,085）、`delist_date` 由 FinMind `TaiwanStockDelisting` 權威值補到 72 檔（原本一律寫死 null）；新增 `stock_info_rows`／`delisting_rows`／`reconcile_stock_meta` 與 12 條產業別對映，未知分類一律 raise。三個依賴 stock_meta 的因子（含 pin 特徵 `residual_reversal_5d`）每日多覆蓋最多 39 檔。重物化與重跑轉 T-112。
 - 2026-09-04 D-053 濾網調查的真正產出是兩個量測缺陷：回測與標籤完全不含股利（平均殖利率 3.16%／年，絕對報酬系統性低估約 3%）；`stock_meta` 缺 64 檔已下市股，使三個因子（含一個 pin 特徵）對左尾樣本靜默無值（T-111）。選股型濾網最大只值 2.7pp／年，全部不足。

@@ -1996,7 +1996,7 @@ def ml_train(
         # D-054：不給預設值是刻意的。未還原的標籤在 6~8 月有近兩成「輸家」是除息
         # 假象，而除息日事先公告 → 模型會學到「預測誰要除息」且驗收看起來會過關。
         raise typer.BadParameter(
-            f"{config} 的 label 未指定 total_return（D-054）。"
+            f"{config or 'configs/ml.yaml'} 的 label 未指定 total_return（D-054）。"
             "含股利的總報酬標籤請寫 `total_return: true`；"
             "要重現舊模型的訓練配方請明寫 `total_return: false`。"
         )

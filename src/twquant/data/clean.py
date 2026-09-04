@@ -378,3 +378,45 @@ def reconcile_stock_meta(
         )
     out = out.unique(subset=["stock_id"], keep="first").sort("stock_id")
     return schemas.validate("stock_meta", out)
+
+
+# adj_factor 經 after/before 的浮點往返後乘回前收，末位誤差約 1e-16 相對量級。
+_BAND_FLOAT_TOL = 1e-9
+
+
+def inconsistent_events(
+    events: pl.DataFrame, prices: pl.DataFrame, *, max_deviation: float
+) -> pl.DataFrame:
+    """找出還原因子與行情互相矛盾的除權息事件（T-098 / D-054 複查）。
+
+    除權息當日的成交價必須落在「參考價 ± 漲跌幅」之內；若 `open` 相對
+    `adj_factor × 前收` 的偏離超過 `max_deviation`（＝台股漲跌幅 10%），
+    那個因子就不可能是對的。實測 6 筆如此，其中 3 筆在宣稱的除權日其實是**漲停**。
+
+    危害方向與 D-054 相反但性質相同：假事件讓該股的累積還原因子憑空縮小，
+    每個跨過該日的標籤窗被灌水 `1/adj_factor`（實測最大 +47.8%），
+    使它連續 h 個訊號日排在橫斷面前段——同樣是「模型學到公司行動日曆」。
+
+    除權息日**無行情列**者（颱風休市、停牌，約 5.75%）無從比對，不視為矛盾。
+    """
+    px = (
+        prices.sort("stock_id", "date")
+        .with_columns(prev_close=pl.col("close").shift(1).over("stock_id"))
+        .select("date", "stock_id", "open", "prev_close")
+    )
+    return (
+        events.join(px, on=["date", "stock_id"], how="inner")
+        .filter(
+            pl.col("prev_close").is_not_null()
+            & (pl.col("prev_close") > 0.0)
+            & (pl.col("open") > 0.0)
+        )
+        .with_columns(
+            deviation=pl.col("open") / (pl.col("adj_factor") * pl.col("prev_close")) - 1.0
+        )
+        # 漲跌停價**恰好**落在帶寬邊界上（實測 6791 於 2026-04-16 自參考價 120.0 漲停到
+        # 132.0，偏離正好 +10.0%），而 adj_factor 是 after/before 的浮點往返值，
+        # 乘回去會有末位誤差。不留容差會把合法的漲跌停誤判為資料錯誤。
+        .filter(pl.col("deviation").abs() > max_deviation * (1.0 + _BAND_FLOAT_TOL))
+        .sort("date", "stock_id")
+    )
