@@ -3,6 +3,9 @@
 > 前一份交接是 [HANDOFF-2026-09-02-data-rebuild.md](HANDOFF-2026-09-02-data-rebuild.md)（資料重建、T-080～T-105 的執行細節）。
 > 這一份只講**現在該做什麼、為什麼**，讓接手的人不必讀完前一份就能動手。
 > 分支 `claude/handoff-2026-08-31-ml-phase-2-c618a1`，worktree `.claude/worktrees/strange-kalam-3ec702`。
+>
+> 下一代「讓 ML 只負責避雷」的可執行交接另見
+> [HANDOFF-2026-09-04-ml-negative-screen.md](HANDOFF-2026-09-04-ml-negative-screen.md)。
 
 ## 1. 一句話現況
 

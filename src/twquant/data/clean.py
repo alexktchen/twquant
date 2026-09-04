@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping, Sequence
 
 import polars as pl
 
@@ -312,3 +313,68 @@ TPEX_CLEANERS = {
 TDCC_CLEANERS = {
     "shareholding_dispersion": clean_shareholding_dispersion,
 }
+
+
+def reconcile_stock_meta(
+    existing: pl.DataFrame,
+    *,
+    present_ids: Sequence[str],
+    info: Sequence[Mapping[str, object]],
+    delistings: Sequence[Mapping[str, object]],
+) -> pl.DataFrame:
+    """把「有行情但不在 stock_meta」的股票補進來，並補上 delist_date（T-111 / D-053）。
+
+    `clean_stock_meta` 的來源（ISIN）只列現存上市櫃公司，故已下市者整批缺席；
+    依賴 stock_meta 的三個因子（含 pin 特徵 `price.residual_reversal_5d`）會**靜默**略過它們，
+    而缺的正是後來下市的左尾樣本。
+
+    規則：
+    - **既有列不覆蓋**（名稱／市場／產業／上市日都保留），只補原本永遠是 null 的 `delist_date`。
+    - `present_ids`（行情裡真的出現過的股票）中不在 `existing` 者，用 `info` 補列。
+    - `market` 是必填欄位，`info` 沒給市場別的股票**不補列**（不得偽造），由呼叫端回報缺口。
+    """
+    inf = {str(r["stock_id"]): r for r in info}
+    dl = {str(r["stock_id"]): r["delist_date"] for r in delistings}
+    have = set(existing["stock_id"].to_list()) if existing.height else set()
+
+    added: list[dict[str, object]] = []
+    for sid in present_ids:
+        if sid in have:
+            continue
+        rec = inf.get(sid)
+        if rec is None or rec.get("market") is None:
+            continue  # 缺市場別（必填）→ 不補列
+        added.append(
+            {
+                "stock_id": sid,
+                "name": rec.get("name"),
+                "market": rec["market"],
+                "industry": rec.get("industry"),
+                "list_date": None,
+                "delist_date": dl.get(sid),
+            }
+        )
+
+    cols = ["stock_id", "name", "market", "industry", "list_date", "delist_date"]
+    out = (
+        existing.select(cols)
+        if existing.height
+        else pl.DataFrame(schema={c: pl.String for c in cols})
+    )
+    if added:
+        new = pl.DataFrame(added).with_columns(
+            pl.col("list_date").cast(pl.Date), pl.col("delist_date").cast(pl.Date)
+        )
+        out = pl.concat([out.select(cols), new.select(cols)], how="vertical_relaxed")
+    # 既有列補 delist_date（原本一律 null）
+    if dl:
+        m = pl.DataFrame({"stock_id": list(dl), "_dl": [dl[k] for k in dl]}).with_columns(
+            pl.col("_dl").cast(pl.Date)
+        )
+        out = (
+            out.join(m, on="stock_id", how="left")
+            .with_columns(delist_date=pl.coalesce("delist_date", "_dl"))
+            .drop("_dl")
+        )
+    out = out.unique(subset=["stock_id"], keep="first").sort("stock_id")
+    return schemas.validate("stock_meta", out)

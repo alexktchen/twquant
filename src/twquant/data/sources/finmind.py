@@ -218,3 +218,146 @@ def statement_rows(rows: Iterable[Mapping[str, Any]], statement: str) -> list[di
         )
     out.sort(key=lambda r: (r["date"], r["stock_id"], r["type"]))
     return out
+
+
+# ── stock_meta 補列（T-111 / D-053）────────────────────────────────────────
+# ISIN 來源只列**現存**上市櫃公司，故已下市者整批不在 stock_meta——實測 2,056 檔有行情的
+# 股票中有 82 檔缺席，使 `price.residual_reversal_5d`（pin 特徵）等三個因子對它們靜默無值。
+STOCK_INFO_DATASET = "TaiwanStockInfo"
+DELISTING_DATASET = "TaiwanStockDelisting"
+
+# FinMind 用的是**舊版**產業分類，與 ISIN 現行分類名稱不同。直接寫入會把同一個產業拆成兩組
+# （「建材營造」與「建材營造業」），讓既有股票的產業均值失真，故一律對映到 ISIN 的寫法。
+_INDUSTRY_ALIASES = {
+    "其他": "其他業",
+    "其他電子類": "其他電子業",
+    "建材營造": "建材營造業",
+    "觀光事業": "觀光餐旅",
+    "貿易百貨": "貿易百貨業",
+    "運動休閒類": "運動休閒",
+    "金融保險": "金融保險業",
+    "金融業": "金融保險業",
+    "居家生活類": "居家生活",
+    "數位雲端類": "數位雲端",
+    "綠能環保類": "綠能環保",
+    "農業科技": "農業科技業",
+}
+# ISIN 現行分類（34 種中 FinMind 會用到的 30 種），原樣沿用。
+_INDUSTRY_EXACT = frozenset(
+    {
+        "光電業",
+        "其他電子業",
+        "化學工業",
+        "半導體業",
+        "塑膠工業",
+        "居家生活",
+        "數位雲端",
+        "文化創意業",
+        "橡膠工業",
+        "水泥工業",
+        "汽車工業",
+        "油電燃氣業",
+        "玻璃陶瓷",
+        "生技醫療業",
+        "紡織纖維",
+        "綠能環保",
+        "航運業",
+        "觀光餐旅",
+        "資訊服務業",
+        "農業科技業",
+        "通信網路業",
+        "造紙工業",
+        "運動休閒",
+        "鋼鐵工業",
+        "電器電纜",
+        "電子通路業",
+        "電子零組件業",
+        "電機機械",
+        "電腦及週邊設備業",
+        "食品工業",
+    }
+)
+# 無法對映 → 產業別留 null（**不猜**）。兩類原因：
+#   (a) 舊的大分類，在現行分類已被拆成多個子產業，硬歸到其中一個會污染那個族群
+#       ——「電子工業」對應 8 個子產業、「化學生技醫療」對應 2 個。
+#   (b) 根本不是產業，而是板別或商品類型（ETF／存託憑證／指數等）。
+_INDUSTRY_UNMAPPABLE = frozenset(
+    {
+        "電子工業",
+        "化學生技醫療",
+        "創新板股票",
+        "存託憑證",
+        "受益證券",
+        "大盤",
+        "所有證券",
+        "Index",
+        "ETF",
+        "ETN",
+        "上櫃ETF",
+        "上櫃指數股票型基金(ETF)",
+        "指數投資證券(ETN)",
+    }
+)
+_MARKETS = {"twse": "TWSE", "tpex": "TPEX"}
+
+
+def stock_info_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanStockInfo` → stock_meta 的 (stock_id, name, market, industry)。
+
+    產業別對映見 `_INDUSTRY_ALIASES`／`_INDUSTRY_UNMAPPABLE`；**未知分類一律 raise**
+    ——來源新增類別而靜默補 null，會讓因子悄悄少掉一批股票（黃金規則 5）。
+    市場別只認 twse／tpex，其餘（興櫃等）回 None，由呼叫端決定是否補列。
+
+    同一檔股票在來源會有**多列**（不同日期的分類快照，且舊列可能用已淘汰的分類名，
+    例如 6763 的舊列是「電子商務業」）——取 `date` 最新的一列為準，
+    否則會對早已不使用的歷史分類 raise。
+    """
+    latest: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        sid = row.get("stock_id")
+        if not isinstance(sid, str) or not sid:
+            continue
+        prev = latest.get(sid)
+        if prev is None or str(row.get("date") or "") >= str(prev.get("date") or ""):
+            latest[sid] = row
+    out: list[dict[str, Any]] = []
+    for sid, row in latest.items():
+        raw_ind = row.get("industry_category")
+        ind = raw_ind.strip() if isinstance(raw_ind, str) else ""
+        if ind and ind not in _INDUSTRY_EXACT and ind not in _INDUSTRY_ALIASES:
+            if ind not in _INDUSTRY_UNMAPPABLE:
+                raise DataError(
+                    "stock_meta",
+                    None,
+                    f"FinMind 出現未知產業別 {ind!r}（{sid}）——需先決定它對映到 ISIN 的哪一類，"
+                    "或確認它不是產業別；靜默補 null 會讓因子少掉一批股票。",
+                )
+            ind = ""
+        name = row.get("stock_name")
+        typ = row.get("type")
+        out.append(
+            {
+                "stock_id": sid,
+                "name": name.strip() if isinstance(name, str) and name.strip() else None,
+                "market": _MARKETS.get(typ.strip().lower()) if isinstance(typ, str) else None,
+                "industry": _INDUSTRY_ALIASES.get(ind, ind) if ind else None,
+            }
+        )
+    out.sort(key=lambda r: r["stock_id"])
+    return out
+
+
+def delisting_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanStockDelisting` → (stock_id, delist_date)。
+
+    用權威的下市日，不用「最後交易日」推導——兩者實測差 5～218 天
+    （2499 最後交易 2020-04-06、實際下市 2020-11-10）。
+    """
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        sid = row.get("stock_id")
+        if not isinstance(sid, str) or not sid:
+            continue
+        out.append({"stock_id": sid, "delist_date": _date(row, "stock_meta")})
+    out.sort(key=lambda r: r["stock_id"])
+    return out
