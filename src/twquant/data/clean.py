@@ -56,8 +56,86 @@ def clean_prices(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     return schemas.validate("prices_daily", out)
 
 
+# T86 的內部恆等式。實測 2026-08-31 全 1,335 列成立（七條全過）。
+#
+# 為什麼需要它（T-102）：2022-01~2026-09 有 41 個**分散**的日子、共 508 列，欄位整體
+# 位移 3 格（湖的 foreign_net = 外陸資＋投信、trust_net = 自營商賣出(自行)、
+# dealer_net = 自行買賣超）。2026-09-05 重抓 2026-08-31 的原始回應並以現行程式碼剖析，
+# 與 FinMind **1,331 檔逐列相符、0 差異**——**剖析器是對的**，出事的是上游當時給了
+# fields 與 data 不對應的回應。日期分散而非連續，也指向暫時性故障而非 schema 變更。
+#
+# 既然不能靠修剖析器，唯一的防線就是資料自己的一致性：位移會同時破壞下列每一條。
+_T86_IDENTITIES: tuple[tuple[str, tuple[tuple[int, str], ...]], ...] = (
+    (
+        "三大法人買賣超股數",
+        (
+            (1, "外陸資買賣超股數(不含外資自營商)"),
+            (1, "外資自營商買賣超股數"),
+            (1, "投信買賣超股數"),
+            (1, "自營商買賣超股數"),
+        ),
+    ),
+    (
+        "自營商買賣超股數",
+        ((1, "自營商買賣超股數(自行買賣)"), (1, "自營商買賣超股數(避險)")),
+    ),
+    (
+        "外陸資買賣超股數(不含外資自營商)",
+        ((1, "外陸資買進股數(不含外資自營商)"), (-1, "外陸資賣出股數(不含外資自營商)")),
+    ),
+    ("外資自營商買賣超股數", ((1, "外資自營商買進股數"), (-1, "外資自營商賣出股數"))),
+    ("投信買賣超股數", ((1, "投信買進股數"), (-1, "投信賣出股數"))),
+    (
+        "自營商買賣超股數(自行買賣)",
+        ((1, "自營商買進股數(自行買賣)"), (-1, "自營商賣出股數(自行買賣)")),
+    ),
+    ("自營商買賣超股數(避險)", ((1, "自營商買進股數(避險)"), (-1, "自營商賣出股數(避險)"))),
+)
+
+
+def assert_t86_consistent(raw: pl.DataFrame, date: dt.date) -> None:
+    """T86 原始表的自我一致性檢查（T-102）。任一恆等式被違反即 raise。
+
+    連一條都驗不了時同樣 raise：上游若改欄名，一個安靜地什麼都不檢查的閘門
+    比沒有閘門更危險，因為它讓人以為有防護（黃金規則 5）。
+    """
+    cols = set(raw.columns)
+    checked = 0
+    violations: list[tuple[str, int, list[str]]] = []
+    for lhs, terms in _T86_IDENTITIES:
+        if lhs not in cols or any(c not in cols for _, c in terms):
+            continue
+        checked += 1
+        rhs = terms[0][0] * _int(terms[0][1])
+        for sign, col in terms[1:]:
+            rhs = rhs + sign * _int(col)
+        bad = raw.filter(_int(lhs).is_not_null() & rhs.is_not_null() & (_int(lhs) != rhs))
+        if bad.height:
+            ids = bad["證券代號"].str.strip_chars().to_list() if "證券代號" in cols else []
+            violations.append((lhs, bad.height, ids[:5]))
+    if checked == 0:
+        raise DataError(
+            "institutional_daily",
+            date,
+            "T86 原始表湊不出任何一條內部恆等式（欄名可能已變更）——"
+            f"現有欄位：{sorted(cols)}。閘門不得在無法檢查時靜默放行。",
+        )
+    if violations:
+        detail = "；".join(
+            f"{lhs} 有 {n} 列不符（如 {', '.join(ids)}）" for lhs, n, ids in violations
+        )
+        raise DataError(
+            "institutional_daily",
+            date,
+            f"T86 內部恆等式不成立：{detail}。"
+            "已知成因是上游回傳的 fields 與 data 不對應，造成欄位整體位移而**不報錯**"
+            "（T-102：2022-01~2026-09 曾有 41 日共 508 列如此）。此日資料不可用。",
+        )
+
+
 def clean_institutional(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     """T86 原始 → institutional_daily。外資 = 外陸資(不含自營) + 外資自營商。"""
+    assert_t86_consistent(raw, date)
     at = _at(date, 18)
     out = raw.select(
         pl.lit(date, dtype=pl.Date).alias("date"),
