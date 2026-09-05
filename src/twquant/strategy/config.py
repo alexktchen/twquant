@@ -36,7 +36,34 @@ class UniverseConfig(BaseConfig):
     # None（預設）＝停用，輸出與加入本欄位之前逐位元相同。
     # 事前寫定：ROE 為 null 一律排除——「不知道是不是品質股」不等於「是品質股」。
     min_roe: float | None = None
+    # T-121／SPEC-013：市值排名帶。排名 1 = 當日市值最大。
+    # **刻意用排名而非絕對市值**——T-120 已指出絕對門檻在長歷史上會漂移
+    # （3,000 萬 TWD 在 2005 與 2026 是完全不同的門檻），排名依定義不漂移。
+    # 排名母體是「當日有市值的四碼普通股全體」，不是流動性濾網之後的殘存集合：
+    # 「市值前 100 大」是市場事實，不該隨我們調整 min_adv_twd 而變動。
+    mktcap_rank_max: int | None = None  # 只留排名 ≤ 此值（大型股宇宙）
+    mktcap_rank_min: int | None = None  # 只留排名 ≥ 此值（小型股宇宙）
+    # T-122／SPEC-013 §3.4：月營收成長濾網。三個門檻是**外部先驗**（finlab 公開文章：
+    # 連 3 月正成長、年增 10%~150%），非我們配適，故 D-060 禁止因回測難看而調整。
+    # 上限刻意存在：排除減資、合併、基期異常造成的假成長。
+    # 缺營收者一律排除（比照 min_roe，黃金規則 5 的精神）。
+    min_revenue_yoy: float | None = None  # 最新已公布月營收 YoY 下限
+    max_revenue_yoy: float | None = None  # 同上，上限
+    min_revenue_streak: int | None = None  # 最近連續幾個「營收月份」YoY 為正
     hygiene_lookback: int = 60  # 衛生濾網回看列數
+
+    @model_validator(mode="after")
+    def _mktcap_ranks_positive(self) -> UniverseConfig:
+        for name in ("mktcap_rank_max", "mktcap_rank_min"):
+            v = getattr(self, name)
+            if v is not None and v < 1:
+                raise ValueError(f"{name} 須 ≥ 1（排名從 1 起算），得到 {v}")
+        if self.min_revenue_streak is not None and self.min_revenue_streak < 1:
+            raise ValueError(f"min_revenue_streak 須 ≥ 1，得到 {self.min_revenue_streak}")
+        lo, hi = self.min_revenue_yoy, self.max_revenue_yoy
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError(f"min_revenue_yoy({lo}) 不得大於 max_revenue_yoy({hi})")
+        return self
 
 
 class SignalConfig(BaseConfig):

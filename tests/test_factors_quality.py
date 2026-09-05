@@ -24,6 +24,7 @@ from twquant.data.warehouse import Warehouse
 from twquant.factors import compute as fc
 from twquant.factors.registry import get, list_factors
 from twquant.factors.testing import assert_no_lookahead
+from twquant.strategy.config import UniverseConfig
 
 _STOCKS = ["1101", "2330"]
 _NAMES = [
@@ -404,3 +405,122 @@ def test_ac1_min_roe_respects_pit_cutoff(tmp_path: Path) -> None:
     # 門檻設在兩檔之間 → 只留高的那檔；濾網若讀到未來財報，留下的集合會改變
     mid = sum(roe.values()) / 2
     assert universe_ids(wh.view(day), day, base.model_copy(update={"min_roe": mid})) == [hi]
+
+
+# ── T-121：宇宙層市值排名濾網 ──────────────────────────────────────
+#
+# 為什麼用「排名」而非絕對市值：T-120 已指出絕對門檻在長歷史上會漂移
+# （3,000 萬 TWD 在 2005 與 2026 是完全不同的門檻）。排名依定義不漂移。
+#
+# 排名的母體是**當日有市值的四碼普通股全體**，不是流動性濾網之後的殘存集合。
+# 這是刻意的：「市值前 100 大」是市場事實，不該隨我們把 min_adv_twd 調高調低而變動，
+# 否則 T-120 的門檻漂移問題會經由排名滲進來。
+
+
+def _uni_base() -> UniverseConfig:
+    return UniverseConfig(
+        min_adv_twd=None, min_price=None, max_jump_ratio=None, max_gap_sessions=None
+    )
+
+
+def test_ac1_mktcap_rank_max_keeps_only_the_largest(tmp_path: Path) -> None:
+    """`mktcap_rank_max=1` 只留市值最大的一檔（2330 市值 1.5e6 vs 1101 的 4e3）。"""
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    day = _DAYS[-1]
+    base = _uni_base()
+    assert set(universe_ids(wh.view(day), day, base)) == {"1101", "2330"}
+    assert universe_ids(wh.view(day), day, base.model_copy(update={"mktcap_rank_max": 1})) == [
+        "2330"
+    ]
+
+
+def test_ac1_mktcap_rank_min_excludes_the_largest(tmp_path: Path) -> None:
+    """`mktcap_rank_min=2` 排除市值前 1 大——A 軌小型股宇宙就是靠這個成立。"""
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    day = _DAYS[-1]
+    assert universe_ids(
+        wh.view(day), day, _uni_base().model_copy(update={"mktcap_rank_min": 2})
+    ) == ["1101"]
+
+
+def test_ac1_mktcap_rank_band_can_be_combined(tmp_path: Path) -> None:
+    """兩端同時給定時取交集；空集合是合法結果（由 build_targets 那層 raise，不在此處）。"""
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    day = _DAYS[-1]
+    both = _uni_base().model_copy(update={"mktcap_rank_min": 1, "mktcap_rank_max": 2})
+    assert universe_ids(wh.view(day), day, both) == ["1101", "2330"]
+    empty = _uni_base().model_copy(update={"mktcap_rank_min": 2, "mktcap_rank_max": 1})
+    assert universe_ids(wh.view(day), day, empty) == []
+
+
+def test_ac1_mktcap_none_is_bit_identical(tmp_path: Path) -> None:
+    """未啟用時輸出必須與加此功能之前逐位元相同——既有 15 個策略配置都沒有這兩個欄位。"""
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path)
+    day = _DAYS[-1]
+    cfg = UniverseConfig(min_adv_twd=None, min_price=None)
+    assert cfg.mktcap_rank_max is None and cfg.mktcap_rank_min is None
+    assert universe_ids(wh.view(day), day, cfg) == universe_ids(
+        wh.view(day), day, cfg.model_copy(update={"mktcap_rank_max": None, "mktcap_rank_min": None})
+    )
+
+
+def test_ac1_null_mktcap_is_excluded_not_kept(tmp_path: Path) -> None:
+    """市值為 null 一律排除，比照 `min_roe`（D-059）。
+
+    「不知道它多大」不等於「它符合規模條件」。把缺值當成通過，等於讓沒有財報的
+    新股整批繞過濾網（黃金規則 5 的精神）。
+    """
+    from twquant.strategy.universe import universe_ids
+
+    # 只給 1101 財報 → 2330 無股本 → 市值 null
+    wh = _wh(tmp_path, st=_statements().filter(pl.col("stock_id") == "1101"))
+    day = _DAYS[-1]
+    base = _uni_base()
+    assert set(universe_ids(wh.view(day), day, base)) == {"1101", "2330"}
+    # 門檻寬到不可能擋掉任何有值的股票，2330 仍須因 null 被排除
+    kept = universe_ids(wh.view(day), day, base.model_copy(update={"mktcap_rank_max": 999}))
+    assert kept == ["1101"], "市值為 null 的 2330 不得因門檻寬鬆而被放行"
+
+
+def test_ac2_mktcap_gate_has_no_lookahead(tmp_path: Path) -> None:
+    """f(data[:t]) 必須等於 f(data)[:t]：只給到 t 的資料湖，與完整資料湖，在 t 的宇宙相同。
+
+    `assert_no_lookahead` 的簽章吃因子函數，套不到宇宙濾網上，故在此直接檢驗同一性質。
+    """
+    from twquant.strategy.universe import universe_ids
+
+    day = _DAYS[3]
+    full = _wh(tmp_path / "full")
+    upto = _wh(tmp_path / "upto", days=[d for d in _DAYS if d <= day])
+    cfg = _uni_base().model_copy(update={"mktcap_rank_max": 1})
+    assert universe_ids(full.view(day), day, cfg) == universe_ids(upto.view(day), day, cfg)
+
+
+def test_ac2_mktcap_gate_respects_pit_cutoff(tmp_path: Path) -> None:
+    """濾網只能看訊號日當下可得的財報——與因子走同一條 PitView，不得繞過。
+
+    股本改成隨季別遞增，若濾網讀到尚未公布的年報（2023Q4，2024-03-31 22:00 才可見），
+    1101 的市值會跳到超過 2330，排名互換 → 留下的集合會改變。
+    """
+    from twquant.strategy.universe import universe_ids
+
+    st = _statements().with_columns(
+        value=pl.when(
+            (pl.col("type") == "OrdinaryShare") & (pl.col("date") == dt.date(2023, 12, 31))
+        )
+        .then(pl.lit(1e9))  # 未來才可見的巨額股本
+        .otherwise(pl.col("value"))
+    )
+    wh = _wh(tmp_path, st=st)
+    day = _DAYS[-1]  # 2024-01-10，2023Q4 年報尚不可見
+    cfg = _uni_base().model_copy(update={"mktcap_rank_max": 1})
+    assert universe_ids(wh.view(day), day, cfg) == ["2330"], "讀到未來股本會讓 1101 變成最大"
