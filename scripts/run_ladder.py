@@ -19,6 +19,7 @@ import time
 REPO = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path("D:/project/twquant/data/ladder")
 START, END = "2022-07-01", "2026-02-28"  # END 是保險庫邊界，不得後移
+CAPITAL = 80_000_000.0  # D-068：10M 下曝險隨檔數由 82% 掉到 65%，汙染「檔數」的比較
 COSTS = "costs.yaml"  # 1× 的基準；0× 由 --cost-scale 0 產生
 
 RUNGS = [
@@ -55,6 +56,8 @@ def main() -> None:
             START,
             "--end",
             END,
+            "--capital",
+            str(CAPITAL),
             "--costs",
             COSTS,
             "--out",

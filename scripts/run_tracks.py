@@ -18,11 +18,13 @@ import time
 REPO = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path("D:/project/twquant/data/tracks")
 START, END = "2022-07-01", "2026-02-28"  # END 是保險庫邊界，不得後移
+CAPITAL = 80_000_000.0  # D-068：10M 下曝險隨檔數由 82% 掉到 65%，汙染「檔數」的比較
 COSTS = "costs.yaml"
 
 TRACKS = [
     ("A", "track_a_smallcap"),
     ("B1", "track_b1_large_enhanced"),
+    ("B1ML", "track_b1ml_large_enhanced"),  # D-067：2×2 的第四格，與 B1 只差訊號
     ("B2", "track_b2_broad_capw"),
 ]
 SCALES = [("1x", None), ("0x", "0"), ("1.5x", "1.5")]
@@ -49,6 +51,8 @@ def main() -> None:
             START,
             "--end",
             END,
+            "--capital",
+            str(CAPITAL),
             "--costs",
             COSTS,
             "--out",
