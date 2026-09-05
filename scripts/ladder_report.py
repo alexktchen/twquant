@@ -18,6 +18,10 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+import datetime as _dt2  # noqa: E402
+
+from twquant.backtest.diagnostics import round_trip_stats  # noqa: E402
+from twquant.backtest.engine import Trade  # noqa: E402
 from twquant.backtest.validation import paired_block_stats  # noqa: E402
 from twquant.reporting.result_bundle import metrics_from_bundle, read_bundle  # noqa: E402
 
@@ -83,6 +87,24 @@ def _daily_diff(
     return days, diffs
 
 
+def _round_trips(b: dict[str, object]) -> object:
+    """由結果包的 ledger 算逐筆統計。**與日勝率是不同的東西**，故兩者都列。"""
+    trades = [
+        Trade(
+            _dt2.date.fromisoformat(t["date"]),
+            t["stock_id"],
+            t["side"],
+            int(t["shares"]),
+            float(t["price"]),
+            float(t["commission"]),
+            float(t["tax"]),
+            float(t["slippage"]),
+        )
+        for t in b["ledger"]  # type: ignore[union-attr]
+    ]
+    return round_trip_stats(trades)
+
+
 def _pct(x: float | None, d: int = 2) -> str:
     return "—" if x is None else f"{x * 100:+.{d}f}%"
 
@@ -135,6 +157,10 @@ def main() -> None:
         "- 「零成本仍輸 → 成本不是元凶」。正確說法只到「移除成本仍不足以解釋全部落後」。",
         "- 「B 軌贏了 → 架構貢獻大於訊號貢獻」。B1／B2 同時換了四樣東西，無法歸因。",
         "",
+        "**兩種勝率不是同一件事**（D-061 明列不得混用）：日勝率＝報酬為正的交易日比例；"
+        "逐筆勝率＝已平倉 round trip 中獲利的比例。右尾型策略常見「賠得多次、賺得大筆」，"
+        "兩者可差十個百分點以上。賺賠比＝總獲利 ÷ 總虧損（絕對值），無虧損時為「—」。",
+        "",
         "不確定性一律用**月度區塊**標準誤（持股期 20 個交易日、日報酬高度自相關，"
         "日頻 t 值會嚴重高估顯著性）。`|t| < 2` 一律標為**未能區分**——那是合法結果。",
         "",
@@ -153,18 +179,21 @@ def main() -> None:
         lines += [
             f"## {label}",
             "",
-            "| 階 | 變更 | CAGR | Sharpe | MDD | 年化周轉 |",
-            "|---|---|---|---|---|---|",
+            "| 階 | 變更 | CAGR | Sharpe | MDD | 年化周轉 | 日勝率 | 逐筆勝率 | 賺賠比 | 平倉/未平 |",
+            "|---|---|---|---|---|---|---|---|---|---|",
         ]
         for rung, _, desc in RUNGS:
             b = bundles.get((rung, tag))
             if b is None:
-                lines.append(f"| **{rung}** | {desc} | — | — | — | — |")
+                lines.append(f"| **{rung}** | {desc} | — | — | — | — | — | — | — | — |")
                 continue
             m = metrics_from_bundle(b)
+            rt = _round_trips(b)
+            pf = "—" if rt.profit_factor is None else f"{rt.profit_factor:.2f}"
             lines.append(
                 f"| **{rung}** | {desc} | {_pct(m.cagr)} | {m.sharpe:+.3f} | "
-                f"{_pct(m.mdd)} | {m.turnover * 100:.0f}% |"
+                f"{_pct(m.mdd)} | {m.turnover * 100:.0f}% | {m.win_rate * 100:.1f}% | "
+                f"{rt.win_rate * 100:.1f}% | {pf} | {rt.n_closed}/{rt.n_open} |"
             )
         lines.append("")
 

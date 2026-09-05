@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from twquant.backtest.engine import BacktestResult
+from twquant.backtest.engine import BacktestResult, Trade
 from twquant.backtest.metrics import Metrics, compute_metrics
 from twquant.errors import DataError
 
@@ -158,3 +158,77 @@ def positions_from_ledger(result: BacktestResult) -> pl.DataFrame:
             {"date": d, "stock_id": sid, "shares": sh} for sid, sh in sorted(held.items()) if sh > 0
         )
     return pl.DataFrame(rows, schema=schema)
+
+
+@dataclass(frozen=True)
+class RoundTripStats:
+    """逐筆（round-trip）損益統計（T-133）。
+
+    **與 `Metrics.win_rate` 是不同的東西**：後者是**日勝率**（報酬為正的交易日比例）。
+    右尾型策略常見「賠得比較多次、但賺得大筆」，兩個勝率可以差十個百分點以上，
+    混用會得到相反的印象（D-061 明列此為必須分開呈現的項目）。
+    """
+
+    n_closed: int  # 已平倉趟數
+    n_open: int  # 期末仍持有的部位數（不計入已實現統計）
+    win_rate: float  # 已平倉中獲利的比例
+    profit_factor: float | None  # 總獲利 ÷ 總虧損（絕對值）；無虧損時為 None
+    avg_win: float  # 獲利趟的平均報酬率
+    avg_loss: float  # 虧損趟的平均報酬率（≤0）
+    total_pnl: float  # 已實現損益（TWD，已含兩邊費用）
+
+
+def round_trip_stats(ledger: list[Trade]) -> RoundTripStats:
+    """由成交流水算逐筆損益。一趟 ＝ 部位由 0 建立到回到 0 的完整循環。
+
+    分批出場仍屬**同一趟**（部位沒歸零就還沒結束）；清空後再進場是**新的一趟**。
+    期末未平倉者不計入已實現統計，但回報筆數——把它當成平倉會虛報勝率。
+
+    兩邊的費用都計：買進費用加進成本、賣出費用從價款扣除。只扣一邊會高估報酬。
+
+    純函數、無 IO（黃金規則 10）。
+    """
+    pos: dict[str, int] = {}
+    cost: dict[str, float] = {}
+    proceeds: dict[str, float] = {}
+    closed: list[tuple[float, float]] = []  # (損益, 報酬率)
+
+    for t in sorted(ledger, key=lambda x: (x.date, x.stock_id, x.side)):
+        fees = t.commission + t.tax + t.slippage
+        if t.side == "buy":
+            pos[t.stock_id] = pos.get(t.stock_id, 0) + t.shares
+            cost[t.stock_id] = cost.get(t.stock_id, 0.0) + t.shares * t.price + fees
+        elif t.side == "sell":
+            pos[t.stock_id] = pos.get(t.stock_id, 0) - t.shares
+            proceeds[t.stock_id] = proceeds.get(t.stock_id, 0.0) + t.shares * t.price - fees
+            if pos[t.stock_id] < 0:
+                raise DataError(
+                    "backtest_ledger",
+                    t.date,
+                    f"{t.stock_id} 於 {t.date} 的累計股數為 {pos[t.stock_id]}（負）。"
+                    "放空未實作，負部位代表流水損壞。",
+                )
+            if pos[t.stock_id] == 0:
+                c = cost.pop(t.stock_id, 0.0)
+                p = proceeds.pop(t.stock_id, 0.0)
+                closed.append((p - c, (p - c) / c if c > 0 else 0.0))
+        else:
+            raise DataError("backtest_ledger", t.date, f"未知的 side「{t.side}」（{t.stock_id}）。")
+
+    n_open = sum(1 for v in pos.values() if v > 0)
+    if not closed:
+        return RoundTripStats(0, n_open, 0.0, None, 0.0, 0.0, 0.0)
+    wins = [r for _, r in closed if r > 0]
+    losses = [r for _, r in closed if r <= 0]
+    gross_win = sum(p for p, _ in closed if p > 0)
+    gross_loss = -sum(p for p, _ in closed if p <= 0)
+    return RoundTripStats(
+        n_closed=len(closed),
+        n_open=n_open,
+        win_rate=len(wins) / len(closed),
+        # 無虧損時分母為 0：回傳 None 而非 0——0 會被讀成「全賠」，是反向的誤導
+        profit_factor=(gross_win / gross_loss) if gross_loss > 0 else None,
+        avg_win=sum(wins) / len(wins) if wins else 0.0,
+        avg_loss=sum(losses) / len(losses) if losses else 0.0,
+        total_pnl=sum(p for p, _ in closed),
+    )
