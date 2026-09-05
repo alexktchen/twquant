@@ -11,15 +11,15 @@
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import subprocess
 import sys
 import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-OUT = pathlib.Path("D:/project/twquant/data/ladder")
 START, END = "2022-07-01", "2026-02-28"  # END 是保險庫邊界，不得後移
-CAPITAL = 80_000_000.0  # D-068：10M 下曝險隨檔數由 82% 掉到 65%，汙染「檔數」的比較
+DEFAULT_CAPITAL = 80_000_000.0  # D-068：10M 下曝險隨檔數由 82% 掉到 65%，汙染「檔數」的比較
 COSTS = "costs.yaml"  # 1× 的基準；0× 由 --cost-scale 0 產生
 
 RUNGS = [
@@ -37,7 +37,29 @@ SCALES = [("1x", None), ("0x", "0")]
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--capital",
+        type=float,
+        default=DEFAULT_CAPITAL,
+        help="初始資金。改這個會改變成交結果（整張捨去的比例），故輸出目錄也要跟著換",
+    )
+    ap.add_argument(
+        "--out",
+        default="D:/project/twquant/data/ladder",
+        help="結果包目錄。**不同資金必須寫不同目錄**——同名覆蓋會讓兩組數字混在一起",
+    )
+    args = ap.parse_args()
+    capital, out = args.capital, pathlib.Path(args.out)
+    if capital != DEFAULT_CAPITAL and out == pathlib.Path("D:/project/twquant/data/ladder"):
+        raise SystemExit(
+            f"--capital {capital:,.0f} 不是預設值卻用預設目錄——會覆蓋 80M 的那批。請一併給 --out。"
+        )
+    print(f"資金 {capital:,.0f}、輸出 {out}", flush=True)
+
+    OUT = out
     OUT.mkdir(parents=True, exist_ok=True)
+    CAPITAL = capital
     total = len(RUNGS) * len(SCALES)
     t0 = time.perf_counter()
     failures: list[str] = []
