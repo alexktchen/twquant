@@ -19,38 +19,72 @@ from twquant.reporting.benchmarks import (
     annual_returns,
     bench_stats,
     benchmark_series,
+    cumulative_factors,
     index_series,
 )
 
 _D = [dt.date(2024, 1, d) for d in (2, 3, 4, 5, 8)]
 
 
-def _prices(rows: list[tuple[dt.date, str, float, float]]) -> pl.DataFrame:
+def _px(rows: list[tuple[dt.date, str, float]]) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "date": [r[0] for r in rows],
             "stock_id": [r[1] for r in rows],
             "close": [r[2] for r in rows],
-            "adj": [r[3] for r in rows],
         }
     )
 
 
-def test_ac11_total_return_uses_adj_not_close() -> None:
-    """含息序列必須是 close/adj。用 close 會少掉股利——那正是「有沒有輸給 0050」的量級。"""
-    px = _prices([(_D[0], "0050", 100.0, 1.0), (_D[1], "0050", 100.0, 0.9)])
-    got = benchmark_series(px, "0050", total_return=True)["value"].to_list()
-    assert got == [100.0, pytest.approx(111.111111, rel=1e-6)]
-    # 未還原時同一組價格看起來是「零報酬」——除息被誤讀成沒漲
-    plain = benchmark_series(px, "0050", total_return=False)["value"].to_list()
-    assert plain == [100.0, 100.0]
+def _ev(rows: list[tuple[dt.date, str, str, float]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": [r[0] for r in rows],
+            "stock_id": [r[1] for r in rows],
+            "event_type": [r[2] for r in rows],
+            "adj_factor": [r[3] for r in rows],
+        }
+    )
 
 
-def test_ac11_total_return_without_adj_raises_instead_of_falling_back() -> None:
-    """缺 adj 卻要求含息 → raise。靜默回退會產生一個看起來合理的錯數字。"""
-    px = pl.DataFrame({"date": [_D[0]], "stock_id": ["0050"], "close": [100.0]})
-    with pytest.raises(DataError, match="adj"):
-        benchmark_series(px, "0050", total_return=True)
+def test_ac11_split_is_adjusted_even_for_price_return() -> None:
+    """**分割根本不是報酬**，不含息路徑也必須還原。
+
+    0050 在 2025-06 的 1:4 分割若只在含息時還原，價格序列會留著斷崖：
+    實測那樣算出來是 CAGR −8.66%、MDD −77.18%（2025 −66%）。
+    """
+    px = _px([(_D[0], "0050", 100.0), (_D[1], "0050", 25.5)])
+    ev = _ev([(_D[1], "0050", "split", 0.25)])
+    got = benchmark_series(cumulative_factors(px, ev), "0050", total_return=False)
+    vals = got["value"].to_list()
+    assert vals == [100.0, pytest.approx(102.0)], "分割日的 25.5 應還原成 102，而不是 −74.5%"
+
+
+def test_ac11_total_return_divides_by_the_dividend_factor_too() -> None:
+    """含息時再除以股利因子；分割那一份已經在價格路徑扣掉，不得重複套用。"""
+    px = _px([(_D[0], "0050", 100.0), (_D[1], "0050", 25.5)])
+    ev = _ev([(_D[1], "0050", "split", 0.25), (_D[1], "0050", "cash_dividend", 0.98)])
+    got = benchmark_series(cumulative_factors(px, ev), "0050", total_return=True)
+    assert got["value"].to_list() == [100.0, pytest.approx(102.0 / 0.98)]
+
+
+def test_ac11_total_return_without_any_dividend_event_raises() -> None:
+    """含息卻查不到任何股利事件 → raise。
+
+    `corporate_events` 對 380 檔 ETF 只涵蓋 16 檔，缺事件時因子被填成常數 1.0，
+    於是「含息」靜默退化成不含息——實測 006208 因此少掉約 4.4pp／年，
+    而頁面上照樣標著「含息」。
+    """
+    px = _px([(_D[0], "006208", 100.0), (_D[1], "006208", 101.0)])
+    ev = _ev([(_D[0], "0050", "cash_dividend", 0.98)])  # 別檔的事件
+    with pytest.raises(DataError, match="查不到任何股利事件"):
+        benchmark_series(cumulative_factors(px, ev), "006208", total_return=True)
+
+
+def test_ac11_missing_factor_columns_raise_instead_of_falling_back() -> None:
+    """沒過 `cumulative_factors` 就用 → raise，不得回退成未還原價。"""
+    with pytest.raises(DataError, match="cumulative_factors"):
+        benchmark_series(_px([(_D[0], "0050", 100.0)]), "0050", total_return=False)
 
 
 def test_ac11_missing_benchmark_day_raises_instead_of_forward_filling() -> None:
@@ -100,3 +134,26 @@ def test_ac11_index_series_is_labelled_and_found() -> None:
     assert index_series(idx, "TAIEX")["value"].to_list() == [17000.0, 17100.0]
     with pytest.raises(DataError, match="TPEX"):
         index_series(idx, "TPEX")
+
+
+def test_ac11_suspension_ending_in_a_documented_event_may_carry_forward() -> None:
+    """停牌可以結轉，但**只在有公司行動可解釋時**——0050 停 5 天是為了 1:4 分割。
+
+    這不是「前值填補缺值」，是停牌期間本來就沒有可成交價格、部位也沒動。
+    區別在於：復牌那天是不是一個**有記錄的**事件日。沒有記錄就代表我們不知道
+    為什麼缺，那就該吵。
+    """
+    series = pl.DataFrame({"date": [_D[0], _D[1], _D[4]], "value": [100.0, 101.0, 25.0]})
+    # _D[4] 是有記錄的事件日（分割復牌）→ 中間的 _D[2]、_D[3] 可結轉
+    got = align_to(series, _D, name="0050", event_dates={_D[4]})
+    assert got == [100.0, 101.0, 101.0, 101.0, 25.0]
+
+
+def test_ac11_unexplained_gap_still_raises_even_when_events_are_supplied() -> None:
+    """有事件清單不等於放行全部缺口——缺口後的第一天不是事件日就仍要 raise。
+
+    否則這個參數會退化成「無條件前值填補」，而那正是本模組要防的。
+    """
+    series = pl.DataFrame({"date": [_D[0], _D[1], _D[4]], "value": [100.0, 101.0, 99.0]})
+    with pytest.raises(DataError, match="不得前值填補"):
+        align_to(series, _D, name="b", event_dates={_D[1]})  # 事件日不在缺口之後

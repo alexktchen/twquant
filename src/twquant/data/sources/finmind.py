@@ -435,3 +435,72 @@ def dividend_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda r: (r["date"], r["stock_id"]))
     return out
+
+
+# 分割類事件的 FinMind 型別（T-151）。**與 `_EVENT_TYPES` 不同的是**：這裡的型別字串
+# 是描述性的，還原的數學只依賴 after/before——除權息才需要靠型別決定參考價公式。
+# 實測全市場 2019 起共 34 筆，其中 22 筆標成「面額變更」：只認「分割」會漏掉大多數。
+_SPLIT_TYPES = frozenset({"分割", "反分割", "面額變更"})
+
+
+def split_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanStockSplitPrice` → `corporate_events` 六欄（T-151）。
+
+    沿用與 `dividend_rows` **同一個**還原慣例 `after_price / before_price`，否則兩類
+    事件的累乘會互相矛盾。
+
+    為什麼非有不可：`corporate_events` 原本只有除權息，於是 0050 在 2025-06 的 1:4 分割
+    （188.65 → 47.16，中間停牌 5 天）會被算成 **−74.8% 的單日報酬**——而 0050 正是
+    「有沒有打敗大盤」的主基準。既有的防護都攔不住：`_entry > 0` 只擋零價（分割兩端
+    都是正價）、跨距防護不攔（停牌 5 個開市日遠在容忍值內）、`safe_ratio` 只防零分母。
+
+    **反分割的因子 > 1**（`00632R` 3.28 → 22.96 ＝ 1:7），不得強制壓到 < 1——
+    那會讓還原方向相反，產生一個看起來合理的錯數字。
+
+    型別為空字串時由因子推導方向（實測有 1 筆如此）；非空的未知型別仍 raise，
+    新類別必須被人看到。
+    """
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        sid = row.get("stock_id")
+        if not isinstance(sid, str) or not sid:
+            continue
+        day = _date(row, "corporate_events")
+        raw = row.get("type")
+        kind = raw.strip() if isinstance(raw, str) else ""
+        if kind and kind not in _SPLIT_TYPES:
+            raise DataError(
+                "corporate_events",
+                day,
+                f"FinMind 出現未知的分割類別 {kind!r}（{sid}）——靜默歸類會讓還原因子"
+                "套錯一整類事件。確認它的參考價語意後再加進 _SPLIT_TYPES。",
+            )
+        before, after = row.get("before_price"), row.get("after_price")
+        if not isinstance(before, (int, float)) or not isinstance(after, (int, float)):
+            raise DataError(
+                "corporate_events", day, f"分割價格欄型別非數值（{sid}）：{before!r} / {after!r}"
+            )
+        if before <= 0.0 or after <= 0.0:
+            raise DataError(
+                "corporate_events",
+                day,
+                f"分割價格須 > 0（{sid}）：before={before} after={after}"
+                "——0 或負值會讓還原因子變成 0／inf／負數，並經累乘污染該股全部歷史。",
+            )
+        factor = float(after) / float(before)
+        out.append(
+            {
+                "date": day,
+                "stock_id": sid,
+                # 型別由**因子方向**決定而非字串：還原的數學只依賴因子，
+                # 而 FinMind 的「面額變更」與「分割」在數學上是同一件事。
+                "event_type": "reverse_split" if factor > 1.0 else "split",
+                "adj_factor": factor,
+                "ref_price": float(after),
+                "available_at": dt.datetime(
+                    day.year, day.month, day.day, _EVENT_AVAILABLE_HOUR, tzinfo=TZ
+                ),
+            }
+        )
+    out.sort(key=lambda r: (r["date"], r["stock_id"]))
+    return out

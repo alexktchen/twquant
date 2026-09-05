@@ -42,26 +42,77 @@ class BenchStats:
     n_days: int
 
 
-def benchmark_series(prices: pl.DataFrame, stock_id: str, *, total_return: bool) -> pl.DataFrame:
-    """由行情取單一標的的基準序列，回傳 (date, value)。
+_SPLIT_TYPES = ("split", "reverse_split")
 
-    `total_return=True` 時用還原價（`close / adj`），需含 `adj` 欄；缺欄即 raise
-    ——靜默回退成未還原價會讓 0050 的年化少掉約 3~4pp 的股利，而那正是
-    「策略有沒有輸給大盤」這個問題的量級。
+
+def cumulative_factors(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
+    """加兩欄還原因子：`adj_split`（**一律**套用）與 `adj_div`（只在含息時套用）。
+
+    **為什麼一定要拆開**：分割根本不是報酬，是計價單位改變，任何情況都必須還原；
+    股利才是「含不含息」的選擇。把兩者混成單一因子、再讓不含息路徑整個跳過，
+    會讓 0050 的價格序列留著 1:4 分割的斷崖——實測那樣算出來是 CAGR **−8.66%**、
+    MDD **−77.18%**（2025 年 −66%），而正確值是 +34.5%／−27.5%。
     """
-    need = {_DATE, "stock_id", "close"} | ({"adj"} if total_return else set())
+    need = {_DATE, "stock_id", "event_type", "adj_factor"}
+    missing = sorted(need - set(events.columns))
+    if missing:
+        raise DataError("corporate_events", None, f"事件表缺欄位 {missing}")
+    bad = events.filter(pl.col("adj_factor").is_null() | (pl.col("adj_factor") <= 0.0))
+    if bad.height:
+        raise DataError(
+            "corporate_events",
+            None,
+            f"adj_factor 須 > 0 且非 null，違規 {bad.height} 列——0 或負值會經累乘污染該股全部歷史",
+        )
+    out = prices.sort(_DATE)
+    for col, keep in (("adj_split", True), ("adj_div", False)):
+        sel = pl.col("event_type").is_in(_SPLIT_TYPES)
+        cum = (
+            events.filter(sel if keep else ~sel)
+            .select(_DATE, "stock_id", "adj_factor")
+            .sort("stock_id", _DATE)
+            .with_columns(**{col: pl.col("adj_factor").cum_prod().over("stock_id")})
+            .select("stock_id", _DATE, col)
+            .sort(_DATE)
+        )
+        out = out.join_asof(cum, on=_DATE, by="stock_id", strategy="backward").with_columns(
+            pl.col(col).fill_null(1.0)
+        )
+    return out
+
+
+def benchmark_series(prices: pl.DataFrame, stock_id: str, *, total_return: bool) -> pl.DataFrame:
+    """由行情取單一標的的基準序列，回傳 (date, value)。需先過 `cumulative_factors`。
+
+    **分割一律還原**（`close / adj_split`）——它不是報酬，是計價單位改變。
+    `total_return=True` 時再除以 `adj_div`（股利）。
+
+    含息卻查不到任何股利事件 → raise。`corporate_events` 對 380 檔 ETF 只涵蓋 16 檔，
+    而缺事件時累積因子會被填成常數 1.0，於是「含息」**靜默退化成不含息**——實測
+    006208 因此少掉約 4.4pp／年（+35.64% vs 應有的水準），而頁面上照樣標著「含息」。
+    """
+    need = {_DATE, "stock_id", "close", "adj_split"} | ({"adj_div"} if total_return else set())
     missing = sorted(need - set(prices.columns))
     if missing:
         raise DataError(
             "prices_daily",
             None,
-            f"基準 {stock_id} 缺欄位 {missing}"
-            + ("；total_return=True 需要 adj，不得回退成未還原價。" if "adj" in missing else ""),
+            f"基準 {stock_id} 缺欄位 {missing}——請先過 `cumulative_factors`；不得回退成未還原價。",
         )
     sub = prices.filter(pl.col("stock_id") == stock_id).sort(_DATE)
     if sub.height == 0:
         raise DataError("prices_daily", None, f"行情中找不到基準 {stock_id}")
-    value = (pl.col("close") / pl.col("adj")) if total_return else pl.col("close")
+    if total_return and sub["adj_div"].n_unique() <= 1:
+        raise DataError(
+            "corporate_events",
+            None,
+            f"基準 {stock_id} 要求含息，但整段期間查不到任何股利事件"
+            f"（adj_div 恆為 {sub['adj_div'][0]}）。這幾乎一定是事件表沒涵蓋它，"
+            "而不是它真的不配息——靜默當成不含息會讓報表標著「含息」卻是價格報酬。",
+        )
+    value = pl.col("close") / pl.col("adj_split")
+    if total_return:
+        value = value / pl.col("adj_div")
     return sub.select(_DATE, value.alias(_VALUE)).filter(pl.col(_VALUE) > 0.0)
 
 
@@ -73,23 +124,56 @@ def index_series(index_daily: pl.DataFrame, index_id: str) -> pl.DataFrame:
     return sub.select(_DATE, pl.col("close").alias(_VALUE)).filter(pl.col(_VALUE) > 0.0)
 
 
-def align_to(series: pl.DataFrame, dates: list[dt.date], *, name: str) -> list[float]:
-    """把基準對齊到策略實際走過的交易日；缺任何一天即 raise。
+def align_to(
+    series: pl.DataFrame,
+    dates: list[dt.date],
+    *,
+    name: str,
+    event_dates: set[dt.date] | None = None,
+) -> list[float]:
+    """把基準對齊到策略實際走過的交易日；缺的日子**只在有公司行動可解釋時**才結轉。
 
-    前值填補會讓 MDD 被系統性低估——缺的那天往往正是停牌或大跌那天——而且不會有
-    任何錯誤訊息。寧可吵，不要安靜地算出一個看起來合理的錯數字（黃金規則 5）。
+    無條件前值填補會讓 MDD 被系統性低估——缺的那天往往正是停牌或大跌那天——而且
+    不會有任何錯誤訊息。寧可吵，不要安靜地算出一個看起來合理的錯數字（黃金規則 5）。
+
+    `event_dates`（該標的在 `corporate_events` 的事件日）放行**一種**缺口：
+    停牌期間本來就沒有可成交價格、部位也沒動，復牌那天是有記錄的事件日。
+    0050 為了 1:4 分割停牌 2025-06-11~06-17 就是這個形狀。
+
+    判準刻意收得很緊：**一段連續缺口，只有當它之後的第一個有值日是事件日時才放行**。
+    否則這個參數會退化成「無條件前值填補」，而那正是本函式要防的。
     """
     have = dict(zip(series[_DATE].to_list(), series[_VALUE].to_list(), strict=True))
-    missing = [d for d in dates if d not in have]
-    if missing:
+    events = event_dates or set()
+    out: list[float] = []
+    pending: list[dt.date] = []
+    last: float | None = None
+    for d in dates:
+        if d in have:
+            if pending:
+                if d not in events or last is None:
+                    raise DataError(
+                        "benchmark",
+                        pending[0],
+                        f"基準 {name} 缺 {len(pending)} 個策略交易日"
+                        f"（{pending[0]} ~ {pending[-1]}），而復牌日 {d} "
+                        f"{'不是有記錄的公司行動日' if last is not None else '之前沒有任何值'}。"
+                        "不得前值填補：缺的那天往往正是大跌那天，填補會讓 MDD 被系統性低估。",
+                    )
+                out.extend([last] * len(pending))
+                pending = []
+            last = float(have[d])
+            out.append(last)
+        else:
+            pending.append(d)
+    if pending:
         raise DataError(
             "benchmark",
-            missing[0],
-            f"基準 {name} 缺 {len(missing)} 個策略交易日（最早 {missing[0]}、最晚 "
-            f"{missing[-1]}）。不得前值填補：缺的那天往往正是大跌那天，"
-            "填補會讓 MDD 被系統性低估。",
+            pending[0],
+            f"基準 {name} 末端缺 {len(pending)} 個策略交易日"
+            f"（{pending[0]} ~ {pending[-1]}），其後沒有任何有值日可判斷缺口原因。",
         )
-    return [float(have[d]) for d in dates]
+    return out
 
 
 def annual_returns(dates: list[dt.date], values: list[float]) -> dict[int, float]:
@@ -119,12 +203,14 @@ def bench_stats(
     label: str,
     role: str,
     total_return: bool,
+    event_dates: set[dt.date] | None = None,
 ) -> BenchStats:
     """把基準序列換算成與策略同口徑的指標（同交易日、同 `compute_metrics`）。
 
     `turnover` 對基準沒有意義，固定 0.0——買進持有沒有周轉。
+    `event_dates` 見 `align_to`：只放行有公司行動可解釋的停牌。
     """
-    values = align_to(series, dates, name=label)
+    values = align_to(series, dates, name=label, event_dates=event_dates)
     return BenchStats(
         key=key,
         label=label,

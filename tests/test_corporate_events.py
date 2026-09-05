@@ -257,3 +257,85 @@ def test_ac2_inconsistent_events_allows_limit_move_exactly_on_the_band() -> None
         ]
     )
     assert inconsistent_events(ev, px, max_deviation=0.10).is_empty()
+
+
+# ── T-151：分割／面額變更／反分割 ────────────────────────────────────────
+
+
+def _sp(sid: str, day: str, kind: str, before: float, after: float) -> dict[str, object]:
+    return {
+        "date": day,
+        "stock_id": sid,
+        "type": kind,
+        "before_price": before,
+        "after_price": after,
+    }
+
+
+def test_ac1_t151_split_rows_use_the_same_after_over_before_convention() -> None:
+    """分割沿用與除權息**同一個**還原慣例，否則兩類事件的累乘會互相矛盾。
+
+    0050 在 2025-06-18 由 188.65 → 47.16 是 1:4 分割，因子恰為 0.25。
+    """
+    from twquant.data.sources.finmind import split_rows
+
+    got = split_rows([_sp("0050", "2025-06-18", "分割", 188.65, 47.16)])
+    assert len(got) == 1
+    r = got[0]
+    assert r["stock_id"] == "0050"
+    assert r["date"] == dt.date(2025, 6, 18)
+    assert r["adj_factor"] == pytest.approx(0.25, abs=1e-4)
+    assert r["ref_price"] == pytest.approx(47.16)
+    assert r["event_type"] == "split"
+
+
+def test_ac2_t151_reverse_split_keeps_factor_above_one() -> None:
+    """反分割的因子 > 1（00632R 3.28 → 22.96 ＝ 1:7）。
+
+    把它強制壓到 < 1 會讓還原方向相反，產生一個看起來合理的錯數字。
+    """
+    from twquant.data.sources.finmind import split_rows
+
+    r = split_rows([_sp("00632R", "2024-12-11", "反分割", 3.28, 22.96)])[0]
+    assert r["adj_factor"] == pytest.approx(7.0, abs=1e-3)
+    assert r["event_type"] == "reverse_split"
+
+
+def test_ac3_t151_par_value_change_is_a_split_by_another_name() -> None:
+    """台股多數「分割」在 FinMind 標成`面額變更`（面額 10 → 1 等）。
+
+    只認`分割`會漏掉絕大多數——實測 34 筆裡有 22 筆是面額變更。
+    """
+    from twquant.data.sources.finmind import split_rows
+
+    r = split_rows([_sp("5314", "2025-03-31", "面額變更", 1390.0, 69.5)])[0]
+    assert r["adj_factor"] == pytest.approx(0.05)
+    assert r["event_type"] == "split"
+
+
+def test_ac4_t151_blank_type_is_derived_from_the_factor_not_guessed_as_a_category() -> None:
+    """FinMind 有 1 筆 `type` 是空字串（00631L 2026-03-31）。
+
+    還原的數學**只依賴因子**，型別字串是描述性的——這與 `dividend_rows` 不同
+    （那裡不同類別有不同的參考價公式，故型別是關鍵資訊）。
+    故空字串由因子推導方向，而不是猜一個類別。
+    """
+    from twquant.data.sources.finmind import split_rows
+
+    assert split_rows([_sp("00631L", "2026-03-31", "", 443.15, 20.14)])[0]["event_type"] == "split"
+
+
+def test_ac5_t151_unknown_non_empty_type_raises() -> None:
+    """非空的未知型別仍要 raise——新類別必須被人看到，不得靜默歸類。"""
+    from twquant.data.sources.finmind import split_rows
+
+    with pytest.raises(DataError, match="未知"):
+        split_rows([_sp("1234", "2025-01-02", "某種新事件", 100.0, 50.0)])
+
+
+def test_ac6_t151_non_positive_prices_raise() -> None:
+    """0 或負價會讓因子變成 0／inf／負數，並經累乘污染該股全部歷史。"""
+    from twquant.data.sources.finmind import split_rows
+
+    with pytest.raises(DataError, match="須 > 0"):
+        split_rows([_sp("1234", "2025-01-02", "分割", 100.0, 0.0)])
