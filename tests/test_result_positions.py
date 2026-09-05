@@ -137,3 +137,65 @@ def test_ac8_absolute_path_is_used_as_is(tmp_path: Path) -> None:
     target = tmp_path / "my_costs.yaml"
     target.write_text("commission_rate: 0.001\n", encoding="utf-8")
     assert _resolve_costs(str(target)) == target
+
+
+# ── T-126：結果包 → 歷年持股的橋 ─────────────────────────────────────────
+
+
+def _sample() -> BacktestResult:
+    """含買進、部分出場、清空、再進場的流水——涵蓋重建會走到的所有分支。"""
+    return _result(
+        [
+            _t(_D[0], "1101", "buy", 1000),
+            _t(_D[0], "2330", "buy", 2000),
+            _t(_D[1], "1101", "sell", 400),
+            _t(_D[2], "1101", "sell", 600),
+            _t(_D[3], "1101", "buy", 200),
+        ]
+    )
+
+
+def test_ac1_t126_positions_from_bundle_matches_the_object_path() -> None:
+    """結果包（dict）與 `BacktestResult`（物件）兩條路徑必須得到**同一張表**。
+
+    T-131 的結果包把 equity／ledger 存成 list[dict]／list[list]，而 T-125 的重建吃的是
+    物件。儀表板讀的是落地的結果包，兩條路徑一旦分歧，報表顯示的持股就不是回測跑的
+    持股——而且不會有任何錯誤訊息。
+    """
+    from twquant.backtest.diagnostics import positions_from_bundle
+
+    res = _sample()
+    bundle = {
+        "equity": [[e.date.isoformat(), e.equity, e.cash, e.positions_value] for e in res.equity],
+        "ledger": [
+            {
+                "date": t.date.isoformat(),
+                "stock_id": t.stock_id,
+                "side": t.side,
+                "shares": t.shares,
+                "price": t.price,
+            }
+            for t in res.ledger
+        ],
+    }
+    assert positions_from_bundle(bundle).equals(positions_from_ledger(res))
+
+
+def test_ac2_t126_bundle_path_rejects_a_trade_outside_the_equity_dates() -> None:
+    """壞資料在兩條路徑都要 raise，不得只有物件那條擋得住。"""
+    from twquant.backtest.diagnostics import positions_from_bundle
+
+    bundle = {
+        "equity": [["2026-01-05", 1.0e6, 1.0e6, 0]],
+        "ledger": [
+            {
+                "date": "2026-01-06",  # 不在權益曲線的日期內
+                "stock_id": "1101",
+                "side": "buy",
+                "shares": 1000,
+                "price": 10.0,
+            }
+        ],
+    }
+    with pytest.raises(DataError, match="不在權益曲線"):
+        positions_from_bundle(bundle)

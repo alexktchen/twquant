@@ -6,6 +6,7 @@ import datetime as dt
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from itertools import pairwise
+from typing import cast
 
 import polars as pl
 
@@ -118,30 +119,61 @@ def positions_from_ledger(result: BacktestResult) -> pl.DataFrame:
 
     純函數、無 IO：落地由呼叫端負責（黃金規則 10）。
     """
+    return _positions(
+        [e.date for e in result.equity],
+        [(t.date, t.stock_id, t.side, t.shares) for t in result.ledger],
+    )
+
+
+def positions_from_bundle(bundle: dict[str, object]) -> pl.DataFrame:
+    """由**落地的結果包**（T-131）重建每個交易日的持倉股數。
+
+    儀表板讀的是結果包而不是 `BacktestResult` 物件，但兩者必須得到同一張表——
+    否則報表顯示的持股不是回測跑的持股，且**不會有任何錯誤訊息**。故本函式與
+    `positions_from_ledger` 共用同一個核心 `_positions`，而不是各寫一份。
+
+    純函數、無 IO：讀檔由呼叫端負責（黃金規則 10）。
+    """
+    eq = cast("list[list[object]]", bundle.get("equity") or [])
+    led = cast("list[dict[str, object]]", bundle.get("ledger") or [])
+    dates = [dt.date.fromisoformat(str(row[0])) for row in eq]
+    trades = [
+        (
+            dt.date.fromisoformat(str(t["date"])),
+            str(t["stock_id"]),
+            str(t["side"]),
+            int(cast("int", t["shares"])),
+        )
+        for t in led
+    ]
+    return _positions(dates, trades)
+
+
+def _positions(dates: list[dt.date], trades: list[tuple[dt.date, str, str, int]]) -> pl.DataFrame:
+    """重建持倉的共用核心。輸入刻意是基本型別，讓物件與結果包兩條路徑不可能分歧。"""
     schema = {"date": pl.Date, "stock_id": pl.String, "shares": pl.Int64}
-    dates = [e.date for e in result.equity]
     if not dates:
         return pl.DataFrame(schema=schema)
     valid = set(dates)
 
     deltas: dict[dt.date, dict[str, int]] = {}
-    for t in result.ledger:
-        if t.date not in valid:
+    for t_date, t_sid, t_side, t_shares in trades:
+        if t_date not in valid:
             raise DataError(
                 "backtest_ledger",
-                t.date,
-                f"成交日 {t.date} 不在權益曲線的日期範圍內"
+                t_date,
+                f"成交日 {t_date} 不在權益曲線的日期範圍內"
                 f"（{dates[0]} ~ {dates[-1]}），無法重建持倉。",
             )
-        if t.side not in ("buy", "sell"):
+        if t_side not in ("buy", "sell"):
             raise DataError(
                 "backtest_ledger",
-                t.date,
-                f"未知的 side「{t.side}」（{t.stock_id}），只接受 buy／sell。",
+                t_date,
+                f"未知的 side「{t_side}」（{t_sid}），只接受 buy／sell。",
             )
-        sign = 1 if t.side == "buy" else -1
-        deltas.setdefault(t.date, {})
-        deltas[t.date][t.stock_id] = deltas[t.date].get(t.stock_id, 0) + sign * t.shares
+        sign = 1 if t_side == "buy" else -1
+        deltas.setdefault(t_date, {})
+        deltas[t_date][t_sid] = deltas[t_date].get(t_sid, 0) + sign * t_shares
 
     rows: list[dict[str, object]] = []
     held: dict[str, int] = {}
