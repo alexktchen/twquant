@@ -101,6 +101,26 @@ def main() -> None:
         # 據實標明缺哪幾格，不以部分結果冒充完整階梯（黃金規則 5）
         print(f"缺 {len(missing)} 份結果包：{'、'.join(missing)}", flush=True)
 
+    # 完整性檢查：**只能比同一階的 1× vs 0×**。跨階比指紋無意義——不同策略讀不同的表
+    # （ML 階讀 ml_scores、四因子階讀財報與月營收），指紋本來就不同，比了必然假警報。
+    # 同一階的兩個成本情境讀完全相同的表，指紋不同即代表兩次跑之間資料變了。
+    fp_warn: list[str] = []
+    checked = 0
+    for rung, _, _ in RUNGS:
+        a, b = bundles.get((rung, "1x")), bundles.get((rung, "0x"))
+        if a is None or b is None:
+            continue
+        checked += 1
+        if str(a["data_fingerprint"]) != str(b["data_fingerprint"]):
+            fp_warn.append(
+                f"- **{rung}**：1× 與 0× 的資料指紋不同"
+                f"（`{str(a['data_fingerprint'])[:12]}…` vs `{str(b['data_fingerprint'])[:12]}…`）"
+                "——兩次跑之間資料變了，該階的零成本對照無效"
+            )
+    if fp_warn:
+        fp_warn = ["⚠ **資料一致性檢查未過**：", ""] + fp_warn + [""]
+        print(f"!! {len(fp_warn) - 3} 階的 1×／0× 指紋不一致", flush=True)
+
     lo, hi = dt.date(2022, 7, 1), dt.date(2026, 2, 28)
     lines: list[str] = [
         "# T-127 控制組階梯結果（SPEC-013 §3.7）",
@@ -121,6 +141,13 @@ def main() -> None:
     ]
     if missing:
         lines += [f"> ⚠ 缺 {len(missing)} 份結果包：{'、'.join(missing)}。下表不完整。", ""]
+    lines += fp_warn
+    if checked and not fp_warn:
+        lines += [
+            f"資料一致性：{checked} 階的 1×／0× 指紋皆相同，零成本對照成立。"
+            "（**跨階不比指紋**——不同策略讀不同的表，指紋必然不同，比了是假警報。）",
+            "",
+        ]
 
     for tag, label in (("1x", "1× 全成本"), ("0x", "0× 零成本反事實")):
         lines += [

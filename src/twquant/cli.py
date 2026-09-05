@@ -1564,6 +1564,7 @@ def backtest(
             max_participation=participation,
             source=source,
             data_fingerprint=data_fingerprint(fp_tables),
+            data_tables=fp_tables,
         )
         write_bundle(out, bundle)
         typer.secho(

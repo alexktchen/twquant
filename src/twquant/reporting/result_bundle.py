@@ -59,6 +59,7 @@ def bundle_backtest(
     max_participation: float,
     source: str,
     data_fingerprint: str,
+    data_tables: dict[str, tuple[int, str]] | None = None,
 ) -> dict[str, Any]:
     """把一次回測的完整輸出與身分序列化成可 JSON 化的 dict（純函數）。
 
@@ -76,6 +77,9 @@ def bundle_backtest(
         "max_participation": max_participation,
         "source": source,
         "data_fingerprint": data_fingerprint,
+        # 逐表明細：跨策略比雜湊無意義（不同策略讀不同的表，雜湊必然不同），
+        # 要比就得比**重疊的表**。純追加欄位，舊結果包缺此鍵仍可讀。
+        "data_tables": {k: list(v) for k, v in sorted((data_tables or {}).items())},
         "initial_equity": result.initial_capital,
         "final_equity": result.final_equity,
         "metrics": {
