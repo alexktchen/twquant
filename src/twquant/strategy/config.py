@@ -17,6 +17,31 @@ from twquant.config import BaseConfig, load_config
 from twquant.errors import ConfigError
 
 
+class PrefilterConfig(BaseConfig):
+    """串接閘門：先用一個因子的橫斷面分位縮小池子，**再**用訊號因子在池內排序。
+
+    設計意圖（使用者的話）：「ML 找出來的已經是相對優於大盤了，代表資金應該在裡面，
+    再用因子訊號來判斷進出場點。」——把「資金該在哪個池子」與「何時進出」拆成兩層。
+
+    為什麼這個用法值得測：ML 的長處是**排序整個橫斷面**（OOS RankIC +0.0452，
+    16 個 walk-forward 窗有 15 個為正），短處是**挑不出最強的 20 檔**
+    （零成本下對四個公開因子只贏 +1.24pp、t +0.33）。當閘門消費的是排序而非尾巴，
+    剛好避開短處。**但這是假說不是結論**——`keep_pct` 之外的部分能不能被技術面
+    有效篩選，要量了才知道。
+
+    閘門在**訊號因子計算之前**執行，故訊號因子的橫斷面標準化是在縮小後的池子裡算的
+    ——那正是「先挑再篩」的語意；若在全宇宙標準化，第二層就不是在池內比較。
+
+    `keep_pct` 是保留比例（0 < p ≤ 1）。`side` 為 `top` 時保留分數最高的一段，
+    方向已依因子的 `direction` 校正（低波動異象 direction=-1，故 top 是低波動那端）。
+    """
+
+    factor: str
+    keep_pct: float = Field(gt=0.0, le=1.0)
+    side: Literal["top", "bottom"] = "top"
+    params: dict[str, object] = Field(default_factory=dict)
+
+
 class UniverseConfig(BaseConfig):
     """選股宇宙過濾條件（SPEC-003 §2）。"""
 
@@ -138,6 +163,8 @@ class StrategyConfig(BaseConfig):
     # 預設 False 是為了保住既有 15 個策略配置的逐位元行為——新的多因子配置須顯式開啟。
     require_all_factors: bool = False
     rebalance: RebalanceConfig = RebalanceConfig()
+    # 串接閘門（可多層）：依序縮小池子，全部在訊號因子計算之前
+    prefilter: list[PrefilterConfig] = Field(default_factory=list)
     overlays: list[str] = Field(default_factory=list)
     # 每個 overlay 的參數，key 為 overlay 名。**必須真的傳到 overlay**：
     # `build.py` 原本寫死傳 `{}`，那樣配置檔寫什麼都不生效且不會報錯

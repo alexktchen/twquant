@@ -9,6 +9,7 @@ signal_dates 用交易日曆（T-003）把 weekly/monthly 排程對到真實開�
 from __future__ import annotations
 
 import datetime as dt
+import math
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -65,6 +66,28 @@ def signal_dates(
     raise ValueError(f"未知排程：{rb.schedule}")
 
 
+def _prefilter_ids(frame: pl.DataFrame, *, keep_pct: float, side: str, direction: int) -> list[str]:
+    """依因子值的橫斷面分位保留一段，回傳保留的 stock_id。
+
+    **null 一律排除**——「不知道分數」不等於「分數高」，與 `min_roe`／市值排名同一規則。
+    保留檔數以無條件進位計算，故 keep_pct 再小也至少留 1 檔（前提是有非 null 值）。
+    方向依因子的 `direction` 校正：低波動異象 direction=-1，`side=top` 指的是
+    「該因子意義上較好的那端」而不是數值大的那端。
+    """
+    if not 0.0 < keep_pct <= 1.0:
+        raise ConfigError(f"keep_pct 須在 (0, 1] 之間，得到 {keep_pct}")
+    valid = frame.filter(pl.col("value").is_not_null() & pl.col("value").is_finite())
+    if valid.height == 0:
+        raise ConfigError(
+            "串接閘門的因子在該日全為 null／非有限值，池子會被清空。"
+            "這是資料或配置問題，不得靜默變成空手日。"
+        )
+    desc = (side == "top") == (direction >= 0)
+    ranked = valid.sort("value", descending=desc)
+    k = max(1, math.ceil(valid.height * keep_pct))
+    return ranked.head(k)["stock_id"].to_list()
+
+
 def _empty() -> pl.DataFrame:
     return pl.DataFrame(schema=_OUT_SCHEMA)
 
@@ -99,6 +122,19 @@ def build_targets(
             f"max_jump_ratio={u.max_jump_ratio}、max_gap_sessions={u.max_gap_sessions}、"
             f"hygiene_lookback={u.hygiene_lookback}",
         )
+
+    # 串接閘門：在訊號因子計算**之前**縮小池子，故訊號的橫斷面標準化是在池內算的
+    for pf in cfg.prefilter:
+        gate = compute([pf.factor], view, dates=[signal_date], params={pf.factor: dict(pf.params)})
+        gate = gate.filter(pl.col("stock_id").is_in(uni)).select("stock_id", "value")
+        uni = _prefilter_ids(
+            gate, keep_pct=pf.keep_pct, side=pf.side, direction=get(pf.factor).direction
+        )
+        if not uni:
+            raise ConfigError(
+                f"串接閘門 {pf.factor}（keep_pct={pf.keep_pct}）把池子清空——"
+                "宇宙全空是配置問題，不是空手日。"
+            )
 
     names = [s.factor for s in cfg.signals]
     params = {s.factor: dict(s.params) for s in cfg.signals}

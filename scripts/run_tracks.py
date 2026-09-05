@@ -38,6 +38,12 @@ KNOWN = {
     "C2b": "track_c2b_boxbreak",
     "C2c": "track_c2c_flaghold",
     "C3": "track_c3_chipflow",
+    "M1": "track_m1_ml_c1",
+    "M2": "track_m2_ml_flag",
+    "M3": "track_m3_mom_flag",
+    "M4": "track_m4_ml_chip",
+    "M5": "track_m5_ml_large",
+    "M6": "track_m6_ml_voltarget",
     "C4": "track_c4_voltarget",
 }
 SCALES = [("1x", None), ("0x", "0"), ("1.5x", "1.5")]

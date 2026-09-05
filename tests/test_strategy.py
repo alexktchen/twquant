@@ -649,3 +649,127 @@ def test_ac5_c4_overlay_params_reach_the_overlay() -> None:
         }
     )
     assert cfg.overlay_params["_probe_params"]["target_vol"] == 0.05
+
+
+# ── 串接閘門：先用一個因子縮小池子，再用另一組因子在池內排序 ────────────────
+
+
+def _cascade_wh(tmp_path: Path) -> tuple[Warehouse, dt.date, list[str]]:
+    """10 檔股票、價格單調遞增且各不相同——動能排序因此可手算。"""
+    days = [dt.date(2026, 3, 2) + dt.timedelta(days=i) for i in range(40)]
+    days = [d for d in days if d.weekday() < 5][:30]
+    sids = [f"{1100 + i}" for i in range(10)]
+    rows: list[dict[str, object]] = []
+    for k, sid in enumerate(sids):
+        c = 100.0
+        for d in days:
+            c *= 1.0 + 0.001 * (k + 1)  # k 越大漲越快 → 動能排序 = sids 反序
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 100000,
+                    "amount": 1e9,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime(d.year, d.month, d.day, 18, tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
+    return wh, days[-1], sids
+
+
+def test_ac1_prefilter_narrows_the_pool_before_ranking(tmp_path: Path) -> None:
+    """`prefilter` 以某因子的橫斷面分位縮小宇宙，**在訊號因子計算之前**。
+
+    這是「先用 ML 挑、再用技術面篩」的機制：ML 的長處是排序整個橫斷面
+    （OOS RankIC +0.045、16 窗有 15 個為正），短處是挑不出最強的 20 檔
+    （零成本下對四因子只贏 +1.24pp、t +0.33）。串接消費的是排序而非尾巴。
+    """
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.config import StrategyConfig
+
+    wh, d, _sids = _cascade_wh(tmp_path)
+    base = {
+        "name": "t",
+        "universe": {"min_adv_twd": None, "max_jump_ratio": None, "max_gap_sessions": None},
+        "signals": [{"factor": "price.mom_20d", "weight": 1.0}],
+        "selection": {"method": "top_n", "top_n": 3},
+        "weighting": "equal",
+        "rebalance": {"schedule": "monthly", "day": "MON", "execution": "next_open"},
+        "max_weight_per_stock": 0.5,
+    }
+    # 不設閘門：10 檔全入池，選前 3 名（漲最快的 1109/1108/1107）
+    full = build_targets(StrategyConfig.model_validate(base), wh, d)
+    assert set(full["stock_id"].to_list()) == {"1109", "1108", "1107"}
+
+    # 閘門留動能後 50%（漲最慢的一半）→ 只能在 1100~1104 裡挑
+    gated = StrategyConfig.model_validate(
+        {**base, "prefilter": [{"factor": "price.mom_20d", "keep_pct": 0.5, "side": "bottom"}]}
+    )
+    out = build_targets(gated, wh, d)
+    assert set(out["stock_id"].to_list()) <= {"1100", "1101", "1102", "1103", "1104"}
+    assert out.height == 3
+
+
+def test_ac2_prefilter_keeps_the_top_fraction_by_default(tmp_path: Path) -> None:
+    """預設 `side: top`：留分位最高的一段（照因子的 direction 校正方向）。"""
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.config import StrategyConfig
+
+    wh, d, _ = _cascade_wh(tmp_path)
+    cfg = StrategyConfig.model_validate(
+        {
+            "name": "t",
+            "universe": {"min_adv_twd": None, "max_jump_ratio": None, "max_gap_sessions": None},
+            "prefilter": [{"factor": "price.mom_20d", "keep_pct": 0.3}],
+            "signals": [{"factor": "price.mom_20d", "weight": 1.0}],
+            "selection": {"method": "top_n", "top_n": 2},
+            "weighting": "equal",
+            "rebalance": {"schedule": "monthly", "day": "MON", "execution": "next_open"},
+            "max_weight_per_stock": 0.5,
+        }
+    )
+    out = build_targets(cfg, wh, d)
+    assert set(out["stock_id"].to_list()) <= {"1109", "1108", "1107"}
+
+
+def test_ac3_prefilter_excludes_null_values(tmp_path: Path) -> None:
+    """閘門因子為 null 者一律排除——「不知道分數」不等於「分數高」。
+
+    與 min_roe／市值排名同一條規則（黃金規則 5 的精神）。
+    """
+    from twquant.strategy.build import _prefilter_ids
+
+    frame = pl.DataFrame(
+        {"stock_id": ["a", "b", "c", "d"], "value": [3.0, 1.0, None, 2.0]},
+        schema={"stock_id": pl.String, "value": pl.Float64},
+    )
+    kept = _prefilter_ids(frame, keep_pct=0.75, side="top", direction=1)
+    assert "c" not in kept, "null 必須被排除，不得當成高分"
+
+
+def test_ac4_prefilter_rejects_an_empty_result(tmp_path: Path) -> None:
+    """閘門把池子清空 → raise，不得靜默變成空手日。
+
+    宇宙全空是配置問題（比照 build_targets 對 universe_ids 的處理）；
+    靜默回空表會讓回測輸出 0 成交卻 exit 0，還把無效試驗寫進 research_log。
+    """
+    from twquant.errors import ConfigError
+    from twquant.strategy.build import _prefilter_ids
+
+    with pytest.raises(ConfigError, match="keep_pct"):
+        _prefilter_ids(
+            pl.DataFrame({"stock_id": ["a"], "value": [1.0]}), keep_pct=0.0, side="top", direction=1
+        )
