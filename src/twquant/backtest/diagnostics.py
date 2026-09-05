@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from itertools import pairwise
 
 import polars as pl
 
@@ -232,3 +233,110 @@ def round_trip_stats(ledger: list[Trade]) -> RoundTripStats:
         avg_loss=sum(losses) / len(losses) if losses else 0.0,
         total_pnl=sum(p for p, _ in closed),
     )
+
+
+@dataclass(frozen=True)
+class HoldingBucket:
+    """一段持有期區間內的逐筆統計（T-134）。`lo`／`hi` 為曆日、含端點。"""
+
+    lo: int
+    hi: int
+    n: int
+    share: float  # 佔已平倉趟數的比例
+    win_rate: float
+    avg_win: float
+    avg_loss: float
+    expectancy: float  # 每筆平均報酬率（含兩邊費用）
+    pnl: float  # 該桶已實現損益（TWD，帶號）——永遠可讀，不受分母問題影響
+    pnl_share: float  # pnl ÷ 全部已實現損益；各桶加總為 1
+
+
+def holding_buckets(ledger: list[Trade], *, edges: tuple[int, ...]) -> list[HoldingBucket]:
+    """把已平倉的 round trip 依**持有曆日**分桶，回報每桶的期望值與損益佔比。
+
+    這個診斷回答的是「**策略靠什麼賺錢**」，不是「該抱多久」。
+
+    **不得讀成「抱久一點比較好」。** 部位之所以活過下一次調倉，正是因為它繼續得高分，
+    而繼續得高分與股價上漲高度相關——「抱久的比較賺」有一大部分只是
+    「賺的才被抱久」的同義反覆。D-042 已經為這個混淆付過代價：當時依落後 IC 推論
+    「拉長持有能保住 alpha」，實作 banding 後周轉降 47% 但**毛報酬由 +4.49% 翻成 −3.03%**。
+    該裁決的結論是：落後 IC 支持的是「降低再平衡頻率」（抱著原本的選股），
+    **不是**「遲滯」（留住名次已衰退的股票）。
+
+    `pnl_share` 是本函數的重點：它直接量出集中度脆弱性——若少數趟數貢獻多數獲利，
+    把那幾趟拿掉策略就垮了，而那不是勝率能反映的。
+
+    `edges` 由呼叫端給定（桶界是呈現參數，不寫死在此，黃金規則 8）。
+    區間為**左閉右開** `[edges[i], edges[i+1])`，最後一桶右端閉合——
+    全用閉區間會讓恰好落在邊界的趟數同時算進兩個桶，筆數加總就不等於總趟數了。
+
+    空桶保留並回報 0，不得悄悄消失——那會讓讀者以為該區間不存在，而非沒有樣本。
+
+    `pnl_share` 的分母是**帶號的**總損益，故各桶加總為 1；總損益為負時符號隨之翻轉
+    （該桶「貢獻了多少虧損」）。總損益接近 0 時此比值不穩定，故 `pnl`（TWD）並列，
+    它永遠可讀。
+    """
+    if list(edges) != sorted(edges) or len(set(edges)) != len(edges):
+        raise ValueError(f"edges 必須嚴格遞增且不重複，得到 {edges}")
+
+    pos: dict[str, int] = {}
+    cost: dict[str, float] = {}
+    proc: dict[str, float] = {}
+    start: dict[str, dt.date] = {}
+    trips: list[tuple[int, float, float]] = []  # (持有曆日, 報酬率, 損益)
+
+    for t in sorted(ledger, key=lambda x: (x.date, x.stock_id, x.side)):
+        fees = t.commission + t.tax + t.slippage
+        if t.side == "buy":
+            if pos.get(t.stock_id, 0) == 0:
+                start[t.stock_id] = t.date
+            pos[t.stock_id] = pos.get(t.stock_id, 0) + t.shares
+            cost[t.stock_id] = cost.get(t.stock_id, 0.0) + t.shares * t.price + fees
+        elif t.side == "sell":
+            pos[t.stock_id] = pos.get(t.stock_id, 0) - t.shares
+            proc[t.stock_id] = proc.get(t.stock_id, 0.0) + t.shares * t.price - fees
+            if pos[t.stock_id] < 0:
+                raise DataError(
+                    "backtest_ledger",
+                    t.date,
+                    f"{t.stock_id} 於 {t.date} 的累計股數為 {pos[t.stock_id]}（負）。",
+                )
+            if pos[t.stock_id] == 0:
+                c = cost.pop(t.stock_id, 0.0)
+                p = proc.pop(t.stock_id, 0.0)
+                held = (t.date - start[t.stock_id]).days
+                trips.append((held, (p - c) / c if c > 0 else 0.0, p - c))
+        else:
+            raise DataError("backtest_ledger", t.date, f"未知的 side「{t.side}」。")
+
+    total_n = len(trips)
+    total_pnl = sum(p for _, _, p in trips)
+    out: list[HoldingBucket] = []
+    n_edges = len(edges)
+    for i, (lo, hi) in enumerate(pairwise(edges)):
+        last = i == n_edges - 2
+        g = (
+            [x for x in trips if lo <= x[0] <= hi]
+            if last
+            else [x for x in trips if lo <= x[0] < hi]
+        )
+        if not g:
+            out.append(HoldingBucket(lo, hi, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+            continue
+        wins = [r for _, r, _ in g if r > 0]
+        losses = [r for _, r, _ in g if r <= 0]
+        out.append(
+            HoldingBucket(
+                lo=lo,
+                hi=hi,
+                n=len(g),
+                share=len(g) / total_n if total_n else 0.0,
+                win_rate=len(wins) / len(g),
+                avg_win=sum(wins) / len(wins) if wins else 0.0,
+                avg_loss=sum(losses) / len(losses) if losses else 0.0,
+                expectancy=sum(r for _, r, _ in g) / len(g),
+                pnl=sum(p for _, _, p in g),
+                pnl_share=(sum(p for _, _, p in g) / total_pnl) if total_pnl != 0 else 0.0,
+            )
+        )
+    return out
