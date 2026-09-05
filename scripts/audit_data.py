@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import math
 import pathlib
 import statistics as st
 import sys
 
 import polars as pl
+import psycopg
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from twquant.config import ServingConfig
@@ -271,7 +271,9 @@ def _check_nonfinite(cur, schema: str, table: str, since: dt.date | None) -> lis
             (since,) if since else (),
         )
         n = cur.fetchone()[0]
-    except Exception as exc:  # numeric 欄不支援 Infinity 比較等
+    except psycopg.Error as exc:
+        # numeric 欄不支援 Infinity 比較。回報「無法檢查」而非靜默跳過——
+        # 一個安靜地什麼都不查的檢查比沒有檢查更危險（黃金規則 5）。
         return [Finding(table, "非有限值", "info", f"無法檢查（{type(exc).__name__}）")]
     if not n:
         return []
