@@ -89,8 +89,8 @@ def main() -> None:
     #
     # `since` 必須涵蓋**最長**的因子回看，否則因子輸出會缺前段（該參數的 docstring
     # 明文警告）。取子集裡的最大 lookback（fundamental.revenue_yoy 是 430 天）再加倍。
-    from twquant.factors.registry import get as _get
     import twquant.factors.builtins  # noqa: F401
+    from twquant.factors.registry import get as _get
 
     max_lb = max(_get(f).lookback_days for f in FACTORS)
     since = args.lo - dt.timedelta(days=max_lb * 2 + 60)
