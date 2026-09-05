@@ -29,6 +29,9 @@ RUNGS = [
     ("L3", "ladder_l3_simple"),
     ("L4", "ladder_l4_wt"),
     ("X1", "ladder_x1_simple20"),
+    # T-146／D-066 的處理組：與 L0 逐字相同，只換成 T-145 重訓的乾淨模型。
+    # 對照組就是同批的 X1，故兩者必然跑在同一份資料上（結果包指紋可驗）。
+    ("L0new", "ladder_l0_new"),
 ]
 SCALES = [("1x", None), ("0x", "0")]
 
@@ -78,7 +81,7 @@ def main() -> None:
     if failures:
         print(f"失敗 {len(failures)} 次：{'；'.join(failures)}", flush=True)
         raise SystemExit(1)
-    print(f"12 次全部成功，結果包在 {OUT}", flush=True)
+    print(f"{total} 次全部成功，結果包在 {OUT}", flush=True)
 
 
 if __name__ == "__main__":
