@@ -45,11 +45,19 @@ class MaterializeResult:
 
 
 def _compute_universe(
-    source: TableSource, as_of: dt.date, factors: Sequence[str] | None = None
+    source: TableSource,
+    as_of: dt.date,
+    factors: Sequence[str] | None = None,
+    *,
+    trim_lookback: bool = False,
 ) -> pl.DataFrame | None:
     """算全宇宙全因子並附 pct / z / signed_z；無可算資料回 None。
 
     factors（T-094）：只算這個子集（籌碼回補後重算 7 個籌碼因子，不重跑全表 7 小時）。
+
+    trim_lookback（T-083）：依各因子宣告的 `lookback_days` 裁切歷史下界。物化是逐日
+    重跑上千次的路徑，不裁切時每個因子每天都重讀六年全史（實測全期約 45 小時）。
+    只動下界、不動 PIT 上界，等價性由 `tests/test_lookback_trim.py` 保證。
     子集內任一名字未註冊即 raise——打錯名字若被下面的 except 吞掉，就會「成功地什麼都沒算」。
     """
     import twquant.factors.builtins  # noqa: F401  # 觸發因子註冊
@@ -67,7 +75,7 @@ def _compute_universe(
         # 預期資料缺口（DataError：缺表/史料不足）記 DEBUG；非預期錯誤記 WARNING 附堆疊，
         # 讓「某因子在某些交易日悄悄消失」這類 bug 從無聲變可見（D-020）。
         try:
-            frames.append(compute([name], view, dates=[as_of]))
+            frames.append(compute([name], view, dates=[as_of], trim_lookback=trim_lookback))
         except DataError as exc:
             _log.debug("因子 %s 於 %s 無可算資料，略過：%s", name, as_of, exc)
         except Exception as exc:  # noqa: BLE001  # 記錄後續算，不吞掉整天
@@ -106,6 +114,8 @@ def _materialize_on(
     cfg: ServingConfig,
     as_of: dt.date,
     factors: Sequence[str] | None = None,
+    *,
+    trim_lookback: bool = False,
 ) -> MaterializeResult:
     # D-057：子集 ⊇ composite 集合時照常重算 composite_daily（與全因子模式同結果）；
     # 部分重疊則兩害皆有——重算會得到不同的綜合分，不重算則兩張表對同一因子有兩個版本。
@@ -120,7 +130,7 @@ def _materialize_on(
                 "請把 composite 因子補齊（子集完整包含即可重算 composite_daily），"
                 "或改用全因子物化。"
             )
-    merged = _compute_universe(source, as_of, factors)
+    merged = _compute_universe(source, as_of, factors, trim_lookback=trim_lookback)
     if merged is None:
         return MaterializeResult(as_of, 0, 0, 0)
 

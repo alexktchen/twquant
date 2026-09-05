@@ -86,10 +86,10 @@ def test_compute_universe_logs_unexpected_factor_failure(
     as_of = dt.date(2026, 6, 24)
     real = compute_mod.compute
 
-    def flaky(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+    def flaky(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
         if names == ["price.mom_20d"]:
             raise RuntimeError("boom")  # 非 DataError → 視為非預期
-        return real(names, view, dates=dates)
+        return real(names, view, dates=dates, **kw)
 
     monkeypatch.setattr(compute_mod, "compute", flaky)
     with caplog.at_level(logging.WARNING, logger="twquant.serving"):
@@ -116,10 +116,10 @@ def test_compute_universe_expected_data_gap_logged_below_warning(
     as_of = dt.date(2026, 6, 24)
     real = compute_mod.compute
 
-    def flaky(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+    def flaky(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
         if names == ["price.mom_20d"]:
             raise DataError("chip_table", as_of, "clean 層無資料")
-        return real(names, view, dates=dates)
+        return real(names, view, dates=dates, **kw)
 
     monkeypatch.setattr(compute_mod, "compute", flaky)
     with caplog.at_level(logging.DEBUG, logger="twquant.serving"):
@@ -151,9 +151,9 @@ def test_t094_compute_universe_subset_only_computes_requested_factors(
     real = compute_mod.compute
     seen: list[str] = []
 
-    def spy(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+    def spy(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
         seen.extend(names)
-        return real(names, view, dates=dates)
+        return real(names, view, dates=dates, **kw)
 
     monkeypatch.setattr(compute_mod, "compute", spy)
     smat._compute_universe(wh, as_of, factors=["price.mom_20d", "price.reversal_5d"])

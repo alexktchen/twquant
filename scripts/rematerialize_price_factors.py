@@ -83,9 +83,22 @@ def main() -> None:
     print(f"重物化 {len(FACTORS)} 個因子：{', '.join(FACTORS)}")
     print(f"composite 集合 {sorted(comp)} 已完整包含 ✓")
 
+    # 真正的瓶頸不是計算而是 **PG 讀取**：`PgTableSource.scan()` 預設整表讀出，
+    # 而 `trim_lookback` 是在讀出**之後**才於 polars 過濾——省了計算，沒省 I/O。
+    # `since` 會把日期條件推進 SQL，`cache=True` 讓整段期間只讀一次。
+    #
+    # `since` 必須涵蓋**最長**的因子回看，否則因子輸出會缺前段（該參數的 docstring
+    # 明文警告）。取子集裡的最大 lookback（fundamental.revenue_yoy 是 430 天）再加倍。
+    from twquant.factors.registry import get as _get
+    import twquant.factors.builtins  # noqa: F401
+
+    max_lb = max(_get(f).lookback_days for f in FACTORS)
+    since = args.lo - dt.timedelta(days=max_lb * 2 + 60)
+    print(f"PG 讀取下界 since={since}（最長回看 {max_lb} 天 × 2 + 60 緩衝）")
+
     conn = store.connect(cfg)
     try:
-        source = PgTableSource(conn, cfg.pg_schema)
+        source = PgTableSource(conn, cfg.pg_schema, cache=True, since=since)
         days = source.dates_in_range("prices_daily", args.lo, args.hi)
         skipped = [d for d in days if SKIP_LO <= d <= SKIP_HI]
         days = [d for d in days if not (SKIP_LO <= d <= SKIP_HI)]
@@ -101,7 +114,7 @@ def main() -> None:
         sch.ensure_schema(conn, cfg.pg_schema)
         t0 = time.perf_counter()
         for k, d in enumerate(mine, 1):
-            r = smat._materialize_on(source, conn, cfg, d, list(FACTORS))
+            r = smat._materialize_on(source, conn, cfg, d, list(FACTORS), trim_lookback=True)
             if k % 20 == 0 or k == len(mine):
                 el = time.perf_counter() - t0
                 print(
