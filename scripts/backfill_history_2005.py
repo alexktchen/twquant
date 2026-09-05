@@ -26,14 +26,20 @@ UNIVERSE = STAGING / "universe_historical.txt"
 START, END = "2005-01-01", "2026-09-04"
 
 # 順序＝重要性：行情是面板本體，先抓完它就能開始下游工作。
+#
+# 2026-09-05 重排（原順序是法人／融資券排在財報之前）：SPEC-013 兩軌需要的是
+# 月營收（T-122 的營收濾網）與損益／資產負債（`fundamental.roe`、`log_market_cap`
+# 的股本），**完全用不到法人與融資券**。免費層 600 次/小時、每個資料集約 5 小時，
+# 把三個財報類提前等於讓可用時點從約 30 小時縮到約 15 小時。
+# 已抓完的資料集重跑時「待抓 0 檔」瞬間跳過，故重排不浪費任何已完成的工作。
 DATASETS = [
     ("TaiwanStockPrice", "finmind_hist_price"),
     ("TaiwanStockPER", "finmind_hist_per"),
-    ("TaiwanStockInstitutionalInvestorsBuySell", "finmind_hist_institutional"),
-    ("TaiwanStockMarginPurchaseShortSale", "finmind_hist_margin"),
     ("TaiwanStockMonthRevenue", "finmind_hist_revenue"),
     ("TaiwanStockFinancialStatements", "finmind_hist_income"),
     ("TaiwanStockBalanceSheet", "finmind_hist_balance"),
+    ("TaiwanStockInstitutionalInvestorsBuySell", "finmind_hist_institutional"),
+    ("TaiwanStockMarginPurchaseShortSale", "finmind_hist_margin"),
     ("TaiwanStockCashFlowsStatement", "finmind_hist_cashflow"),
 ]
 

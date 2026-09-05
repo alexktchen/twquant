@@ -1,0 +1,31 @@
+# T-127 控制組階梯（SPEC-013 §3.2，D-060／D-061 事前登記）。
+# 判讀規則見 SPEC-013 §3.7：**只填表、不下結論**，且「未能區分」是合法結果。
+# trial_scope 不帶 bt: 前綴——`backtest_trial_scope` 會自己加（D-061／R5）。
+#
+# L1：= L0，唯一變更 top_n 20 → 40。
+# 回答 Q3（檔數值多少回撤）。
+# 
+name: ladder_l1_n40
+description: L1：= L0，唯一變更 top_n 20 → 40。回答 Q3（檔數值多少回撤）。（診斷用，非部署候選）
+trial_scope: ladder_diag
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000
+  min_price: 10.0
+combine: zscore_weighted
+signals:
+  - factor: ml.lgbm_net_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_net_h20_20260225_9a575e97
+selection:
+  method: top_n
+  top_n: 40
+weighting: equal
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []
+max_weight_per_stock: 0.05
