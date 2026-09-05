@@ -154,12 +154,19 @@ def cost_adjusted_return_labels(
     downside_penalty: float,
     cost_cfg: CostConfig,
     adjusted: bool = False,
+    max_span_sessions: int | None = None,
 ) -> pl.DataFrame:
     """建立 H 日成本後超額報酬標籤；ADV 僅含訊號日及以前資料。
 
     `adjusted=True` 時毛報酬改用還原價（總報酬，T-098／D-054），但**成本仍用真實
     成交價**——滑價的半價差是價格相依的（`costs.py:_half_spread_frac`），股數也由
     真實價決定；用還原價會同時算錯這兩項。
+
+    **`max_span_sessions`（T-144）**：本函式有**自己的** `shift(-(1 + horizon))`，與
+    `forward_open_returns` 完全獨立。T-139 只防護了後者，而凍結模型的配置是
+    `transform: cost_adjusted_return`——於是那道防護對它**是 no-op**：旗標看起來接上了，
+    實際什麼都沒擋。這裡補上同一道防護：出場列與當前列的開市日跨距超過此值即設 null。
+    跨距以全市場日曆計，故連假不受影響。**預設 None ＝不啟用**，既有結果逐位元不變。
     """
     required = {"date", "stock_id", "open", "amount"}
     missing = sorted(required - set(prices.columns))
@@ -173,6 +180,11 @@ def cost_adjusted_return_labels(
         raise ValueError(f"position_notional_twd 須 > 0，得到 {position_notional_twd}")
     if downside_penalty < 0:
         raise ValueError(f"downside_penalty 須 >= 0，得到 {downside_penalty}")
+    if max_span_sessions is not None and max_span_sessions < horizon + 1:
+        raise ValueError(
+            f"max_span_sessions({max_span_sessions}) 不得小於 horizon+1({horizon + 1})"
+            "：出場列至少在 h+1 個開市日之後，設得更小會讓所有標籤變 null"
+        )
 
     def estimated_cost_rate(row: dict[str, float | None]) -> float | None:
         entry_raw, exit_raw, adv_raw = row["_entry"], row["_exit"], row["_adv"]
@@ -194,14 +206,25 @@ def cost_adjusted_return_labels(
         return (buy.total + sell.total) / (entry * shares)
 
     px_ret = _return_price(adjusted, prices.columns)
+    exit_px = pl.col("open").shift(-(1 + horizon)).over("stock_id")
+    exit_r = px_ret.shift(-(1 + horizon)).over("stock_id")
+    if max_span_sessions is not None:
+        prices = session_index(prices)
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        span = sidx.shift(-(1 + horizon)).over("stock_id", order_by="date") - sidx
+        ok = span <= max_span_sessions
+        # 出場價與報酬基準價都要遮：只遮後者的話，成本仍會用一個已判定不可用的
+        # 出場價算出來，label 變成「乾淨的毛報酬減掉髒的成本」。
+        exit_px = pl.when(ok).then(exit_px).otherwise(None)
+        exit_r = pl.when(ok).then(exit_r).otherwise(None)
     prepared = (
         prices.sort("stock_id", "date")
         .with_columns(
             pl.col("open").shift(-1).over("stock_id").alias("_entry"),
-            pl.col("open").shift(-(1 + horizon)).over("stock_id").alias("_exit"),
+            exit_px.alias("_exit"),
             # 報酬基準價：adjusted 時為還原價，否則與 _entry/_exit 同值
             px_ret.shift(-1).over("stock_id").alias("_entry_r"),
-            px_ret.shift(-(1 + horizon)).over("stock_id").alias("_exit_r"),
+            exit_r.alias("_exit_r"),
             pl.col("amount")
             .rolling_median(window_size=adv_window_sessions, min_samples=adv_window_sessions)
             .over("stock_id")

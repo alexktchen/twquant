@@ -22,7 +22,10 @@ label:
   adv_window_sessions: 20
   position_notional_twd: 500_000.0
   downside_penalty: 0.25
-  total_return: false # D-054：凍結模型的原始配方＝未含股利；新配置一律 true
+  total_return: true # D-054／D-066：含股利。未還原時 6~8 月有 38.2% 樣本換分位
+  # T-139／T-144：h=20 × 2 的跨距容忍。橫跨資料缺口的標籤設 null——不設時約 8,673 個
+  # 訓練樣本的「20 日報酬」實際橫跨數月，而模型會把它當成真實的極端報酬學進去。
+  max_span_sessions: 42
 split:
   train_min_years: 2.0
   test_months: 3

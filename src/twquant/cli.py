@@ -2121,10 +2121,16 @@ def ml_train(
             downside_penalty=cfg.label.downside_penalty,
             cost_cfg=cost_cfg,
             adjusted=cfg.label.total_return,
+            max_span_sessions=cfg.label.max_span_sessions,
         )
     else:
         labels = excess_rank_labels(
-            forward_open_returns(px, cfg.horizon_days, adjusted=cfg.label.total_return)
+            forward_open_returns(
+                px,
+                cfg.horizon_days,
+                adjusted=cfg.label.total_return,
+                max_span_sessions=cfg.label.max_span_sessions,
+            )
         )
     # T-088 AC-3：任一 pin 特徵在 factor_values 全空即拒絕訓練（Phase 1 曾以 3 個空特徵訓練並回報成功）
     shares = assert_feature_coverage(feats)

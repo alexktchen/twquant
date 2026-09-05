@@ -522,3 +522,123 @@ def test_ac_t139_default_is_no_guard_so_existing_configs_are_unchanged() -> None
     """預設不啟用：既有配置的行為逐位元不變，啟用與否由配置顯式決定。"""
     px = _gap_prices()
     assert forward_open_returns(px, 1).equals(forward_open_returns(px, 1, max_span_sessions=None))
+
+
+# ── T-144：把跨距防護接到配置層，並補上成本感知路徑的同一個洞 ──────────────
+
+
+def _gap_prices_with_amount() -> pl.DataFrame:
+    """`_gap_prices` 加上 `amount`（成本感知路徑需要它算 ADV）。"""
+    return _gap_prices().with_columns(pl.lit(1_000_000.0).alias("amount"))
+
+
+def test_ac1_t144_cost_aware_path_has_the_same_gap_hole() -> None:
+    """**這才是真正要修的洞**：凍結模型的配置是 `transform: cost_adjusted_return`。
+
+    `cost_adjusted_return_labels` 有自己的 `shift(-(1 + horizon))`，與
+    `forward_open_returns` 完全獨立。T-139 只防護了後者，於是那道防護對
+    `ml_h20_cost_aware.yaml` **是 no-op**——旗標看起來接上了，實際什麼都沒擋。
+
+    B 的列在開市日 [0, 1, 7, 8, 9]，h=1 → 出場是 shift(-2)：
+    前兩列跨距 7，遠超 h+1=2。防護後須為 null。
+    """
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    kw = dict(
+        horizon=1,
+        adv_window_sessions=2,
+        position_notional_twd=1_000.0,
+        downside_penalty=0.25,
+        cost_cfg=CostConfig(),
+    )
+    px = _gap_prices_with_amount()
+
+    naive = cost_adjusted_return_labels(px, **kw)  # type: ignore[arg-type]
+    nb = naive.filter(pl.col("stock_id") == "B").sort("date")["label"].to_list()
+    assert nb[0] is not None or nb[1] is not None, (
+        "樸素版應為跨缺口的列算出數字；若它本來就是 null，本測試沒有測到防護"
+    )
+
+    guarded = cost_adjusted_return_labels(px, max_span_sessions=2, **kw)  # type: ignore[arg-type]
+    gb = guarded.filter(pl.col("stock_id") == "B").sort("date")["label"].to_list()
+    assert gb[0] is None and gb[1] is None, f"跨缺口的兩列須為 null，得到 {gb[:2]}"
+
+
+def test_ac2_t144_cost_aware_none_is_bit_identical() -> None:
+    """預設 None 時逐位元不變——既有凍結模型建立在樸素版上，差異必須可歸因。"""
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    kw = dict(
+        horizon=1,
+        adv_window_sessions=2,
+        position_notional_twd=1_000.0,
+        downside_penalty=0.25,
+        cost_cfg=CostConfig(),
+    )
+    px = _gap_prices_with_amount()
+    assert cost_adjusted_return_labels(px, **kw).equals(  # type: ignore[arg-type]
+        cost_adjusted_return_labels(px, max_span_sessions=None, **kw)  # type: ignore[arg-type]
+    )
+
+
+def test_ac3_t144_cost_aware_rejects_span_below_horizon() -> None:
+    """`max_span` < h+1 會讓所有標籤變 null——那不是防護，是把標籤關掉。"""
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    with pytest.raises(ValueError, match="max_span_sessions"):
+        cost_adjusted_return_labels(
+            _gap_prices_with_amount(),
+            horizon=5,
+            adv_window_sessions=2,
+            position_notional_twd=1_000.0,
+            downside_penalty=0.25,
+            cost_cfg=CostConfig(),
+            max_span_sessions=3,
+        )
+
+
+def test_ac4_t144_label_config_carries_max_span_and_defaults_to_none() -> None:
+    """`MlLabelConfig` 要有這個欄位，預設 None＝不啟用（既有配置行為不變）。"""
+    from twquant.config import MlLabelConfig
+
+    assert MlLabelConfig().max_span_sessions is None
+    assert MlLabelConfig(max_span_sessions=42).max_span_sessions == 42
+
+
+def test_ac5_t144_config_load_rejects_span_below_horizon(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """配置載入時就要擋：h=20 卻設 max_span=10，等於把全部標籤關掉。
+
+    在載入時擋而不是在跑到一半才擋——否則使用者要等訓練跑完才發現標籤全空。
+    """
+    from twquant.config import MlConfig, load_config
+    from twquant.errors import ConfigError
+
+    # embargo_days 預設 10 < h=20，會先撞既有的 embargo 驗證；本測試要測的是 max_span 那條
+    split = "split:\n  embargo_days: 20\n"
+
+    p = tmp_path / "bad.yaml"
+    p.write_text(f"horizon_days: 20\n{split}label:\n  max_span_sessions: 10\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_span_sessions"):
+        load_config(p, MlConfig)
+
+    ok = tmp_path / "ok.yaml"
+    ok.write_text(f"horizon_days: 20\n{split}label:\n  max_span_sessions: 42\n", encoding="utf-8")
+    assert load_config(ok, MlConfig).label.max_span_sessions == 42
+
+
+def test_ac6_t144_frozen_config_enables_the_guard_and_total_return() -> None:
+    """`ml_h20_cost_aware.yaml` 要實際設上——D-066 明列的兩處資料修正。
+
+    這條測的是**配置檔本身**，不是程式碼：程式碼支援但配置沒開，等於沒修。
+    """
+    from pathlib import Path
+
+    from twquant.config import MlConfig, load_config
+
+    cfg = load_config(Path("configs/ml_h20_cost_aware.yaml"), MlConfig)
+    assert cfg.label.total_return is True, "D-054：新配置一律含股利"
+    assert cfg.label.max_span_sessions == 42, "T-139：h=20 × 2 的跨距容忍"
+    assert cfg.label.max_span_sessions >= cfg.horizon_days + 1
