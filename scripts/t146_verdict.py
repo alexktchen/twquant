@@ -29,9 +29,19 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+import argparse
+
 from twquant.backtest.validation import paired_block_stats
 
-LADDER = pathlib.Path("D:/project/twquant/data/ladder")
+_AP = argparse.ArgumentParser()
+_AP.add_argument(
+    "--dir",
+    default="D:/project/twquant/data/ladder",
+    help="結果包目錄。**穩健性檢查用**：同一組判準套在不同資金的那批上，"
+    "若判定會隨資金翻轉，那件事本身就必須回報",
+)
+_ARGS = _AP.parse_args()
+LADDER = pathlib.Path(_ARGS.dir)
 TREAT = LADDER / "L0new_ladder_l0_new_1x.json"  # 處理組：乾淨模型
 CONTROL = LADDER / "X1_ladder_x1_simple20_1x.json"  # 對照組：四因子，其餘逐字同
 
@@ -64,6 +74,7 @@ def _daily_diff(
 
 
 def main() -> None:
+    print(f"結果包目錄：{LADDER}")
     missing = [p.name for p in (TREAT, CONTROL) if not p.exists()]
     if missing:
         raise SystemExit(f"缺結果包 {missing}——先跑 scripts/run_ladder.py")
