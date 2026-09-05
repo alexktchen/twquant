@@ -320,7 +320,6 @@ def _check_constant_cross_section(cur, schema: str, since: dt.date | None) -> li
     ]
 
 
-
 def _check_null_market(cur, schema: str, since: dt.date | None) -> list[Finding]:
     """#9 無市場別的股票（T-143）：`markets` 濾網**排除** market 為 null 者。
 
@@ -334,7 +333,14 @@ def _check_null_market(cur, schema: str, since: dt.date | None) -> list[Finding]
         (schema, "stock_meta"),
     )
     if cur.fetchone() is None:
-        return [Finding("stock_meta", "無市場別的股票", "critical", "stock_meta 不存在，markets 濾網會 raise")]
+        return [
+            Finding(
+                "stock_meta",
+                "無市場別的股票",
+                "critical",
+                "stock_meta 不存在，markets 濾網會 raise",
+            )
+        ]
     where = "AND p.date >= %s" if since else ""
     cur.execute(
         f'''SELECT p.stock_id, MIN(p.date), MAX(p.date), COUNT(*)
@@ -358,6 +364,69 @@ def _check_null_market(cur, schema: str, since: dt.date | None) -> list[Finding]
             f"{worst}。若這些日期落在回測窗內即為存活者偏誤——補 `stock_meta`，不要放寬濾網。",
         )
     ]
+
+
+def _check_unadjusted_actions(cur, schema: str, since: dt.date | None) -> list[Finding]:
+    """#10 未還原的公司行動與零收盤價（T-151）——兩者都會產生「合法但荒謬」的報酬。
+
+    `corporate_events` 只有 `cash_dividend`，**沒有分割／減資**。於是 0050 在 2025-06
+    的 1:4 分割（188.65 → 47.57，中間停牌 5 天）會被算成 **−74.8% 的單日報酬**——
+    而 0050 正是「有沒有打敗大盤」的主基準。
+
+    為什麼既有防護攔不住：`_entry > 0 & _exit > 0` 只擋零價，分割兩端都是正價；
+    T-144 的跨距防護也不攔，因為停牌 5 個開市日遠在容忍值內。這是**第三種**形狀。
+
+    `close = 0` 是另一回事：實測 727 列**全部集中在 2021 年**，其中 218 列
+    `volume > 0`——有成交卻沒有收盤價，資料本身自相矛盾。
+    """
+    where = "AND date >= %s" if since else ""
+    args = (since,) if since else ()
+    cur.execute(
+        f'''SELECT COUNT(*) FILTER (WHERE close = 0),
+                  COUNT(*) FILTER (WHERE close = 0 AND volume > 0)
+            FROM "{schema}".prices_daily
+            WHERE stock_id ~ '^[0-9]{{4}}$' {where}''',
+        args,
+    )
+    z_close, z_contra = cur.fetchone()
+    out: list[Finding] = []
+    if z_close:
+        out.append(
+            Finding(
+                "prices_daily",
+                "零收盤價",
+                "critical" if z_contra else "warn",
+                f"{z_close:,} 列 `close = 0`，其中 **{z_contra:,} 列 `volume > 0`**"
+                "（有成交卻沒有收盤價，資料自相矛盾）。跨這些列的報酬是 ±100%。",
+            )
+        )
+    cur.execute(
+        f'''WITH r AS (
+              SELECT date, stock_id, close,
+                     LAG(close) OVER (PARTITION BY stock_id ORDER BY date) prev
+              FROM "{schema}".prices_daily
+              WHERE stock_id ~ '^[0-9]{{4}}$' AND close > 0 {where})
+            SELECT r.date, r.stock_id, r.prev, r.close
+            FROM r LEFT JOIN "{schema}".corporate_events e
+              ON e.date = r.date AND e.stock_id = r.stock_id
+            WHERE r.prev > 0 AND r.close / r.prev - 1 < -0.5 AND e.stock_id IS NULL
+            ORDER BY r.close / r.prev LIMIT 10''',
+        args,
+    )
+    rows = cur.fetchall()
+    if rows:
+        worst = "、".join(f"`{s}` {d}（{p:g} → {c:g}）" for d, s, p, c in rows[:4])
+        out.append(
+            Finding(
+                "corporate_events",
+                "未還原的公司行動",
+                "critical",
+                f"{len(rows)}+ 筆單日跌幅 < −50% 而 `corporate_events` 無對應事件"
+                f"——分割／減資的形狀：{worst}。"
+                "`_entry > 0` 與跨距防護都攔不住（兩端都是正價、停牌天數也在容忍內）。",
+            )
+        )
+    return out
 
 
 def main() -> None:
@@ -395,6 +464,7 @@ def main() -> None:
             findings += _check_nonfinite(cur, cfg.pg_schema, t, args.since)
             if t == "prices_daily":
                 findings += _check_null_market(cur, cfg.pg_schema, args.since)
+                findings += _check_unadjusted_actions(cur, cfg.pg_schema, args.since)
             if t == "factor_values":
                 findings += _check_factor_coverage(cur, cfg.pg_schema, args.since)
                 findings += _check_constant_cross_section(cur, cfg.pg_schema, args.since)
@@ -442,6 +512,7 @@ def main() -> None:
         "| 橫斷面常數因子 | MAD=0 時 winsorize 把因子壓成常數 | 每一步都「正確」，"
         "合起來刪除因子，全程無錯誤 |",
         "| 無市場別的股票 | 有行情但 `stock_meta.market` 為 null | `markets` 濾網**排除** null，缺 meta 的股票會無聲地離開宇宙——正是存活者偏誤的形狀 |",
+        "| 未還原的公司行動／零收盤價 | 分割與減資不在 `corporate_events` | 兩端都是正價，`_entry > 0` 與跨距防護都攔不住；0050 的 1:4 分割會變成 −74.8% 的單日報酬 |",
         "",
     ]
     out = pathlib.Path(args.out)

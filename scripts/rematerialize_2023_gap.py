@@ -99,8 +99,7 @@ def main() -> None:
     if missing:
         # D-057：靜默略過會讓 composite_daily 與 factor_values 對同一因子有兩個版本
         raise SystemExit(
-            f"子集未完整包含 composite 集合，缺 {sorted(missing)}——"
-            "composite_daily 會與因子表脫節。"
+            f"子集未完整包含 composite 集合，缺 {sorted(missing)}——composite_daily 會與因子表脫節。"
         )
 
     import twquant.factors.builtins  # noqa: F401

@@ -38,9 +38,7 @@ def main() -> None:
     total = len(RUNGS) * len(SCALES)
     t0 = time.perf_counter()
     failures: list[str] = []
-    for i, ((rung, cfg), (tag, scale)) in enumerate(
-        ((r, s) for r in RUNGS for s in SCALES), 1
-    ):
+    for i, ((rung, cfg), (tag, scale)) in enumerate(((r, s) for r in RUNGS for s in SCALES), 1):
         dest = OUT / f"{rung}_{cfg}_{tag}.json"
         if dest.exists():
             print(f"[{i}/{total}] {rung} {tag}：結果包已存在，跳過（續傳）", flush=True)
@@ -66,7 +64,10 @@ def main() -> None:
         if scale is not None:
             cmd += ["--cost-scale", scale]
         el = (time.perf_counter() - t0) / 60
-        print(f"\n{'=' * 70}\n[{i}/{total}] {rung} {cfg} {tag}（已 {el:.1f} 分）\n{'=' * 70}", flush=True)
+        print(
+            f"\n{'=' * 70}\n[{i}/{total}] {rung} {cfg} {tag}（已 {el:.1f} 分）\n{'=' * 70}",
+            flush=True,
+        )
         r = subprocess.run(cmd, cwd=REPO)
         if r.returncode != 0:
             # 不中止整批：一階失敗不該讓其餘 11 次白等，但要據實記下（黃金規則 5）
