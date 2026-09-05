@@ -4,9 +4,9 @@
 （避免處置股污染橫斷面標準化）。
 
 第一版可實作：20 日成交金額中位數（ADV，中位數抗漲停無量）、最低價、四碼普通股
-（排除權證/ETF）。**待接資料**：處置/全額交割（disposition_stocks）、上市日
-（stock_meta.list_date）、市場別（stock_meta.market）——相關旗標暫為 no-op 並在
-STRATEGY/TASKS 標註，接上後於此啟用。
+（排除權證/ETF）。**市場別（stock_meta.market）已於 T-143 接上**（`_market_gate`）。
+**仍待接資料**：處置/全額交割（disposition_stocks）、上市日（stock_meta.list_date）
+——相關旗標暫為 no-op 並在 STRATEGY/TASKS 標註，接上後於此啟用。
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ import datetime as dt
 from typing import TYPE_CHECKING
 
 import polars as pl
+
+from twquant.errors import DataError
 
 if TYPE_CHECKING:
     from twquant.data.warehouse import PitView
@@ -68,6 +70,8 @@ def universe_ids(view: PitView, signal_date: dt.date, cfg: UniverseConfig) -> li
     if cfg.min_price is not None:
         at = at.filter(pl.col("close") >= cfg.min_price)
     ids = sorted(at.select("stock_id").collect()["stock_id"].to_list())
+    if cfg.markets:
+        ids = _market_gate(view, ids, cfg.markets)
     if cfg.mktcap_rank_max is not None or cfg.mktcap_rank_min is not None:
         ids = _mktcap_gate(
             view,
@@ -153,6 +157,43 @@ def _revenue_gate(
         keep = streak_ids if keep is None else (keep & streak_ids)
 
     assert keep is not None  # 呼叫端已確認至少一個門檻有值
+    return [s for s in ids if s in keep]
+
+
+def _market_gate(view: PitView, ids: list[str], markets: list[str]) -> list[str]:
+    """T-143：依 `stock_meta.market` 過濾，**市場別為 null 一律排除**。
+
+    先前這個旗標是 no-op（本檔開頭的註解明載「暫為 no-op」），於是擋住興櫃的其實只是
+    「`prices_daily` 剛好沒有它們」——一個靠巧合成立的防線。D-065 發現 T-137 差一點
+    就把 387 檔興櫃、316,389 列補進價格表，那會讓它們無聲地進入策略宇宙。
+
+    **為什麼 null 排除不會造成存活者偏誤**（量出來的，不是假設，見 D-069）：補完 meta 後，
+    回測窗 2022-07-01 ~ 2026-02-28 內無市場別者 **0 檔**（原本 1 檔＝3718 中光電投控，
+    已由 `ingest-meta` 補進 TPEX）。殘餘 7 檔（0054／4947／8287／1333／3562／8913／3452）
+    末筆行情皆 ≤ 2022-05-26，全在窗外；它們在 FinMind 只出現於不含市場別欄位的下市端點，
+    故**不偽造**（T-111 同一規則）。
+
+    這個前提是**當時**的事實而非永久保證：窗口一旦前移到 2022-07 之前，那 7 檔就會落進窗內
+    而被靜默排除。故 `scripts/audit_data.py` 的檢查 #9 帶 `--since` 時報 critical——
+    已雙向驗證（`--since 2022-07-01` 無發現、`--since 2020-01-01` 報出全部 7 檔）。
+
+    缺 `stock_meta` 表時 raise 而非放行：靜默放行會讓濾網在缺表時「成功地什麼都沒過濾」，
+    正是黃金規則 5 要防的失敗模式。
+    """
+    try:
+        meta = view.table("stock_meta").select("stock_id", "market").collect()
+    except DataError as exc:
+        raise DataError(
+            "stock_meta",
+            None,
+            f"markets={markets} 要求依市場別過濾，但讀不到 stock_meta：{exc}。"
+            "不得靜默放行——那會讓濾網在缺表時什麼都不過濾。",
+        ) from exc
+    keep = set(
+        meta.filter(pl.col("market").is_not_null() & pl.col("market").is_in(markets))[
+            "stock_id"
+        ].to_list()
+    )
     return [s for s in ids if s in keep]
 
 

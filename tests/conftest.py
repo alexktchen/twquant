@@ -110,3 +110,29 @@ def build_snapshot_warehouse(root: Path) -> Warehouse:
 def snapshot_wh(tmp_path: Path) -> Warehouse:
     """建好的小資料湖（給 monitoring.snapshot 與 monitoring.api 測試共用）。"""
     return build_snapshot_warehouse(tmp_path)
+
+
+def write_stock_meta(wh: Warehouse, prices: pl.DataFrame, market: str = "TWSE") -> None:
+    """依行情裡出現的股票補一張 `stock_meta`（T-143 的 `markets` 濾網需要它）。
+
+    濾網上線後宇宙需要市場別，缺表時 `universe_ids` 會 raise（黃金規則 5：不得靜默放行，
+    否則濾網會在缺表時「成功地什麼都沒過濾」）。測試 fixture 的股票都是正常上市櫃標的，
+    故一律標為可交易市場——這不是放寬測試，是把 fixture 補成合法的資料湖。
+    """
+    ids = prices["stock_id"].unique().sort().to_list()
+    n = len(ids)
+    wh.write(
+        "clean",
+        "stock_meta",
+        pl.DataFrame(
+            {
+                "stock_id": ids,
+                "name": pl.Series(ids, dtype=pl.String),
+                "market": pl.Series([market] * n, dtype=pl.String),
+                "industry": pl.Series([None] * n, dtype=pl.String),
+                "list_date": pl.Series([None] * n, dtype=pl.Date),
+                "delist_date": pl.Series([None] * n, dtype=pl.Date),
+            }
+        ),
+        source=market.lower(),
+    )

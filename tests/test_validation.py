@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 import twquant.factors.builtins  # noqa: F401
+from tests.conftest import write_stock_meta
 from twquant.backtest import validation as v
 from twquant.backtest.costs import CostConfig
 from twquant.conventions import TZ
@@ -76,6 +77,7 @@ def _wh(tmp_path: Path) -> Warehouse:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 

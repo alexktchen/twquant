@@ -10,6 +10,7 @@ import polars as pl
 import pytest
 
 import twquant.factors.builtins  # noqa: F401  # 註冊因子
+from tests.conftest import write_stock_meta
 from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.calendar import TradingCalendar
@@ -204,6 +205,7 @@ def _synthetic_wh(tmp_path: Path, *, amounts: dict[str, float] | None = None) ->
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 
@@ -273,6 +275,7 @@ def test_breadth_overlay_bear_floor(tmp_path: Path) -> None:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     d = dt.date(2026, 6, 25)
     view = wh.view(d)
     assert market_breadth(view, d, 10) == pytest.approx(0.0)
@@ -320,6 +323,7 @@ def _holiday_wh(
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh, sessions
 
 
@@ -395,6 +399,7 @@ def _falling_wh(tmp_path: Path) -> Warehouse:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 
@@ -474,6 +479,7 @@ def test_r12_require_all_factors_drops_stocks_missing_a_factor(tmp_path: Path) -
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     d = base + dt.timedelta(days=79)
     two = {
         "signals": [

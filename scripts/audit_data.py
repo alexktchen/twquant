@@ -320,6 +320,46 @@ def _check_constant_cross_section(cur, schema: str, since: dt.date | None) -> li
     ]
 
 
+
+def _check_null_market(cur, schema: str, since: dt.date | None) -> list[Finding]:
+    """#9 無市場別的股票（T-143）：`markets` 濾網**排除** market 為 null 者。
+
+    這條檢查是 `strategy/universe.py::_market_gate` 那句「窗口前移時本腳本會抓到」的兌現。
+    排除 null 的前提是「窗內沒有 null」——2026-09 量測時窗內確實是 0 檔，但那是**當時**的
+    事實，不是永久保證：`stock_meta` 的來源（ISIN）只列現存上市櫃公司，一旦回測窗前移到
+    2022-07 之前，2020 年下市的那 7 檔就會落進窗內而被靜默排除，那才是真的存活者偏誤。
+    """
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema=%s AND table_name=%s",
+        (schema, "stock_meta"),
+    )
+    if cur.fetchone() is None:
+        return [Finding("stock_meta", "無市場別的股票", "critical", "stock_meta 不存在，markets 濾網會 raise")]
+    where = "AND p.date >= %s" if since else ""
+    cur.execute(
+        f'''SELECT p.stock_id, MIN(p.date), MAX(p.date), COUNT(*)
+            FROM "{schema}".prices_daily p
+            LEFT JOIN "{schema}".stock_meta m USING (stock_id)
+            WHERE (m.stock_id IS NULL OR m.market IS NULL)
+              AND p.stock_id ~ '^[0-9]{{4}}$' {where}
+            GROUP BY 1 ORDER BY 3 DESC LIMIT 10''',
+        (since,) if since else (),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    worst = "、".join(f"`{s}`（末 {b}，{n} 列）" for s, _, b, n in rows[:5])
+    return [
+        Finding(
+            "stock_meta",
+            "無市場別的股票",
+            "critical" if since else "warn",
+            f"{len(rows)} 檔四碼股有行情但 `market` 為 null，會被 `markets` 濾網**靜默排除**："
+            f"{worst}。若這些日期落在回測窗內即為存活者偏誤——補 `stock_meta`，不要放寬濾網。",
+        )
+    ]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", type=dt.date.fromisoformat, default=None)
@@ -353,6 +393,8 @@ def main() -> None:
             findings += _check_dupe_snapshots(cur, cfg.pg_schema, t, args.since)
             findings += _check_stock_gaps(cur, cfg.pg_schema, t, args.since)
             findings += _check_nonfinite(cur, cfg.pg_schema, t, args.since)
+            if t == "prices_daily":
+                findings += _check_null_market(cur, cfg.pg_schema, args.since)
             if t == "factor_values":
                 findings += _check_factor_coverage(cur, cfg.pg_schema, args.since)
                 findings += _check_constant_cross_section(cur, cfg.pg_schema, args.since)
@@ -399,6 +441,7 @@ def main() -> None:
         "標籤含 inf 會被橫斷面平均擴散到當日所有樣本 |",
         "| 橫斷面常數因子 | MAD=0 時 winsorize 把因子壓成常數 | 每一步都「正確」，"
         "合起來刪除因子，全程無錯誤 |",
+        "| 無市場別的股票 | 有行情但 `stock_meta.market` 為 null | `markets` 濾網**排除** null，缺 meta 的股票會無聲地離開宇宙——正是存活者偏誤的形狀 |",
         "",
     ]
     out = pathlib.Path(args.out)

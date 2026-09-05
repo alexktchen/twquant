@@ -20,6 +20,7 @@ from pathlib import Path
 
 import polars as pl
 
+from tests.conftest import write_stock_meta
 from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.warehouse import Warehouse
@@ -108,6 +109,7 @@ def _revenue(extra: dict[str, dict[str, float]] | None = None) -> pl.DataFrame:
 def _wh(tmp_path: Path, extra: dict[str, dict[str, float]] | None = None) -> Warehouse:
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", _prices(), source="twse")
+    write_stock_meta(wh, _prices())
     wh.write("clean", "monthly_revenue", _revenue(extra), source="mops_sii")
     return wh
 

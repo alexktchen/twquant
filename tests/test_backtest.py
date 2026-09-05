@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 import twquant.factors.builtins  # noqa: F401
+from tests.conftest import write_stock_meta
 from twquant.backtest import costs as ct
 from twquant.backtest.engine import _fill, _State, run_backtest
 from twquant.backtest.metrics import compute_metrics
@@ -144,6 +145,7 @@ def _synthetic_wh(tmp_path: Path) -> Warehouse:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 
@@ -195,6 +197,7 @@ def _jump_wh(tmp_path: Path) -> Warehouse:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 

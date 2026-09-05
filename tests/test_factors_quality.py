@@ -18,6 +18,7 @@ import polars as pl
 import pytest
 
 import twquant.factors.builtins  # noqa: F401  # 註冊全部因子
+from tests.conftest import write_stock_meta
 from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.warehouse import Warehouse
@@ -154,9 +155,18 @@ def _prices(days: list[dt.date]) -> pl.DataFrame:
     )
 
 
-def _wh(tmp_path: Path, days: list[dt.date] = _DAYS, st: pl.DataFrame | None = None) -> Warehouse:
+def _wh(
+    tmp_path: Path,
+    days: list[dt.date] = _DAYS,
+    st: pl.DataFrame | None = None,
+    *,
+    meta: bool = True,
+) -> Warehouse:
+    """`meta=False` 刻意不寫 `stock_meta`，供 T-143 的「缺表要 raise」測試用。"""
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", _prices(days), source="twse")
+    if meta:
+        write_stock_meta(wh, _prices(days))
     wh.write(
         "clean", "financial_statements", st if st is not None else _statements(), source="finmind"
     )
@@ -524,3 +534,95 @@ def test_ac2_mktcap_gate_respects_pit_cutoff(tmp_path: Path) -> None:
     day = _DAYS[-1]  # 2024-01-10，2023Q4 年報尚不可見
     cfg = _uni_base().model_copy(update={"mktcap_rank_max": 1})
     assert universe_ids(wh.view(day), day, cfg) == ["2330"], "讀到未來股本會讓 1101 變成最大"
+
+
+# ── T-143：`markets` 濾網做成真的（先前是 no-op）────────────────────
+#
+# 現在擋住興櫃的只是「`prices_daily` 剛好沒有它們」——一個靠巧合成立的防線。
+# D-065 發現 T-137 差點就把 387 檔興櫃、316,389 列補進去，那會讓它們無聲進入宇宙。
+#
+# null 的處置（D-069）：實測回測窗（2022-07 起）內只有 1 檔無市場別（3718，
+# FinMind 查得到 tpex，已補），6 檔真下市股最後行情都在 2020 年、不在任何回測窗內。
+# 故「null 一律排除」不會造成存活者偏誤——但這是**量出來的**，不是假設的，
+# 所以 `test_ac1_markets_null_is_excluded` 之外另有一條實測守門的驗收（見 TASKS）。
+
+
+def _meta(rows: list[tuple[str, str]]) -> pl.DataFrame:
+    """(stock_id, market) → stock_meta 最小骨架。"""
+    return pl.DataFrame(
+        {
+            "stock_id": [r[0] for r in rows],
+            "name": [None] * len(rows),
+            "market": [r[1] for r in rows],
+            "industry": [None] * len(rows),
+            "list_date": [None] * len(rows),
+            "delist_date": [None] * len(rows),
+        },
+        schema={
+            "stock_id": pl.String,
+            "name": pl.String,
+            "market": pl.String,
+            "industry": pl.String,
+            "list_date": pl.Date,
+            "delist_date": pl.Date,
+        },
+    )
+
+
+def _wh_with_meta(tmp_path: Path, meta: pl.DataFrame) -> Warehouse:
+    wh = _wh(tmp_path)
+    wh.write("clean", "stock_meta", meta, source="twse")
+    return wh
+
+
+def test_ac1_markets_filters_by_stock_meta(tmp_path: Path) -> None:
+    """`markets: [TWSE]` 只留上市股——先前這個旗標是 no-op，兩檔都會留下。"""
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh_with_meta(tmp_path, _meta([("1101", "TWSE"), ("2330", "TPEX")]))
+    day = _DAYS[-1]
+    base = _uni_base()
+    assert set(universe_ids(wh.view(day), day, base)) == {"1101", "2330"}
+    assert universe_ids(wh.view(day), day, base.model_copy(update={"markets": ["TWSE"]})) == [
+        "1101"
+    ]
+
+
+def test_ac1_markets_null_is_excluded(tmp_path: Path) -> None:
+    """市場別為 null 一律排除，比照 `min_roe` 與市值篩。
+
+    「不知道它在哪個市場」不等於「它在允許的市場」。放行等於讓沒有 meta 的股票
+    整批繞過濾網——而興櫃正是「有價格、沒 meta」的那一類（D-065）。
+    """
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh_with_meta(tmp_path, _meta([("1101", "TWSE")]))  # 2330 無 meta
+    day = _DAYS[-1]
+    kept = universe_ids(
+        wh.view(day), day, _uni_base().model_copy(update={"markets": ["TWSE", "TPEX"]})
+    )
+    assert kept == ["1101"], "無 stock_meta 的 2330 不得因市場別缺值而被放行"
+
+
+def test_ac1_markets_empty_list_disables_the_filter(tmp_path: Path) -> None:
+    """空清單＝不過濾。既有 15 個配置都寫 `[TWSE, TPEX]`，這條是給診斷用的逃生門。"""
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh_with_meta(tmp_path, _meta([("1101", "TWSE")]))
+    day = _DAYS[-1]
+    kept = universe_ids(wh.view(day), day, _uni_base().model_copy(update={"markets": []}))
+    assert set(kept) == {"1101", "2330"}, "空清單時不得過濾，含無 meta 者"
+
+
+def test_ac1_markets_without_stock_meta_table_raises(tmp_path: Path) -> None:
+    """沒有 stock_meta 卻要求市場別過濾 → raise，不得靜默放行全部。
+
+    靜默放行會讓濾網在缺表時「成功地什麼都沒過濾」——正是黃金規則 5 要防的。
+    """
+    from twquant.errors import DataError
+    from twquant.strategy.universe import universe_ids
+
+    wh = _wh(tmp_path, meta=False)  # 刻意不寫 stock_meta
+    day = _DAYS[-1]
+    with pytest.raises(DataError, match="stock_meta"):
+        universe_ids(wh.view(day), day, _uni_base().model_copy(update={"markets": ["TWSE"]}))
