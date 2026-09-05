@@ -128,6 +128,60 @@ def _holdings(b: dict) -> dict[str, float]:
     return {"median": float(n.median()), "min": int(n.min()), "max": int(n.max())}
 
 
+def _invested_stats(b: dict) -> dict[str, float | int]:
+    """**有部位時**的報酬統計——低曝險策略只看 CAGR 會被完全誤解。
+
+    C2b（箱型突破）平均曝險只有 17%、CAGR +0.33%、MDD −5.5%：它大部分時間在現金，
+    所以既不賠也不賺。這時候「訊號好不好」的問題不是 CAGR，而是
+    **實際持有部位的那些日子，賺得比市場多嗎**。
+
+    定義：曝險 > 5% 的交易日視為「有部位」。回傳那些日子的日報酬年化與勝率，
+    以及有部位的日子佔比。這三個數字合起來才能判讀事件型策略。
+    """
+    eq = [(dt.date.fromisoformat(str(r[0])), float(r[1]), float(r[2])) for r in b["equity"]]
+    eq = [(d, e, c) for d, e, c in eq if e > 0]
+    if len(eq) < 2:
+        return {}
+    rets, n_in = [], 0
+    for i in range(1, len(eq)):
+        _, e0, c0 = eq[i - 1]
+        _, e1, _ = eq[i]
+        if 1.0 - c0 / e0 > 0.05:  # 前一日收盤有部位 → 今日的報酬歸因給它
+            n_in += 1
+            rets.append(e1 / e0 - 1.0)
+    if not rets:
+        return {"days_invested": 0, "share_invested": 0.0}
+    mean = sum(rets) / len(rets)
+    return {
+        "days_invested": n_in,
+        "share_invested": n_in / (len(eq) - 1),
+        "ann_return_when_invested": (1.0 + mean) ** 252 - 1.0,
+        "win_rate_when_invested": sum(1 for r in rets if r > 0) / len(rets),
+    }
+
+
+def _yearly(b: dict) -> dict[str, dict[str, float]]:
+    """逐年報酬與該年平均曝險——報告的年度長條圖用。"""
+    eq = [(dt.date.fromisoformat(str(r[0])), float(r[1]), float(r[2])) for r in b["equity"]]
+    eq = [(d, e, c) for d, e, c in eq if e > 0]
+    out: dict[str, dict[str, float]] = {}
+    by_year: dict[int, list[tuple[dt.date, float, float]]] = {}
+    for d, e, c in eq:
+        by_year.setdefault(d.year, []).append((d, e, c))
+    prev_end = eq[0][1] if eq else None
+    for y in sorted(by_year):
+        rows_y = by_year[y]
+        end = rows_y[-1][1]
+        if prev_end and prev_end > 0:
+            out[str(y)] = {
+                "ret": end / prev_end - 1.0,
+                "exposure": sum(1.0 - c / e for _, e, c in rows_y) / len(rows_y),
+                "n_days": len(rows_y),
+            }
+        prev_end = end
+    return out
+
+
 def _unfilled(b: dict) -> dict[str, int]:
     out: dict[str, int] = {}
     for u in b.get("unfilled", []) or []:
@@ -284,6 +338,8 @@ def main() -> None:
                     "n_days": m["n_days"],
                     "n_trades": len(b["ledger"]),
                     "exposure": _exposure(b),
+                    "invested": _invested_stats(b),
+                    "yearly": _yearly(b),
                     "holdings": _holdings(b),
                     "unfilled": _unfilled(b),
                     "final_equity": b["final_equity"],
