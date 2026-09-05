@@ -1413,6 +1413,43 @@ def targets(
     )
 
 
+def _fingerprint_inputs(wh: object, strategy: object) -> dict[str, tuple[int, str]]:
+    """收集這次回測會讀到的每張表的 (列數, max(available_at))，供資料指紋用（T-131）。
+
+    表的清單由策略自己決定：訊號因子宣告的 `tables`，加上一定會用到的 prices_daily，
+    再依宇宙濾網補上 financial_statements（ROE／市值）與 monthly_revenue（營收篩）。
+    寫死一份固定清單會在新增濾網時悄悄失效——指紋涵蓋不到的資料變動等於沒有指紋。
+    """
+    import polars as pl
+
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發因子註冊
+    from twquant.factors.registry import get
+
+    names = {"prices_daily"}
+    for s in strategy.signals:  # type: ignore[attr-defined]
+        names |= set(get(s.factor).tables)
+    u = strategy.universe  # type: ignore[attr-defined]
+    if u.min_roe is not None or u.mktcap_rank_max is not None or u.mktcap_rank_min is not None:
+        names.add("financial_statements")
+    if (
+        u.min_revenue_yoy is not None
+        or u.max_revenue_yoy is not None
+        or u.min_revenue_streak is not None
+    ):
+        names.add("monthly_revenue")
+
+    out: dict[str, tuple[int, str]] = {}
+    for name in sorted(names):
+        row = (
+            wh.scan(name)  # type: ignore[attr-defined]
+            .select(pl.len().alias("n"), pl.col("available_at").max().alias("mx"))
+            .collect()
+            .row(0)
+        )
+        out[name] = (int(row[0]), str(row[1]))
+    return out
+
+
 def _resolve_costs(name: str) -> pathlib.Path:
     """把 --costs 的值解析成路徑：絕對路徑照用，相對名稱相對於 configs/（T-124）。
 
@@ -1436,6 +1473,9 @@ def backtest(
     ),
     costs: str = typer.Option(
         "costs.yaml", "--costs", help="成本配置檔；相對路徑相對於 configs/（T-124）"
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="把完整結果包（曲線／ledger／未成交／指紋）落地成 JSON（T-131）"
     ),
     pg: bool = typer.Option(
         True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
@@ -1469,6 +1509,9 @@ def backtest(
     s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
 
     try:
+        # 指紋在跑回測**之前**取：跑完再取的話，長回測期間若有 ingest 寫入，
+        # 記下的會是跑完後的狀態，與這次實際讀到的資料不符。
+        fp_tables = _fingerprint_inputs(wh, strat) if out else {}
         res = run_backtest(
             strat,
             cost,
@@ -1504,6 +1547,29 @@ def backtest(
     )
 
     source = "pg" if pg else "lake"
+    if out:
+        from twquant.reporting.result_bundle import (
+            bundle_backtest,
+            data_fingerprint,
+            write_bundle,
+        )
+
+        bundle = bundle_backtest(
+            res,
+            strategy=strat,
+            cost=cost,
+            start=s,
+            end=e,
+            initial_capital=capital,
+            max_participation=participation,
+            source=source,
+            data_fingerprint=data_fingerprint(fp_tables),
+        )
+        write_bundle(out, bundle)
+        typer.secho(
+            f"結果包已寫入 {out}（指紋 {bundle['data_fingerprint']}）", fg=typer.colors.GREEN
+        )
+
     log_metrics = {
         "sharpe": m.sharpe,
         "cagr": m.cagr,
