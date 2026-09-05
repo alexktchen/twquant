@@ -70,12 +70,27 @@ def main() -> None:
     treat = json.loads(TREAT.read_text(encoding="utf-8"))
     ctrl = json.loads(CONTROL.read_text(encoding="utf-8"))
 
-    # 同一份資料是配對比較的前提：指紋不同就代表比的是兩件事
-    fp_t, fp_c = treat.get("data_fingerprint"), ctrl.get("data_fingerprint")
-    same_data = fp_t == fp_c
-    print(f"資料指紋：處理組 {fp_t}　對照組 {fp_c}　{'相同 ✓' if same_data else '**不同 ✗**'}")
-    if not same_data:
-        raise SystemExit("兩組不在同一份資料上，配對比較無效（D-067 同一條要求）。須同批重跑。")
+    # 同一份資料是配對比較的前提。**不能直接比 data_fingerprint**：它雜湊的是該策略
+    # 實際讀到的表集合，而訊號不同必然讀不同的表（L0-new 讀 ml_scores、X1 讀
+    # financial_statements + monthly_revenue），指紋因此永遠不同——那是設計如此，
+    # 不是資料有問題。正確的判準是**共用表的列數與水位一致**。
+    tt = treat.get("data_tables") or {}
+    tc = ctrl.get("data_tables") or {}
+    shared = sorted(set(tt) & set(tc))
+    if not shared:
+        raise SystemExit("兩組沒有任何共用資料表，無從驗證是否同一份資料。")
+    mismatch = [k for k in shared if tt[k] != tc[k]]
+    print("資料一致性（比共用表，不比整體指紋——訊號不同必然讀不同的表）：")
+    for k in shared:
+        ok = tt[k] == tc[k]
+        print(f"  {k:24} {tt[k][0]:>12,} 列 @ {tt[k][1]}　{'一致 ✓' if ok else '**不一致 ✗**'}")
+    only_t, only_c = sorted(set(tt) - set(tc)), sorted(set(tc) - set(tt))
+    if only_t or only_c:
+        print(f"  各自獨有：處理組 {only_t or '—'}　對照組 {only_c or '—'}（訊號不同所致，非缺陷）")
+    if mismatch:
+        raise SystemExit(
+            f"共用表 {mismatch} 的列數或水位不同——兩組不在同一份資料上，配對比較無效。"
+        )
 
     mt, mc = treat["metrics"], ctrl["metrics"]
     d_cagr = mt["cagr"] - mc["cagr"]
