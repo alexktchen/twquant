@@ -6,8 +6,11 @@ import datetime as dt
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
+import polars as pl
+
 from twquant.backtest.engine import BacktestResult
 from twquant.backtest.metrics import Metrics, compute_metrics
+from twquant.errors import DataError
 
 
 @dataclass(frozen=True)
@@ -95,3 +98,63 @@ def summarize_backtest(result: BacktestResult) -> BacktestDiagnostics:
         unfilled_count=len(result.unfilled),
         unfilled_by_reason=reasons,
     )
+
+
+def positions_from_ledger(result: BacktestResult) -> pl.DataFrame:
+    """由成交流水重建每個交易日的持倉股數（T-125／SPEC-013 §6.2）。
+
+    `BacktestResult` 只存期末快照 `final_holdings`，歷史部位從未落地，
+    但「歷年持股」報表需要逐日的持股清單。唯一的重建來源就是 `ledger`。
+
+    回傳 (date, stock_id, shares)，**只含股數 > 0 的列**：清空當日不留 0 股的列，
+    否則持股表會出現一堆空部位。日期取自 `result.equity`（回測實際走過的交易日），
+    未成交日的部位由前一日結轉。
+
+    三種情況一律 raise 而非靜默處理（黃金規則 5）：
+      * 股數變負——放空未實作，負值只可能是重建邏輯錯誤或流水損壞
+      * 成交日不在權益曲線的日期內——靜默略過會讓持股表少掉一整段
+      * 未知的 side——買賣以外的字串不得被當成其中之一
+
+    純函數、無 IO：落地由呼叫端負責（黃金規則 10）。
+    """
+    schema = {"date": pl.Date, "stock_id": pl.String, "shares": pl.Int64}
+    dates = [e.date for e in result.equity]
+    if not dates:
+        return pl.DataFrame(schema=schema)
+    valid = set(dates)
+
+    deltas: dict[dt.date, dict[str, int]] = {}
+    for t in result.ledger:
+        if t.date not in valid:
+            raise DataError(
+                "backtest_ledger",
+                t.date,
+                f"成交日 {t.date} 不在權益曲線的日期範圍內"
+                f"（{dates[0]} ~ {dates[-1]}），無法重建持倉。",
+            )
+        if t.side not in ("buy", "sell"):
+            raise DataError(
+                "backtest_ledger",
+                t.date,
+                f"未知的 side「{t.side}」（{t.stock_id}），只接受 buy／sell。",
+            )
+        sign = 1 if t.side == "buy" else -1
+        deltas.setdefault(t.date, {})
+        deltas[t.date][t.stock_id] = deltas[t.date].get(t.stock_id, 0) + sign * t.shares
+
+    rows: list[dict[str, object]] = []
+    held: dict[str, int] = {}
+    for d in dates:
+        for sid, ds in sorted(deltas.get(d, {}).items()):
+            held[sid] = held.get(sid, 0) + ds
+            if held[sid] < 0:
+                raise DataError(
+                    "backtest_ledger",
+                    d,
+                    f"{sid} 於 {d} 的累計股數為 {held[sid]}（負）。"
+                    "放空未實作，負股數代表流水損壞或重建邏輯錯誤。",
+                )
+        rows.extend(
+            {"date": d, "stock_id": sid, "shares": sh} for sid, sh in sorted(held.items()) if sh > 0
+        )
+    return pl.DataFrame(rows, schema=schema)

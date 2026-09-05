@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -1412,6 +1413,17 @@ def targets(
     )
 
 
+def _resolve_costs(name: str) -> pathlib.Path:
+    """把 --costs 的值解析成路徑：絕對路徑照用，相對名稱相對於 configs/（T-124）。
+
+    先前寫死 `configs/costs.yaml`，使 `configs/costs_finlab.yaml`（finlab 口徑，
+    報表已在用）從 CLI 根本無法選用。預設值維持 "costs.yaml"，故不指定時
+    解析結果與改動前逐位元相同。
+    """
+    p = pathlib.Path(name)
+    return p if p.is_absolute() else _CONFIG_DIR / name
+
+
 @app.command()
 def backtest(
     strategy: str = typer.Option(..., help="策略 YAML 路徑"),
@@ -1421,6 +1433,9 @@ def backtest(
     participation: float = typer.Option(0.05, min=0.0, max=1.0, help="單股 ADV 參與率上限"),
     cost_scale: float | None = typer.Option(
         None, "--cost-scale", min=0.0, help="成本倍率覆寫；0=零成本反事實"
+    ),
+    costs: str = typer.Option(
+        "costs.yaml", "--costs", help="成本配置檔；相對路徑相對於 configs/（T-124）"
     ),
     pg: bool = typer.Option(
         True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
@@ -1448,7 +1463,7 @@ def backtest(
         pg_conn = None
         wh = Warehouse(cfg.data_dir)
     strat = load_strategy(strategy)
-    cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    cost = load_config(_resolve_costs(costs), CostConfig)
     if cost_scale is not None:
         cost = cost.model_copy(update={"cost_scale": cost_scale})
     s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
