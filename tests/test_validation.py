@@ -116,3 +116,93 @@ def test_param_plateau_grid(tmp_path: Path) -> None:
     )
     assert [c.params["window"] for c in cells] == [5, 10]
     assert all(isinstance(c.sharpe, float) for c in cells)
+
+
+# ── T-127／D-061 R1：配對比較的區塊標準誤 ──────────────────────────
+#
+# 為什麼不能用日頻 t 值：持股期 20 個交易日，日報酬高度自相關，
+# 把每日配對差當獨立樣本會嚴重高估顯著性——那正是「看起來有效」的主要來源。
+
+
+def test_ac12_block_se_is_larger_than_the_naive_daily_se() -> None:
+    """自相關的序列上，區塊標準誤必須大於天真的日頻標準誤。
+
+    構造一個「月內同號、月間變號」的序列：日頻看來變異極小（幾乎恆為 ±d），
+    但真正的不確定性在月與月之間。日頻 SE 會低估，區塊 SE 不會。
+    """
+    import datetime as dt
+
+    from twquant.backtest.validation import paired_block_stats
+
+    days: list[dt.date] = []
+    diffs: list[float] = []
+    for m in range(1, 13):
+        sign = 1.0 if m % 2 else -1.0
+        for d in range(1, 21):
+            days.append(dt.date(2025, m, d))
+            diffs.append(sign * 0.01)
+    st = paired_block_stats(days, diffs)
+    naive = (sum((x - st.mean) ** 2 for x in diffs) / (len(diffs) - 1)) ** 0.5 / len(diffs) ** 0.5
+    assert st.block_se is not None
+    # 這個構造下比值是可手算的：每區塊 20 日、12 個區塊，
+    # block_se/naive = sqrt(20) × sqrt(12/11) × sqrt(239/240) ≈ 4.66。
+    # 釘死數值而非只斷言「比較大」——後者無法分辨「區塊化生效」與「算錯但剛好較大」。
+    expected = (20.0 * 12.0 / 11.0 * 239.0 / 240.0) ** 0.5
+    assert st.block_se / naive == pytest.approx(expected, rel=1e-9), (
+        f"區塊 SE {st.block_se:.6f} / 日頻 SE {naive:.6f} = {st.block_se / naive:.4f}，"
+        f"預期 {expected:.4f}"
+    )
+    assert st.block_se > naive * 4, "區塊化必須放大不確定性"
+    assert st.n_blocks == 12
+
+
+def test_ac12_block_se_zero_when_every_block_identical() -> None:
+    """所有月份的均值相同 → 月間無變異 → 區塊 SE 為 0（而非 NaN 或例外）。"""
+    import datetime as dt
+
+    from twquant.backtest.validation import paired_block_stats
+
+    days = [dt.date(2025, m, d) for m in range(1, 5) for d in range(1, 11)]
+    st = paired_block_stats(days, [0.002] * len(days))
+    assert st.mean == pytest.approx(0.002)
+    assert st.block_se == pytest.approx(0.0)
+
+
+def test_ac12_single_block_cannot_estimate_uncertainty() -> None:
+    """只有一個月時無從估計月間變異——回傳 None 而不是假裝 SE 是 0。
+
+    回傳 0 會讓下游把它讀成「極度顯著」，那是最糟的失敗模式（黃金規則 5 的精神）。
+    """
+    import datetime as dt
+
+    from twquant.backtest.validation import paired_block_stats
+
+    days = [dt.date(2025, 1, d) for d in range(1, 21)]
+    st = paired_block_stats(days, [0.001] * 20)
+    assert st.n_blocks == 1
+    assert st.block_se is None
+    assert st.t_stat is None
+
+
+def test_ac12_length_mismatch_raises() -> None:
+    import datetime as dt
+
+    from twquant.backtest.validation import paired_block_stats
+
+    with pytest.raises(ValueError, match="長度"):
+        paired_block_stats([dt.date(2025, 1, 2)], [0.1, 0.2])
+
+
+def test_ac12_indistinguishable_when_t_below_two() -> None:
+    """「未能區分」是合法結果（SPEC-013 §3.7），必須由函數本身表態而非留給讀者猜。"""
+    import datetime as dt
+    import random
+
+    from twquant.backtest.validation import paired_block_stats
+
+    rnd = random.Random(20260905)
+    days = [dt.date(2025, m, d) for m in range(1, 13) for d in range(1, 21)]
+    st = paired_block_stats(days, [rnd.gauss(0.0, 0.01) for _ in days])
+    assert st.t_stat is not None
+    assert abs(st.t_stat) < 2.0
+    assert st.indistinguishable is True

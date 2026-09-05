@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -53,9 +54,14 @@ def append_research_log(data_dir: str | Path, entries: list[dict[str, object]]) 
     d = _dir(data_dir)
     d.mkdir(parents=True, exist_ok=True)
     df = pl.DataFrame(entries, schema=_SCHEMA)
+    # T-132：檔名原本只有時間戳，而 Windows 系統時鐘解析度約 1~16ms——實測連續兩次
+    # `now_tw()` 有 ~100% 機率完全相同，第二筆會直接覆蓋第一筆而**毫無訊號**。
+    # 這張表是 **DSR 的試驗登記簿**：掉一筆登記 → `trials_count` 少算一個 distinct
+    # params_hash → DSR 被高估 → 晉升閘門被騙過。整個反過度配適機制建立在它完整之上。
     ts = now_tw().strftime("%Y%m%dT%H%M%S%f")
-    final = d / f"part-{ts}.parquet"
-    tmp = d / f"part-{ts}.parquet.tmp"
+    name = f"part-{ts}-{uuid.uuid4().hex[:8]}"
+    final = d / f"{name}.parquet"
+    tmp = d / f"{name}.parquet.tmp"
     df.write_parquet(tmp)
     tmp.replace(final)
     return final
