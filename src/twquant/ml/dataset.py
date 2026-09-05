@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
+from twquant.panel import session_index
 
 
 def attach_adjustment(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
@@ -69,7 +70,11 @@ def _return_price(adjusted: bool, columns: Sequence[str]) -> pl.Expr:
 
 
 def forward_open_returns(
-    prices: pl.DataFrame, horizon: int, *, adjusted: bool = False
+    prices: pl.DataFrame,
+    horizon: int,
+    *,
+    adjusted: bool = False,
+    max_span_sessions: int | None = None,
 ) -> pl.DataFrame:
     """open(t+1) → open(t+1+h) 前向報酬。輸入需含 (date, stock_id, open)。
 
@@ -78,12 +83,31 @@ def forward_open_returns(
 
     `adjusted=True` 時改算**總報酬**（含股利），需另含 `adj` 欄。標籤是前瞻構造，
     不受 `assert_no_lookahead` 與還原價錨定規則（D-055）約束。
+
+    **`max_span_sessions`（T-139）**：`shift` 是**列位移**，某檔中間缺 N 個開市日時，
+    「h 日報酬」實際橫跨數月而不帶任何標記——它只是一個看起來很大的數字，會被模型
+    當成真實的極端報酬學進去。實測 `prices_daily` 有 413 處 >5 開市日的個股缺口
+    （最大 260 日），h=20 下約 8,673 個訓練樣本受影響。
+
+    給定時，出場列與當前列的**開市日跨距**超過此值即設 null。跨距以全市場日曆計，
+    故連假不受影響（全市場休市不佔開市日）。**預設 None ＝不啟用**，既有配置的
+    結果逐位元不變；是否啟用由配置顯式決定。
     """
     if horizon < 1:
         raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
+    if max_span_sessions is not None and max_span_sessions < horizon + 1:
+        raise ValueError(
+            f"max_span_sessions({max_span_sessions}) 不得小於 horizon+1({horizon + 1})"
+            "：出場列至少在 h+1 個開市日之後，設得更小會讓所有標籤變 null"
+        )
     px = _return_price(adjusted, prices.columns)
     entry = px.shift(-1).over("stock_id")
     exit_ = px.shift(-(1 + horizon)).over("stock_id")
+    if max_span_sessions is not None:
+        prices = session_index(prices)
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        span = sidx.shift(-(1 + horizon)).over("stock_id", order_by="date") - sidx
+        exit_ = pl.when(span <= max_span_sessions).then(exit_).otherwise(None)
     return (
         prices.sort("stock_id", "date")
         .with_columns(

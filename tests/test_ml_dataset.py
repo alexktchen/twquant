@@ -454,3 +454,71 @@ def test_ac3_forward_open_returns_zero_price_yields_null_not_inf() -> None:
     assert all(v is None or math.isfinite(v) for v in vals), f"出現 inf：{vals}"
     lab = excess_rank_labels(fwd).filter(pl.col("date") == days[0])["label"].to_list()
     assert len({v for v in lab if v is not None}) > 0
+
+
+# ── T-139：標籤不得橫跨資料缺口 ─────────────────────────────────────
+#
+# `shift(-(1+h))` 是**列位移**。某檔中間缺 N 個開市日時，「20 日報酬」實際橫跨數月，
+# 而且不帶任何標記——它只是一個看起來很大的數字，會被模型當成真實的極端報酬學進去。
+# 實測 prices_daily 有 413 處 >5 開市日的個股缺口（最大 260 日），h=20 下約
+# 8,673 個訓練樣本受影響；凍結模型正是以此訓練。
+
+
+def _gap_prices() -> pl.DataFrame:
+    """A 撐起完整的市場日曆；B 在中間缺 5 個開市日。"""
+    days = [dt.date(2026, 1, d) for d in (5, 6, 7, 8, 9, 12, 13, 14, 15, 16)]
+    rows = [{"date": d, "stock_id": "A", "open": 10.0 + i} for i, d in enumerate(days)]
+    # B 只有第 0、1 列與第 7、8、9 列 → 第 1 列到第 7 列之間漏了 5 個開市日
+    for i in (0, 1, 7, 8, 9):
+        rows.append({"date": days[i], "stock_id": "B", "open": 100.0 * (i + 1)})
+    return pl.DataFrame(rows)
+
+
+def test_ac_t139_label_spanning_a_gap_is_null_not_a_number() -> None:
+    """B 的列落在開市日 [0, 1, 7, 8, 9]；h=1 故出場是 `shift(-2)`。
+
+    逐列推：
+      第 0 列（開市日 0）→ 出場在開市日 7，跨距 7 → **跨缺口**
+      第 1 列（開市日 1）→ 出場在開市日 8，跨距 7 → **跨缺口**
+      第 2 列（開市日 7）→ 出場在開市日 9，跨距 2 → 正常，可手算
+      第 3、4 列未來列不足 → null（本來就是）
+
+    不設防護時前兩列會安靜地回傳跨越 6 個開市日的報酬，標成「h=1 的 1 日報酬」。
+    """
+    out = forward_open_returns(_gap_prices(), 1, max_span_sessions=2)
+    b = out.filter(pl.col("stock_id") == "B").sort("date")
+    got = b["fwd_ret"].to_list()
+    assert got[0] is None and got[1] is None, f"跨缺口的兩列須為 null，得到 {got[:2]}"
+    # 第 2 列：進場 open=900（開市日 8）、出場 open=1000（開市日 9）
+    assert got[2] == pytest.approx(1000.0 / 900.0 - 1.0), "未跨缺口的列必須照常算出值"
+    assert got[3] is None and got[4] is None, "未來列不足"
+
+    # 反向確認：不設防護時，前兩列會有值——證明這道防護真的攔到了東西
+    naive = forward_open_returns(_gap_prices(), 1).filter(pl.col("stock_id") == "B").sort("date")
+    assert naive["fwd_ret"][0] is not None and naive["fwd_ret"][1] is not None, (
+        "樸素版應算出跨缺口的數字；若它本來就是 null，本測試沒有測到防護"
+    )
+
+
+def test_ac_t139_no_gap_is_bit_identical_to_before() -> None:
+    """無缺口時，加了防護的結果必須與樸素版**逐位元相同**。
+
+    既有的凍結模型與所有回測都建立在樸素版上；若這道防護改變了乾淨資料的結果，
+    差異就無法歸因給資料修補。
+    """
+    px = _gap_prices().filter(pl.col("stock_id") == "A")
+    guarded = forward_open_returns(px, 2, max_span_sessions=99)
+    plain = forward_open_returns(px, 2, max_span_sessions=None)
+    assert guarded.equals(plain)
+
+
+def test_ac_t139_max_span_must_not_be_below_horizon() -> None:
+    """`max_span` < h+1 會讓所有標籤都變 null——那不是防護，是把標籤關掉。"""
+    with pytest.raises(ValueError, match="max_span_sessions"):
+        forward_open_returns(_gap_prices(), 5, max_span_sessions=3)
+
+
+def test_ac_t139_default_is_no_guard_so_existing_configs_are_unchanged() -> None:
+    """預設不啟用：既有配置的行為逐位元不變，啟用與否由配置顯式決定。"""
+    px = _gap_prices()
+    assert forward_open_returns(px, 1).equals(forward_open_returns(px, 1, max_span_sessions=None))

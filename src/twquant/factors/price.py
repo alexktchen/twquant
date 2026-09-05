@@ -12,9 +12,36 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from twquant.factors.registry import factor
+from twquant.panel import safe_ratio
 
 if TYPE_CHECKING:
     from twquant.data.warehouse import PitView
+
+
+# T-139／T-140：價格比率的共用構造。兩個缺陷同一個根——`shift` 是**列位移**。
+#
+# 實測 `factor_values` 有 22,988 列 `inf`：5547 在 2026-03 只有 6 列，`shift(20)` 往回
+# 落到 **2021-02** 一列 `close=0` 的無效資料上 → 除以零 → `inf`。而 `inf` 不是 null，
+# `drop_nulls` 攔不住它，它會一路流進標準化與模型。
+#
+# `_SPAN_TOLERANCE` 是**開市日跨距的容忍倍數**。往回數 window 列至少跨 window 個開市日；
+# 設 3 倍是刻意寬鬆的——正常的停牌、處置、減資復牌都在這個範圍內，只攔那種
+# 「往回 20 列卻跨了 1,200 個開市日」的荒謬情形。收緊它會改變大量正常值，
+# 屬策略層變更，須另行裁決。
+_SPAN_TOLERANCE = 3
+
+
+def _lagged_return(prices: pl.LazyFrame, window: int) -> pl.LazyFrame:
+    """close(t)/close(t−window) − 1，附零分母與跨缺口防護。回傳含 `value` 欄的 LazyFrame。"""
+    idx = prices.select("date").unique().sort("date").with_row_index("_sidx")
+    joined = prices.join(idx, on="date", how="left").sort(["stock_id", "date"])
+    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
+    sidx = pl.col("_sidx").cast(pl.Int64)
+    span = sidx - sidx.shift(window).over("stock_id", order_by="date")
+    ok = span <= window * _SPAN_TOLERANCE
+    return joined.with_columns(
+        pl.when(ok).then(safe_ratio(pl.col("close"), prev) - 1.0).otherwise(None).alias("value")
+    )
 
 
 @factor(
@@ -33,9 +60,8 @@ def mom_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     prices = (
         view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
     )
-    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
     return (
-        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        _lagged_return(prices, window)
         .select("date", "stock_id", "value")
         .drop_nulls("value")
         .collect()
@@ -60,7 +86,7 @@ def high_52w(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     )
     hi = pl.col("close").rolling_max(window).over("stock_id")
     return (
-        prices.with_columns((pl.col("close") / hi).alias("value"))
+        prices.with_columns(safe_ratio(pl.col("close"), hi).alias("value"))
         .select("date", "stock_id", "value")
         .drop_nulls("value")
         .collect()
@@ -83,9 +109,8 @@ def reversal_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     prices = (
         view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
     )
-    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
     return (
-        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        _lagged_return(prices, window)
         .select("date", "stock_id", "value")
         .drop_nulls("value")
         .collect()
@@ -108,9 +133,8 @@ def mom_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     prices = (
         view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
     )
-    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
     return (
-        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        _lagged_return(prices, window)
         .select("date", "stock_id", "value")
         .drop_nulls("value")
         .collect()
@@ -133,7 +157,10 @@ def vol_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     prices = (
         view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
     )
-    ret = pl.col("close") / pl.col("close").shift(1).over("stock_id", order_by="date") - 1.0
+    ret = (
+        safe_ratio(pl.col("close"), pl.col("close").shift(1).over("stock_id", order_by="date"))
+        - 1.0
+    )
     return (
         prices.with_columns(_r=ret)
         .with_columns(value=pl.col("_r").rolling_std(window).over("stock_id"))
@@ -159,16 +186,19 @@ def rs_market_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     raw = params.get("window", 20)
     window = int(raw) if isinstance(raw, int | float | str) else 20
     px = view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
-    sret = pl.col("close") / pl.col("close").shift(window).over("stock_id", order_by="date") - 1.0
+    sret = (
+        safe_ratio(pl.col("close"), pl.col("close").shift(window).over("stock_id", order_by="date"))
+        - 1.0
+    )
     idx = (
         view.table("index_daily")
         .filter(pl.col("index_id") == "TAIEX")
         .select("date", "close")
         .sort("date")
     )
-    idx = idx.with_columns(_mret=pl.col("close") / pl.col("close").shift(window) - 1.0).select(
-        "date", "_mret"
-    )
+    idx = idx.with_columns(
+        _mret=safe_ratio(pl.col("close"), pl.col("close").shift(window)) - 1.0
+    ).select("date", "_mret")
     return (
         px.with_columns(_sret=sret)
         .join(idx, on="date", how="inner")
@@ -272,7 +302,10 @@ def residual_reversal_5d(view: PitView, params: dict[str, object]) -> pl.DataFra
     raw = params.get("window", 5)
     window = int(raw) if isinstance(raw, int | float | str) else 5
     px = view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
-    ret = pl.col("close") / pl.col("close").shift(window).over("stock_id", order_by="date") - 1.0
+    ret = (
+        safe_ratio(pl.col("close"), pl.col("close").shift(window).over("stock_id", order_by="date"))
+        - 1.0
+    )
     meta = (
         view.table("stock_meta")
         .select("stock_id", "industry")
@@ -311,9 +344,8 @@ def mom_1d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     prices = (
         view.table("prices_daily").select("date", "stock_id", "close").sort(["stock_id", "date"])
     )
-    prev = pl.col("close").shift(window).over("stock_id", order_by="date")
     return (
-        prices.with_columns((pl.col("close") / prev - 1.0).alias("value"))
+        _lagged_return(prices, window)
         .select("date", "stock_id", "value")
         .drop_nulls("value")
         .collect()
