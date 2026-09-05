@@ -1,0 +1,48 @@
+# MG4「M2 ＋分數 EMA 平滑」
+#
+# **家族：MG 系列（M 結構 ＋ G 濾網）。事前登記見 DECISIONS D-073。**
+#
+# 基座是 **M2**：ML 前 30% 當池子（決定資金在哪）× `flag_hold_50d` 回踩有撐才進場
+# （決定何時進）× `fixed_slot`（沒訊號就空手）。本格 = 基座 **＋分數 EMA 平滑**。
+# 故「這個濾網在串接結構上值多少」= 本格 − M2，是乾淨的邊際效果。
+#
+# **判讀規則（事前寫定）**：格數多，最好那格幾乎必然是運氣。看邊際效果、不挑冠軍；
+# 冠軍格在報告中須標「不得據此下結論」。
+#
+# 未經部署裁決，勿用於實盤。
+name: track_mg4_ema
+description: MG 系列 MG4：M2 基座 ＋分數 EMA 平滑
+trial_scope: ml_cascade_gates
+universe:
+  markets:
+  - TWSE
+  - TPEX
+  min_adv_twd: 50000000
+  min_price: 10.0
+prefilter:
+- factor: ml.lgbm_net_20d
+  keep_pct: 0.3
+  params:
+    model_id: lgbm_net_h20_20260225_6a798962
+    smooth_days: 10
+combine: rank_avg
+signals:
+- factor: price.flag_hold_50d
+  weight: 0.3
+- factor: price.high_52w
+  weight: 0.3
+- factor: price.mom_60d
+  weight: 0.25
+- factor: volume.turnover_z_20d
+  weight: 0.15
+require_all_factors: true
+selection:
+  method: top_n
+  top_n: 20
+weighting: fixed_slot
+max_weight_per_stock: 0.1
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []
