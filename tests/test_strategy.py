@@ -353,3 +353,142 @@ def test_ac3_empty_universe_raises_instead_of_silent_zero(tmp_path: Path) -> Non
     cfg = _mom_cfg(universe={"min_adv_twd": 1e12, "min_price": None})
     with pytest.raises(DataError, match="2025-02-14"):
         build.build_targets(cfg, wh, dt.date(2025, 2, 14))
+
+
+# ── T-123／D-061：加權契約的整合驗收（單元測試在 test_weighting.py）──────
+#
+# 這裡驗的是 `build_targets` 的**順序**契約，那是單元測試看不到的：
+# 截頂與重分配必須在 `_weight` 內完成，overlay 之後不得再歸一。
+
+
+def _falling_wh(tmp_path: Path) -> Warehouse:
+    """全市場一路下跌 → market_breadth = 0 → breadth overlay 會把曝險壓到 floor。
+
+    80 天不是隨意取的：`build_targets` 呼叫 overlay 時傳空參數，故用預設 `ma_window=60`；
+    資料不足 60 天時算不出均線，breadth 不會是 0，overlay 乘數變成 1.0 而測不到東西。
+    """
+    base = dt.date(2026, 6, 1)
+    rows = []
+    for i in range(80):
+        d = base + dt.timedelta(days=i)
+        for sid, slope in {"1101": 1.0, "2330": 2.0, "2454": 0.5}.items():
+            c = 200.0 - slope * i
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 1000,
+                    "amount": 1e8,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime(d.year, d.month, d.day, 18, tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df, source="twse")
+    return wh
+
+
+def test_ac7_overlay_exposure_is_not_renormalized_back_to_one(tmp_path: Path) -> None:
+    """D-061／R4：截頂重分配在 overlay **之前**，故 overlay 壓低的曝險必須留住。
+
+    先前的順序是 `_weight` → overlay → 截頂；若在最後把總權重歸一到 1，
+    breadth overlay 刻意降到 50% 的曝險會被悄悄補回去，策略行為被改變而無人察覺。
+    """
+    wh = _falling_wh(tmp_path)
+    d = dt.date(2026, 8, 15)
+    assert market_breadth(wh.view(d), d, 60) == pytest.approx(0.0), "fixture 應為全空頭"
+    cfg = _mom_cfg(
+        selection={"method": "top_n", "top_n": 2},
+        overlays=["breadth_regime_filter"],
+        max_weight_per_stock=0.6,
+    )
+    out = build.build_targets(cfg, wh, d)
+    total = out["target_weight"].sum()
+    assert total == pytest.approx(0.5, abs=1e-9), (
+        f"breadth floor 0.5 應讓總曝險維持 0.5，得到 {total}——歸一被錯誤地放在 overlay 之後"
+    )
+
+
+def test_ac7_without_overlay_total_exposure_is_one(tmp_path: Path) -> None:
+    """反向確認：沒有 overlay 時總曝險仍是 1（證明上一條測到的是 overlay 而非 bug）。"""
+    wh = _falling_wh(tmp_path)
+    cfg = _mom_cfg(selection={"method": "top_n", "top_n": 2}, max_weight_per_stock=0.6)
+    out = build.build_targets(cfg, wh, dt.date(2026, 8, 15))
+    assert out["target_weight"].sum() == pytest.approx(1.0, abs=1e-9)
+
+
+def test_ac14_infeasible_cap_raises_on_actual_picked_count(tmp_path: Path) -> None:
+    """設定 top_n=40 但宇宙只有 3 檔；判準須用**實際入選檔數**。
+
+    以 `top_n × cap` 判斷會算出 40 × 0.2 = 8 ≥ 1 而放行，然後產出總曝險 0.6 的組合。
+    """
+    wh = _falling_wh(tmp_path)
+    cfg = _mom_cfg(selection={"method": "top_n", "top_n": 40}, max_weight_per_stock=0.2)
+    with pytest.raises(ConfigError, match="實際入選"):
+        build.build_targets(cfg, wh, dt.date(2026, 8, 15))
+
+
+def test_r12_require_all_factors_drops_stocks_missing_a_factor(tmp_path: Path) -> None:
+    """`rank_avg` 對存在的列求和 → 缺負向因子的股票拿不到負分、分數虛高。
+
+    2454 只有 20 日行情不足以算 60 日動能（缺 `price.mom_60d`）。關閉時它仍會被
+    計分（只用另一個因子），開啟後必須被剔除。
+    """
+    base = dt.date(2026, 6, 1)
+    rows = []
+    for i in range(80):
+        d = base + dt.timedelta(days=i)
+        for sid in ("1101", "2330", "2454"):
+            if sid == "2454" and i < 45:  # 2454 有 35 天：夠算 mom_20d，不夠算 mom_60d
+                continue
+            c = 100.0 + i
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 1000,
+                    "amount": 1e8,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime(d.year, d.month, d.day, 18, tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df, source="twse")
+    d = base + dt.timedelta(days=79)
+    two = {
+        "signals": [
+            SignalConfig(factor="price.mom_20d", weight=0.5),
+            SignalConfig(factor="price.mom_60d", weight=0.5),
+        ],
+        "combine": "rank_avg",
+        "selection": {"method": "top_n", "top_n": 5},
+        "max_weight_per_stock": 0.5,
+        "universe": {"min_adv_twd": None, "min_price": None, "max_gap_sessions": None},
+    }
+    off = build.build_targets(StrategyConfig.model_validate({"name": "t", **two}), wh, d)
+    on = build.build_targets(
+        StrategyConfig.model_validate({"name": "t", "require_all_factors": True, **two}), wh, d
+    )
+    assert "2454" in off["stock_id"].to_list(), "關閉時應仍被計分（這正是問題所在）"
+    assert "2454" not in on["stock_id"].to_list(), "開啟時因子不齊者須被剔除"
+    assert on["target_weight"].sum() == pytest.approx(1.0, abs=1e-9)

@@ -123,7 +123,16 @@ class StrategyConfig(BaseConfig):
     signals: list[SignalConfig]
     combine: Literal["zscore_weighted", "rank_avg", "ic_weighted"] = "zscore_weighted"
     selection: SelectionConfig = SelectionConfig()
-    weighting: Literal["equal", "score_prop", "inv_vol"] = "equal"
+    # T-123／SPEC-013 §2.2.1：score_pow 與 mktcap 為本次新增；score_prop 是 score_pow 的
+    # p=1 特例（同一套實作）；inv_vol 仍未實作，本規格用不到，不得順手補（CLAUDE.md §7）。
+    weighting: Literal["equal", "score_prop", "score_pow", "inv_vol", "mktcap"] = "equal"
+    # score_pow 的指數。預設 1.0 ＝ score_prop，故既有配置行為不變；
+    # SPEC-013 的 L4 與 B 軌明確用 2.0，YAML 須顯式寫出，不得依賴預設值。
+    weighting_power: float = 1.0
+    # D-061／R12：`rank_avg` 對**存在的列**求和，故缺少負向因子（如低波動）的股票
+    # 拿不到那個負分、分數虛高。開啟後在選股前剔除因子不齊者。
+    # 預設 False 是為了保住既有 15 個策略配置的逐位元行為——新的多因子配置須顯式開啟。
+    require_all_factors: bool = False
     rebalance: RebalanceConfig = RebalanceConfig()
     overlays: list[str] = Field(default_factory=list)
     max_weight_per_stock: float = 0.05

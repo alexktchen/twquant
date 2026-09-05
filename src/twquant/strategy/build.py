@@ -18,6 +18,11 @@ from twquant.strategy.banding import banded_selection
 from twquant.strategy.combine import combined_score
 from twquant.strategy.overlays import get_overlay
 from twquant.strategy.universe import universe_ids
+from twquant.strategy.weighting import (
+    cap_and_renormalize,
+    mktcap_weights,
+    shifted_power_weights,
+)
 
 if TYPE_CHECKING:
     from twquant.data.calendar import TradingCalendar
@@ -102,6 +107,19 @@ def build_targets(
     if fdf.is_empty():
         return _empty()
 
+    if cfg.require_all_factors:
+        # D-061／R12：`rank_avg` 對存在的列求和，缺負向因子者拿不到負分、分數虛高。
+        # 在**組合分數之前**剔除，否則它們會先污染各因子的橫斷面百分位。
+        complete = (
+            fdf.group_by("stock_id")
+            .agg(_k=pl.col("factor").n_unique())
+            .filter(pl.col("_k") == len(names))["stock_id"]
+            .to_list()
+        )
+        fdf = fdf.filter(pl.col("stock_id").is_in(complete))
+        if fdf.is_empty():
+            return _empty()
+
     # 方向併入權重：direction=-1 的因子以負權重併入，使高分一致代表看多
     signed = {s.factor: s.weight * get(s.factor).direction for s in cfg.signals}
     score = combined_score(fdf, signed, cfg.combine).drop_nulls("score")
@@ -112,15 +130,19 @@ def build_targets(
     if picked.is_empty():
         return _empty()
 
-    weights = _weight(picked, cfg)
+    # 平移基準取**全宇宙**最低分（非入選名單），見 SPEC-013 §2.2.1(a)
+    score_min = float(score["score"].min())  # type: ignore[arg-type]
+    log_mktcap: dict[str, float] = {}
+    if cfg.weighting == "mktcap":
+        mc = compute(["fundamental.log_market_cap"], view, dates=[signal_date])
+        log_mktcap = dict(zip(mc["stock_id"].to_list(), mc["value"].to_list(), strict=True))
+
+    # 截頂與重分配在 `_weight` 內完成，**overlay 之後不再歸一**（SPEC-013 §2.2.1(c)）：
+    # 在最後歸一會把 breadth 這類 overlay 刻意壓低的曝險補回去，改變既有策略行為。
+    weights = _weight(picked, cfg, score_min=score_min, log_mktcap=log_mktcap)
     for name in cfg.overlays:
         weights = get_overlay(name)(signal_date, weights, view, {})
 
-    weights = weights.with_columns(
-        pl.min_horizontal(pl.col("target_weight"), pl.lit(cfg.max_weight_per_stock)).alias(
-            "target_weight"
-        )
-    )
     return weights.select("date", "stock_id", "target_weight").sort("stock_id")
 
 
@@ -148,10 +170,39 @@ def _select(
     raise ValueError(f"未知選股方法：{sel.method}")
 
 
-def _weight(picked: pl.DataFrame, cfg: StrategyConfig) -> pl.DataFrame:
+def _weight(
+    picked: pl.DataFrame,
+    cfg: StrategyConfig,
+    *,
+    score_min: float,
+    log_mktcap: dict[str, float],
+) -> pl.DataFrame:
+    """依配置算目標權重，並在此完成截頂與重分配（SPEC-013 §2.2.1）。
+
+    `picked` 的列序由 `_select` 決定且穩定；下面以位置對應寫回權重，不得重排。
+    """
+    ids = picked["stock_id"].to_list()
+    n = len(ids)
     if cfg.weighting == "equal":
-        w = 1.0 / picked.height
-        return picked.with_columns(pl.lit(w).alias("target_weight"))
-    raise NotImplementedError(
-        f"weighting={cfg.weighting} 待接（score_prop/inv_vol，見 TASKS T-017 備註）"
-    )
+        raw = [1.0 / n] * n
+    elif cfg.weighting in ("score_prop", "score_pow"):
+        p = 1.0 if cfg.weighting == "score_prop" else cfg.weighting_power
+        raw = shifted_power_weights(picked["score"].to_list(), p=p, score_min=score_min)
+    elif cfg.weighting == "mktcap":
+        missing = [s for s in ids if s not in log_mktcap]
+        if missing:
+            # 靜默補等權會讓「市值加權」名不副實；缺市值是資料問題（黃金規則 5）
+            raise DataError(
+                "financial_statements",
+                None,
+                f"weighting=mktcap 但 {len(missing)} 檔入選股無市值："
+                f"{', '.join(missing[:8])}。宇宙層應以 mktcap_rank_* 先排除無市值者。",
+            )
+        raw = mktcap_weights([log_mktcap[s] for s in ids])
+    else:  # inv_vol
+        raise NotImplementedError(
+            f"weighting={cfg.weighting} 尚未實作（見 SPEC-013 §2.2.1）。"
+            "本規格用不到它，不得為了順手而實作（CLAUDE.md §7 禁止範圍外重構）。"
+        )
+    w = cap_and_renormalize(raw, cfg.max_weight_per_stock)
+    return picked.with_columns(pl.Series("target_weight", w))
