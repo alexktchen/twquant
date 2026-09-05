@@ -192,3 +192,68 @@ def test_ac2_short_history_is_not_flagged() -> None:
     """鄰近窗不足時寧可不報也不誤報（首次回補的頭幾天）。"""
     panel = _counts_panel({"2024-06-03": 100, "2024-06-04": 5000})
     assert sparse_dates(panel, min_ratio=0.5, window=5) == []
+
+
+# ── T-136：整條腿缺席的偵測（`sparse_dates` 對長時間停擺失效）──────────
+def _leg_frame(twse_by_day: dict[dt.date, int], tpex_per_day: int = 800) -> pl.DataFrame:
+    rows = []
+    for d, n_twse in twse_by_day.items():
+        rows += [{"date": d, "market": "TWSE", "stock_id": f"t{i}"} for i in range(n_twse)]
+        rows += [{"date": d, "market": "TPEX", "stock_id": f"p{i}"} for i in range(tpex_per_day)]
+    return pl.DataFrame(rows)
+
+
+def test_t136_long_outage_is_caught_when_sparse_dates_fails() -> None:
+    """核心案例：連續 50 天整腿缺席。
+
+    `sparse_dates` 以鄰近日中位數為基準，缺口中間的鄰居也全是壞的，一天都抓不到——
+    這正是 2023-03~05 的 TWSE 缺腿在正式閘門下存活兩個半月的原因。
+    佔比檢查以**全期**為基準，不看鄰居，故抓得到。
+    """
+    from twquant.data.quality import group_share_anomalies, sparse_dates
+
+    days = [dt.date(2023, 1, 1) + dt.timedelta(days=i) for i in range(200)]
+    twse = {d: (5 if 60 <= i < 110 else 1000) for i, d in enumerate(days)}
+    frame = _leg_frame(twse)
+
+    # sparse_dates 用 window=5：缺口中段的鄰居也壞掉 → 抓不到
+    mid = sparse_dates(frame, min_ratio=0.7, window=5)
+    assert not any(dt.date(2023, 1, 1) + dt.timedelta(days=80) == h.date for h in mid), (
+        "sparse_dates 竟抓到了缺口中段——本測試的前提需重新檢視"
+    )
+
+    hits = group_share_anomalies(frame, group_col="market", min_ratio=0.5)
+    assert len(hits) == 50, f"應抓到 50 天，實得 {len(hits)}"
+    assert {h.group for h in hits} == {"TWSE"}
+    assert hits[0].n_rows == 5
+
+
+def test_t136_healthy_data_produces_no_hits() -> None:
+    """比例穩定時不得誤報——誤報會讓人關掉檢查。"""
+    from twquant.data.quality import group_share_anomalies
+
+    days = [dt.date(2023, 1, 1) + dt.timedelta(days=i) for i in range(60)]
+    frame = _leg_frame({d: 1000 for d in days})
+    assert group_share_anomalies(frame, group_col="market", min_ratio=0.5) == []
+
+
+def test_t136_gate_raises_and_names_the_leg() -> None:
+    from twquant.data.quality import assert_no_group_share_anomalies
+    from twquant.errors import QualityGateError
+
+    days = [dt.date(2023, 1, 1) + dt.timedelta(days=i) for i in range(30)]
+    frame = _leg_frame({d: (5 if i >= 20 else 1000) for i, d in enumerate(days)})
+    with pytest.raises(QualityGateError, match="TWSE"):
+        assert_no_group_share_anomalies(
+            frame, table="prices_daily", group_col="market", min_ratio=0.5
+        )
+
+
+def test_t136_bad_params_raise() -> None:
+    from twquant.data.quality import group_share_anomalies
+
+    f = _leg_frame({dt.date(2023, 1, 1): 10})
+    with pytest.raises(ValueError, match="min_ratio"):
+        group_share_anomalies(f, group_col="market", min_ratio=1.5)
+    with pytest.raises(ValueError, match="缺少欄位"):
+        group_share_anomalies(f, group_col="no_such", min_ratio=0.5)

@@ -218,3 +218,94 @@ def assert_no_sparse_dates(
         "這通常代表某一個來源整條腿缺席（實例：只抓到上市、整個上櫃沒進來），"
         "而該日仍被記為擷取成功——請補抓缺的來源，不要略過。",
     )
+
+
+@dataclass(frozen=True)
+class GroupShareAnomaly:
+    """某日某個分組的列數佔比異常塌陷（T-136）。"""
+
+    date: dt.date
+    group: str
+    n_rows: int
+    share: float  # 當日該組佔比
+    baseline: float  # 全期該組佔比
+
+
+def group_share_anomalies(
+    frame: pl.DataFrame,
+    *,
+    group_col: str,
+    min_ratio: float,
+    date_col: str = _DATE,
+) -> list[GroupShareAnomaly]:
+    """找出「某個分組在某日的佔比遠低於其全期佔比」的日期。
+
+    為什麼需要它而不是 `sparse_dates`（T-136 的教訓）：後者以**鄰近日中位數**為基準，
+    對長時間的停擺完全失效——`prices_daily` 曾連續 51 個交易日只有 TPEX 一條腿、
+    TWSE 整腿缺席（2023-03-09~05-23，台積電 0 列），而缺口中間那些日子的鄰居**也全是壞的**，
+    局部中位數因此跟著塌陷，`sparse_dates` 一天都抓不到。
+
+    本函數的基準是**全期佔比**，不看鄰居，故不受停擺長度影響：
+    TWSE 佔四碼普通股約 55%（975/1,767），缺腿日掉到 0.3%（5/797），差三個數量級。
+
+    限制：若某組在**多數期間**都缺席，全期佔比本身就被拉低，本檢查會失靈。
+    它防的是「本來有、後來整段消失」，不是「從來就沒有」。
+    """
+    if not 0.0 < min_ratio < 1.0:
+        raise ValueError(f"min_ratio 須介於 0 與 1 之間，得到 {min_ratio}")
+    for c in (date_col, group_col):
+        if c not in frame.columns:
+            raise ValueError(f"缺少欄位：{c}")
+    if frame.is_empty():
+        return []
+
+    total = frame.height
+    base = (
+        frame.group_by(group_col)
+        .len()
+        .with_columns(_base=pl.col("len") / total)
+        .select(group_col, "_base")
+    )
+    per_day = frame.group_by([date_col, group_col]).len()
+    day_tot = frame.group_by(date_col).len().rename({"len": "_day"})
+    joined = (
+        per_day.join(day_tot, on=date_col)
+        .join(base, on=group_col)
+        .with_columns(_share=pl.col("len") / pl.col("_day"))
+        .filter(pl.col("_share") < pl.col("_base") * min_ratio)
+        .sort([date_col, group_col])
+    )
+    return [
+        GroupShareAnomaly(
+            date=r[date_col],
+            group=str(r[group_col]),
+            n_rows=int(r["len"]),
+            share=float(r["_share"]),
+            baseline=float(r["_base"]),
+        )
+        for r in joined.to_dicts()
+    ]
+
+
+def assert_no_group_share_anomalies(
+    frame: pl.DataFrame,
+    *,
+    table: str,
+    group_col: str,
+    min_ratio: float,
+    date_col: str = _DATE,
+) -> None:
+    """`group_share_anomalies` 的閘門版：有任何塌陷即 raise（黃金規則 5）。"""
+    hits = group_share_anomalies(frame, group_col=group_col, min_ratio=min_ratio, date_col=date_col)
+    if not hits:
+        return
+    head = "；".join(
+        f"{h.date} {h.group} 佔比 {h.share:.1%}（全期 {h.baseline:.1%}、{h.n_rows} 列）"
+        for h in hits[:5]
+    )
+    raise QualityGateError(
+        f"{table}.group_share",
+        f"{len(hits)} 個 (日期, {group_col}) 的列數佔比塌陷至全期水準的 "
+        f"{min_ratio:.0%} 以下：{head}。這是「整條腿缺席」的特徵"
+        "——`sparse_dates` 以鄰近日為基準，對長時間停擺會失效，故另設本檢查。",
+    )
