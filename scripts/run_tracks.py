@@ -35,6 +35,8 @@ KNOWN = {
     "B2": "track_b2_broad_capw",
     "C1": "track_c1_breakout",
     "C2": "track_c2_wbottom",
+    "C2b": "track_c2b_boxbreak",
+    "C2c": "track_c2c_flaghold",
     "C3": "track_c3_chipflow",
     "C4": "track_c4_voltarget",
 }

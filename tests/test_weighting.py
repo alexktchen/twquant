@@ -118,3 +118,60 @@ def test_ac6_mktcap_never_inverts_large_and_small() -> None:
     """
     got = mktcap_weights([math.log(1e9), math.log(1e6)])
     assert got[0] > got[1], "大市值必須拿到較大權重"
+
+
+# ── 固定格位加權：讓「訊號少就少投」變成可表達的行為 ──────────────────────
+
+
+def test_ac1_fixed_slot_holds_cash_when_signals_are_scarce() -> None:
+    """符合 4 檔、格位 20 → 只投 4/20 = 20%，其餘 80% 是現金。
+
+    既有的 `equal` 永遠是 `1/n`，不論當日有幾檔符合都滿倉——事件型策略因此
+    **無法表達**「今天沒訊號就別交易」。而 `cap_and_renormalize` 更直接把
+    「總曝險 < 1」當成 bug（docstring：「等於偷偷持有現金」），
+    `n × cap < 1` 時還會 raise，於是稀疏事件日會讓整個回測崩掉。
+
+    掛零不是缺陷，是事件策略的正確行為。
+    """
+    from twquant.strategy.weighting import fixed_slot_weights
+
+    w = fixed_slot_weights(4, slots=20, cap=0.10)
+    assert w == [pytest.approx(0.05)] * 4
+    assert sum(w) == pytest.approx(0.20), "只投 20%，不得補到滿倉"
+
+
+def test_ac2_fixed_slot_is_fully_invested_when_signals_are_plentiful() -> None:
+    """符合 20 檔、格位 20 → 滿倉，與 `equal` 等價。"""
+    from twquant.strategy.weighting import fixed_slot_weights
+
+    w = fixed_slot_weights(20, slots=20, cap=0.10)
+    assert sum(w) == pytest.approx(1.0)
+    assert w == [pytest.approx(0.05)] * 20
+
+
+def test_ac3_fixed_slot_never_exceeds_the_cap_and_never_redistributes() -> None:
+    """單股上限仍生效，但**不重分配**——重分配會把省下的現金又投出去。"""
+    from twquant.strategy.weighting import fixed_slot_weights
+
+    w = fixed_slot_weights(3, slots=5, cap=0.10)  # 1/5 = 0.20 > cap 0.10
+    assert w == [pytest.approx(0.10)] * 3
+    assert sum(w) == pytest.approx(0.30), "截頂後不得把差額補給其他部位"
+
+
+def test_ac4_fixed_slot_with_no_candidates_is_all_cash() -> None:
+    """一檔都不符合 → 空手。這是事件策略最重要的一種狀態，不得 raise。"""
+    from twquant.strategy.weighting import fixed_slot_weights
+
+    assert fixed_slot_weights(0, slots=20, cap=0.10) == []
+
+
+def test_ac5_fixed_slot_rejects_more_names_than_slots() -> None:
+    """入選數超過格位數是呼叫端的錯（`_select` 應已限制在 top_n 內）。
+
+    靜默容忍會讓總曝險 > 1，而引擎沒有融資模型——那是一個無法成交的目標權重。
+    """
+    from twquant.errors import ConfigError
+    from twquant.strategy.weighting import fixed_slot_weights
+
+    with pytest.raises(ConfigError, match="格位"):
+        fixed_slot_weights(21, slots=20, cap=0.10)

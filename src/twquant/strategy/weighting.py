@@ -109,3 +109,36 @@ def cap_and_renormalize(raw: Sequence[float], cap: float) -> list[float]:
         for i in free:
             out[i] = w[i] / free_sum * remaining
         w = out
+
+
+def fixed_slot_weights(n: int, *, slots: int, cap: float) -> list[float]:
+    """固定格位：每檔拿 `1/slots`，**符合幾檔就投幾檔的資金，其餘留現金**。
+
+    為什麼需要它：`equal` 永遠是 `1/n`，不論當日有幾檔符合都滿倉；而
+    `cap_and_renormalize` 更把「總曝險 < 1」當成 bug（它的 docstring 寫
+    「等於偷偷持有現金」），`n × cap < 1` 時直接 raise。於是**事件型策略
+    無法表達**——「今天只有 4 檔符合就只投 4 檔」在既有框架裡不是選項，
+    而是會讓回測崩掉的錯誤。
+
+    掛零不是缺陷，是事件策略的正確行為：沒有訊號就不該持有部位。
+
+    與 `equal` + `cap_and_renormalize` 的關鍵差異是**不重分配**——截頂後省下的
+    資金留在現金，不會被推給其他部位。重分配會讓「少投一點」的意圖被抵銷。
+
+    `n > slots` 時 raise：那會讓總曝險 > 1，而引擎沒有融資模型，
+    產生的目標權重根本無法成交（呼叫端的 `_select` 應已限制在 top_n 內）。
+    """
+    if slots < 1:
+        raise ConfigError(f"格位數須 ≥ 1，得到 {slots}")
+    if cap <= 0.0:
+        raise ConfigError(f"單股上限須 > 0，得到 {cap}")
+    if n < 0:
+        raise ConfigError(f"入選檔數不得為負，得到 {n}")
+    if n > slots:
+        raise ConfigError(
+            f"入選 {n} 檔超過格位數 {slots}，總曝險會 > 1——引擎沒有融資模型，"
+            "這樣的目標權重無法成交。應由 selection 先限制在 top_n 內。"
+        )
+    if n == 0:
+        return []
+    return [min(1.0 / slots, cap)] * n

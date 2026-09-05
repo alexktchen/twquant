@@ -125,7 +125,11 @@ class StrategyConfig(BaseConfig):
     selection: SelectionConfig = SelectionConfig()
     # T-123／SPEC-013 §2.2.1：score_pow 與 mktcap 為本次新增；score_prop 是 score_pow 的
     # p=1 特例（同一套實作）；inv_vol 仍未實作，本規格用不到，不得順手補（CLAUDE.md §7）。
-    weighting: Literal["equal", "score_prop", "score_pow", "inv_vol", "mktcap"] = "equal"
+    # `fixed_slot`：每檔固定 1/top_n，**符合幾檔就投幾檔的資金，其餘留現金**。
+    # 事件型策略必需——`equal` 永遠是 1/n 故永遠滿倉，無法表達「今天沒訊號就別買」。
+    weighting: Literal["equal", "score_prop", "score_pow", "inv_vol", "mktcap", "fixed_slot"] = (
+        "equal"
+    )
     # score_pow 的指數。預設 1.0 ＝ score_prop，故既有配置行為不變；
     # SPEC-013 的 L4 與 B 軌明確用 2.0，YAML 須顯式寫出，不得依賴預設值。
     weighting_power: float = 1.0

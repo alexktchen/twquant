@@ -13,13 +13,14 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from twquant.errors import DataError
+from twquant.errors import ConfigError, DataError
 from twquant.strategy.banding import banded_selection
 from twquant.strategy.combine import combined_score
 from twquant.strategy.overlays import get_overlay
 from twquant.strategy.universe import universe_ids
 from twquant.strategy.weighting import (
     cap_and_renormalize,
+    fixed_slot_weights,
     mktcap_weights,
     shifted_power_weights,
 )
@@ -185,6 +186,21 @@ def _weight(
     n = len(ids)
     if cfg.weighting == "equal":
         raw = [1.0 / n] * n
+    elif cfg.weighting == "fixed_slot":
+        # 固定格位：每檔 1/top_n，不足額的部分留現金。**直接回傳、不過 cap_and_renormalize**
+        # ——那個函式會把省下的資金重分配回去，正好抵銷「少投一點」的意圖。
+        slots = cfg.selection.top_n
+        if slots is None:
+            raise ConfigError(
+                "weighting=fixed_slot 需要 selection.top_n 決定格位數；"
+                "threshold 選股沒有固定格位，語意未定義。"
+            )
+        return picked.with_columns(
+            pl.Series(
+                "target_weight",
+                fixed_slot_weights(n, slots=slots, cap=cfg.max_weight_per_stock),
+            )
+        )
     elif cfg.weighting in ("score_prop", "score_pow"):
         p = 1.0 if cfg.weighting == "score_prop" else cfg.weighting_power
         raw = shifted_power_weights(picked["score"].to_list(), p=p, score_min=score_min)
