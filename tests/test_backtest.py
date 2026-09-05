@@ -329,3 +329,24 @@ def test_unknown_slippage_model_raises() -> None:
             participation=0.0,
             cfg=ct.CostConfig(slippage=ct.SlippageConfig(model="bogus")),
         )
+
+
+def test_t135_sub_lot_target_is_recorded_as_unfilled_not_silently_dropped() -> None:
+    """T-135：目標金額不足一張（1,000 股）時，先前靜默歸零、不記未成交。
+
+    實測後果：40 檔等權、10M 資金 → 每檔 25 萬 → 股價 300 元以上買不到一張 →
+    曝險只有 61%，且檔數越多越嚴重（20 檔 89%、30 檔 68%、50 檔 64%）。
+    跨檔數的比較全被這個混淆。這裡只要求它**現形**，成交行為不變。
+    """
+    from twquant.backtest import engine as eng
+
+    st = eng._State(cash=1_000_000.0)
+    # 目標 2% × 1M = 20,000 元；股價 300 → 66 股 < 一張 → 歸零
+    day = dt.date(2026, 1, 5)
+    px = {"9999": {"open": 300.0, "close": 300.0, "_adv": 1e9, "_prev_close": 300.0}}
+    eng._execute(st, {"9999": 0.02}, day, px, ct.CostConfig(), 0.05)
+    assert st.holdings.get("9999", 0) == 0, "不足一張本來就買不到，行為不變"
+    lots = [u for u in st.unfilled if u.reason == "lot"]
+    assert len(lots) == 1, "不足一張必須記成 unfilled，不得靜默"
+    assert lots[0].stock_id == "9999" and lots[0].side == "buy"
+    assert lots[0].shares == 66, "記下原本想買的股數，讓報表能量出被捨去的曝險"
