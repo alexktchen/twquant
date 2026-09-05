@@ -140,7 +140,7 @@ def main() -> None:
                 "——兩次跑之間資料變了，該階的零成本對照無效"
             )
     if fp_warn:
-        fp_warn = ["⚠ **資料一致性檢查未過**：", ""] + fp_warn + [""]
+        fp_warn = ["⚠ **資料一致性檢查未過**：", "", *fp_warn, ""]
         print(f"!! {len(fp_warn) - 3} 階的 1×／0× 指紋不一致", flush=True)
 
     lo, hi = dt.date(2022, 7, 1), dt.date(2026, 2, 28)
