@@ -101,6 +101,19 @@ SPECS = [
         "C 軌",
         "同 C1，加波動率縮放 overlay（Barroso–Santa-Clara）",
     ),
+    ("M1", "tracks_m", "M1_track_m1_ml_c1", "M 系列", "ML 前 30% 當池子 × C1 技術排序"),
+    ("M2", "tracks_m23", "M2_track_m2_ml_flag", "M 系列", "ML 池 × 回踩有撐才進場（固定格位）"),
+    ("M3", "tracks_m23", "M3_track_m3_mom_flag", "M 系列", "**隔離格**：同 M2 但池子改用動能"),
+    ("M4", "tracks_m", "M4_track_m4_ml_chip", "M 系列", "ML 池 × C3 籌碼排序"),
+    ("M5", "tracks_m", "M5_track_m5_ml_large", "M 系列", "ML 池 × B1 大型股市值加權"),
+    ("M6", "tracks_m", "M6_track_m6_ml_voltarget", "M 系列", "M1 ＋ 波動率縮放"),
+    ("G1", "tracks_g", "G1_track_g1_ml_revenue", "G 濾網矩陣", "ML ＋ 營收成長濾網"),
+    ("G2", "tracks_g", "G2_track_g2_ml_lowvol", "G 濾網矩陣", "ML ＋ 低波動池"),
+    ("G3", "tracks_g", "G3_track_g3_ml_voltarget", "G 濾網矩陣", "ML ＋ 波動率縮放"),
+    ("G4", "tracks_g", "G4_track_g4_ml_smooth", "G 濾網矩陣", "ML ＋ 分數 EMA 平滑"),
+    ("G5", "tracks_g", "G5_track_g5_ml_large", "G 濾網矩陣", "ML ＋ 大型股宇宙"),
+    ("G6", "tracks_g", "G6_track_g6_ml_flaggate", "G 濾網矩陣", "ML ＋ 型態進場閘門"),
+    ("GALL", "tracks_g", "GALL_track_gall_ml_allgates", "G 濾網矩陣", "六個濾網全上"),
 ]
 SCALES = ["1x", "0x", "1.5x"]
 
@@ -373,6 +386,16 @@ def main() -> None:
         ("訊號（大型加權）= B1 − B1-ML", "B1", "B1-ML", "架構固定，只換訊號"),
         ("因子選擇 = C1 − X1", "C1", "X1", "都是四因子，但選的因子完全不同"),
         ("風險管理 = C4 − C1", "C4", "C1", "逐字相同，只多波動率縮放 overlay"),
+        # D-071 的判定邊（唯一乾淨的隔離）
+        ("ML 當池子 = M2 − M3", "M2", "M3", "逐字相同，只把閘門從 ML 換成動能"),
+        # D-072 的邊際效果：每格 = 基準只加一個濾網
+        ("濾網 G1 營收 = G1 − L0-new", "G1", "L0-new", "只加營收成長濾網"),
+        ("濾網 G2 低波動 = G2 − L0-new", "G2", "L0-new", "只加低波動池"),
+        ("濾網 G3 波動縮放 = G3 − L0-new", "G3", "L0-new", "只加波動率縮放 overlay"),
+        ("濾網 G4 EMA = G4 − L0-new", "G4", "L0-new", "只加分數 EMA 平滑"),
+        ("濾網 G5 大型股 = G5 − L0-new", "G5", "L0-new", "只換成大型股宇宙"),
+        ("濾網 G6 型態閘門 = G6 − L0-new", "G6", "L0-new", "只加型態進場閘門＋固定格位"),
+        ("全部一起 = GALL − L0-new", "GALL", "L0-new", "六個濾網全上（**非各邊際效果之和**）"),
     ):
         ba, bb = get(a), get(b)
         if not (ba and bb):
