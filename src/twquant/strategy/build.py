@@ -141,7 +141,7 @@ def build_targets(
     # 在最後歸一會把 breadth 這類 overlay 刻意壓低的曝險補回去，改變既有策略行為。
     weights = _weight(picked, cfg, score_min=score_min, log_mktcap=log_mktcap)
     for name in cfg.overlays:
-        weights = get_overlay(name)(signal_date, weights, view, {})
+        weights = get_overlay(name)(signal_date, weights, view, cfg.overlay_params.get(name, {}))
 
     return weights.select("date", "stock_id", "target_weight").sort("stock_id")
 

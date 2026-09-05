@@ -498,3 +498,154 @@ def test_r12_require_all_factors_drops_stocks_missing_a_factor(tmp_path: Path) -
     assert "2454" in off["stock_id"].to_list(), "關閉時應仍被計分（這正是問題所在）"
     assert "2454" not in on["stock_id"].to_list(), "開啟時因子不齊者須被剔除"
     assert on["target_weight"].sum() == pytest.approx(1.0, abs=1e-9)
+
+
+# ── C4：Barroso–Santa-Clara 波動率縮放 overlay ────────────────────────────
+
+
+def _vol_wh(tmp_path: Path, daily_ret: float, n: int = 80) -> tuple[Warehouse, dt.date]:
+    """建一個「每日固定報酬 ±daily_ret 交替」的資料湖，已實現波動率因此可手算。
+
+    交替漲跌讓價格幾乎不漂移，故縮放倍數只由波動率決定，不被趨勢干擾。
+    """
+    days = [dt.date(2026, 3, 2) + dt.timedelta(days=i) for i in range(n * 2)]
+    days = [d for d in days if d.weekday() < 5][:n]
+    rows: list[dict[str, object]] = []
+    for sid in ("1101", "2330"):
+        c = 100.0
+        for i, d in enumerate(days):
+            c *= 1.0 + (daily_ret if i % 2 == 0 else -daily_ret)
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 1000,
+                    "amount": 1e8,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime(d.year, d.month, d.day, 18, tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
+    return wh, days[-1]
+
+
+def _w(d: dt.date) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": [d, d],
+            "stock_id": ["1101", "2330"],
+            "target_weight": [0.5, 0.5],
+        }
+    )
+
+
+def test_ac1_c4_high_volatility_scales_exposure_down() -> None:
+    """已實現波動率高於目標 → 縮減曝險（Barroso–Santa-Clara 2015）。
+
+    這是 C4 存在的理由：動能策略的病不是報酬不夠，是崩起來太深
+    （實測 A 軌 MDD −38.5%、ML −46.1%）。
+    """
+    import tempfile
+
+    from twquant.strategy.overlays import vol_target_scaling
+
+    with tempfile.TemporaryDirectory() as td:
+        wh, d = _vol_wh(Path(td), daily_ret=0.04)  # 年化約 63%
+        out = vol_target_scaling(d, _w(d), wh.view(d), {"target_vol": 0.20, "window": 20})
+    assert out["target_weight"].sum() < 1.0 - 1e-9, "高波動時必須減碼"
+
+
+def test_ac2_c4_low_volatility_is_capped_at_one() -> None:
+    """低波動時**不得加槓桿**：倍數上限 1.0。
+
+    Barroso–Santa-Clara 原文允許槓桿，但本專案的回測引擎沒有融資模型，
+    放大到 >1 會產生一個引擎無法成交的目標權重——那是靜默的錯數字。
+    """
+    import tempfile
+
+    from twquant.strategy.overlays import vol_target_scaling
+
+    with tempfile.TemporaryDirectory() as td:
+        wh, d = _vol_wh(Path(td), daily_ret=0.001)  # 年化約 1.6%，遠低於目標
+        out = vol_target_scaling(d, _w(d), wh.view(d), {"target_vol": 0.20, "window": 20})
+    assert out["target_weight"].sum() == pytest.approx(1.0), "低波動時倍數封頂於 1.0，不得加槓桿"
+
+
+def test_ac3_c4_insufficient_history_does_not_silently_pass_through() -> None:
+    """歷史不足以估波動率時 raise，不得靜默回傳原權重。
+
+    靜默放行會讓 overlay 在資料不足時「成功地什麼都沒做」——正是黃金規則 5 要防的
+    失敗模式，而且它會發生在回測**最前面那段**，剛好是曝險最該被管的時候。
+    """
+    import tempfile
+
+    from twquant.errors import DataError
+    from twquant.strategy.overlays import vol_target_scaling
+
+    with tempfile.TemporaryDirectory() as td:
+        wh, d = _vol_wh(Path(td), daily_ret=0.02, n=5)  # 只有 5 天，不足 20 日窗
+        with pytest.raises(DataError, match="波動率"):
+            vol_target_scaling(d, _w(d), wh.view(d), {"target_vol": 0.20, "window": 20})
+
+
+def test_ac4_c4_scaling_is_proportional_and_preserves_relative_weights() -> None:
+    """縮放只改整體曝險，**不得改變個股之間的相對比例**——那是選股層的事。"""
+    import tempfile
+
+    from twquant.strategy.overlays import vol_target_scaling
+
+    with tempfile.TemporaryDirectory() as td:
+        wh, d = _vol_wh(Path(td), daily_ret=0.04)
+        w = pl.DataFrame(
+            {"date": [d, d], "stock_id": ["1101", "2330"], "target_weight": [0.7, 0.3]}
+        )
+        out = vol_target_scaling(d, w, wh.view(d), {"target_vol": 0.20, "window": 20})
+    a, b = out["target_weight"].to_list()
+    assert a / b == pytest.approx(0.7 / 0.3), "相對比例必須不變"
+
+
+def test_ac5_c4_overlay_params_reach_the_overlay() -> None:
+    """`overlay_params` 必須真的傳到 overlay——否則它是宣告了卻不生效的 no-op。
+
+    `build.py` 原本寫死傳 `{}`，而 `StrategyConfig` 沒有這個欄位；那樣的話
+    配置檔寫 `target_vol: 0.05` 也不會有任何效果，且**不會有任何錯誤訊息**。
+    """
+    from twquant.strategy.overlays import get_overlay, overlay
+
+    seen: dict[str, object] = {}
+
+    @overlay("_probe_params")
+    def _probe(  # type: ignore[unused-ignore]
+        signal_date: dt.date, weights: pl.DataFrame, view: object, params: dict[str, object]
+    ) -> pl.DataFrame:
+        seen.update(params)
+        return weights
+
+    assert get_overlay("_probe_params") is _probe
+
+    from twquant.strategy.config import StrategyConfig
+
+    cfg = StrategyConfig.model_validate(
+        {
+            "name": "t",
+            "signals": [{"factor": "price.mom_20d", "weight": 1.0}],
+            "selection": {"method": "top_n", "top_n": 2},
+            "weighting": "equal",
+            "rebalance": {"schedule": "monthly", "day": "MON", "execution": "next_open"},
+            "overlays": ["_probe_params"],
+            "overlay_params": {"_probe_params": {"target_vol": 0.05}},
+        }
+    )
+    assert cfg.overlay_params["_probe_params"]["target_vol"] == 0.05

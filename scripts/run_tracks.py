@@ -21,22 +21,54 @@ START, END = "2022-07-01", "2026-02-28"  # END 是保險庫邊界，不得後移
 CAPITAL = 80_000_000.0  # D-068：10M 下曝險隨檔數由 82% 掉到 65%，汙染「檔數」的比較
 COSTS = "costs.yaml"
 
+# 預設是 A/B 軌；C 軌以 --tracks 指定（各自寫不同 --out，不得覆蓋彼此）
 TRACKS = [
     ("A", "track_a_smallcap"),
     ("B1", "track_b1_large_enhanced"),
     ("B1ML", "track_b1ml_large_enhanced"),  # D-067：2×2 的第四格，與 B1 只差訊號
     ("B2", "track_b2_broad_capw"),
 ]
+KNOWN = {
+    "A": "track_a_smallcap",
+    "B1": "track_b1_large_enhanced",
+    "B1ML": "track_b1ml_large_enhanced",
+    "B2": "track_b2_broad_capw",
+    "C1": "track_c1_breakout",
+    "C2": "track_c2_wbottom",
+    "C3": "track_c3_chipflow",
+    "C4": "track_c4_voltarget",
+}
 SCALES = [("1x", None), ("0x", "0"), ("1.5x", "1.5")]
 
 
 def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
-    jobs = [(t, c, tag, sc) for t, c in TRACKS for tag, sc in SCALES]
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tracks", default="", help="逗號分隔的軌名（如 C1,C4）；空＝預設 A/B 軌")
+    ap.add_argument("--out", default="", help="結果包目錄；空＝預設。**不同批必須寫不同目錄**")
+    args = ap.parse_args()
+    tracks = TRACKS
+    if args.tracks:
+        keys = [k.strip() for k in args.tracks.split(",") if k.strip()]
+        bad = [k for k in keys if k not in KNOWN]
+        if bad:
+            raise SystemExit(f"未知軌名 {bad}，可用：{sorted(KNOWN)}")
+        tracks = [(k, KNOWN[k]) for k in keys]
+        if not args.out:
+            raise SystemExit(
+                "--tracks 指定了非預設組合，必須一併給 --out，否則會與既有結果混在一起"
+            )
+    out = pathlib.Path(args.out) if args.out else OUT
+    print(f"軌：{[t for t, _ in tracks]}　輸出：{out}", flush=True)
+
+    globals()["OUT"] = out
+    out.mkdir(parents=True, exist_ok=True)
+    jobs = [(t, c, tag, sc) for t, c in tracks for tag, sc in SCALES]
     t0 = time.perf_counter()
     failures: list[str] = []
     for i, (track, cfg, tag, scale) in enumerate(jobs, 1):
-        dest = OUT / f"{track}_{cfg}_{tag}.json"
+        dest = out / f"{track}_{cfg}_{tag}.json"
         if dest.exists():
             print(f"[{i}/{len(jobs)}] {track} {tag}：結果包已存在，跳過（續傳）", flush=True)
             continue

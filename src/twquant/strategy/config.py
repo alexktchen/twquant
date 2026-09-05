@@ -135,6 +135,10 @@ class StrategyConfig(BaseConfig):
     require_all_factors: bool = False
     rebalance: RebalanceConfig = RebalanceConfig()
     overlays: list[str] = Field(default_factory=list)
+    # 每個 overlay 的參數，key 為 overlay 名。**必須真的傳到 overlay**：
+    # `build.py` 原本寫死傳 `{}`，那樣配置檔寫什麼都不生效且不會報錯
+    # ——正是 `scripts/audit_silent.py` 的 no-op 配置那一類缺陷。
+    overlay_params: dict[str, dict[str, object]] = Field(default_factory=dict)
     max_weight_per_stock: float = 0.05
 
     @model_validator(mode="after")
