@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import pathlib
 import sys
 
@@ -30,7 +31,10 @@ MIN_ADV_TWD = 30_000_000.0  # 現行 UniverseConfig 預設
 MIN_PRICE = 10.0
 ADV_WINDOW = 20
 UNIVERSE_RE = r"^[1-9][0-9]{3}$"  # 四碼普通股，排除 ETF 與權證
-PCTL = 0.5  # 相對門檻對照：成交額中位數以上（finlab 用「剔除 60 日均額後 50%」）
+# 相對門檻的切點分位。0.5 ＝ finlab 的「剔除 60 日均額後 50%」（保留前 50%）。
+# **D-062 需要的是 0.70（保留前 30%）**：現行絕對門檻的平均留存率是 30.3%，
+# 用 0.5 量出來的穩定度是「同時換了穩定度與宇宙大小」的結果，說不出是哪一項的功勞。
+PCTL = 0.5
 
 
 def _load() -> pl.DataFrame:
@@ -54,7 +58,7 @@ def _load() -> pl.DataFrame:
     return out.filter(pl.col("stock_id").str.contains(UNIVERSE_RE))
 
 
-def main() -> None:
+def main(pctl: float = PCTL, since: str = "") -> None:
     px = _load()
     print(
         f"載入 {px.height:,} 列、{px['stock_id'].n_unique():,} 檔、"
@@ -62,10 +66,16 @@ def main() -> None:
         flush=True,
     )
 
-    # 20 日成交金額中位數（與 universe.py 同一定義：中位數抗漲停無量）
+    # 20 日成交金額中位數（與 universe.py 同一定義：中位數抗漲停無量）。
+    # **ADV 在裁切之前先算**：先裁再算會讓起點後的前 19 個交易日 ADV 為 null，
+    # 等於把該區間的第一個月整個丟掉。
     px = px.sort(["stock_id", "date"]).with_columns(
         _adv=pl.col("amount").rolling_median(ADV_WINDOW).over("stock_id")
     )
+    if since:
+        lo = dt.date.fromisoformat(since)
+        px = px.filter(pl.col("date") >= lo)
+        print(f"裁切至 {lo} 之後：{px.height:,} 列、{px['stock_id'].n_unique():,} 檔", flush=True)
     # **每月**取樣後再按年平均。單日快照太吵：實測相鄰兩年的 ADV 中位數可差 3 倍，
     # 那多半是取樣日落在什麼行情上，不是真的體制轉換。用一年 12 個點才看得出趨勢。
     px = px.with_columns(_y=pl.col("date").dt.year(), _m=pl.col("date").dt.month())
@@ -77,7 +87,9 @@ def main() -> None:
         s = g.drop_nulls("_adv")
         if s.height == 0:
             continue
-        cut = s["_adv"].quantile(PCTL)
+        # interpolation 與 `strategy/universe.py` 同為 linear：切點之後是 `>= cut`，
+        # "nearest" 會把切點那一檔也留下來，量測與實作就會差一個檔位。
+        cut = s["_adv"].quantile(pctl, "linear")
         monthly.append(
             {
                 "_y": y,
@@ -121,7 +133,7 @@ def main() -> None:
         "",
         f"絕對門檻＝現行 `UniverseConfig` 預設：`min_adv_twd={MIN_ADV_TWD:,.0f}`、"
         f"`min_price={MIN_PRICE}`；ADV 為 {ADV_WINDOW} 日成交金額中位數。",
-        f"相對門檻＝當日 ADV 的第 {PCTL:.0%} 百分位（同樣套 `min_price`，以隔離是哪一道在漂）。",
+        f"相對門檻＝保留 ADV 前 {1 - pctl:.0%}（切在第 {pctl:.0%} 百分位）（同樣套 `min_price`，以隔離是哪一道在漂）。",
         "",
         "| 年 | 月數 | 有 ADV 檔數 | 絕對門檻留下 | 留存率 | ADV 中位數 | 相對門檻留下 | 留存率 |",
         "|---|---|---|---|---|---|---|---|",
@@ -137,5 +149,23 @@ def main() -> None:
     print(f"\n已寫出 {OUT}", flush=True)
 
 
+def _cli() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--pctl",
+        type=float,
+        default=PCTL,
+        help="相對門檻的切點分位；0.70 ＝ 保留 ADV 前 30%%（對齊現行絕對門檻的平均留存率）",
+    )
+    ap.add_argument("--since", default="", help="只算此日之後（YYYY-MM-DD）")
+    ap.add_argument("--out", default="", help="輸出 markdown；空＝預設路徑")
+    a = ap.parse_args()
+    if a.out:
+        globals()["OUT"] = pathlib.Path(a.out)
+    main(a.pctl, a.since)
+
+
 if __name__ == "__main__":
-    main()
+    _cli()
