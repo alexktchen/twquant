@@ -47,7 +47,10 @@ class InsightEvidence(BaseModel):
     captured_at: dt.datetime
     stock_id: str | None = None
     industry: str | None = None
-    direction: Literal["support", "contradict", "gap"]
+    # neutral＝有這筆事實但不構成支持或反對；gap＝已知缺口（來源不存在或該期無資料）。
+    direction: Literal["support", "contradict", "neutral", "gap"]
+    # D-081(f)：available_at 是估計值時 PIT 強度不足，只能中性呈現，不得當支持證據。
+    availability: Literal["actual", "estimated"] = "actual"
     reason_ref: str | None = None
 
     @field_validator("published_at", "available_at", "captured_at")
@@ -69,6 +72,10 @@ class InsightEvidence(BaseModel):
     @model_validator(mode="after")
     def _validate_timeline(self) -> InsightEvidence:
         """A source cannot become available before publication, or be captured before that."""
+        if self.availability == "estimated" and self.direction == "support":
+            raise ValueError(
+                f"evidence_id={self.evidence_id} 的 available_at 為估計值，不得當支持證據（D-081f）"
+            )
         if self.available_at < self.published_at:
             raise ValueError(f"evidence_id={self.evidence_id} 的 available_at 早於 published_at")
         if self.captured_at < self.available_at:

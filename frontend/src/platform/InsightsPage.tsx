@@ -12,7 +12,8 @@ export type InsightEvidence = {
   captured_at: string
   stock_id: string | null
   industry: string | null
-  direction: 'support' | 'contradict' | 'gap'
+  direction: 'support' | 'contradict' | 'neutral' | 'gap'
+  availability?: 'actual' | 'estimated'
   reason_ref: string | null
 }
 
@@ -39,6 +40,7 @@ type Response = { packs: InsightPack[]; issues: { insight_run_id: string; detail
 const DIRECTION_LABEL: Record<InsightEvidence['direction'], string> = {
   support: '支持',
   contradict: '反對',
+  neutral: '中性',
   gap: '缺口',
 }
 
