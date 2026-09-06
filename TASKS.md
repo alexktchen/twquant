@@ -158,11 +158,29 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 > T-005 依賴補上轉接器；T-023 的 report 步驟改為掛點預留、T-024 接上（解除 T-023↔T-024
 > 循環）；T-025 補上 T-015/T-016。表格順序依實際依賴重排（T-004/006/007-010 先於 T-003/005）。
 
-## 平台規劃交付
+## 平台重構工單（T-200～T-215）
+
+使用者於 2026-09-06 指定此佇列依序實作，驗收後合併 main。原平台文件 T-152 改號 T-200，避免與 ML 研究混用。本段為平台工單狀態的唯一來源。
 
 | ID | 任務 | 規格 | 依賴 | 模型 | 狀態 |
 |---|---|---|---|---|---|
-| T-152 | 【文件】專業平台資訊架構與前端交接：每日 ML 名單、訓練歷程、回測中心、產業／個股洞悉、版本追溯、K 線推薦日、API 草案與分期驗收；延伸 PRD-002 | [PRD-003](docs/PRD-003-platform-console.md)；D-070 | 使用者本輪指定；文件交付不依賴新訓練 | — | done（2026-09-05；純文件與示意互動預覽，不代表平台已實作。DoD：修改前 fast 709 passed／23 skipped；追加 K 線設計後完整 check：ruff、format、mypy 全綠，pytest 709 passed／23 skipped；CHANGELOG 已更新，diff 僅規劃文件。無新增公開程式介面／計算參數／golden 變更，功能 AC-1～11 留待各實作任務。預覽使用 Lightweight Charts 5.2.0，已驗證日 K／成交量、推薦日期、盤後與最早交易日、標記切換、事件點選與鍵盤定位、縮放重設、行情表、切股隔離與套件失敗狀態；原導覽／搜尋／追蹤流程通過，七頁在 1024／736／360px 深淺色均無頁面溢出或執行錯誤） |
+| T-200 | 【文件】專業平台資訊架構與前端交接：每日 ML 名單、訓練歷程、回測中心、產業／個股洞悉、版本追溯、K 線推薦日、API 草案與分期驗收；延伸 PRD-002 | [PRD-003](docs/PRD-003-platform-console.md)；D-080 | 使用者本輪指定；文件交付不依賴新訓練 | — | done（2026-09-05；純文件與示意互動預覽，不代表平台已實作。DoD：修改前 fast 709 passed／23 skipped；追加 K 線設計後完整 check：ruff、format、mypy 全綠，pytest 709 passed／23 skipped；CHANGELOG 已更新，diff 僅規劃文件。無新增公開程式介面／計算參數／golden 變更，功能 AC-1～11 留待各實作任務。預覽使用 Lightweight Charts 5.2.0，已驗證日 K／成交量、推薦日期、盤後與最早交易日、標記切換、事件點選與鍵盤定位、縮放重設、行情表、切股隔離與套件失敗狀態；原導覽／搜尋／追蹤流程通過，七頁在 1024／736／360px 深淺色均無頁面溢出或執行錯誤） |
+
+| T-201 | 平台導覽、深連結與響應式殼層 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §2 AC-201-1～3 | T-200 | — | in_progress |
+| T-202 | 模型／回測 artifact 索引與安全讀取投影 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-202-1～2 | T-201 | — | todo |
+| T-203 | 研究索引唯讀 API 與錯誤契約 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-203-1 | T-202 | — | todo |
+| T-204 | 模型歷程與回測中心接線／圖表 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-204-1～2 | T-203 | — | todo |
+| T-205 | ML 推薦快照合約、保存與匯入 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §4 AC-205-1～2 | T-204 | — | todo |
+| T-206 | 每日 ML 名單與首頁、篩選與歷史 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §4 AC-206-1～2 | T-205 | — | todo |
+| T-207 | 個股研究分頁、選股分離與日期身分 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §5 AC-207-1～2 | T-206 | — | todo |
+| T-208 | K 線推薦日標記、定位與事件詳情 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §5 AC-208-1～2；PRD-003 §14 | T-207 | — | todo |
+| T-209 | 產業研究頁與來源／覆蓋呈現 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §6 AC-209-1 | T-208 | — | todo |
+| T-210 | 洞悉證據包驗證與分析閱讀頁 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §6 AC-210-1 | T-209 | — | todo |
+| T-211 | 本機自選與研究筆記、舊資料相容 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §6 AC-211-1 | T-210 | — | todo |
+| T-212 | 資料後台與工作中心操作重構 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §6 AC-212-1 | T-211 | — | todo |
+| T-213 | 日頻 ML 推論輸出推薦快照 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §7 AC-213-1 | T-205；既有研究推論入口 | — | todo |
+| T-214 | 洞悉特徵與成熟 outcome 回訓匯出契約 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §7 AC-214-1 | T-210；標籤／資料成熟度 | — | todo |
+| T-215 | 整合驗收、操作文件與 main 合併 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §7 AC-215-1 | T-201～T-214 | — | todo |
 
 ## 完成紀錄
 
