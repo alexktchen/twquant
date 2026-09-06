@@ -9,12 +9,17 @@ from __future__ import annotations
 import datetime as dt
 import warnings
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 import numpy as np
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
 from twquant.panel import session_index
+
+# 事件表開頭可容忍的空窗（交易日）。約一季——真實的事件表在區間開頭本來就可能
+# 有幾週沒有除權息（台股除權息集中在 6~8 月），但不可能空一整季以上。
+_MAX_UNCOVERED_SESSIONS = 60
 
 
 def attach_adjustment(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
@@ -36,6 +41,23 @@ def attach_adjustment(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFram
             "空事件表會靜默退回未還原標籤——6~8 月近兩成的「最差一成」是除息假象。"
             "請先確認供應層 corporate_events 已載入（scripts/load_corporate_events.py）。"
         )
+    # **空表不是唯一的失效模式**（T-169）：事件表只涵蓋價格區間的一部分時，
+    # 未涵蓋的那幾年會**靜默地**變成價格報酬，而其餘年份是總報酬——同一份訓練資料
+    # 裡兩種標籤定義，模型看到的是一個不存在的體制轉折。實測踩到過：長歷史載到
+    # 2015-06 之後，corporate_events 仍只有 2019 起，2015-06~2018-12 的 886 個交易日
+    # 對應 0 筆事件（台股一年約 1,400~1,600 筆），而舊的空表檢查完全攔不住。
+    px_lo = cast("dt.date | None", prices["date"].min())
+    ev_lo = cast("dt.date | None", events["date"].min())
+    if px_lo is not None and ev_lo is not None and ev_lo > px_lo:
+        gap = prices.filter(pl.col("date") < ev_lo)["date"].n_unique()
+        if gap > _MAX_UNCOVERED_SESSIONS:
+            raise ValueError(
+                f"corporate_events 最早只到 {ev_lo}，而行情從 {px_lo} 開始"
+                f"——前面 {gap:,} 個交易日沒有任何事件可還原。"
+                "那些日子的標籤會靜默退回價格報酬，與其餘年份的總報酬不同口徑"
+                f"（容忍上限 {_MAX_UNCOVERED_SESSIONS} 個交易日，約一季，"
+                "留給事件表尾端的正常空窗）。請先回補事件表，或把訓練起日移到事件涵蓋範圍內。"
+            )
     bad = events.filter(pl.col("adj_factor").is_null() | (pl.col("adj_factor") <= 0.0))
     if bad.height:
         raise ValueError(

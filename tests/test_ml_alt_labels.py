@@ -415,3 +415,35 @@ def test_alt_label_configs_match_base_model_lgbm_and_split() -> None:
         assert cfg.split.vault_months == base.split.vault_months, name
         assert cfg.split.days_per_year == base.split.days_per_year, name
         assert cfg.split.days_per_month == base.split.days_per_month, name
+
+
+# ── T-169：事件表涵蓋範圍的防護 ────────────────────────────────────────────
+
+
+def test_attach_adjustment_rejects_partial_event_coverage() -> None:
+    """事件表只涵蓋價格區間的一部分 → raise。
+
+    **空表不是唯一的失效模式。** 長歷史載到 2015-06 之後，`corporate_events`
+    仍只有 2019 起：2015-06~2018-12 的 886 個交易日對應 **0 筆事件**
+    （台股一年約 1,400~1,600 筆）。舊的空表檢查完全攔不住，於是那幾年的標籤
+    會靜默退回價格報酬，而其餘年份是總報酬——同一份訓練資料裡兩種定義。
+    """
+    from twquant.ml.dataset import attach_adjustment
+
+    days = _weekdays(dt.date(2024, 1, 1), 200)
+    px = pl.DataFrame([{"date": d, "stock_id": "2330", "open": 100.0} for d in days])
+    late = pl.DataFrame(
+        [{"date": days[150], "stock_id": "2330", "adj_factor": 0.95}],
+        schema={"date": pl.Date, "stock_id": pl.String, "adj_factor": pl.Float64},
+    )
+    with pytest.raises(ValueError, match="沒有任何事件可還原"):
+        attach_adjustment(px, late)
+
+    # 開頭只空幾週是正常的（台股除權息集中在 6~8 月），不得誤擋
+    early = pl.DataFrame(
+        [{"date": days[10], "stock_id": "2330", "adj_factor": 0.95}],
+        schema={"date": pl.Date, "stock_id": pl.String, "adj_factor": pl.Float64},
+    )
+    out = attach_adjustment(px, early)
+    assert out.height == px.height
+    assert out.filter(pl.col("date") < days[10])["adj"].to_list() == [1.0] * 10
