@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- 2026-09-06 T-219：新增 `insights-run`（組包→分析→原子落地，每檔候選獨立、相同輸入冪等、推薦快照不被改寫）。實跑真實 PG 抓到並修掉三個缺陷：PG 的 timestamptz 是 UTC 偏移導致全部驗證失敗、`ml_scores` 取最新一列會拿到別的模型半年前的分數、產業證據把未計算的族群報酬填 0 變成「報酬 0.00%」的假話。完整 gate 843 passed。
+
 - 2026-09-06 T-218：新增候選證據分析 task。指令在凍結的 system prompt、證據在 user turn 並明標為資料；離線／超預算／拒答／連續失敗／引用越界五種情況都回傳具名缺席原因而不拋例外。拒答不重試。`insight_run_id` 以 (run, stock, bundle_hash, prompt 版本, model) 內容定址。**未做 Message Batches**：批次需要不同的 backend 形狀且離線測試無法驗證，成本因此約 62 TWD／晚而非 31，仍遠低於預算。完整 gate 836 passed。
 
 - 2026-09-06 T-217：新增證據包建構（純函數，資料由呼叫端傳入）。五區段的支持／反對方向一律由規則計算，LLM 不改方向；截點後的列排除並留 gap，缺席成為 gap 證據而非空白；估計可得時間一律降為中性（D-081f）；消息區段因 repo 無來源恆為 gap。證據合約新增 neutral 方向與 availability 欄位。完整 gate 826 passed。

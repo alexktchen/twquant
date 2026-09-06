@@ -122,10 +122,13 @@ def _ml_section(
             "ml_score"
         ]
     available, captured = _timestamps(row, as_of)
-    title = (
-        f"模型 {row.get('model_id')} 於 {row.get('date')} 的分數 {float(row['score']):.5f}"
-        f"（宇宙分位 {float(row.get('rank_pct', 0.0)):.4f}）"
+    rank_pct = row.get("rank_pct")
+    position = (
+        f"宇宙分位 {float(rank_pct):.4f}"
+        if rank_pct is not None
+        else f"名次 {row.get('rank')} / {row.get('candidates_total')}"
     )
+    title = f"模型 {row.get('model_id')} 於 {row.get('date')} 的分數 {float(row['score']):.5f}（{position}）"
     return [
         _item(
             "ml_score",
@@ -186,9 +189,17 @@ def _fundamentals_section(
         out.append(
             _item(
                 "fundamentals_valuation",
-                title=(
-                    f"PER {valuation.get('per')}、PBR {valuation.get('pbr')}、"
-                    f"殖利率 {float(valuation.get('dividend_yield') or 0.0) * 100:.2f}%"
+                # 缺的欄位就不提；把來源的 0 當成「本益比 0 倍」寫進證據會誤導模型。
+                title="、".join(
+                    part
+                    for part in (
+                        f"PER {valuation['per']}" if valuation.get("per") is not None else "",
+                        f"PBR {valuation['pbr']}" if valuation.get("pbr") is not None else "",
+                        f"殖利率 {float(valuation['dividend_yield']) * 100:.2f}%"
+                        if valuation.get("dividend_yield") is not None
+                        else "",
+                    )
+                    if part
                 ),
                 table="stock_valuation",
                 stock_id=stock_id,
@@ -268,9 +279,12 @@ def _industry_section(
             "industry"
         ]
     net = float(row.get("net_yi") or 0.0)
+    # 沒算族群報酬就不要提它。填 0 會讓「報酬 0.00%」變成一句寫進證據的假話。
+    ret = row.get("ret_pct")
+    ret_part = f"、報酬 {float(ret):.2f}%" if ret is not None else ""
     title = (
-        f"產業「{row.get('industry')}」近 {row.get('window')} 交易日法人淨流入 {net:.2f} 億、"
-        f"報酬 {float(row.get('ret_pct') or 0.0):.2f}%（涵蓋 {row.get('n')} 檔；當前分類，非歷史 PIT 分類）"
+        f"產業「{row.get('industry')}」近 {row.get('window')} 交易日法人淨流入 {net:.2f} 億{ret_part}"
+        f"（涵蓋 {row.get('n')} 檔；當前分類，非歷史 PIT 分類）"
     )
     return [
         _item(

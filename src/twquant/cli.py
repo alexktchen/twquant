@@ -2018,6 +2018,68 @@ def recommendations_import(
     typer.secho(f"[OK] {action}：{result.path}", fg=typer.colors.GREEN)
 
 
+@app.command(name="insights-run")
+def insights_run(
+    run: str = typer.Option(..., help="推薦快照 run_id（先跑 ml export-recommendations）"),
+    top: int = typer.Option(30, help="分析前 N 檔候選（D-081b 事前登記 N=30）"),
+    out: str = typer.Option("", help="資料根目錄；空＝configs/system.yaml data_dir"),
+    window: int = typer.Option(20, help="產業資金流的回看交易日數"),
+) -> None:
+    """對推薦快照的前 N 檔候選組證據包並產生洞悉分析（SPEC-014 §6、PLAN §3.3）。
+
+    每檔獨立：任一檔失敗只記錄，其餘照常完成。LLM 離線或超預算時仍會保存證據包
+    並寫明缺席原因——洞悉是增強不是依賴。相同輸入重跑為冪等，不會產生重複版本。
+    """
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.insight.client import InsightClient
+    from twquant.insight.config import load_llm_config
+    from twquant.reporting.insight_run import run_insights
+    from twquant.reporting.insight_sources import (
+        fetch_industry_of,
+        fetch_industry_rows,
+        fetch_sections,
+    )
+    from twquant.reporting.recommendation_snapshot import select_snapshots
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    catalog = select_snapshots(data_dir, run_id=run)
+    if not catalog.runs:
+        raise typer.BadParameter(f"找不到推薦快照 run_id={run}")
+    as_of = catalog.runs[0].as_of
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        industries = fetch_industry_rows(conn, scfg.pg_schema, as_of, window)
+
+        def sections(stock_id: str) -> dict[str, object]:
+            industry = fetch_industry_of(conn, scfg.pg_schema, stock_id)
+            return fetch_sections(
+                conn, scfg.pg_schema, stock_id, as_of, industries.get(industry or "")
+            )
+
+        client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)
+        summary = run_insights(
+            data_dir,
+            recommendation_run_id=run,
+            top_n=top,
+            client=client,
+            now=now_tw(),
+            fetch_sections=sections,
+        )
+    finally:
+        conn.close()
+
+    typer.secho(
+        f"[OK] {run}：{summary.requested} 檔候選 → 分析 {summary.analysed}、"
+        f"缺席 {summary.absent}、新存 {summary.saved}、沿用 {summary.reused}",
+        fg=typer.colors.GREEN,
+    )
+    for failure in summary.failures:
+        typer.secho(f"  [!] {failure['stock_id']}：{failure['detail']}", fg=typer.colors.YELLOW)
+
+
 @app.command(name="insights-import")
 def insights_import(
     source: str = typer.Argument(..., help="已存在的洞悉證據包 JSON（依 SPEC-014 §6 驗證）"),
