@@ -36,8 +36,10 @@
 
 **兩個必須修正的既有假設**
 
-1. SPEC-008 §3 的範例用 `output_format=Proposal`——依 claude-api skill 這是**已棄用**參數；實作時用 `client.messages.parse()`
-   ＋ pydantic，細節在實作當下讀 skill 的 `python/claude-api/tool-use.md`，不憑記憶。`Backend` 是可呼叫介面，只有 `_anthropic_backend` 要改。
+1. ~~SPEC-008 §3 的 `output_format=` 已棄用~~——**這條規劃時寫錯了**（2026-09-06 實作時查證更正）。
+   棄用的是 `messages.create()` 上的 `output_format`；SPEC-008 與既有 `_anthropic_backend` 用的是
+   `client.messages.parse(..., output_format=Model)`，正是目前建議寫法，**不需要改**。既有 backend 也早就用
+   `thinking={"type": "adaptive"}`，沒有送會 400 的 `budget_tokens`。
 2. `configs/llm.yaml` 與 MODEL-POLICY 的 OPUS 是 `claude-opus-4-8`；現行世代是 `claude-opus-5`（同價 $5／$25 per M，thinking 預設開）。
    換模型＝改 config ＋ 重跑 prompt 回歸（MODEL-POLICY §1），列入 §7 裁決。
 
@@ -112,7 +114,7 @@ L0 名單照常發布、候選維持 `pending`、證據包帶缺席原因。
 |---|---|
 | 模型 | 只從 `configs/llm.yaml` 取；建議新增 `candidate_analysis: opus` 且 OPUS 改 `claude-opus-5`（§7-a） |
 | 思考 | Opus 5 預設 adaptive；`output_config.effort: high`；**不**送 `budget_tokens`（現行模型會 400） |
-| 結構化輸出 | `client.messages.parse()` ＋ pydantic `CandidateAnalysis`；不用已棄用的 `output_format=` |
+| 結構化輸出 | `client.messages.parse(..., output_format=CandidateAnalysis)`（既有 backend 已是此寫法，不需改） |
 | 呼叫方式 | **Message Batches**：N 檔一批、以 `custom_id=insight_run_id` 對應（結果不保證順序）；成本減半、不佔即時額度 |
 | Prompt caching | system prompt 凍結並掛 `cache_control`；證據包在 user turn。`cache_read_input_tokens` 為 0 就是有東西在打破前綴 |
 | 拒答 | 檢查 `stop_reason == "refusal"`；記 `analysis_absent_reason = "refusal:<category>"`，不重試 |

@@ -203,9 +203,12 @@ T-120 寫的是「3,000 萬 TWD 在 2005 與 2026 是完全不同的門檻……
    除權息／股利／減資／分割（12,177 列，2019-01~2026-09）。PRD-002 §4.2 的「消息與事件」區段
    在有來源之前**只能誠實記為 gap**，不得由 LLM 以常識補寫。新聞接入是獨立研究線（PRD-002 §11），
    需自己的來源、PIT、成本與 fixture 規格，不在洞悉層的關鍵路徑上。
-2. **SPEC-008 §3 的 API 範例已過時**：`output_format=` 參數已棄用，且 `budget_tokens` 在現行模型
-   會回 400。實作時一律依 claude-api skill 現場確認，不憑記憶；只有 `_anthropic_backend` 需要改，
-   `Backend` 介面與其上所有測試不受影響。
+2. **更正（實作時查證）**：規劃階段我寫「SPEC-008 §3 的 `output_format=` 已棄用」是**錯的**。
+   棄用的是 `messages.create()` 上的 `output_format`；SPEC-008 用的是
+   `client.messages.parse(..., output_format=Model)`，那正是目前建議的結構化輸出寫法，
+   既有 `_anthropic_backend` 不需要為此改寫。SPEC-008 §3 唯一過時處是範例裡寫死的模型字串，
+   而模型本來就從 `configs/llm.yaml` 注入。`budget_tokens` 在現行模型會 400 這點成立，
+   但既有 backend 用的是 `thinking={"type": "adaptive"}`，本來就沒送 `budget_tokens`。
 
 **本輪明文不做**（各需獨立的事前登記）：L2 規則分類的最終 `bucket`、任何訓練或回訓、
 LLM 對策略／風控／下單的寫入路徑。
