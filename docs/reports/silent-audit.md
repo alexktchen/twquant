@@ -14,11 +14,11 @@
 - `src/twquant/config.py|strategy/config.py:190` — MlConfig.context_features 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
 - `src/twquant/config.py|strategy/config.py:194` — MlConfig.refit 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
 - `src/twquant/config.py|strategy/config.py:195` — MlConfig.trials_log 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
-- `src/twquant/config.py|strategy/config.py:24` — UniverseConfig.exclude_disposition 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
-- `src/twquant/config.py|strategy/config.py:25` — UniverseConfig.exclude_full_delivery 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
-- `src/twquant/config.py|strategy/config.py:26` — UniverseConfig.exclude_recent_ipo_days 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
+- `src/twquant/config.py|strategy/config.py:49` — UniverseConfig.exclude_disposition 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
+- `src/twquant/config.py|strategy/config.py:50` — UniverseConfig.exclude_full_delivery 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
+- `src/twquant/config.py|strategy/config.py:51` — UniverseConfig.exclude_recent_ipo_days 宣告了但全 repo 找不到讀取點——配置照樣驗證通過，使用者以為設定生效了
 
-## bare-except — 裸 except（吞例外）（9 處）
+## bare-except — 裸 except（吞例外）（10 處）
 
 - `src/twquant/cli.py:869` — except Exception 未 re-raise——例外被吞掉後呼叫端會拿到一個「成功但不完整」的結果
 - `src/twquant/cli.py:663` — except Exception 未 re-raise——例外被吞掉後呼叫端會拿到一個「成功但不完整」的結果
@@ -29,6 +29,7 @@
 - `src/twquant/monitoring/snapshot.py:188` — except Exception 未 re-raise——例外被吞掉後呼叫端會拿到一個「成功但不完整」的結果
 - `src/twquant/monitoring/snapshot.py:298` — except Exception 未 re-raise——例外被吞掉後呼叫端會拿到一個「成功但不完整」的結果
 - `src/twquant/pipeline.py:63` — except Exception 未 re-raise——例外被吞掉後呼叫端會拿到一個「成功但不完整」的結果
+- `scripts/report_bundle.py:298` — except Exception 未 re-raise——例外被吞掉後呼叫端會拿到一個「成功但不完整」的結果
 
 ## default-fill — 危險預設填補（24 處）
 
@@ -57,7 +58,7 @@
 - `src/twquant/portfolio/core.py:72` — 對真實世界量套用預設值：return sum(abs(target.get(k, 0.0) - current.get(k, 0.0)) for k in keys) / 2.0——缺資料被偽裝成一個具體數值，下游看不出差別
 - `src/twquant/portfolio/core.py:159` — 對真實世界量套用預設值：s: min(target.get(s, 0.0), current.get(s, 0.0))——缺資料被偽裝成一個具體數值，下游看不出差別
 
-## unguarded-shift — 未防護的列位移（19 處）
+## unguarded-shift — 未防護的列位移（20 處）
 
 - `src/twquant/backtest/engine.py:104` — _price_panel() 有 1 處列位移但無跨距防護——個股缺 N 個開市日時，「h 日報酬」實際橫跨數月而不帶任何標記
 - `src/twquant/data/clean.py:476` — inconsistent_events() 有 1 處列位移但無跨距防護——個股缺 N 個開市日時，「h 日報酬」實際橫跨數月而不帶任何標記
@@ -78,6 +79,7 @@
 - `src/twquant/factors/quality.py:86` — _quarterly() 有 3 處列位移但無跨距防護——個股缺 N 個開市日時，「h 日報酬」實際橫跨數月而不帶任何標記
 - `src/twquant/factors/volume.py:28` — vol_ratio_5d() 有 1 處列位移但無跨距防護——個股缺 N 個開市日時，「h 日報酬」實際橫跨數月而不帶任何標記
 - `src/twquant/monitoring/screener.py:36` — daily_metrics() 有 1 處列位移但無跨距防護——個股缺 N 個開市日時，「h 日報酬」實際橫跨數月而不帶任何標記
+- `src/twquant/strategy/overlays.py:101` — vol_target_scaling() 有 1 處列位移但無跨距防護——個股缺 N 個開市日時，「h 日報酬」實際橫跨數月而不帶任何標記
 
 ## raw-division — 裸除法（4 處）
 

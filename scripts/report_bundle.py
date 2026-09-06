@@ -203,6 +203,23 @@ def _unfilled(b: dict) -> dict[str, int]:
     return out
 
 
+def _downsample(b: dict, every: int = 5) -> list[list[object]]:
+    """權益曲線降採樣供繪圖：每 N 個交易日取一點，末點必留。
+
+    886 個交易日 × 70 個策略全存會讓 JSON 膨脹到難以處理，而圖上肉眼分辨不出
+    5 日以內的差異。末點必留是因為它決定終值，不能被降採樣抹掉。
+    """
+    eq = b.get("equity") or []
+    if not eq:
+        return []
+    base = float(eq[0][1]) or 1.0
+    pts = [[str(r[0]), round(float(r[1]) / base, 5)] for i, r in enumerate(eq) if i % every == 0]
+    last = [str(eq[-1][0]), round(float(eq[-1][1]) / base, 5)]
+    if not pts or pts[-1][0] != last[0]:
+        pts.append(last)
+    return pts
+
+
 def _curve(b: dict) -> dict[dt.date, float]:
     return {dt.date.fromisoformat(str(r[0])): float(r[1]) for r in b["equity"]}
 
@@ -282,6 +299,10 @@ def _benchmarks(dates: list[dt.date]) -> list[dict]:
             st = bench_stats(
                 fn(), dates, key=key, label=label, role=role, total_return=tr, event_dates=e
             )
+            from twquant.reporting.benchmarks import align_to
+
+            values = align_to(fn(), dates, name=label, event_dates=e)
+            values0 = values[0] or 1.0
             out.append(
                 {
                     "key": key,
@@ -292,6 +313,12 @@ def _benchmarks(dates: list[dt.date]) -> list[dict]:
                     "mdd": st.metrics.mdd,
                     "sharpe": st.metrics.sharpe,
                     "annual": {str(k): v for k, v in sorted(st.annual.items())},
+                    "curve": [
+                        [str(dd), round(vv / values0, 5)]
+                        for i, (dd, vv) in enumerate(zip(dates, values, strict=True))
+                        if i % 5 == 0
+                    ]
+                    + [[str(dates[-1]), round(values[-1] / values0, 5)]],
                     "n_days": st.n_days,
                 }
             )
@@ -352,6 +379,7 @@ def main() -> None:
                     "n_trades": len(b["ledger"]),
                     "exposure": _exposure(b),
                     "invested": _invested_stats(b),
+                    "curve": _downsample(b),
                     "yearly": _yearly(b),
                     "holdings": _holdings(b),
                     "unfilled": _unfilled(b),
