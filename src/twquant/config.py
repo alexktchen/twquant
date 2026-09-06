@@ -65,6 +65,10 @@ class CloudConfig(BaseConfig):
     pattern_tables: tuple[str, ...] = ("prices_daily", "broker_trades")
     # 滾動窗口（交易日數）；未列出的表全史保留（小表）。硬下限＝因子最大回看（有測試把關）
     windows: dict[str, int] = {}
+    # 雲端不算的因子：需要的歷史超過該表的滾動窗（含 expanding 統計）。列在這裡＝明確承認
+    # 「本機研究用、雲端沒有」，而非讓雲端在殘缺窗口上算出看似正常的數字。test_cloud 把關：
+    # 每個被排除的因子都必須真的超窗，清單不能拿來藏錯。
+    exclude_factors: tuple[str, ...] = ()
 
 
 class ServingConfig(BaseConfig):
@@ -123,6 +127,15 @@ class MlLabelConfig(BaseConfig):
     adv_window_sessions: int = Field(default=20, ge=1)
     position_notional_twd: float = Field(default=500_000.0, gt=0.0)
     downside_penalty: float = Field(default=0.25, ge=0.0)
+    # T-098／D-054：標籤是否含股利（總報酬）。**None ＝ 未表態，`ml train` 拒絕執行**
+    # ——未還原時 6~8 月的 h=20 標籤有 38.2% 樣本換分位、原「最差一成」17.9% 是除息
+    # 假象；若給預設值，忘了寫的配置會靜默沿用被污染的標籤（黃金規則 5）。
+    total_return: bool | None = None
+    # T-144／T-139：標籤的出場列與當前列的**開市日跨距**上限；超過即設 null。
+    # `shift` 是列位移，某檔中間缺 N 個開市日時「h 日報酬」實際橫跨數月而不帶標記
+    # ——它只是一個看起來很大的數字，會被模型當成真實極端報酬學進去。
+    # None ＝不啟用（既有配置逐位元不變）；啟用與否由配置顯式決定。
+    max_span_sessions: int | None = Field(default=None, ge=1)
 
 
 class MlSplitConfig(BaseConfig):
@@ -180,6 +193,18 @@ class MlConfig(BaseConfig):
     lgbm: MlLgbmConfig = MlLgbmConfig()
     refit: MlRefitConfig = MlRefitConfig()
     trials_log: str = "research_log"
+
+    @model_validator(mode="after")
+    def _max_span_covers_horizon(self) -> MlConfig:
+        # 在載入時擋，而不是等訓練跑完才發現標籤全空：出場列至少在 h+1 個開市日之後，
+        # 設得更小不是「防護嚴一點」，是把標籤整個關掉。
+        span = self.label.max_span_sessions
+        if span is not None and span < self.horizon_days + 1:
+            raise ValueError(
+                f"label.max_span_sessions（{span}）須 ≥ horizon_days+1"
+                f"（{self.horizon_days + 1}），否則所有標籤都會變 null"
+            )
+        return self
 
     @model_validator(mode="after")
     def _embargo_covers_horizon(self) -> MlConfig:

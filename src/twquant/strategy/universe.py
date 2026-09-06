@@ -4,20 +4,21 @@
 （避免處置股污染橫斷面標準化）。
 
 第一版可實作：20 日成交金額中位數（ADV，中位數抗漲停無量）、最低價、四碼普通股
-（排除權證/ETF）。**待接資料**：處置/全額交割（disposition_stocks）、上市日
-（stock_meta.list_date）、市場別（stock_meta.market）——相關旗標暫為 no-op 並在
-STRATEGY/TASKS 標註，接上後於此啟用。
+（排除權證/ETF）。**市場別（stock_meta.market）已於 T-143 接上**（`_market_gate`）。
+**仍待接資料**：處置/全額交割（disposition_stocks）、上市日（stock_meta.list_date）
+——相關旗標暫為 no-op 並在 STRATEGY/TASKS 標註，接上後於此啟用。
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import TYPE_CHECKING
 
 import polars as pl
 
-if TYPE_CHECKING:
-    import datetime as dt
+from twquant.errors import DataError
 
+if TYPE_CHECKING:
     from twquant.data.warehouse import PitView
     from twquant.strategy.config import UniverseConfig
 
@@ -68,4 +69,189 @@ def universe_ids(view: PitView, signal_date: dt.date, cfg: UniverseConfig) -> li
         at = at.filter(pl.col("_adv") >= cfg.min_adv_twd)
     if cfg.min_price is not None:
         at = at.filter(pl.col("close") >= cfg.min_price)
-    return sorted(at.select("stock_id").collect()["stock_id"].to_list())
+    ids = sorted(at.select("stock_id").collect()["stock_id"].to_list())
+    if cfg.markets:
+        ids = _market_gate(view, ids, cfg.markets)
+    if cfg.mktcap_rank_max is not None or cfg.mktcap_rank_min is not None:
+        ids = _mktcap_gate(
+            view,
+            signal_date,
+            ids,
+            rank_max=cfg.mktcap_rank_max,
+            rank_min=cfg.mktcap_rank_min,
+        )
+    if (
+        cfg.min_revenue_yoy is not None
+        or cfg.max_revenue_yoy is not None
+        or cfg.min_revenue_streak is not None
+    ):
+        ids = _revenue_gate(
+            view,
+            ids,
+            min_yoy=cfg.min_revenue_yoy,
+            max_yoy=cfg.max_revenue_yoy,
+            min_streak=cfg.min_revenue_streak,
+        )
+    if cfg.min_roe is not None:
+        ids = _quality_gate(view, signal_date, ids, cfg.min_roe)
+    return ids
+
+
+def _revenue_gate(
+    view: PitView,
+    ids: list[str],
+    *,
+    min_yoy: float | None,
+    max_yoy: float | None,
+    min_streak: int | None,
+) -> list[str]:
+    """T-122：依月營收年增與連續正成長月數過濾，**無營收資料者一律排除**。
+
+    PIT 由 `view.table` 負責（依 available_at 截斷），故這裡**不再**依 `date` 過濾——
+    月營收的 `date` 是所屬月月底，不是公布日，拿它當截點會放行尚未公告的月份。
+
+    「連續」以 **year_month 的跨距**驗證，不是「有幾筆是正的」：`drop_nulls` 之後
+    缺月的兩筆會變成相鄰，只數筆數會把 10 月與 12 月誤判為連續兩個月。
+    """
+    rev = (
+        view.table("monthly_revenue")
+        .select("stock_id", "year_month", "yoy")
+        .drop_nulls("yoy")
+        # year_month 為 "YYYY-MM"，字典序即時序
+        .sort(["stock_id", "year_month"])
+        .collect()
+    )
+    if rev.is_empty():
+        return []
+    # 由新到舊的序號：1 = 最新已公布月
+    rev = rev.with_columns(
+        _from_end=pl.len().over("stock_id") - pl.int_range(pl.len()).over("stock_id")
+    )
+
+    keep: set[str] | None = None
+    if min_yoy is not None or max_yoy is not None:
+        latest = rev.filter(pl.col("_from_end") == 1)
+        if min_yoy is not None:
+            latest = latest.filter(pl.col("yoy") >= min_yoy)
+        if max_yoy is not None:
+            latest = latest.filter(pl.col("yoy") <= max_yoy)
+        keep = set(latest["stock_id"].to_list())
+
+    if min_streak is not None:
+        # 月份序數：year × 12 + month，用來驗證跨距而非筆數
+        mo = pl.col("year_month").str.slice(0, 4).cast(pl.Int32) * 12 + pl.col(
+            "year_month"
+        ).str.slice(5, 2).cast(pl.Int32)
+        win = rev.filter(pl.col("_from_end") <= min_streak).with_columns(_mo=mo)
+        agg = win.group_by("stock_id").agg(
+            _n=pl.len(),
+            _all_pos=(pl.col("yoy") > 0).all(),
+            _span=pl.col("_mo").max() - pl.col("_mo").min(),
+        )
+        ok = agg.filter(
+            (pl.col("_n") == min_streak)  # 歷史不足即不通過（不得用較短的鏈充數）
+            & pl.col("_all_pos")
+            & (pl.col("_span") == min_streak - 1)  # 月份必須真的連續
+        )
+        streak_ids = set(ok["stock_id"].to_list())
+        keep = streak_ids if keep is None else (keep & streak_ids)
+
+    assert keep is not None  # 呼叫端已確認至少一個門檻有值
+    return [s for s in ids if s in keep]
+
+
+def _market_gate(view: PitView, ids: list[str], markets: list[str]) -> list[str]:
+    """T-143：依 `stock_meta.market` 過濾，**市場別為 null 一律排除**。
+
+    先前這個旗標是 no-op（本檔開頭的註解明載「暫為 no-op」），於是擋住興櫃的其實只是
+    「`prices_daily` 剛好沒有它們」——一個靠巧合成立的防線。D-065 發現 T-137 差一點
+    就把 387 檔興櫃、316,389 列補進價格表，那會讓它們無聲地進入策略宇宙。
+
+    **為什麼 null 排除不會造成存活者偏誤**（量出來的，不是假設，見 D-069）：補完 meta 後，
+    回測窗 2022-07-01 ~ 2026-02-28 內無市場別者 **0 檔**（原本 1 檔＝3718 中光電投控，
+    已由 `ingest-meta` 補進 TPEX）。殘餘 7 檔（0054／4947／8287／1333／3562／8913／3452）
+    末筆行情皆 ≤ 2022-05-26，全在窗外；它們在 FinMind 只出現於不含市場別欄位的下市端點，
+    故**不偽造**（T-111 同一規則）。
+
+    這個前提是**當時**的事實而非永久保證：窗口一旦前移到 2022-07 之前，那 7 檔就會落進窗內
+    而被靜默排除。故 `scripts/audit_data.py` 的檢查 #9 帶 `--since` 時報 critical——
+    已雙向驗證（`--since 2022-07-01` 無發現、`--since 2020-01-01` 報出全部 7 檔）。
+
+    缺 `stock_meta` 表時 raise 而非放行：靜默放行會讓濾網在缺表時「成功地什麼都沒過濾」，
+    正是黃金規則 5 要防的失敗模式。
+    """
+    try:
+        meta = view.table("stock_meta").select("stock_id", "market").collect()
+    except DataError as exc:
+        raise DataError(
+            "stock_meta",
+            None,
+            f"markets={markets} 要求依市場別過濾，但讀不到 stock_meta：{exc}。"
+            "不得靜默放行——那會讓濾網在缺表時什麼都不過濾。",
+        ) from exc
+    keep = set(
+        meta.filter(pl.col("market").is_not_null() & pl.col("market").is_in(markets))[
+            "stock_id"
+        ].to_list()
+    )
+    return [s for s in ids if s in keep]
+
+
+def _mktcap_gate(
+    view: PitView,
+    signal_date: dt.date,
+    ids: list[str],
+    *,
+    rank_max: int | None,
+    rank_min: int | None,
+) -> list[str]:
+    """T-121：依 PIT 市值排名過濾（排名 1 = 最大），**市值為 null 一律排除**。
+
+    排名的母體是「當日有市值的四碼普通股全體」，而**不是** ids（流動性濾網之後的殘存集合）。
+    這是刻意的：「市值前 100 大」是市場事實，若母體隨 min_adv_twd 變動，T-120 的
+    絕對門檻漂移問題就會經由排名滲進來，長歷史上「前 100 大」會年年代表不同的東西。
+
+    為什麼 null 要排除：「不知道它多大」不等於「它符合規模條件」。把缺值當成通過，
+    等於讓沒有財報的新股整批繞過濾網（黃金規則 5 的精神，與 D-059 的 min_roe 同一規則）。
+
+    走與因子同一條 compute（因而同一條 PitView），故 PIT 語意一致、不另開讀取路徑。
+    """
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發因子註冊
+    from twquant.factors.compute import compute
+
+    # log 是單調遞增，故以 ln(市值) 排序等同以市值排序；不需還原成線性值。
+    mc = compute(["fundamental.log_market_cap"], view, dates=[signal_date])
+    ranked = (
+        mc.filter(pl.col("value").is_not_null())
+        .filter(pl.col("stock_id").str.contains(_COMMON_STOCK))
+        # 次序鍵 stock_id：市值同值時決定性排名（避免跨程序順序影響宇宙）
+        .sort(["value", "stock_id"], descending=[True, False])
+        .with_row_index("_rank", offset=1)
+    )
+    if rank_max is not None:
+        ranked = ranked.filter(pl.col("_rank") <= rank_max)
+    if rank_min is not None:
+        ranked = ranked.filter(pl.col("_rank") >= rank_min)
+    keep = set(ranked["stock_id"].to_list())
+    return [s for s in ids if s in keep]
+
+
+def _quality_gate(view: PitView, signal_date: dt.date, ids: list[str], min_roe: float) -> list[str]:
+    """D-059／T-119：TTM ROE 低於門檻者移出宇宙，**null 一律排除**。
+
+    走與因子同一條 `compute`（因而同一條 PitView），故 PIT 語意一致、不另開讀取路徑。
+    濾網必須在因子的橫斷面標準化**之前**作用——否則被剔除的股票仍會影響 z 分數。
+
+    為什麼 null 要排除：「不知道它是不是品質股」不等於「它是品質股」。把缺值當成通過，
+    等於讓沒有財報的新股與非標準公司整批繞過濾網，是靜默放行（黃金規則 5 的精神）。
+    """
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發因子註冊
+    from twquant.factors.compute import compute
+
+    roe = compute(["fundamental.roe"], view, dates=[signal_date])
+    keep = set(
+        roe.filter(pl.col("value").is_not_null() & (pl.col("value") >= min_roe))[
+            "stock_id"
+        ].to_list()
+    )
+    return [s for s in ids if s in keep]

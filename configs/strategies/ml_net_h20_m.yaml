@@ -1,0 +1,36 @@
+# D-052(乙)／T-110：與 ml_net_h20.yaml **逐字相同，只改 rebalance.schedule 為 monthly**。
+#
+# 為什麼是這一格：D-052 的診斷指出瓶頸是「毛利 ≈ 來回成本」，而兩個修法單獨都已失敗——
+#   目標函數（ml_net_h20 週頻）：top-20 超額 +0.55%／10 日（rank 模型的 7 倍），但周轉 2,768% → 1× Sharpe 0.13
+#   降周轉（D-046 rank 月頻）：周轉 879%，但毛利仍是 rank 標籤的 +0.08%／10 日 → 1× Sharpe 0.39
+# 組合從未測過：+0.55%／10 日的毛利配上月頻的 5.7pp／年成本（取代週頻的 21pp／年），
+# 是唯一「量到的毛利 > 量到的成本」的格子。
+#
+# 不需重訓：沿用已凍結的 lgbm_net_h20_20260225_9a575e97。
+# trial_scope 用新的 bt:ml_net_h20_turnover，不佔 ml_rank 家族額度。
+name: ml_net_h20_m
+description: D-052(乙) 第三代降周轉候選：成本感知 H20 標籤 × 月頻（未經部署裁決，勿用於實盤）
+trial_scope: ml_net_h20_turnover
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000
+  min_price: 10.0
+
+signals:
+  - factor: ml.lgbm_net_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_net_h20_20260225_9a575e97
+
+combine: zscore_weighted
+selection:
+  method: top_n
+  top_n: 20
+weighting: equal
+rebalance:
+  schedule: monthly # ← 與 ml_net_h20.yaml 的唯一差異
+  day: MON
+  execution: next_open
+overlays: []
+max_weight_per_stock: 0.05

@@ -1,0 +1,32 @@
+# T-076／SPEC-012：ml_rank 加 buy/hold banding。與 ml_rank.yaml 的唯一差異是
+# selection——模型、宇宙、成本、排程、權重全部不變，故淨值差異可完全歸因於
+# 遲滯選股本身。兩個門檻是事前登記的純量（D-041），取自 Novy-Marx & Velikov
+# (FAJ 2019) 的 top-decile 進、top-30% 出；**不得掃描**，改動須另行登記 trial。
+name: ml_rank_band
+description: 純 ML 排序 + buy/hold banding（T-076 降周轉候選；未經部署裁決，勿用於實盤）
+trial_scope: ml_rank_h10_band
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000
+  min_price: 10.0
+
+signals:
+  - factor: ml.lgbm_rank_10d
+    weight: 1.0
+    params:
+      model_id: lgbm_h10_20260225_2f5a21a9 # 與 ml_rank.yaml 同一凍結 artifact
+
+combine: zscore_weighted
+selection:
+  method: banded_top_n
+  top_n: 20
+  entry_rank_pct: 0.90 # 進場：當日橫斷面前 10%
+  exit_rank_pct: 0.70 # 出場：已持有者跌出前 30% 才賣
+weighting: equal
+rebalance:
+  schedule: weekly
+  day: MON
+  execution: next_open
+overlays: []
+max_weight_per_stock: 0.05

@@ -51,7 +51,7 @@ class Unfilled:
     stock_id: str
     side: str
     shares: int
-    reason: str  # limit_up | limit_down | participation | cash
+    reason: str  # limit_up | limit_down | participation | cash | lot（不足一張，T-135）
 
 
 @dataclass
@@ -162,6 +162,12 @@ def _execute(
         w = targets.get(sid, 0.0)
         o = float(row["open"])
         desired = int((w * pv) // (o * _LOT)) * _LOT if (w > 0 and o > 0) else 0
+        if w > 0 and o > 0 and desired == 0:
+            # T-135：目標金額不足一張 → 整張捨去歸零。先前**靜默**——不記未成交、不報錯，
+            # 結果是「40 檔等權、10M 資金」實測曝險只有 61%，且檔數越多越嚴重，把跨檔數的
+            # 比較整個混淆掉（黃金規則 5）。記成 unfilled 讓它在 CLI 的「未成交」與結果包裡現形；
+            # 成交行為本身不變，只是不再靜默。
+            _unfill(state, sid, "buy", int(w * pv / o), day, "lot")
         if desired != cur:
             deltas[sid] = desired - cur
 
@@ -335,7 +341,8 @@ def run_backtest(
         )
 
         if day in sig_dates:
-            tdf = build_targets(strategy_cfg, warehouse, day)
+            # SPEC-012：banding 需要「昨天在不在裡面」；狀態留在引擎，build_targets 保持純函數
+            tdf = build_targets(strategy_cfg, warehouse, day, held=frozenset(state.holdings))
             pending = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
 
     equity_series = [e.equity for e in equity_curve]

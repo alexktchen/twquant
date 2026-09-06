@@ -129,6 +129,69 @@ MIRROR_SPECS: tuple[TableSpec, ...] = (
         pk=("stock_id", "date", "level"),
     ),
     TableSpec(
+        # T-010／D-044：FinMind 評價資料。dividend_yield 存小數（黃金規則 3）；
+        # PER 可為負（虧損公司），故不加非負約束。
+        "stock_valuation",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("per", "double precision"),
+            ("pbr", "double precision"),
+            ("dividend_yield", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("date", "stock_id"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
+        # T-097：財報三表長表（FinMind 免費層）。PK 含 statement——損益表與資產負債表
+        # 有同名科目 EquityAttributableToOwnersOfParent（淨利 vs 權益）。
+        "financial_statements",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("statement", "text"),
+            ("type", "text"),
+            ("value", "double precision"),
+            ("available_at", "timestamptz"),
+            ("available_at_estimated", "boolean"),
+        ),
+        pk=("date", "stock_id", "statement", "type"),
+        indexes=(("date",), ("stock_id",)),
+    ),
+    TableSpec(
+        # T-082：先前遺漏於鏡射清單，導致 serving sync 不同步指數；而因子物化在 D-026
+        # 之後改讀 PG，故 price.rs_market_20d 只能在 PG 恰好有的 52 天算出來
+        # （Phase 1 模型中 split=0、gain=0.00%）。TPEx 僅提供收盤，OHL 可為 null。
+        "index_daily",
+        (
+            ("date", "date"),
+            ("index_id", "text"),
+            ("open", "double precision"),
+            ("high", "double precision"),
+            ("low", "double precision"),
+            ("close", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("date", "index_id"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
+        # T-098／D-054：除權息還原因子。因子與標籤讀它算總報酬；回測引擎**不**讀它
+        # （成交要用可成交的真實價格），改以現金入帳處理（T-113）。
+        "corporate_events",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("event_type", "text"),
+            ("adj_factor", "double precision"),
+            ("ref_price", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("date", "stock_id"),
+        indexes=(("stock_id",),),
+    ),
+    TableSpec(
         "stock_meta",
         (
             ("stock_id", "text"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from pathlib import Path
 from typing import Any
 
@@ -224,3 +225,52 @@ def test_ac8_h20_thin_factor_is_registered() -> None:
     assert fdef.category == "ml"
     assert fdef.direction == 1
     assert fdef.params["model_prefix"] == "lgbm_net_h20_"
+
+
+def test_ac3_invalid_entry_price_yields_null_and_does_not_poison_cross_section() -> None:
+    """AC-3：open(t+1) 無效（<=0）時該列 label=null，且不得汙染當日其他股票。
+
+    缺陷歷史：`_gross` 的除法原本沒有正值防護（成本路徑有），open=0 產生 inf，
+    再被 `mean().over("date")` 擴散到整個橫斷面，使該日所有股票的 label 變成 -inf。
+    """
+    good = [100.0, 100.0, 110.0, 121.0, 121.0, 121.0]
+    # "3303" 在 _DAYS[2]（即 _DAYS[1] 的 t+1）開盤為 0 —— 合法值（schema 允許 >= 0）
+    bad = [100.0, 100.0, 0.0, 121.0, 121.0, 121.0]
+    rows: list[tuple[dt.date, str, float, float]] = []
+    for sid, opens in {"1101": good, "2202": good, "3303": bad}.items():
+        rows.extend((_DAYS[i], sid, price, 1_000_000.0) for i, price in enumerate(opens))
+
+    out = cost_adjusted_return_labels(
+        _prices(rows),
+        horizon=1,
+        adv_window_sessions=2,
+        position_notional_twd=1_100.0,
+        downside_penalty=0.25,
+        cost_cfg=_simple_cost(),
+    )
+    day = out.filter(pl.col("date") == _DAYS[1])
+    got = {r["stock_id"]: r["label"] for r in day.to_dicts()}
+
+    # 壞列本身為 null，列仍保留（不填 0、不 drop）
+    assert day.height == 3
+    assert got["3303"] is None
+
+    # 同日其他股票必須是有限值，且不受壞列影響
+    for sid in ("1101", "2202"):
+        assert got[sid] is not None, f"{sid} 被壞列汙染成 null"
+        assert math.isfinite(got[sid]), f"{sid} 被壞列汙染成 {got[sid]}"
+
+    # 兩檔走勢相同 -> 市場均值應只由有效宇宙（這兩檔）計算，故超額為 0，
+    # 標籤等於 -成本（再乘下檔加重）。若壞列進了均值，這個等式不成立。
+    entry, exit_ = 110.0, 121.0
+    shares = int(1_100.0 // entry)
+    cfg = _simple_cost()
+    buy = trade_cost(
+        side="buy", price=entry, shares=shares, participation=1_100.0 / 1_000_000.0, cfg=cfg
+    )
+    sell = trade_cost(
+        side="sell", price=exit_, shares=shares, participation=1_100.0 / 1_000_000.0, cfg=cfg
+    )
+    cost_rate = (buy.total + sell.total) / (entry * shares)
+    expected = -cost_rate * (1.0 + 0.25)
+    assert got["1101"] == pytest.approx(expected, rel=1e-12)

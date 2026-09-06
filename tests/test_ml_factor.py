@@ -164,6 +164,70 @@ def test_ac6_factor_can_pin_exact_model_id(tmp_path: Path) -> None:
     assert got == {"1101": pytest.approx(0.10), "2330": pytest.approx(0.50)}
 
 
+# ── T-090：分數 EMA 平滑（D-046 候選 3、4）───────────────────────────
+# 診斷（D-046）：前 20 名週留存僅 36%，離開者 39% 直接掉到 100 名外——周轉來自分數
+# 本身大幅重排；而 IC 隨 horizon 單調上升到 h=20，代表重排多為噪音。平滑是對症的工具。
+# EMA 是**列基**（每檔自己的歷史列），分數缺日不得補 0；只用 ≤ 訊號日的分數（PIT）。
+
+
+def _run_factor(
+    wh: Warehouse, as_of: dt.date, **params: object
+) -> dict[tuple[dt.date, str], float]:
+    fdef = get("ml.lgbm_rank_10d")
+    assert fdef.fn is not None
+    out = fdef.fn(wh.view(as_of), {**fdef.params, **params})
+    if isinstance(out, pl.LazyFrame):
+        out = out.collect()
+    return {(r["date"], r["stock_id"]): r["value"] for r in out.to_dicts()}
+
+
+def test_ac1_smooth_days_zero_is_bit_identical_to_default(tmp_path: Path) -> None:
+    """AC-1：smooth_days=0（預設）與未帶參數的輸出逐位元相同——既有回測不得被本任務改動。"""
+    wh = _lake(tmp_path, _full_scores())
+    fdef = get("ml.lgbm_rank_10d")
+    assert fdef.fn is not None
+    base = fdef.fn(wh.view(_DAYS[-1]), fdef.params)
+    zero = fdef.fn(wh.view(_DAYS[-1]), {**fdef.params, "smooth_days": 0})
+    if isinstance(base, pl.LazyFrame):
+        base = base.collect()
+    if isinstance(zero, pl.LazyFrame):
+        zero = zero.collect()
+    assert base.equals(zero)
+    assert fdef.params.get("smooth_days", 0) == 0, "預設必須是不平滑"
+
+
+def test_ac2_smoothed_factor_no_lookahead(tmp_path: Path) -> None:
+    """AC-2：平滑後仍過反前視——EMA 只能吃 ≤ 切點的分數。"""
+    wh = _lake(tmp_path, _full_scores())
+    assert_no_lookahead(
+        "ml.lgbm_rank_10d", wh, cut_dates=[_DAYS[2], _DAYS[4], _DAYS[-1]], params={"smooth_days": 3}
+    )
+
+
+def test_ac3_ema_matches_hand_computation(tmp_path: Path) -> None:
+    """AC-3：span=3 → α=0.5、adjust=False：e1=v1、e2=½v2+½e1、e3=½v3+½e2。"""
+    m = "lgbm_h10_20260531_aaaaaaaa"
+    d0, d1, d2 = _DAYS[:3]
+    wh = _lake(
+        tmp_path,
+        _scores([(d0, "1101", m, 0.2, 0.2), (d1, "1101", m, 0.8, 0.8), (d2, "1101", m, 0.5, 0.5)]),
+    )
+    got = _run_factor(wh, d2, smooth_days=3)
+    assert got[(d0, "1101")] == pytest.approx(0.2)
+    assert got[(d1, "1101")] == pytest.approx(0.5)  # ½·0.8 + ½·0.2
+    assert got[(d2, "1101")] == pytest.approx(0.5)  # ½·0.5 + ½·0.5
+
+
+def test_ac4_missing_day_is_not_filled_with_zero(tmp_path: Path) -> None:
+    """AC-4：分數缺日的股票不得產生虛假平滑值——EMA 走該檔自己的列，缺日既不補 0 也不輸出。"""
+    m = "lgbm_h10_20260531_aaaaaaaa"
+    d0, d1, d2 = _DAYS[:3]
+    wh = _lake(tmp_path, _scores([(d0, "2330", m, 0.4, 0.4), (d2, "2330", m, 0.8, 0.8)]))  # d1 缺
+    got = _run_factor(wh, d2, smooth_days=3)
+    assert (d1, "2330") not in got, "缺日不得憑空出現一列"
+    assert got[(d2, "2330")] == pytest.approx(0.6)  # ½·0.8 + ½·0.4；若補 0 會得 0.5
+
+
 # ── cross_rank_pct（ml score 寫 rank_pct 用）─────────────────────────
 
 

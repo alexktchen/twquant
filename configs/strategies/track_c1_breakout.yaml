@@ -1,0 +1,52 @@
+# C1「52 週高點突破」——文獻支撐最硬的飆股框架，零新程式碼。
+#
+# 與 A 軌（小型飆股）的三個關鍵差異：
+#
+# 1. **不排除市值前 100 大**。A 軌的 `mktcap_rank_min: 101` 讓它在 2022-07~2026-02
+#    這個由權值股帶動的窗口裡系統性地站在行情對面（實測 A 軌 +15.90% vs 0050 +40.08%）。
+#
+# 2. **完全沒有獲利門檻**。A 軌用 `fundamental.roe` 當 20% 權重，等於系統性排除
+#    「還沒賺錢的成長股」——而那正是飆股最常出現的地方。C 軌不用 roe、
+#    不用 earnings_yield、不用 gross_profitability。營收類因子可留（沒獲利也有營收），
+#    但本方案刻意連營收都不用，讓 C1 成為**純技術面**的乾淨基準。
+#
+# 3. **以 52 週高點接近度為主訊號**。George & Hwang (2004, JF)「The 52-Week High and
+#    Momentum Investing」的核心發現：**接近 52 週高點比過去報酬本身更能預測續漲**，
+#    且該效果無法被傳統動能解釋。這是飆股研究裡最硬的一篇。
+#
+# 其餘三個訊號的出處：
+#   price.mom_60d        Jegadeesh & Titman (1993, JF) 中期動能
+#   volume.turnover_z_20d Gervais, Kaniel & Mingelgrin (2001, JF)「The High-Volume
+#                         Return Premium」——異常放量預測正報酬
+#   price.rs_market_20d   相對大盤強弱（與 mom_60d 互補：一個看絕對、一個看相對）
+#
+# ADV 門檻 5000 萬（高於 A 軌的 3000 萬）：飆股的問題從來不是找不到，是買不進去。
+# 這個門檻是可交易性的下界，不得為了讓回測好看而放寬。
+#
+# 未經部署裁決，勿用於實盤。
+name: track_c1_breakout
+description: C1 純技術面飆股：52 週高點 × 中期動能 × 異常放量 × 相對強弱（不排大型股、無獲利門檻）
+trial_scope: breakout_technical
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 50_000_000
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 } # George–Hwang 2004：主訊號
+  - { factor: price.mom_60d, weight: 0.25 } # Jegadeesh–Titman 1993
+  - { factor: volume.turnover_z_20d, weight: 0.25 } # Gervais et al. 2001
+  - { factor: price.rs_market_20d, weight: 0.15 }
+# 四項不齊全即不入選：rank_avg 對「存在的列」求和，缺項者分數虛高（D-061／R12）
+require_all_factors: true
+
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

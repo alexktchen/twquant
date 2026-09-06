@@ -8,6 +8,7 @@ append-only 分片寫入（SPEC-001 §7），並行安全。
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from pathlib import Path
 
 import polars as pl
@@ -52,9 +53,14 @@ def record(
         "detail": detail[:300],
     }
     df = pl.DataFrame([row], schema=_SCHEMA)
+    # T-115：檔名原本只有時間戳，而 Windows 系統時鐘解析度約 1~16ms——實測連續兩次
+    # `now_tw()` 有 ~100% 機率完全相同，第二筆會直接覆蓋第一筆而**毫無訊號**
+    # （黃金規則 5）。加隨機尾碼讓檔名唯一；跨程序也適用（回補腳本會開子程序寫同一個
+    # 目錄）。時間戳留在前綴，檔名排序仍大致依時序。
     stamp = ts.strftime("%Y%m%dT%H%M%S%f")
-    final = d / f"part-{stamp}.parquet"
-    tmp = d / f"part-{stamp}.parquet.tmp"
+    name = f"part-{stamp}-{uuid.uuid4().hex[:8]}"
+    final = d / f"{name}.parquet"
+    tmp = d / f"{name}.parquet.tmp"
     df.write_parquet(tmp)
     tmp.replace(final)
 

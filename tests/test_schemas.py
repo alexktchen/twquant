@@ -69,9 +69,11 @@ def test_unknown_table_raises() -> None:
 
 
 def test_all_tables_registered_with_version() -> None:
-    # 17 張 clean 層表都要有 schema 與版本（含 index_daily、market_holidays、
-    # ml_scores——T-068/SPEC-010 §5 新增）
-    assert len(schemas.SCHEMAS) == 17
+    # 18 張 clean 層表都要有 schema 與版本（含 index_daily、market_holidays、
+    # ml_scores、stock_valuation——T-068/SPEC-010 §5、T-010/D-044 新增）
+    assert (
+        len(schemas.SCHEMAS) == 19
+    )  # +stock_valuation（T-010／D-044）+financial_statements（T-097）
     for name in schemas.SCHEMAS:
         assert schemas.schema_version(name) >= 1
 
@@ -90,3 +92,20 @@ def test_monthly_revenue_valid() -> None:
         }
     )
     assert schemas.validate("monthly_revenue", df).shape[0] == 1
+
+
+def test_t097_financial_statements_valid_long_format() -> None:
+    """T-097：財報三表長表 (date=季底, stock_id, statement, type, value, available_at, estimated)。"""
+    df = pl.DataFrame(
+        {
+            "date": [dt.date(2024, 3, 31), dt.date(2024, 3, 31)],
+            "stock_id": ["2330", "2330"],
+            "statement": ["income", "balance"],
+            "type": ["Revenue", "TotalAssets"],
+            "value": [592_644_201_000.0, 5_787_891_082_000.0],
+            "available_at": pl.Series([_AT, _AT], dtype=schemas.TW_DT),
+            "available_at_estimated": [True, True],
+        }
+    )
+    out = schemas.validate("financial_statements", df)
+    assert out.height == 2 and schemas.schema_version("financial_statements") >= 1

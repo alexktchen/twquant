@@ -12,10 +12,13 @@ index_trend_filter 需加權指數序列（尚未接），待補。完整三態 
 from __future__ import annotations
 
 import datetime as dt
+import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import polars as pl
+
+from twquant.errors import ConfigError, DataError
 
 if TYPE_CHECKING:
     from twquant.data.warehouse import PitView
@@ -88,4 +91,88 @@ def breadth_regime_filter(
         mult = 1.0
     else:
         mult = floor + (1.0 - floor) * (breadth - lower) / (upper - lower)
+    return _scale(weights, mult)
+
+
+_TRADING_DAYS_PER_YEAR = 252  # 年化基數；與 backtest/metrics.py 一致，非魔術數字
+
+
+@overlay("vol_target_scaling")
+def vol_target_scaling(
+    signal_date: dt.date, weights: pl.DataFrame, view: PitView, params: dict[str, object]
+) -> pl.DataFrame:
+    """Barroso & Santa-Clara (2015, JFE)「Momentum Has Its Moments」：以已實現波動率縮放曝險。
+
+    動能策略的病不是報酬不夠，是崩起來太深——實測本專案 A 軌 MDD −38.5%、ML −46.1%，
+    而 Daniel & Moskowitz (2016, JFE)「Momentum Crashes」指出動能在空頭＋高波動時崩得最慘。
+    原文的做法是用**近期已實現波動率**縮放部位，把組合的事後波動率壓到一個常數目標，
+    實證上大致讓 Sharpe 翻倍、極端左尾大幅收斂。
+
+    本版的實作與原文的三點差異，都是刻意的：
+
+    1. **不加槓桿**（倍數封頂 1.0）。原文允許 >1，但本專案的回測引擎沒有融資模型，
+       放大到 >1 會產生引擎無法成交的目標權重——那是一個靜默的錯數字。
+    2. **用等權組合報酬的波動率**，而非個股波動率的加權平均：後者忽略相關性，
+       在個股齊漲齊跌時會嚴重低估組合波動。
+    3. **歷史不足時 raise 而非放行**。靜默放行會讓 overlay 在資料不足時「成功地什麼都沒做」，
+       而那剛好發生在回測最前面那段——曝險最該被管的時候。
+
+    參數：`target_vol`（年化，預設 0.20）、`window`（估計窗，交易日，預設 60）、
+    `min_mult`（倍數下限，預設 0.2；避免極端行情下曝險歸零而完全踏空）。
+    """
+    target = _as_float(params.get("target_vol", 0.20), 0.20)
+    window = _as_int(params.get("window", 60), 60)
+    min_mult = _as_float(params.get("min_mult", 0.2), 0.2)
+    if target <= 0.0:
+        raise ConfigError(f"target_vol 須 > 0，得到 {target}")
+    if window < 2:
+        raise ConfigError(f"window 須 ≥ 2，得到 {window}")
+
+    held = weights["stock_id"].unique().to_list()
+    px = (
+        view.table("prices_daily")
+        .select("date", "stock_id", "close")
+        .filter(pl.col("stock_id").is_in(held))
+        .collect()
+        .sort(["stock_id", "date"])
+    )
+    if px.height == 0:
+        raise DataError(
+            "prices_daily",
+            signal_date,
+            f"{signal_date} 的持股 {held[:5]} 在 PIT 視圖中沒有任何行情，無法估波動率。",
+        )
+    # 等權組合的日報酬：先算個股報酬，再對同日取平均（自然涵蓋相關性）
+    rets = (
+        px.with_columns(
+            (pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0).alias("r")
+        )
+        .drop_nulls("r")
+        .group_by("date")
+        .agg(pl.col("r").mean().alias("r"))
+        .sort("date")
+        .tail(window)
+    )
+    if rets.height < window:
+        raise DataError(
+            "prices_daily",
+            signal_date,
+            f"估波動率需要 {window} 個交易日，只有 {rets.height} 個。"
+            "不得靜默回傳原權重——那會讓 overlay 在資料不足時「成功地什麼都沒做」，"
+            "而那剛好是回測最前段、曝險最該被管的時候。",
+        )
+    # polars 的 Series.std 型別是 float | timedelta（同一個方法也服務時間欄），
+    # 這裡的欄位是報酬率，故明確收斂到 float 而不是讓型別檢查器猜。
+    raw_sd = rets["r"].std(ddof=1)
+    sd = float(raw_sd) if isinstance(raw_sd, (int, float)) else None
+    if sd is None or sd <= 0.0:
+        raise DataError(
+            "prices_daily",
+            signal_date,
+            f"近 {window} 日組合報酬的標準差為 {raw_sd!r}——零波動代表價格未動或資料有誤，"
+            "此時縮放倍數無定義。",
+        )
+    realized = sd * math.sqrt(_TRADING_DAYS_PER_YEAR)
+    mult = min(1.0, target / realized)  # 封頂 1.0：不加槓桿
+    mult = max(min_mult, mult)
     return _scale(weights, mult)

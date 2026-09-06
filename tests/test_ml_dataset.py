@@ -14,12 +14,18 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from collections.abc import Sequence
 
 import polars as pl
 import pytest
 
-from twquant.ml.dataset import assemble, excess_rank_labels, forward_open_returns
+from twquant.ml.dataset import (
+    assemble,
+    assert_feature_coverage,
+    excess_rank_labels,
+    forward_open_returns,
+)
 
 _D = [dt.date(2026, 3, 2 + i) for i in range(6)]  # 連續 6 個曆日；純函數只依列序，不依交易日曆
 
@@ -179,3 +185,460 @@ def test_ac3_assemble_deterministic() -> None:
 def test_ac3_assemble_empty_features_raises() -> None:
     with pytest.raises(ValueError):
         assemble({}, excess_rank_labels(_fwd([(_D[0], "A", 0.01)])))
+
+
+# ── T-088 AC-3：訓練前的特徵覆蓋閘門 ─────────────────────────────────────────
+# Phase 1 的 25 個 pin 特徵裡有 2 個在 factor_values 從未有值（D-045）、1 個全 null（T-082），
+# 訓練照樣「成功」。訓練路徑須在 assemble 前 raise；生產 ml score 不掛此閘門（單日缺某因子屬正常）。
+
+
+def test_t088_ac3_empty_feature_raises_with_name() -> None:
+    d = dt.date(2026, 6, 1)
+    feats = {"price.mom_20d": _feat([(d, "1101", 0.1)]), "chip.short_margin_ratio": _feat([])}
+    with pytest.raises(ValueError, match=r"chip\.short_margin_ratio"):
+        assert_feature_coverage(feats)
+
+
+def test_t088_ac3_all_null_feature_raises() -> None:
+    d = dt.date(2026, 6, 1)
+    feats = {
+        "price.mom_20d": _feat([(d, "1101", 0.1)]),
+        "price.rs_market_20d": _feat([(d, "1101", None), (d, "2330", None)]),
+    }
+    with pytest.raises(ValueError, match=r"price\.rs_market_20d"):
+        assert_feature_coverage(feats)
+
+
+def test_t088_ac3_min_share_threshold_catches_near_empty_feature() -> None:
+    """覆蓋率低於門檻也要抓（Phase 1 的籌碼因子只有 14%）。門檻由呼叫端傳入，不寫死。"""
+    d = dt.date(2026, 6, 1)
+    sparse = _feat([(d, "1101", 0.2)] + [(d, f"{2000 + i}", None) for i in range(9)])
+    feats = {
+        "price.mom_20d": _feat([(d, f"{2000 + i}", 0.1) for i in range(10)]),
+        "chip.foreign_net_10d": sparse,
+    }
+    with pytest.raises(ValueError, match=r"chip\.foreign_net_10d"):
+        assert_feature_coverage(feats, min_non_null_share=0.5)
+    assert_feature_coverage(feats, min_non_null_share=0.05)  # 門檻放低即通過
+
+
+def test_t088_ac3_healthy_features_pass_and_report_shares() -> None:
+    d = dt.date(2026, 6, 1)
+    feats = {
+        "a": _feat([(d, "1101", 0.1), (d, "2330", None)]),
+        "b": _feat([(d, "1101", 0.3), (d, "2330", 0.4)]),
+    }
+    shares = assert_feature_coverage(feats)
+    assert shares == {"a": pytest.approx(0.5), "b": pytest.approx(1.0)}
+
+
+# ── T-098／D-054：股利還原後的總報酬標籤 ────────────────────────────────
+#
+# 實測（DECISIONS.md D-054）：未還原時 6–8 月有 38.2% 的樣本換分位、原「最差一成」
+# 有 17.9% 是除息假象。標籤是前瞻構造，不受 assert_no_lookahead 與還原價錨定規則
+# （D-055）約束，故可獨立於因子端先行。
+
+
+def _px_with_adj() -> pl.DataFrame:
+    """1101 在 D4 除息（價格 100 → 90，adj_factor 0.9）；1102 全程平盤無事件。
+
+    `adj` 是**固定過去錨**的累積還原因子：只含 ex_date <= 該列日期的事件，
+    故與 as_of 無關（這正是它能通過 bit-exact 比較的原因）。
+    """
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3, 4, 5, 8, 9, 10)]
+    rows = []
+    for i, d in enumerate(days):
+        ex_passed = i >= 3
+        rows.append(
+            {
+                "date": d,
+                "stock_id": "1101",
+                "open": 90.0 if ex_passed else 100.0,
+                "adj": 0.9 if ex_passed else 1.0,
+                "amount": 5.0e8,
+            }
+        )
+        rows.append({"date": d, "stock_id": "1102", "open": 100.0, "adj": 1.0, "amount": 5.0e8})
+    return pl.DataFrame(rows)
+
+
+def test_ac3_forward_open_returns_total_return_removes_ex_dividend_drop() -> None:
+    """除息造成的機械跌幅不是虧損。未還原時 1101 看起來 −10%，還原後應為 0%。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    px = _px_with_adj()
+    d0 = dt.date(2024, 7, 1)  # entry = open(D2)=100 / 100，exit = open(D4)=90 / 100
+    raw = forward_open_returns(px.drop("adj"), 2)
+    adj = forward_open_returns(px, 2, adjusted=True)
+
+    def at(f: pl.DataFrame, sid: str) -> float:
+        return float(f.filter((pl.col("date") == d0) & (pl.col("stock_id") == sid))["fwd_ret"][0])
+
+    assert at(raw, "1101") == pytest.approx(-0.1)
+    assert at(raw, "1102") == pytest.approx(0.0)
+    assert at(adj, "1101") == pytest.approx(0.0)
+    assert at(adj, "1102") == pytest.approx(0.0)
+
+
+def test_ac3_total_return_label_no_longer_ranks_ex_dividend_stock_last() -> None:
+    """這條是 D-054 的核心：未還原時除息股被標成當日最差，還原後與同儕並列。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    px = _px_with_adj()
+    d0 = dt.date(2024, 7, 1)
+    raw = excess_rank_labels(forward_open_returns(px.drop("adj"), 2))
+    adj = excess_rank_labels(forward_open_returns(px, 2, adjusted=True))
+
+    def lab(f: pl.DataFrame, sid: str) -> float:
+        return float(f.filter((pl.col("date") == d0) & (pl.col("stock_id") == sid))["label"][0])
+
+    assert lab(raw, "1101") < lab(raw, "1102")  # 除息股被判為輸家
+    assert lab(adj, "1101") == lab(adj, "1102")  # 還原後打平
+
+
+def test_ac3_adjusted_requires_adj_column() -> None:
+    """缺 adj 欄卻要求還原＝靜默回退成價格報酬，正是 D-054 要消滅的失效模式。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    with pytest.raises(ValueError, match="adj"):
+        forward_open_returns(_px_with_adj().drop("adj"), 2, adjusted=True)
+
+
+def test_ac3_adjusted_is_identity_when_no_events() -> None:
+    """adj 恆為 1（該股全期無除權息）時，還原版必須與原版 bit-identical。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    px = _px_with_adj().filter(pl.col("stock_id") == "1102")
+    assert forward_open_returns(px, 2, adjusted=True).equals(
+        forward_open_returns(px.drop("adj"), 2)
+    )
+
+
+def test_ac3_cost_model_uses_raw_price_not_adjusted() -> None:
+    """成本必須用**可成交的真實價格**算：滑價的半價差是價格相依的
+    （`costs.py:_half_spread_frac` = max(0.5×tick/price, 5bps)），股數也由真實價決定。
+
+    兩檔股票的**還原後**價格序列完全相同（皆 100），但真實價分別是 11 與 99。
+    毛報酬因此相同、超額為 0，label 只剩成本項——若成本誤用還原價，兩者會相等。
+    """
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3, 4, 5, 8)]
+    rows = []
+    for d in days:
+        rows.append({"date": d, "stock_id": "1101", "open": 11.0, "adj": 0.11, "amount": 5.0e8})
+        rows.append({"date": d, "stock_id": "1102", "open": 99.0, "adj": 0.99, "amount": 5.0e8})
+    px = pl.DataFrame(rows)
+    out = cost_adjusted_return_labels(
+        px,
+        horizon=2,
+        adv_window_sessions=2,
+        position_notional_twd=500_000.0,
+        downside_penalty=0.0,
+        cost_cfg=CostConfig(),
+        adjusted=True,
+        # 取第二列：adv_window_sessions=2 需要兩列才有 ADV，首列的成本必為 null
+    ).filter(pl.col("date") == dt.date(2024, 7, 2))
+    by = {r["stock_id"]: r["label"] for r in out.to_dicts()}
+    assert by["1101"] is not None and by["1102"] is not None
+    assert by["1101"] < 0.0 and by["1102"] < 0.0  # 毛報酬 0 → label 純成本
+    assert by["1101"] != by["1102"], "成本未反映真實價格水準（疑似誤用還原價）"
+
+
+def test_ac3_attach_adjustment_is_cumulative_and_asof() -> None:
+    """累積還原因子：固定過去錨（只含 ex_date ≤ 該列日期的事件）。
+
+    實測約 5.75% 的除息日在 prices_daily 沒有對應列（颱風休市、停牌）。內連接會
+    靜默丟掉那些事件的調整，故必須 as-of：調整從**下一個有行情的交易日**起生效。
+    """
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, d), "stock_id": "1101", "open": 100.0}
+            for d in (1, 2, 4, 5, 8)
+        ]  # 7/3 無行情列
+    )
+    ev = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, 2), "stock_id": "1101", "adj_factor": 0.9},
+            {"date": dt.date(2024, 7, 3), "stock_id": "1101", "adj_factor": 0.5},  # 該日無行情
+        ]
+    )
+    got = {r["date"]: r["adj"] for r in attach_adjustment(px, ev).to_dicts()}
+    assert got[dt.date(2024, 7, 1)] == pytest.approx(1.0)
+    assert got[dt.date(2024, 7, 2)] == pytest.approx(0.9)
+    # 7/3 的事件沒有行情列，但不得遺失：從 7/4 起併入累積
+    assert got[dt.date(2024, 7, 4)] == pytest.approx(0.45)
+    assert got[dt.date(2024, 7, 8)] == pytest.approx(0.45)
+
+
+def test_ac3_attach_adjustment_leaves_eventless_stocks_at_one() -> None:
+    """無事件的股票 adj 恆為 1.0，且不得因 join 丟列。"""
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, d), "stock_id": s, "open": 100.0}
+            for d in (1, 2)
+            for s in ("1101", "1102")
+        ]
+    )
+    ev = pl.DataFrame([{"date": dt.date(2024, 7, 2), "stock_id": "1101", "adj_factor": 0.9}])
+    out = attach_adjustment(px, ev)
+    assert out.height == px.height
+    assert out.filter(pl.col("stock_id") == "1102")["adj"].to_list() == [1.0, 1.0]
+
+
+def test_ac3_attach_adjustment_rejects_nonpositive_factor() -> None:
+    """adj ≤ 0 會讓還原價變成 0／負數，並經累乘污染該股全部歷史（黃金規則 5）。"""
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "open": 100.0}])
+    ev = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "adj_factor": 0.0}])
+    with pytest.raises(ValueError, match="adj_factor"):
+        attach_adjustment(px, ev)
+
+
+def test_ac3_attach_adjustment_refuses_empty_events() -> None:
+    """空事件表必須 raise，不得回傳 adj=1.0。
+
+    這是複查抓到的 critical：`attach_adjustment` 只在呼叫端已選擇 total_return 時
+    才會被呼叫，此時空表**一定**是錯誤狀態。原本靜默回 1.0 會讓 cli 照樣印
+    「標籤改用總報酬」然後用未還原標籤訓練——把 D-054 要消滅的東西原樣復活。
+    """
+    from twquant.ml.dataset import attach_adjustment
+
+    px = pl.DataFrame([{"date": dt.date(2024, 7, 1), "stock_id": "1101", "open": 100.0}])
+    empty = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.String, "adj_factor": pl.Float64})
+    with pytest.raises(ValueError, match="0 筆"):
+        attach_adjustment(px, empty)
+
+
+def test_ac3_attach_adjustment_accumulates_per_stock_not_globally() -> None:
+    """累乘必須 .over("stock_id")。複查用突變測試證明：拿掉它，全套 572 測試仍全綠
+    ——因為兩個既有 fixture 都只有**一檔**股票有事件。"""
+    from twquant.ml.dataset import attach_adjustment
+
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3)]
+    px = pl.DataFrame(
+        [{"date": d, "stock_id": s, "open": 100.0} for d in days for s in ("1101", "1102")]
+    )
+    ev = pl.DataFrame(
+        [
+            {"date": dt.date(2024, 7, 2), "stock_id": "1101", "adj_factor": 0.5},
+            {"date": dt.date(2024, 7, 2), "stock_id": "1102", "adj_factor": 0.8},
+        ]
+    )
+    out = attach_adjustment(px, ev)
+    got = {(r["stock_id"], r["date"]): r["adj"] for r in out.to_dicts()}
+    # 逐股票累乘：各自 0.5 與 0.8。全域累乘會得到 0.5 與 0.4（或 0.8 與 0.4，視排序）
+    assert got[("1101", dt.date(2024, 7, 3))] == pytest.approx(0.5)
+    assert got[("1102", dt.date(2024, 7, 3))] == pytest.approx(0.8)
+
+
+def test_ac3_forward_open_returns_zero_price_yields_null_not_inf() -> None:
+    """schema 允許 open >= 0，故 0 是合法值。未防護時 open(t+1)=0 → +inf，
+    而 `excess_rank_labels` 的 mean().over("date") 會把 inf 擴散到整個橫斷面，
+    讓當日所有 label 變成同一個常數。成本感知路徑早已有這道防護，此路徑先前沒有。"""
+    from twquant.ml.dataset import forward_open_returns
+
+    days = [dt.date(2024, 7, d) for d in (1, 2, 3, 4)]
+    px = pl.DataFrame(
+        [{"date": d, "stock_id": "1101", "open": 0.0 if d == days[1] else 100.0} for d in days]
+        + [{"date": d, "stock_id": "1102", "open": 100.0} for d in days]
+    )
+    fwd = forward_open_returns(px, 1)
+    vals = fwd.filter(pl.col("stock_id") == "1101")["fwd_ret"].to_list()
+    assert all(v is None or math.isfinite(v) for v in vals), f"出現 inf：{vals}"
+    lab = excess_rank_labels(fwd).filter(pl.col("date") == days[0])["label"].to_list()
+    assert len({v for v in lab if v is not None}) > 0
+
+
+# ── T-139：標籤不得橫跨資料缺口 ─────────────────────────────────────
+#
+# `shift(-(1+h))` 是**列位移**。某檔中間缺 N 個開市日時，「20 日報酬」實際橫跨數月，
+# 而且不帶任何標記——它只是一個看起來很大的數字，會被模型當成真實的極端報酬學進去。
+# 實測 prices_daily 有 413 處 >5 開市日的個股缺口（最大 260 日），h=20 下約
+# 8,673 個訓練樣本受影響；凍結模型正是以此訓練。
+
+
+def _gap_prices() -> pl.DataFrame:
+    """A 撐起完整的市場日曆；B 在中間缺 5 個開市日。"""
+    days = [dt.date(2026, 1, d) for d in (5, 6, 7, 8, 9, 12, 13, 14, 15, 16)]
+    rows = [{"date": d, "stock_id": "A", "open": 10.0 + i} for i, d in enumerate(days)]
+    # B 只有第 0、1 列與第 7、8、9 列 → 第 1 列到第 7 列之間漏了 5 個開市日
+    for i in (0, 1, 7, 8, 9):
+        rows.append({"date": days[i], "stock_id": "B", "open": 100.0 * (i + 1)})
+    return pl.DataFrame(rows)
+
+
+def test_ac_t139_label_spanning_a_gap_is_null_not_a_number() -> None:
+    """B 的列落在開市日 [0, 1, 7, 8, 9]；h=1 故出場是 `shift(-2)`。
+
+    逐列推：
+      第 0 列（開市日 0）→ 出場在開市日 7，跨距 7 → **跨缺口**
+      第 1 列（開市日 1）→ 出場在開市日 8，跨距 7 → **跨缺口**
+      第 2 列（開市日 7）→ 出場在開市日 9，跨距 2 → 正常，可手算
+      第 3、4 列未來列不足 → null（本來就是）
+
+    不設防護時前兩列會安靜地回傳跨越 6 個開市日的報酬，標成「h=1 的 1 日報酬」。
+    """
+    out = forward_open_returns(_gap_prices(), 1, max_span_sessions=2)
+    b = out.filter(pl.col("stock_id") == "B").sort("date")
+    got = b["fwd_ret"].to_list()
+    assert got[0] is None and got[1] is None, f"跨缺口的兩列須為 null，得到 {got[:2]}"
+    # 第 2 列：進場 open=900（開市日 8）、出場 open=1000（開市日 9）
+    assert got[2] == pytest.approx(1000.0 / 900.0 - 1.0), "未跨缺口的列必須照常算出值"
+    assert got[3] is None and got[4] is None, "未來列不足"
+
+    # 反向確認：不設防護時，前兩列會有值——證明這道防護真的攔到了東西
+    naive = forward_open_returns(_gap_prices(), 1).filter(pl.col("stock_id") == "B").sort("date")
+    assert naive["fwd_ret"][0] is not None and naive["fwd_ret"][1] is not None, (
+        "樸素版應算出跨缺口的數字；若它本來就是 null，本測試沒有測到防護"
+    )
+
+
+def test_ac_t139_no_gap_is_bit_identical_to_before() -> None:
+    """無缺口時，加了防護的結果必須與樸素版**逐位元相同**。
+
+    既有的凍結模型與所有回測都建立在樸素版上；若這道防護改變了乾淨資料的結果，
+    差異就無法歸因給資料修補。
+    """
+    px = _gap_prices().filter(pl.col("stock_id") == "A")
+    guarded = forward_open_returns(px, 2, max_span_sessions=99)
+    plain = forward_open_returns(px, 2, max_span_sessions=None)
+    assert guarded.equals(plain)
+
+
+def test_ac_t139_max_span_must_not_be_below_horizon() -> None:
+    """`max_span` < h+1 會讓所有標籤都變 null——那不是防護，是把標籤關掉。"""
+    with pytest.raises(ValueError, match="max_span_sessions"):
+        forward_open_returns(_gap_prices(), 5, max_span_sessions=3)
+
+
+def test_ac_t139_default_is_no_guard_so_existing_configs_are_unchanged() -> None:
+    """預設不啟用：既有配置的行為逐位元不變，啟用與否由配置顯式決定。"""
+    px = _gap_prices()
+    assert forward_open_returns(px, 1).equals(forward_open_returns(px, 1, max_span_sessions=None))
+
+
+# ── T-144：把跨距防護接到配置層，並補上成本感知路徑的同一個洞 ──────────────
+
+
+def _gap_prices_with_amount() -> pl.DataFrame:
+    """`_gap_prices` 加上 `amount`（成本感知路徑需要它算 ADV）。"""
+    return _gap_prices().with_columns(pl.lit(1_000_000.0).alias("amount"))
+
+
+def test_ac1_t144_cost_aware_path_has_the_same_gap_hole() -> None:
+    """**這才是真正要修的洞**：凍結模型的配置是 `transform: cost_adjusted_return`。
+
+    `cost_adjusted_return_labels` 有自己的 `shift(-(1 + horizon))`，與
+    `forward_open_returns` 完全獨立。T-139 只防護了後者，於是那道防護對
+    `ml_h20_cost_aware.yaml` **是 no-op**——旗標看起來接上了，實際什麼都沒擋。
+
+    B 的列在開市日 [0, 1, 7, 8, 9]，h=1 → 出場是 shift(-2)：
+    前兩列跨距 7，遠超 h+1=2。防護後須為 null。
+    """
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    kw = dict(
+        horizon=1,
+        adv_window_sessions=2,
+        position_notional_twd=1_000.0,
+        downside_penalty=0.25,
+        cost_cfg=CostConfig(),
+    )
+    px = _gap_prices_with_amount()
+
+    naive = cost_adjusted_return_labels(px, **kw)  # type: ignore[arg-type]
+    nb = naive.filter(pl.col("stock_id") == "B").sort("date")["label"].to_list()
+    assert nb[0] is not None or nb[1] is not None, (
+        "樸素版應為跨缺口的列算出數字；若它本來就是 null，本測試沒有測到防護"
+    )
+
+    guarded = cost_adjusted_return_labels(px, max_span_sessions=2, **kw)  # type: ignore[arg-type]
+    gb = guarded.filter(pl.col("stock_id") == "B").sort("date")["label"].to_list()
+    assert gb[0] is None and gb[1] is None, f"跨缺口的兩列須為 null，得到 {gb[:2]}"
+
+
+def test_ac2_t144_cost_aware_none_is_bit_identical() -> None:
+    """預設 None 時逐位元不變——既有凍結模型建立在樸素版上，差異必須可歸因。"""
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    kw = dict(
+        horizon=1,
+        adv_window_sessions=2,
+        position_notional_twd=1_000.0,
+        downside_penalty=0.25,
+        cost_cfg=CostConfig(),
+    )
+    px = _gap_prices_with_amount()
+    assert cost_adjusted_return_labels(px, **kw).equals(  # type: ignore[arg-type]
+        cost_adjusted_return_labels(px, max_span_sessions=None, **kw)  # type: ignore[arg-type]
+    )
+
+
+def test_ac3_t144_cost_aware_rejects_span_below_horizon() -> None:
+    """`max_span` < h+1 會讓所有標籤變 null——那不是防護，是把標籤關掉。"""
+    from twquant.backtest.costs import CostConfig
+    from twquant.ml.dataset import cost_adjusted_return_labels
+
+    with pytest.raises(ValueError, match="max_span_sessions"):
+        cost_adjusted_return_labels(
+            _gap_prices_with_amount(),
+            horizon=5,
+            adv_window_sessions=2,
+            position_notional_twd=1_000.0,
+            downside_penalty=0.25,
+            cost_cfg=CostConfig(),
+            max_span_sessions=3,
+        )
+
+
+def test_ac4_t144_label_config_carries_max_span_and_defaults_to_none() -> None:
+    """`MlLabelConfig` 要有這個欄位，預設 None＝不啟用（既有配置行為不變）。"""
+    from twquant.config import MlLabelConfig
+
+    assert MlLabelConfig().max_span_sessions is None
+    assert MlLabelConfig(max_span_sessions=42).max_span_sessions == 42
+
+
+def test_ac5_t144_config_load_rejects_span_below_horizon(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """配置載入時就要擋：h=20 卻設 max_span=10，等於把全部標籤關掉。
+
+    在載入時擋而不是在跑到一半才擋——否則使用者要等訓練跑完才發現標籤全空。
+    """
+    from twquant.config import MlConfig, load_config
+    from twquant.errors import ConfigError
+
+    # embargo_days 預設 10 < h=20，會先撞既有的 embargo 驗證；本測試要測的是 max_span 那條
+    split = "split:\n  embargo_days: 20\n"
+
+    p = tmp_path / "bad.yaml"
+    p.write_text(f"horizon_days: 20\n{split}label:\n  max_span_sessions: 10\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_span_sessions"):
+        load_config(p, MlConfig)
+
+    ok = tmp_path / "ok.yaml"
+    ok.write_text(f"horizon_days: 20\n{split}label:\n  max_span_sessions: 42\n", encoding="utf-8")
+    assert load_config(ok, MlConfig).label.max_span_sessions == 42
+
+
+def test_ac6_t144_frozen_config_enables_the_guard_and_total_return() -> None:
+    """`ml_h20_cost_aware.yaml` 要實際設上——D-066 明列的兩處資料修正。
+
+    這條測的是**配置檔本身**，不是程式碼：程式碼支援但配置沒開，等於沒修。
+    """
+    from pathlib import Path
+
+    from twquant.config import MlConfig, load_config
+
+    cfg = load_config(Path("configs/ml_h20_cost_aware.yaml"), MlConfig)
+    assert cfg.label.total_return is True, "D-054：新配置一律含股利"
+    assert cfg.label.max_span_sessions == 42, "T-139：h=20 × 2 的跨距容忍"
+    assert cfg.label.max_span_sessions >= cfg.horizon_days + 1

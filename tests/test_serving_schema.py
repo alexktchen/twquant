@@ -18,6 +18,9 @@ _MIRROR = {
     "monthly_revenue",
     "shareholding_dispersion",
     "stock_meta",
+    "stock_valuation",  # T-010/D-044：FinMind 評價資料（PER/PBR/殖利率）
+    "index_daily",  # T-082：先前遺漏，導致 price.rs_market_20d 因 PG 無指數而永遠算不出來
+    "financial_statements",  # T-097：財報三表長表（FinMind 免費層）
 }
 _ALL = _MIRROR | {"sync_state"}
 
@@ -115,3 +118,46 @@ def test_rebuild_targets_rejects_unknown_table() -> None:
 
     with pytest.raises(ValueError, match="不支援"):
         sch.rebuild_targets(["does_not_exist"])
+
+
+def test_t082_index_daily_is_mirrored_so_rs_market_20d_can_compute() -> None:
+    """T-082：`index_daily` 必須在 MIRROR_SPECS 中。
+
+    缺陷歷史：它不在鏡射清單裡 → `serving sync` 不同步 → PG 只有來源不明的 52 天；
+    而因子物化在 D-026 之後改讀 PG，故 `price.rs_market_20d`
+    （宣告 tables=[prices_daily, index_daily]）在 Phase 1 模型中 split=0、gain=0.00%，
+    完全未被使用；Phase 2 的 12 特徵清單仍含它，等於一欄全空。
+    """
+    from twquant.data.serving import schema as sch
+
+    assert "index_daily" in sch.MIRROR_TABLES
+    spec = next(s for s in sch.MIRROR_SPECS if s.name == "index_daily")
+    assert spec.pk == ("date", "index_id"), "主鍵須與既有 PG 表一致，否則 upsert 會失敗"
+    assert not spec.snapshot, "index_daily 是日頻事實表，非快照表"
+    assert spec.column_names == (
+        "date",
+        "index_id",
+        "open",
+        "high",
+        "low",
+        "close",
+        "available_at",
+    ), "欄位順序與名稱須與 clean 層 parquet 及既有 PG 表一致"
+
+
+def test_t010_stock_valuation_is_mirrored_with_decimal_yield() -> None:
+    """T-010／D-044：評價資料表須進鏡射清單，否則因子物化（讀 PG）取不到——
+    這正是 T-082 在 `index_daily` 上踩過的坑。"""
+    from twquant.data.serving import schema as sch
+
+    assert "stock_valuation" in sch.MIRROR_TABLES
+    spec = next(s for s in sch.MIRROR_SPECS if s.name == "stock_valuation")
+    assert spec.pk == ("date", "stock_id")
+    assert spec.column_names == (
+        "date",
+        "stock_id",
+        "per",
+        "pbr",
+        "dividend_yield",
+        "available_at",
+    )

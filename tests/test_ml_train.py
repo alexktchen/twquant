@@ -191,3 +191,100 @@ def test_ml_yaml_loads_and_converts() -> None:
 def test_ml_config_embargo_must_cover_horizon() -> None:
     with pytest.raises(ValidationError, match="embargo"):
         MlConfig.model_validate({"horizon_days": 10, "split": {"embargo_days": 5}})
+
+
+# ── T-073：模型身分的內容定址 ────────────────────────────────────────
+#
+# 缺陷：`make_model_id` 的 fingerprint 只含 ML／成本配置，不含**程式碼**與**資料**版本，
+# 而 `save_model` 為冪等覆寫 → 修好一個缺陷後重訓會產生「同一 id 的不同模型」並靜默蓋掉舊的。
+#
+# 設計決定（見完成註記）：程式碼／資料雜湊**不進 trial fingerprint**。
+# `training_config_hash` 同時是 research_log 的 `params_hash`，也就是 DSR 的 trial 計數依據；
+# 把程式碼版本塞進去，等於每修一次 bug 就消耗一個 DSR 名額——而 trial 計的是「假設」，不是維護。
+# 改成：fingerprint 記在 artifact 裡，由 `save_model` 在「同 id 不同內容」時 raise。
+
+
+def test_ac1_training_code_hash_is_deterministic_and_covers_the_label_module() -> None:
+    """程式碼雜湊須決定性，且必須涵蓋標籤算式所在的模組（dataset.py）。"""
+    from twquant.ml.train import _CODE_SOURCES, training_code_hash
+
+    assert training_code_hash() == training_code_hash()
+    assert len(training_code_hash()) == 16
+    assert "dataset.py" in _CODE_SOURCES, "標籤算式改了卻不反映在雜湊上，等於沒做"
+
+
+def test_ac1_training_data_hash_detects_a_single_changed_value() -> None:
+    """資料雜湊要能分辨「同樣形狀但內容不同」——這是 stock_meta 補列、除權息還原
+    這類改動的表現形式（列數可能相同，值不同）。"""
+    from twquant.ml.train import training_data_hash
+
+    a = _frame(n_days=4, n_stocks=6)
+    b = a.with_columns(
+        pl.when((pl.col("stock_id") == "1003") & (pl.col("date") == dt.date(2026, 1, 6)))
+        .then(pl.col("f1") + 0.001)
+        .otherwise(pl.col("f1"))
+        .alias("f1")
+    )
+    assert a.shape == b.shape
+    assert training_data_hash(a) != training_data_hash(b)
+    assert training_data_hash(a) == training_data_hash(a.clone())
+
+
+def test_ac2_model_id_and_trial_hash_stay_config_only() -> None:
+    """model_id 與 params_hash 不得因程式碼版本而變——否則每次修 bug 都虛增一個 DSR trial
+    （T-078 已記錄同型缺陷：hash 對向後相容的 schema 新增不穩定，使 trials 虛增）。"""
+    from twquant.ml.train import make_model_id, training_code_hash, training_config_hash
+
+    cfg = load_config(Path("configs/ml.yaml"), MlConfig)
+    mid = make_model_id(dt.date(2026, 2, 25), cfg)
+    assert training_code_hash()[:8] not in mid
+    assert training_code_hash()[:8] not in training_config_hash(cfg)
+
+
+def test_ac3_save_model_refuses_a_different_model_under_the_same_id(tmp_path: Path) -> None:
+    """T-073 的缺陷本體：同一目錄、不同 fingerprint → 必須 raise，不得靜默覆寫。"""
+    from twquant.errors import TwquantError
+    from twquant.ml.train import fit_ranker, save_model
+
+    booster = fit_ranker(_frame(), _FEATS, _LGBM)
+    base = {"model_id": "lgbm_h10_20260225_deadbeef", "train_end": "2026-02-25"}
+    save_model(tmp_path, booster, {**base, "artifact_fingerprint": "aaaa1111"})
+    with pytest.raises(TwquantError, match="fingerprint"):
+        save_model(tmp_path, booster, {**base, "artifact_fingerprint": "bbbb2222"})
+
+
+def test_ac3_save_model_allows_an_identical_refit(tmp_path: Path) -> None:
+    """同 fingerprint ＝ 同程式碼同資料同配置 → 重存是冪等的，不該擋。"""
+    from twquant.ml.train import fit_ranker, save_model
+
+    booster = fit_ranker(_frame(), _FEATS, _LGBM)
+    meta = {
+        "model_id": "lgbm_h10_20260225_deadbeef",
+        "train_end": "2026-02-25",
+        "artifact_fingerprint": "aaaa1111",
+    }
+    save_model(tmp_path, booster, meta)
+    save_model(tmp_path, booster, meta)  # 不得 raise
+    assert (
+        json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))["artifact_fingerprint"]
+        == "aaaa1111"
+    )
+
+
+def test_ac3_save_model_refuses_an_artifact_without_a_fingerprint(tmp_path: Path) -> None:
+    """T-073 之前存下的五個凍結模型沒有 fingerprint 欄位。無法證明是同一個模型，
+    就不得覆寫——訊息要告訴操作者先封存。"""
+    from twquant.errors import TwquantError
+    from twquant.ml.train import fit_ranker, save_model
+
+    booster = fit_ranker(_frame(), _FEATS, _LGBM)
+    (tmp_path).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "meta.json").write_text(
+        json.dumps({"model_id": "old", "train_end": "2026-02-25"}), encoding="utf-8"
+    )
+    with pytest.raises(TwquantError, match="封存"):
+        save_model(
+            tmp_path,
+            booster,
+            {"model_id": "old", "train_end": "2026-02-25", "artifact_fingerprint": "aaaa1111"},
+        )

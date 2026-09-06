@@ -54,6 +54,9 @@ def limit_down_proxy(prev_close: float) -> float:
 
 
 class SlippageConfig(BaseConfig):
+    # "adv_impact"：價格相依半價差 + √參與率 衝擊（預設）。
+    # "none"：完全無滑價——僅供與「未假設滑價」的外部回測同口徑比較，不得用於晉升判定。
+    # 為什麼需要 "none"：half_spread_bps 只是**下限**，跳動點半價差恆常套用，設 0 關不掉。
     model: str = "adv_impact"
     half_spread_bps: float = 5.0
     k_bps: float = 25.0
@@ -104,7 +107,13 @@ def trade_cost(
     )
     tax = notional * cfg.tax_rate_sell if side == "sell" else 0.0
     part = max(participation, 0.0)
-    slip_frac = _half_spread_frac(price, cfg) + cfg.slippage.k_bps / 1e4 * math.sqrt(part)
+    if cfg.slippage.model == "none":
+        slip_frac = 0.0
+    elif cfg.slippage.model == "adv_impact":
+        slip_frac = _half_spread_frac(price, cfg) + cfg.slippage.k_bps / 1e4 * math.sqrt(part)
+    else:
+        # 靜默當成無滑價會讓成本悄悄少算，且回測看起來變好（黃金規則 5）。
+        raise ValueError(f"未知的 slippage.model：{cfg.slippage.model!r}（可用：adv_impact、none）")
     slippage = notional * slip_frac
     scale = cfg.cost_scale
     return TradeCost(

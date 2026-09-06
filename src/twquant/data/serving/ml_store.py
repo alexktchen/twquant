@@ -80,6 +80,23 @@ def read_prices_open(conn: Any, schema: str, start: object, end: object) -> pl.D
     return pl.DataFrame(rows, schema=schema_, orient="row")
 
 
+def read_corporate_events(conn: Any, schema: str, end: object) -> pl.DataFrame:
+    """corporate_events 的 (date, stock_id, adj_factor) 切片（標籤總報酬還原用）。
+
+    不設下界：累積因子是固定過去錨的連乘，錨之前的事件在報酬比值中恆等抵銷，
+    故載入 `date <= end` 已足夠且與載入全期等價。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, stock_id, adj_factor FROM "{schema}"."corporate_events" '
+            "WHERE date <= %s AND adj_factor IS NOT NULL",
+            (end,),
+        )
+        rows = cur.fetchall()
+    schema_ = {"date": pl.Date, "stock_id": pl.String, "adj_factor": pl.Float64}
+    return pl.DataFrame(rows, schema=schema_, orient="row")
+
+
 def read_prices_training(conn: Any, schema: str, start: object, end: object) -> pl.DataFrame:
     """讀取成本感知標籤所需的行情欄位；期間在 PG server-side 過濾。"""
     with conn.cursor() as cur:

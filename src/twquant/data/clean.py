@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping, Sequence
 
 import polars as pl
 
@@ -55,8 +56,86 @@ def clean_prices(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     return schemas.validate("prices_daily", out)
 
 
+# T86 的內部恆等式。實測 2026-08-31 全 1,335 列成立（七條全過）。
+#
+# 為什麼需要它（T-102）：2022-01~2026-09 有 41 個**分散**的日子、共 508 列，欄位整體
+# 位移 3 格（湖的 foreign_net = 外陸資＋投信、trust_net = 自營商賣出(自行)、
+# dealer_net = 自行買賣超）。2026-09-05 重抓 2026-08-31 的原始回應並以現行程式碼剖析，
+# 與 FinMind **1,331 檔逐列相符、0 差異**——**剖析器是對的**，出事的是上游當時給了
+# fields 與 data 不對應的回應。日期分散而非連續，也指向暫時性故障而非 schema 變更。
+#
+# 既然不能靠修剖析器，唯一的防線就是資料自己的一致性：位移會同時破壞下列每一條。
+_T86_IDENTITIES: tuple[tuple[str, tuple[tuple[int, str], ...]], ...] = (
+    (
+        "三大法人買賣超股數",
+        (
+            (1, "外陸資買賣超股數(不含外資自營商)"),
+            (1, "外資自營商買賣超股數"),
+            (1, "投信買賣超股數"),
+            (1, "自營商買賣超股數"),
+        ),
+    ),
+    (
+        "自營商買賣超股數",
+        ((1, "自營商買賣超股數(自行買賣)"), (1, "自營商買賣超股數(避險)")),
+    ),
+    (
+        "外陸資買賣超股數(不含外資自營商)",
+        ((1, "外陸資買進股數(不含外資自營商)"), (-1, "外陸資賣出股數(不含外資自營商)")),
+    ),
+    ("外資自營商買賣超股數", ((1, "外資自營商買進股數"), (-1, "外資自營商賣出股數"))),
+    ("投信買賣超股數", ((1, "投信買進股數"), (-1, "投信賣出股數"))),
+    (
+        "自營商買賣超股數(自行買賣)",
+        ((1, "自營商買進股數(自行買賣)"), (-1, "自營商賣出股數(自行買賣)")),
+    ),
+    ("自營商買賣超股數(避險)", ((1, "自營商買進股數(避險)"), (-1, "自營商賣出股數(避險)"))),
+)
+
+
+def assert_t86_consistent(raw: pl.DataFrame, date: dt.date) -> None:
+    """T86 原始表的自我一致性檢查（T-102）。任一恆等式被違反即 raise。
+
+    連一條都驗不了時同樣 raise：上游若改欄名，一個安靜地什麼都不檢查的閘門
+    比沒有閘門更危險，因為它讓人以為有防護（黃金規則 5）。
+    """
+    cols = set(raw.columns)
+    checked = 0
+    violations: list[tuple[str, int, list[str]]] = []
+    for lhs, terms in _T86_IDENTITIES:
+        if lhs not in cols or any(c not in cols for _, c in terms):
+            continue
+        checked += 1
+        rhs = terms[0][0] * _int(terms[0][1])
+        for sign, col in terms[1:]:
+            rhs = rhs + sign * _int(col)
+        bad = raw.filter(_int(lhs).is_not_null() & rhs.is_not_null() & (_int(lhs) != rhs))
+        if bad.height:
+            ids = bad["證券代號"].str.strip_chars().to_list() if "證券代號" in cols else []
+            violations.append((lhs, bad.height, ids[:5]))
+    if checked == 0:
+        raise DataError(
+            "institutional_daily",
+            date,
+            "T86 原始表湊不出任何一條內部恆等式（欄名可能已變更）——"
+            f"現有欄位：{sorted(cols)}。閘門不得在無法檢查時靜默放行。",
+        )
+    if violations:
+        detail = "；".join(
+            f"{lhs} 有 {n} 列不符（如 {', '.join(ids)}）" for lhs, n, ids in violations
+        )
+        raise DataError(
+            "institutional_daily",
+            date,
+            f"T86 內部恆等式不成立：{detail}。"
+            "已知成因是上游回傳的 fields 與 data 不對應，造成欄位整體位移而**不報錯**"
+            "（T-102：2022-01~2026-09 曾有 41 日共 508 列如此）。此日資料不可用。",
+        )
+
+
 def clean_institutional(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     """T86 原始 → institutional_daily。外資 = 外陸資(不含自營) + 外資自營商。"""
+    assert_t86_consistent(raw, date)
     at = _at(date, 18)
     out = raw.select(
         pl.lit(date, dtype=pl.Date).alias("date"),
@@ -246,6 +325,17 @@ def clean_stock_meta(raw: pl.DataFrame, market: str) -> pl.DataFrame:
         .alias("list_date"),
         pl.lit(None, dtype=pl.Date).alias("delist_date"),
     )
+    # T-117：中文名不得含替換字元 U+FFFD。這是解碼失敗留下的痕跡，只影響顯示但會出現在
+    # 每一份對外報表；閘門放在這裡是因為它是唯一能同時看到 stock_id 與 name 的地方。
+    broken = out.filter(pl.col("name").str.contains("\ufffd", literal=True))
+    if broken.height:
+        ids = broken["stock_id"].to_list()[:8]
+        raise DataError(
+            "stock_meta",
+            None,
+            f"中文名含替換字元 U+FFFD 的有 {broken.height} 檔（如 {', '.join(ids)}）"
+            "——來源解碼失敗。標準 Big5 缺「碁」等字，須用 cp950（T-117）。",
+        )
     # 上市日不合理（<1911，例如來源改回民國 3 碼年被誤解析為西元 115 年）→ 視為缺值，
     # 避免靜默寫入錯誤日期（ISIN 現況為西元 yyyy/mm/dd，此為防未來格式變動的防呆）。
     out = out.with_columns(
@@ -312,3 +402,110 @@ TPEX_CLEANERS = {
 TDCC_CLEANERS = {
     "shareholding_dispersion": clean_shareholding_dispersion,
 }
+
+
+def reconcile_stock_meta(
+    existing: pl.DataFrame,
+    *,
+    present_ids: Sequence[str],
+    info: Sequence[Mapping[str, object]],
+    delistings: Sequence[Mapping[str, object]],
+) -> pl.DataFrame:
+    """把「有行情但不在 stock_meta」的股票補進來，並補上 delist_date（T-111 / D-053）。
+
+    `clean_stock_meta` 的來源（ISIN）只列現存上市櫃公司，故已下市者整批缺席；
+    依賴 stock_meta 的三個因子（含 pin 特徵 `price.residual_reversal_5d`）會**靜默**略過它們，
+    而缺的正是後來下市的左尾樣本。
+
+    規則：
+    - **既有列不覆蓋**（名稱／市場／產業／上市日都保留），只補原本永遠是 null 的 `delist_date`。
+    - `present_ids`（行情裡真的出現過的股票）中不在 `existing` 者，用 `info` 補列。
+    - `market` 是必填欄位，`info` 沒給市場別的股票**不補列**（不得偽造），由呼叫端回報缺口。
+    """
+    inf = {str(r["stock_id"]): r for r in info}
+    dl = {str(r["stock_id"]): r["delist_date"] for r in delistings}
+    have = set(existing["stock_id"].to_list()) if existing.height else set()
+
+    added: list[dict[str, object]] = []
+    for sid in present_ids:
+        if sid in have:
+            continue
+        rec = inf.get(sid)
+        if rec is None or rec.get("market") is None:
+            continue  # 缺市場別（必填）→ 不補列
+        added.append(
+            {
+                "stock_id": sid,
+                "name": rec.get("name"),
+                "market": rec["market"],
+                "industry": rec.get("industry"),
+                "list_date": None,
+                "delist_date": dl.get(sid),
+            }
+        )
+
+    cols = ["stock_id", "name", "market", "industry", "list_date", "delist_date"]
+    out = (
+        existing.select(cols)
+        if existing.height
+        else pl.DataFrame(schema={c: pl.String for c in cols})
+    )
+    if added:
+        new = pl.DataFrame(added).with_columns(
+            pl.col("list_date").cast(pl.Date), pl.col("delist_date").cast(pl.Date)
+        )
+        out = pl.concat([out.select(cols), new.select(cols)], how="vertical_relaxed")
+    # 既有列補 delist_date（原本一律 null）
+    if dl:
+        m = pl.DataFrame({"stock_id": list(dl), "_dl": [dl[k] for k in dl]}).with_columns(
+            pl.col("_dl").cast(pl.Date)
+        )
+        out = (
+            out.join(m, on="stock_id", how="left")
+            .with_columns(delist_date=pl.coalesce("delist_date", "_dl"))
+            .drop("_dl")
+        )
+    out = out.unique(subset=["stock_id"], keep="first").sort("stock_id")
+    return schemas.validate("stock_meta", out)
+
+
+# adj_factor 經 after/before 的浮點往返後乘回前收，末位誤差約 1e-16 相對量級。
+_BAND_FLOAT_TOL = 1e-9
+
+
+def inconsistent_events(
+    events: pl.DataFrame, prices: pl.DataFrame, *, max_deviation: float
+) -> pl.DataFrame:
+    """找出還原因子與行情互相矛盾的除權息事件（T-098 / D-054 複查）。
+
+    除權息當日的成交價必須落在「參考價 ± 漲跌幅」之內；若 `open` 相對
+    `adj_factor × 前收` 的偏離超過 `max_deviation`（＝台股漲跌幅 10%），
+    那個因子就不可能是對的。實測 6 筆如此，其中 3 筆在宣稱的除權日其實是**漲停**。
+
+    危害方向與 D-054 相反但性質相同：假事件讓該股的累積還原因子憑空縮小，
+    每個跨過該日的標籤窗被灌水 `1/adj_factor`（實測最大 +47.8%），
+    使它連續 h 個訊號日排在橫斷面前段——同樣是「模型學到公司行動日曆」。
+
+    除權息日**無行情列**者（颱風休市、停牌，約 5.75%）無從比對，不視為矛盾。
+    """
+    px = (
+        prices.sort("stock_id", "date")
+        .with_columns(prev_close=pl.col("close").shift(1).over("stock_id"))
+        .select("date", "stock_id", "open", "prev_close")
+    )
+    return (
+        events.join(px, on=["date", "stock_id"], how="inner")
+        .filter(
+            pl.col("prev_close").is_not_null()
+            & (pl.col("prev_close") > 0.0)
+            & (pl.col("open") > 0.0)
+        )
+        .with_columns(
+            deviation=pl.col("open") / (pl.col("adj_factor") * pl.col("prev_close")) - 1.0
+        )
+        # 漲跌停價**恰好**落在帶寬邊界上（實測 6791 於 2026-04-16 自參考價 120.0 漲停到
+        # 132.0，偏離正好 +10.0%），而 adj_factor 是 after/before 的浮點往返值，
+        # 乘回去會有末位誤差。不留容差會把合法的漲跌停誤判為資料錯誤。
+        .filter(pl.col("deviation").abs() > max_deviation * (1.0 + _BAND_FLOAT_TOL))
+        .sort("date", "stock_id")
+    )

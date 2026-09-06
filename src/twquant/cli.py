@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -1412,6 +1413,54 @@ def targets(
     )
 
 
+def _fingerprint_inputs(wh: object, strategy: object) -> dict[str, tuple[int, str]]:
+    """收集這次回測會讀到的每張表的 (列數, max(available_at))，供資料指紋用（T-131）。
+
+    表的清單由策略自己決定：訊號因子宣告的 `tables`，加上一定會用到的 prices_daily，
+    再依宇宙濾網補上 financial_statements（ROE／市值）與 monthly_revenue（營收篩）。
+    寫死一份固定清單會在新增濾網時悄悄失效——指紋涵蓋不到的資料變動等於沒有指紋。
+    """
+    import polars as pl
+
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發因子註冊
+    from twquant.factors.registry import get
+
+    names = {"prices_daily"}
+    for s in strategy.signals:  # type: ignore[attr-defined]
+        names |= set(get(s.factor).tables)
+    u = strategy.universe  # type: ignore[attr-defined]
+    if u.min_roe is not None or u.mktcap_rank_max is not None or u.mktcap_rank_min is not None:
+        names.add("financial_statements")
+    if (
+        u.min_revenue_yoy is not None
+        or u.max_revenue_yoy is not None
+        or u.min_revenue_streak is not None
+    ):
+        names.add("monthly_revenue")
+
+    out: dict[str, tuple[int, str]] = {}
+    for name in sorted(names):
+        row = (
+            wh.scan(name)  # type: ignore[attr-defined]
+            .select(pl.len().alias("n"), pl.col("available_at").max().alias("mx"))
+            .collect()
+            .row(0)
+        )
+        out[name] = (int(row[0]), str(row[1]))
+    return out
+
+
+def _resolve_costs(name: str) -> pathlib.Path:
+    """把 --costs 的值解析成路徑：絕對路徑照用，相對名稱相對於 configs/（T-124）。
+
+    先前寫死 `configs/costs.yaml`，使 `configs/costs_finlab.yaml`（finlab 口徑，
+    報表已在用）從 CLI 根本無法選用。預設值維持 "costs.yaml"，故不指定時
+    解析結果與改動前逐位元相同。
+    """
+    p = pathlib.Path(name)
+    return p if p.is_absolute() else _CONFIG_DIR / name
+
+
 @app.command()
 def backtest(
     strategy: str = typer.Option(..., help="策略 YAML 路徑"),
@@ -1421,6 +1470,12 @@ def backtest(
     participation: float = typer.Option(0.05, min=0.0, max=1.0, help="單股 ADV 參與率上限"),
     cost_scale: float | None = typer.Option(
         None, "--cost-scale", min=0.0, help="成本倍率覆寫；0=零成本反事實"
+    ),
+    costs: str = typer.Option(
+        "costs.yaml", "--costs", help="成本配置檔；相對路徑相對於 configs/（T-124）"
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="把完整結果包（曲線／ledger／未成交／指紋）落地成 JSON（T-131）"
     ),
     pg: bool = typer.Option(
         True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
@@ -1448,12 +1503,15 @@ def backtest(
         pg_conn = None
         wh = Warehouse(cfg.data_dir)
     strat = load_strategy(strategy)
-    cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    cost = load_config(_resolve_costs(costs), CostConfig)
     if cost_scale is not None:
         cost = cost.model_copy(update={"cost_scale": cost_scale})
     s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
 
     try:
+        # 指紋在跑回測**之前**取：跑完再取的話，長回測期間若有 ingest 寫入，
+        # 記下的會是跑完後的狀態，與這次實際讀到的資料不符。
+        fp_tables = _fingerprint_inputs(wh, strat) if out else {}
         res = run_backtest(
             strat,
             cost,
@@ -1489,6 +1547,30 @@ def backtest(
     )
 
     source = "pg" if pg else "lake"
+    if out:
+        from twquant.reporting.result_bundle import (
+            bundle_backtest,
+            data_fingerprint,
+            write_bundle,
+        )
+
+        bundle = bundle_backtest(
+            res,
+            strategy=strat,
+            cost=cost,
+            start=s,
+            end=e,
+            initial_capital=capital,
+            max_participation=participation,
+            source=source,
+            data_fingerprint=data_fingerprint(fp_tables),
+            data_tables=fp_tables,
+        )
+        write_bundle(out, bundle)
+        typer.secho(
+            f"結果包已寫入 {out}（指紋 {bundle['data_fingerprint']}）", fg=typer.colors.GREEN
+        )
+
     log_metrics = {
         "sharpe": m.sharpe,
         "cagr": m.cagr,
@@ -1975,10 +2057,16 @@ def ml_train(
     from twquant.backtest.costs import CostConfig
     from twquant.config import config_hash, load_config
     from twquant.data.serving import store
-    from twquant.data.serving.ml_store import read_prices_open, read_prices_training
+    from twquant.data.serving.ml_store import (
+        read_corporate_events,
+        read_prices_open,
+        read_prices_training,
+    )
     from twquant.ml import train as mlt
     from twquant.ml.dataset import (
         assemble,
+        assert_feature_coverage,
+        attach_adjustment,
         cost_adjusted_return_labels,
         excess_rank_labels,
         forward_open_returns,
@@ -1986,6 +2074,14 @@ def ml_train(
     from twquant.ml.splits import walk_forward_splits
 
     cfg = _load_ml(config)
+    if cfg.label.total_return is None:
+        # D-054：不給預設值是刻意的。未還原的標籤在 6~8 月有近兩成「輸家」是除息
+        # 假象，而除息日事先公告 → 模型會學到「預測誰要除息」且驗收看起來會過關。
+        raise typer.BadParameter(
+            f"{config or 'configs/ml.yaml'} 的 label 未指定 total_return（D-054）。"
+            "含股利的總報酬標籤請寫 `total_return: true`；"
+            "要重現舊模型的訓練配方請明寫 `total_return: false`。"
+        )
     sys_cfg = _load_system()
     start, end = dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
     scfg = _load_serving()
@@ -1998,6 +2094,9 @@ def ml_train(
             if cfg.label.transform == "cost_adjusted_return"
             else read_prices_open(conn, scfg.pg_schema, start, end)
         )
+        events = (
+            read_corporate_events(conn, scfg.pg_schema, end) if cfg.label.total_return else None
+        )
     finally:
         conn.close()
     # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
@@ -2008,6 +2107,9 @@ def ml_train(
         cast("dt.date | None", px["date"].max()),
     )
     typer.echo(f"prices {px.height} 列（{px_lo} ~ {px_hi}）")
+    if events is not None:
+        px = attach_adjustment(px, events)
+        typer.echo(f"除權息事件 {events.height} 筆 → 標籤改用總報酬（D-054）")
     cost_cfg: CostConfig | None = None
     if cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
@@ -2018,9 +2120,22 @@ def ml_train(
             position_notional_twd=cfg.label.position_notional_twd,
             downside_penalty=cfg.label.downside_penalty,
             cost_cfg=cost_cfg,
+            adjusted=cfg.label.total_return,
+            max_span_sessions=cfg.label.max_span_sessions,
         )
     else:
-        labels = excess_rank_labels(forward_open_returns(px, cfg.horizon_days))
+        labels = excess_rank_labels(
+            forward_open_returns(
+                px,
+                cfg.horizon_days,
+                adjusted=cfg.label.total_return,
+                max_span_sessions=cfg.label.max_span_sessions,
+            )
+        )
+    # T-088 AC-3：任一 pin 特徵在 factor_values 全空即拒絕訓練（Phase 1 曾以 3 個空特徵訓練並回報成功）
+    shares = assert_feature_coverage(feats)
+    sparsest = sorted(shares.items(), key=lambda kv: kv[1])[:5]
+    typer.echo("特徵覆蓋最低 5 個：" + "、".join(f"{n} {v:.0%}" for n, v in sparsest))
     frame = assemble(feats, labels)
     labeled = frame.filter(pl.col("label").is_not_null())
     days: list[dt.date] = sorted(px["date"].unique().to_list())
@@ -2051,6 +2166,16 @@ def ml_train(
             "train_end": train_end.isoformat(),
             "features": features,
             "config_hash": mlt.training_config_hash(cfg, cost_cfg),
+            # T-073：artifact 的身分＝配置 × 程式碼 × 資料。三者任一變了就是不同的模型，
+            # save_model 會據此拒絕「同 id 不同內容」的覆寫。
+            "artifact_fingerprint": mlt.artifact_fingerprint(
+                config=mlt.training_config_hash(cfg, cost_cfg),
+                code=mlt.training_code_hash(),
+                data=mlt.training_data_hash(frame),
+            ),
+            "code_hash": mlt.training_code_hash(),
+            "data_hash": mlt.training_data_hash(frame),
+            "data_rows": frame.height,
             "ml_config_hash": config_hash(cfg),
             "cost_config_hash": config_hash(cost_cfg) if cost_cfg is not None else None,
             "label": cfg.label.model_dump(mode="json"),

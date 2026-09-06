@@ -6,12 +6,50 @@
 
 ## 0. 閱讀順序
 
-1. 本文件（CLAUDE.md）
+**第 0 份、每個 session 開頭都讀**：[WHERE-IS-EVERYTHING.md](WHERE-IS-EVERYTHING.md)
+——資料、模型、結果、報告在哪，常用指令，以及目前踩得到的陷阱。
+它刻意寫得短（約 150 行），讀它比四處摸索便宜得多。
+
+接著依需要：
+
+1. 本文件（CLAUDE.md）— 黃金規則與工作法
 2. [docs/specs/SPEC-000-conventions.md](docs/specs/SPEC-000-conventions.md) — 全域慣例
 3. 你要做的任務在 [TASKS.md](TASKS.md) 指到的那一份 SPEC
-4. 只有需要跨模組時才讀 [ARCHITECTURE.md](ARCHITECTURE.md)
+4. **改設計或訂門檻之前**：[DECISIONS.md](DECISIONS.md) 的相關裁決
+   ——**事前登記的門檻不得事後修改**，看到結果才調門檻等於沒有登記
+5. 只有需要跨模組時才讀 [ARCHITECTURE.md](ARCHITECTURE.md)
+6. 想知道上一輪做了什麼、留下哪些未解問題：`docs/HANDOFF-<最新日期>-*.md`
 
 一次只做一個任務。不要為了「順手」重構任務範圍外的程式碼。
+
+### 0.1 文件一律放 repo，不用 wiki
+
+**所有文件放在本 repo 內**，跟著 commit 一起版控。**不使用 GitHub wiki**
+——wiki 是獨立的 git repo，不隨程式碼的 commit 前進，改了程式沒改 wiki 不會有任何
+機制發現，PR 上也看不到它的 diff。
+
+| 放什麼 | 放哪 |
+|---|---|
+| 現況導覽（資料/模型/結果在哪、常用指令、陷阱） | **根目錄 `WHERE-IS-EVERYTHING.md`**，**每輪結束前更新** |
+| 規則與慣例 | `CLAUDE.md`、`docs/specs/SPEC-*.md` |
+| 裁決（含事前登記） | `DECISIONS.md` |
+| 任務 | `TASKS.md` |
+| 一輪工作的交接 | `docs/HANDOFF-<YYYY-MM-DD>-<主題>.md` |
+| 量測結果、稽核報告 | `docs/reports/*.md` |
+| **資料、模型、結果包、日誌** | `data/`（`.gitignore` 排除，**不進版控**） |
+
+**資料與文件的分界**：可重新產生的產物（結果包、模型、staging）不進版控；
+描述「發生了什麼、為什麼這樣決定」的文字一律進版控。
+結果的數字以 markdown 摘要進 `docs/reports/`，原始包留在 `data/`。
+
+### 0.2 兩個 `data/` 的陷阱
+
+`configs/system.yaml` 的 `data_dir: data` 是**相對路徑**。在 worktree 裡執行時，
+它指向 worktree 自己的 `data/`，而不是主 checkout 的正本。
+
+**任何會寫檔的指令都要明確給絕對路徑**（`--out` / `--models` / `--data-dir`）。
+已因此發生過：`ml train` 把重訓模型寫進 worktree、回測的研究登記簿被切成兩半
+（DSR 試驗計數少算 160 筆）。相關任務 T-084。
 
 ## 1. 黃金規則（違反任何一條 = 該次變更全部作廢）
 
@@ -129,3 +167,10 @@ python -m twquant check --fast   # 只跑受影響模組的測試（開發中用
 | 因子函數裡 fetch 網路資料 | 因子是純函數，資料先進倉儲 |
 | 一個任務裡順手重構別的模組 | 開新任務 |
 | commit token / 帳密 | .env（gitignore） |
+
+## 9. 專案長期記憶
+
+- **台股 ML 選股研究**：結論、已排除方向、文獻與共編偏好見
+  [memory/projects/twquant-ml-stock-selection.md](memory/projects/twquant-ml-stock-selection.md)。
+- 投資者版實驗結果統一維護在 `data/reports/台股ML選股實驗總覽.html`；使用白話、保留失敗結果，
+  並讓每個數字可追溯。新想法須明確標示尚未回測。

@@ -1,0 +1,31 @@
+# T-129 B2：全市場多因子 + 市值加權（SPEC-013 §5.3）。
+#
+# 與 B1 逐字相同，**只差三處**：移除 mktcap_rank_max（改為全市場流動性篩）、
+# top_n 30 → 50、name/description/trial_scope。
+# 不限制市值，但改成市值加權，讓權值股在得分高時能真正吃到權重。
+name: track_b2_broad_capw
+description: B2 全市場多因子 + 市值加權：選 50 檔（未經部署裁決，勿用於實盤）
+trial_scope: broad_capweighted
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 30_000_000
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - {factor: fundamental.revenue_yoy, weight: 0.25}
+  - {factor: price.mom_60d, weight: 0.25}
+  - {factor: fundamental.roe, weight: 0.25}
+  - {factor: price.vol_20d, weight: 0.25, params: {window: 60}}
+# D-061／R12：`rank_avg` 對存在的列求和，缺低波因子者拿不到負分、分數虛高
+require_all_factors: true
+
+selection: {method: top_n, top_n: 50}
+weighting: mktcap
+max_weight_per_stock: 0.25 # 同 B1，§5.4 事前決定
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

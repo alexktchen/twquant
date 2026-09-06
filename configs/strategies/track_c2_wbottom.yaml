@@ -1,0 +1,51 @@
+# C2「型態事件」——以 W 底突破當**入場閘門**，再用 C1 的技術訊號排序。
+#
+# 文獻：Lo, Mamaysky & Wang (2000, JF)「Foundations of Technical Analysis」——
+# 用核回歸自動辨識頭肩、W 底等型態，證實**部分型態帶有增量資訊**。這是技術型態
+# 少數通過同儕審查的實證支持。
+#
+# **為什麼只用 W 底，不用箱型突破與旗形**——這是量出來的，不是偏好：
+# 抽樣 12 個訊號日（宇宙＝TWSE+TPEX、ADV≥5000 萬、價≥10），每日符合的檔數為
+#   box_breakout_60d     1 ~ 15（中位約 4）   → 選不滿 20 檔
+#   flag_hold_50d        0 ~  5（常常掛零）   → 完全不可行
+#   double_bottom_120d  21 ~ 76（中位約 45）  → 可行
+# 型態越嚴格越稀疏；把稀疏型態當閘門會讓策略在多數日子只買得到個位數檔股票，
+# 那不是集中，是沒得選。若日後要用那兩個，須先降 top_n 或改成多型態 OR 閘門
+# （目前 `require_all_factors` 是 AND，列多個型態＝要求同時成立，機率近乎零）。
+#
+# 閘門機制：`require_all_factors: true` 只留「所有列出因子都有值」的股票，
+# 而型態因子只在事件成立日（起 active_days 內）才輸出——故列進 signals 即天然成為閘門，
+# 不需要新程式碼。權重給 0.20 是讓型態深度也參與排序（深度大＝型態更明確）。
+#
+# 其餘三個訊號與 C1 相同，讓「加了型態閘門值多少」＝ C2 − C1 這條邊可以乾淨歸因。
+#
+# 未經部署裁決，勿用於實盤。
+name: track_c2_wbottom
+description: C2 型態事件：W 底突破當入場閘門 × 52 週高點／動能／量能排序（Lo-Mamaysky-Wang 2000）
+trial_scope: pattern_event
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 50_000_000
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: price.double_bottom_120d, weight: 0.20 } # ← 事件閘門兼排序項
+  - { factor: price.high_52w, weight: 0.30 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+# 這一行就是閘門：型態未成立者沒有 double_bottom_120d 的值 → 被剔除
+require_all_factors: true
+
+selection: { method: top_n, top_n: 20 }
+# **實測必須用 fixed_slot**：第一次用 `equal` 跑，三個成本情境全部崩潰——
+# 某個調倉日只有 8 檔 W 底成立，`cap_and_renormalize` 的 `8 × 0.10 = 0.8 < 1` 直接 raise。
+# 那不是配置錯誤，是框架強迫「永遠滿倉」：訊號少的日子不該被當成錯誤狀態。
+weighting: fixed_slot
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

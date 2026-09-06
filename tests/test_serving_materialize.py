@@ -86,10 +86,10 @@ def test_compute_universe_logs_unexpected_factor_failure(
     as_of = dt.date(2026, 6, 24)
     real = compute_mod.compute
 
-    def flaky(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+    def flaky(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
         if names == ["price.mom_20d"]:
             raise RuntimeError("boom")  # 非 DataError → 視為非預期
-        return real(names, view, dates=dates)
+        return real(names, view, dates=dates, **kw)
 
     monkeypatch.setattr(compute_mod, "compute", flaky)
     with caplog.at_level(logging.WARNING, logger="twquant.serving"):
@@ -116,10 +116,10 @@ def test_compute_universe_expected_data_gap_logged_below_warning(
     as_of = dt.date(2026, 6, 24)
     real = compute_mod.compute
 
-    def flaky(names: list[str], view: Any, dates: Any = None) -> pl.DataFrame:
+    def flaky(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
         if names == ["price.mom_20d"]:
             raise DataError("chip_table", as_of, "clean 層無資料")
-        return real(names, view, dates=dates)
+        return real(names, view, dates=dates, **kw)
 
     monkeypatch.setattr(compute_mod, "compute", flaky)
     with caplog.at_level(logging.DEBUG, logger="twquant.serving"):
@@ -131,6 +131,136 @@ def test_compute_universe_expected_data_gap_logged_below_warning(
     assert all(r.levelno < logging.WARNING for r in recs), [
         (r.levelname, r.getMessage()) for r in recs
     ]
+
+
+# ── T-094：因子子集物化（籌碼回補後只重算 7 個籌碼因子，不重跑全表 7 小時）──────────
+
+
+def test_t094_compute_universe_subset_only_computes_requested_factors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-1：factors=子集 → 只對子集呼叫 compute；預設 None → 全部註冊因子（既有行為）。"""
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.data.serving import materialize as smat
+    from twquant.factors import compute as compute_mod
+    from twquant.factors.registry import list_factors
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    as_of = dt.date(2026, 6, 24)
+    real = compute_mod.compute
+    seen: list[str] = []
+
+    def spy(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
+        seen.extend(names)
+        return real(names, view, dates=dates, **kw)
+
+    monkeypatch.setattr(compute_mod, "compute", spy)
+    smat._compute_universe(wh, as_of, factors=["price.mom_20d", "price.reversal_5d"])
+    assert seen == ["price.mom_20d", "price.reversal_5d"]
+    seen.clear()
+    smat._compute_universe(wh, as_of)
+    assert seen == list_factors(), "factors=None 必須維持全部註冊因子"
+
+
+def test_t094_subset_rejects_unknown_factor(tmp_path: Path) -> None:
+    """子集含未註冊因子 → raise，不得靜默略過（否則「重算籌碼因子」打錯名字會靜默什麼都沒算）。"""
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.data.serving import materialize as smat
+    from twquant.errors import TwquantError
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    with pytest.raises(TwquantError, match=r"chip\.no_such_factor"):
+        smat._compute_universe(wh, dt.date(2026, 6, 24), factors=["chip.no_such_factor"])
+
+
+def test_t094_subset_intersecting_composite_is_refused(tmp_path: Path) -> None:
+    """D-057：子集與 composite 集合**部分重疊** → raise。
+
+    此時 `merged` 缺了部分 composite 因子，重算 composite_daily 會得到與全因子模式不同的
+    綜合分；不重算則 factor_values 與 composite_daily 對同一因子出現兩個版本。兩害皆不可取。
+    （**完整包含**的情形已改為允許，見下一條測試。）"""
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.config import ServingConfig
+    from twquant.data.serving import materialize as smat
+    from twquant.errors import TwquantError
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    cfg = ServingConfig(
+        pg_schema=_SCHEMA,
+        composite_factors=("price.reversal_5d", "price.mom_20d"),
+    )
+    with pytest.raises(TwquantError, match="composite"):
+        smat._materialize_on(wh, None, cfg, dt.date(2026, 6, 24), factors=["price.reversal_5d"])
+
+
+def test_d057_subset_containing_all_composite_factors_is_allowed(tmp_path: Path) -> None:
+    """D-057：子集 ⊇ composite 集合 → 准算，且 composite_daily 照常重算。
+
+    T-111 修好 stock_meta 後只需重算 3 個 composite 因子；舊規則會逼人做全 45 因子 ×
+    1,619 日的物化（實測會 OOM）來換 1 個因子的更新。
+    """
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.config import ServingConfig
+    from twquant.data.serving import materialize as smat
+
+    conn = _connect_or_skip()
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    cfg = ServingConfig(pg_schema=_SCHEMA, composite_factors=("price.reversal_5d",))
+    try:
+        _drop(conn)
+        r = smat.materialize_day(
+            wh, cfg, dt.date(2026, 6, 24), ["price.reversal_5d", "price.mom_20d"]
+        )
+        assert r.factors == 2
+        assert r.composite_rows > 0, "完整包含 composite 集合時，composite_daily 必須被重算"
+    finally:
+        _drop(conn)
+        conn.close()
+
+
+def test_t094_subset_mode_writes_only_factor_tables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-2：子集模式只 upsert factor_values 與 factor_cross_stats（且只含子集因子），不碰 composite_daily。"""
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.config import ServingConfig
+    from twquant.data.serving import materialize as smat
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    writes: list[tuple[str, set[str]]] = []
+
+    def fake_upsert(cur: Any, schema: str, spec: Any, df: pl.DataFrame) -> None:
+        writes.append(
+            (spec.name, set(df["factor"].unique().to_list()) if "factor" in df.columns else set())
+        )
+
+    class _Cur:
+        def __enter__(self) -> _Cur:
+            return self
+
+        def __exit__(self, *a: Any) -> None:
+            return None
+
+    class _Conn:
+        def cursor(self) -> _Cur:
+            return _Cur()
+
+        def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(smat, "upsert", fake_upsert)
+    cfg = ServingConfig(pg_schema=_SCHEMA, composite_factors=("price.reversal_5d",))
+    r = smat._materialize_on(wh, _Conn(), cfg, dt.date(2026, 6, 24), factors=["price.mom_20d"])
+    assert r.factors == 1 and r.composite_rows == 0
+    tables = [w[0] for w in writes]
+    assert "composite_daily" not in tables, tables
+    assert set(tables) == {"factor_values", "factor_cross_stats"}
+    assert all(w[1] == {"price.mom_20d"} for w in writes), writes
 
 
 def test_ac3_materialized_value_matches_compute(tmp_path: Path) -> None:

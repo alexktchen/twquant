@@ -102,7 +102,10 @@ def test_ac_windows_cover_max_factor_lookback() -> None:
     cfg = load_config(Path("configs/serving.yaml"), ServingConfig)
     win = cfg.cloud.windows
     assert "prices_daily" in win and "factor_values" in win
+    excluded = set(cfg.cloud.exclude_factors)
     for name in registry.list_factors():
+        if name in excluded:
+            continue  # 雲端明確不算的因子（另有測試驗證它們真的超窗）
         fdef = registry.get(name)
         tables = set(fdef.tables)
         if not tables <= set(win):
@@ -214,3 +217,19 @@ def test_ac_seed_window_and_stock_pattern() -> None:
         _drop(conn)
         conn.close()
         dst_conn.close()
+
+
+def test_cloud_exclude_list_only_holds_factors_that_truly_exceed_a_window() -> None:
+    """exclude_factors 不能拿來藏錯：每個被排除的因子都必須至少對一張修剪表超窗。"""
+    from pathlib import Path
+
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.config import ServingConfig, load_config
+    from twquant.factors import registry
+
+    cfg = load_config(Path("configs/serving.yaml"), ServingConfig)
+    win = cfg.cloud.windows
+    for name in cfg.cloud.exclude_factors:
+        fdef = registry.get(name)  # 未註冊 → raise
+        over = [t for t in fdef.tables if t in win and fdef.lookback_days > win[t]]
+        assert over, f"{name} 沒有任何一張修剪表超窗，不該列在 exclude_factors"

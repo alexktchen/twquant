@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 import twquant.factors.builtins  # noqa: F401
+from tests.conftest import write_stock_meta
 from twquant.backtest import costs as ct
 from twquant.backtest.engine import _fill, _State, run_backtest
 from twquant.backtest.metrics import compute_metrics
@@ -144,6 +145,7 @@ def _synthetic_wh(tmp_path: Path) -> Warehouse:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 
@@ -195,6 +197,7 @@ def _jump_wh(tmp_path: Path) -> Warehouse:
     )
     wh = Warehouse(tmp_path)
     wh.write("clean", "prices_daily", df, source="twse")
+    write_stock_meta(wh, df)
     return wh
 
 
@@ -298,3 +301,55 @@ def test_backtest_deterministic_across_processes(tmp_path: Path) -> None:
 
     a, b = _run("0"), _run("1")
     assert a == b and a != ""
+
+
+def test_slippage_model_none_removes_only_slippage() -> None:
+    """`slippage.model: none` 關掉滑價，手續費與稅照算。
+
+    為什麼需要：`half_spread_bps` 只是**下限**——跳動點半價差
+    `max(0.5×tick/價, half_spread_bps)` 恆常套用，把 bps 設 0 也關不掉滑價。
+    要與「未假設滑價」的外部回測（如 finlab `sim()`）同口徑比較，就需要一個明確的關閉開關；
+    `slippage.model` 這個欄位本來就是為此存在（既有值 `adv_impact`）。
+    """
+    off = ct.CostConfig(slippage=ct.SlippageConfig(model="none"))
+    buy = ct.trade_cost(side="buy", price=500.0, shares=1000, participation=0.5, cfg=off)
+    sell = ct.trade_cost(side="sell", price=500.0, shares=1000, participation=0.5, cfg=off)
+    assert buy.slippage == 0.0 and sell.slippage == 0.0
+    assert buy.commission == pytest.approx(500_000 * 0.001425 * 0.35)
+    assert sell.tax == pytest.approx(500_000 * 0.003)
+    # 預設模型仍照算（不得因新增選項而改變既有行為）
+    on = ct.trade_cost(side="buy", price=500.0, shares=1000, participation=0.5, cfg=_CC)
+    assert on.slippage > 0.0
+
+
+def test_unknown_slippage_model_raises() -> None:
+    """未知模型名不得靜默當成無滑價——那會讓成本悄悄少算（黃金規則 5）。"""
+    with pytest.raises(ValueError, match="slippage"):
+        ct.trade_cost(
+            side="buy",
+            price=100.0,
+            shares=1000,
+            participation=0.0,
+            cfg=ct.CostConfig(slippage=ct.SlippageConfig(model="bogus")),
+        )
+
+
+def test_t135_sub_lot_target_is_recorded_as_unfilled_not_silently_dropped() -> None:
+    """T-135：目標金額不足一張（1,000 股）時，先前靜默歸零、不記未成交。
+
+    實測後果：40 檔等權、10M 資金 → 每檔 25 萬 → 股價 300 元以上買不到一張 →
+    曝險只有 61%，且檔數越多越嚴重（20 檔 89%、30 檔 68%、50 檔 64%）。
+    跨檔數的比較全被這個混淆。這裡只要求它**現形**，成交行為不變。
+    """
+    from twquant.backtest import engine as eng
+
+    st = eng._State(cash=1_000_000.0)
+    # 目標 2% × 1M = 20,000 元；股價 300 → 66 股 < 一張 → 歸零
+    day = dt.date(2026, 1, 5)
+    px = {"9999": {"open": 300.0, "close": 300.0, "_adv": 1e9, "_prev_close": 300.0}}
+    eng._execute(st, {"9999": 0.02}, day, px, ct.CostConfig(), 0.05)
+    assert st.holdings.get("9999", 0) == 0, "不足一張本來就買不到，行為不變"
+    lots = [u for u in st.unfilled if u.reason == "lot"]
+    assert len(lots) == 1, "不足一張必須記成 unfilled，不得靜默"
+    assert lots[0].stock_id == "9999" and lots[0].side == "buy"
+    assert lots[0].shares == 66, "記下原本想買的股數，讓報表能量出被捨去的曝險"

@@ -19,20 +19,30 @@ if TYPE_CHECKING:
 _KEYS = ["date", "stock_id"]
 
 
-def _run(name: str, warehouse: Warehouse, as_of: dt.date) -> pl.DataFrame:
+def _run(
+    name: str, warehouse: Warehouse, as_of: dt.date, params: dict[str, object] | None = None
+) -> pl.DataFrame:
     fdef = get(name)
     assert fdef.fn is not None, f"因子 {name} 無實作"
-    out = fdef.fn(warehouse.view(as_of), fdef.params)
+    out = fdef.fn(warehouse.view(as_of), {**fdef.params, **(params or {})})
     if isinstance(out, pl.LazyFrame):
         out = out.collect()
     return out.sort(_KEYS)
 
 
-def assert_no_lookahead(name: str, warehouse: Warehouse, cut_dates: list[dt.date]) -> None:
-    """驗證因子無前視。cut_dates 為切點；warehouse 需含足夠歷史。"""
-    full = _run(name, warehouse, max(cut_dates))
+def assert_no_lookahead(
+    name: str,
+    warehouse: Warehouse,
+    cut_dates: list[dt.date],
+    params: dict[str, object] | None = None,
+) -> None:
+    """驗證因子無前視。cut_dates 為切點；warehouse 需含足夠歷史。
+
+    params 覆寫 registry 預設（如 smooth_days），讓非預設參數路徑也能被反前視護欄檢查。
+    """
+    full = _run(name, warehouse, max(cut_dates), params)
     for t in cut_dates:
-        truncated = _run(name, warehouse, t)
+        truncated = _run(name, warehouse, t, params)
         expected = full.filter(pl.col("date") <= t).sort(_KEYS)
         if not truncated.equals(expected):
             diff = truncated.join(expected, on=_KEYS, how="anti")

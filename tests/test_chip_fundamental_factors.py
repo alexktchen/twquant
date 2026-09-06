@@ -203,3 +203,88 @@ def test_no_lookahead_revenue(tmp_path: Path) -> None:
         ),
     )
     assert_no_lookahead("fundamental.revenue_yoy", wh, [days[9], days[12], days[18]])
+
+
+# ── T-088／D-045（依 D-008）：融資因子以 T-1 進當日訊號 ─────────────────────
+# margin_daily.available_at = 21:00 晚於 20:00 截點 → 第 d 天的融資在 as_of=d 依定義不可見。
+# 舊實作把值標成融資列自己的日期，materialize 只留 dates=[as_of]，於是整張表歷史 0 列。
+# D-008 明訂「融資以 T-1 進當日訊號」：因子須把值標到**下一個交易日**。
+
+
+def _margin(days: list[dt.date], bal: dict[str, list[tuple[int, int]]]) -> pl.DataFrame:
+    rows = [
+        {
+            "date": d,
+            "stock_id": s,
+            "margin_balance": bal[s][i][0],
+            "short_balance": bal[s][i][1],
+            "available_at": _at(d, 21),  # 21:00：晚於 20:00 截點
+        }
+        for i, d in enumerate(days)
+        for s in _STOCKS
+    ]
+    return pl.DataFrame(rows).with_columns(pl.col("available_at").cast(schemas.TW_DT))
+
+
+def _wh_margin(
+    tmp_path: Path, days: list[dt.date], bal: dict[str, list[tuple[int, int]]]
+) -> Warehouse:
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(days), source="twse")
+    wh.write(
+        "clean", "margin_daily", _margin(days[:-1], bal), source="twse"
+    )  # 最後一天的融資尚未公布
+    return wh
+
+
+def _vals(wh: Warehouse, name: str, day: dt.date) -> dict[str, float]:
+    out = fc.compute([name], wh.view(day), dates=[day])
+    return {r["stock_id"]: r["value"] for r in out.to_dicts()}
+
+
+_D = [dt.date(2026, 6, d) for d in (1, 2, 3, 4, 5, 8, 9, 10)]  # 8 個交易日（含跨週末）
+
+
+def test_t088_short_margin_ratio_uses_previous_session_per_d008(tmp_path: Path) -> None:
+    """as_of=d 的券資比 = 融資列 d−1 的 short/margin；d 當天的融資（21:00）不得被用到。"""
+    bal = {
+        "1101": [(1000, 100)] * 7,
+        "2330": [
+            (2000, 100),
+            (2000, 200),
+            (2000, 300),
+            (2000, 400),
+            (2000, 500),
+            (2000, 600),
+            (2000, 700),
+        ],
+    }
+    wh = _wh_margin(tmp_path, _D, bal)
+    got = _vals(wh, "chip.short_margin_ratio", _D[3])  # 6/4：應用 6/3 的餘額 → 2330 = 300/2000
+    assert got["2330"] == pytest.approx(0.15) and got["1101"] == pytest.approx(0.10)
+    assert _vals(wh, "chip.short_margin_ratio", _D[0]) == {}, "第一天沒有 T-1 融資，不得有值"
+
+
+def test_t088_margin_factors_label_next_session_across_weekend(tmp_path: Path) -> None:
+    """週五（6/5）的融資要標到下週一（6/8），不是標成 6/6 這種非交易日。"""
+    bal = {s: [(1000 + 10 * i, 50) for i in range(7)] for s in _STOCKS}
+    wh = _wh_margin(tmp_path, _D, bal)
+    mon = _vals(wh, "chip.short_margin_ratio", _D[5])  # 6/8（週一）→ 用 6/5 的餘額 1040
+    assert mon["1101"] == pytest.approx(50 / 1040)
+
+
+def test_t088_margin_velocity_has_value_on_as_of_day(tmp_path: Path) -> None:
+    """velocity 需要 window+1 列融資；標到下一交易日後，as_of 當天要有值（舊實作永遠 0 列）。"""
+    bal = {s: [(1000 + 100 * i, 50) for i in range(7)] for s in _STOCKS}
+    wh = _wh_margin(tmp_path, _D, bal)
+    got = _vals(wh, "chip.margin_velocity_5d", _D[-1])  # 6/10：用到 6/9 的融資（第 7 列）
+    assert set(got) == set(_STOCKS)
+    # 6/9 融資 1600 − 5 列前（6/2）1100 = 500，除以 5 日成交量 5000（每日 1000）
+    assert got["1101"] == pytest.approx(500 / 5000)
+
+
+def test_t088_margin_factors_no_lookahead(tmp_path: Path) -> None:
+    bal = {s: [(1000 + 100 * i, 50 + i) for i in range(7)] for s in _STOCKS}
+    wh = _wh_margin(tmp_path, _D, bal)
+    for name in ("chip.short_margin_ratio", "chip.margin_velocity_5d"):
+        assert_no_lookahead(name, wh, _D[2:])

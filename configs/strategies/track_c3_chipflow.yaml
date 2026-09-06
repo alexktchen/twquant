@@ -1,0 +1,51 @@
+# C3「籌碼＋技術」——台股特有的法人與融資券資料，疊在 C1 的技術骨架上。
+#
+# 為什麼台股值得單獨做這一軌：法人買賣超與融資融券餘額是**台股逐日公開、
+# 且顆粒度到個股**的資料，多數市場沒有。投信作帳、外資連買、散戶融資追高，
+# 都是本地文獻與實務長期觀察到的現象。
+#
+# **刻意不用 `chip.broker_*`（主力分點）三個因子**，兩個理由都是量出來的：
+#   1. 效能：T-150 記錄 broker 因子每天**無條件全撈** `broker_trades`（5,700 萬列、
+#      單次約 286 秒），放進逐日回測會慢到不可行（實測全因子物化 90 分鐘／天）。
+#   2. 涵蓋：分點資料只到 2022 年起，會讓回測窗比其他 C 軌短，失去可比性。
+# 本軌用的 `institutional_daily`（2,569,035 列）與 `margin_daily`（2,602,677 列）
+# 都是 2020-01-02 起全期涵蓋，且表小得多。
+#
+# 四個籌碼訊號的先驗方向（皆已在 factor registry 宣告，此處不重複定義）：
+#   chip.trust_streak        +1  投信連續買超天數（投信作帳／群聚買進）
+#   chip.foreign_net_10d     +1  外資 10 日買超占成交量比
+#   chip.margin_velocity_5d  −1  融資餘額淨增 ÷ 成交量（散戶密集度代理，負向）
+#   chip.short_margin_ratio  +1  券資比（軋空燃料）——**先驗較弱**，registry 註明
+#                                「實際符號待 IC」，故只給 10% 權重
+#
+# 技術面保留 C1 的兩個主軸（52 週高點、量能），讓 C3 − C1 這條邊量出
+# 「加籌碼值多少」。**沒有任何獲利門檻**（同 C1）——飆股常常還沒賺錢。
+#
+# 未經部署裁決，勿用於實盤。
+name: track_c3_chipflow
+description: C3 籌碼流向：投信連買／外資買超／融資反向／券資比 × 52 週高點與量能（不含分點資料）
+trial_scope: chipflow_technical
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 50_000_000
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: chip.trust_streak, weight: 0.20 }
+  - { factor: chip.foreign_net_10d, weight: 0.15 }
+  - { factor: chip.margin_velocity_5d, weight: 0.15 } # direction=-1，由 build 自動轉負權重
+  - { factor: chip.short_margin_ratio, weight: 0.10 } # 先驗較弱，權重最低
+  - { factor: price.high_52w, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.15 }
+require_all_factors: true
+
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

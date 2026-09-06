@@ -180,3 +180,53 @@ def param_plateau(
         res = run_backtest(cfg, cost_cfg, start, end, warehouse)
         cells.append(PlateauCell(params={"window": val}, sharpe=res.metrics.sharpe))
     return cells
+
+
+@dataclass(frozen=True)
+class PairedBlockStats:
+    """配對日報酬差的區塊統計（T-127／SPEC-013 §3.7，D-061／R1）。"""
+
+    mean: float  # 日均配對差
+    block_se: float | None  # 月度區塊標準誤；只有一個區塊時為 None
+    t_stat: float | None
+    n_days: int
+    n_blocks: int
+
+    @property
+    def indistinguishable(self) -> bool:
+        """|t| < 2 或無從估計不確定性 → 「未能區分」。
+
+        這是 SPEC-013 §3.7 明列的**合法結果**，由函數自己表態而不是留給讀者
+        看著點估計自行判斷——後者正是「事後找故事」的入口。
+        """
+        return self.t_stat is None or abs(self.t_stat) < 2.0
+
+
+def paired_block_stats(days: list[dt.date], diffs: list[float]) -> PairedBlockStats:
+    """配對日報酬差的均值與**月度區塊**標準誤。
+
+    為什麼不用日頻標準誤：本專案的持股期是 20 個交易日，日報酬高度自相關，
+    把每日配對差當獨立樣本會嚴重高估顯著性（D-061／R1）。以「曆月」為區塊，
+    先算每月均值再對月均值取標準誤，讓月內的自相關不再假裝成獨立資訊。
+
+    只有一個區塊時 `block_se` 回傳 **None 而非 0**：0 會被下游讀成「極度顯著」，
+    是最糟的失敗模式（黃金規則 5 的精神）。
+    """
+    if len(days) != len(diffs):
+        raise ValueError(f"days 與 diffs 長度不符：{len(days)} vs {len(diffs)}")
+    if not diffs:
+        return PairedBlockStats(0.0, None, None, 0, 0)
+
+    blocks: dict[tuple[int, int], list[float]] = {}
+    for d, x in zip(days, diffs, strict=True):
+        blocks.setdefault((d.year, d.month), []).append(x)
+    means = [sum(v) / len(v) for _, v in sorted(blocks.items())]
+    mean = sum(diffs) / len(diffs)
+    if len(means) < 2:
+        return PairedBlockStats(mean, None, None, len(diffs), len(means))
+
+    m = sum(means) / len(means)
+    var = sum((x - m) ** 2 for x in means) / (len(means) - 1)
+    se = (var / len(means)) ** 0.5
+    t = mean / se if se > 0 else None
+    return PairedBlockStats(mean, se, t, len(diffs), len(means))

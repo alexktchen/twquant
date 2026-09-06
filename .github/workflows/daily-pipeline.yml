@@ -1,15 +1,16 @@
 # T-056（D-030）：每日雲端 pipeline——本機關機後的唯一常駐排程。
-# 兩班次（Asia/Taipei）：19:05 主跑（行情/法人已公布）；22:05 補跑（融資券 21:30、
+# 兩班次（Asia/Taipei）：19:23 主跑（行情/法人已公布）；22:43 補跑（融資券 21:30、
 # 券商分點晚間公布；pipeline 冪等，重跑只補新資料）。GHA cron 常態晚發車 3-15 分，
 # 但 2026-08-27/28 曾延遲 7-10 小時跨過台北午夜——交易日解析見下方 Resolve trading day。
+# 分鐘刻意避開每小時起始尖峰；GitHub 官方說尖峰時 schedule 可能延遲甚至被丟棄。
 # 失敗通知：GitHub 對 scheduled workflow 失敗會寄信給 repo 擁有者（免額外設定）。
 # 已知限制：平日國定假日無行情 → 降級紅燈（~15-20 次/年），屬預期噪音（見 D-030）。
 name: daily-pipeline
 
 on:
   schedule:
-    - cron: "5 11 * * 1-5" # 19:05 台北
-    - cron: "5 14 * * 1-5" # 22:05 台北（補融資券/券商）
+    - cron: "23 11 * * 1-5" # 19:23 台北
+    - cron: "43 14 * * 1-5" # 22:43 台北（補融資券/券商）
   workflow_dispatch:
     inputs:
       date:
@@ -55,22 +56,15 @@ jobs:
         run: |
           DAY="${{ inputs.date }}"
           if [ -z "$DAY" ]; then
-            # 不能直接用「執行當下的台北日期」：GHA cron 晚發車跨過台北午夜時（2026-08-27/28
-            # 延遲 7-10 小時），會解析成隔日甚至週六 → 品質閘門必紅、原定交易日整天漏抓。
-            # 行情最早也要 17:00（台北）後才齊、班次在 19:05/22:05，故 17:00 前發車一律視為
-            # 前一日的延遲補跑；解析落在週末（cron 只排平日，必為延遲或手動）回退到週五。
-            if [ "$(TZ=Asia/Taipei date +%-H)" -lt 17 ]; then
-              DAY=$(TZ=Asia/Taipei date -d yesterday +%F)
-            else
-              DAY=$(TZ=Asia/Taipei date +%F)
-            fi
-            case "$(date -d "$DAY" +%u)" in
-              6) DAY=$(date -d "$DAY -1 day" +%F) ;;
-              7) DAY=$(date -d "$DAY -2 days" +%F) ;;
-            esac
+            # 不能用 runner 當下日期：schedule 可能延遲跨日/週末。回推最近一個預定班次，
+            # 取得原排程所屬日期；平日國定假日仍由品質閘門大聲失敗。
+            uv run python scripts/resolve_pipeline_day.py \
+              --slot "19:23" --slot "22:43" >> "$GITHUB_ENV"
+          else
+            # 手動補跑日期由操作者明確指定，優先於自動解析。
+            echo "DAY=$DAY" >> "$GITHUB_ENV"
+            echo "FROM7=$(date -d "$DAY -7 days" +%F)" >> "$GITHUB_ENV"
           fi
-          echo "DAY=$DAY" >> "$GITHUB_ENV"
-          echo "FROM7=$(date -d "$DAY -7 days" +%F)" >> "$GITHUB_ENV"
 
       - name: 融資券 T-1 補抓（21:30 才公布，前幾日缺口冪等回補）
         run: uv run python -m twquant backfill --from "$FROM7" --to "$DAY" --tables margin_daily --no-skip-existing

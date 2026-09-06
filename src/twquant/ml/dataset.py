@@ -6,29 +6,118 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
+from twquant.panel import session_index
 
 
-def forward_open_returns(prices: pl.DataFrame, horizon: int) -> pl.DataFrame:
+def attach_adjustment(prices: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
+    """為 prices 掛上累積除權息還原因子 `adj`（T-098／D-054）。純函數。
+
+    `adj(t) = Π{ adj_factor(e) : ex_date(e) ≤ t }`——**固定過去錨**，只依賴 t 以前的
+    事件，故與 as_of 無關。錨之前的事件對報酬比值 `adj(t1)/adj(t2)` 恆等抵銷，
+    所以只載入所需期間的事件即可。
+
+    以 as-of join（backward）而非等值 join：實測約 5.75% 的除權息日在 `prices_daily`
+    沒有對應列（颱風休市、停牌），等值 join 會**靜默**丟掉那些調整。
+    """
+    if events.is_empty():
+        # 靜默回傳 adj=1.0 會讓 total_return=True 的訓練**原樣退回未還原標籤**，
+        # 而呼叫端仍會印「標籤改用總報酬」——正是 D-054 要消滅的失效模式。
+        # 本函數只在呼叫端已選擇 total_return 時才被呼叫，故空表一定是錯誤狀態。
+        raise ValueError(
+            "corporate_events 讀到 0 筆事件，但標籤已要求總報酬（D-054）。"
+            "空事件表會靜默退回未還原標籤——6~8 月近兩成的「最差一成」是除息假象。"
+            "請先確認供應層 corporate_events 已載入（scripts/load_corporate_events.py）。"
+        )
+    bad = events.filter(pl.col("adj_factor").is_null() | (pl.col("adj_factor") <= 0.0))
+    if bad.height:
+        raise ValueError(
+            f"adj_factor 須 > 0 且非 null，違規 {bad.height} 列（首列：{bad.row(0)}）"
+            "——0 或負值會經累乘污染該股全部歷史"
+        )
+    cum = (
+        events.select("date", "stock_id", "adj_factor")
+        .sort("stock_id", "date")
+        .with_columns(adj=pl.col("adj_factor").cum_prod().over("stock_id"))
+        .select("stock_id", "date", "adj")
+        .sort("date")
+    )
+    return (
+        prices.sort("date")
+        .join_asof(cum, on="date", by="stock_id", strategy="backward")
+        .with_columns(adj=pl.col("adj").fill_null(1.0))
+    )
+
+
+def _return_price(adjusted: bool, columns: Sequence[str]) -> pl.Expr:
+    """報酬用價格：`adjusted` 時除以累積還原因子 `adj`（T-098／D-054）。
+
+    `adj` 是固定過去錨的累乘（只含 ex_date ≤ 該列日期的事件），故與 as_of 無關。
+    缺欄卻要求還原 → raise：靜默回退成價格報酬正是 D-054 要消滅的失效模式。
+    """
+    if not adjusted:
+        return pl.col("open")
+    if "adj" not in columns:
+        raise ValueError(
+            "adjusted=True 需要 adj 欄（固定過去錨的累積除權息還原因子）；"
+            "缺欄時不得回退成未還原價格——6~8 月的標籤會有近兩成是除息假象（D-054）"
+        )
+    return pl.col("open") / pl.col("adj")
+
+
+def forward_open_returns(
+    prices: pl.DataFrame,
+    horizon: int,
+    *,
+    adjusted: bool = False,
+    max_span_sessions: int | None = None,
+) -> pl.DataFrame:
     """open(t+1) → open(t+1+h) 前向報酬。輸入需含 (date, stock_id, open)。
 
     「t+1」是各股票自身的下一個有行情列——停牌期間不可成交，進出場順延（與回測
     引擎的可成交語意一致）。未來列不足者 fwd_ret 為 null（保留列，不靜默丟棄）。
+
+    `adjusted=True` 時改算**總報酬**（含股利），需另含 `adj` 欄。標籤是前瞻構造，
+    不受 `assert_no_lookahead` 與還原價錨定規則（D-055）約束。
+
+    **`max_span_sessions`（T-139）**：`shift` 是**列位移**，某檔中間缺 N 個開市日時，
+    「h 日報酬」實際橫跨數月而不帶任何標記——它只是一個看起來很大的數字，會被模型
+    當成真實的極端報酬學進去。實測 `prices_daily` 有 413 處 >5 開市日的個股缺口
+    （最大 260 日），h=20 下約 8,673 個訓練樣本受影響。
+
+    給定時，出場列與當前列的**開市日跨距**超過此值即設 null。跨距以全市場日曆計，
+    故連假不受影響（全市場休市不佔開市日）。**預設 None ＝不啟用**，既有配置的
+    結果逐位元不變；是否啟用由配置顯式決定。
     """
     if horizon < 1:
         raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
+    if max_span_sessions is not None and max_span_sessions < horizon + 1:
+        raise ValueError(
+            f"max_span_sessions({max_span_sessions}) 不得小於 horizon+1({horizon + 1})"
+            "：出場列至少在 h+1 個開市日之後，設得更小會讓所有標籤變 null"
+        )
+    px = _return_price(adjusted, prices.columns)
+    entry = px.shift(-1).over("stock_id")
+    exit_ = px.shift(-(1 + horizon)).over("stock_id")
+    if max_span_sessions is not None:
+        prices = session_index(prices)
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        span = sidx.shift(-(1 + horizon)).over("stock_id", order_by="date") - sidx
+        exit_ = pl.when(span <= max_span_sessions).then(exit_).otherwise(None)
     return (
         prices.sort("stock_id", "date")
         .with_columns(
-            (
-                pl.col("open").shift(-(1 + horizon)).over("stock_id")
-                / pl.col("open").shift(-1).over("stock_id")
-                - 1.0
-            ).alias("fwd_ret")
+            # schema 允許 open >= 0，故 0 是合法值。未防護時 open(t+1)=0 → +inf，
+            # 而 excess_rank_labels 的 mean().over("date") 會把 inf 擴散到整個橫斷面，
+            # 讓當日所有 label 塌成同一個常數。成本感知路徑早有同一道防護。
+            pl.when((entry > 0.0) & (exit_ > 0.0))
+            .then(exit_ / entry - 1.0)
+            .otherwise(pl.lit(None, dtype=pl.Float64))
+            .alias("fwd_ret")
         )
         .select("date", "stock_id", "fwd_ret")
         .sort("date", "stock_id")
@@ -64,8 +153,21 @@ def cost_adjusted_return_labels(
     position_notional_twd: float,
     downside_penalty: float,
     cost_cfg: CostConfig,
+    adjusted: bool = False,
+    max_span_sessions: int | None = None,
 ) -> pl.DataFrame:
-    """建立 H 日成本後超額報酬標籤；ADV 僅含訊號日及以前資料。"""
+    """建立 H 日成本後超額報酬標籤；ADV 僅含訊號日及以前資料。
+
+    `adjusted=True` 時毛報酬改用還原價（總報酬，T-098／D-054），但**成本仍用真實
+    成交價**——滑價的半價差是價格相依的（`costs.py:_half_spread_frac`），股數也由
+    真實價決定；用還原價會同時算錯這兩項。
+
+    **`max_span_sessions`（T-144）**：本函式有**自己的** `shift(-(1 + horizon))`，與
+    `forward_open_returns` 完全獨立。T-139 只防護了後者，而凍結模型的配置是
+    `transform: cost_adjusted_return`——於是那道防護對它**是 no-op**：旗標看起來接上了，
+    實際什麼都沒擋。這裡補上同一道防護：出場列與當前列的開市日跨距超過此值即設 null。
+    跨距以全市場日曆計，故連假不受影響。**預設 None ＝不啟用**，既有結果逐位元不變。
+    """
     required = {"date", "stock_id", "open", "amount"}
     missing = sorted(required - set(prices.columns))
     if missing:
@@ -78,6 +180,11 @@ def cost_adjusted_return_labels(
         raise ValueError(f"position_notional_twd 須 > 0，得到 {position_notional_twd}")
     if downside_penalty < 0:
         raise ValueError(f"downside_penalty 須 >= 0，得到 {downside_penalty}")
+    if max_span_sessions is not None and max_span_sessions < horizon + 1:
+        raise ValueError(
+            f"max_span_sessions({max_span_sessions}) 不得小於 horizon+1({horizon + 1})"
+            "：出場列至少在 h+1 個開市日之後，設得更小會讓所有標籤變 null"
+        )
 
     def estimated_cost_rate(row: dict[str, float | None]) -> float | None:
         entry_raw, exit_raw, adv_raw = row["_entry"], row["_exit"], row["_adv"]
@@ -98,22 +205,49 @@ def cost_adjusted_return_labels(
         )
         return (buy.total + sell.total) / (entry * shares)
 
+    px_ret = _return_price(adjusted, prices.columns)
+    exit_px = pl.col("open").shift(-(1 + horizon)).over("stock_id")
+    exit_r = px_ret.shift(-(1 + horizon)).over("stock_id")
+    if max_span_sessions is not None:
+        prices = session_index(prices)
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        span = sidx.shift(-(1 + horizon)).over("stock_id", order_by="date") - sidx
+        ok = span <= max_span_sessions
+        # 出場價與報酬基準價都要遮：只遮後者的話，成本仍會用一個已判定不可用的
+        # 出場價算出來，label 變成「乾淨的毛報酬減掉髒的成本」。
+        exit_px = pl.when(ok).then(exit_px).otherwise(None)
+        exit_r = pl.when(ok).then(exit_r).otherwise(None)
     prepared = (
         prices.sort("stock_id", "date")
         .with_columns(
             pl.col("open").shift(-1).over("stock_id").alias("_entry"),
-            pl.col("open").shift(-(1 + horizon)).over("stock_id").alias("_exit"),
+            exit_px.alias("_exit"),
+            # 報酬基準價：adjusted 時為還原價，否則與 _entry/_exit 同值
+            px_ret.shift(-1).over("stock_id").alias("_entry_r"),
+            exit_r.alias("_exit_r"),
             pl.col("amount")
             .rolling_median(window_size=adv_window_sessions, min_samples=adv_window_sessions)
             .over("stock_id")
             .alias("_adv"),
         )
         .with_columns(
-            (pl.col("_exit") / pl.col("_entry") - 1.0).alias("_gross"),
+            # schema 允許 open >= 0，故 0 是合法值；但 SPEC-011 §2 要求「價格無效」時
+            # label 為 null。少了這道防護，除以 0 會得到 inf，再被下一步的當日均值
+            # 擴散到整個橫斷面（成本路徑早已有相同判斷，見 estimated_cost_rate）。
+            pl.when(
+                (pl.col("_entry") > 0.0)
+                & (pl.col("_exit") > 0.0)
+                & (pl.col("_entry_r") > 0.0)
+                & (pl.col("_exit_r") > 0.0)
+            )
+            .then(pl.col("_exit_r") / pl.col("_entry_r") - 1.0)
+            .otherwise(pl.lit(None, dtype=pl.Float64))
+            .alias("_gross"),
             pl.struct("_entry", "_exit", "_adv")
             .map_elements(estimated_cost_rate, return_dtype=pl.Float64)
             .alias("_cost"),
         )
+        # mean() 略過 null，故均值即 SPEC-011 §2 的「當日有效宇宙」平均。
         .with_columns((pl.col("_gross") - pl.col("_gross").mean().over("date")).alias("_excess"))
         .with_columns((pl.col("_excess") - pl.col("_cost")).alias("_net"))
     )
@@ -137,6 +271,35 @@ def cross_rank_pct(frame: pl.DataFrame, value_col: str, out_col: str) -> pl.Data
             / pl.col(value_col).count().over("date")
         ).alias(out_col)
     )
+
+
+def assert_feature_coverage(
+    features: Mapping[str, pl.DataFrame], *, min_non_null_share: float = 0.0
+) -> dict[str, float]:
+    """訓練前的特徵覆蓋閘門（T-088 AC-3）：任一特徵無列或非空比例 ≤ 門檻即 raise，回傳各特徵非空比例。
+
+    Phase 1 的 25 個 pin 特徵裡有 2 個在 factor_values 從未有值（D-045）、1 個全 null（T-082），
+    LightGBM 照樣「成功」訓練——全空特徵在模型裡是白佔的欄位，而沒有任何一關報錯。
+    只掛在訓練路徑；生產 `ml score` 單日缺某因子屬正常，不得套用。
+    """
+    if not 0.0 <= min_non_null_share < 1.0:
+        raise ValueError(f"min_non_null_share 須介於 [0, 1)，得到 {min_non_null_share}")
+    shares: dict[str, float] = {}
+    dead: list[str] = []
+    for name, df in features.items():
+        n = df.height
+        share = float(df["value"].is_not_null().sum() / n) if n else 0.0
+        shares[name] = share
+        if n == 0 or share <= min_non_null_share:
+            dead.append(f"{name}（{n:,} 列、非空 {share:.1%}）")
+    if dead:
+        raise ValueError(
+            "特徵覆蓋不足，拒絕訓練："
+            + "；".join(dead)
+            + f"。門檻 non-null > {min_non_null_share:.0%}。全空或近空的特徵在模型裡是白佔的欄位"
+            "（Phase 1 曾以 3 個空特徵訓練並回報成功）——先補資料或從配置移除，不得靜默訓練。"
+        )
+    return shares
 
 
 def assemble(features: Mapping[str, pl.DataFrame], labels: pl.DataFrame) -> pl.DataFrame:
