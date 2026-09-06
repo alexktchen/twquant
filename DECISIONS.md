@@ -5,35 +5,6 @@
 
 ## 待裁決
 
-### D-081（2026-09-06，待裁決）洞悉層實作：六個必須先裁的參數
-
-規劃見 [PLAN-2026-09-06-insight-layer.md](docs/PLAN-2026-09-06-insight-layer.md)。
-盤點結果是**基座已經齊了**（LLM client 的離線降級／預算閘／schema 重試、凍結 prompt、
-推薦快照、證據包合約、回訓契約皆有測試），真正缺的是「組證據包 → 跑分析 → 接回平台」三塊。
-但有六個參數屬於**看到結果前就該寫死**的設計選擇，先裁再動手。
-
-| # | 問題 | 選項 A（建議） | 選項 B | 影響範圍 |
-|---|---|---|---|---|
-| a | `candidate_analysis` 走哪個模型 | `claude-opus-5`（現行世代，adaptive thinking；與 llm.yaml 目前的 `claude-opus-4-8` 同價 $5/$25） | `claude-sonnet-5`（$2/$10） | configs/llm.yaml、MODEL-POLICY §1 |
-| b | 每晚分析檔數 N | **30**（前 30 名），事前登記 | 依剩餘預算動態調整 | 成本、涵蓋率 |
-| c | `recommended_bucket` 是否呈現 | 存並顯示為「LLM 提議」，與最終分類分開 | 不顯示，只存 | 平台 UI、L2 邊界 |
-| d | rationale 數字必須能在被引用證據中找到 | 先實作但只記錄拒絕率，兩週後再決定是否強制 | 立刻強制 | 分析可用率 |
-| e | 供應層證據的 `url` 形式 | 內部 URI `twquant://serving/<table>/<sid>/<date>`，UI 明標內部資料 | 放空字串／另加欄位 | InsightEvidence 合約 |
-| f | `available_at_estimated=true` 的列能否當 support 證據 | **不能**，只能是 `estimated` 中性證據 | 可以，但標記 | PIT 誠實度 |
-
-**兩個非參數、但必須一併記錄的事實**
-
-1. **目前沒有任何消息／公告／法說資料來源。** `mops.py` 只抓月營收；`corporate_events` 只有
-   除權息／股利／減資／分割（12,177 列，2019-01~2026-09）。PRD-002 §4.2 的「消息與事件」區段
-   在有來源之前**只能誠實記為 gap**，不得由 LLM 以常識補寫。新聞接入是獨立研究線（PRD-002 §11），
-   需自己的來源、PIT、成本與 fixture 規格，不在洞悉層的關鍵路徑上。
-2. **SPEC-008 §3 的 API 範例已過時**：`output_format=` 參數已棄用，且 `budget_tokens` 在現行模型
-   會回 400。實作時一律依 claude-api skill 現場確認，不憑記憶；只有 `_anthropic_backend` 需要改，
-   `Backend` 介面與其上所有測試不受影響。
-
-**本輪明文不做**（各需獨立的事前登記）：L2 規則分類的最終 `bucket`、任何訓練或回訓、
-LLM 對策略／風控／下單的寫入路徑。
-
 ### D-062（2026-09-05，待裁決）宇宙門檻：T-120 的前提被證偽，但問題換成**體制耦合**
 
 T-120 AC-1 已量測完成（22 年 × 每月取樣後年度平均，資料為 T-116 回補的 2,671 檔
@@ -209,6 +180,49 @@ T-120 寫的是「3,000 萬 TWD 在 2005 與 2026 是完全不同的門檻……
 
 
 ## 已裁決
+
+### D-081（2026-09-06，已裁決）洞悉層實作：六個必須先裁的參數
+
+規劃見 [PLAN-2026-09-06-insight-layer.md](docs/PLAN-2026-09-06-insight-layer.md)。
+盤點結果是**基座已經齊了**（LLM client 的離線降級／預算閘／schema 重試、凍結 prompt、
+推薦快照、證據包合約、回訓契約皆有測試），真正缺的是「組證據包 → 跑分析 → 接回平台」三塊。
+但有六個參數屬於**看到結果前就該寫死**的設計選擇，先裁再動手。
+
+| # | 問題 | 選項 A（建議） | 選項 B | 影響範圍 |
+|---|---|---|---|---|
+| a | `candidate_analysis` 走哪個模型 | `claude-opus-5`（現行世代，adaptive thinking；與 llm.yaml 目前的 `claude-opus-4-8` 同價 $5/$25） | `claude-sonnet-5`（$2/$10） | configs/llm.yaml、MODEL-POLICY §1 |
+| b | 每晚分析檔數 N | **30**（前 30 名），事前登記 | 依剩餘預算動態調整 | 成本、涵蓋率 |
+| c | `recommended_bucket` 是否呈現 | 存並顯示為「LLM 提議」，與最終分類分開 | 不顯示，只存 | 平台 UI、L2 邊界 |
+| d | rationale 數字必須能在被引用證據中找到 | 先實作但只記錄拒絕率，兩週後再決定是否強制 | 立刻強制 | 分析可用率 |
+| e | 供應層證據的 `url` 形式 | 內部 URI `twquant://serving/<table>/<sid>/<date>`，UI 明標內部資料 | 放空字串／另加欄位 | InsightEvidence 合約 |
+| f | `available_at_estimated=true` 的列能否當 support 證據 | **不能**，只能是 `estimated` 中性證據 | 可以，但標記 | PIT 誠實度 |
+
+**兩個非參數、但必須一併記錄的事實**
+
+1. **目前沒有任何消息／公告／法說資料來源。** `mops.py` 只抓月營收；`corporate_events` 只有
+   除權息／股利／減資／分割（12,177 列，2019-01~2026-09）。PRD-002 §4.2 的「消息與事件」區段
+   在有來源之前**只能誠實記為 gap**，不得由 LLM 以常識補寫。新聞接入是獨立研究線（PRD-002 §11），
+   需自己的來源、PIT、成本與 fixture 規格，不在洞悉層的關鍵路徑上。
+2. **SPEC-008 §3 的 API 範例已過時**：`output_format=` 參數已棄用，且 `budget_tokens` 在現行模型
+   會回 400。實作時一律依 claude-api skill 現場確認，不憑記憶；只有 `_anthropic_backend` 需要改，
+   `Backend` 介面與其上所有測試不受影響。
+
+**本輪明文不做**（各需獨立的事前登記）：L2 規則分類的最終 `bucket`、任何訓練或回訓、
+LLM 對策略／風控／下單的寫入路徑。
+
+#### 裁決（2026-09-06，使用者）：六項全採選項 A
+
+| # | 裁定 | 已落地 |
+|---|---|---|
+| a | `candidate_analysis` 走 `claude-opus-5` | `configs/llm.yaml` 的 OPUS 由 `claude-opus-4-8` 改為 `claude-opus-5` 並新增 `candidate_analysis: opus` 路由；MODEL-POLICY §1 同步。**副作用（明記）**：`advisor` 與 `explainer` 也路由到 opus，故一併換代；三者測試皆走注入 backend，不受模型字串影響 |
+| b | 每晚分析 N = 30（前 30 名） | 事前登記；T-219 的 CLI 預設值 |
+| c | `recommended_bucket` 存並顯示為「LLM 提議」，與最終分類分開 | T-216 存欄位、T-220 顯示 |
+| d | rationale 數字驗證**先實作但不拒絕**，只記錄 | T-216 以 `unverified_numbers` 存進 artifact，兩週後看拒絕率再決定是否強制 |
+| e | 供應層證據用內部 URI `twquant://serving/<table>/<sid>/<date>` | T-217 建包時產生；UI 明標內部資料 |
+| f | `available_at_estimated=true` 的列**不得**當 support | T-217 一律降為中性 `estimated` 證據 |
+
+門檻性質的 (b) 為事前登記，**不得因為看到結果而事後調整**。
+
 
 ### D-080（2026-09-06，已裁決）平台與洞悉回饋採分期實作
 

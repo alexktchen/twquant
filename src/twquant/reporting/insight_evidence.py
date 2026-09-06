@@ -76,8 +76,23 @@ class InsightEvidence(BaseModel):
         return self
 
 
+class AnalysisRisk(BaseModel):
+    """One named risk the analysis raised, tied to the evidence that raised it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: str = Field(min_length=1)
+    evidence_ids: tuple[str, ...] = ()
+    note: str = ""
+
+
 class InsightAnalysis(BaseModel):
-    """The generated reading of a pack, saved together with how it was produced."""
+    """The generated reading of a pack, saved together with how it was produced.
+
+    v1 (T-210) carried only a summary and its citations. v2 (T-216) adds the structured
+    fields of PRD-002 §5; the extra fields stay optional so v1 packs keep loading, and a
+    validator requires them once ``analysis_schema_version`` reaches 2.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -88,6 +103,17 @@ class InsightAnalysis(BaseModel):
     as_of: dt.datetime
     summary: str = Field(min_length=1)
     cited_evidence_ids: tuple[str, ...]
+    # ── v2 (PRD-002 §5) ───────────────────────────────────────────────────────────
+    stance: Literal["support", "neutral", "conflict", "insufficient_data"] | None = None
+    supporting_evidence_ids: tuple[str, ...] = ()
+    contradicting_evidence_ids: tuple[str, ...] = ()
+    event_horizon: Literal["short", "medium", "long", "unknown"] | None = None
+    risks: tuple[AnalysisRisk, ...] = ()
+    missing_data: tuple[str, ...] = ()
+    # LLM 的**提案**欄位，不是最終分類（D-081c）；最終 bucket 由版本化規則另算。
+    recommended_bucket: Literal["select", "watch", "exclude"] | None = None
+    # D-081d：數字驗證這一版只記錄不拒絕，留下拒絕率供日後決定是否強制。
+    unverified_numbers: tuple[str, ...] = ()
 
     @field_validator("as_of")
     @classmethod
@@ -102,6 +128,29 @@ class InsightAnalysis(BaseModel):
             raise ValueError("cited_evidence_ids 不得重複")
         return self
 
+    @model_validator(mode="after")
+    def _v2_fields_are_complete_and_consistent(self) -> InsightAnalysis:
+        """Require the v2 fields once v2 is claimed, and keep leanings inside the citations."""
+        if self.analysis_schema_version >= 2:
+            for name in ("stance", "recommended_bucket", "event_horizon"):
+                if getattr(self, name) is None:
+                    raise ValueError(f"analysis_schema_version 2 必須提供 {name}")
+        cited = set(self.cited_evidence_ids)
+        leaned_on = set(self.supporting_evidence_ids) | set(self.contradicting_evidence_ids)
+        # 支持／反對必須也在 cited 裡，才會一起受證據存在與截點檢查（見 InsightPack）。
+        if not leaned_on <= cited:
+            raise ValueError(
+                f"支持／反對的 evidence 必須列入 cited_evidence_ids：{sorted(leaned_on - cited)}"
+            )
+        overlap = set(self.supporting_evidence_ids) & set(self.contradicting_evidence_ids)
+        if overlap:
+            raise ValueError(f"evidence 不得同時列為支持與反對：{sorted(overlap)}")
+        if self.stance == "support" and not self.supporting_evidence_ids:
+            raise ValueError("stance=support 必須提供 supporting_evidence_ids")
+        if self.stance == "insufficient_data" and not self.missing_data:
+            raise ValueError("stance=insufficient_data 必須在 missing_data 說明缺什麼")
+        return self
+
 
 class InsightPack(BaseModel):
     """Evidence plus an optional analysis; an absent analysis must say why it is absent."""
@@ -110,6 +159,8 @@ class InsightPack(BaseModel):
 
     schema_version: Literal[1] = INSIGHT_SCHEMA_VERSION
     insight_run_id: str = Field(pattern=_SAFE_ID)
+    # 推薦快照不可變，所以洞悉反向掛在證據包上，讀取端以 (run_id, stock_id) join（PLAN §3.3）。
+    recommendation_run_id: str | None = Field(default=None, pattern=_SAFE_ID)
     as_of: dt.datetime
     stock_id: str | None = None
     industry: str | None = None

@@ -123,5 +123,7 @@ def test_retry_exhausted_returns_none(tmp_path: Path) -> None:
 
 def test_sample_llm_yaml_loads() -> None:
     cfg = load_llm_config(Path("configs/llm.yaml"))
-    assert cfg.model_for("advisor").id == "claude-opus-4-8"
+    # D-081(a): OPUS 換代為現行世代；advisor／explainer 一併換（裁決已明記此副作用）。
+    assert cfg.model_for("advisor").id == "claude-opus-5"
+    assert cfg.model_for("candidate_analysis").id == "claude-opus-5"
     assert cfg.daily_budget_twd > 0
