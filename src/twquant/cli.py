@@ -2018,6 +2018,20 @@ def recommendations_import(
     typer.secho(f"[OK] {action}：{result.path}", fg=typer.colors.GREEN)
 
 
+@app.command(name="insights-import")
+def insights_import(
+    source: str = typer.Argument(..., help="已存在的洞悉證據包 JSON（依 SPEC-014 §6 驗證）"),
+    out: str = typer.Option("", help="證據包資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """受控匯入既有洞悉證據包；只驗證與保存，不呼叫任何語言模型。"""
+    from twquant.reporting.insight_evidence import import_pack
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    result = import_pack(source, data_dir)
+    action = "已保存" if result.created else "內容相同，保留既有證據包"
+    typer.secho(f"[OK] {action}：{result.path}", fg=typer.colors.GREEN)
+
+
 # ── ML 排序層（SPEC-010，T-067）──────────────────────────────────────
 
 ml_app = typer.Typer(help="ML 排序層（SPEC-010）：研究軌訓練與每日推論")

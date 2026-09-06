@@ -28,6 +28,7 @@ from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
+from twquant.reporting.insight_evidence import select_packs
 from twquant.reporting.platform_artifacts import (
     ArtifactCatalog,
     backtest_detail,
@@ -238,6 +239,26 @@ def get_platform_stock_recommendations(
     except OSError as exc:
         raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
     return {"sid": sid, "events": events}
+
+
+@app.get("/api/platform/insights")
+def get_platform_insights(
+    data_dir: RecommendationDataRootDep,
+    stock: Annotated[str | None, Query()] = None,
+    run: Annotated[str | None, Query()] = None,
+) -> dict[str, object]:
+    """Read saved insight evidence packs; this endpoint never calls a language model."""
+    if stock is not None and _PLATFORM_SID.fullmatch(stock) is None:
+        raise HTTPException(status_code=422, detail="股票代號格式錯誤")
+    try:
+        catalog = select_packs(data_dir, stock_id=stock, insight_run_id=run)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="洞悉證據包儲存區暫時無法讀取") from exc
+    return {
+        "packs": [pack.model_dump(mode="json") for pack in catalog.packs],
+        "issues": catalog.issues,
+        "query": {"stock": stock, "run": run},
+    }
 
 
 @app.get("/api/snapshot")

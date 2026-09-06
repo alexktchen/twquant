@@ -85,11 +85,38 @@ const { chromium } = require('playwright');
         { industry: '航運', n: 4, net_yi: 1.1, frgn_yi: 0.5, trust_yi: 0.6, amt_yi: 55.5, ret_pct: 0.12 },
       ],
     });
+    const evidence = (id, direction, title, available) => ({
+      evidence_id: id, title, url: `https://source.example/${id}`,
+      published_at: '2026-06-24T08:00:00+08:00', available_at: available ?? '2026-06-24T09:00:00+08:00',
+      captured_at: '2026-06-24T10:00:00+08:00', stock_id: '0050', industry: null, direction, reason_ref: null,
+    });
+    const insightPacks = {
+      packs: [
+        {
+          insight_run_id: 'ins_1', as_of: '2026-06-25T20:00:00+08:00', stock_id: '0050', industry: null,
+          evidence: [evidence('ev_1', 'support', '月營收年增 18%'), evidence('ev_2', 'contradict', '投信連三日賣超'), evidence('ev_3', 'gap', '尚無法人持股明細')],
+          analysis: {
+            prompt_id: 'insight_v1', prompt_hash: 'abc123', analysis_schema_version: 1,
+            model_version: 'claude-x-2026', as_of: '2026-06-25T20:00:00+08:00',
+            summary: '營收成長支持基本面，但籌碼面出現反向訊號。', cited_evidence_ids: ['ev_1', 'ev_2'],
+          },
+          analysis_absent_reason: null,
+        },
+        {
+          // The LLM was unavailable, so the evidence stands alone with a stated reason.
+          insight_run_id: 'ins_2', as_of: '2026-06-24T20:00:00+08:00', stock_id: '0050', industry: null,
+          evidence: [evidence('ev_9', 'support', '法說會釋出擴產計畫')],
+          analysis: null, analysis_absent_reason: 'LLM 離線，未產生分析',
+        },
+      ],
+      issues: [],
+    };
     page.on('pageerror', error => errors.push(error.message));
     // All HTTP is fulfilled locally; the test never reaches data services.
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
       if (url.pathname === '/api/sector-flows') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ flows: sectorFlows(Number(url.searchParams.get('window')) || 20) }) });
+      if (url.pathname === '/api/platform/insights') return route.fulfill({ contentType: 'application/json', body: JSON.stringify(url.searchParams.get('stock') === '2330' ? { packs: [], issues: [] } : insightPacks) });
       if (url.pathname === '/api/health') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', as_of: marketAsOf }) });
       if (url.pathname === '/api/meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ as_of: marketAsOf, window: '2022-01-01~2026-06-30', rev_month: null, top_stocks: ['0050', '2330'], coverage: [] }) });
       if (url.pathname === '/api/stock-meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ meta: stockMeta }) });
@@ -230,6 +257,48 @@ const { chromium } = require('playwright');
     // A window with no rows is a legitimate zero, not a read failure.
     await page.getByRole('link', { name: '60 日', exact: true }).click();
     await page.getByText('零筆，不是讀取失敗', { exact: false }).waitFor();
+    // AC-210-1: citations, cutoff, support/contradict/gap and an offline analysis are all visible.
+    await page.goto('http://twquant.test/#/insights');
+    await page.getByRole('heading', { name: '洞悉與證據', exact: true }).first().waitFor();
+    await page.getByText('營收成長支持基本面', { exact: false }).waitFor();
+    assert.match(await page.locator('#platform-content').innerText(), /prompt insight_v1（abc123）/);
+    assert.match(await page.locator('#platform-content').innerText(), /截點 2026-06-25 20:00/);
+    for (const label of ['支持', '反對', '缺口']) {
+      await page.getByText(label, { exact: true }).first().waitFor();
+    }
+    assert.match(await page.locator('#platform-content').innerText(), /有 1 項已知缺口/);
+    // An absent analysis states why instead of being generated.
+    await page.getByText('LLM 離線，未產生分析', { exact: false }).waitFor();
+    await page.getByText('不會補寫分析', { exact: false }).waitFor();
+    // A stock with no packs says so; it never falls back to another stock's insight.
+    await page.goto('http://twquant.test/#/insights?stock=2330');
+    await page.getByText('2330 尚未保存任何洞悉證據包。', { exact: false }).waitFor();
+    await page.getByText('不會在沒有證據時生成分析', { exact: false }).waitFor();
+    // AC-211-1: a legacy watchlist is readable, edits persist and corruption is never eaten.
+    await page.goto('http://twquant.test/#/watchlists');
+    await page.evaluate(() => localStorage.setItem('twquant.watchlist', '["0050","2330"]'));
+    await page.reload();
+    await page.getByRole('link', { name: '0050', exact: true }).waitFor();
+    await page.getByText('讀到舊版自選格式', { exact: false }).first().waitFor();
+    await page.getByRole('textbox', { name: '0050 的研究筆記' }).fill('等回踩月線');
+    await page.reload();
+    assert.equal(await page.getByRole('textbox', { name: '0050 的研究筆記' }).inputValue(), '等回踩月線');
+    assert.equal(await page.getByRole('link', { name: '0050', exact: true }).count(), 1); // "0050" kept as a string.
+    await page.getByRole('textbox', { name: '加入追蹤的股票代號' }).fill('2317');
+    await page.getByRole('button', { name: '加入', exact: true }).click();
+    await page.getByRole('link', { name: '2317', exact: true }).waitFor();
+    await page.locator('tr', { hasText: '2330' }).getByRole('button', { name: '移除', exact: true }).click();
+    assert.equal(await page.getByRole('link', { name: '2330', exact: true }).count(), 0);
+    await page.reload();
+    assert.equal(await page.getByRole('textbox', { name: '0050 的研究筆記' }).inputValue(), '等回踩月線');
+    // Corrupt storage is reported and the raw value is left in place until the user resets it.
+    await page.evaluate(() => localStorage.setItem('twquant.watchlist', '{not json'));
+    await page.reload();
+    await page.getByText('自選資料無法讀取', { exact: false }).first().waitFor();
+    assert.equal(await page.evaluate(() => localStorage.getItem('twquant.watchlist')), '{not json');
+    await page.getByRole('button', { name: '清空並重建自選（會覆寫損毀資料）', exact: true }).click();
+    await page.getByText('還沒有追蹤任何股票', { exact: false }).waitFor();
+    await page.evaluate(() => localStorage.removeItem('twquant.watchlist'));
     // AC-206-2: zero candidates, nothing generated and read failure stay distinguishable.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-04');
     await page.getByText('合法地沒有候選股票', { exact: false }).waitFor();
@@ -241,7 +310,8 @@ const { chromium } = require('playwright');
       await page.setViewportSize({ width, height: 900 });
       for (const name of ['今日總覽', 'ML 選股', '我的追蹤', '產業研究', '洞悉與證據', '模型中心', '回測中心', '資料與工作']) {
         await page.getByRole('link', { name, exact: true }).click();
-        await page.getByRole('heading', { name, exact: true }).waitFor();
+        // A page whose panel repeats the page title matches twice; the h1 is the first.
+        await page.getByRole('heading', { name, exact: true }).first().waitFor();
         assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), `${width}: ${name} overflow`);
       }
     }
@@ -253,6 +323,6 @@ const { chromium } = require('playwright');
     assert.equal(await page.locator('#platform-content').evaluate(el => el === document.activeElement), true);
     assert.equal(new URL(page.url()).hash, '#/models');
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2 and AC-209-1: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, responsive navigation and keyboard focus (offline HTTP fixtures).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-209-1, AC-210-1 and AC-211-1: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, responsive navigation and keyboard focus (offline HTTP fixtures).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
