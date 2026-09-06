@@ -6,12 +6,23 @@ import { zhang } from '../theme'
 import { Skeleton } from '../ui'
 import { Delta, MiniTS, TPanel } from './ui'
 
+/** 讀取失敗與「真的零筆」必須分開顯示，否則面板消失會被誤讀成沒有訊號（SPEC-014 §1）。 */
+function PanelState({ title, live }: { title: string; live: boolean }) {
+  return (
+    <TPanel title={title}>
+      <div className="h-[100px] flex items-center justify-center text-center text-[13px] text-[var(--muted)]">
+        {live ? '這檔股票在此區間沒有資料（零筆）。' : '資料讀取失敗，未以其他來源替代；這不是「沒有資料」。'}
+      </div>
+    </TPanel>
+  )
+}
+
 export function InstitutionalPanel({ sid }: { sid: string }) {
   const empty: StockSeries<InstRow> = { sid, as_of: null, source: 'pg', rows: [] }
   const r = useResource(`inst:${sid}`, () => fetchStockInstitutional(sid, 90), () => empty)
   if (r.loading) return <TPanel title="法人買賣超"><Skeleton height={100} /></TPanel>
   const rows = r.data?.rows ?? []
-  if (!rows.length) return null
+  if (!rows.length) return <PanelState title="法人買賣超" live={r.live} />
   const last = rows[rows.length - 1]
   return (
     <TPanel title="法人買賣超（張）" sub={`外資日買賣超＋累計 · ${r.data?.source}`}>
@@ -31,7 +42,7 @@ export function MarginPanel({ sid }: { sid: string }) {
   const r = useResource(`margin:${sid}`, () => fetchStockMargin(sid, 90), () => empty)
   if (r.loading) return <TPanel title="融資券"><Skeleton height={100} /></TPanel>
   const rows = r.data?.rows ?? []
-  if (!rows.length) return null
+  if (!rows.length) return <PanelState title="融資券" live={r.live} />
   const last = rows[rows.length - 1]
   const ratio = last.short_margin_ratio
   return (
@@ -51,7 +62,7 @@ export function RevenuePanel({ sid }: { sid: string }) {
   const r = useResource(`rev:${sid}`, () => fetchStockRevenue(sid, 36), () => empty)
   if (r.loading) return <TPanel title="月營收"><Skeleton height={100} /></TPanel>
   const rows = r.data?.rows ?? []
-  if (!rows.length) return null
+  if (!rows.length) return <PanelState title="月營收" live={r.live} />
   const last = rows[rows.length - 1]
   const yi = (v: number | null) => (v == null ? 0 : v / 1e8)
   return (
@@ -71,7 +82,7 @@ export function BrokerPanel({ sid }: { sid: string }) {
   const r = useResource(`brokers:${sid}`, () => fetchStockBrokers(sid, 5), () => empty)
   if (r.loading) return <TPanel title="主力券商買賣超"><Skeleton height={120} /></TPanel>
   const d = r.data ?? empty
-  if (!d.top_buy.length && !d.top_sell.length) return null
+  if (!d.top_buy.length && !d.top_sell.length) return <PanelState title="主力券商買賣超" live={r.live} />
   const bcol = (rows: BrokerRow[], title: string, up: boolean) => (
     <div className="min-w-0">
       <div className="text-[12px] font-semibold mb-1" style={{ color: up ? 'var(--up)' : 'var(--down)' }}>{title}</div>

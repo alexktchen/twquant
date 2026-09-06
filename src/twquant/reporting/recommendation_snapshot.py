@@ -221,6 +221,52 @@ def index_snapshots(data_dir: str | Path) -> RecommendationCatalog:
     return RecommendationCatalog(runs=runs, issues=issues)
 
 
+def select_candidates(
+    run: RecommendationSnapshot,
+    *,
+    bucket: str | None = None,
+    query: str | None = None,
+) -> tuple[RecommendationCandidate, ...]:
+    """Apply display filters to one run while preserving each candidate's original rank."""
+    needle = query.strip().casefold() if query else None
+    return tuple(
+        candidate
+        for candidate in run.candidates
+        if (bucket is None or candidate.bucket == bucket)
+        and (needle is None or needle in candidate.stock_id.casefold())
+    )
+
+
+def stock_events(data_dir: str | Path, stock_id: str) -> list[dict[str, object]]:
+    """Return one stock's saved recommendation events in as_of order; no events yields []."""
+    wanted = normalize_stock_id(stock_id)
+    catalog = index_snapshots(data_dir)
+    events: list[dict[str, object]] = []
+    for run in sorted(catalog.runs, key=lambda item: (item.as_of, item.run_id)):
+        for candidate in run.candidates:
+            if candidate.stock_id != wanted:
+                continue
+            events.append(
+                {
+                    "run_id": run.run_id,
+                    "model_id": run.model_id,
+                    "stock_id": candidate.stock_id,
+                    "as_of": run.as_of.isoformat(),
+                    "published_at": (
+                        run.published_at.isoformat() if run.published_at is not None else None
+                    ),
+                    "mode": run.mode,
+                    "rank": candidate.rank,
+                    "score": candidate.score,
+                    "bucket": candidate.bucket,
+                    "reason_ref": candidate.reason_ref,
+                    "insight_run_id": candidate.insight_run_id,
+                    "data_status": candidate.data_status,
+                }
+            )
+    return events
+
+
 def select_snapshots(
     data_dir: str | Path,
     *,

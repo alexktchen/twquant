@@ -56,12 +56,15 @@ function ModelCenter({ route }: { route: PlatformRoute }): JSX.Element {
   const detail = useArtifactQuery(`model:${route.entityId ?? ''}`, () =>
     route.entityId ? fetchModel(route.entityId) : Promise.resolve(null),
   )
-  const selected = detail.data?.item ?? catalog.data?.items.find(item => item.artifact_id === route.entityId) ?? null
+  // A recommendation run links here by model_id, so resolve that to the saved artifact.
+  const requestedModel = route.query.get('model')
+  const selected = detail.data?.item ?? catalog.data?.items.find(item => item.artifact_id === route.entityId)
+    ?? (route.entityId ? null : catalog.data?.items.find(item => item.model_id === requestedModel)) ?? null
   return <div className="platform-research-layout">
     <Panel title="保存的模型版本" sub={catalog.data ? `${catalog.data.items.length} 份 metadata` : '讀取中'}>
       {!catalog.data ? <QueryState loading={catalog.loading} error={catalog.error} empty="目前尚未保存模型 metadata。" /> : catalog.data.items.length === 0 ? <QueryState loading={false} error={null} empty="目前尚未保存模型 metadata。" /> :
         <div className="platform-table-wrap"><table className="platform-data-table"><thead><tr><th>模型</th><th>訓練截點</th><th>OOS RankIC</th><th>狀態</th></tr></thead><tbody>
-          {catalog.data.items.map(item => <tr key={item.artifact_id} className={item.artifact_id === route.entityId ? 'is-selected' : undefined}>
+          {catalog.data.items.map(item => <tr key={item.artifact_id} className={item.artifact_id === (selected?.artifact_id ?? route.entityId) ? 'is-selected' : undefined}>
             <td><a href={routeHref('models', item.artifact_id, route.query)}>{item.model_id ?? item.artifact_id}</a></td>
             <td>{item.train_end ?? '未記錄'}</td><td>{item.oos_rank_ic == null ? '未記錄' : item.oos_rank_ic.toFixed(4)}</td><td><StateTag state={item.artifact_state} /></td>
           </tr>)}

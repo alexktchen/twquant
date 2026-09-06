@@ -34,7 +34,11 @@ from twquant.reporting.platform_artifacts import (
     index_backtests,
     index_models,
 )
-from twquant.reporting.recommendation_snapshot import select_snapshots
+from twquant.reporting.recommendation_snapshot import (
+    select_candidates,
+    select_snapshots,
+    stock_events,
+)
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
 
@@ -74,6 +78,8 @@ _BACKTEST_ROOTS = (
     "tracks_mg",
 )
 _OPAQUE_ID = re.compile(r"^(model|backtest)_[0-9a-f]{20}$")
+# Stock identity stays a string with leading zeroes; no separator can reach the filesystem.
+_PLATFORM_SID = re.compile(r"^[A-Za-z0-9]{1,16}$")
 
 
 def get_platform_artifact_roots() -> PlatformArtifactRoots:
@@ -183,17 +189,55 @@ def get_platform_recommendations(
     date: Annotated[dt.date | None, Query()] = None,
     model: Annotated[str | None, Query()] = None,
     run: Annotated[str | None, Query()] = None,
+    bucket: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query(max_length=64)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> dict[str, object]:
     """Read persisted ML recommendation runs; this endpoint never executes inference."""
     try:
         catalog = select_snapshots(data_dir, date=date, model_id=model, run_id=run)
     except OSError as exc:
         raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
+    runs: list[dict[str, object]] = []
+    start = (page - 1) * page_size
+    for item in catalog.runs:
+        # Bucket/search filters run over the whole saved run before any page slice,
+        # so a later page can never surface a candidate an earlier filter removed.
+        kept = select_candidates(item, bucket=bucket, query=q)
+        projection = item.model_dump(mode="json")
+        projection["candidate_total"] = len(kept)
+        projection["candidates"] = [
+            candidate.model_dump(mode="json") for candidate in kept[start : start + page_size]
+        ]
+        runs.append(projection)
     return {
-        "runs": [item.model_dump(mode="json") for item in catalog.runs],
+        "runs": runs,
         "issues": catalog.issues,
-        "query": {"date": date.isoformat() if date else None, "model": model, "run": run},
+        "query": {
+            "date": date.isoformat() if date else None,
+            "model": model,
+            "run": run,
+            "bucket": bucket,
+            "q": q,
+            "page": page,
+            "page_size": page_size,
+        },
     }
+
+
+@app.get("/api/platform/stocks/{sid}/recommendations")
+def get_platform_stock_recommendations(
+    sid: str, data_dir: RecommendationDataRootDep
+) -> dict[str, object]:
+    """Return one stock's saved recommendation events; unknown stocks are legitimately empty."""
+    if _PLATFORM_SID.fullmatch(sid) is None:
+        raise HTTPException(status_code=422, detail="股票代號格式錯誤")
+    try:
+        events = stock_events(data_dir, sid)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
+    return {"sid": sid, "events": events}
 
 
 @app.get("/api/snapshot")
