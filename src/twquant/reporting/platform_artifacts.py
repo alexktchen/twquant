@@ -196,36 +196,106 @@ def _backtest_projection(
     }
 
 
-def index_backtests(roots: Mapping[str, Path]) -> ArtifactCatalog:
-    """Index result bundles below named roots without returning source filesystem paths."""
-    items: list[dict[str, object]] = []
-    issues: list[dict[str, str]] = []
+def _backtest_paths(roots: Mapping[str, Path]) -> list[tuple[str, Path, Path, str]]:
+    """Enumerate result files with their server-side source and opaque identity."""
+    paths: list[tuple[str, Path, Path, str]] = []
     for source_name, root in sorted(roots.items()):
         if not root.exists():
             continue
         for path in sorted(root.rglob("*.json"), key=lambda item: item.as_posix()):
             relative = path.relative_to(root)
-            artifact_id = _artifact_id("backtest", source_name, relative)
-            try:
-                _read_object(path)
-                bundle = read_bundle(path)
-                items.append(
-                    _backtest_projection(
-                        bundle, artifact_id, _artifact_state(relative), source_name
-                    )
+            paths.append(
+                (
+                    source_name,
+                    path,
+                    relative,
+                    _artifact_id("backtest", source_name, relative),
                 )
-            except (
-                DataError,
-                OSError,
-                UnicodeDecodeError,
-                json.JSONDecodeError,
-                ValueError,
-            ) as exc:
-                issues.append(
-                    _issue(
-                        artifact_id,
-                        "backtest",
-                        f"result unavailable: {_safe_problem_detail(exc)}",
-                    )
+            )
+    return paths
+
+
+def index_backtests(roots: Mapping[str, Path]) -> ArtifactCatalog:
+    """Index result bundles below named roots without returning source filesystem paths."""
+    items: list[dict[str, object]] = []
+    issues: list[dict[str, str]] = []
+    for source_name, path, relative, artifact_id in _backtest_paths(roots):
+        try:
+            _read_object(path)
+            bundle = read_bundle(path)
+            items.append(
+                _backtest_projection(bundle, artifact_id, _artifact_state(relative), source_name)
+            )
+        except (DataError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            issues.append(
+                _issue(
+                    artifact_id,
+                    "backtest",
+                    f"result unavailable: {_safe_problem_detail(exc)}",
                 )
+            )
     return ArtifactCatalog(items=items, issues=issues)
+
+
+def _equity_projection(value: object) -> list[dict[str, object]]:
+    """Validate saved equity rows without recalculating returns or metrics."""
+    if not isinstance(value, list):
+        raise ValueError("equity must be a list")
+    rows: list[dict[str, object]] = []
+    for index, row in enumerate(value):
+        if not isinstance(row, list) or len(row) != 4:
+            raise ValueError(f"equity[{index}] must contain date, equity, cash and positions_value")
+        date = _optional_date(row[0], f"equity[{index}].date")
+        equity = _optional_number(row[1], f"equity[{index}].equity")
+        cash = _optional_number(row[2], f"equity[{index}].cash")
+        positions_value = _optional_number(row[3], f"equity[{index}].positions_value")
+        if date is None or equity is None or cash is None or positions_value is None:
+            raise ValueError(f"equity[{index}] values must not be null")
+        rows.append(
+            {
+                "date": date,
+                "equity": equity,
+                "cash": cash,
+                "positions_value": positions_value,
+            }
+        )
+    return rows
+
+
+def _holdings_projection(value: object) -> list[dict[str, object]] | None:
+    """Return validated final holdings while preserving string stock identifiers."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("final_holdings must be a list")
+    holdings: list[dict[str, object]] = []
+    for index, row in enumerate(value):
+        if not isinstance(row, dict):
+            raise ValueError(f"final_holdings[{index}] must be an object")
+        stock_id = _optional_string(row.get("stock_id"), f"final_holdings[{index}].stock_id")
+        if stock_id is None:
+            raise ValueError(f"final_holdings[{index}].stock_id must not be null")
+        item: dict[str, object] = {"stock_id": stock_id}
+        for field in ("shares", "last_close", "value", "weight", "avg_cost", "ret", "max_loss"):
+            number = _optional_number(row.get(field), f"final_holdings[{index}].{field}")
+            if number is not None:
+                item[field] = number
+        entry_date = _optional_date(row.get("entry_date"), f"final_holdings[{index}].entry_date")
+        if entry_date is not None:
+            item["entry_date"] = entry_date
+        holdings.append(item)
+    return holdings
+
+
+def backtest_detail(roots: Mapping[str, Path], artifact_id: str) -> dict[str, object] | None:
+    """Read one persisted bundle by opaque ID and return safe display fields only."""
+    for source_name, path, relative, candidate_id in _backtest_paths(roots):
+        if candidate_id != artifact_id:
+            continue
+        _read_object(path)
+        bundle = read_bundle(path)
+        detail = _backtest_projection(bundle, candidate_id, _artifact_state(relative), source_name)
+        detail["equity"] = _equity_projection(bundle.get("equity"))
+        detail["final_holdings"] = _holdings_projection(bundle.get("final_holdings"))
+        return detail
+    return None

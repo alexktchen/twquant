@@ -7,8 +7,8 @@ function subscribe(listener: () => void): () => void {
   return () => window.removeEventListener('hashchange', listener)
 }
 /** Render the research workspace while keeping page identity in the URL. */
-export function PlatformShell({ live, asOf, stock, operations }: {
-  live: boolean; asOf: string | null; stock: (route: PlatformRoute) => ReactNode; operations: ReactNode
+export function PlatformShell({ live, asOf, stock, research, operations }: {
+  live: boolean; asOf: string | null; stock: (route: PlatformRoute) => ReactNode; research: (route: PlatformRoute) => ReactNode; operations: ReactNode
 }): JSX.Element {
   const hash = useSyncExternalStore(subscribe, () => window.location.hash, () => '')
   const route = parseRoute(hash)
@@ -30,7 +30,7 @@ export function PlatformShell({ live, asOf, stock, operations }: {
       <main id="platform-content" className="platform-content" tabIndex={-1}>
         <div className="platform-page-heading"><div><div className="platform-eyebrow">RESEARCH WORKSPACE</div><h1>{current?.label ?? '找不到這個頁面'}</h1><p>{current?.description ?? '請確認連結，或回到總覽繼續。'}</p></div><span className="platform-mode">研究模式</span></div>
         <div className="platform-context"><span>查詢日期：{route.query.get('date') ?? '最新可得'}</span>{route.query.get('model') && <span>模型：{route.query.get('model')}</span>}{route.query.get('run') && <span>推薦版本：{route.query.get('run')}</span>}</div>
-        {route.page === 'stocks' ? stock(route) : route.page === 'operations' ? operations : route.page === 'not-found' ? <a href={routeHref('overview')}>回今日總覽 →</a> : <PlatformPending route={route} />}
+        {route.page === 'stocks' ? stock(route) : route.page === 'operations' ? operations : route.page === 'models' || route.page === 'backtests' ? research(route) : route.page === 'not-found' ? <a href={routeHref('overview')}>回今日總覽 →</a> : <PlatformPending route={route} />}
       </main>
     </div>
   </div>

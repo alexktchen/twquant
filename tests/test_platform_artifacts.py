@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from twquant.reporting.platform_artifacts import index_backtests, index_models
+from twquant.reporting.platform_artifacts import backtest_detail, index_backtests, index_models
 
 
 def _write(path: Path, payload: object) -> None:
@@ -136,3 +136,40 @@ def test_ac202_2_backtest_index_reports_non_object_without_leaking_root(tmp_path
     assert catalog.items == []
     assert catalog.issues[0]["detail"] == "result unavailable: artifact JSON must be an object"
     assert str(root) not in json.dumps(catalog.issues[0])
+
+
+def test_ac204_2_backtest_detail_keeps_stored_equity_and_holdings_without_recalculation(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "results"
+    payload = {
+        "schema_version": 1,
+        "strategy": {"name": "strategy"},
+        "metrics": {"cagr": 0.1},
+        "equity": [["2023-01-02", 80_000_000, 79_000_000, 1_000_000]],
+        "final_holdings": [
+            {
+                "stock_id": "0050",
+                "shares": 1000,
+                "last_close": 50.0,
+                "value": 50_000.0,
+                "weight": 0.1,
+            }
+        ],
+    }
+    _write(root / "strategy.json", payload)
+    artifact_id = index_backtests({"ladder": root}).items[0]["artifact_id"]
+    assert isinstance(artifact_id, str)
+
+    detail = backtest_detail({"ladder": root}, artifact_id)
+
+    assert detail is not None
+    assert detail["equity"] == [
+        {
+            "date": "2023-01-02",
+            "equity": 80_000_000,
+            "cash": 79_000_000,
+            "positions_value": 1_000_000,
+        }
+    ]
+    assert detail["final_holdings"] == payload["final_holdings"]

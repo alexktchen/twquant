@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- 2026-09-06 T-204：模型中心接入保存 metadata，回測中心接入 result bundle 的指標、最終持倉與權益曲線；全程唯讀且不捏造未保存的訓練歷程或重算績效。完整 gate 742 passed／23 skipped，前端 build、單測及 Edge 固定資料瀏覽器驗證通過。
+
 - 2026-09-06 T-203：提供模型／回測 artifact 的唯讀 API 清單與詳情，opaque ID 解析、422／404／503 錯誤契約與固定根目錄保護；GET 不啟動訓練或回測。完整 gate 741 passed／23 skipped。
 
 - 2026-09-06 T-202：新增安全唯讀的模型／回測 artifact 索引，使用穩定 opaque ID、白名單投影與封存／拒絕／損毀狀態；不讀模型權重、不重算績效、不洩漏檔案路徑。完整 gate 734 passed／23 skipped。

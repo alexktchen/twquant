@@ -28,7 +28,12 @@ from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
-from twquant.reporting.platform_artifacts import ArtifactCatalog, index_backtests, index_models
+from twquant.reporting.platform_artifacts import (
+    ArtifactCatalog,
+    backtest_detail,
+    index_backtests,
+    index_models,
+)
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
 
@@ -97,6 +102,12 @@ def _artifact_detail(catalog: ArtifactCatalog, artifact_id: str, kind: str) -> d
     raise HTTPException(status_code=404, detail="找不到指定的 artifact")
 
 
+def _validate_artifact_id(artifact_id: str, kind: str) -> None:
+    """Reject malformed opaque IDs before an artifact catalog is read."""
+    if _OPAQUE_ID.fullmatch(artifact_id) is None or not artifact_id.startswith(f"{kind}_"):
+        raise HTTPException(status_code=422, detail="artifact_id 格式錯誤")
+
+
 def _artifact_storage_error() -> HTTPException:
     """Return a path-safe server error for unavailable artifact storage."""
     return HTTPException(status_code=503, detail="artifact 儲存區暫時無法讀取")
@@ -152,7 +163,14 @@ def get_platform_backtests(roots: PlatformArtifactRootsDep) -> dict[str, object]
 def get_platform_backtest(artifact_id: str, roots: PlatformArtifactRootsDep) -> dict[str, object]:
     """Return one persisted backtest projection resolved only from an opaque ID."""
     try:
-        return _artifact_detail(index_backtests(roots.backtest_roots), artifact_id, "backtest")
+        _validate_artifact_id(artifact_id, "backtest")
+        catalog = index_backtests(roots.backtest_roots)
+        if not any(item.get("artifact_id") == artifact_id for item in catalog.items):
+            raise HTTPException(status_code=404, detail="找不到指定的 artifact")
+        detail = backtest_detail(roots.backtest_roots, artifact_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="找不到指定的 artifact")
+        return {"item": detail, "issues": catalog.issues}
     except OSError as exc:
         raise _artifact_storage_error() from exc
 

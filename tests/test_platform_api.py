@@ -70,11 +70,11 @@ def test_ac203_1_backtest_list_and_detail_do_not_trigger_calculation(tmp_path: P
 
     listed = api.get_platform_backtests(roots)
     artifact_id = _artifact_id(listed)
+    detail = _detail_item(api.get_platform_backtest(artifact_id, roots))
 
     assert listed["source"] == "result_bundle"
-    assert (
-        _detail_item(api.get_platform_backtest(artifact_id, roots))["strategy_name"] == "strategy"
-    )
+    assert detail["strategy_name"] == "strategy"
+    assert detail["equity"] == []
     assert path.read_bytes() == before
 
 
