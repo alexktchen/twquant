@@ -243,7 +243,7 @@ def _benchmarks(dates: list[dt.date]) -> list[dict]:
     try:
         px = pl.read_database(
             "select date, stock_id, close from serving.prices_daily "
-            "where stock_id in ('0050','0056') and date >= '2022-06-01'",
+            "where stock_id in ('0050','0056','0051','006201') and date >= '2022-06-01'",
             conn,
         )
         idx = pl.read_database(
@@ -283,6 +283,22 @@ def _benchmarks(dates: list[dt.date]) -> list[dict]:
             True,
             lambda: benchmark_series(px, "0056", total_return=True),
             evd("0056"),
+        ),
+        (
+            "0051_tr",
+            "0051 元大中型100（含息）",
+            "**結構上不含台積電**（市值 51~150 名）——小型／中型策略的公平對照",
+            True,
+            lambda: benchmark_series(px, "0051", total_return=True),
+            evd("0051"),
+        ),
+        (
+            "006201_px",
+            "006201 富邦櫃買（價格）",
+            "純上櫃小型股的市場報酬。事件表無其股利，故**只能算價格報酬**，真實含息更高",
+            False,
+            lambda: benchmark_series(px, "006201", total_return=False),
+            evd("006201"),
         ),
         (
             "TAIEX",

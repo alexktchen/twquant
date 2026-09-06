@@ -143,6 +143,9 @@ footer{color:var(--ink-3); font-size:12.5px; border-top:1px solid var(--line); p
 .chart .grid{stroke:var(--line); stroke-width:1}
 .chart .cross{stroke:var(--accent); stroke-width:1; stroke-dasharray:4 3; opacity:.55}
 .chart .bmk{fill:var(--accent); stroke:var(--surface); stroke-width:2}
+.chart .cross2{stroke:var(--f2); stroke-width:1; stroke-dasharray:2 4; opacity:.7}
+.chart .bmk2{fill:var(--f2); stroke:var(--surface); stroke-width:1.6}
+.chart .bmk2tx{fill:var(--f2); font-weight:600}
 .chart .bmktx{fill:var(--accent); font-weight:600}
 .chart text{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
 .chart .tick{font-size:10.5px; fill:var(--ink-3)}
@@ -226,6 +229,15 @@ def scatter_risk_return(rows, bench):
         g.append(f'<line x1="{L}" y1="{ay(v):.1f}" x2="{W - R}" y2="{ay(v):.1f}" class="grid"/>')
         g.append(f'<text x="{L - 8}" y="{ay(v) + 4:.1f}" class="tick end">{v:.0%}</text>')
     for b in bench:
+        # 0051 是**結構上不含台積電**的對照，對小型策略才公平；一起畫成準星，
+        # 讓「輸給大盤是因為沒買台積電」這個說法在圖上就能被檢驗
+        if b.get("key") == "0051_tr" and b.get("cagr") is not None:
+            bx, by = ax(abs(b["mdd"])), ay(b["cagr"])
+            g.append(f'<line x1="{L}" y1="{by:.1f}" x2="{W - R}" y2="{by:.1f}" class="cross2"/>')
+            g.append(f'<circle cx="{bx:.1f}" cy="{by:.1f}" r="5" class="bmk2"/>')
+            g.append(
+                f'<text x="{bx + 10:.1f}" y="{by + 4:.1f}" class="lbl bmk2tx">0051 中型100</text>'
+            )
         if b.get("key") != "0050_tr" or b.get("cagr") is None:
             continue
         bx, by = ax(abs(b["mdd"])), ay(b["cagr"])
@@ -480,6 +492,16 @@ def main() -> None:
         vcells.append(
             ("差距", f'<span class="num down">−{gap:.2%}</span>', "年化，策略落後基準", False)
         )
+    b51 = bench.get("0051_tr", {})
+    if best and b51.get("cagr") is not None:
+        vcells.append(
+            (
+                "0051 中型100（不含台積電）",
+                pct(b51["cagr"], 2, False),
+                f"MDD {b51['mdd']:.1%}・Sharpe {b51['sharpe']:.2f}",
+                False,
+            )
+        )
     vcells.append(
         (
             "已完成回測",
@@ -572,6 +594,9 @@ def main() -> None:
 <section>
   <div class="verdict">
     <p class="lede">到目前為止，<strong>沒有任何一個策略打敗 0050（含息）</strong>。這是這批實驗最硬的事實，放在最前面。</p>
+    <p class="lede" style="font-size:15px">而且不能歸咎於「0050 有台積電」：<strong>0051 中型100 結構上排除市值前 50 名</strong>，
+    同期仍有 <strong>+31.57%／Sharpe 1.54</strong>。刻意選小型股的 A 軌（+15.90%／0.68）輸它近 16pp
+    ——差距來自選股，不是來自權值股。</p>
     <div class="vgrid">{vhtml}</div>
   </div>
   <div class="note">
