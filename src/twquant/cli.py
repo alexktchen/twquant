@@ -31,6 +31,10 @@ app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
+# 洞悉分析在 pipeline 的參數：N 為 D-081(b) 的事前登記值；窗口與 sector-flows 預設一致。
+_INSIGHT_TOP_N = 30
+_SECTOR_WINDOW = 20
+
 
 def _force_utf8_output() -> None:
     """Windows 主控台預設 cp950，中文輸出會亂碼；把 stdout/stderr 重設為 UTF-8。"""
@@ -1038,6 +1042,55 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         res = scr.snapshot(scfg, day, day)
         return f"{res['rows']} 列" if res["rows"] else "無可快照資料（尚無當日供應層資料）"
 
+    def _insight_step() -> str:
+        # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
+        # 前提是當日已有推薦快照；沒有就是正常的「沒有 L0 名單可分析」，不是錯誤。
+        # 注意：ml score → export-recommendations 這段 L0 產生鏈**刻意未掛進 pipeline**，
+        # 因為 `latest_model_dir` 只比 train_end，現有模型 train_end 全同會選到回撤風控
+        # 模型（WHERE-IS-EVERYTHING 陷阱④）。修好之前不讓它每晚自動產生推薦。
+        from twquant.data.serving import store
+        from twquant.insight.client import InsightClient
+        from twquant.insight.config import load_llm_config
+        from twquant.reporting.insight_run import run_id_for_day, run_insights
+        from twquant.reporting.insight_sources import (
+            fetch_industry_of,
+            fetch_industry_rows,
+            fetch_sections,
+        )
+        from twquant.reporting.recommendation_snapshot import select_snapshots
+
+        data_dir = Path(cfg.data_dir)
+        run_id = run_id_for_day(data_dir, day)
+        if run_id is None:
+            return "當日無推薦快照，略過"
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過（display-only）"
+        as_of = select_snapshots(data_dir, run_id=run_id).runs[0].as_of
+        conn = store.connect(scfg)
+        try:
+            industries = fetch_industry_rows(conn, scfg.pg_schema, as_of, _SECTOR_WINDOW)
+            summary = run_insights(
+                data_dir,
+                recommendation_run_id=run_id,
+                top_n=_INSIGHT_TOP_N,
+                client=InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir),
+                now=now_tw(),
+                fetch_sections=lambda sid: fetch_sections(
+                    conn,
+                    scfg.pg_schema,
+                    sid,
+                    as_of,
+                    industries.get(fetch_industry_of(conn, scfg.pg_schema, sid) or ""),
+                ),
+            )
+        finally:
+            conn.close()
+        return (
+            f"分析 {summary.analysed}、缺席 {summary.absent}、新存 {summary.saved}、"
+            f"沿用 {summary.reused}、失敗 {len(summary.failures)}"
+        )
+
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
@@ -1045,6 +1098,7 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
+        PipelineStep("洞悉分析", _insight_step),
     ]
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
 

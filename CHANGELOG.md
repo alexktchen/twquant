@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- 2026-09-06 T-221：洞悉分析掛進每日 pipeline（一鍵跑今日全部資料與排程都會跑到），best-effort 不擋主線；當日沒有推薦快照即正常略過。**刻意未把 ml score → export-recommendations 掛進 pipeline**：`latest_model_dir` 會選到回撤風控模型（陷阱④），修好前不讓它每晚自動產生推薦。完整 gate 849 passed。
+
 - 2026-09-06 T-220：洞悉接回平台。候選的洞悉欄位在讀取時 join（快照檔案位元組不變），已分析／無分析（附原因）／沒有 pack 三態分開；`recommended_bucket` 一律標為「LLM 提議」且不覆蓋候選自身 bucket；個股頁新增洞悉頁籤。完整 gate 848 passed。
 
 - 2026-09-06 T-219：新增 `insights-run`（組包→分析→原子落地，每檔候選獨立、相同輸入冪等、推薦快照不被改寫）。實跑真實 PG 抓到並修掉三個缺陷：PG 的 timestamptz 是 UTC 偏移導致全部驗證失敗、`ml_scores` 取最新一列會拿到別的模型半年前的分數、產業證據把未計算的族群報酬填 0 變成「報酬 0.00%」的假話。完整 gate 843 passed。

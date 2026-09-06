@@ -161,3 +161,15 @@ def insights_for_run(data_dir: str | Path, recommendation_run_id: str) -> dict[s
             "gap_n": directions.count("gap"),
         }
     return joined
+
+
+def run_id_for_day(data_dir: str | Path, day: dt.date) -> str | None:
+    """The saved recommendation run for one trading day, or None when none was produced.
+
+    The nightly pipeline uses this to decide whether there is anything to analyse. Returning
+    None is a normal outcome, not a failure: no snapshot simply means no L0 list that day.
+    """
+    catalog = select_snapshots(data_dir, date=day)
+    if not catalog.runs:
+        return None
+    return max(catalog.runs, key=lambda run: run.generated_at).run_id

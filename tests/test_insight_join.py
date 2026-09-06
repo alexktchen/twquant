@@ -179,3 +179,14 @@ def test_ac220_2_recommendations_without_any_insight_still_serve(tmp_path: Path)
     run = cast(list[dict[str, Any]], response["runs"])[0]
 
     assert cast(list[dict[str, Any]], run["candidates"])[0]["insight"] is None
+
+
+def test_ac221_1_the_pipeline_finds_the_days_run_or_reports_none(tmp_path: Path) -> None:
+    from twquant.reporting.insight_run import run_id_for_day
+
+    # No snapshot for the day is a normal outcome the pipeline treats as "nothing to do".
+    assert run_id_for_day(tmp_path, dt.date(2026, 9, 4)) is None
+
+    _snapshot(tmp_path, ["0050"])
+    assert run_id_for_day(tmp_path, dt.date(2026, 9, 4)) == RUN
+    assert run_id_for_day(tmp_path, dt.date(2026, 9, 3)) is None

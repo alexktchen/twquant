@@ -74,6 +74,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | 跑軌別 | `uv run --all-groups python scripts/run_tracks.py --tracks C1,C3 --out D:/project/twquant/data/tracks_c` |
 | 判定 | `scripts/t146_verdict.py`（D-066）、`scripts/d071_verdict.py`（D-071）、`scripts/d067_edges.py`（D-067） |
 | **前端閘門**（後端 gate 不涵蓋） | `cd frontend && npm test && npm run test:browser` |
+| **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
 
@@ -105,6 +106,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 **④ `ml score` 會挑錯模型。** `latest_model_dir` 只比 `train_end`，而現有 8 個模型的
 train_end **全部是 2026-02-25**，同分時取排序最前者＝`lgbm_dd_h60`（D-075 的**回撤風控**模型），
 不是選股模型。要對特定模型推論，`--models` 要指向只含該模型的目錄。未開任務。
+**因此每日 pipeline 刻意沒有掛 `ml score` → `export-recommendations`**（T-221）：修好前不讓它每晚
+自動用錯模型產生推薦名單。洞悉步驟會回「當日無推薦快照，略過」。
 
 ## 7. 還在跑的東西
 
