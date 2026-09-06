@@ -167,3 +167,10 @@ python -m twquant check --fast   # 只跑受影響模組的測試（開發中用
 | 因子函數裡 fetch 網路資料 | 因子是純函數，資料先進倉儲 |
 | 一個任務裡順手重構別的模組 | 開新任務 |
 | commit token / 帳密 | .env（gitignore） |
+
+## 9. 專案長期記憶
+
+- **台股 ML 選股研究**：結論、已排除方向、文獻與共編偏好見
+  [memory/projects/twquant-ml-stock-selection.md](memory/projects/twquant-ml-stock-selection.md)。
+- 投資者版實驗結果統一維護在 `data/reports/台股ML選股實驗總覽.html`；使用白話、保留失敗結果，
+  並讓每個數字可追溯。新想法須明確標示尚未回測。
