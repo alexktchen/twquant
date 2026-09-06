@@ -1,5 +1,7 @@
 # TASKS — 實作任務佇列
 
+> **最新交接**：[HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md) — 進度、工作量、五個未解問題、產物清單。
+
 規則見 CLAUDE.md §2；「模型」欄依 MODEL-POLICY.md §2（A=OPUS、B=SONNET、C=HAIKU）。
 狀態：`todo | in_progress | done | blocked`。挑最小編號的、無未完成依賴的 todo。
 完成時附上閘門輸出摘要。B/C 級任務合併前需 OPUS 級複審（見 MODEL-POLICY §2-2）。
