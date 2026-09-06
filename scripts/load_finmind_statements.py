@@ -52,6 +52,10 @@ def _load(staging: pathlib.Path, statement: str) -> pl.DataFrame:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--staging-root", default="D:/project/twquant/data/staging")
+    # T-116 的長歷史 staging 叫 finmind_hist_{income,balance,cashflow}，
+    # 與 2020+ 那批（finmind_{...}）並存；用前綴切換而不是把目錄改名，
+    # 兩批才能各自重跑與比對。
+    ap.add_argument("--prefix", default="finmind_", help="staging 目錄前綴")
     ap.add_argument("--lake", default="D:/project/twquant/data/lake_rebuild")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--write", action="store_true")
@@ -62,7 +66,7 @@ def main() -> None:
     t0 = time.perf_counter()
     frames = []
     for statement in STATEMENT_DATASETS:
-        staging = pathlib.Path(args.staging_root) / f"finmind_{statement}"
+        staging = pathlib.Path(args.staging_root) / f"{args.prefix}{statement}"
         if not staging.exists():
             raise SystemExit(
                 f"staging 不存在：{staging}（backfill_finmind.py 尚未跑 {STATEMENT_DATASETS[statement]}）"
