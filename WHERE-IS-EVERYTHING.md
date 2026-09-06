@@ -109,6 +109,15 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 `configs/ml.yaml` 的 **`production_ranking_model`** 明寫（目前 `lgbm_net_h20_20260225_6a798962`）
 ——換模型改這一行。L0 產生鏈已掛進每日 pipeline（T-225）。
 
+**⑤ 重跑「已擷取過的某一天」的 pipeline 會 OOM（2026-09-07 實測）。** 正常的每日前進式
+執行沒問題——排程器 2026-09-04 那天跑完整條線（供應層鏡射同步＋物化 28,000 因子列、
+選股池 381 列）。但把同一天再跑一次，**供應層步驟會被 OOM killer 砍掉**（容器 exit 137），
+訊號生成後 RSS 已 1.7 GB，鏡射同步再推一次大 delta 就爆。這不是新步驟造成的：
+ML 推薦名單與洞悉分析排在供應層之後，根本沒被執行到。
+
+**更危險的是 `docker compose run` 會回報 exit 0**，即使容器其實是被 SIGKILL（137）殺掉的。
+用 `docker run` 才看得到真正的 137。任何靠 exit code 判斷成功的包裝都會被騙。未修，見 T-226。
+
 ## 7. 還在跑的東西
 
 - **長天期回補**：融資融券 `data/staging/finmind_hist_margin`，約 3.9 小時（其餘六個資料集已滿）
