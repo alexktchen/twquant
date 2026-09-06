@@ -19,6 +19,26 @@
 
 範圍上界依 **D-083** 定在 2015-06-01：`limit_up_proxy` 寫死 ×1.10，而台股
 2015-06-01 之前的漲跌幅上限是 7%（T-162）。腳本會擋下更早的起日。
+
+## 三道規則（D-084 選項 A）
+
+| # | 規則 | 擋掉什麼 |
+|---|---|---|
+| 1 | 股票須在 `stock_meta` 且市場別為 TWSE／TPEX | 387 檔從未上市的興櫃、471 檔市場別不明的下市股 |
+| 2 | `date >= list_date`（已知者） | 上市櫃**之前**的興櫃期 |
+| 3 | `date <= delist_date`（已知者） | 下市之後不該存在的列 |
+
+外加 **OHLC 恆等式**剔除（`low ≤ open,close ≤ high`）並計數；違規率超過 1% 即中止
+——那個量級只可能是單位錯（「張 vs 股」會讓 `amount/volume` 差一千倍，而 schema 攔不住）。
+
+**規則 1 為什麼綁 `stock_meta` 而不是自己判斷**：策略層的 `markets` 濾網（T-143）
+就是查這張表。載入它認不得的股票只是白佔空間——那些列在回測時一定會被濾掉。
+兩層用同一個真值來源，就不會出現「載進去了卻用不到」或更糟的「載進去且被誤用」。
+
+**已知且刻意接受的偏誤（D-084）**：471 檔下市股拿不到市場別（FinMind 現行清單不列，
+證交所 ISIN 的七個 strMode 全是現存證券），其中 **44 檔在載入窗口有資料、
+共 26,058 列（1.30%）**被規則 1 擋掉。那是**左尾**（後來倒掉的公司），
+故任何長窗口結果都必須標註這個數字。不編造市場別是刻意的取捨。
 """
 
 from __future__ import annotations
@@ -49,31 +69,98 @@ EARLIEST_ALLOWED = dt.date(2015, 6, 1)
 # 現有 prices_daily 的起點。這之後是 TWSE 官方＋三次修補的權威版本，不覆蓋。
 AUTHORITATIVE_FROM = dt.date(2020, 1, 2)
 _COMPARE_COLS = ("open", "high", "low", "close", "volume", "amount")
+# 恆等式違規率的中止門檻。實測套上三道規則後是 0.065%，故 1% 有 15 倍餘裕，
+# 同時仍抓得到系統性單位錯（那會是接近 100%，不是 1%）。
+_MAX_VIOLATION_RATE = 0.01
+_TRADABLE = ("TWSE", "TPEX")
 
 
-def _load_staging(lo: dt.date, hi: dt.date) -> tuple[pl.DataFrame, dict[str, int]]:
-    """讀所有個股檔、清洗、串成一張表。回傳 (frame, 剔除統計)。"""
+def _listing_windows(conn: object, schema: str) -> dict[str, tuple[object, object]]:
+    """{stock_id: (list_date, delist_date)}，只含市場別為 TWSE／TPEX 的股票。
+
+    **這就是規則 1**：不在這個字典裡的股票一律不載。與策略層的 `markets` 濾網
+    （T-143）查同一張表，故「載得進去」與「用得到」是同一個集合。
+    """
+    with conn.cursor() as cur:  # type: ignore[attr-defined]
+        cur.execute(
+            f'SELECT stock_id, list_date, delist_date FROM "{schema}"."stock_meta" '
+            "WHERE market = ANY(%s)",
+            (list(_TRADABLE),),
+        )
+        return {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+
+
+def _load_staging(
+    lo: dt.date,
+    hi: dt.date,
+    windows: dict[str, tuple[object, object]] | None = None,
+) -> tuple[pl.DataFrame, dict[str, int]]:
+    """讀所有個股檔、清洗、套規則、串成一張表。回傳 (frame, 剔除統計)。
+
+    `windows` 給定時套規則 1~3（載入路徑）；給 None 時只清洗不過濾
+    （`--verify-overlap` 用，要比對的是清洗器本身而不是規則）。
+    """
     files = sorted(SRC.glob("*.parquet"))
     if not files:
         raise SystemExit(f"找不到回補的行情檔：{SRC}")
     frames: list[pl.DataFrame] = []
-    stats = {"stub": 0, "zero": 0, "null": 0, "dup": 0, "rows_in": 0}
+    stats = {
+        "stub": 0,
+        "zero": 0,
+        "null": 0,
+        "dup": 0,
+        "rows_in": 0,
+        "not_in_meta": 0,
+        "pre_listing": 0,
+        "post_delisting": 0,
+    }
     for f in files:
         raw = pl.read_parquet(f)
         if "date" not in raw.columns:
             # 查無資料的股票會落地成只有 stock_id 一欄的殘檔（實測 336 檔）——計數，不當錯誤
             stats["stub"] += 1
             continue
-        r = clean_finmind_prices(raw)
+        # 清洗是對**整檔**做的（2005~2026），故 r 的剔除統計是全檔數字。
+        # 逐年回報時必須先裁到視窗再算，否則每一年都會印出同一個全檔數字
+        # ——那是一個「看起來像年度統計、其實不是」的數字，比不印還糟。
+        in_window = (
+            raw.with_columns(
+                _d=pl.col("date").cast(pl.Date)
+                if raw["date"].dtype == pl.Date
+                else pl.col("date").str.to_date("%Y-%m-%d", strict=True)
+            )
+            .filter(pl.col("_d").is_between(lo, hi))
+            .drop("_d")
+        )
+        if in_window.is_empty():
+            continue
+        r = clean_finmind_prices(in_window)
         stats["rows_in"] += r.rows_in
         stats["zero"] += r.dropped_zero_price
         stats["null"] += r.dropped_null
         stats["dup"] += r.dropped_duplicate
         part = r.frame.filter(pl.col("date").is_between(lo, hi))
-        if part.height:
-            frames.append(part)
+        if not part.height:
+            continue
+        if windows is not None:
+            win = windows.get(f.stem)
+            if win is None:
+                stats["not_in_meta"] += part.height  # 規則 1
+                continue
+            listed, delisted = win
+            if listed is not None:
+                before = part.height
+                part = part.filter(pl.col("date") >= listed)  # 規則 2
+                stats["pre_listing"] += before - part.height
+            if delisted is not None:
+                before = part.height
+                part = part.filter(pl.col("date") <= delisted)  # 規則 3
+                stats["post_delisting"] += before - part.height
+            if not part.height:
+                continue
+        frames.append(part)
     if not frames:
-        raise SystemExit(f"{lo} ~ {hi} 清洗後沒有任何列")
+        raise SystemExit(f"{lo} ~ {hi} 清洗並套規則後沒有任何列")
     return pl.concat(frames).sort("date", "stock_id"), stats
 
 
@@ -166,18 +253,30 @@ def load(conn: object, schema: str, cfg: ServingConfig, lo: dt.date, hi: dt.date
         )
     sch.ensure_schema(conn, cfg.pg_schema)
     spec = sch.spec_of("prices_daily")
+    windows = _listing_windows(conn, schema)
+    n_ld = sum(1 for v in windows.values() if v[0] is not None)
+    print(
+        f"規則 1 的白名單：stock_meta 裡市場別為 TWSE／TPEX 的 {len(windows):,} 檔"
+        f"（其中 {n_ld:,} 檔有 list_date 可套規則 2）\n"
+    )
     t0 = time.perf_counter()
-    total = 0
+    total = dropped = 0
     for year in range(lo.year, hi.year + 1):
         y_lo = max(lo, dt.date(year, 1, 1))
         y_hi = min(hi, dt.date(year, 12, 31))
-        frame, stats = _load_staging(y_lo, y_hi)
+        frame, stats = _load_staging(y_lo, y_hi, windows)
         bad = price_identity_violations(frame)
-        if bad.height:
-            # 單位錯誤會讓整年的因子失真，且 schema 攔不住——停下來，不要寫進去
+        rate = bad.height / frame.height if frame.height else 0.0
+        if rate > _MAX_VIOLATION_RATE:
+            # 這個量級只可能是單位錯（「張 vs 股」讓 amount/volume 差一千倍），
+            # 而兩者都是合法的非負數，schema 完全攔不住——停下來，不要寫進去
             raise SystemExit(
-                f"{year} 有 {bad.height:,} 列違反行情恆等式，拒絕寫入。首列：{bad.row(0, named=True)}"
+                f"{year} 的恆等式違規率 {rate:.2%} 超過門檻 {_MAX_VIOLATION_RATE:.0%}，拒絕寫入。"
+                f"首列：{bad.row(0, named=True)}"
             )
+        if bad.height:
+            frame = frame.join(bad.select("date", "stock_id"), on=["date", "stock_id"], how="anti")
+            dropped += bad.height
         with conn.cursor() as cur:  # type: ignore[attr-defined]
             upsert(cur, schema, spec, frame)
         conn.commit()  # type: ignore[attr-defined]
@@ -185,11 +284,15 @@ def load(conn: object, schema: str, cfg: ServingConfig, lo: dt.date, hi: dt.date
         el = (time.perf_counter() - t0) / 60
         print(
             f"  {year}：{frame.height:,} 列寫入（{frame['stock_id'].n_unique():,} 檔、"
-            f"{frame['date'].n_unique():,} 交易日）｜"
-            f"零價剔除 {stats['zero']:,}、重複 {stats['dup']:,}｜已 {el:.1f} 分",
+            f"{frame['date'].n_unique():,} 交易日）｜剔除：零價 {stats['zero']:,}、"
+            f"不在 meta {stats['not_in_meta']:,}、上市前 {stats['pre_listing']:,}、"
+            f"下市後 {stats['post_delisting']:,}、恆等式 {bad.height:,}｜已 {el:.1f} 分",
             flush=True,
         )
-    print(f"\n完成：共寫入 {total:,} 列，耗時 {(time.perf_counter() - t0) / 60:.1f} 分")
+    print(
+        f"\n完成：共寫入 {total:,} 列（恆等式剔除 {dropped:,} 列），"
+        f"耗時 {(time.perf_counter() - t0) / 60:.1f} 分"
+    )
 
 
 def main() -> None:
