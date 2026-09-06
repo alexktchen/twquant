@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import warnings
 from collections.abc import Mapping, Sequence
 
+import numpy as np
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
@@ -322,3 +325,227 @@ def assemble(features: Mapping[str, pl.DataFrame], labels: pl.DataFrame) -> pl.D
     return wide.join(
         labels.select("date", "stock_id", "label"), on=["date", "stock_id"], how="left"
     ).sort("date", "stock_id")
+
+
+# ── D-074／D-075：月頻訊號日的另類標籤 ────────────────────────────────────
+# 兩條事前登記的研究線換的是**預測標的**，不是特徵工程或調參（那是 D-066 乙層
+# 明文禁止的）。切分與 LightGBM 參數與既有模型完全相同，故結果可比。
+
+
+def month_end_signal_dates(trading_days: Sequence[dt.date]) -> list[dt.date]:
+    """每個日曆月的最後一個交易日（D-074／D-075 寫定的訊號日）。
+
+    月營收在次月約 10 日公布，所以「月底」是唯一一個對所有個股都剛好站在
+    「本月已公布、下月未公布」邊界上的日子；R 系列沿用同一組日子純粹是為了讓
+    兩條線的切分逐字可比。
+
+    尾端若是不完整的月份（資料迄日落在月中），仍會產生一個訊號日——它的標籤
+    必然是 null（前向視窗不足），故不影響訓練，只影響推論時的最新一列。
+    """
+    days = sorted(set(trading_days))
+    if not days:
+        raise ValueError("trading_days 為空，無法取月底訊號日")
+    return [
+        a
+        for a, b in zip(days, [*days[1:], None], strict=True)
+        if b is None or (b.year, b.month) != (a.year, a.month)
+    ]
+
+
+def _session_numbers(trading_days: Sequence[dt.date]) -> pl.DataFrame:
+    """全市場日曆 → (_d, _n)：稠密開市日序號，供任意日期換算開市日跨距。"""
+    return (
+        pl.DataFrame({"_d": sorted(set(trading_days))}, schema={"_d": pl.Date})
+        .sort("_d")
+        .with_row_index("_n")
+        .with_columns(pl.col("_n").cast(pl.Int64))
+    )
+
+
+# 橫斷面 OLS 需要「截距 ＋ 2 個解釋變數」共 3 個參數，再留 1 個殘差自由度。
+# 這是迴歸的秩要求，不是可調的門檻——低於此值代表當日資料壞了，不是該放寬。
+_MIN_REGRESSION_ROWS = 4
+
+
+def _residualize_cross_section(
+    frame: pl.DataFrame, y_col: str, x_cols: Sequence[str], out_col: str
+) -> pl.DataFrame:
+    """逐日橫斷面 OLS（含截距）殘差。
+
+    用 numpy 而非 polars 運算式：每日最小平方解沒有對應的 polars 表達式，
+    硬湊會比一個 3 欄的 lstsq 更難讀也更容易錯。輸入須已無缺值與非有限值。
+    """
+    parts: list[pl.DataFrame] = []
+    for part in frame.partition_by("date", maintain_order=True):
+        n = part.height
+        if n < _MIN_REGRESSION_ROWS:
+            day = part["date"][0]
+            raise ValueError(
+                f"{day} 的橫斷面只有 {n} 檔，不足以做 {len(x_cols)} 元迴歸"
+                f"（需 ≥ {_MIN_REGRESSION_ROWS}）。真實橫斷面是上千檔，"
+                "出現這種日子代表上游資料缺了一段，不得靜默略過"
+            )
+        design = np.column_stack([np.ones(n), *(part[c].to_numpy() for c in x_cols)])
+        y = part[y_col].to_numpy()
+        beta, *_ = np.linalg.lstsq(design, y, rcond=None)
+        parts.append(part.with_columns(pl.Series(out_col, y - design @ beta, dtype=pl.Float64)))
+    return pl.concat(parts)
+
+
+def revenue_surprise_labels(
+    revenue: pl.DataFrame,
+    signal_dates: Sequence[dt.date],
+    trading_days: Sequence[dt.date],
+    *,
+    max_lag_sessions: int,
+) -> pl.DataFrame:
+    """F 系列標籤（D-074）：下一次公布的月營收 YoY 對「本月 YoY ＋ 加速度」的橫斷面殘差。
+
+    輸入 `revenue` 需含 (stock_id, period_end, available_at, yoy)；
+    輸出 (date, stock_id, label)，label 為同日殘差的橫斷面百分位 (0, 1]。
+
+    **為什麼是殘差而不是 YoY 本身**：直接以「下月 YoY」為標籤時，最強的預測子是
+    營收加速度自己（RankIC −0.29），那不是訊號而是均值回歸——把它壓掉之後
+    剩下的才是「量價籌碼領先基本面」這個假說要問的東西。
+
+    **PIT 的定義由公布日決定，不是月份**：在訊號日 t，`yoy`／`_accel` 取
+    `available_at ≤ t` 的最後一次公布，標籤取**緊接其後**的那一次公布（相鄰，
+    不跳號）。該次公布距 t 超過 `max_lag_sessions` 個開市日者無標籤——那是
+    遲報或缺報，不是驚奇。
+
+    label 是前瞻構造，不受 `assert_no_lookahead` 約束（與 `excess_rank_labels` 同）。
+    """
+    if max_lag_sessions < 1:
+        raise ValueError(f"max_lag_sessions 須 ≥ 1，得到 {max_lag_sessions}")
+    for col in ("stock_id", "period_end", "available_at", "yoy"):
+        if col not in revenue.columns:
+            raise ValueError(f"revenue 缺欄位 {col}（需 stock_id/period_end/available_at/yoy）")
+    rev = (
+        revenue.select("stock_id", "period_end", "available_at", "yoy")
+        .drop_nulls("yoy")
+        .with_columns(_avail=pl.col("available_at").dt.date())
+        # 同一天有多筆（更正重編）時取 period_end 最新的那筆
+        .sort("stock_id", "_avail", "period_end")
+        .unique(subset=["stock_id", "_avail"], keep="last", maintain_order=True)
+        .with_columns(
+            _accel=pl.col("yoy") - pl.col("yoy").shift(1).over("stock_id", order_by="_avail"),
+            _yoy_next=pl.col("yoy").shift(-1).over("stock_id", order_by="_avail"),
+            _avail_next=pl.col("_avail").shift(-1).over("stock_id", order_by="_avail"),
+        )
+        .select("stock_id", "_avail", "yoy", "_accel", "_yoy_next", "_avail_next")
+        .sort("stock_id", "_avail")
+    )
+    spine = (
+        pl.DataFrame({"date": sorted(set(signal_dates))}, schema={"date": pl.Date})
+        .join(rev.select("stock_id").unique(), how="cross")
+        .sort("stock_id", "date")
+    )
+    with warnings.catch_warnings():
+        # 附 by 群組時 polars 無法驗證排序旗標；已明確 sort（同 factors/fundamental.py）
+        warnings.filterwarnings("ignore", message="Sortedness of columns cannot be checked")
+        joined = spine.join_asof(
+            rev, left_on="date", right_on="_avail", by="stock_id", strategy="backward"
+        )
+    cal = _session_numbers(trading_days)
+    have_next = (
+        joined.filter(pl.col("_avail_next").is_not_null())
+        .join(cal.rename({"_d": "date", "_n": "_n_t"}), on="date", how="inner")
+        .sort("_avail_next")
+    )
+    have_next = have_next.join_asof(
+        cal, left_on="_avail_next", right_on="_d", strategy="backward"
+    ).rename({"_n": "_n_next"})
+    usable = have_next.filter(
+        pl.col("yoy").is_not_null()
+        & pl.col("_accel").is_not_null()
+        & pl.col("_yoy_next").is_not_null()
+        & pl.col("_n_next").is_not_null()
+        & (pl.col("_n_next") - pl.col("_n_t")).is_between(1, max_lag_sessions)
+    ).select("date", "stock_id", "_yoy_next", "yoy", "_accel")
+    if usable.is_empty():
+        raise ValueError(
+            f"營收驚奇標籤為空：{len(signal_dates)} 個訊號日中沒有任何一檔"
+            f"在 {max_lag_sessions} 個開市日內有下一次公布。"
+            "檢查 monthly_revenue 的 available_at 是否覆蓋該區間"
+        )
+    bad = usable.filter(
+        ~pl.all_horizontal(pl.col(c).is_finite() for c in ("_yoy_next", "yoy", "_accel"))
+    )
+    if not bad.is_empty():
+        # 黃金規則 5：非有限值不是缺值，drop_nulls 攔不住，而 OLS 會把它擴散到
+        # 當日整個橫斷面的殘差——一列壞資料毀掉一整天的樣本
+        raise ValueError(
+            f"monthly_revenue.yoy 有 {bad.height} 列非有限值（例：{bad.row(0, named=True)}）。"
+            "去年同月營收為 0 會產生 inf；請在清洗層修正，不得帶進標籤"
+        )
+    return (
+        _residualize_cross_section(
+            usable.sort("date", "stock_id"), "_yoy_next", ("yoy", "_accel"), "_resid"
+        )
+        .pipe(cross_rank_pct, "_resid", "label")
+        .select("date", "stock_id", "label")
+        .sort("date", "stock_id")
+    )
+
+
+def forward_drawdown_labels(
+    prices: pl.DataFrame,
+    signal_dates: Sequence[dt.date],
+    *,
+    horizon: int,
+    adjusted: bool = False,
+    max_span_sessions: int | None = None,
+) -> pl.DataFrame:
+    """R 系列標籤（D-075）：未來 `horizon` 個交易日內、**相對 t 日收盤**的最低點跌幅。
+
+    輸入需含 (date, stock_id, close)，`adjusted=True` 時另需 `adj`。
+    輸出 (date, stock_id, label)，label 為同日跌幅的橫斷面百分位 (0, 1]
+    ——**低百分位＝跌得深**，故風控閘門剔除的是分數最低的一段。
+
+    **標籤定義是寫死的，不得改回 run-max 版**（D-075）：原版由「t 之後的 run-max
+    往下算」，與 `price.high_52w`（當下離高點多近）共用「當下價位在區間中的位置」；
+    實測換成本定義後 IC 衰減 13~41%，那一段是共用資訊不是預測力。
+
+    `adjusted=True` 走總報酬價：除息當天的價格跳空不是虧損，未還原時會被當成回撤
+    （D-054 同一個失效模式）。`max_span_sessions` 見 `forward_open_returns`
+    ——出場列與當前列的開市日跨距超過此值即設 null。
+    """
+    if horizon < 1:
+        raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
+    if max_span_sessions is not None and max_span_sessions < horizon:
+        raise ValueError(
+            f"max_span_sessions({max_span_sessions}) 不得小於 horizon({horizon})："
+            "往後 horizon 列至少跨 horizon 個開市日，設得更小會讓所有標籤變 null"
+        )
+    if "close" not in prices.columns:
+        raise ValueError("prices 缺 close 欄（forward_drawdown_labels 以收盤價為基準）")
+    if adjusted and "adj" not in prices.columns:
+        raise ValueError(
+            "adjusted=True 需要 adj 欄（固定過去錨的累積除權息還原因子）；"
+            "缺欄時不得回退成未還原價格——除息跳空會被當成回撤（D-054）"
+        )
+    px = (pl.col("close") / pl.col("adj")) if adjusted else pl.col("close")
+    frame = prices.sort("stock_id", "date")
+    if max_span_sessions is not None:
+        frame = session_index(frame).sort("stock_id", "date")
+    # schema 允許 close >= 0，故 0 是合法值；除以 0 會產生 inf 而 inf 通過每一道 null 檢查
+    frame = frame.with_columns(pl.when(px > 0.0).then(px).otherwise(None).alias("_p"))
+    fwd_min = (
+        pl.col("_p")
+        .rolling_min(window_size=horizon, min_samples=horizon)
+        .shift(-horizon)
+        .over("stock_id", order_by="date")
+    )
+    if max_span_sessions is not None:
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        span = sidx.shift(-horizon).over("stock_id", order_by="date") - sidx
+        fwd_min = pl.when(span <= max_span_sessions).then(fwd_min).otherwise(None)
+    keep = sorted(set(signal_dates))
+    return (
+        frame.with_columns((fwd_min / pl.col("_p") - 1.0).alias("_dd"))
+        .filter(pl.col("date").is_in(keep))
+        .select("date", "stock_id", "_dd")
+        .sort("date", "stock_id")
+        .pipe(cross_rank_pct, "_dd", "label")
+        .select("date", "stock_id", "label")
+    )

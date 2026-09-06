@@ -114,6 +114,55 @@ SPECS = [
     ("G5", "tracks_g", "G5_track_g5_ml_large", "G 濾網矩陣", "ML ＋ 大型股宇宙"),
     ("G6", "tracks_g", "G6_track_g6_ml_flaggate", "G 濾網矩陣", "ML ＋ 型態進場閘門"),
     ("GALL", "tracks_g", "GALL_track_gall_ml_allgates", "G 濾網矩陣", "六個濾網全上"),
+    ("MG1", "tracks_mg", "MG1_track_mg1_rev", "MG 系列", "M 結構 ＋ 營收成長濾網"),
+    ("MG2", "tracks_mg", "MG2_track_mg2_lowvol", "MG 系列", "M 結構 ＋ 低波動第二層池"),
+    ("MG3", "tracks_mg", "MG3_track_mg3_voltgt", "MG 系列", "M 結構 ＋ 波動率縮放"),
+    ("MG4", "tracks_mg", "MG4_track_mg4_ema", "MG 系列", "M 結構 ＋ 分數 EMA 平滑"),
+    ("MG5", "tracks_mg", "MG5_track_mg5_large", "MG 系列", "M 結構 ＋ 大型股宇宙"),
+    # D-073 的兩個**判定格**；尚未跑完，故會出現在 `missing`——那正是要讓它看得見的原因
+    ("MGALL", "tracks_mg", "MGALL_track_mgall_ml_allgates", "MG 系列", "五個濾網全上"),
+    (
+        "MGALL-mom",
+        "tracks_mg",
+        "MGALLM_track_mgallm_mom_allgates",
+        "MG 系列",
+        "**隔離格**：同 MGALL 但池子改用動能（D-073 的判定依據）",
+    ),
+    (
+        "F1",
+        "tracks_fr",
+        "F1_track_f1_revpool",
+        "F／R 系列",
+        "營收驚奇分數當池子（前 30%）× C1 技術排序",
+    ),
+    (
+        "F2",
+        "tracks_fr",
+        "F2_track_f2_mompool",
+        "F／R 系列",
+        "**隔離格**：同 F1 但池子改用 `mom_60d`（D-081 的判定依據）",
+    ),
+    (
+        "F3",
+        "tracks_fr",
+        "F3_track_f3_highpool",
+        "F／R 系列",
+        "**更嚴對照**：同 F1 但池子改用 `high_52w`（單因子 IC 就贏過模型）",
+    ),
+    (
+        "R1",
+        "tracks_fr",
+        "R1_track_r1_c1_ddgate",
+        "F／R 系列",
+        "C1 ＋ 剔除預測未來 60 日回撤最深的 10%",
+    ),
+    (
+        "R2",
+        "tracks_fr",
+        "R2_track_r2_c1_lvgate",
+        "F／R 系列",
+        "**隔離格**：同 R1 但閘門改用 `vol_20d`（D-080 的判定依據）",
+    ),
 ]
 SCALES = ["1x", "0x", "1.5x"]
 
@@ -440,6 +489,14 @@ def main() -> None:
         ("濾網 G5 大型股 = G5 − L0-new", "G5", "L0-new", "只換成大型股宇宙"),
         ("濾網 G6 型態閘門 = G6 − L0-new", "G6", "L0-new", "只加型態進場閘門＋固定格位"),
         ("全部一起 = GALL − L0-new", "GALL", "L0-new", "六個濾網全上（**非各邊際效果之和**）"),
+        # D-081 的判定邊：兩格只差池子的定義
+        ("營收驚奇當池子 = F1 − F2", "F1", "F2", "逐字相同，只把池子從營收驚奇分數換成動能"),
+        ("同上，更嚴對照 = F1 − F3", "F1", "F3", "池子改用 `high_52w`——它單因子就贏過模型"),
+        ("換預測標的 = F1 − M1", "F1", "M1", "**同時換兩件事**（預測什麼＋模型好不好），僅供參考"),
+        # D-080 的判定邊
+        ("回撤閘門 = R1 − R2", "R1", "R2", "逐字相同，只把閘門從回撤分數換成 `vol_20d`"),
+        ("回撤閘門 vs 無閘門 = R1 − C1", "R1", "C1", "只多一道閘門；但看不出它比低波動好在哪"),
+        ("低波動閘門 vs 無閘門 = R2 − C1", "R2", "C1", "同上，閘門是最平凡的替代品"),
     ):
         ba, bb = get(a), get(b)
         if not (ba and bb):

@@ -115,6 +115,45 @@ def read_prices_training(conn: Any, schema: str, start: object, end: object) -> 
     return pl.DataFrame(rows, schema=schema_, orient="row")
 
 
+def read_prices_close(conn: Any, schema: str, start: object, end: object) -> pl.DataFrame:
+    """prices_daily 的 (date, stock_id, close) 切片（D-075 的回撤標籤以收盤價為基準）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, stock_id, close FROM "{schema}"."prices_daily" '
+            "WHERE date BETWEEN %s AND %s AND close IS NOT NULL",
+            (start, end),
+        )
+        rows = cur.fetchall()
+    schema_ = {"date": pl.Date, "stock_id": pl.String, "close": pl.Float64}
+    return pl.DataFrame(rows, schema=schema_, orient="row")
+
+
+def read_monthly_revenue(conn: Any, schema: str, start: object, end: object) -> pl.DataFrame:
+    """monthly_revenue 的 (stock_id, period_end, available_at, yoy) 切片（D-074 標籤用）。
+
+    下界放寬一個月：訊號日 `start` 當天要看得到「上一次公布」，而那次公布可能落在
+    `start` 之前——用 `start` 直接切會讓首月的加速度整排變 null。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT stock_id, period_end, available_at, yoy FROM "{schema}"."monthly_revenue" '
+            "WHERE available_at <= %s AND yoy IS NOT NULL "
+            "AND available_at >= (%s::date - INTERVAL '120 days')",
+            (end, start),
+        )
+        rows = cur.fetchall()
+    return pl.DataFrame(
+        rows,
+        schema={
+            "stock_id": pl.String,
+            "period_end": pl.Date,
+            "available_at": pl.Datetime("us", "Asia/Taipei"),
+            "yoy": pl.Float64,
+        },
+        orient="row",
+    )
+
+
 def upsert_ml_scores(conn: Any, schema: str, frame: pl.DataFrame) -> int:
     """驗證後批次寫入；回傳實際新增列數（衝突略過不計）。"""
     df = schemas.validate("ml_scores", frame.select(_COLS))

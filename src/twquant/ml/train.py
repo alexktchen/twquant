@@ -127,8 +127,12 @@ def walk_forward_train(
 
 
 def training_config_hash(cfg: MlConfig, cost_cfg: CostConfig | None = None) -> str:
-    """訓練 fingerprint；成本感知模型同時綁定 ML 與成本配置。"""
-    if cfg.label.transform == "rank_pct":
+    """訓練 fingerprint；成本感知模型同時綁定 ML 與成本配置。
+
+    只有 `cost_adjusted_return` 的標籤真的吃 CostConfig（成本進了標籤本身）；
+    D-074／D-075 的兩個標籤與成本無關，故與 `rank_pct` 一樣只綁 ML 配置。
+    """
+    if cfg.label.transform != "cost_adjusted_return":
         return config_hash(cfg)
     payload: dict[str, object] = {"ml": cfg.model_dump(mode="json")}
     if cost_cfg is None:
@@ -184,12 +188,31 @@ def artifact_fingerprint(*, config: str, code: str, data: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+# 標籤 → model_id 前綴。前綴是**因子身分**（薄因子以它取分數），不是調參對象；
+# 換了預測標的就是不同的模型系列，共用前綴會讓 `ml.*` 因子撈到別條線的分數。
+_ID_PREFIX: dict[str, str] = {
+    "rank_pct": "lgbm_h",
+    "cost_adjusted_return": "lgbm_net_h",
+    "revenue_surprise": "lgbm_rev_h",  # D-074
+    "forward_drawdown": "lgbm_dd_h",  # D-075
+}
+
+# research_log 的 trial_scope（DSR 的家族鍵）。第一段 IC 檢驗記在 ML 家族，
+# 不佔回測試驗額度——第二段的經濟價值判定才是回測 trial（D-074／D-075）。
+_TRIAL_SCOPE: dict[str, str] = {
+    "rank_pct": "ml:h{h}",
+    "cost_adjusted_return": "ml:net_h{h}",
+    "revenue_surprise": "ml:revenue_surprise",
+    "forward_drawdown": "ml:drawdown_h{h}",
+}
+
+
 def make_model_id(train_end: dt.date, cfg: MlConfig, *, cost_cfg: CostConfig | None = None) -> str:
     """模型 id：演算法_h視窗_訓練截止_配置hash8——可回溯到 configs/ml.yaml（SPEC-010 §4）。"""
-    if cfg.label.transform == "rank_pct":
-        return f"lgbm_h{cfg.horizon_days}_{train_end:%Y%m%d}_{config_hash(cfg)[:8]}"
     fingerprint = training_config_hash(cfg, cost_cfg)
-    return f"lgbm_net_h{cfg.horizon_days}_{train_end:%Y%m%d}_{fingerprint[:8]}"
+    return (
+        f"{_ID_PREFIX[cfg.label.transform]}{cfg.horizon_days}_{train_end:%Y%m%d}_{fingerprint[:8]}"
+    )
 
 
 def save_model(
@@ -238,8 +261,7 @@ def log_training_run(
     *,
     cost_cfg: CostConfig | None = None,
 ) -> None:
-    """research_log 登記一列（AC-8）；trial_scope 綁 horizon，trials 計數供 DSR。"""
-    net = cfg.label.transform == "cost_adjusted_return"
+    """research_log 登記一列（AC-8）；trial_scope 綁標籤家族，trials 計數供 DSR。"""
     append_research_log(
         data_dir,
         [
@@ -251,7 +273,7 @@ def log_training_run(
                 "date": now_tw().date().isoformat(),
                 "metric_name": "oos_rank_ic",
                 "metric_value": oos_ic,
-                "trial_scope": f"ml:net_h{cfg.horizon_days}" if net else f"ml:h{cfg.horizon_days}",
+                "trial_scope": _TRIAL_SCOPE[cfg.label.transform].format(h=cfg.horizon_days),
             }
         ],
     )

@@ -108,10 +108,21 @@ def check(
     typer.secho("閘門全綠。", fg=typer.colors.GREEN, bold=True)
 
 
+#: CLAUDE.md §0.2：`system.yaml` 的 `data_dir` 是**相對路徑**，在 worktree 裡執行時
+#: 指向 worktree 自己的 `data/` 而不是主 checkout 的正本。`--out` 只管得到模型檔，
+#: `research_log`（＝DSR 的試驗計數）與各式落地仍會分岔——實測本輪的兩筆 `ml_train`
+#: 就寫進了 worktree，差點讓試驗帳本一分為二。此環境變數讓所有寫入路徑一次對齊。
+_DATA_DIR_ENV = "TWQUANT_DATA_DIR"
+
+
 def _load_system() -> SystemConfig:
+    import os
+
     from twquant.config import SystemConfig, load_config
 
-    return load_config(_CONFIG_DIR / "system.yaml", SystemConfig)
+    cfg = load_config(_CONFIG_DIR / "system.yaml", SystemConfig)
+    override = os.environ.get(_DATA_DIR_ENV, "").strip()
+    return cfg.model_copy(update={"data_dir": override}) if override else cfg
 
 
 def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> int:
@@ -2059,6 +2070,8 @@ def ml_train(
     from twquant.data.serving import store
     from twquant.data.serving.ml_store import (
         read_corporate_events,
+        read_monthly_revenue,
+        read_prices_close,
         read_prices_open,
         read_prices_training,
     )
@@ -2069,12 +2082,15 @@ def ml_train(
         attach_adjustment,
         cost_adjusted_return_labels,
         excess_rank_labels,
+        forward_drawdown_labels,
         forward_open_returns,
+        month_end_signal_dates,
+        revenue_surprise_labels,
     )
     from twquant.ml.splits import walk_forward_splits
 
     cfg = _load_ml(config)
-    if cfg.label.total_return is None:
+    if cfg.label.is_price_based and cfg.label.total_return is None:
         # D-054：不給預設值是刻意的。未還原的標籤在 6~8 月有近兩成「輸家」是除息
         # 假象，而除息日事先公告 → 模型會學到「預測誰要除息」且驗收看起來會過關。
         raise typer.BadParameter(
@@ -2089,13 +2105,19 @@ def ml_train(
     try:
         features = _ml_features_resolved(cfg)
         feats = _ml_feature_frames(conn, scfg.pg_schema, features, start, end)
-        px = (
-            read_prices_training(conn, scfg.pg_schema, start, end)
-            if cfg.label.transform == "cost_adjusted_return"
-            else read_prices_open(conn, scfg.pg_schema, start, end)
-        )
+        _readers = {
+            "cost_adjusted_return": read_prices_training,
+            "forward_drawdown": read_prices_close,  # D-075：回撤以收盤價為基準
+            "revenue_surprise": read_prices_close,  # 只用來取交易日曆，欄位不進標籤
+        }
+        px = _readers.get(cfg.label.transform, read_prices_open)(conn, scfg.pg_schema, start, end)
         events = (
             read_corporate_events(conn, scfg.pg_schema, end) if cfg.label.total_return else None
+        )
+        revenue = (
+            read_monthly_revenue(conn, scfg.pg_schema, start, end)
+            if cfg.label.transform == "revenue_surprise"
+            else None
         )
     finally:
         conn.close()
@@ -2110,8 +2132,29 @@ def ml_train(
     if events is not None:
         px = attach_adjustment(px, events)
         typer.echo(f"除權息事件 {events.height} 筆 → 標籤改用總報酬（D-054）")
+    days: list[dt.date] = sorted(px["date"].unique().to_list())
+    signal_days = month_end_signal_dates(days) if cfg.label.signal_dates == "month_end" else days
+    if cfg.label.signal_dates == "month_end":
+        typer.echo(f"月頻訊號日 {len(signal_days)} 個（{signal_days[0]} ~ {signal_days[-1]}）")
     cost_cfg: CostConfig | None = None
-    if cfg.label.transform == "cost_adjusted_return":
+    if cfg.label.transform == "revenue_surprise":
+        assert revenue is not None  # transform 與讀取分支同源
+        typer.echo(f"月營收 {revenue.height} 列（D-074：標籤不含任何價格欄位）")
+        labels = revenue_surprise_labels(
+            revenue,
+            signal_days,
+            days,
+            max_lag_sessions=cast("int", cfg.label.max_lag_sessions),
+        )
+    elif cfg.label.transform == "forward_drawdown":
+        labels = forward_drawdown_labels(
+            px,
+            signal_days,
+            horizon=cfg.horizon_days,
+            adjusted=cast("bool", cfg.label.total_return),
+            max_span_sessions=cfg.label.max_span_sessions,
+        )
+    elif cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
         labels = cost_adjusted_return_labels(
             px,
@@ -2120,7 +2163,7 @@ def ml_train(
             position_notional_twd=cfg.label.position_notional_twd,
             downside_penalty=cfg.label.downside_penalty,
             cost_cfg=cost_cfg,
-            adjusted=cfg.label.total_return,
+            adjusted=cast("bool", cfg.label.total_return),
             max_span_sessions=cfg.label.max_span_sessions,
         )
     else:
@@ -2128,7 +2171,7 @@ def ml_train(
             forward_open_returns(
                 px,
                 cfg.horizon_days,
-                adjusted=cfg.label.total_return,
+                adjusted=cast("bool", cfg.label.total_return),
                 max_span_sessions=cfg.label.max_span_sessions,
             )
         )
@@ -2137,8 +2180,13 @@ def ml_train(
     sparsest = sorted(shares.items(), key=lambda kv: kv[1])[:5]
     typer.echo("特徵覆蓋最低 5 個：" + "、".join(f"{n} {v:.0%}" for n, v in sparsest))
     frame = assemble(feats, labels)
+    if cfg.label.signal_dates == "month_end":
+        # 月頻標籤下，其餘交易日的列全是 label null 的空殼——留著只會讓
+        # walk_forward_train 對它們逐日推論（十倍以上的無用計算），且讓
+        # training_data_hash 綁到與訓練無關的列。切分仍用**完整日曆**，
+        # 故 2 年訓練窗的長度不受影響。
+        frame = frame.filter(pl.col("date").is_in(signal_days))
     labeled = frame.filter(pl.col("label").is_not_null())
-    days: list[dt.date] = sorted(px["date"].unique().to_list())
     splits = walk_forward_splits(
         days,
         train_min_days=cfg.split.train_min_days,
@@ -2256,9 +2304,38 @@ def ml_score(
     )
 
 
+def _carry_forward_scores(
+    scored: pl.DataFrame, calendar: list[dt.date], signal_days: list[dt.date]
+) -> pl.DataFrame:
+    """把每個訊號日的分數複製到「該訊號日（含）起、下一個訊號日之前」的每個交易日。
+
+    `available_at` 不變（分數是在原訊號日算出來的），只換 `date`。
+    這不是插值也不是外推——分數在下一個訊號日之前本來就沒有更新。
+    """
+    import polars as pl
+
+    frames = []
+    for i, sig in enumerate(signal_days):
+        nxt = signal_days[i + 1] if i + 1 < len(signal_days) else None
+        span = [d for d in calendar if d >= sig and (nxt is None or d < nxt)]
+        if not span:
+            continue
+        block = scored.filter(pl.col("date") == sig).drop("date")
+        frames.append(
+            pl.DataFrame({"date": span}, schema={"date": pl.Date}).join(block, how="cross")
+        )
+    return pl.concat(frames).select(scored.columns).sort("date", "stock_id")
+
+
 @ml_app.command("backfill-scores")
 def ml_backfill_scores(
     model: str = typer.Option(..., help="模型目錄（讀其 oos_scores.parquet）"),
+    carry_forward_to: str = typer.Option(
+        "",
+        "--carry-forward-to",
+        help="月頻模型專用：把每個訊號日的分數沿用到下一個訊號日之前的每個交易日，"
+        "最後一個訊號日沿用到此日（YYYY-MM-DD）。空＝不沿用",
+    ),
 ) -> None:
     """把 walk-forward 的**樣本外**分數寫進 ml_scores，供回測（SPEC-010 §7 第 3 級）。
 
@@ -2269,6 +2346,12 @@ def ml_backfill_scores(
 
     註：各列實際來自不同窗的模型，統一標記為部署模型的 model_id（薄因子以前綴取用）。
     研究軌專用；生產分數由 `ml score` 逐日寫入。
+
+    **`--carry-forward-to`（月頻模型必要）**：D-074／D-075 的模型每月只在月底出一次
+    分數，而策略在每月第一個週一再平衡——不沿用的話 `prefilter` 當天撈不到任何列，
+    池子會整個空掉（而不是報錯）。沿用的列 `available_at` 保留**原訊號日**的 19:00，
+    因為那才是這個數字實際被算出來的時間；`date` 則是它適用的交易日。
+    沿用不是插值也不是外推：分數在下一個訊號日之前本來就沒有更新。
     """
     import json
 
@@ -2295,6 +2378,26 @@ def ml_backfill_scores(
     conn = store.connect(scfg)
     try:
         ensure_schema(conn, scfg.pg_schema)
+        if carry_forward_to:
+            until = dt.date.fromisoformat(carry_forward_to)
+            signal_days = sorted(scored["date"].unique().to_list())
+            if until <= signal_days[-1]:
+                raise typer.BadParameter(
+                    f"--carry-forward-to {until} 不晚於最後一個訊號日 {signal_days[-1]}，"
+                    "沿用不會產生任何新列"
+                )
+            with conn.cursor() as cur:
+                cur.execute(
+                    f'SELECT DISTINCT date FROM "{scfg.pg_schema}"."prices_daily" '
+                    "WHERE date BETWEEN %s AND %s ORDER BY date",
+                    (signal_days[0], until),
+                )
+                calendar = [r[0] for r in cur.fetchall()]
+            scored = _carry_forward_scores(scored, calendar, signal_days)
+            typer.echo(
+                f"沿用：{len(signal_days)} 個訊號日 → {scored['date'].n_unique()} 個交易日"
+                f"（至 {until}），{scored.height} 列"
+            )
         n = upsert_ml_scores(conn, scfg.pg_schema, scored)
     finally:
         conn.close()

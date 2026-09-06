@@ -59,6 +59,12 @@ KNOWN = {
     "M5": "track_m5_ml_large",
     "M6": "track_m6_ml_voltarget",
     "C4": "track_c4_voltarget",
+    # F／R 兩條事前登記研究線的第二段（D-074／D-075／D-080／D-081）
+    "F1": "track_f1_revpool",
+    "F2": "track_f2_mompool",
+    "F3": "track_f3_highpool",
+    "R1": "track_r1_c1_ddgate",
+    "R2": "track_r2_c1_lvgate",
 }
 SCALES = [("1x", None), ("0x", "0"), ("1.5x", "1.5")]
 

@@ -77,3 +77,38 @@ def lgbm_rank_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
 def lgbm_net_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """LightGBM H20 成本感知連續報酬分數；只讀 PIT-safe ml_scores。"""
     return _scores_for_model(view, params, "lgbm_net_h20_")
+
+
+@factor(
+    name="ml.lgbm_rev_15d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_rev_h15_", "smooth_days": 0},
+)
+def lgbm_rev_15d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """F 系列（D-074）：下次公布的月營收驚奇分數。高分＝驚奇為正。
+
+    只讀 PIT-safe ml_scores。第二段的用法是**池子閘門**（前 30%），
+    與 M3 的「動能當池子」逐字對照，故 F − M3 這條邊只換了池子的定義。
+    """
+    return _scores_for_model(view, params, "lgbm_rev_h15_")
+
+
+@factor(
+    name="ml.lgbm_dd_60d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_dd_h60_", "smooth_days": 0},
+)
+def lgbm_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """R 系列（D-075）：未來 60 日回撤分數。**低分＝預測跌得深**（百分位方向同標籤）。
+
+    用途寫死為**風控閘門**：`prefilter` 保留前 90%，即剔除預測回撤最深的一成。
+    **不得作為 `signals` 進入排序**——先導只證明它能排序「誰會跌得深」，
+    未證明它能排序「誰會漲得多」；把風控訊號拿去選股是換了問題還沿用結論。
+    """
+    return _scores_for_model(view, params, "lgbm_dd_h60_")

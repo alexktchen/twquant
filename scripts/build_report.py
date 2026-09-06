@@ -32,7 +32,7 @@ CSS = """
   --down:#1E8449;    /* 跌：綠（台股慣例） */
   --warn:#8A6D1F; --warn-soft:#FBF3DC;
   --f1:#3A4A8C; --f2:#1E7B7B; --f3:#B0672A;
-  --f4:#7A3E8C; --f5:#4A7A2E; --f6:#8C3A52;
+  --f4:#7A3E8C; --f5:#4A7A2E; --f6:#8C3A52; --f7:#2C6E8F;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -43,7 +43,7 @@ CSS = """
     --up:#E8695B; --down:#4CAF7D;
     --warn:#D9B65C; --warn-soft:#2C2718;
     --f1:#8FA2E8; --f2:#57C4C4; --f3:#E0A063;
-    --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0;
+    --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0; --f7:#6FBCE0;
   }
 }
 :root[data-theme="dark"]{
@@ -54,7 +54,7 @@ CSS = """
   --up:#E8695B; --down:#4CAF7D;
   --warn:#D9B65C; --warn-soft:#2C2718;
   --f1:#8FA2E8; --f2:#57C4C4; --f3:#E0A063;
-  --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0;
+  --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0; --f7:#6FBCE0;
 }
 *{box-sizing:border-box}
 body{
@@ -191,6 +191,7 @@ _FAMILY = {  # 家族 → 顏色變數；固定指派、不循環（同一家族
     "M 系列": "var(--f4)",
     "G 濾網矩陣": "var(--f5)",
     "MG 系列": "var(--f6)",
+    "F／R 系列": "var(--f7)",
 }
 
 
@@ -360,8 +361,6 @@ def write_markdown(d, rows, out_md):
     **不重算任何數字**——與 HTML 走同一組欄位，故兩者不可能不一致。
     結果包本身是可重新產生的產物（20MB+），不進版控；進版控的是這份摘要。
     """
-    b = {x["key"]: x for x in d["benchmarks"]}
-    b50 = b.get("0050_tr", {})
     w = d["window"]
     L = [
         "# 回測總覽",
@@ -396,7 +395,7 @@ def write_markdown(d, rows, out_md):
         "| 策略 | 內容 | CAGR | MDD | Sharpe | 周轉 | 曝險 | 持股 | 有部位時年化 |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列"]
+    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列", "F／R 系列"]
     for g in order:
         grp = [r for r in rows if r["group"] == g]
         if not grp:
@@ -532,7 +531,7 @@ def main() -> None:
     )
 
     # ── 主表（按家族分組，組內按 Sharpe） ──────────────────────────────
-    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列"]
+    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列", "F／R 系列"]
     body = ""
     for g in order:
         grp = [r for r in rows if r["group"] == g]
