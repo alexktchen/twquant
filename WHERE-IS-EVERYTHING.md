@@ -1,4 +1,4 @@
-# 東西在哪（2026-09-06）
+# 東西在哪（2026-09-06，含研究平台上線）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
@@ -7,9 +7,12 @@
 ## 0. 三十秒版本
 
 - 程式碼在 worktree：`D:/project/twquant/.claude/worktrees/strange-kalam-3ec702`
+  （平台工單 T-200~T-215 在 `.claude/worktrees/beautiful-elbakyan-405956`，branch `claude/codex-platform-console-cb66ad`）
 - **資料一律在主 checkout**：`D:/project/twquant/data/`（不進 git，但都在本機）
 - 報告：`D:/project/twquant/data/reports/backtest_report.html`
 - 現況：**83 筆回測完成，沒有任何策略打敗 0050 含息（+40.08%／Sharpe 1.63）**
+- **研究平台已上線**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）。
+  操作看 [docs/OPERATIONS-platform-console.md](docs/OPERATIONS-platform-console.md)
 
 ## 1. ⚠ 最容易踩的陷阱：有兩個 `data/`
 
@@ -33,6 +36,8 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | **模型** | `data/models/lgbm_net_h20_20260225_6a798962`（**現行**） | 213MB（含舊模型） |
 | **研究登記簿（DSR）** | `data/research_log/` | 241 檔／1,884 筆 |
 | 長天期回補原始檔 | `data/staging/finmind_hist_*` | 462MB |
+| **推薦快照** | `data/recommendations/<run_id>.json` | 2026-09-04 一份／1943 檔候選 |
+| **洞悉證據包** | `data/insights/<insight_run_id>.json` | 目前 0 份（頁面正確顯示尚未產生） |
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
 
@@ -68,6 +73,9 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | 跑階梯 | `uv run --all-groups python scripts/run_ladder.py --capital 80000000 --out D:/project/twquant/data/ladder` |
 | 跑軌別 | `uv run --all-groups python scripts/run_tracks.py --tracks C1,C3 --out D:/project/twquant/data/tracks_c` |
 | 判定 | `scripts/t146_verdict.py`（D-066）、`scripts/d071_verdict.py`（D-071）、`scripts/d067_edges.py`（D-067） |
+| **前端閘門**（後端 gate 不涵蓋） | `cd frontend && npm test && npm run test:browser` |
+| **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
+| **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
 
@@ -93,6 +101,10 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 
 **③ 稀疏閘門相乘會歸零**（D-076）。每日 0~5 檔的事件乘上任何 30% 的池子，
 交集期望 0~1.5 檔。**疊閘門前先算交集大小**——本輪已因此作廢兩批實驗（M2/M3 曝險 3%、GALL 0%）。
+
+**④ `ml score` 會挑錯模型。** `latest_model_dir` 只比 `train_end`，而現有 8 個模型的
+train_end **全部是 2026-02-25**，同分時取排序最前者＝`lgbm_dd_h60`（D-075 的**回撤風控**模型），
+不是選股模型。要對特定模型推論，`--models` 要指向只含該模型的目錄。未開任務。
 
 ## 7. 還在跑的東西
 

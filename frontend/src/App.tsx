@@ -26,8 +26,10 @@ import { FALLBACK } from './fallback'
 import { MetaCtx, useMeta, type MetaCtxT } from './hooks'
 import { PlatformShell } from './platform/PlatformShell'
 import { ResearchPages } from './platform/ResearchPages'
+import { routeHref } from './platform/routes'
 import { RecommendationsPage } from './platform/RecommendationsPage'
 import { StockResearch } from './platform/StockResearch'
+import { operationsTabs, parseOperationsTab, type OperationsTabId } from './platform/operationsTabs'
 import { Kpi, Panel, Skeleton } from './ui'
 
 /* ---------- 擷取後台（熱力圖 + 漏抓清單 + 一鍵補抓 / 引導指令）---------- */
@@ -516,8 +518,10 @@ function HolidayPanel({
   )
 }
 
-function Ingest() {
+function Ingest({ tab, onSelectTab }: { tab: string | null; onSelectTab: (tab: OperationsTabId) => void }) {
   const { meta, live } = useMeta()
+  // 頁籤存在 URL：30 秒涵蓋輪詢與 3 秒工作輪詢都改不動使用者正在看的分頁（AC-212-1）。
+  const current = parseOperationsTab(tab)
   const [mx, setMx] = useState<IngestMatrix | null>(null)
   const [gp, setGp] = useState<IngestGaps | null>(null)
   const [hb, setHb] = useState<Heartbeat | null>(null)
@@ -653,30 +657,64 @@ function Ingest() {
         </button>
       </div>
       {err && <div className="text-[12px] text-[var(--crit)]">補抓失敗：{err}</div>}
-      <PipelinePanel hb={hb} busy={busy} onSubmitted={refreshJobs} />
-      {tracks.length > 0 && (
-        <FetchForm
-          tracks={tracks}
-          latest={hb?.latest ?? mx?.latest ?? meta.as_of ?? null}
-          busy={busy}
-          onSubmitted={refreshJobs}
-        />
-      )}
-      {jb && jb.jobs.length > 0 && (
-        <Panel title="背景工作" sub="伺服器端執行 twquant CLI（補抓／每日 pipeline）· 單一併發 · 重啟 API 後清空">
-          <JobList jobs={jb.jobs} />
-        </Panel>
-      )}
-      <HolidayPanel hc={hc} busy={busy} onFetch={runHolidayFetch} />
-      <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
-        {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
-      </Panel>
-      <Panel
-        title="漏抓清單 · 一鍵補抓"
-        sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}
-      >
-        {gp ? <GapList gaps={gp.gaps} busy={busy} onRun={runGap} /> : <Skeleton height={120} />}
-      </Panel>
+      <div className="flex items-center gap-1.5 overflow-x-auto hscroll" role="tablist" aria-label="營運分頁">
+        {operationsTabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`ops-tab-${t.id}`}
+            aria-selected={current === t.id}
+            aria-controls="ops-tabpanel"
+            onClick={() => onSelectTab(t.id)}
+            className={`shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] mono rounded-[2px] border transition-colors ${
+              current === t.id
+                ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]'
+                : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div id="ops-tabpanel" role="tabpanel" aria-labelledby={`ops-tab-${current}`} className="flex flex-col gap-4">
+        {current === 'data' && (
+          <>
+            <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
+              {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
+            </Panel>
+            <HolidayPanel hc={hc} busy={busy} onFetch={runHolidayFetch} />
+          </>
+        )}
+        {current === 'gaps' && (
+          <Panel
+            title="漏抓清單 · 一鍵補抓"
+            sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}
+          >
+            {gp ? <GapList gaps={gp.gaps} busy={busy} onRun={runGap} /> : <Skeleton height={120} />}
+          </Panel>
+        )}
+        {current === 'jobs' && (
+          <>
+            <PipelinePanel hb={hb} busy={busy} onSubmitted={refreshJobs} />
+            {tracks.length > 0 && (
+              <FetchForm
+                tracks={tracks}
+                latest={hb?.latest ?? mx?.latest ?? meta.as_of ?? null}
+                busy={busy}
+                onSubmitted={refreshJobs}
+              />
+            )}
+            <Panel title="背景工作" sub="伺服器端執行 twquant CLI（補抓／每日 pipeline）· 單一併發 · 重啟 API 後清空">
+              {jb && jb.jobs.length > 0 ? (
+                <JobList jobs={jb.jobs} />
+              ) : (
+                <div className="text-[13px] text-[var(--muted)]">目前沒有背景工作。工作清單在 API 重啟後清空。</div>
+              )}
+            </Panel>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -684,7 +722,12 @@ function Ingest() {
 /* ---------- shell ---------- */
 function Shell() {
   const { meta, live } = useMeta()
-  return <PlatformShell live={live} asOf={meta.as_of} operations={<Ingest />}
+  return <PlatformShell live={live} asOf={meta.as_of}
+    operations={(route) => <Ingest tab={route.query.get('tab')} onSelectTab={(tab) => {
+      const query = new URLSearchParams(route.query)
+      query.set('tab', tab)
+      window.location.hash = routeHref('operations', undefined, query)
+    }} />}
     daily={(route) => <RecommendationsPage route={route} dataAsOf={meta.as_of} />}
     research={(route) => <ResearchPages route={route} />}
     stock={(route) => <StockResearch route={route} />}

@@ -117,6 +117,23 @@ const { chromium } = require('playwright');
       const url = new URL(route.request().url());
       if (url.pathname === '/api/sector-flows') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ flows: sectorFlows(Number(url.searchParams.get('window')) || 20) }) });
       if (url.pathname === '/api/platform/insights') return route.fulfill({ contentType: 'application/json', body: JSON.stringify(url.searchParams.get('stock') === '2330' ? { packs: [], issues: [] } : insightPacks) });
+      if (url.pathname === '/api/ingest-matrix') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        datasets: [{ key: 'prices', table: 'prices_daily', source: 'twse', label: '日行情', span: '2022-01-03~2026-06-30', days: 1100, window_missing: 0 }],
+        dates: ['2026-06-29', '2026-06-30'],
+        cells: { prices: { '2026-06-29': 'present', '2026-06-30': 'present' } },
+        last_run: '2026-06-30T19:05:00', latest: marketAsOf,
+      }) });
+      if (url.pathname === '/api/ingest-gaps') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        runs: 1, total_missing: 2,
+        gaps: [{ label: '日行情', table: 'prices_daily', source: 'twse', kind: 'missing', from: '2026-06-10', to: '2026-06-11', days: 2, command: 'twquant ingest --date 2026-06-10', warn_ban: false, detail: '' }],
+      }) });
+      if (url.pathname === '/api/heartbeat') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        heartbeat: { day: marketAsOf, git_hash: 'abc1234', ts: '2026-06-30T19:05:00' },
+        latest: marketAsOf, watchdog_ok: true, watchdog_reason: '',
+      }) });
+      if (url.pathname === '/api/ingest-jobs') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ busy: false, jobs: [] }) });
+      if (url.pathname === '/api/ingest-tracks') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ tracks: [] }) });
+      if (url.pathname === '/api/holiday-calendar') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ available: true, years: [2026], sessions: 240, first: '2026-01-02', last: '2026-12-31', closed: [] }) });
       if (url.pathname === '/api/health') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', as_of: marketAsOf }) });
       if (url.pathname === '/api/meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ as_of: marketAsOf, window: '2022-01-01~2026-06-30', rev_month: null, top_stocks: ['0050', '2330'], coverage: [] }) });
       if (url.pathname === '/api/stock-meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ meta: stockMeta }) });
@@ -299,6 +316,29 @@ const { chromium } = require('playwright');
     await page.getByRole('button', { name: '清空並重建自選（會覆寫損毀資料）', exact: true }).click();
     await page.getByText('還沒有追蹤任何股票', { exact: false }).waitFor();
     await page.evaluate(() => localStorage.removeItem('twquant.watchlist'));
+    // AC-212-1: legacy operations areas stay reachable, and polling never resets the tab.
+    await page.goto('http://twquant.test/#/operations');
+    await page.getByRole('tab', { name: '資料涵蓋', exact: true }).waitFor();
+    await page.getByRole('heading', { name: '擷取涵蓋熱力圖', exact: true }).waitFor();
+    await page.getByRole('tab', { name: '漏抓與補抓', exact: true }).click();
+    await page.waitForFunction(() => location.hash.includes('tab=gaps'));
+    await page.getByRole('heading', { name: /漏抓清單/ }).waitFor();
+    await page.getByRole('tab', { name: '工作中心', exact: true }).click();
+    await page.getByRole('heading', { name: '背景工作', exact: true }).waitFor();
+    assert.match(new URL(page.url()).hash, /tab=jobs/);
+    // The job poll runs every 3s; after more than one cycle the chosen tab must still be shown.
+    await page.waitForTimeout(3500);
+    assert.equal(await page.getByRole('tab', { name: '工作中心', exact: true }).getAttribute('aria-selected'), 'true');
+    await page.getByRole('heading', { name: '背景工作', exact: true }).waitFor();
+    await page.reload();
+    assert.equal(await page.getByRole('tab', { name: '工作中心', exact: true }).getAttribute('aria-selected'), 'true');
+    // No training or ordering control was introduced anywhere in operations.
+    for (const forbidden of ['訓練', '下單', '買進', '賣出']) {
+      assert.equal(await page.getByRole('button', { name: new RegExp(forbidden) }).count(), 0, forbidden);
+    }
+    // The legacy #ingest entry point still lands on operations.
+    await page.goto('http://twquant.test/#ingest');
+    await page.getByRole('heading', { name: '資料與工作', exact: true }).first().waitFor();
     // AC-206-2: zero candidates, nothing generated and read failure stay distinguishable.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-04');
     await page.getByText('合法地沒有候選股票', { exact: false }).waitFor();
@@ -322,7 +362,65 @@ const { chromium } = require('playwright');
     await page.keyboard.press('Enter');
     assert.equal(await page.locator('#platform-content').evaluate(el => el === document.activeElement), true);
     assert.equal(new URL(page.url()).hash, '#/models');
+    // ── AC-215-1: one complete journey on fixed fixtures, then the same on mobile and keyboard.
+    const journey = async label => {
+      await page.goto('http://twquant.test/#/overview');
+      await page.getByRole('heading', { name: 'lgbm_rank_v2', exact: true }).waitFor();
+      // Daily pick → stock research, carrying the run context in the URL.
+      await page.getByRole('link', { name: '0050', exact: true }).first().click();
+      await page.getByRole('heading', { name: '個股研究', exact: true }).first().waitFor();
+      assert.match(new URL(page.url()).hash, /^#\/stocks\/0050\?/, label);
+      await page.getByText('元大台灣50 · K 線', { exact: false }).waitFor();
+      // Stock → recommendation day → source model.
+      await page.getByRole('button', { name: '2026-06-25', exact: true }).click();
+      await page.goto(`http://twquant.test/#/models/${modelId}`);
+      await page.getByRole('heading', { name: '模型 metadata' }).waitFor();
+      // Source model → backtest evidence.
+      await page.getByRole('link', { name: '回測中心', exact: true }).click();
+      await page.getByRole('link', { name: 'monthly_top20', exact: true }).click();
+      await page.getByText('權益曲線', { exact: true }).waitFor();
+      // Track it, then walk back through history to the daily list.
+      await page.goto('http://twquant.test/#/watchlists');
+      await page.getByRole('textbox', { name: '加入追蹤的股票代號' }).fill('0050');
+      await page.getByRole('button', { name: '加入', exact: true }).click();
+      await page.getByRole('link', { name: '0050', exact: true }).waitFor();
+      await page.reload();
+      await page.getByRole('link', { name: '0050', exact: true }).waitFor(); // Survives a reload.
+      await page.goBack();
+      await page.getByText('權益曲線', { exact: true }).waitFor();
+      await page.evaluate(() => localStorage.removeItem('twquant.watchlist'));
+    };
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await journey('desktop');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await journey('mobile');
+    assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), 'mobile journey overflow');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // Keyboard: every page is reachable by focusing a nav link and pressing Enter.
+    for (const name of ['今日總覽', 'ML 選股', '我的追蹤', '個股研究', '產業研究', '洞悉與證據', '模型中心', '回測中心', '資料與工作']) {
+      await page.getByRole('link', { name, exact: true }).focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('heading', { name, exact: true }).first().waitFor();
+    }
+    // AC-215-1: every page states a real source or an explicit not-generated state when data is gone.
+    await page.unroute('**/*');
+    await page.route('**/*', route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"Fixture: all sources down"}' });
+      return route.fulfill({ contentType: 'text/html', body: html });
+    });
+    for (const [path, marker] of [
+      ['#/overview', '推薦快照無法讀取'],
+      ['#/recommendations', '推薦快照無法讀取'],
+      ['#/industries', '產業資料無法讀取'],
+      ['#/insights', '洞悉證據包讀取失敗'],
+      ['#/models', '資料無法讀取'],
+      ['#/backtests', '資料無法讀取'],
+    ]) {
+      await page.goto(`http://twquant.test/${path}`);
+      await page.getByText(marker, { exact: false }).first().waitFor();
+    }
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-209-1, AC-210-1 and AC-211-1: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, responsive navigation and keyboard focus (offline HTTP fixtures).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-209-1, AC-210-1, AC-211-1, AC-212-1 and AC-215-1: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

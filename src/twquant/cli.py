@@ -2284,6 +2284,30 @@ def ml_score(
     )
 
 
+@ml_app.command("export-recommendations")
+def ml_export_recommendations(
+    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（讀該日既有的 scores parquet）"),
+    model: str = typer.Option(..., help="模型目錄（讀其 meta.json 取 model_id 與指紋）"),
+    scores: str = typer.Option("", help="推論結果 parquet；空＝<模型目錄>/scores_<date>.parquet"),
+    out: str = typer.Option("", help="快照資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """把**既有**日頻推論結果輸出為推薦快照（SPEC-014 §7、T-213）。
+
+    只讀已產生的 scores parquet 與模型 metadata：不重跑推論、不訓練、不啟動新研究試驗。
+    輸出一律是 mode=research／published_at=None——訓練成功不等於取得發布資格。
+    同一推論日重複執行為冪等；內容不同則拒絕覆寫，失敗時不留半成品。
+    """
+    from twquant.reporting.recommendation_export import export_scores
+
+    day = dt.date.fromisoformat(date)
+    mdir = Path(model)
+    scores_path = Path(scores) if scores else mdir / f"scores_{day}.parquet"
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    result = export_scores(scores_path, mdir, data_dir, day)
+    action = "已保存" if result.created else "內容相同，保留既有快照"
+    typer.secho(f"[OK] {day} {action}：{result.path}", fg=typer.colors.GREEN)
+
+
 @ml_app.command("backfill-scores")
 def ml_backfill_scores(
     model: str = typer.Option(..., help="模型目錄（讀其 oos_scores.parquet）"),
