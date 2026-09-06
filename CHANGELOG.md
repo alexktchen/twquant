@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- 2026-09-06 T-217：新增證據包建構（純函數，資料由呼叫端傳入）。五區段的支持／反對方向一律由規則計算，LLM 不改方向；截點後的列排除並留 gap，缺席成為 gap 證據而非空白；估計可得時間一律降為中性（D-081f）；消息區段因 repo 無來源恆為 gap。證據合約新增 neutral 方向與 availability 欄位。完整 gate 826 passed。
+
 - 2026-09-06 T-216：洞悉分析輸出改為 PRD-002 §5 的結構化 schema，並要求立場與證據一致（support 必須有支持證據、insufficient_data 必須說明缺什麼、同一證據不得同時支持與反對）；支持／反對必須列入引用，因而一併受既有的截點檢查。持久層擴為 v2 但保持 v1 證據包可讀。rationale 數字驗證依 D-081(d) 只記錄不拒絕。
 
 - 2026-09-06 D-081（已裁決，六項全採選項 A）：洞悉層的模型路由、每晚 N=30、`recommended_bucket` 顯示為「LLM 提議」、數字驗證先記錄不強制、供應層證據用內部 URI、估計可得時間不得當支持證據。`configs/llm.yaml` 的 OPUS 換代為 `claude-opus-5`（副作用：advisor／explainer 一併換代，已明記）。
