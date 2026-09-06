@@ -168,8 +168,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 
 | T-201 | 平台導覽、深連結與響應式殼層 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §2 AC-201-1～3 | T-200 | — | done（2026-09-06；紅測試確認 routes 模組缺席；Node AC 單測 3/3、離線 HTTP fixture 瀏覽器 AC-201-1/2/3 通過：深連結／重新整理／返回前進／0050／375px與1280px／鍵盤。npm build 通過；完整 check：ruff、format、mypy 全綠，728 passed／23 skipped。新增公開函數有型別與 docstring，參數無研究計算變更，無 golden 變更；diff 限平台殼層、個股身分接線與測試。資料頁目前明示尚未接入，後續工單接線） |
 | T-202 | 模型／回測 artifact 索引與安全讀取投影 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-202-1～2 | T-201 | — | done（2026-09-06；先寫 6 條 AC 測試，確認模組缺席紅燈後實作。模型／結果包索引只讀 JSON metadata，產生穩定 opaque ID；允許欄位投影排除 vault／任意 metadata，封存與拒絕項保留狀態，損毀／舊 schema 形成不含路徑的 issue。實機唯讀掃描：1 模型、68 結果包、8 模型問題項。完整 check：ruff、format、mypy 全綠，734 passed／23 skipped；無 golden／研究參數／artifact 寫入變更） |
-| T-203 | 研究索引唯讀 API 與錯誤契約 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-203-1 | T-202 | — | in_progress |
-| T-204 | 模型歷程與回測中心接線／圖表 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-204-1～2 | T-203 | — | todo |
+| T-203 | 研究索引唯讀 API 與錯誤契約 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-203-1 | T-202 | — | done（2026-09-06；先寫 7 條 API AC 測試後實作 `/api/platform/models`、`/models/{id}`、`/backtests`、`/backtests/{id}`。API 只從固定伺服器根目錄掃 opaque ID；格式錯誤 422、未知 404、儲存區不可讀 503 且不帶本機路徑。列表／詳情僅讀既有 artifact，不觸發訓練或回測。完整 check：ruff、format、mypy 全綠，741 passed／23 skipped；無 golden／研究參數變更） |
+| T-204 | 模型歷程與回測中心接線／圖表 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-204-1～2 | T-203 | — | in_progress |
 | T-205 | ML 推薦快照合約、保存與匯入 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §4 AC-205-1～2 | T-204 | — | todo |
 | T-206 | 每日 ML 名單與首頁、篩選與歷史 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §4 AC-206-1～2 | T-205 | — | todo |
 | T-207 | 個股研究分頁、選股分離與日期身分 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §5 AC-207-1～2 | T-206 | — | todo |
