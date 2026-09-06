@@ -27,6 +27,7 @@ import { MetaCtx, useMeta, type MetaCtxT } from './hooks'
 import { StockFactorsPage } from './stock'
 import { PlatformShell } from './platform/PlatformShell'
 import { ResearchPages } from './platform/ResearchPages'
+import { RecommendationsPage } from './platform/RecommendationsPage'
 import { routeHref } from './platform/routes'
 import { Kpi, Panel, Skeleton } from './ui'
 
@@ -685,6 +686,7 @@ function Ingest() {
 function Shell() {
   const { meta, live } = useMeta()
   return <PlatformShell live={live} asOf={meta.as_of} operations={<Ingest />}
+    daily={(route) => <RecommendationsPage route={route} />}
     research={(route) => <ResearchPages route={route} />}
     stock={(route) => <StockFactorsPage selectedSid={route.entityId} onSelectSid={(sid) => {
       window.location.hash = routeHref('stocks', sid, route.query)

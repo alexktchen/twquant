@@ -135,6 +135,14 @@ class SnapshotWriteResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class RecommendationCatalog:
+    """Saved snapshots and client-safe issues for snapshots that cannot be read."""
+
+    runs: list[RecommendationSnapshot]
+    issues: list[dict[str, str]]
+
+
 def snapshot_path(data_dir: str | Path, run_id: str) -> Path:
     """Return the fixed server-side path for a validated opaque run identifier."""
     if not isinstance(run_id, str) or _RUN_ID.fullmatch(run_id) is None:
@@ -195,3 +203,38 @@ def save_snapshot(data_dir: str | Path, snapshot: RecommendationSnapshot) -> Sna
 def import_snapshot(source: str | Path, data_dir: str | Path) -> SnapshotWriteResult:
     """Validate an operator-supplied contract file then save it under the fixed snapshot root."""
     return save_snapshot(data_dir, read_snapshot(source))
+
+
+def index_snapshots(data_dir: str | Path) -> RecommendationCatalog:
+    """Read every saved snapshot without starting inference or hiding invalid artifacts."""
+    root = Path(data_dir) / _SNAPSHOT_DIR
+    if not root.exists():
+        return RecommendationCatalog(runs=[], issues=[])
+    runs: list[RecommendationSnapshot] = []
+    issues: list[dict[str, str]] = []
+    for path in sorted(root.glob("*.json"), key=lambda item: item.name):
+        try:
+            runs.append(read_snapshot(path))
+        except DataError:
+            run_id = path.stem if _RUN_ID.fullmatch(path.stem) else "unreadable_snapshot"
+            issues.append({"run_id": run_id, "detail": "recommendation snapshot is invalid"})
+    return RecommendationCatalog(runs=runs, issues=issues)
+
+
+def select_snapshots(
+    data_dir: str | Path,
+    *,
+    date: dt.date | None = None,
+    model_id: str | None = None,
+    run_id: str | None = None,
+) -> RecommendationCatalog:
+    """Apply date, model and run filters before callers perform any pagination."""
+    catalog = index_snapshots(data_dir)
+    runs = [
+        run
+        for run in catalog.runs
+        if (date is None or run.as_of.date() == date)
+        and (model_id is None or run.model_id == model_id)
+        and (run_id is None or run.run_id == run_id)
+    ]
+    return RecommendationCatalog(runs=runs, issues=catalog.issues)

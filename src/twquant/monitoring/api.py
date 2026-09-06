@@ -34,6 +34,7 @@ from twquant.reporting.platform_artifacts import (
     index_backtests,
     index_models,
 )
+from twquant.reporting.recommendation_snapshot import select_snapshots
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
 
@@ -85,6 +86,7 @@ def get_platform_artifact_roots() -> PlatformArtifactRoots:
 
 
 PlatformArtifactRootsDep = Annotated[PlatformArtifactRoots, Depends(get_platform_artifact_roots)]
+RecommendationDataRootDep = Annotated[Path, Depends(_data_root)]
 
 
 def _artifact_catalog_response(catalog: ArtifactCatalog, source: str) -> dict[str, object]:
@@ -173,6 +175,25 @@ def get_platform_backtest(artifact_id: str, roots: PlatformArtifactRootsDep) -> 
         return {"item": detail, "issues": catalog.issues}
     except OSError as exc:
         raise _artifact_storage_error() from exc
+
+
+@app.get("/api/platform/recommendations")
+def get_platform_recommendations(
+    data_dir: RecommendationDataRootDep,
+    date: Annotated[dt.date | None, Query()] = None,
+    model: Annotated[str | None, Query()] = None,
+    run: Annotated[str | None, Query()] = None,
+) -> dict[str, object]:
+    """Read persisted ML recommendation runs; this endpoint never executes inference."""
+    try:
+        catalog = select_snapshots(data_dir, date=date, model_id=model, run_id=run)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
+    return {
+        "runs": [item.model_dump(mode="json") for item in catalog.runs],
+        "issues": catalog.issues,
+        "query": {"date": date.isoformat() if date else None, "model": model, "run": run},
+    }
 
 
 @app.get("/api/snapshot")
