@@ -2004,6 +2004,20 @@ def archive_restore(
     typer.secho(f"[OK] {day} 還原完成（既有主鍵不覆寫）", fg=typer.colors.GREEN)
 
 
+@app.command(name="recommendations-import")
+def recommendations_import(
+    source: str = typer.Argument(..., help="已存在的推薦快照 JSON（依 SPEC-014 §4 驗證）"),
+    out: str = typer.Option("", help="快照資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """受控匯入既有 ML 推薦快照；不會訓練、推論或改寫既有 run。"""
+    from twquant.reporting.recommendation_snapshot import import_snapshot
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    result = import_snapshot(source, data_dir)
+    action = "已保存" if result.created else "內容相同，保留既有快照"
+    typer.secho(f"[OK] {action}：{result.path}", fg=typer.colors.GREEN)
+
+
 # ── ML 排序層（SPEC-010，T-067）──────────────────────────────────────
 
 ml_app = typer.Typer(help="ML 排序層（SPEC-010）：研究軌訓練與每日推論")
