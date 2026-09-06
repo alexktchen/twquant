@@ -23,7 +23,7 @@ from twquant.errors import DataError, TwquantError
 from twquant.insight.candidate_analysis import analyse_candidate
 from twquant.insight.client import InsightClient
 from twquant.insight.evidence_bundle import build_bundle
-from twquant.reporting.insight_evidence import InsightPack, save_pack
+from twquant.reporting.insight_evidence import InsightPack, index_packs, save_pack
 from twquant.reporting.recommendation_snapshot import (
     RecommendationCandidate,
     RecommendationSnapshot,
@@ -135,3 +135,29 @@ def _analyse_one(
         summary.saved += 1
     else:
         summary.reused += 1
+
+
+def insights_for_run(data_dir: str | Path, recommendation_run_id: str) -> dict[str, dict[str, Any]]:
+    """Derive each candidate's insight summary for one recommendation run, keyed by stock_id.
+
+    Read-time join (PLAN §3.3). The published snapshot is never rewritten, so this is how a
+    candidate gets an insight without the run's file changing. `recommended_bucket` travels as
+    the model's suggestion and is deliberately kept separate from the candidate's own bucket.
+    """
+    catalog = index_packs(data_dir)
+    joined: dict[str, dict[str, Any]] = {}
+    for pack in catalog.packs:
+        if pack.recommendation_run_id != recommendation_run_id or pack.stock_id is None:
+            continue
+        directions = [item.direction for item in pack.evidence]
+        analysis = pack.analysis
+        joined[pack.stock_id] = {
+            "insight_run_id": pack.insight_run_id,
+            "stance": analysis.stance if analysis else None,
+            "recommended_bucket": analysis.recommended_bucket if analysis else None,
+            "absent_reason": pack.analysis_absent_reason,
+            "support_n": directions.count("support"),
+            "contradict_n": directions.count("contradict"),
+            "gap_n": directions.count("gap"),
+        }
+    return joined

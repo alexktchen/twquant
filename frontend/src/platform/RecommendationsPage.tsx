@@ -3,7 +3,36 @@ import { routeHref, type PlatformRoute } from './routes'
 import { apiUrl } from '../api'
 import { Panel } from '../ui'
 
-type Candidate = { stock_id: string; rank: number; score: number; bucket: string; reason_ref: string | null; insight_run_id: string | null; data_status: string }
+type Insight = {
+  insight_run_id: string
+  stance: 'support' | 'neutral' | 'conflict' | 'insufficient_data' | null
+  recommended_bucket: 'select' | 'watch' | 'exclude' | null
+  absent_reason: string | null
+  support_n: number
+  contradict_n: number
+  gap_n: number
+}
+type Candidate = { stock_id: string; rank: number; score: number; bucket: string; reason_ref: string | null; insight_run_id: string | null; data_status: string; insight: Insight | null }
+
+const STANCE_LABEL: Record<NonNullable<Insight['stance']>, string> = {
+  support: '支持', neutral: '中性', conflict: '矛盾', insufficient_data: '資料不足',
+}
+const BUCKET_LABEL: Record<NonNullable<Insight['recommended_bucket']>, string> = {
+  select: '精選', watch: '觀察', exclude: '排除',
+}
+
+/** The model's reading of the evidence. Its bucket is a suggestion, never the final class. */
+function InsightCell({ insight }: { insight: Insight | null }) {
+  if (insight === null) return <span className="platform-muted">尚未分析</span>
+  if (insight.stance === null) {
+    return <span className="platform-muted" title={insight.absent_reason ?? ''}>無分析（{insight.absent_reason ?? '未記錄原因'}）</span>
+  }
+  return <span>
+    {STANCE_LABEL[insight.stance]}
+    <span className="platform-evidence-counts"> 支持 {insight.support_n}／反對 {insight.contradict_n}／缺口 {insight.gap_n}</span>
+    {insight.recommended_bucket && <span className="platform-suggestion">LLM 提議：{BUCKET_LABEL[insight.recommended_bucket]}</span>}
+  </span>
+}
 type Run = { run_id: string; model_id: string; as_of: string; generated_at: string; published_at: string | null; mode: 'research' | 'reconstructed'; artifact_fingerprint: string; candidates: Candidate[]; candidate_total: number }
 type Query = { date: string | null; model: string | null; run: string | null; bucket: string | null; q: string | null; page: number; page_size: number }
 type Response = { runs: Run[]; issues: { run_id: string; detail: string }[]; query: Query }
@@ -87,7 +116,7 @@ function RunCard({ run, route, compact, filtered, dataAsOf }: { run: Run; route:
         <td>{candidate.rank}</td>
         <td><a href={routeHref('stocks', candidate.stock_id, context)}>{candidate.stock_id}</a></td>
         <td>{candidate.score.toFixed(4)}</td><td>{candidate.bucket}</td>
-        <td>{candidate.data_status === 'pending' ? '待分析' : candidate.insight_run_id ?? candidate.data_status}</td>
+        <td><InsightCell insight={candidate.insight} /></td>
       </tr>)}</tbody></table></div>}
     {compact && run.candidate_total > candidates.length && <a className="platform-more-link" href={routeHref('recommendations', undefined, context)}>查看其餘 {run.candidate_total - candidates.length} 檔 →</a>}
   </section>

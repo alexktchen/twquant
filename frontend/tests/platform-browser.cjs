@@ -38,9 +38,11 @@ const { chromium } = require('playwright');
       generated_at: '2026-06-20T20:05:00+08:00', published_at: null, mode: 'research', artifact_fingerprint: 'fp-1',
     };
     const allCandidates = [
-      { stock_id: '0050', rank: 1, score: 0.812, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending' },
-      { stock_id: '2330', rank: 2, score: 0.744, bucket: 'watch', reason_ref: null, insight_run_id: null, data_status: 'pending' },
-      { stock_id: '0056', rank: 3, score: 0.701, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending' },
+      { stock_id: '0050', rank: 1, score: 0.812, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending',
+        insight: { insight_run_id: 'ins_a', stance: 'conflict', recommended_bucket: 'watch', absent_reason: null, support_n: 2, contradict_n: 1, gap_n: 1 } },
+      { stock_id: '2330', rank: 2, score: 0.744, bucket: 'watch', reason_ref: null, insight_run_id: null, data_status: 'pending',
+        insight: { insight_run_id: 'ins_b', stance: null, recommended_bucket: null, absent_reason: 'LLM 離線，未產生分析', support_n: 0, contradict_n: 0, gap_n: 3 } },
+      { stock_id: '0056', rank: 3, score: 0.701, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending', insight: null },
     ];
     // Mirrors the server contract: filters apply to the whole run before any page slice.
     const recommendations = url => {
@@ -95,7 +97,7 @@ const { chromium } = require('playwright');
       packs: [
         {
           insight_run_id: 'ins_1', as_of: '2026-06-25T20:00:00+08:00', stock_id: '0050', industry: null,
-          evidence: [evidence('ev_1', 'support', '月營收年增 18%'), evidence('ev_2', 'contradict', '投信連三日賣超'), evidence('ev_3', 'gap', '尚無法人持股明細')],
+          evidence: [{ ...evidence('ev_1', 'support', '月營收年增 18%'), availability: 'estimated', direction: 'neutral' }, evidence('ev_2', 'contradict', '投信連三日賣超'), evidence('ev_3', 'gap', '尚無法人持股明細')],
           analysis: {
             prompt_id: 'insight_v1', prompt_hash: 'abc123', analysis_schema_version: 1,
             model_version: 'claude-x-2026', as_of: '2026-06-25T20:00:00+08:00',
@@ -346,6 +348,20 @@ const { chromium } = require('playwright');
     // The legacy #ingest entry point still lands on operations.
     await page.goto('http://twquant.test/#ingest');
     await page.getByRole('heading', { name: '資料與工作', exact: true }).first().waitFor();
+    // AC-220: the analysis reaches the daily list as a derived field, and its bucket stays a suggestion.
+    await page.goto('http://twquant.test/#/recommendations');
+    await page.getByRole('link', { name: '0050', exact: true }).waitFor();
+    const table = await page.locator('#platform-content').innerText();
+    assert.match(table, /矛盾/);
+    assert.match(table, /支持 2／反對 1／缺口 1/);
+    assert.match(table, /LLM 提議：觀察/); // Never rendered as the candidate's own bucket.
+    assert.match(table, /LLM 離線，未產生分析/); // Absent analysis says why.
+    assert.match(table, /尚未分析/); // No pack at all is a third, distinct state.
+    // The stock page gains an insight tab reading the same saved packs.
+    await page.goto('http://twquant.test/#/stocks/0050?tab=insights');
+    await page.getByRole('tab', { name: '洞悉', exact: true }).waitFor();
+    await page.getByText('營收成長支持基本面', { exact: false }).waitFor();
+    await page.getByText('可得時間為估計', { exact: false }).first().waitFor();
     // AC-206-2: zero candidates, nothing generated and read failure stay distinguishable.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-04');
     await page.getByText('合法地沒有候選股票', { exact: false }).waitFor();
@@ -428,6 +444,6 @@ const { chromium } = require('playwright');
       await page.getByText(marker, { exact: false }).first().waitFor();
     }
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-209-1, AC-210-1, AC-211-1, AC-212-1 and AC-215-1: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1 and AC-220: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

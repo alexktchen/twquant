@@ -18,6 +18,7 @@ import { TPanel, chip } from './ui'
 import { DEFAULT_STOCK_TAB, parseStockTab, quoteIdentity, stockTabs, type StockTabId } from '../platform/stockTabs'
 import { mapEventsToSessions } from '../platform/eventMarkers'
 import { StockEventsPanel } from '../platform/StockEventsPanel'
+import { StockInsightsPanel } from '../platform/StockInsightsPanel'
 import type { StockEvent } from '../platform/stockRecommendations'
 import { markerFor } from '../platform/markerStyle'
 
@@ -236,6 +237,11 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
               </div>
             </TPanel>
           ))}
+        {currentTab === 'insights' && (sid ? <StockInsightsPanel sid={sid} /> : (
+          <TPanel title="洞悉與證據">
+            <div className="h-[120px] flex items-center justify-center text-[13px] text-[var(--muted)]">選擇個股以檢視洞悉證據</div>
+          </TPanel>
+        ))}
         {currentTab === 'screener' &&
           (live ? (
             <>

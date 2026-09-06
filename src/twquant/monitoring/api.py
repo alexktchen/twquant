@@ -29,6 +29,7 @@ from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
 from twquant.reporting.insight_evidence import select_packs
+from twquant.reporting.insight_run import insights_for_run
 from twquant.reporting.platform_artifacts import (
     ArtifactCatalog,
     backtest_detail,
@@ -203,13 +204,16 @@ def get_platform_recommendations(
     runs: list[dict[str, object]] = []
     start = (page - 1) * page_size
     for item in catalog.runs:
+        # 洞悉在讀取時 join 進來（PLAN §3.3）；已發布的快照檔案不因此改寫。
+        insights = insights_for_run(data_dir, item.run_id)
         # Bucket/search filters run over the whole saved run before any page slice,
         # so a later page can never surface a candidate an earlier filter removed.
         kept = select_candidates(item, bucket=bucket, query=q)
         projection = item.model_dump(mode="json")
         projection["candidate_total"] = len(kept)
         projection["candidates"] = [
-            candidate.model_dump(mode="json") for candidate in kept[start : start + page_size]
+            {**candidate.model_dump(mode="json"), "insight": insights.get(candidate.stock_id)}
+            for candidate in kept[start : start + page_size]
         ]
         runs.append(projection)
     return {

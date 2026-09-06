@@ -31,6 +31,8 @@ export type InsightPack = {
     as_of: string
     summary: string
     cited_evidence_ids: string[]
+    stance?: 'support' | 'neutral' | 'conflict' | 'insufficient_data' | null
+    recommended_bucket?: 'select' | 'watch' | 'exclude' | null
   } | null
   analysis_absent_reason: string | null
 }

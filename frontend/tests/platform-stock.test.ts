@@ -4,7 +4,7 @@ import { DEFAULT_STOCK_TAB, parseStockTab, quoteIdentity, stockTabs } from '../s
 import { parseRoute, routeHref } from '../src/platform/routes.ts'
 
 test('AC-207-1: data tabs are addressable and unknown tabs fall back without losing the page', () => {
-  assert.deepEqual(stockTabs.map(tab => tab.id), ['chips', 'fundamentals', 'factors', 'screener'])
+  assert.deepEqual(stockTabs.map(tab => tab.id), ['chips', 'fundamentals', 'factors', 'insights', 'screener'])
   for (const tab of stockTabs) assert.equal(parseStockTab(tab.id), tab.id)
   assert.equal(parseStockTab(null), DEFAULT_STOCK_TAB)
   assert.equal(parseStockTab('does-not-exist'), DEFAULT_STOCK_TAB)
