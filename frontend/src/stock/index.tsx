@@ -16,13 +16,15 @@ import { StrategyPools } from './StrategyPools'
 import { DEFAULT_SCREEN, MAX_FACTOR_PANES, loadSubFactors, loadWatch, saveSubFactors, saveWatch } from './store'
 import { TPanel } from './ui'
 
-export function StockFactorsPage() {
+export function StockFactorsPage({ selectedSid, onSelectSid }: { selectedSid?: string; onSelectSid?: (sid: string) => void } = {}) {
   const { meta, live } = useMeta()
   const metaMap = useResource('stock-meta', fetchStockMeta, () => ({}) as StockMetaMap)
   const mm = metaMap.data ?? {}
   const [list, setList] = useState<string[]>(meta.top_stocks)
   // 預設選股：優先第一檔追蹤股，其次熱門第一檔
-  const [sid, setSid] = useState<string>(() => loadWatch()[0] ?? meta.top_stocks[0] ?? '')
+  const [localSid, setLocalSid] = useState<string>(() => loadWatch()[0] ?? meta.top_stocks[0] ?? '')
+  const sid = selectedSid ?? localSid
+  const setSid = (value: string) => { setLocalSid(value); onSelectSid?.(value) }
   // OHLC 以 sid 標記：換股瞬間舊資料因 sid 不符而不渲染，杜絕「新標題配舊 K 線」殘影
   const [ohlc, setOhlc] = useState<{ sid: string; rows: Candle[] } | undefined>(() =>
     live || !sid ? undefined : { sid, rows: FALLBACK.stocks[sid] ?? [] },

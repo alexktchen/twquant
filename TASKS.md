@@ -166,8 +166,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 |---|---|---|---|---|---|
 | T-200 | 【文件】專業平台資訊架構與前端交接：每日 ML 名單、訓練歷程、回測中心、產業／個股洞悉、版本追溯、K 線推薦日、API 草案與分期驗收；延伸 PRD-002 | [PRD-003](docs/PRD-003-platform-console.md)；D-080 | 使用者本輪指定；文件交付不依賴新訓練 | — | done（2026-09-05；純文件與示意互動預覽，不代表平台已實作。DoD：修改前 fast 709 passed／23 skipped；追加 K 線設計後完整 check：ruff、format、mypy 全綠，pytest 709 passed／23 skipped；CHANGELOG 已更新，diff 僅規劃文件。無新增公開程式介面／計算參數／golden 變更，功能 AC-1～11 留待各實作任務。預覽使用 Lightweight Charts 5.2.0，已驗證日 K／成交量、推薦日期、盤後與最早交易日、標記切換、事件點選與鍵盤定位、縮放重設、行情表、切股隔離與套件失敗狀態；原導覽／搜尋／追蹤流程通過，七頁在 1024／736／360px 深淺色均無頁面溢出或執行錯誤） |
 
-| T-201 | 平台導覽、深連結與響應式殼層 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §2 AC-201-1～3 | T-200 | — | in_progress |
-| T-202 | 模型／回測 artifact 索引與安全讀取投影 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-202-1～2 | T-201 | — | todo |
+| T-201 | 平台導覽、深連結與響應式殼層 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §2 AC-201-1～3 | T-200 | — | done（2026-09-06；紅測試確認 routes 模組缺席；Node AC 單測 3/3、離線 HTTP fixture 瀏覽器 AC-201-1/2/3 通過：深連結／重新整理／返回前進／0050／375px與1280px／鍵盤。npm build 通過；完整 check：ruff、format、mypy 全綠，728 passed／23 skipped。新增公開函數有型別與 docstring，參數無研究計算變更，無 golden 變更；diff 限平台殼層、個股身分接線與測試。資料頁目前明示尚未接入，後續工單接線） |
+| T-202 | 模型／回測 artifact 索引與安全讀取投影 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-202-1～2 | T-201 | — | in_progress |
 | T-203 | 研究索引唯讀 API 與錯誤契約 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-203-1 | T-202 | — | todo |
 | T-204 | 模型歷程與回測中心接線／圖表 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §3 AC-204-1～2 | T-203 | — | todo |
 | T-205 | ML 推薦快照合約、保存與匯入 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §4 AC-205-1～2 | T-204 | — | todo |

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   fetchHealth,
   fetchHeartbeat,
@@ -25,6 +25,8 @@ import {
 import { FALLBACK } from './fallback'
 import { MetaCtx, useMeta, type MetaCtxT } from './hooks'
 import { StockFactorsPage } from './stock'
+import { PlatformShell } from './platform/PlatformShell'
+import { routeHref } from './platform/routes'
 import { Kpi, Panel, Skeleton } from './ui'
 
 /* ---------- 擷取後台（熱力圖 + 漏抓清單 + 一鍵補抓 / 引導指令）---------- */
@@ -679,97 +681,13 @@ function Ingest() {
 }
 
 /* ---------- shell ---------- */
-const PAGES = [
-  { id: 'stock', label: '個股因子', el: <StockFactorsPage /> },
-  { id: 'ingest', label: '資料後台', el: <Ingest /> },
-]
-
 function Shell() {
   const { meta, live } = useMeta()
-  // 預設落在個股因子頁（PG 直查、毫秒級）；總覽等讀湖頁面切到才算（分鐘級）
-  const [page, setPage] = useState('stock')
-  const cur = useMemo(() => PAGES.find((p) => p.id === page)!, [page])
-  return (
-    <div className="min-h-screen md:flex text-[var(--fg)]">
-      {/* 桌面側欄（md 起）；手機改用下方頂欄 */}
-      <aside className="hidden md:flex w-52 shrink-0 border-r border-[var(--line)] bg-[var(--panel)] flex-col sticky top-0 h-screen">
-        <div className="px-4 py-4 border-b border-[var(--line)]">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} />
-            <span className="font-semibold tracking-wide">twquant</span>
-          </div>
-          <div className="text-[11px] text-[var(--muted)] mt-0.5">台股量化平台 · 監控</div>
-        </div>
-        <nav className="flex flex-col p-2 gap-0.5">
-          {PAGES.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setPage(p.id)}
-              className={`text-left px-3 py-2 rounded text-[13px] transition-colors ${
-                page === p.id ? 'bg-[var(--panel-2)] text-[var(--fg)] font-medium' : 'text-[var(--muted)] hover:text-[var(--fg)] hover:bg-[var(--panel-2)]'
-              }`}
-            >
-              {p.id === page && <span className="inline-block w-1 h-1 rounded-full mr-2 align-middle" style={{ background: 'var(--accent)' }} />}
-              {p.label}
-            </button>
-          ))}
-        </nav>
-        <div className="mt-auto p-4 text-[10px] text-[var(--muted)] border-t border-[var(--line)] leading-relaxed">
-          <div>資料 {live ? '即時' : '快照'} {meta.as_of ?? '—'}</div>
-          <div>TWSE · TPEX · MOPS</div>
-          <div className="mt-1">
-            <span style={{ color: 'var(--up)' }}>紅漲</span> · <span style={{ color: 'var(--down)' }}>綠跌</span>（台股慣例）
-          </div>
-        </div>
-      </aside>
-
-      {/* 手機頂欄（mobile-first）：品牌＋狀態列與橫向捲動頁籤，sticky 常駐 */}
-      <div className="md:hidden sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--bg)]/95 backdrop-blur">
-        <div className="flex items-center gap-2 px-3 pt-2">
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: 'var(--accent)' }} />
-          <span className="font-semibold tracking-wide text-[14px]">twquant</span>
-          <span className="ml-auto flex items-center gap-1.5 text-[10px] mono text-[var(--muted)] whitespace-nowrap">
-            <span
-              className="inline-block w-1.5 h-1.5 rounded-full"
-              style={{ background: live ? 'var(--good)' : 'var(--muted)' }}
-              title={live ? '即時連線 API' : '離線快照 fallback'}
-            />
-            {live ? '即時' : '快照'} {meta.as_of ?? '—'}
-          </span>
-        </div>
-        <nav className="flex gap-1 overflow-x-auto hscroll px-2 py-2">
-          {PAGES.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setPage(p.id)}
-              className={`shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] rounded-[2px] border transition-colors ${
-                page === p.id
-                  ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]'
-                  : 'border-transparent text-[var(--muted)]'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      <main className="flex-1 min-w-0">
-        <header className="hidden md:flex px-6 py-4 border-b border-[var(--line)] items-baseline justify-between">
-          <h1 className="text-[17px] font-semibold tracking-wide">{cur.label}</h1>
-          <span className="text-[12px] mono text-[var(--muted)] flex items-center gap-2">
-            <span
-              className="inline-block w-1.5 h-1.5 rounded-full"
-              style={{ background: live ? 'var(--good)' : 'var(--muted)' }}
-              title={live ? '即時連線 API' : '離線快照 fallback'}
-            />
-            {live ? '即時 · 讀資料湖' : '快照 · 內嵌 data.json'} · lightweight-charts
-          </span>
-        </header>
-        <div className="p-3 md:p-6 max-w-[1180px]">{cur.el}</div>
-      </main>
-    </div>
-  )
+  return <PlatformShell live={live} asOf={meta.as_of} operations={<Ingest />}
+    stock={(route) => <StockFactorsPage selectedSid={route.entityId} onSelectSid={(sid) => {
+      window.location.hash = routeHref('stocks', sid, route.query)
+    }} />}
+  />
 }
 
 export default function App() {
