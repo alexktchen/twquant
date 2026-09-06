@@ -52,7 +52,8 @@ const { chromium } = require('playwright');
       return { runs: [{ ...runBase, candidates: kept, candidate_total: kept.length }], issues: [], query };
     };
     // A connected-mode fixture: /api/health succeeds so the stock page runs in live mode.
-    const marketAsOf = '2026-06-30';
+    // Deliberately different from the embedded snapshot's 2026-06-30 so the two are distinguishable.
+    const marketAsOf = '2026-07-02';
     // Weekends are absent so a non-trading publication day has to map forward to a real session.
     const closedDays = new Set(['2026-06-06', '2026-06-07', '2026-06-13', '2026-06-14', '2026-06-20', '2026-06-21', '2026-06-27', '2026-06-28']);
     const candles = sid => Array.from({ length: 30 }, (_, i) => {
@@ -135,7 +136,8 @@ const { chromium } = require('playwright');
       if (url.pathname === '/api/ingest-tracks') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ tracks: [] }) });
       if (url.pathname === '/api/holiday-calendar') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ available: true, years: [2026], sessions: 240, first: '2026-01-02', last: '2026-12-31', closed: [] }) });
       if (url.pathname === '/api/health') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', as_of: marketAsOf }) });
-      if (url.pathname === '/api/meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ as_of: marketAsOf, window: '2022-01-01~2026-06-30', rev_month: null, top_stocks: ['0050', '2330'], coverage: [] }) });
+      // /api/meta scans the data lake for minutes in production; the delay reproduces that gap.
+      if (url.pathname === '/api/meta') return new Promise(resolve => setTimeout(resolve, 1500)).then(() => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ as_of: marketAsOf, window: '2022-01-01~2026-07-02', rev_month: null, top_stocks: ['0050', '2330'], coverage: [] }) }));
       if (url.pathname === '/api/stock-meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ meta: stockMeta }) });
       if (url.pathname === '/api/stocks') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ stocks: ['0050', '2330'] }) });
       {
@@ -158,6 +160,11 @@ const { chromium } = require('playwright');
     });
     await page.goto(`http://twquant.test/#/models/${modelId}?date=2026-08-24&run=run-a`);
     await page.getByRole('heading', { name: '模型中心', exact: true }).waitFor();
+    // The data date comes from /api/health the moment it answers; the snapshot's date is never
+    // shown as a connected data date while the slow /api/meta is still pending.
+    await page.locator('.platform-connection').getByText('資料至 2026-07-02', { exact: true }).waitFor();
+    assert.match(await page.locator('.platform-connection').innerText(), /API 已連線/);
+    assert.doesNotMatch(await page.locator('.platform-connection').innerText(), /2026-06-30/);
     await page.getByRole('link', { name: 'lgbm_rank_v2', exact: true }).waitFor();
     await page.getByText('詳細執行過程未記錄', { exact: true }).waitFor();
     assert.match(await page.locator('.platform-context').innerText(), /2026-08-24/);

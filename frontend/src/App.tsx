@@ -740,11 +740,18 @@ export default function App() {
   const [ctx, setCtx] = useState<MetaCtxT>({ meta: FALLBACK.meta, live: false })
   useEffect(() => {
     let alive = true
+    let metaLoaded = false
+    // /api/health 毫秒級且已帶最新行情日：一連上就用它更新資料日。否則在 /api/meta
+    // （掃資料湖，實測 2 分鐘）回來前，頂欄會把內嵌快照的日期當成「已連線」的資料日。
     fetchHealth()
-      .then(() => alive && setCtx((c) => (c.live ? c : { ...c, live: true })))
+      .then((h) => alive && !metaLoaded && setCtx((c) => ({ live: true, meta: { ...c.meta, as_of: h.as_of } })))
       .catch(() => {}) // 探針失敗 → 維持快照模式；meta 若成功仍會翻 live
     fetchMeta()
-      .then((m) => alive && setCtx({ meta: m, live: true }))
+      .then((m) => {
+        if (!alive) return
+        metaLoaded = true
+        setCtx({ meta: m, live: true })
+      })
       .catch(() => {}) // API 不可達 → 維持內嵌 meta
     return () => {
       alive = false
