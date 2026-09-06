@@ -1042,12 +1042,28 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         res = scr.snapshot(scfg, day, day)
         return f"{res['rows']} 列" if res["rows"] else "無可快照資料（尚無當日供應層資料）"
 
+    def _recommendation_step() -> str:
+        # L0 名單（T-225）：對當日全宇宙推論 → 匯出推薦快照。best-effort，不擋主線。
+        # 用哪個模型由 configs/ml.yaml 的 production_ranking_model 明寫（T-224）——
+        # 未綁定時略過而不是自動選，因為八個模型的 train_end 全同、自動選會挑到風控模型。
+        from twquant.reporting.recommendation_export import export_scores
+
+        bound = _load_ml().production_ranking_model
+        if not bound:
+            return "未綁定生產模型（configs/ml.yaml production_ranking_model），略過"
+        root = Path(cfg.data_dir) / "models"
+        mdir = root / bound
+        if not (mdir / "meta.json").exists():
+            return f"找不到綁定的模型 {bound}，略過"
+        scores_path = mdir / f"scores_{day}.parquet"
+        if not scores_path.exists():
+            _ml_score_day(day, mdir, scores_path)
+        result = export_scores(scores_path, mdir, Path(cfg.data_dir), day)
+        return f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}"
+
     def _insight_step() -> str:
         # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
         # 前提是當日已有推薦快照；沒有就是正常的「沒有 L0 名單可分析」，不是錯誤。
-        # 注意：ml score → export-recommendations 這段 L0 產生鏈**刻意未掛進 pipeline**，
-        # 因為 `latest_model_dir` 只比 train_end，現有模型 train_end 全同會選到回撤風控
-        # 模型（WHERE-IS-EVERYTHING 陷阱④）。修好之前不讓它每晚自動產生推薦。
         from twquant.data.serving import store
         from twquant.insight.client import InsightClient
         from twquant.insight.config import load_llm_config
@@ -1098,6 +1114,7 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
+        PipelineStep("ML 推薦名單", _recommendation_step),
         PipelineStep("洞悉分析", _insight_step),
     ]
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
@@ -2339,14 +2356,13 @@ def ml_train(
     )
 
 
-@ml_app.command("score")
-def ml_score(
-    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（取 train_end < 該日的最新模型）"),
-    models: str = typer.Option("", help="模型根目錄；空＝<data_dir>/models"),
-    out: str = typer.Option("", help="輸出 parquet；空＝<模型目錄>/scores_<date>.parquet"),
-    pg: bool = typer.Option(False, "--pg", help="同時 upsert serving.ml_scores（T-068）"),
-) -> None:
-    """對單日全宇宙推論 → parquet（＋選擇性 upsert ml_scores 表，SPEC-010 §4/§5）。"""
+def _ml_score_day(
+    day: dt.date, model_dir: Path, out_path: Path, *, pg: bool = False
+) -> tuple[int, int]:
+    """對單日全宇宙推論並寫出 parquet；回傳（列數, upsert 列數）。
+
+    由 `ml score` 與每日 pipeline 共用，兩條路徑因此不可能算出不同的分數。
+    """
     import polars as pl
 
     from twquant.conventions import now_tw
@@ -2355,14 +2371,10 @@ def ml_score(
     from twquant.ml import train as mlt
     from twquant.ml.dataset import assemble, cross_rank_pct
 
-    day = dt.date.fromisoformat(date)
-    sys_cfg = _load_system()
-    root = Path(models) if models else Path(sys_cfg.data_dir) / "models"
-    mdir = mls.latest_model_dir(root, day)
-    booster, meta = mls.load_model(mdir, day)
+    booster, meta = mls.load_model(model_dir, day)
     raw_feats = meta.get("features")
     if not isinstance(raw_feats, list) or not raw_feats:
-        raise ValueError(f"{mdir} meta.json 缺 features：模型不可推論，拒用")
+        raise ValueError(f"{model_dir} meta.json 缺 features：模型不可推論，拒用")
     features = [str(f) for f in raw_feats]
     scfg = _load_serving()
     conn = store.connect(scfg)
@@ -2379,7 +2391,7 @@ def ml_score(
         scored = cross_rank_pct(
             mlt.predict_scores(booster, frame, features), "score", "rank_pct"
         ).with_columns(
-            pl.lit(mdir.name).alias("model_id"),
+            pl.lit(model_dir.name).alias("model_id"),
             pl.lit(now_tw()).alias("available_at"),
         )
         inserted = 0
@@ -2391,11 +2403,41 @@ def ml_score(
             inserted = upsert_ml_scores(conn, scfg.pg_schema, scored)
     finally:
         conn.close()
-    out_path = Path(out) if out else mdir / f"scores_{day}.parquet"
     scored.write_parquet(out_path)
+    return scored.height, inserted
+
+
+@ml_app.command("score")
+def ml_score(
+    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（取 train_end < 該日的最新模型）"),
+    models: str = typer.Option("", help="模型根目錄；空＝<data_dir>/models"),
+    model: str = typer.Option("", help="直接指定模型目錄；給了就不自動選（T-224）"),
+    purpose: str = typer.Option(
+        "ranking", help="自動選模型時的用途：ranking／risk_gate／revenue_surprise（T-224）"
+    ),
+    out: str = typer.Option("", help="輸出 parquet；空＝<模型目錄>/scores_<date>.parquet"),
+    pg: bool = typer.Option(False, "--pg", help="同時 upsert serving.ml_scores（T-068）"),
+) -> None:
+    """對單日全宇宙推論 → parquet（＋選擇性 upsert ml_scores 表，SPEC-010 §4/§5）。"""
+    from twquant.ml import score as mls
+
+    day = dt.date.fromisoformat(date)
+    sys_cfg = _load_system()
+    root = Path(models) if models else Path(sys_cfg.data_dir) / "models"
+    # 指定目錄優先；否則按用途自動選，同 train_end 有多個候選時 latest_model_dir 會 raise
+    # 而不是靜默挑第一個（T-224：曾因此挑到回撤風控模型當選股器）。
+    bound = _load_ml().production_ranking_model
+    if model:
+        mdir = Path(model)
+    elif bound:
+        mdir = root / bound
+    else:
+        mdir = mls.latest_model_dir(root, day, purpose=purpose)
+    out_path = Path(out) if out else mdir / f"scores_{day}.parquet"
+    rows, inserted = _ml_score_day(day, mdir, out_path, pg=pg)
     pg_note = f"、PG +{inserted} 列" if pg else ""
     typer.secho(
-        f"[OK] {day}：{scored.height} 檔 → {out_path}（模型 {mdir.name}）{pg_note}",
+        f"[OK] {day}：{rows} 檔 → {out_path}（模型 {mdir.name}）{pg_note}",
         fg=typer.colors.GREEN,
     )
 

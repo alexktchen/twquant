@@ -103,11 +103,11 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 **③ 稀疏閘門相乘會歸零**（D-076）。每日 0~5 檔的事件乘上任何 30% 的池子，
 交集期望 0~1.5 檔。**疊閘門前先算交集大小**——本輪已因此作廢兩批實驗（M2/M3 曝險 3%、GALL 0%）。
 
-**④ `ml score` 會挑錯模型。** `latest_model_dir` 只比 `train_end`，而現有 8 個模型的
-train_end **全部是 2026-02-25**，同分時取排序最前者＝`lgbm_dd_h60`（D-075 的**回撤風控**模型），
-不是選股模型。要對特定模型推論，`--models` 要指向只含該模型的目錄。未開任務。
-**因此每日 pipeline 刻意沒有掛 `ml score` → `export-recommendations`**（T-221）：修好前不讓它每晚
-自動用錯模型產生推薦名單。洞悉步驟會回「當日無推薦快照，略過」。
+**④ `ml score` 挑錯模型——已修（T-224）。** 現有 8 個模型的 train_end **全部是 2026-02-25**，
+舊版 `latest_model_dir` 同分時取排序最前者＝`lgbm_dd_h60`（D-075 的**回撤風控**模型）當選股器。
+現在候選不唯一會 **raise 並列出候選**，並可用 `--purpose` 過濾。每日推論用哪個模型由
+`configs/ml.yaml` 的 **`production_ranking_model`** 明寫（目前 `lgbm_net_h20_20260225_6a798962`）
+——換模型改這一行。L0 產生鏈已掛進每日 pipeline（T-225）。
 
 ## 7. 還在跑的東西
 

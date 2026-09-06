@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-09-06 T-225：每日 pipeline 新增「ML 推薦名單」步驟（推論→匯出推薦快照→洞悉），推論邏輯與 CLI 共用同一函數；未綁定生產模型時略過而非自動選。完整 gate 854 passed。
+
+- 2026-09-06 T-224：修掉 `latest_model_dir` 的靜默選擇。八個模型 train_end 全同，舊版依目錄排序挑第一個，實際挑到 D-075 的回撤風控模型當每日選股器。現在候選不唯一一律 raise 並列出候選，並新增 `model_purpose` 依標籤用途過濾；生產模型改由 `configs/ml.yaml` 的 `production_ranking_model` 明寫。
+
 - 2026-09-06 T-221：洞悉分析掛進每日 pipeline（一鍵跑今日全部資料與排程都會跑到），best-effort 不擋主線；當日沒有推薦快照即正常略過。**刻意未把 ml score → export-recommendations 掛進 pipeline**：`latest_model_dir` 會選到回撤風控模型（陷阱④），修好前不讓它每晚自動產生推薦。完整 gate 849 passed。
 
 - 2026-09-06 T-220：洞悉接回平台。候選的洞悉欄位在讀取時 join（快照檔案位元組不變），已分析／無分析（附原因）／沒有 pack 三態分開；`recommended_bucket` 一律標為「LLM 提議」且不覆蓋候選自身 bucket；個股頁新增洞悉頁籤。完整 gate 848 passed。

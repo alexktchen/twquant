@@ -288,3 +288,83 @@ def test_ac3_save_model_refuses_an_artifact_without_a_fingerprint(tmp_path: Path
             booster,
             {"model_id": "old", "train_end": "2026-02-25", "artifact_fingerprint": "aaaa1111"},
         )
+
+
+# ── T-224：模型選擇不得靜默 ──────────────────────────────────────────
+
+
+def _model_dir_with(root: Path, name: str, train_end: str, **meta: object) -> Path:
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "meta.json").write_text(
+        json.dumps({"train_end": train_end, **meta}, ensure_ascii=False), encoding="utf-8"
+    )
+    return d
+
+
+def test_t224_purpose_comes_from_the_label_the_model_was_trained_on() -> None:
+    from twquant.ml.score import model_purpose
+
+    assert model_purpose({"label": {"transform": "rank_pct"}}) == "ranking"
+    assert model_purpose({"label": {"transform": "cost_adjusted_return"}}) == "ranking"
+    # D-075 的回撤模型是風控閘門，不是選股器。
+    assert model_purpose({"label": {"transform": "forward_drawdown"}}) == "risk_gate"
+    assert model_purpose({"label": {"transform": "revenue_surprise"}}) == "revenue_surprise"
+    # 沒有標籤定義的舊 artifact 是未知用途，不能被當成任何用途使用。
+    assert model_purpose({"train_end": "2026-02-25"}) == "unknown"
+    # meta 明寫 purpose 時以它為準（新模型應直接記錄）。
+    assert (
+        model_purpose({"purpose": "ranking", "label": {"transform": "forward_drawdown"}})
+        == "ranking"
+    )
+
+
+def test_t224_a_tie_on_train_end_raises_instead_of_picking_by_directory_order(
+    tmp_path: Path,
+) -> None:
+    """實務上這個沉默選擇挑到了 lgbm_dd_h60（回撤風控）當每日選股器。"""
+    from twquant.ml.score import latest_model_dir
+
+    _model_dir_with(tmp_path, "a_dd", "2026-02-25", label={"transform": "forward_drawdown"})
+    _model_dir_with(tmp_path, "z_rank", "2026-02-25", label={"transform": "rank_pct"})
+
+    with pytest.raises(ValueError, match="同一 train_end"):
+        latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4))
+
+
+def test_t224_filtering_by_purpose_excludes_a_risk_model_from_stock_selection(
+    tmp_path: Path,
+) -> None:
+    from twquant.ml.score import latest_model_dir
+
+    _model_dir_with(tmp_path, "a_dd", "2026-02-25", label={"transform": "forward_drawdown"})
+    ranker = _model_dir_with(tmp_path, "z_rank", "2026-02-25", label={"transform": "rank_pct"})
+
+    assert latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4), purpose="ranking") == ranker
+    assert (
+        latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4), purpose="risk_gate")
+        == tmp_path / "a_dd"
+    )
+    with pytest.raises(ValueError, match="無可用模型"):
+        latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4), purpose="revenue_surprise")
+
+
+def test_t224_several_models_of_the_same_purpose_still_refuse_to_guess(tmp_path: Path) -> None:
+    from twquant.ml.score import latest_model_dir
+
+    _model_dir_with(tmp_path, "rank_a", "2026-02-25", label={"transform": "rank_pct"})
+    _model_dir_with(tmp_path, "rank_b", "2026-02-25", label={"transform": "cost_adjusted_return"})
+
+    with pytest.raises(ValueError, match="同一 train_end") as raised:
+        latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4), purpose="ranking")
+    # 錯誤訊息要列出候選，操作者才知道要指定哪一個。
+    assert "rank_a" in str(raised.value) and "rank_b" in str(raised.value)
+
+
+def test_t224_an_unambiguous_newer_model_is_still_chosen(tmp_path: Path) -> None:
+    from twquant.ml.score import latest_model_dir
+
+    _model_dir_with(tmp_path, "old", "2026-01-31", label={"transform": "rank_pct"})
+    newest = _model_dir_with(tmp_path, "new", "2026-02-25", label={"transform": "rank_pct"})
+
+    assert latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4), purpose="ranking") == newest
