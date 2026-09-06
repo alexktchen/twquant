@@ -2,6 +2,7 @@ import { ColorType, LineSeries, createChart } from 'lightweight-charts'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { ACC, LINE, MUT, num, pct } from '../theme'
 import { Panel } from '../ui'
+import { IndustriesPage } from './IndustriesPage'
 import { routeHref, type PlatformRoute } from './routes'
 import {
   fetchBacktestArtifact,
@@ -153,5 +154,6 @@ function FinalHoldings({ rows }: { rows: BacktestDetail['final_holdings'] }) {
 export function ResearchPages({ route }: { route: PlatformRoute }): JSX.Element {
   if (route.page === 'models') return <ModelCenter route={route} />
   if (route.page === 'backtests') return <BacktestCenter route={route} />
+  if (route.page === 'industries') return <IndustriesPage route={route} />
   return <div className="platform-query-state">這個研究頁面尚未接入資料。</div>
 }

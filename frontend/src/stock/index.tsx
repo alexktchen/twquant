@@ -1,6 +1,6 @@
 // 個股研究頁（SPEC-014 §5）：首屏是股票資訊 + K 線 + 推薦事件；籌碼／基本面／因子與
 // 「條件選股」各自為頁籤，避免長頁。元件拆在 src/stock/；共用原件在 src/charts.tsx、src/ui.tsx。
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Candle, CompositeTop, FactorOption, FactorOrder, FactorTop, StockMetaMap } from '../api'
 import { fetchCompositeTop, fetchFactorTop, fetchStockList, fetchStockMeta, fetchStockOhlc } from '../api'
 import { FALLBACK } from '../fallback'
@@ -16,14 +16,20 @@ import { StrategyPools } from './StrategyPools'
 import { DEFAULT_SCREEN, MAX_FACTOR_PANES, loadSubFactors, loadWatch, saveSubFactors, saveWatch } from './store'
 import { TPanel, chip } from './ui'
 import { DEFAULT_STOCK_TAB, parseStockTab, quoteIdentity, stockTabs, type StockTabId } from '../platform/stockTabs'
+import { mapEventsToSessions } from '../platform/eventMarkers'
+import { StockEventsPanel } from '../platform/StockEventsPanel'
+import type { StockEvent } from '../platform/stockRecommendations'
+import { markerFor } from '../platform/markerStyle'
 
-export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, dateContext = null, recommendations }: {
+export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, dateContext = null, events = [], eventsLoading = false, eventsError = null }: {
   selectedSid?: string
   onSelectSid?: (sid: string) => void
   tab?: string | null
   onSelectTab?: (tab: StockTabId) => void
   dateContext?: string | null
-  recommendations?: ReactNode
+  events?: StockEvent[]
+  eventsLoading?: boolean
+  eventsError?: string | null
 } = {}) {
   const activeTab = parseStockTab(tab ?? null)
   const [localTab, setLocalTab] = useState<StockTabId>(DEFAULT_STOCK_TAB)
@@ -113,6 +119,19 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
     }
   }, [quoteKey, live])
   const series = ohlc?.key === quoteKey ? ohlc.rows : undefined
+  // 事件→交易日的映射在此完成（圖表不自行貼棒）；換股時 series 換掉，標記自然清空。
+  const mapping = useMemo(
+    () => mapEventsToSessions(events, (series ?? []).map((k) => k.d)),
+    [events, series],
+  )
+  const chartMarkers = useMemo(() => mapping.groups.map(markerFor), [mapping])
+  const [focusDay, setFocusDay] = useState<string | null>(null)
+  useEffect(() => {
+    setFocusDay(null) // 換股或換日一律回到完整區間，不把上一檔的定位帶過來。
+  }, [quoteKey])
+  const focusSession = focusDay
+    ? (mapping.groups.find((g) => g.day === focusDay)?.session ?? null)
+    : null
 
   return (
     <div className="flex flex-col gap-3 md:gap-4">
@@ -136,6 +155,9 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
           factors={subFactors}
           available={ftop.data?.available ?? []}
           onToggle={toggleSub}
+          markers={chartMarkers.length ? chartMarkers : undefined}
+          focusTime={focusSession}
+          onResetView={() => setFocusDay(null)}
         />
       ) : sid ? (
         <TPanel title={`${labelOf(mm, sid)} · K 線`}>
@@ -150,7 +172,16 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
           </div>
         </TPanel>
       ) : null}
-      {recommendations}
+      {sid && (
+        <StockEventsPanel
+          groups={mapping.groups}
+          pending={mapping.pending}
+          loading={eventsLoading}
+          error={eventsError}
+          selectedDay={focusDay ?? dateContext}
+          onSelectDay={setFocusDay}
+        />
+      )}
       <div className="flex items-center gap-1.5 overflow-x-auto hscroll" role="tablist" aria-label="個股資料頁籤">
         {stockTabs.map((t) => (
           <button

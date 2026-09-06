@@ -53,23 +53,43 @@ const { chromium } = require('playwright');
     };
     // A connected-mode fixture: /api/health succeeds so the stock page runs in live mode.
     const marketAsOf = '2026-06-30';
+    // Weekends are absent so a non-trading publication day has to map forward to a real session.
+    const closedDays = new Set(['2026-06-06', '2026-06-07', '2026-06-13', '2026-06-14', '2026-06-20', '2026-06-21', '2026-06-27', '2026-06-28']);
     const candles = sid => Array.from({ length: 30 }, (_, i) => {
       const day = `2026-06-${String(i + 1).padStart(2, '0')}`;
       const base = sid === '0050' ? 200 : 900;
       return { date: day, open: base + i, high: base + i + 3, low: base + i - 3, close: base + i + 1, volume: 1000 * (i + 1) };
-    });
+    }).filter(row => !closedDays.has(row.date));
     const stockEvents = {
       '0050': [
         { run_id: 'run_a', model_id: 'lgbm_rank_v2', stock_id: '0050', as_of: '2026-06-20T20:00:00+08:00', published_at: null, mode: 'research', rank: 1, score: 0.812, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending' },
         { run_id: 'run_b', model_id: 'lgbm_rank_v2', stock_id: '0050', as_of: '2026-06-25T20:00:00+08:00', published_at: null, mode: 'research', rank: 4, score: 0.655, bucket: 'watch', reason_ref: null, insight_run_id: null, data_status: 'pending' },
+        // Same publication day as run_b, so the group must expand rather than draw a second arrow.
+        { run_id: 'run_c', model_id: 'lgbm_rank_v2', stock_id: '0050', as_of: '2026-06-25T20:10:00+08:00', published_at: null, mode: 'research', rank: 7, score: 0.601, bucket: 'top_decile', reason_ref: null, insight_run_id: 'ins_1', data_status: 'ready' },
+        // Published after the last available bar: listed as pending, never plotted.
+        { run_id: 'run_d', model_id: 'lgbm_rank_v2', stock_id: '0050', as_of: '2026-07-10T20:00:00+08:00', published_at: null, mode: 'research', rank: 2, score: 0.702, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending' },
       ],
       '2330': [],
     };
-    const stockMeta = { '0050': { name: '元大台灣50', industry: 'ETF', market: 'TWSE' }, '2330': { name: '台積電', industry: '半導體', market: 'TWSE' } };
+    const stockMeta = {
+      '0050': { name: '元大台灣50', industry: 'ETF', market: 'TWSE' },
+      '2330': { name: '台積電', industry: '半導體', market: 'TWSE' },
+      // 航運 appears in the flow rows but not here, so its coverage gap is exercised.
+      '2454': { name: '聯發科', industry: '半導體', market: 'TWSE' },
+    };
+    const sectorFlows = window => ({
+      as_of: marketAsOf, window, dates: [], daily: {},
+      sectors: window === 60 ? [] : [
+        { industry: '半導體', n: 2, net_yi: 12.5, frgn_yi: 9.1, trust_yi: 3.4, amt_yi: 880.2, ret_pct: 2.31 },
+        { industry: 'ETF', n: 1, net_yi: -3.2, frgn_yi: -2.0, trust_yi: -1.2, amt_yi: 120.0, ret_pct: -0.44 },
+        { industry: '航運', n: 4, net_yi: 1.1, frgn_yi: 0.5, trust_yi: 0.6, amt_yi: 55.5, ret_pct: 0.12 },
+      ],
+    });
     page.on('pageerror', error => errors.push(error.message));
     // All HTTP is fulfilled locally; the test never reaches data services.
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
+      if (url.pathname === '/api/sector-flows') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ flows: sectorFlows(Number(url.searchParams.get('window')) || 20) }) });
       if (url.pathname === '/api/health') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', as_of: marketAsOf }) });
       if (url.pathname === '/api/meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ as_of: marketAsOf, window: '2022-01-01~2026-06-30', rev_month: null, top_stocks: ['0050', '2330'], coverage: [] }) });
       if (url.pathname === '/api/stock-meta') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ meta: stockMeta }) });
@@ -120,7 +140,7 @@ const { chromium } = require('playwright');
     // AC-207-1: the K-line and the saved recommendation events are the first screen.
     await page.getByText('元大台灣50 · K 線', { exact: false }).waitFor();
     await page.getByRole('heading', { name: '推薦事件', exact: true }).waitFor();
-    await page.getByText('2026-06-25', { exact: false }).waitFor();
+    await page.getByText('2026-06-25', { exact: false }).first().waitFor();
     for (const [tab, marker] of [['基本面', '月營收'], ['因子', '因子體檢'], ['條件選股', '條件選股']]) {
       await page.getByRole('tab', { name: tab, exact: true }).click();
       await page.waitForFunction(() => location.hash.includes('tab='));
@@ -171,6 +191,45 @@ const { chromium } = require('playwright');
     await page.getByRole('link', { name: '0050', exact: true }).click();
     await page.getByRole('heading', { name: '個股研究', exact: true }).waitFor();
     assert.match(new URL(page.url()).hash, /^#\/stocks\/0050\?/);
+    // AC-208-1/2: markers, grouping, non-trading-day mapping, locate and reset.
+    await page.goto('http://twquant.test/#/stocks/0050');
+    await page.getByRole('heading', { name: '推薦事件', exact: true }).waitFor();
+    await page.locator('table.platform-data-table tbody tr', { hasText: '2026-06-25' }).first().waitFor();
+    // Two events share 06-25, so the row reports a count of 2 and expands to both run ids.
+    const grouped = page.locator('table.platform-data-table tbody tr', { hasText: '2026-06-25' }).first();
+    assert.match(await grouped.innerText(), /2/);
+    await grouped.getByRole('button', { name: '展開', exact: true }).click();
+    await page.getByText('run run_b', { exact: false }).waitFor();
+    await page.getByText('run run_c', { exact: false }).waitFor();
+    // A Saturday publication maps forward to the next session and says so.
+    await page.getByText('前次非交易日發布', { exact: false }).waitFor();
+    // A publication with no later bar stays pending instead of being plotted.
+    await page.getByText('還沒有交易日行情', { exact: false }).waitFor();
+    await page.getByRole('button', { name: '推薦標記', exact: true }).waitFor();
+    await page.getByRole('button', { name: '2026-06-25', exact: true }).click(); // Locate that day.
+    await page.getByRole('button', { name: '查看全區間', exact: true }).click();
+    await page.getByRole('button', { name: '推薦標記', exact: true }).click(); // Toggle markers off.
+    await page.getByRole('button', { name: '推薦標記', exact: true }).click();
+    // AC-208-1: a stock with no events draws no markers and offers no toggle.
+    await page.goto('http://twquant.test/#/stocks/2330');
+    await page.getByText('沒有任何保存的推薦事件', { exact: false }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '推薦標記', exact: true }).count(), 0);
+    // AC-209-1: the industry table mirrors the API and names its own window and coverage.
+    await page.goto('http://twquant.test/#/industries');
+    await page.getByRole('heading', { name: '產業資金流向', exact: true }).waitFor();
+    assert.match(await page.locator('#platform-content').innerText(), /窗口 20 交易日/);
+    assert.match(await page.locator('#platform-content').innerText(), /12\.50/);
+    await page.getByRole('link', { name: '半導體', exact: true }).click();
+    await page.getByText('這是目前分類，不是歷史 PIT 分類', { exact: false }).waitFor();
+    await page.getByRole('link', { name: '2454', exact: true }).waitFor();
+    assert.match(await page.locator('#platform-content').innerText(), /API 回報 2 檔.*可對應 2 檔/s);
+    // An industry the classification table cannot name says so instead of showing nothing.
+    await page.getByRole('link', { name: '航運', exact: true }).click();
+    await page.getByText('目前分類表沒有屬於「航運」的股票', { exact: false }).waitFor();
+    assert.match(await page.locator('#platform-content').innerText(), /API 回報 4 檔；目前分類表沒有可對應的股票/);
+    // A window with no rows is a legitimate zero, not a read failure.
+    await page.getByRole('link', { name: '60 日', exact: true }).click();
+    await page.getByText('零筆，不是讀取失敗', { exact: false }).waitFor();
     // AC-206-2: zero candidates, nothing generated and read failure stay distinguishable.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-04');
     await page.getByText('合法地沒有候選股票', { exact: false }).waitFor();
@@ -194,6 +253,6 @@ const { chromium } = require('playwright');
     assert.equal(await page.locator('#platform-content').evaluate(el => el === document.activeElement), true);
     assert.equal(new URL(page.url()).hash, '#/models');
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2 and AC-207-1/2: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, responsive navigation and keyboard focus (offline HTTP fixtures).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2 and AC-209-1: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, responsive navigation and keyboard focus (offline HTTP fixtures).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

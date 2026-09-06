@@ -24,12 +24,10 @@ import {
 } from './api'
 import { FALLBACK } from './fallback'
 import { MetaCtx, useMeta, type MetaCtxT } from './hooks'
-import { StockFactorsPage } from './stock'
 import { PlatformShell } from './platform/PlatformShell'
 import { ResearchPages } from './platform/ResearchPages'
 import { RecommendationsPage } from './platform/RecommendationsPage'
-import { StockEventsPanel } from './platform/StockEventsPanel'
-import { routeHref } from './platform/routes'
+import { StockResearch } from './platform/StockResearch'
 import { Kpi, Panel, Skeleton } from './ui'
 
 /* ---------- 擷取後台（熱力圖 + 漏抓清單 + 一鍵補抓 / 引導指令）---------- */
@@ -689,18 +687,7 @@ function Shell() {
   return <PlatformShell live={live} asOf={meta.as_of} operations={<Ingest />}
     daily={(route) => <RecommendationsPage route={route} dataAsOf={meta.as_of} />}
     research={(route) => <ResearchPages route={route} />}
-    stock={(route) => <StockFactorsPage
-      selectedSid={route.entityId}
-      onSelectSid={(sid) => { window.location.hash = routeHref('stocks', sid, route.query) }}
-      tab={route.query.get('tab')}
-      onSelectTab={(tab) => {
-        const query = new URLSearchParams(route.query)
-        query.set('tab', tab)
-        window.location.hash = routeHref('stocks', route.entityId, query)
-      }}
-      dateContext={route.query.get('date')}
-      recommendations={route.entityId ? <StockEventsPanel sid={route.entityId} selectedDay={route.query.get('date')} /> : undefined}
-    />}
+    stock={(route) => <StockResearch route={route} />}
   />
 }
 
