@@ -49,7 +49,23 @@ class UniverseConfig(BaseConfig):
     exclude_disposition: bool = True
     exclude_full_delivery: bool = True
     exclude_recent_ipo_days: int = 60
-    min_adv_twd: float | None = 30_000_000  # 20 日成交金額中位數下限
+    min_adv_twd: float | None = 30_000_000  # 20 日成交金額中位數下限（**絕對**門檻）
+    # D-062／T-163：**相對**流動性門檻——保留當日 ADV 在第 `min_adv_pctl` 百分位以上者。
+    # 0.70 ＝ 保留前 30%，與現行絕對門檻的平均留存率（26.4%）對齊。
+    #
+    # 為什麼要它：絕對門檻的留存率有**九成八**由當年市場成交熱度解釋
+    # （2015-06 起實測 r = +0.982），亦即宇宙大小是**行情的函數**而非公司品質的函數。
+    # 壓力年宇宙縮四成、成分也不同——而 D-038 §5 的晉升條件裡有最大回撤，回撤正好
+    # 發生在壓力年。等於在最需要穩定基準的時段換了一個池子。
+    #
+    # 實測（`docs/reports/universe-drift-p30-since2015.md`）：
+    #   絕對門檻 留存率 19.2~34.4%（極差 15.2pp、標準差 5.29pp）
+    #   前 30%   留存率 28.7~29.9%（極差  1.2pp、標準差 **0.42pp**）
+    #
+    # 與 `min_adv_twd` **互斥**（兩道流動性濾網疊起來說不清是哪一道在篩）；
+    # 要用本欄位須把 `min_adv_twd` 顯式設為 null，不自動關掉——靜默改變既有配置的
+    # 語意正是黃金規則 5 要消滅的事。
+    min_adv_pctl: float | None = Field(default=None, gt=0.0, lt=1.0)
     min_price: float | None = None
     # D-029 衛生濾網：近窗出現跳價/交易日缺口（停牌復牌、減資、資料缺段）→ 排除
     max_jump_ratio: float | None = 0.35  # 相鄰列 |Δclose| 上限；None 停用
@@ -76,6 +92,18 @@ class UniverseConfig(BaseConfig):
     max_revenue_yoy: float | None = None  # 同上，上限
     min_revenue_streak: int | None = None  # 最近連續幾個「營收月份」YoY 為正
     hygiene_lookback: int = 60  # 衛生濾網回看列數
+
+    @model_validator(mode="after")
+    def _one_liquidity_gate_only(self) -> UniverseConfig:
+        # 兩道流動性濾網同時開著，交集是「絕對且相對都過」——那既不是 D-062 的相對門檻，
+        # 也不是原本的絕對門檻，而且留存率會重新耦合到行情上（絕對那道還在）。
+        if self.min_adv_twd is not None and self.min_adv_pctl is not None:
+            raise ValueError(
+                f"min_adv_twd（{self.min_adv_twd:,.0f}）與 min_adv_pctl（{self.min_adv_pctl}）"
+                "互斥：兩道流動性濾網疊起來說不清是哪一道在篩，且絕對那道會把行情耦合帶回來"
+                "（D-062 實測 r = +0.982）。要用相對門檻請把 min_adv_twd 顯式設為 null"
+            )
+        return self
 
     @model_validator(mode="after")
     def _mktcap_ranks_positive(self) -> UniverseConfig:

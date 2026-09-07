@@ -80,6 +80,9 @@ def bundle_backtest(
         # 逐表明細：跨策略比雜湊無意義（不同策略讀不同的表，雜湊必然不同），
         # 要比就得比**重疊的表**。純追加欄位，舊結果包缺此鍵仍可讀。
         "data_tables": {k: list(v) for k, v in sorted((data_tables or {}).items())},
+        # D-085／D-086：這份結果是含息還是價格報酬。舊結果包缺此鍵 → 視為 False
+        # （它們是引擎還沒有收益路徑時跑的），故讀取端用 `bundle.get(..., False)`。
+        "credit_dividends": result.credit_dividends,
         "initial_equity": result.initial_capital,
         "final_equity": result.final_equity,
         "metrics": {
@@ -119,6 +122,20 @@ def bundle_backtest(
             }
             for u in result.unfilled
         ],
+        # D-085：股利明細。**沒有它就無法核對**——權益曲線只看得到「多了一筆錢」，
+        # 看不出那筆錢是哪一天、哪一檔、每股多少配出來的。首次跑完時就是因為缺這一欄，
+        # 報表印出「股利 0 筆」卻同時顯示 CAGR 上升 10pp，兩者無從對帳。
+        "dividends": [
+            {
+                "date": d.date.isoformat(),
+                "stock_id": d.stock_id,
+                "shares": d.shares,
+                "per_share": d.per_share,
+                "cash": d.cash,
+                "event_type": d.event_type,
+            }
+            for d in result.dividends
+        ],
         "final_holdings": [
             {
                 "stock_id": h.stock_id,
@@ -128,6 +145,7 @@ def bundle_backtest(
                 "weight": h.weight,
                 "entry_date": h.entry_date.isoformat() if h.entry_date else None,
                 "avg_cost": h.avg_cost,
+                "dividends": h.dividends,
                 "ret": h.ret,
                 "max_loss": h.max_loss,
             }

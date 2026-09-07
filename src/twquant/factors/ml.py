@@ -77,3 +77,87 @@ def lgbm_rank_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
 def lgbm_net_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """LightGBM H20 成本感知連續報酬分數；只讀 PIT-safe ml_scores。"""
     return _scores_for_model(view, params, "lgbm_net_h20_")
+
+
+# ── 長窗口模型（D-088，sample_tag=lw）────────────────────────────────────
+# T-172 刻意讓 `lgbm_net_h20_` 撈不到 `lgbm_lw_net_h20_*`：兩個樣本上訓練的模型不是同一條線，
+# 分數不得混。要用長窗口分數就得明確指名——這三個因子就是那個「明確指名」。
+# 標籤定義、方向、用途限制全部與短窗口版逐字相同，只差模型前綴。
+
+
+@factor(
+    name="ml.lgbm_lw_net_20d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_net_h20_", "smooth_days": 0},
+)
+def lgbm_lw_net_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """長窗口（2015-09 起訓練）的 H20 成本感知分數；語意同 `ml.lgbm_net_20d`。"""
+    return _scores_for_model(view, params, "lgbm_lw_net_h20_")
+
+
+@factor(
+    name="ml.lgbm_lw_rev_15d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_rev_h15_", "smooth_days": 0},
+)
+def lgbm_lw_rev_15d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """長窗口（2017-01 起訓練）的營收驚奇分數；語意同 `ml.lgbm_rev_15d`。"""
+    return _scores_for_model(view, params, "lgbm_lw_rev_h15_")
+
+
+@factor(
+    name="ml.lgbm_lw_dd_60d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_dd_h60_", "smooth_days": 0},
+)
+def lgbm_lw_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """長窗口（2017-01 起訓練）的 60 日回撤分數；用途限制同 `ml.lgbm_dd_60d`（只能當閘門）。
+
+    D-089 已量出這個模型 94% 是 `price.vol_20d` 的機械關係；LW-R1 對 LW-R2 那條邊
+    就是在問剩下的 6% 有沒有經濟價值。
+    """
+    return _scores_for_model(view, params, "lgbm_lw_dd_h60_")
+
+
+@factor(
+    name="ml.lgbm_rev_15d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_rev_h15_", "smooth_days": 0},
+)
+def lgbm_rev_15d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """F 系列（D-074）：下次公布的月營收驚奇分數。高分＝驚奇為正。
+
+    只讀 PIT-safe ml_scores。第二段的用法是**池子閘門**（前 30%），
+    與 M3 的「動能當池子」逐字對照，故 F − M3 這條邊只換了池子的定義。
+    """
+    return _scores_for_model(view, params, "lgbm_rev_h15_")
+
+
+@factor(
+    name="ml.lgbm_dd_60d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_dd_h60_", "smooth_days": 0},
+)
+def lgbm_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """R 系列（D-075）：未來 60 日回撤分數。**低分＝預測跌得深**（百分位方向同標籤）。
+
+    用途寫死為**風控閘門**：`prefilter` 保留前 90%，即剔除預測回撤最深的一成。
+    **不得作為 `signals` 進入排序**——先導只證明它能排序「誰會跌得深」，
+    未證明它能排序「誰會漲得多」；把風控訊號拿去選股是換了問題還沿用結論。
+    """
+    return _scores_for_model(view, params, "lgbm_dd_h60_")

@@ -1,0 +1,45 @@
+# P5（D-092，事前登記）：與 track_a_smallcap.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+
+# T-128 A 軌：小型飆股（SPEC-013 §4，D-060／D-061 事前登記）。
+#
+# **主基準是等權小型宇宙，不是 0050。** 這個池子裡沒有台積電，拿它比市值加權指數
+# 沒有意義（SPEC-013 §1.2）。研究判定＝「在這個池子裡挑股票有沒有加值」。
+# 但依 D-061／R2，**可部署判定**仍須與 0050 比機會成本，且要等 T-113 股息入帳。
+#
+# 明確承認這是高波動、低容量、追求右尾的策略。§4.3 的三項強制檢查不得省略：
+# 容量（低於 1,000 萬須紅字）、成本敏感度、`unfilled` 的 limit_up 比例。
+name: lw_a_smallcap
+description: A 軌小型飆股：小市值 × 動能 × 營收加速 × 量能（未經部署裁決，勿用於實盤）（長窗口 P5 D-092）
+trial_scope: lw:long_window_all
+
+universe:
+  markets: [TWSE, TPEX]
+  mktcap_rank_min: 101 # 排除市值前 100 大（T-121）
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+  # 與 §3.4 同一組外部先驗，D-060 禁止調整
+  min_revenue_yoy: 0.10
+  max_revenue_yoy: 1.50
+  min_revenue_streak: 3
+
+combine: rank_avg
+signals:
+  - {factor: price.mom_60d, weight: 0.30}
+  - {factor: fundamental.revenue_accel, weight: 0.30}
+  - {factor: volume.turnover_z_20d, weight: 0.20}
+  # ROE 在此是**護欄不是選股**：finlab 動能文實測品質篩是動能策略的轉折點
+  # （年化 11.5% → 39.6%），機轉是砍掉動能的投機尾巴。權重刻意壓低到 0.20，
+  # 因為我們自己的 T-119 實測顯示**硬濾網**會造成排序稀釋——這裡用軟排名取兩者之長。
+  - {factor: fundamental.roe, weight: 0.20}
+require_all_factors: true
+
+selection: {method: top_n, top_n: 15}
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

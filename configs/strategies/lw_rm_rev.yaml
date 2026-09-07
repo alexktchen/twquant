@@ -1,0 +1,52 @@
+# P8（D-092，事前登記）：只用營收驚奇分數排序。這一格單獨的數字沒有意義，它的用途是當三格比較的一端。
+#
+# Chan, Jegadeesh & Lakonishok (1996, JF)《Momentum Strategies》：價格動能與盈餘驚奇
+# 是**兩個分開的異象**，市場對兩種資訊的反應不足方式不同，合起來優於任一單獨。
+# 台股月營收一年 12 次，是美股 SUE（季報 4 次）的 3 倍密度——這是台股才做得動的檢定。
+#
+# **為什麼不能用 F1 回答這個問題**：F1 把營收當池子、動能在排序層（mom_60d 權重 0.25
+# ＋ high_52w 0.35），兩者已經混在一起，分不出「營收有用」與「營收×動能的交互作用」。
+# 本批三格**只差 signals 一段**，且都不用 prefilter——讓兩個訊號在同一層競爭。
+# 未經部署裁決，勿用於實盤。
+
+# P5（D-092，事前登記）：與 track_f1_revpool.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+# P2／P5b：model_id 與薄因子已改指**長窗口模型**（D-088 sample_tag=lw）；短窗口 pin 不得混用（T-172）。
+
+# F1「營收驚奇池 × C1 技術排序」——D-074 第二段的判定格。
+#
+# **家族：F 系列。事前登記見 DECISIONS D-074（第一段判準）、D-081（基座與對照格）。
+# 判準先寫定、不事後挑。**
+#
+# 假說（使用者提出）：「前面要有一些特徵發生，之後的財報是用來驗證的。」
+# 即知情資金的腳印先於基本面出現。第一段已證明「量價籌碼 → 下月營收驚奇」可預測；
+# 這一格問的是**能不能換到錢**——預測得到營收卻換不到報酬，那是學術結果不是策略。
+#
+# 結構與 `track_m1_ml_c1.yaml` **逐字相同，只把池子因子換成營收驚奇分數**。
+# 判定對象是 **F1 − F2**（F2 把池子換成 `price.mom_60d`），不是 F1 − M1
+# ——後者同時換了「預測什麼」與「模型好不好」，說不出單一歸因。
+#
+# 為什麼不照 D-074 原文用 M3 當基座：M2／M3 的曝險只有 3%（D-076），
+# 在兩個 97% 時間空手的策略之間比較，量到的是雜訊。見 D-081。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_rm_rev
+description: 純營收驚奇（營收×動能隔離 P8 D-092）
+trial_scope: lw:revenue_x_momentum
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+combine: rank_avg
+signals:
+  - { factor: ml.lgbm_lw_rev_15d, weight: 1.0, params: { model_id: lgbm_lw_rev_h15_20260225_9d4a149c } }
+require_all_factors: true
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

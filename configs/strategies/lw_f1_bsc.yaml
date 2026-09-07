@@ -1,0 +1,59 @@
+# P7（D-092，事前登記）：營收驚奇池 × Barroso-Santa-Clara (2015, JFE)：曝險 ∝ 1／已實現波動。
+# 與 lw_f1_revpool.yaml **逐字相同，只多一層 overlay**。所有參數固定不掃（Zakamulin 2014）。
+# 六條規則在同一個基座上並排，才分得出「有沒有用」與「哪一條有用」。
+# 未經部署裁決，勿用於實盤。
+
+# P5（D-092，事前登記）：與 track_f1_revpool.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+# P2／P5b：model_id 與薄因子已改指**長窗口模型**（D-088 sample_tag=lw）；短窗口 pin 不得混用（T-172）。
+
+# F1「營收驚奇池 × C1 技術排序」——D-074 第二段的判定格。
+#
+# **家族：F 系列。事前登記見 DECISIONS D-074（第一段判準）、D-081（基座與對照格）。
+# 判準先寫定、不事後挑。**
+#
+# 假說（使用者提出）：「前面要有一些特徵發生，之後的財報是用來驗證的。」
+# 即知情資金的腳印先於基本面出現。第一段已證明「量價籌碼 → 下月營收驚奇」可預測；
+# 這一格問的是**能不能換到錢**——預測得到營收卻換不到報酬，那是學術結果不是策略。
+#
+# 結構與 `track_m1_ml_c1.yaml` **逐字相同，只把池子因子換成營收驚奇分數**。
+# 判定對象是 **F1 − F2**（F2 把池子換成 `price.mom_60d`），不是 F1 − M1
+# ——後者同時換了「預測什麼」與「模型好不好」，說不出單一歸因。
+#
+# 為什麼不照 D-074 原文用 M3 當基座：M2／M3 的曝險只有 3%（D-076），
+# 在兩個 97% 時間空手的策略之間比較，量到的是雜訊。見 D-081。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_f1_bsc
+description: F1：營收驚奇池 × C1 技術排序（長窗口 P5 D-092）（＋Barroso-Santa-Clara (2015, JFE) P7）
+trial_scope: lw:overlay_matrix
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+  - factor: ml.lgbm_lw_rev_15d
+    keep_pct: 0.3
+    params:
+      model_id: lgbm_lw_rev_h15_20260225_9d4a149c
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+  - { factor: price.rs_market_20d, weight: 0.15 }
+require_all_factors: true
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: [vol_target_scaling]
+overlay_params:
+  vol_target_scaling:
+    target_vol: 0.20
+    window: 60
+    min_mult: 0.2

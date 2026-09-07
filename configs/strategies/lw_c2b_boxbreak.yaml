@@ -1,0 +1,52 @@
+# P5（D-092，事前登記）：與 track_c2b_boxbreak.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+
+# C2b「箱型突破」——Darvas box 的實作，事件稀疏但不強迫滿倉
+#
+# **本方案原本被我判為「不可行」，那個判斷是錯的。** 當時的理由是「每日符合檔數
+# 中位只有 4，選不滿 20 檔」——但那是把「永遠滿倉」這個假設套到事件策略上。
+# 事件策略本來就該在沒訊號時空手：掛零不是缺陷，是正確行為。
+#
+# 之所以會有那個錯誤判斷，是因為框架當時**表達不出來**：`weighting: equal` 永遠是
+# 1/n（不論幾檔都滿倉），而 `cap_and_renormalize` 把總曝險 < 1 當成 bug、
+# `n × cap < 1` 時直接 raise。故稀疏事件日不只是「集中」，是會讓回測崩掉。
+# 現已新增 `weighting: fixed_slot`：每檔固定 1/top_n，**符合幾檔就投幾檔的資金，
+# 其餘留現金**，且截頂後不重分配。
+#
+# 文獻：Lo, Mamaysky & Wang (2000, JF)「Foundations of Technical Analysis」——
+# 用核回歸自動辨識技術型態，證實部分型態帶有增量資訊。
+#
+# 實測每日符合檔數（抽樣 12 個訊號日，宇宙 ADV≥5000 萬、價≥10）：
+#   box_breakout_60d：1 ~ 15 檔（中位約 4）
+# 故多數日子的曝險會遠低於 100%——**那是設計，不是缺陷**。判讀時要看
+# 「有部位的日子表現如何」與「平均曝險多少」，不能只看 CAGR
+# （長期低曝險必然壓低 CAGR，那不代表訊號沒用）。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_c2b_boxbreak
+description: C2b 箱型突破事件：固定格位，符合幾檔投幾檔（Lo-Mamaysky-Wang 2000）（長窗口 P5 D-092）
+trial_scope: lw:long_window_all
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: price.box_breakout_60d, weight: 0.25 } # ← 事件閘門兼排序項
+  - { factor: price.high_52w, weight: 0.30 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.20 }
+require_all_factors: true
+
+selection: { method: top_n, top_n: 20 }
+# ← 關鍵：符合幾檔就投幾檔的資金，其餘現金
+weighting: fixed_slot
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

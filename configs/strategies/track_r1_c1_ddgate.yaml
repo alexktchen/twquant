@@ -1,0 +1,45 @@
+# R1「C1 ＋ 回撤風控閘門」——D-075 第二段的判定格。
+#
+# **家族：R 系列。事前登記見 DECISIONS D-075（第一段判準與第二段判準）、
+# D-080（波動率隔離對照）。判準先寫定、不事後挑。**
+#
+# 與 `track_c1_breakout.yaml` **逐字相同，只多一道 `prefilter`**：
+# 剔除模型預測未來 60 日回撤最深的 10%（`ml.lgbm_dd_60d` 的 direction 為 +1，
+# 高分＝跌得淺，故 `side: top` 保留 90% 即剔除最深的一成）。
+#
+# **R 分數明文不得進 `signals`**（D-075）：先導只證明它能排序「誰會跌得深」，
+# 未證明它能排序「誰會漲得多」——把風控訊號拿去選股是換了問題還沿用結論。
+#
+# 判準與其他線不同，因為用途不同（風控不是選股）：
+#   ΔMDD ≥ +5pp（回撤變淺）且 ΔCAGR ≥ −3pp，或 ΔSharpe ≥ +0.15。
+# **判定對象是 R1 − R2**（R2 把閘門換成低波動），不是 R1 − C1：R 分數有 88%
+# 是波動率排序（同日 Spearman −0.8835），只比 C1 說不出它比一個低波動濾網好在哪。
+#
+# 未經部署裁決，勿用於實盤。
+name: track_r1_c1_ddgate
+description: R1：C1 ＋ 剔除預測回撤最深 10%
+trial_scope: drawdown_gate
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: 50_000_000
+  min_price: 10.0
+prefilter:
+  - factor: ml.lgbm_dd_60d
+    keep_pct: 0.9
+    params:
+      model_id: lgbm_dd_h60_20260225_1a2c3a8e
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+  - { factor: price.rs_market_20d, weight: 0.15 }
+require_all_factors: true
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

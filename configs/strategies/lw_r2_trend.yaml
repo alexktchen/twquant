@@ -1,0 +1,54 @@
+# P4（D-092，事前登記）：與 lw_r2_c1_lvgate.yaml **逐字相同，只多 overlay `index_trend_gate`**
+# （Faber 2007：TAIEX 前一日收盤 > 200 日 SMA 才持有，否則空手）。window 固定 200 不掃（Zakamulin 2014）。
+# 反事實預估（timing_all.py）寫在 D-092；引擎版與它差 ≤ 3pp 才算反事實可信。未經部署裁決，勿用於實盤。
+
+# 長窗口版（D-091，事前登記）：與 track_r2_c1_lvgate.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，與 D-087 四格一致，D-062）、trial_scope。
+# 問的問題：**風控層能不能把丙層（MDD > 40%）的架構救回乙層或甲層。**
+# 未經部署裁決，勿用於實盤。
+# P2／P5b：model_id 與薄因子已改指**長窗口模型**（D-088 sample_tag=lw）；短窗口 pin 不得混用（T-172）。
+
+# R2「C1 ＋ 低波動閘門」——R 系列的**隔離對照格**（D-080）。
+#
+# 與 R1 **逐字相同，只把閘門因子從 `ml.lgbm_lw_dd_60d` 換成 `price.vol_20d`**
+# （direction 為 −1，故 `side: top` 保留的是低波動那端＝剔除波動最高的 10%）。
+#
+# 為什麼非有這一格不可（已量測，非假設）：R 分數與 `price.vol_20d` 的同日
+# Spearman 是 **−0.8835**，vol_20d 單獨對回撤標籤的 OOS RankIC 就有 **−0.3798**
+# ——R 模型有 88% 是波動率排序。控制掉波動後 R 仍有 +0.1562 的偏 IC（43/46 日為正），
+# 增量是真的，但只比 C1 完全看不出這一點。
+#
+# **判定對象就是 R1 − R2**，判準沿用 D-075 第二段。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_r2_trend
+description: R2：C1 ＋ 剔除波動最高 10%（R 系列的隔離對照）（長窗口 D-091）（＋擇時 P4 D-092）
+trial_scope: lw:long_window_timing
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+  - factor: price.vol_20d
+    keep_pct: 0.9
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+  - { factor: price.rs_market_20d, weight: 0.15 }
+require_all_factors: true
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: [index_trend_gate]
+overlay_params:
+  index_trend_gate:
+    index_id: TAIEX
+    window: 200
+    floor: 0.0
