@@ -61,12 +61,13 @@ def main() -> None:
     etf_eq = etf.with_columns(pl.col("close").cast(pl.Float64).alias("equity")).select(
         "date", "equity"
     )
-    w0050, p0, t0, rec0 = _dd(etf_eq)
-    print(f"0050（價格）長窗口 MDD {w0050 * 100:.2f}%　峰 {p0} → 谷 {t0} → 回復 {rec0}\n")
-
+    # 0050 的 raw close **沒還原分割**（2025-06 有 1:4），拿它算自己的 MDD 會得到 −77% 的假值。
+    # 這裡只用它算「策略峰→谷區間內 0050 跌多少」，而四支策略的谷都在 2022-10 以前，故安全。
+    # 0050 自己的長窗口 MDD 用 benchmarks_two_windows.py（有還原分割）的 −36.38%。
     print(
         f"{'策略':12s} {'成本拖累':>9s} {'beta':>6s} {'相關':>6s} {'年化α':>8s} | {'MDD':>8s} {'峰':>10s} {'谷':>10s} {'回復':>10s} {'0050同期':>9s}"
     )
+    rows: list[dict[str, object]] = []
     for cell, cfg in (
         ("LW-C1", "lw_c1_breakout"),
         ("LW-C1abs", "lw_c1_abs_threshold"),
@@ -96,6 +97,26 @@ def main() -> None:
             f"{worst * 100:>7.2f}% {p!s:>10s} {t!s:>10s} {str(rec) if rec else '未回復':>10s} {etf_same:>8.2f}%"
         )
         print(f"{'':12s} 周轉率 {m1['turnover']:.1f}×／年")
+        rows.append(
+            {
+                "cell": cell,
+                "cost_drag_pp": drag,
+                "beta": beta,
+                "corr": corr,
+                "alpha_pct": alpha,
+                "mdd": worst,
+                "peak": str(p),
+                "trough": str(t),
+                "recovered": str(rec) if rec else None,
+                "etf_same_period_pct": etf_same,
+                "turnover": m1["turnover"],
+                "cagr_0x": m0["cagr"],
+                "cagr_1x": m1["cagr"],
+            }
+        )
+    out = R / "reports/lw_diagnosis.json"
+    out.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"\n→ {out}")
 
 
 if __name__ == "__main__":

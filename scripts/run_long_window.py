@@ -41,8 +41,67 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-C4", "lw_c4_voltarget"),  # C1 ＋ 波動率縮放（Barroso–Santa-Clara）
         ("LW-B1", "lw_b1_large_enhanced"),  # 市值前 100 選 30、市值加權（beta ≈ 1）
     ),
+    "turnover": (  # D-092 P1：帶狀區間降周轉
+        ("LW-C1band", "lw_c1_band"),
+        ("LW-X1band", "lw_x1_band"),
+    ),
+    "ml": (  # D-092 P2：長窗口 ML 訊號進各載具（需先 backfill-scores）
+        ("LW-M1", "lw_m1_ml_c1"),
+        ("LW-R1", "lw_r1_c1_ddgate"),
+        ("LW-B1ML", "lw_b1ml_large_enhanced"),
+        ("LW-MG3", "lw_mg3_voltgt"),
+    ),
+    "timing": (  # D-092 P4：Faber 200 日擇時 overlay
+        ("LW-B2trend", "lw_b2_trend"),
+        ("LW-X1trend", "lw_x1_trend"),
+        ("LW-B1trend", "lw_b1_trend"),
+        ("LW-R2trend", "lw_r2_trend"),  # 預期無增量——為了確認反事實
+    ),
+    "public_all": (  # D-092 P5a：其餘純公開因子策略
+        ("LW-A", "lw_a_smallcap"),
+        ("LW-C2", "lw_c2_wbottom"),
+        ("LW-C2b", "lw_c2b_boxbreak"),
+        ("LW-C2c", "lw_c2c_flaghold"),
+        ("LW-C3", "lw_c3_chipflow"),
+        ("LW-F2", "lw_f2_mompool"),
+        ("LW-F3", "lw_f3_highpool"),
+        ("LW-M3", "lw_m3_mom_flag"),
+        ("LW-MGALLm", "lw_mgallm_mom_allgates"),
+        ("LW-L3", "lw_l3_simple"),
+        ("LW-L4", "lw_l4_wt"),
+    ),
+    "ml_all": (  # D-092 P5b：其餘 ML 策略（P2 的四格另在 "ml"）
+        ("LW-F1", "lw_f1_revpool"),
+        ("LW-G1", "lw_g1_ml_revenue"),
+        ("LW-G2", "lw_g2_ml_lowvol"),
+        ("LW-G3", "lw_g3_ml_voltarget"),
+        ("LW-G4", "lw_g4_ml_smooth"),
+        ("LW-G5", "lw_g5_ml_large"),
+        ("LW-G6", "lw_g6_ml_flaggate"),
+        ("LW-GALL", "lw_gall_ml_allgates"),
+        ("LW-M2", "lw_m2_ml_flag"),
+        ("LW-M4", "lw_m4_ml_chip"),
+        ("LW-M5", "lw_m5_ml_large"),
+        # LW-M6 與 LW-MG3 改指同一個長窗口模型後逐字相同，只跑 MG3（在 "ml" 集）
+        ("LW-MG1", "lw_mg1_rev"),
+        ("LW-MG2", "lw_mg2_lowvol"),
+        ("LW-MG4", "lw_mg4_ema"),
+        ("LW-MG5", "lw_mg5_large"),
+        ("LW-MGALL", "lw_mgall_ml_allgates"),
+        ("LW-L0new", "lw_l0_new"),
+        ("LW-L1", "lw_l1_n40"),
+        ("LW-L2", "lw_l2_rev"),
+    ),
 }
-OUT_SUFFIX = {"public": "", "risk": "_risk"}
+OUT_SUFFIX = {
+    "public": "",
+    "risk": "_risk",
+    "turnover": "_turnover",
+    "ml": "_ml",
+    "timing": "_timing",
+    "public_all": "_all",
+    "ml_all": "_all_ml",
+}
 
 
 def main() -> None:

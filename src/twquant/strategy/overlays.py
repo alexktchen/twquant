@@ -74,6 +74,53 @@ def market_breadth(view: PitView, signal_date: dt.date, ma_window: int) -> float
     return float(df["b"][0])
 
 
+@overlay("index_trend_gate")
+def index_trend_gate(
+    signal_date: dt.date, weights: pl.DataFrame, view: PitView, params: dict[str, object]
+) -> pl.DataFrame:
+    """Faber (2007, JWM)：大盤收盤 > N 日簡單移動平均 → 全額曝險；否則降到 `floor`（預設 0＝空手）。
+
+    這是 D-092 P4 的擇時層。三個刻意的決定：
+
+    1. **只看 signal_date 之前的指數**（`date < signal_date`）。訊號在 t 日產生、t+1 開盤執行，
+       t 日的收盤在訊號時刻尚未發生；用它就是前視。`index_daily` 若無 `available_at`，
+       PitView 不會替你擋，所以這裡自己擋。
+    2. **N 固定在配置、不掃**。Zakamulin (2014, JAM) 指出這條規則對均線長度極敏感、
+       樣本外弱得多——掃 N 就是在製造那個問題。預設 200（Faber 的 10 個月）。
+    3. **歷史不足 N 日就 raise**，不靜默放行。放行等於 overlay 在資料不足時
+       「成功地什麼都沒做」，而那正好落在回測最前段。
+
+    現金報酬記 0（台幣活存約 1%，忽略是保守方向）。「換到防禦標的」引擎不支援，另立任務。
+    參數：`index_id`（預設 TAIEX）、`window`（預設 200）、`floor`（預設 0.0）。
+    """
+    index_id = str(params.get("index_id", "TAIEX"))
+    window = _as_int(params.get("window", 200), 200)
+    floor = _as_float(params.get("floor", 0.0), 0.0)
+    if window < 2:
+        raise ConfigError(f"window 須 ≥ 2，得到 {window}")
+    if not 0.0 <= floor <= 1.0:
+        raise ConfigError(f"floor 須在 [0, 1]，得到 {floor}")
+
+    hist = (
+        view.table("index_daily")
+        .filter((pl.col("index_id") == index_id) & (pl.col("date") < signal_date))
+        .select("date", "close")
+        .sort("date")
+        .tail(window)
+        .collect()
+    )
+    if hist.height < window:
+        raise DataError(
+            "index_daily",
+            signal_date,
+            f"{index_id} 在 {signal_date} 之前只有 {hist.height} 個交易日，"
+            f"不足 {window} 日均線；請把資料起點往前推或縮短 window（不得靜默放行）。",
+        )
+    last_close = float(hist["close"].item(-1))
+    sma = float(hist["close"].mean())  # type: ignore[arg-type]  # Series.mean 的回傳型別是寬聯集
+    return _scale(weights, 1.0 if last_close > sma else floor)
+
+
 @overlay("breadth_regime_filter")
 def breadth_regime_filter(
     signal_date: dt.date, weights: pl.DataFrame, view: PitView, params: dict[str, object]

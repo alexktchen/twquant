@@ -79,6 +79,55 @@ def lgbm_net_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     return _scores_for_model(view, params, "lgbm_net_h20_")
 
 
+# ── 長窗口模型（D-088，sample_tag=lw）────────────────────────────────────
+# T-172 刻意讓 `lgbm_net_h20_` 撈不到 `lgbm_lw_net_h20_*`：兩個樣本上訓練的模型不是同一條線，
+# 分數不得混。要用長窗口分數就得明確指名——這三個因子就是那個「明確指名」。
+# 標籤定義、方向、用途限制全部與短窗口版逐字相同，只差模型前綴。
+
+
+@factor(
+    name="ml.lgbm_lw_net_20d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_net_h20_", "smooth_days": 0},
+)
+def lgbm_lw_net_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """長窗口（2015-09 起訓練）的 H20 成本感知分數；語意同 `ml.lgbm_net_20d`。"""
+    return _scores_for_model(view, params, "lgbm_lw_net_h20_")
+
+
+@factor(
+    name="ml.lgbm_lw_rev_15d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_rev_h15_", "smooth_days": 0},
+)
+def lgbm_lw_rev_15d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """長窗口（2017-01 起訓練）的營收驚奇分數；語意同 `ml.lgbm_rev_15d`。"""
+    return _scores_for_model(view, params, "lgbm_lw_rev_h15_")
+
+
+@factor(
+    name="ml.lgbm_lw_dd_60d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_dd_h60_", "smooth_days": 0},
+)
+def lgbm_lw_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """長窗口（2017-01 起訓練）的 60 日回撤分數；用途限制同 `ml.lgbm_dd_60d`（只能當閘門）。
+
+    D-089 已量出這個模型 94% 是 `price.vol_20d` 的機械關係；LW-R1 對 LW-R2 那條邊
+    就是在問剩下的 6% 有沒有經濟價值。
+    """
+    return _scores_for_model(view, params, "lgbm_lw_dd_h60_")
+
+
 @factor(
     name="ml.lgbm_rev_15d",
     category="ml",

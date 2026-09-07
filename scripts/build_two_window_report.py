@@ -109,6 +109,38 @@ def _model(mid: str) -> dict[str, object] | None:
     }
 
 
+def _dsr_block() -> dict[str, object]:
+    """試驗數與 DSR ≥ 0.95 所需的年化 Sharpe（Bailey & López de Prado 的期望最大值近似）。"""
+    import math
+    from statistics import NormalDist
+
+    import polars as pl
+
+    from twquant.reporting.research_log import read_research_log
+
+    log = read_research_log(R)
+    bt = log.filter(pl.col("entry_type") == "backtest")
+    n = int(bt["params_hash"].n_unique())
+    fam = int(bt["trial_scope"].n_unique())
+    z, g = NormalDist().inv_cdf, 0.5772
+
+    def need(n_trials: int, t_days: int) -> float:
+        e_max = math.sqrt(1 / t_days) * (
+            (1 - g) * z(1 - 1 / n_trials) + g * z(1 - 1 / (n_trials * math.e))
+        )
+        return (e_max + z(0.95) * math.sqrt(1 / t_days)) * math.sqrt(244)
+
+    return {
+        "n_trials": n,
+        "n_families": fam,
+        "need_long": need(n, 2227),
+        "need_short": need(n, 886),
+        "need_long_plus100": need(n + 100, 2227),
+        "best_long_sharpe": 0.71,
+        "best_short_sharpe": 1.60,
+    }
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     bench = json.loads((R / "reports/benchmarks_two_windows.json").read_text(encoding="utf-8"))
@@ -136,7 +168,15 @@ def main() -> None:
         row["long"] = _model(m["long_id"])
         models.append(row)
 
+    diag_p = R / "reports/lw_diagnosis.json"
+    diagnosis = json.loads(diag_p.read_text(encoding="utf-8")) if diag_p.exists() else []
+    # DSR 門檻：294 次試驗後，長窗口要 DSR ≥ 0.95 需年化 Sharpe ≈ 1.50（scripts 內算過）。
+    # 這裡直接讀登記簿算試驗數，門檻用同一條公式。
+    dsr = _dsr_block()
+
     payload = {
+        "diagnosis": diagnosis,
+        "dsr": dsr,
         "windows": {
             "short": {
                 "start": "2022-07-01",
@@ -164,7 +204,7 @@ def main() -> None:
         sp, lp = s.get("short_px_1x"), s.get("long_px_1x")
         f = lambda m: (
             f"{m['cagr'] * 100:+6.2f}% / {m['mdd'] * 100:6.2f}%" if m else "        —      "
-        )  # noqa: E731
+        )
         print(f"  {s['name']:22s} 短 {f(sp)}　長 {f(lp)}")
     for m in models:
         sm, lm = m["short"], m["long"]
