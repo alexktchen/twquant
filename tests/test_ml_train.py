@@ -23,16 +23,19 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from twquant.config import MlConfig, MlLgbmConfig, config_hash, load_config
+from twquant.backtest.costs import CostConfig
+from twquant.config import MlConfig, MlLgbmConfig, load_config
 from twquant.ml.score import latest_model_dir, load_model
 from twquant.ml.splits import walk_forward_splits
 from twquant.ml.train import (
+    _scope,
     fit_ranker,
     log_training_run,
     make_model_id,
     oos_rank_ic,
     predict_scores,
     save_model,
+    training_config_hash,
     walk_forward_train,
 )
 from twquant.reporting.research_log import read_research_log
@@ -163,7 +166,9 @@ def test_ac8_log_training_run_appends_one_row(tmp_path: Path) -> None:
     row = log.to_dicts()[0]
     assert row["entry_type"] == "ml_train"
     assert row["strategy"] == "lgbm_h10_x"
-    assert row["params_hash"] == config_hash(cfg)
+    # `training_config_hash`（而非泛用的 `config_hash`）才是實際落地的 params_hash：
+    # 兩者只在「取回溯相容預設值的後加欄位」上不同，見 train.py 的 _BACKCOMPAT_DEFAULTS。
+    assert row["params_hash"] == training_config_hash(cfg)
     assert row["metric_name"] == "oos_rank_ic"
     assert row["metric_value"] == pytest.approx(0.042)
     assert row["trial_scope"] == "ml:h10"
@@ -173,7 +178,7 @@ def test_model_id_binds_horizon_train_end_and_config() -> None:
     cfg = MlConfig()
     mid = make_model_id(dt.date(2026, 7, 31), cfg)
     assert mid.startswith("lgbm_h10_20260731_")
-    assert config_hash(cfg)[:8] in mid
+    assert training_config_hash(cfg)[:8] in mid
 
 
 # ── MlConfig ─────────────────────────────────────────────────────────
@@ -368,3 +373,54 @@ def test_t224_an_unambiguous_newer_model_is_still_chosen(tmp_path: Path) -> None
     newest = _model_dir_with(tmp_path, "new", "2026-02-25", label={"transform": "rank_pct"})
 
     assert latest_model_dir(tmp_path, as_of=dt.date(2026, 9, 4), purpose="ranking") == newest
+
+
+# ── T-172：訓練樣本是模型身分的一部分 ─────────────────────────────────
+#
+# 缺陷：`training_config_hash` 只看超參數，不看訓練窗口。同一份 config 在
+# 2020+ 與 2017+ 兩個樣本上訓練會得到**同一個 model_id**，而 `ml_scores`
+# 按 model_id 索引——兩批分數會混進同一條線，薄因子以前綴取用時也分不出來。
+
+
+def test_ac1_sample_tag_changes_the_model_id_and_the_trial_scope() -> None:
+    base = load_config(_ROOT / "configs" / "ml.yaml", MlConfig)
+    lw = base.model_copy(update={"sample_tag": "lw"})
+    te = dt.date(2026, 2, 25)
+    assert make_model_id(te, base) != make_model_id(te, lw)
+    assert training_config_hash(base) != training_config_hash(lw)
+    # 家族鍵也要分開：不同樣本上的同一組超參數不是同一個假設，
+    # 併進同一個 trial_scope 會讓 DSR 的試驗計數失真。
+    assert _scope(base) != _scope(lw)
+
+
+def test_ac1_sample_tag_sits_in_front_so_thin_factor_prefixes_do_not_collide() -> None:
+    """薄因子以**前綴**取分數。tag 放尾端的話 `lgbm_net_h20_` 會撈到長窗口的分數。"""
+    base = load_config(_ROOT / "configs" / "ml_h20_cost_aware.yaml", MlConfig)
+    lw = base.model_copy(update={"sample_tag": "lw"})
+    cost = load_config(_ROOT / "configs" / "costs.yaml", CostConfig)
+    te = dt.date(2026, 2, 25)
+    short_id = make_model_id(te, base, cost_cfg=cost)
+    long_id = make_model_id(te, lw, cost_cfg=cost)
+    assert short_id.startswith("lgbm_net_h20_")
+    assert long_id.startswith("lgbm_lw_net_h20_")
+    assert not long_id.startswith("lgbm_net_h20_")
+
+
+def test_ac2_empty_sample_tag_leaves_existing_model_ids_bit_identical() -> None:
+    """後加欄位取回溯相容預設值時**整個鍵不進 hash**——否則既有模型的 `meta.json`
+    與 `ml_scores` 都以舊 id 落地，重算不出同一個 id，T-073 的內容定址就失效。
+
+    這兩個 id 是磁碟上真實存在的模型目錄，抄在此處當回歸基準。
+    """
+    cost = load_config(_ROOT / "configs" / "costs.yaml", CostConfig)
+    te = dt.date(2026, 2, 25)
+    f = load_config(_ROOT / "configs" / "ml_f_revenue_surprise.yaml", MlConfig)
+    r = load_config(_ROOT / "configs" / "ml_r_drawdown60.yaml", MlConfig)
+    assert make_model_id(te, f, cost_cfg=cost) == "lgbm_rev_h15_20260225_a3227e06"
+    assert make_model_id(te, r, cost_cfg=cost) == "lgbm_dd_h60_20260225_1a2c3a8e"
+
+
+def test_ac3_sample_tag_must_be_alphanumeric() -> None:
+    """tag 直接進 model_id，而前綴比對容不下底線或分隔符。"""
+    with pytest.raises(ValidationError, match="sample_tag"):
+        MlConfig.model_validate({"sample_tag": "long_window"})

@@ -123,7 +123,19 @@ class MlLabelConfig(BaseConfig):
 
     execution: Literal["next_open"] = "next_open"
     excess: Literal["market_mean"] = "market_mean"
-    transform: Literal["rank_pct", "cost_adjusted_return"] = "rank_pct"
+    # D-074／D-075 新增兩個**換預測標的**的標籤（非調參）：
+    #   revenue_surprise ＝下次公布的月營收 YoY 對「本月 YoY ＋ 加速度」的橫斷面殘差
+    #   forward_drawdown ＝未來 horizon 個交易日、相對 t 日收盤的最低點跌幅
+    transform: Literal[
+        "rank_pct", "cost_adjusted_return", "revenue_surprise", "forward_drawdown"
+    ] = "rank_pct"
+    # 訊號日：daily ＝每個交易日一列（既有模型）；month_end ＝每個日曆月的最後一個
+    # 交易日（D-074／D-075）。月營收在次月約 10 日公布，月底是唯一對所有個股都站在
+    # 「本月已公布、下月未公布」邊界上的日子。
+    signal_dates: Literal["daily", "month_end"] = "daily"
+    # revenue_surprise 專用：下一次營收公布距訊號日的**開市日**上限，超過即無標籤
+    # （遲報或缺報不是驚奇）。其他 transform 下必須留空。
+    max_lag_sessions: int | None = Field(default=None, ge=1)
     adv_window_sessions: int = Field(default=20, ge=1)
     position_notional_twd: float = Field(default=500_000.0, gt=0.0)
     downside_penalty: float = Field(default=0.25, ge=0.0)
@@ -136,6 +148,11 @@ class MlLabelConfig(BaseConfig):
     # ——它只是一個看起來很大的數字，會被模型當成真實極端報酬學進去。
     # None ＝不啟用（既有配置逐位元不變）；啟用與否由配置顯式決定。
     max_span_sessions: int | None = Field(default=None, ge=1)
+
+    @property
+    def is_price_based(self) -> bool:
+        """標籤是否由價格構成（決定 D-054 的 total_return 表態是否適用）。"""
+        return self.transform != "revenue_surprise"
 
 
 class MlSplitConfig(BaseConfig):
@@ -186,6 +203,12 @@ class MlConfig(BaseConfig):
 
     horizon_days: int = 10
     aux_horizons: tuple[int, ...] = (5, 20)
+    # 訓練樣本的標籤（如 "lw" ＝長窗口）。**參與 config hash，也進 model_id**。
+    # 沒有它的話，同一份 config 在不同樣本上訓練會得到同一個 model_id——
+    # `save_model` 的 T-073 防護只在同一個目錄下擋得住，寫到不同 `--out` 就擋不住，
+    # 而 `ml_scores` 按 model_id 索引，兩個模型的分數會混在一起。
+    # 空字串＝預設樣本，既有模型的 id 與 hash 逐位元不變。
+    sample_tag: str = ""
     features: tuple[str, ...] = ()  # 空＝訓練時解析為全部註冊因子
     context_features: tuple[str, ...] = ()
     label: MlLabelConfig = MlLabelConfig()
@@ -207,6 +230,74 @@ class MlConfig(BaseConfig):
             raise ValueError(
                 f"label.max_span_sessions（{span}）須 ≥ horizon_days+1"
                 f"（{self.horizon_days + 1}），否則所有標籤都會變 null"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _sample_tag_is_id_safe(self) -> MlConfig:
+        # tag 會直接進 model_id，而薄因子以**前綴**取分數；含底線或非英數字元
+        # 會讓前綴比對失準（`lgbm_lw_net_h20_` vs `lgbm_net_h20_` 是兩回事，
+        # 但 `lgbm_l_w_...` 這種就說不準了）。
+        if self.sample_tag and not self.sample_tag.isalnum():
+            raise ValueError(
+                f"sample_tag 只能是英數字（會直接進 model_id 與前綴比對），得到 {self.sample_tag!r}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _alt_labels_are_monthly(self) -> MlConfig:
+        # D-074／D-075 把訊號日寫定為月底：營收驚奇的 PIT 邊界（本月已公布、下月未公布）
+        # 只在月底成立，而 R 系列沿用同一組日子純粹是為了讓兩條線的切分逐字可比。
+        # 允許 daily 就等於允許一個未登記的變體悄悄長出來。
+        alt = {"revenue_surprise", "forward_drawdown"}
+        if self.label.transform in alt and self.label.signal_dates != "month_end":
+            raise ValueError(
+                f"label.transform={self.label.transform}（D-074／D-075）要求 "
+                f"signal_dates=month_end，得到 {self.label.signal_dates}"
+            )
+        if self.label.transform not in alt and self.label.signal_dates != "daily":
+            raise ValueError(
+                f"label.signal_dates={self.label.signal_dates} 只適用於 D-074／D-075 的"
+                f"月頻標籤，transform={self.label.transform} 不得使用"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _revenue_surprise_bans_fundamental_features(self) -> MlConfig:
+        # D-074：標籤是營收的殘差，放營收／財報類特徵進去等於把答案的一部分餵給模型。
+        # 這條寫在配置層而非靠審查——特徵清單是最容易「順手加一個」的地方。
+        if self.label.transform != "revenue_surprise":
+            if self.label.max_lag_sessions is not None:
+                raise ValueError(
+                    f"label.max_lag_sessions 只適用於 revenue_surprise，"
+                    f"transform={self.label.transform} 不得設定"
+                )
+            return self
+        if self.label.max_lag_sessions is None:
+            raise ValueError(
+                "label.transform=revenue_surprise 須指定 max_lag_sessions"
+                "（下一次營收公布距訊號日的開市日上限，D-074 寫定 15）"
+            )
+        if self.label.total_return is not None:
+            raise ValueError(
+                "label.transform=revenue_surprise 的標籤不含價格，"
+                "total_return 不適用；請移除該欄而非填 false（D-054 的表態只對價格標籤有意義）"
+            )
+        if self.label.max_span_sessions is not None:
+            raise ValueError(
+                "label.transform=revenue_surprise 的標籤不做前向價格位移，"
+                "max_span_sessions 不適用（跨距由 max_lag_sessions 以公布日把關）"
+            )
+        if not self.features:
+            raise ValueError(
+                "label.transform=revenue_surprise 不得用「空 features ＝全部註冊因子」"
+                "——那會把 fundamental.* 一起帶進來（D-074 明文禁止）。請顯式列出特徵"
+            )
+        banned = sorted(f for f in self.features if f.startswith("fundamental."))
+        if banned:
+            raise ValueError(
+                f"label.transform=revenue_surprise 禁止營收／財報類特徵（D-074）："
+                f"{'、'.join(banned)}。標籤是營收的殘差，這些特徵是答案的一部分"
             )
         return self
 

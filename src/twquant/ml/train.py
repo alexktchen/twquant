@@ -17,7 +17,7 @@ import lightgbm as lgb
 import polars as pl
 
 from twquant.backtest.costs import CostConfig
-from twquant.config import MlConfig, MlLgbmConfig, config_hash
+from twquant.config import MlConfig, MlLgbmConfig
 from twquant.conventions import now_tw
 from twquant.errors import TwquantError
 from twquant.ml.splits import WalkSplit
@@ -126,11 +126,72 @@ def walk_forward_train(
     return MlTrainResult(oos_scores=pl.concat(outs).sort("date", "stock_id"), window_ics=ics)
 
 
+# 後加欄位 → 它「等同於加這個欄位之前的世界」的那個值。
+# 取這個值時**整個鍵不進 fingerprint**，於是既有模型的 id 逐位元不變。
+#
+# 為什麼需要這張表：每加一個有預設值的欄位，`model_dump()` 就多一個鍵，
+# 既有模型的 hash 全部改變——它們的 `meta.json` 與 `ml_scores` 已用舊 id 落地，
+# 重算不出同一個 id，T-073 的內容定址就失效了。
+#
+# **這張表只往前防，補不回已經斷掉的。** D-074 加 `label.signal_dates` 與
+# `label.max_lag_sessions` 時沒有這道防護，於是那批之前訓練的模型
+# （`lgbm_net_h20_*_6a798962`、四個 `lgbm_h10_*`）已經對不回自己的目錄名。
+# 補列那兩個鍵可以救回它們，但會反過來弄壞 D-074 之後訓練的
+# `lgbm_dd_h60_*_1a2c3a8e`——它的 hash 本來就含 `max_lag_sessions: null`。
+# 兩個世代是用兩套 schema 雜湊的，單一函數無法同時重現，故**不試**：
+# 保住現在對得上的，斷掉的記在 T-173，重訓時自然消失。
+#
+# **只有「該值＝欄位不存在時的行為」才可列入。** 若某個預設值會改變訓練結果，
+# 它就必須進 hash，列進這裡即是掩蓋一次真正的模型變更。
+_BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
+    (("sample_tag",), ""),  # 空＝預設樣本
+)
+
+# **永遠**不進訓練指紋的欄位——不論它們的值是什麼。
+# 與上面那張表不同：那張是「取回溯相容預設值時才略過」，這張是「這根本不是訓練輸入」。
+#
+# `production_ranking_model` 是**營運綁定**（每日推論要用哪個模型），不是研究參數。
+# 換綁一個模型不會改變任何模型學到了什麼，卻會改變 `training_config_hash`——
+# 而那個 hash 同時是 research_log 的 `params_hash`，也就是 DSR 的試驗計數依據。
+# 讓它進去等於每換一次生產模型就消耗一個試驗名額，而且既有八個模型的 id 全部改變。
+# （合併 PR#65 時由 T-172 的回歸測試抓到：兩個模型目錄名都對不回來。）
+_NOT_TRAINING_INPUTS: tuple[tuple[str, ...], ...] = (("production_ranking_model",),)
+
+
+def _hashable_dump(cfg: MlConfig) -> dict[str, object]:
+    """訓練 fingerprint 用的配置字典，剔除取回溯相容預設值的後加欄位。"""
+    dump: dict[str, object] = cfg.model_dump(mode="json")
+    node: object
+    for path in _NOT_TRAINING_INPUTS:
+        node = dump
+        for key in path[:-1]:
+            if not isinstance(node, dict):
+                break
+            node = node.get(key)
+        if isinstance(node, dict):
+            node.pop(path[-1], None)
+    for path, legacy in _BACKCOMPAT_DEFAULTS:
+        node = dump
+        for key in path[:-1]:
+            if not isinstance(node, dict):
+                break
+            node = node.get(key)
+        if isinstance(node, dict) and node.get(path[-1]) == legacy:
+            node.pop(path[-1])
+    return dump
+
+
 def training_config_hash(cfg: MlConfig, cost_cfg: CostConfig | None = None) -> str:
-    """訓練 fingerprint；成本感知模型同時綁定 ML 與成本配置。"""
-    if cfg.label.transform == "rank_pct":
-        return config_hash(cfg)
-    payload: dict[str, object] = {"ml": cfg.model_dump(mode="json")}
+    """訓練 fingerprint；成本感知模型同時綁定 ML 與成本配置。
+
+    只有 `cost_adjusted_return` 的標籤真的吃 CostConfig（成本進了標籤本身）；
+    D-074／D-075 的兩個標籤與成本無關，故與 `rank_pct` 一樣只綁 ML 配置。
+    """
+    ml = _hashable_dump(cfg)
+    if cfg.label.transform != "cost_adjusted_return":
+        encoded = json.dumps(ml, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:16]
+    payload: dict[str, object] = {"ml": ml}
     if cost_cfg is None:
         raise ValueError("cost_adjusted_return 模型缺 CostConfig，無法建立 fingerprint")
     payload["cost"] = cost_cfg.model_dump(mode="json")
@@ -184,12 +245,40 @@ def artifact_fingerprint(*, config: str, code: str, data: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+# 標籤 → model_id 前綴。前綴是**因子身分**（薄因子以它取分數），不是調參對象；
+# 換了預測標的就是不同的模型系列，共用前綴會讓 `ml.*` 因子撈到別條線的分數。
+_ID_KIND: dict[str, str] = {
+    "rank_pct": "",
+    "cost_adjusted_return": "net_",
+    "revenue_surprise": "rev_",  # D-074
+    "forward_drawdown": "dd_",  # D-075
+}
+
+# research_log 的 trial_scope（DSR 的家族鍵）。第一段 IC 檢驗記在 ML 家族，
+# 不佔回測試驗額度——第二段的經濟價值判定才是回測 trial（D-074／D-075）。
+_TRIAL_SCOPE: dict[str, str] = {
+    "rank_pct": "ml:h{h}",
+    "cost_adjusted_return": "ml:net_h{h}",
+    "revenue_surprise": "ml:revenue_surprise",
+    "forward_drawdown": "ml:drawdown_h{h}",
+}
+
+
+def _scope(cfg: MlConfig) -> str:
+    """DSR 的家族鍵。**換樣本＝換家族**——不同樣本上的同一組超參數不是同一個假設，
+    算進同一個 trial_scope 會讓試驗計數與 DSR 門檻都失真。"""
+    base = _TRIAL_SCOPE[cfg.label.transform].format(h=cfg.horizon_days)
+    return f"{base}:{cfg.sample_tag}" if cfg.sample_tag else base
+
+
 def make_model_id(train_end: dt.date, cfg: MlConfig, *, cost_cfg: CostConfig | None = None) -> str:
     """模型 id：演算法_h視窗_訓練截止_配置hash8——可回溯到 configs/ml.yaml（SPEC-010 §4）。"""
-    if cfg.label.transform == "rank_pct":
-        return f"lgbm_h{cfg.horizon_days}_{train_end:%Y%m%d}_{config_hash(cfg)[:8]}"
     fingerprint = training_config_hash(cfg, cost_cfg)
-    return f"lgbm_net_h{cfg.horizon_days}_{train_end:%Y%m%d}_{fingerprint[:8]}"
+    # `sample_tag` 插在 **lgbm 之後**而不是尾端：薄因子以前綴取分數，
+    # 放在前面 `lgbm_lw_net_h20_` 與 `lgbm_net_h20_` 才不會互相命中（放尾端就會）。
+    tag = f"{cfg.sample_tag}_" if cfg.sample_tag else ""
+    kind = _ID_KIND[cfg.label.transform]
+    return f"lgbm_{tag}{kind}h{cfg.horizon_days}_{train_end:%Y%m%d}_{fingerprint[:8]}"
 
 
 def save_model(
@@ -238,8 +327,7 @@ def log_training_run(
     *,
     cost_cfg: CostConfig | None = None,
 ) -> None:
-    """research_log 登記一列（AC-8）；trial_scope 綁 horizon，trials 計數供 DSR。"""
-    net = cfg.label.transform == "cost_adjusted_return"
+    """research_log 登記一列（AC-8）；trial_scope 綁標籤家族，trials 計數供 DSR。"""
     append_research_log(
         data_dir,
         [
@@ -251,7 +339,7 @@ def log_training_run(
                 "date": now_tw().date().isoformat(),
                 "metric_name": "oos_rank_ic",
                 "metric_value": oos_ic,
-                "trial_scope": f"ml:net_h{cfg.horizon_days}" if net else f"ml:h{cfg.horizon_days}",
+                "trial_scope": _scope(cfg),
             }
         ],
     )

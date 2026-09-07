@@ -32,7 +32,7 @@ CSS = """
   --down:#1E8449;    /* 跌：綠（台股慣例） */
   --warn:#8A6D1F; --warn-soft:#FBF3DC;
   --f1:#3A4A8C; --f2:#1E7B7B; --f3:#B0672A;
-  --f4:#7A3E8C; --f5:#4A7A2E; --f6:#8C3A52;
+  --f4:#7A3E8C; --f5:#4A7A2E; --f6:#8C3A52; --f7:#2C6E8F;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -43,7 +43,7 @@ CSS = """
     --up:#E8695B; --down:#4CAF7D;
     --warn:#D9B65C; --warn-soft:#2C2718;
     --f1:#8FA2E8; --f2:#57C4C4; --f3:#E0A063;
-    --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0;
+    --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0; --f7:#6FBCE0;
   }
 }
 :root[data-theme="dark"]{
@@ -54,7 +54,7 @@ CSS = """
   --up:#E8695B; --down:#4CAF7D;
   --warn:#D9B65C; --warn-soft:#2C2718;
   --f1:#8FA2E8; --f2:#57C4C4; --f3:#E0A063;
-  --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0;
+  --f4:#C48FD8; --f5:#8FC96A; --f6:#E086A0; --f7:#6FBCE0;
 }
 *{box-sizing:border-box}
 body{
@@ -143,6 +143,9 @@ footer{color:var(--ink-3); font-size:12.5px; border-top:1px solid var(--line); p
 .chart .grid{stroke:var(--line); stroke-width:1}
 .chart .cross{stroke:var(--accent); stroke-width:1; stroke-dasharray:4 3; opacity:.55}
 .chart .bmk{fill:var(--accent); stroke:var(--surface); stroke-width:2}
+.chart .cross2{stroke:var(--f2); stroke-width:1; stroke-dasharray:2 4; opacity:.7}
+.chart .bmk2{fill:var(--f2); stroke:var(--surface); stroke-width:1.6}
+.chart .bmk2tx{fill:var(--f2); font-weight:600}
 .chart .bmktx{fill:var(--accent); font-weight:600}
 .chart text{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
 .chart .tick{font-size:10.5px; fill:var(--ink-3)}
@@ -188,6 +191,7 @@ _FAMILY = {  # 家族 → 顏色變數；固定指派、不循環（同一家族
     "M 系列": "var(--f4)",
     "G 濾網矩陣": "var(--f5)",
     "MG 系列": "var(--f6)",
+    "F／R 系列": "var(--f7)",
 }
 
 
@@ -226,6 +230,15 @@ def scatter_risk_return(rows, bench):
         g.append(f'<line x1="{L}" y1="{ay(v):.1f}" x2="{W - R}" y2="{ay(v):.1f}" class="grid"/>')
         g.append(f'<text x="{L - 8}" y="{ay(v) + 4:.1f}" class="tick end">{v:.0%}</text>')
     for b in bench:
+        # 0051 是**結構上不含台積電**的對照，對小型策略才公平；一起畫成準星，
+        # 讓「輸給大盤是因為沒買台積電」這個說法在圖上就能被檢驗
+        if b.get("key") == "0051_tr" and b.get("cagr") is not None:
+            bx, by = ax(abs(b["mdd"])), ay(b["cagr"])
+            g.append(f'<line x1="{L}" y1="{by:.1f}" x2="{W - R}" y2="{by:.1f}" class="cross2"/>')
+            g.append(f'<circle cx="{bx:.1f}" cy="{by:.1f}" r="5" class="bmk2"/>')
+            g.append(
+                f'<text x="{bx + 10:.1f}" y="{by + 4:.1f}" class="lbl bmk2tx">0051 中型100</text>'
+            )
         if b.get("key") != "0050_tr" or b.get("cagr") is None:
             continue
         bx, by = ax(abs(b["mdd"])), ay(b["cagr"])
@@ -348,8 +361,6 @@ def write_markdown(d, rows, out_md):
     **不重算任何數字**——與 HTML 走同一組欄位，故兩者不可能不一致。
     結果包本身是可重新產生的產物（20MB+），不進版控；進版控的是這份摘要。
     """
-    b = {x["key"]: x for x in d["benchmarks"]}
-    b50 = b.get("0050_tr", {})
     w = d["window"]
     L = [
         "# 回測總覽",
@@ -384,7 +395,7 @@ def write_markdown(d, rows, out_md):
         "| 策略 | 內容 | CAGR | MDD | Sharpe | 周轉 | 曝險 | 持股 | 有部位時年化 |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列"]
+    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列", "F／R 系列"]
     for g in order:
         grp = [r for r in rows if r["group"] == g]
         if not grp:
@@ -443,6 +454,60 @@ def write_markdown(d, rows, out_md):
     return out_md
 
 
+def _dividend_section(dr: dict) -> str:
+    """股利重跑的對照表。**與主表分開呈現**——兩種口徑不得混在同一張表。"""
+    cells = dr.get("cells") or []
+    done, total = dr.get("done", 0), dr.get("total", 0)
+    if not cells:
+        return (
+            '<div class="note">引擎已修好（D-085：除息日把現金入帳），'
+            f"全部 {total} 筆重跑尚未產出可比對的結果。</div>"
+        )
+    deltas = sorted((c["new_cagr"] - c["old_cagr"]) * 100 for c in cells)
+
+    def _row(c: dict) -> str:
+        cash = "&mdash;" if c["div_cash"] is None else f"{c['div_cash']:,.0f}"
+        dc = (c["new_cagr"] - c["old_cagr"]) * 100
+        ds = c["new_sharpe"] - c["old_sharpe"]
+        return (
+            f"<tr><td>{esc(c['name'])}</td>"
+            f"<td class='num'>{pct(c['old_cagr'])}</td>"
+            f"<td class='num'>{pct(c['new_cagr'])}</td>"
+            f"<td class='num'><strong>{dc:+.2f}pp</strong></td>"
+            f"<td class='num'>{plain(c['old_sharpe'])}</td>"
+            f"<td class='num'>{plain(c['new_sharpe'])}</td>"
+            f"<td class='num'>{ds:+.2f}</td>"
+            f"<td class='num'>{pct(c['new_mdd'])}</td>"
+            f"<td class='num'>{cash}</td></tr>"
+        )
+
+    body = "".join(_row(c) for c in cells)
+    return f"""
+  <div class="note"><strong>進度 {done}/{total} 筆。</strong>下表只列新舊都有的格，
+  <strong>與上方主表分開</strong>——主表是舊引擎（價格報酬），這裡是新引擎（含息），
+  兩種口徑混在一張表就是這份報告最該避免的那種不一致。</div>
+  <div class="warn-box"><strong>ΔCAGR 不等於「股利值多少」（D-086，待裁決）。</strong>
+  核對 A 軌後發現：入帳金額本身正確（90 筆逐筆比對「每股 ÷ 前收」與應有跌幅完全吻合，中位配發率 2.70%），
+  宇宙也沒變（第一個分歧日就是除息日、前一日分毫不差），
+  <strong>但等式對不上</strong>——每筆股利各自複利到期末是 33.69M，實際期末差 47.31M，
+  殘差 <strong>+13.61M（+40.4%）</strong>。來源是參與率上限：部位變大後未成交由
+  438 筆／1,380 萬股增到 493 筆／<strong>1,898 萬股（+37.5%）</strong>，而被擋住的<strong>賣單</strong>
+  讓部位留得更久，上漲期間反而加分。那是 D-068／T-148 已記錄的容量問題，股利只是放大了它。
+  <strong>故 ΔCAGR 應讀作「收到股利 ＋ 在 80M 規模下部署它」的合併效果。</strong>
+  同家族的邊（F1−F2、R1−R2、M2−M3）不受影響——兩邊容量假象對消。</div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>策略</th><th class='num'>舊 CAGR<br><span class='hint'>價格報酬</span></th>
+    <th class='num'>新 CAGR<br><span class='hint'>含息</span></th><th class='num'>Δ</th>
+    <th class='num'>舊 Sharpe</th><th class='num'>新 Sharpe</th><th class='num'>Δ</th>
+    <th class='num'>新 MDD</th><th class='num'>股利（元）</th></tr></thead>
+    <tbody>{body}</tbody>
+  </table></div>
+  <p class="figcap">ΔCAGR 由 {deltas[0]:+.2f}pp 到 {deltas[-1]:+.2f}pp、中位 {deltas[len(deltas) // 2]:+.2f}pp
+  ——<strong>幅度不一致，所以排序也會變</strong>，不是所有人一起平移。
+  「股利（元）」欄在最早跑完的那幾格是「—」：結果包當時還沒序列化這個欄位（已修），
+  指標仍正確，只是缺稽核明細。</p>"""
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(OUT))
@@ -480,6 +545,16 @@ def main() -> None:
         vcells.append(
             ("差距", f'<span class="num down">−{gap:.2%}</span>', "年化，策略落後基準", False)
         )
+    b51 = bench.get("0051_tr", {})
+    if best and b51.get("cagr") is not None:
+        vcells.append(
+            (
+                "0051 中型100（不含台積電）",
+                pct(b51["cagr"], 2, False),
+                f"MDD {b51['mdd']:.1%}・Sharpe {b51['sharpe']:.2f}",
+                False,
+            )
+        )
     vcells.append(
         (
             "已完成回測",
@@ -510,7 +585,7 @@ def main() -> None:
     )
 
     # ── 主表（按家族分組，組內按 Sharpe） ──────────────────────────────
-    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列"]
+    order = ["階梯", "雙軌", "C 軌", "M 系列", "G 濾網矩陣", "MG 系列", "F／R 系列"]
     body = ""
     for g in order:
         grp = [r for r in rows if r["group"] == g]
@@ -557,6 +632,8 @@ def main() -> None:
     scatter = scatter_risk_return(rows, d["benchmarks"])
     bars = bars_marginal(d["edges"])
     equity = equity_lines(rows, d["benchmarks"])
+    dr = d.get("dividend_rerun") or {"done": 0, "total": 0, "cells": []}
+    divhtml = _dividend_section(dr)
 
     page = f"""<title>台股策略回測總覽</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&family=Noto+Serif+TC:wght@600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
@@ -572,6 +649,12 @@ def main() -> None:
 <section>
   <div class="verdict">
     <p class="lede">到目前為止，<strong>沒有任何一個策略打敗 0050（含息）</strong>。這是這批實驗最硬的事實，放在最前面。</p>
+    <p class="lede" style="font-size:15px;color:var(--warn)"><strong>但這張表的口徑目前是不對稱的（D-085）</strong>：
+    引擎原本沒有任何收益路徑，除息當天只看到價格跳空下跌、記為虧損，<strong>所以下方每一個 CAGR 都是「價格報酬」</strong>，
+    卻一直在跟含息的 0050 比。引擎已修好並正在重跑全部 120 筆——已完成的部分見「股利入帳之後」那一段。</p>
+    <p class="lede" style="font-size:15px">而且不能歸咎於「0050 有台積電」：<strong>0051 中型100 結構上排除市值前 50 名</strong>，
+    同期仍有 <strong>+31.57%／Sharpe 1.54</strong>。刻意選小型股的 A 軌（+15.90%／0.68）輸它近 16pp
+    ——差距來自選股，不是來自權值股。</p>
     <div class="vgrid">{vhtml}</div>
   </div>
   <div class="note">
@@ -627,6 +710,11 @@ def main() -> None:
   <h2>歸因邊</h2>
   <p>每一條都<strong>只換一件事</strong>，其餘逐字相同。不確定性一律用<strong>月度區塊標準誤</strong>：持股期是 20 個交易日、日報酬高度自相關，把每日配對差當獨立樣本會把顯著性高估約 4.5 倍。</p>
   <div class="edges">{ehtml}</div>
+</section>
+
+<section>
+  <h2>股利入帳之後（重跑中）</h2>
+  {divhtml}
 </section>
 
 <section>

@@ -1,0 +1,40 @@
+# P5（D-092，事前登記）：與 track_f2_mompool.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+
+# F2「動能池 × C1 技術排序」——F 系列的**隔離對照格**（D-081）。
+#
+# 與 F1 **逐字相同，只把池子因子從營收驚奇分數換成 `price.mom_60d`**。
+#
+# 沒有它，F1 好看只能說「這個結構有用」，**說不出「營收驚奇分數有用」**
+# ——任何合理的池子定義都可能有一樣的效果。這是 D-071 的 M2／M3、
+# D-073 的 MGALL-mom 在 F 線上的重演：任何閘門都要對照最平凡的替代品。
+#
+# **判定對象就是 F1 − F2**，判準沿用 D-074（D-066 三層）。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_f2_mompool
+description: F2：動能池 × C1 技術排序（F 系列的隔離對照）（長窗口 P5 D-092）
+trial_scope: lw:long_window_all
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+  - factor: price.mom_60d
+    keep_pct: 0.3
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+  - { factor: price.rs_market_20d, weight: 0.15 }
+require_all_factors: true
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

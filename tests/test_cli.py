@@ -246,3 +246,20 @@ def test_fubon_status_lines_zero_total_no_crash() -> None:
     # 資料湖不可用（宇宙總數 0）→ 百分比顯示 n/a，不除零
     lines = _fubon_status_lines([(dt.date(2026, 5, 7), 3, 1, False)], total=0)
     assert "n/a" in lines[0]
+
+
+def test_data_dir_env_override_beats_relative_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE.md §0.2：`TWQUANT_DATA_DIR` 讓 worktree 裡的寫入對齊主 checkout 的正本。
+
+    `system.yaml` 的 `data_dir` 是相對路徑，在 worktree 裡執行時指向 worktree 自己的
+    `data/`。`--out` 只管得到模型檔，`research_log`（＝DSR 的試驗計數）仍會分岔。
+    """
+    from twquant import cli as _cli
+
+    baseline = _cli._load_system()
+    assert baseline.data_dir == "data"
+    monkeypatch.setenv(_cli._DATA_DIR_ENV, "D:/project/twquant/data")
+    assert _cli._load_system().data_dir == "D:/project/twquant/data"
+    # 空字串＝未設，不得把 data_dir 洗成空
+    monkeypatch.setenv(_cli._DATA_DIR_ENV, "   ")
+    assert _cli._load_system().data_dir == "data"

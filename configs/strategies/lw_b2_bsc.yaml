@@ -1,0 +1,49 @@
+# P7（D-092，事前登記）：多因子市值加權 × Barroso-Santa-Clara (2015, JFE)：曝險 ∝ 1／已實現波動。
+# 與 lw_b2_broad_capw.yaml **逐字相同，只多一層 overlay**。所有參數固定不掃（Zakamulin 2014）。
+# 六條規則在同一個基座上並排，才分得出「有沒有用」與「哪一條有用」。
+# 未經部署裁決，勿用於實盤。
+
+# lw_b2_broad_capw——長窗口（D-087 事前登記）。**判準先寫定，不事後挑。**
+#
+# 與 `track_b2_broad_capw.yaml` **逐字相同，只換兩件事**：
+#   1. 流動性門檻由絕對（`min_adv_twd`）改為相對（`min_adv_pctl: 0.70`，保留 ADV 前 30%）
+#      ——D-062 裁決。絕對門檻的留存率有九成八由當年成交熱度解釋（r = +0.982），
+#      跨期樣本不可比；相對門檻的標準差由 5.29pp 降到 0.42pp。
+#   2. 視窗改為 2017-01-03 ~ 2026-02-28（保險庫邊界不變）。
+#
+# **與既有 113 筆完全不可比**：引擎現在會收股利（D-085），這裡是含息報酬；
+# 而且視窗、宇宙定義都不同。只能與本家族的其他格、以及含息基準比。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_b2_bsc
+description: B2 全市場多因子 + 市值加權：選 50 檔（未經部署裁決，勿用於實盤）（長窗口 D-087）（＋Barroso-Santa-Clara (2015, JFE) P7）
+trial_scope: lw:overlay_matrix
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - {factor: fundamental.revenue_yoy, weight: 0.25}
+  - {factor: price.mom_60d, weight: 0.25}
+  - {factor: fundamental.roe, weight: 0.25}
+  - {factor: price.vol_20d, weight: 0.25, params: {window: 60}}
+# D-061／R12：`rank_avg` 對存在的列求和，缺低波因子者拿不到負分、分數虛高
+require_all_factors: true
+
+selection: {method: top_n, top_n: 50}
+weighting: mktcap
+max_weight_per_stock: 0.25 # 同 B1，§5.4 事前決定
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: [vol_target_scaling]
+overlay_params:
+  vol_target_scaling:
+    target_vol: 0.20
+    window: 60
+    min_mult: 0.2

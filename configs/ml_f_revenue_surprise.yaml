@@ -1,0 +1,71 @@
+# F 系列（D-074，事前登記於任何訓練之前）：以量價籌碼預測**下月營收驚奇**。
+#
+# 假說（使用者提出）：「前面要有一些特徵發生，之後的財報是用來驗證的。」
+# 即知情資金的腳印先於基本面出現。台股月營收一年公布 12 次，標籤密度是季報的 4 倍。
+# 文獻：Ke & Petroni (2004)；Christophe, Ferri & Angel (2004, JF)。
+#
+# **與 ml_h20_cost_aware.yaml 只差三件事**：標籤（換預測標的）、訊號日（月頻）、
+# 特徵（禁營收類、補籌碼類）。切分與 LightGBM 參數**逐字相同**，故兩者可比。
+# D-066 乙層禁止的是「以 ML 還有價值為由重啟特徵工程或調參」，管轄的是
+# 標籤為「未來 20 日成本後超額報酬」的那個模型；本線換了預測標的，不在該禁令內。
+#
+# 第一段判準（事前寫定，不得於看到結果後調整）：
+#   OOS 營收驚奇 RankIC ≥ +0.02 且 ≥ 60% 測試窗為正；未過即整條線關閉。
+# 先導量測的 IR 6+ 是全期樣本內，**明文不算數**。
+
+# 標籤在訊號日之後 15 個開市日內可見（次月 10 日公布截止 ＋ 5 日緩衝）。
+# 這個數字同時是 embargo 的下界：測試段起點須離訓練截止至少一個標籤視窗。
+horizon_days: 15
+aux_horizons: []
+
+# **明文禁止任何 fundamental.*（D-074）**：標籤是營收的殘差，放營收特徵進去
+# 等於把答案的一部分餵給模型。config.py 有對應的驗證，不是靠審查。
+#
+# `price.rs_market_20d` 刻意不列入：實測它在 factor_values.z 與 price.mom_20d
+# **逐列相同**（2024 全年 441,298 對，最大差 1.8e-15）——它是 mom_20d 減去
+# 每日一個常數，z 標準化後兩者完全等價。列進去只是多一個一模一樣的欄位（T-159）。
+features:
+  - chip.foreign_net_10d
+  - chip.inst_net_10d
+  - chip.margin_velocity_5d
+  - chip.short_margin_ratio
+  - chip.trust_streak # 先導最強的籌碼訊號：50 個月中 85% 為正
+  - price.high_52w
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+context_features: []
+
+label:
+  transform: revenue_surprise
+  signal_dates: month_end
+  max_lag_sessions: 15
+  # total_return / max_span_sessions 不適用（標籤不含價格），config.py 會擋住誤填。
+
+# 與 ml_h20_cost_aware.yaml 逐字相同——這是「可比」的唯一來源，不得因窗數少而放寬。
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 20
+  vault_months: 6
+  days_per_year: 244
+  days_per_month: 21
+
+# 不調參（D-074 明文）。與 ml_h20_cost_aware.yaml 逐字相同。
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+
+refit:
+  schedule: monthly
+trials_log: research_log

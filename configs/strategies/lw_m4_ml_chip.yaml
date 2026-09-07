@@ -1,0 +1,60 @@
+# P5（D-092，事前登記）：與 track_m4_ml_chip.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+# P2／P5b：model_id 與薄因子已改指**長窗口模型**（D-088 sample_tag=lw）；短窗口 pin 不得混用（T-172）。
+
+# M4「ML 池 × C3 籌碼排序」
+#
+# **家族：M 系列（ML 串接）。事前登記見 DECISIONS D-071，判準先寫定、不事後挑。**
+#
+# 設計意圖（使用者的話）：「ML 找出來的已經是相對優於大盤了，代表資金應該在裡面，
+# 再用因子訊號來判斷進出場點。」——把「資金該在哪個池子」與「何時進出」拆成兩層。
+#
+# 為什麼這個用法值得測（而不是又一次調參）：ML 的長處是**排序整個橫斷面**
+# （OOS RankIC +0.0452，16 個 walk-forward 窗有 15 個為正），短處是**挑不出最強的
+# 20 檔**（零成本下對四個公開因子只贏 +1.24pp、月度區塊 t +0.33）。閘門消費的是
+# 排序而非尾巴，剛好避開短處。D-066 乙層禁止的是重啟特徵工程與調參；
+# 改變投組建構屬「架構」，正是該層明文指定資源該去的方向。
+#
+# ML 保留前 30%，再用投信／外資／融資／券資比與技術面在池內排序。M4 − C3 量出「ML 當池子」在籌碼軌上值多少。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_m4_ml_chip
+description: M4：ML 池 × C3 籌碼排序（長窗口 P5 D-092）
+trial_scope: lw:long_window_all_ml
+universe:
+  markets:
+  - TWSE
+  - TPEX
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+- factor: ml.lgbm_lw_net_20d
+  keep_pct: 0.3
+  params:
+    model_id: lgbm_lw_net_h20_20260225_83890036
+combine: rank_avg
+signals:
+- factor: chip.trust_streak
+  weight: 0.2
+- factor: chip.foreign_net_10d
+  weight: 0.15
+- factor: chip.margin_velocity_5d
+  weight: 0.15
+- factor: chip.short_margin_ratio
+  weight: 0.1
+- factor: price.high_52w
+  weight: 0.25
+- factor: volume.turnover_z_20d
+  weight: 0.15
+require_all_factors: true
+selection:
+  method: top_n
+  top_n: 20
+weighting: equal
+max_weight_per_stock: 0.1
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

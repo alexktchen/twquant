@@ -1,0 +1,57 @@
+# P7（D-092，事前登記）：大型股增強 × Moskowitz-Ooi-Pedersen (2012, JFE)：方向閘門 × 波動縮放。
+# 與 lw_b1_large_enhanced.yaml **逐字相同，只多一層 overlay**。所有參數固定不掃（Zakamulin 2014）。
+# 六條規則在同一個基座上並排，才分得出「有沒有用」與「哪一條有用」。
+# 未經部署裁決，勿用於實盤。
+
+# 長窗口版（D-091，事前登記）：與 track_b1_large_enhanced.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，與 D-087 四格一致，D-062）、trial_scope。
+# 問的問題：**風控層能不能把丙層（MDD > 40%）的架構救回乙層或甲層。**
+# 未經部署裁決，勿用於實盤。
+
+# T-129 B1：大型股增強（SPEC-013 §5.2）。
+#
+# 貼著 0050 走，靠因子傾斜賺幾個百分點。**Beta 應接近 1**——若顯著低於 0.8，
+# 代表架構改造失敗（仍結構性做空大盤），此時「輸給 0050」不得歸因於因子（§5.5）。
+#
+# §0 已證明等權 20 檔小型股在結構上追不上市值加權的 0050（人家台積電約 57%、
+# 我們單股上限 5%）。這不是選股問題，是加權與宇宙的問題：**要打敗 0050，
+# 必須先能「像」0050**。故 B 軌改的是宇宙與加權，不是繼續換因子。
+name: lw_b1_mop
+description: B1 大型股增強：市值前 100 大選 30 檔、市值加權（未經部署裁決，勿用於實盤）（長窗口 D-091）（＋Moskowitz-Ooi-Pedersen (2012, JFE) P7）
+trial_scope: lw:overlay_matrix
+
+universe:
+  markets: [TWSE, TPEX]
+  mktcap_rank_max: 100 # 只在市值前 100 大裡選（T-121）
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - {factor: fundamental.revenue_yoy, weight: 0.25}
+  - {factor: price.mom_60d, weight: 0.25}
+  - {factor: fundamental.roe, weight: 0.25}
+  - {factor: price.vol_20d, weight: 0.25, params: {window: 60}}
+# D-061／R12：`rank_avg` 對存在的列求和，缺低波因子者拿不到負分、分數虛高
+require_all_factors: true
+
+selection: {method: top_n, top_n: 30}
+weighting: mktcap # T-123；權重用 exp(ln 市值)，不得按 log 值比例、不得套 direction
+# §5.4 事前決定，**不得為了改善回測而調整**：0050 的台積電約 57%，設 5% 就結構性
+# 做空它、設 57% 則整個策略等於一檔股票。0.25 讓單一權值股吃到 7.5 倍於等權
+# （30 檔等權 = 3.33%），又保留至少 4 檔的有效分散度下限。
+max_weight_per_stock: 0.25
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: [tsmom_vol_scaling]
+overlay_params:
+  tsmom_vol_scaling:
+    index_id: TAIEX
+    mom_window: 244
+    vol_window: 60
+    target_vol: 0.20
+    min_mult: 0.2
+    floor: 0.0
