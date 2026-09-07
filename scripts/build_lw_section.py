@@ -218,7 +218,25 @@ CELLS: list[dict[str, object]] = [
     },
 ]
 
-_BENCH_LONG = {"cagr": 0.1791, "mdd": -0.3638, "sharpe": 0.96}  # 0050 不含息，同視窗同口徑
+_BENCH_LONG = {"cagr": 0.1791, "mdd": -0.3638, "sharpe": 0.96}  # 0050 不含息，2017 視窗
+
+
+def _bench_by_window() -> dict[str, dict[str, float]]:
+    """每個視窗各自的 0050（不含息，與策略同口徑）。
+
+    **每一格都要跟自己視窗的基準比**。拿 2017 視窗的基準去比 2019 視窗的策略，
+    等於把「那幾年大盤比較好賺」算成策略的功勞——本輪量到的差是 CAGR 最多 8.4pp。
+    """
+    f = R / "reports/benchmarks_two_windows.json"
+    if not f.exists():
+        return {"2017-01-03": _BENCH_LONG}
+    b = json.loads(f.read_text(encoding="utf-8")).get("0050_px", {})
+    out: dict[str, dict[str, float]] = {}
+    for win, key in (("2017-01-03", "long"), ("2019-05-02", "w2019")):
+        m = b.get(key)
+        if m:
+            out[win] = {"cagr": m["cagr"], "mdd": m["mdd"], "sharpe": m["sharpe"]}
+    return out or {"2017-01-03": _BENCH_LONG}
 
 
 def _metrics(cell: dict[str, object]) -> dict[str, float] | None:
@@ -268,6 +286,7 @@ def _discover_all() -> list[dict[str, object]]:
     手寫清單負責敘事（名稱、在做什麼、對照誰），這裡負責**完整性**：
     使用者要的是「全部跑過的策略都盤點完」，而手寫清單永遠會落後於實際跑的格數。
     """
+    bench = _bench_by_window()
     rows: list[dict[str, object]] = []
     for dname, (window, batch) in _DIRS.items():
         d = R / dname
@@ -290,9 +309,67 @@ def _discover_all() -> list[dict[str, object]]:
                     "sharpe": m["sharpe"],
                     "turnover": m.get("turnover"),
                     "tier": _tier(m["cagr"], m["mdd"]),
+                    "vs_bench": (
+                        None
+                        if window not in bench
+                        else {
+                            "cagr_pp": (m["cagr"] - bench[window]["cagr"]) * 100,
+                            "mdd_pp": (abs(bench[window]["mdd"]) - abs(m["mdd"])) * 100,
+                            "sharpe": m["sharpe"] - bench[window]["sharpe"],
+                        }
+                    ),
                 }
             )
     return sorted(rows, key=lambda r: (str(r["window"]), -float(r["sharpe"])))
+
+
+def _window_calibration() -> dict[str, object]:
+    """同一份設定在兩個視窗下的差——**這是跨視窗比較能不能做的唯一依據**。
+
+    D-093 只能事前說「2019 視窗少了 2018 Q4，MDD 應該偏淺」；配對對照跑完之後
+    才知道偏多少。若 MDD 幾乎不動而 CAGR 動很大，那結論是
+    「回撤可以跨視窗比、報酬不行」——比籠統地說「都不可比」精確得多。
+    """
+    pairs: list[dict[str, object]] = []
+    for a_dir, b_dir in (
+        ("tracks_lw_nodiv", "tracks_lw_w2019_nodiv"),
+        ("tracks_lw_risk_nodiv", "tracks_lw_risk_w2019_nodiv"),
+    ):
+        da, db = R / a_dir, R / b_dir
+        if not (da.exists() and db.exists()):
+            continue
+        for fa in sorted(da.glob("*_1x.json")):
+            fb = db / fa.name
+            if not fb.exists():
+                continue
+            try:
+                ma = json.loads(fa.read_text(encoding="utf-8"))["metrics"]
+                mb = json.loads(fb.read_text(encoding="utf-8"))["metrics"]
+            except (json.JSONDecodeError, KeyError, OSError):
+                continue
+            pairs.append(
+                {
+                    "code": fa.stem.split("_", 1)[0],
+                    "cagr_2017": ma["cagr"],
+                    "cagr_2019": mb["cagr"],
+                    "mdd_2017": ma["mdd"],
+                    "mdd_2019": mb["mdd"],
+                    "d_cagr_pp": (mb["cagr"] - ma["cagr"]) * 100,
+                    "d_mdd_pp": (abs(ma["mdd"]) - abs(mb["mdd"])) * 100,  # 正＝2019 較淺
+                }
+            )
+    if not pairs:
+        return {"pairs": []}
+    dm = sorted(float(p["d_mdd_pp"]) for p in pairs)
+    dc = sorted(float(p["d_cagr_pp"]) for p in pairs)
+    mid = len(pairs) // 2
+    return {
+        "pairs": pairs,
+        "mdd_median_pp": dm[mid],
+        "mdd_max_pp": dm[-1],
+        "cagr_median_pp": dc[mid],
+        "cagr_max_pp": dc[-1],
+    }
 
 
 # 跑不出來、而「跑不出來」本身就是結果的格。**不是待修的錯**——
@@ -350,6 +427,8 @@ def main() -> None:
         "total": len(rows),
         "all_results": every,
         "infeasible": _INFEASIBLE,
+        "bench_by_window": _bench_by_window(),
+        "calibration": _window_calibration(),
         "windows": {
             w: sum(1 for e in every if e["window"] == w)
             for w in sorted({str(e["window"]) for e in every})
