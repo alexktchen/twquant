@@ -884,3 +884,4 @@
 - 2026-07-04 規格階段：建立文件體系（CLAUDE.md、ARCHITECTURE.md、LOOP.md、
   SPEC-000~007、TASKS.md、DECISIONS.md）。尚無程式碼。
 - 2026-09-07 T-172：`MlConfig.sample_tag` 讓訓練樣本進 model_id 與 trial_scope；空值不進 hash 故既有 id 逐位元不變。D-088 事前登記長窗口三條線
+- 2026-09-07 T-174：長窗口三條線訓練完成（D-088）。基礎 H20 三項全過且共同測試期勝短窗口 +0.0176；F 長樣本無增益；R 的 +0.42 實測 94% 是 vol_20d 的機械關係（D-089）
