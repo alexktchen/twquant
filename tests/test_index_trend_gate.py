@@ -1,4 +1,7 @@
-"""D-092 P4：`index_trend_gate` overlay（Faber 2007 的 N 日均線擇時）。
+"""D-092 P4／P6：兩條擇時規則的 overlay。
+
+`index_trend_gate` ＝ Faber (2007) 的 N 日均線；
+`absolute_momentum_gate` ＝ Antonacci (2014) 的 12 個月絕對動能。
 
 契約（由本測試凍結）：
 - AC-1 大盤 **t−1** 收盤 > N 日 SMA → 倍數 1.0；否則 → `floor`（預設 0＝空手）。
@@ -21,7 +24,15 @@ from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.warehouse import Warehouse
 from twquant.errors import ConfigError, DataError
-from twquant.strategy.overlays import get_overlay, index_trend_gate
+from twquant.strategy.overlays import (
+    absolute_momentum_gate,
+    crash_risk_gate,
+    get_overlay,
+    index_trend_gate,
+    inverse_variance_scaling,
+    tsmom_vol_scaling,
+    vol_target_scaling,
+)
 
 
 def _wh_with_index(tmp_path: Path, closes: list[float], start: dt.date) -> Warehouse:
@@ -94,7 +105,7 @@ def test_ac3_insufficient_history_raises(tmp_path: Path) -> None:
     start = dt.date(2026, 1, 1)
     wh = _wh_with_index(tmp_path, [100.0] * 10, start)
     d = start + dt.timedelta(days=10)
-    with pytest.raises(DataError, match="不足 200 日均線"):
+    with pytest.raises(DataError, match="不足 200 日"):
         index_trend_gate(d, _W, wh.view(d), {})  # 預設 window=200
 
 
@@ -110,3 +121,197 @@ def test_ac4_params_are_validated(tmp_path: Path) -> None:
 
 def test_registered_under_its_config_name() -> None:
     assert get_overlay("index_trend_gate") is index_trend_gate
+
+
+# ── Antonacci (2014) 絕對動能（D-092 P6）──────────────────────────────
+
+
+def test_ac5_absolute_momentum_compares_endpoints_not_average(tmp_path: Path) -> None:
+    """**這是與 Faber 的實質差別，不是參數差別。**
+
+    構造一段「先跌後漲、但終點仍低於起點」的行情：
+    端點報酬為負（Antonacci → 空手），而現價高於均線（Faber → 持有）。
+    同一段資料兩條規則給出相反的訊號——這正是兩者要並排跑的理由。
+    """
+    start = dt.date(2026, 1, 1)
+    closes = (
+        [100.0] + [60.0] * 8 + [70.0, 80.0, 85.0, 88.0, 90.0, 95.0]
+    )  # 15 天，終點 95 < 起點 100
+    wh = _wh_with_index(tmp_path, closes, start)
+    d = start + dt.timedelta(days=15)
+    view = wh.view(d)
+
+    # Antonacci：95 / 100 − 1 = −5% ≤ 0 → 空手
+    out_abs = absolute_momentum_gate(d, _W, view, {"window": 15})
+    assert out_abs["target_weight"][0] == pytest.approx(0.0)
+
+    # Faber：均線 (100+60×8+70+80+85+88+90+95)/15 ≈ 77.9，而 95 > 77.9 → 持有
+    out_sma = index_trend_gate(d, _W, view, {"window": 15})
+    assert out_sma["target_weight"][0] == pytest.approx(0.5)
+
+
+def test_ac5_absolute_momentum_positive_return_holds(tmp_path: Path) -> None:
+    start = dt.date(2026, 1, 1)
+    wh = _wh_with_index(tmp_path, [100.0 + i for i in range(15)], start)
+    d = start + dt.timedelta(days=15)
+    out = absolute_momentum_gate(d, _W, wh.view(d), {"window": 15})
+    assert out["target_weight"][0] == pytest.approx(0.5)
+
+
+def test_ac5_hurdle_raises_the_bar(tmp_path: Path) -> None:
+    """hurdle 是「超額報酬」版：漲 14% 但門檻 20% → 仍空手。"""
+    start = dt.date(2026, 1, 1)
+    wh = _wh_with_index(tmp_path, [100.0 + i for i in range(15)], start)  # 100 → 114，+14%
+    d = start + dt.timedelta(days=15)
+    view = wh.view(d)
+    assert absolute_momentum_gate(d, _W, view, {"window": 15, "hurdle": 0.20})["target_weight"][
+        0
+    ] == pytest.approx(0.0)
+    assert absolute_momentum_gate(d, _W, view, {"window": 15, "hurdle": 0.10})["target_weight"][
+        0
+    ] == pytest.approx(0.5)
+
+
+def test_ac5_absolute_momentum_never_uses_signal_day(tmp_path: Path) -> None:
+    start = dt.date(2026, 1, 1)
+    closes = [100.0] * 15 + [1000.0]  # 平盤（報酬 0，不 > 0 → 空手）；當日暴漲只有偷看才會翻多
+    wh = _wh_with_index(tmp_path, closes, start)
+    d = start + dt.timedelta(days=15)
+    view = wh.view(dt.datetime.combine(d, dt.time(23, 59), tzinfo=TZ))
+    assert absolute_momentum_gate(d, _W, view, {"window": 15})["target_weight"][0] == pytest.approx(
+        0.0
+    )
+
+
+def test_ac5_absolute_momentum_insufficient_history_raises(tmp_path: Path) -> None:
+    start = dt.date(2026, 1, 1)
+    wh = _wh_with_index(tmp_path, [100.0] * 10, start)
+    d = start + dt.timedelta(days=10)
+    with pytest.raises(DataError, match="絕對動能回看"):
+        absolute_momentum_gate(d, _W, wh.view(d), {})  # 預設 window=244
+
+
+def test_absolute_momentum_registered() -> None:
+    assert get_overlay("absolute_momentum_gate") is absolute_momentum_gate
+
+
+# ── 另外三條文獻規則（D-092 P7）────────────────────────────────────────
+#
+# 這一組測試的重點**不是**「函數會跑」，而是**六條規則彼此不是參數變體**。
+# 若它們在同一段資料上永遠給出相同的倍數，那這批實驗就只是同一個假設試六次，
+# DSR 的試驗計數會嚴重低估。每個測試都構造一個「只有這條規則會這樣判」的情境。
+
+
+def _wh_px(tmp_path: Path, closes: list[float], start: dt.date) -> Warehouse:
+    """兩檔同步的股價（等權組合報酬 = 個股報酬），供波動類 overlay 使用。"""
+    rows = []
+    for i, c in enumerate(closes):
+        d = start + dt.timedelta(days=i)
+        for sid in ("1101", "2330"):
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "open": c,
+                    "high": c,
+                    "low": c,
+                    "close": c,
+                    "volume": 1000,
+                    "amount": 1e8,
+                    "limit_up_price": None,
+                    "limit_down_price": None,
+                    "available_at": dt.datetime.combine(d, dt.time(18), tzinfo=TZ),
+                }
+            )
+    df = pl.DataFrame(rows).with_columns(
+        pl.col("available_at").cast(schemas.TW_DT),
+        pl.col("limit_up_price").cast(pl.Float64),
+        pl.col("limit_down_price").cast(pl.Float64),
+    )
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", df)
+    return wh
+
+
+def _both(tmp_path: Path, idx: list[float], px: list[float], start: dt.date) -> Warehouse:
+    wh = _wh_with_index(tmp_path, idx, start)
+    _wh_px(tmp_path, px, start)  # 同一個 tmp_path＝同一個資料湖
+    return wh
+
+
+_W2 = pl.DataFrame(
+    {"date": [dt.date(2026, 1, 1)] * 2, "stock_id": ["1101", "2330"], "target_weight": [0.5, 0.5]}
+)
+
+
+def test_ac6_tsmom_is_antonacci_times_volscaling(tmp_path: Path) -> None:
+    """MOP = 方向閘門 × 波動縮放。方向為負時空手（同 Antonacci）；為正時**還要**縮放。"""
+    start = dt.date(2026, 1, 1)
+    # 指數下跌 → 方向為負 → 空手，且**不必**看波動
+    wh = _both(tmp_path / "dn", [100.0 - i for i in range(20)], [100.0] * 20, start)
+    d = start + dt.timedelta(days=20)
+    p: dict[str, object] = {"mom_window": 20, "vol_window": 10}
+    assert tsmom_vol_scaling(d, _W2, wh.view(d), p)["target_weight"][0] == pytest.approx(0.0)
+
+    # 指數上漲、股價劇烈震盪 → 在場但被縮放：倍數 < 1，而 Antonacci 會給滿倉
+    idx = [100.0 + i for i in range(20)]
+    px = [100.0 * (1.15 if i % 2 else 0.85) for i in range(20)]  # 每日 ±15%，年化波動遠超 20%
+    wh2 = _both(tmp_path / "up", idx, px, start)
+    v = wh2.view(d)
+    m_ts = tsmom_vol_scaling(d, _W2, v, p)["target_weight"][0]
+    m_abs = absolute_momentum_gate(d, _W2, v, {"window": 20})["target_weight"][0]
+    assert m_abs == pytest.approx(0.5)  # Antonacci：滿倉
+    assert 0.0 < m_ts < 0.5  # MOP：在場但縮了——這就是兩者的差
+
+
+def test_ac6_inverse_variance_cuts_harder_than_linear(tmp_path: Path) -> None:
+    """Moreira–Muir 用 1/σ²、Barroso 用 1/σ。同一段高波動資料，前者砍得更兇。
+
+    這不是參數差異：兩者的參考波動刻意設成同一個值（0.20），差別只剩指數。
+    """
+    start = dt.date(2026, 1, 1)
+    px = [100.0 * (1.08 if i % 2 else 0.92) for i in range(20)]  # 高波動
+    wh = _both(tmp_path, [100.0 + i for i in range(20)], px, start)
+    d = start + dt.timedelta(days=20)
+    v = wh.view(d)
+    lin = vol_target_scaling(d, _W2, v, {"window": 10, "target_vol": 0.20, "min_mult": 0.0})
+    sq = inverse_variance_scaling(d, _W2, v, {"vol_window": 10, "ref_vol": 0.20, "min_mult": 0.0})
+    assert 0.0 < sq["target_weight"][0] < lin["target_weight"][0]
+
+
+def test_ac6_crash_gate_needs_both_bear_and_high_vol(tmp_path: Path) -> None:
+    """DM 是**條件式**規則：空頭且高波動才砍。單獨成立任一條都不砍——
+    這正是它與 Antonacci（只看空頭）和波動縮放（只看波動）的分野。"""
+    start = dt.date(2026, 1, 1)
+    d = start + dt.timedelta(days=30)
+    p: dict[str, object] = {"bear_window": 30, "vol_window": 10, "vol_threshold": 0.25}
+
+    # (1) 空頭 ＋ 高波動 → 砍
+    bear_wild = [100.0 * (1 - 0.02 * i) * (1.05 if i % 2 else 0.95) for i in range(30)]
+    wh1 = _wh_with_index(tmp_path / "a", bear_wild, start)
+    assert crash_risk_gate(d, _W2, wh1.view(d), p)["target_weight"][0] == pytest.approx(0.0)
+
+    # (2) 空頭但低波動（慢跌）→ 不砍。Antonacci 在這裡會空手，DM 不會。
+    bear_calm = [100.0 - 0.5 * i for i in range(30)]
+    wh2 = _wh_with_index(tmp_path / "b", bear_calm, start)
+    assert crash_risk_gate(d, _W2, wh2.view(d), p)["target_weight"][0] == pytest.approx(0.5)
+    assert absolute_momentum_gate(d, _W2, wh2.view(d), {"window": 30})["target_weight"][
+        0
+    ] == pytest.approx(0.0)
+
+    # (3) 多頭但高波動（急漲）→ 不砍。波動縮放在這裡會砍，DM 不會。
+    bull_wild = [100.0 * (1 + 0.02 * i) * (1.05 if i % 2 else 0.95) for i in range(30)]
+    wh3 = _wh_with_index(tmp_path / "c", bull_wild, start)
+    assert crash_risk_gate(d, _W2, wh3.view(d), p)["target_weight"][0] == pytest.approx(0.5)
+
+
+def test_ac6_all_six_are_registered() -> None:
+    for name, fn in (
+        ("index_trend_gate", index_trend_gate),
+        ("absolute_momentum_gate", absolute_momentum_gate),
+        ("tsmom_vol_scaling", tsmom_vol_scaling),
+        ("inverse_variance_scaling", inverse_variance_scaling),
+        ("crash_risk_gate", crash_risk_gate),
+        ("vol_target_scaling", vol_target_scaling),
+    ):
+        assert get_overlay(name) is fn

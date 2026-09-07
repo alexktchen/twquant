@@ -25,4 +25,6 @@ say "回填齊了"
 
 say "P2 ML 四格";     run_set ml
 say "P5b ML 全部";    run_set ml_all
+say "P6 F1 擇時對照"; run_set f1_timing
+say "P7 六規則矩陣";   run_set matrix
 say "全部結束"

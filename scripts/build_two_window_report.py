@@ -174,7 +174,14 @@ def main() -> None:
     # 這裡直接讀登記簿算試驗數，門檻用同一條公式。
     dsr = _dsr_block()
 
+    lw_p = R / "reports/lw_series.json"
+    lw = json.loads(lw_p.read_text(encoding="utf-8")) if lw_p.exists() else {"cells": []}
+    ta_p = R / "reports/timing_all.json"
+    timing = json.loads(ta_p.read_text(encoding="utf-8")) if ta_p.exists() else []
+
     payload = {
+        "lw": lw,
+        "timing": [t for t in timing if t["long_window"]],  # 短窗口只有一個空頭事件，不進報告
         "diagnosis": diagnosis,
         "dsr": dsr,
         "windows": {
