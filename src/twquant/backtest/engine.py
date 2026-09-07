@@ -109,6 +109,9 @@ class BacktestResult:
     final_equity: float
     final_holdings: list[Holding] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)  # D-085：可稽核的股利明細
+    # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
+    # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
+    credit_dividends: bool = True
 
 
 @dataclass
@@ -382,8 +385,15 @@ def run_backtest(
     warehouse: TableSource,
     initial_capital: float = 10_000_000.0,
     max_participation: float = 0.05,
+    credit_dividends: bool = True,
 ) -> BacktestResult:
-    """跑回測，回傳 BacktestResult（權益曲線、ledger、unfilled、指標）。"""
+    """跑回測，回傳 BacktestResult（權益曲線、ledger、unfilled、指標）。
+
+    `credit_dividends=False` 關掉 D-085 的股利入帳，回到**價格報酬**口徑。
+    存在的理由是 D-086：含息與不含息兩次相減，才分離得出「股利本身」與
+    「部位變大之後撞參與率上限」——後者實測占了 A 軌 47.3M 期末差裡的 13.6M。
+    **不是預設**：真實投資人收得到股利，關掉它只是為了做對照。
+    """
     from twquant.data import calendar as cal
     from twquant.strategy.build import build_targets, signal_dates
 
@@ -399,7 +409,7 @@ def run_backtest(
     pending: dict[str, float] | None = None
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
-    div_by_date = _dividends_by_date(warehouse, start, end)
+    div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
     for day in sessions:
         day_px = by_date.get(day, {})
         # D-085：**先入帳再更新收盤**。每股金額要用除息前的收盤，而 `state.last_close`
@@ -486,4 +496,5 @@ def run_backtest(
         final_equity=final_equity,
         final_holdings=final_holdings,
         dividends=state.dividends,
+        credit_dividends=credit_dividends,
     )

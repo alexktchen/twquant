@@ -268,3 +268,71 @@ def test_ac7_dividends_only_for_stocks_actually_held(tmp_path: Path) -> None:
     ex = days[3]  # 第一次再平衡成交之前，尚無持倉
     r = _run(_wh(tmp_path, days, [_event(ex, s, 0.9) for s in _STOCKS]), days)
     assert r.dividends == [], "還沒建倉就不該收到股利"
+
+
+# ── D-086：--no-dividends 開關 ────────────────────────────────────────────
+
+
+def _run_flag(wh: Warehouse, days: list[dt.date], *, credit: bool) -> BacktestResult:
+    return run_backtest(
+        _cfg(),
+        load_config(_CONFIG_DIR / "costs.yaml", CostConfig),
+        days[0],
+        days[-1],
+        wh,
+        initial_capital=10_000_000.0,
+        credit_dividends=credit,
+    )
+
+
+def test_no_dividends_flag_reverts_to_price_return(tmp_path: Path) -> None:
+    """`credit_dividends=False` 回到價格報酬口徑，且結果記得住是哪一種。
+
+    存在的理由是 D-086：含息與不含息兩次相減，才分離得出「股利本身」與
+    「部位變大之後撞參與率上限」——後者實測占了 A 軌 47.3M 期末差裡的 13.6M。
+    """
+    days = _sessions(60)
+    ex = days[40]
+    wh = _wh(tmp_path, days, [_event(ex, s, 0.95) for s in _STOCKS], ex_date=ex, drop=0.05)
+    on = _run_flag(wh, days, credit=True)
+    off = _run_flag(wh, days, credit=False)
+
+    assert on.dividends and not off.dividends
+    assert on.credit_dividends is True and off.credit_dividends is False
+    assert on.final_equity > off.final_equity, "含息必須高於價格報酬"
+
+    # 除息**之前**兩者逐位元相同——開關不得影響其他任何路徑
+    ea = {p.date: p.equity for p in on.equity}
+    eb = {p.date: p.equity for p in off.equity}
+    before = [d for d in ea if d < ex]
+    assert before
+    assert all(ea[d] == eb[d] for d in before), "除息日之前不得有任何差異"
+
+
+def test_bundle_records_the_dividend_mode(tmp_path: Path) -> None:
+    """結果包必須記下口徑。
+
+    不記的話，含息與不含息的結果包長得一模一樣，誰也分不出手上這份是哪一種
+    ——而那正是最容易造成靜默不一致的地方。
+    """
+    from twquant.reporting.result_bundle import bundle_backtest
+
+    days = _sessions(60)
+    ex = days[40]
+    wh = _wh(tmp_path, days, [_event(ex, s, 0.95) for s in _STOCKS], ex_date=ex, drop=0.05)
+    cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    for credit in (True, False):
+        res = _run_flag(wh, days, credit=credit)
+        b = bundle_backtest(
+            res,
+            strategy=_cfg(),
+            cost=cost,
+            start=days[0],
+            end=days[-1],
+            initial_capital=10_000_000.0,
+            max_participation=0.05,
+            source="test",
+            data_fingerprint="x",
+        )
+        assert b["credit_dividends"] is credit
+        assert bool(b["dividends"]) is credit

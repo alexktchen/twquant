@@ -1491,6 +1491,11 @@ def backtest(
     pg: bool = typer.Option(
         True, "--pg/--no-pg", help="讀 PG serving 鏡射表（D-026 預設）；--no-pg 走本機資料湖"
     ),
+    dividends: bool = typer.Option(
+        True,
+        "--dividends/--no-dividends",
+        help="除息日是否把股利現金入帳（D-085 預設開）；--no-dividends 回到價格報酬口徑，供 D-086 的對照",
+    ),
 ) -> None:
     """跑回測，印績效指標並記入 research_log（純量化，不需 LLM）。"""
     from twquant.backtest.costs import CostConfig
@@ -1531,6 +1536,7 @@ def backtest(
             wh,
             initial_capital=capital,
             max_participation=participation,
+            credit_dividends=dividends,
         )
     finally:
         if pg_conn is not None:
@@ -1539,7 +1545,10 @@ def backtest(
     diag = summarize_backtest(res)
     total_ret = res.final_equity / res.initial_capital - 1.0
     typer.secho(
-        f"回測 {strat.name} · {s} ~ {e} · {m.n_days} 交易日", fg=typer.colors.CYAN, bold=True
+        f"回測 {strat.name} · {s} ~ {e} · {m.n_days} 交易日"
+        f" · {'含息' if dividends else '**價格報酬（--no-dividends）**'}",
+        fg=typer.colors.CYAN,
+        bold=True,
     )
     typer.echo(f"  總報酬 {total_ret * 100:+.2f}%　CAGR {m.cagr * 100:+.2f}%")
     typer.echo(f"  Sharpe {m.sharpe:+.2f}　Sortino {m.sortino:+.2f}　Calmar {m.calmar:+.2f}")

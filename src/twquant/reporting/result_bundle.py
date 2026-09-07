@@ -80,6 +80,9 @@ def bundle_backtest(
         # 逐表明細：跨策略比雜湊無意義（不同策略讀不同的表，雜湊必然不同），
         # 要比就得比**重疊的表**。純追加欄位，舊結果包缺此鍵仍可讀。
         "data_tables": {k: list(v) for k, v in sorted((data_tables or {}).items())},
+        # D-085／D-086：這份結果是含息還是價格報酬。舊結果包缺此鍵 → 視為 False
+        # （它們是引擎還沒有收益路徑時跑的），故讀取端用 `bundle.get(..., False)`。
+        "credit_dividends": result.credit_dividends,
         "initial_equity": result.initial_capital,
         "final_equity": result.final_equity,
         "metrics": {
