@@ -118,6 +118,12 @@ ML 推薦名單與洞悉分析排在供應層之後，根本沒被執行到。
 **更危險的是 `docker compose run` 會回報 exit 0**，即使容器其實是被 SIGKILL（137）殺掉的。
 用 `docker run` 才看得到真正的 137。任何靠 exit code 判斷成功的包裝都會被騙。未修，見 T-226。
 
+**⑥ 映像少了 `libgomp1`，容器內完全不能推論（2026-09-07 實測，已修）。** `python:3.12-slim`
+沒帶 OpenMP runtime，`import lightgbm` 會炸在 `libgomp.so.1`。這代表每日 pipeline 的 ML 步驟
+在 Docker 裡**永遠失敗**——而它是 best-effort，所以只會安靜地什麼都不產出。
+Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗過了」其實只驗到匯出，
+因為 scores parquet 是在**主機**上先產生的，推論那段根本沒被走到。
+
 ## 7. 還在跑的東西
 
 - **長天期回補**：融資融券 `data/staging/finmind_hist_margin`，約 3.9 小時（其餘六個資料集已滿）

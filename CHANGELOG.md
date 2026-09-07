@@ -1,5 +1,9 @@
 # CHANGELOG
 
+- 2026-09-07 修正：Dockerfile 補 `libgomp1`。`python:3.12-slim` 沒帶 OpenMP runtime，`import lightgbm` 會炸在 `libgomp.so.1`，等於每日 pipeline 的 ML 推薦步驟在容器裡永遠失敗（且因為 best-effort 而安靜失敗）。修好後在容器內對 2026-09-07 推論 1961 檔並匯出快照。
+
+- 2026-09-07 平台：ML 選股、洞悉與證據、我的追蹤三頁的股票代號旁顯示中文名稱，共用一份對照表；查無名稱時只顯示代號。
+
 - 2026-09-06 T-225：每日 pipeline 新增「ML 推薦名單」步驟（推論→匯出推薦快照→洞悉），推論邏輯與 CLI 共用同一函數；未綁定生產模型時略過而非自動選。完整 gate 854 passed。
 
 - 2026-09-06 T-224：修掉 `latest_model_dir` 的靜默選擇。八個模型 train_end 全同，舊版依目錄排序挑第一個，實際挑到 D-075 的回撤風控模型當每日選股器。現在候選不唯一一律 raise 並列出候選，並新增 `model_purpose` 依標籤用途過濾；生產模型改由 `configs/ml.yaml` 的 `production_ranking_model` 明寫。
