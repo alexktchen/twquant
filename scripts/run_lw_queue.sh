@@ -9,7 +9,22 @@ export TWQUANT_DATA_DIR="D:/project/twquant/data"
 DATA=D:/project/twquant/data
 LOG=logs/lw_queue.log
 say() { echo "=== $(date +%F' '%T) $*" | tee -a "$LOG"; }
-run_set() { uv run --all-groups python scripts/run_long_window.py --set "$1" --scales 1x --no-dividends >>"$LOG" 2>&1; say "$1 結束 rc=$?"; }
+# 每跑完一組就重建報告資料與 HTML（使用者要求）。發布 artifact 需要 Claude，
+# 故這裡只把檔案更新到最新，並在 log 印一行 REPORT-READY 讓監看器抓到。
+refresh_report() {
+  uv run --all-groups python scripts/build_lw_section.py >>"$LOG" 2>&1
+  uv run --all-groups python scripts/timing_all.py >>"$LOG" 2>&1
+  uv run --all-groups python scripts/build_two_window_report.py >>"$LOG" 2>&1
+  uv run --all-groups python scripts/render_two_window_report.py >>"$LOG" 2>&1
+  local n
+  n=$(uv run --all-groups python -c "import json;d=json.load(open(r'$DATA/reports/lw_series.json',encoding='utf-8'));print(sum(1 for c in d['cells'] if c['metrics']))" 2>/dev/null)
+  echo "REPORT-READY $1 完成，LW 已有 $n 格"
+}
+run_set() {
+  uv run --all-groups python scripts/run_long_window.py --set "$1" --scales 1x --no-dividends >>"$LOG" 2>&1
+  say "$1 結束 rc=$?"
+  refresh_report "$1"
+}
 
 say "等 D-091 的最後一格（LW-B1）"
 until [ -f "$DATA/tracks_lw_risk_nodiv/LW-B1_lw_b1_large_enhanced_1x.json" ]; do sleep 60; done
