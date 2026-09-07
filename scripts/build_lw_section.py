@@ -232,6 +232,82 @@ def _metrics(cell: dict[str, object]) -> dict[str, float] | None:
     return None
 
 
+# 每個輸出目錄 → (視窗, 這批在問什麼)。**視窗不同的格不可直接相比**（D-093）：
+# 2019 視窗少了 2018 Q4 那個壓力體制，MDD 會系統性偏淺。
+_DIRS: dict[str, tuple[str, str]] = {
+    "tracks_lw_nodiv": ("2017-01-03", "D-087 公開因子四格"),
+    "tracks_lw_risk_nodiv": ("2017-01-03", "D-091 風控三格"),
+    "tracks_lw_turnover_nodiv": ("2017-01-03", "D-092 P1 降周轉"),
+    "tracks_lw_timing_nodiv": ("2017-01-03", "D-092 P4 擇時"),
+    "tracks_lw_all_nodiv": ("2017-01-03", "D-092 P5a 其餘公開因子"),
+    "tracks_lw_matrix_nodiv": ("2017-01-03", "D-092 P7 六規則 × 公開因子基座"),
+    "tracks_lw_revenue_nodiv": ("2017-01-03", "營收線（需 ML 分數的格已改列 2019）"),
+    "tracks_lw_w2019_nodiv": ("2019-05-02", "D-093 配對對照（公開因子四格）"),
+    "tracks_lw_risk_w2019_nodiv": ("2019-05-02", "D-093 配對對照（風控三格）"),
+    "tracks_lw_ml_w2019_nodiv": ("2019-05-02", "D-092 P2 ML 訊號進各載具"),
+    "tracks_lw_revenue_w2019_nodiv": ("2019-05-02", "營收線"),
+    "tracks_lw_revmom_w2019_nodiv": ("2019-05-02", "D-092 P8 營收 × 動能"),
+    "tracks_lw_all_ml_w2019_nodiv": ("2019-05-02", "D-092 P5b 其餘 ML 策略"),
+    "tracks_lw_f1_timing_w2019_nodiv": ("2019-05-02", "D-092 P6 F1 × 兩條擇時"),
+    "tracks_lw_matrix_ml_w2019_nodiv": ("2019-05-02", "D-092 P7 六規則 × ML 基座"),
+}
+
+
+def _tier(cagr: float, mdd: float) -> str:
+    """D-087 的分層。甲層原文是「MDD ≤ 30% **且 CAGR > 0**」——只看 MDD 會把
+    「常態空手所以回撤淺」的事件型策略誤判為甲（LW-C2b／C2c／M3 三格 CAGR 都是負的）。
+    虧錢不是站得住。"""
+    if cagr <= 0:
+        return "丙"
+    return "甲" if abs(mdd) <= 0.30 else "乙" if abs(mdd) <= 0.40 else "丙"
+
+
+def _discover_all() -> list[dict[str, object]]:
+    """掃過所有輸出目錄，把**每一格**都列出來——不只上面手寫說明的那些。
+
+    手寫清單負責敘事（名稱、在做什麼、對照誰），這裡負責**完整性**：
+    使用者要的是「全部跑過的策略都盤點完」，而手寫清單永遠會落後於實際跑的格數。
+    """
+    rows: list[dict[str, object]] = []
+    for dname, (window, batch) in _DIRS.items():
+        d = R / dname
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("*_1x.json")):
+            try:
+                m = json.loads(f.read_text(encoding="utf-8"))["metrics"]
+            except (json.JSONDecodeError, KeyError, OSError):
+                # 只吞這三種：正在寫入的半成品 JSON、缺 metrics 的舊格式、讀檔失敗。
+                # **不吞其他例外**——那會讓真的壞掉靜默變成「這一格沒跑」。
+                continue
+            rows.append(
+                {
+                    "code": f.stem.split("_", 1)[0],
+                    "window": window,
+                    "batch": batch,
+                    "cagr": m["cagr"],
+                    "mdd": m["mdd"],
+                    "sharpe": m["sharpe"],
+                    "turnover": m.get("turnover"),
+                    "tier": _tier(m["cagr"], m["mdd"]),
+                }
+            )
+    return sorted(rows, key=lambda r: (str(r["window"]), -float(r["sharpe"])))
+
+
+# 跑不出來、而「跑不出來」本身就是結果的格。**不是待修的錯**——
+# 放寬設定讓它跑得出來，等於改配置去迎合結果（D-092 明文不調 keep_pct／top_n）。
+_INFEASIBLE: list[dict[str, str]] = [
+    {
+        "code": "LW-MGALLm",
+        "window": "2017-01-03",
+        "name": "動能池 ＋ 五道濾網全上",
+        "why": "五道濾網疊起來後實際入選只剩 **3 檔**，單股上限 0.15 讓權重加不到 1，引擎直接 raise。"
+        "**這就是答案**：把所有濾網疊在一起，在長窗口的宇宙上沒有東西通得過。",
+    },
+]
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     got = {str(c["code"]): _metrics(c) for c in CELLS}
@@ -241,11 +317,10 @@ def main() -> None:
         base = got.get(str(c["base"])) if c["base"] else None
         row = dict(c)
         row["metrics"] = m
-        row["tier"] = (
-            None
-            if m is None
-            else ("甲" if abs(m["mdd"]) <= 0.30 else "乙" if abs(m["mdd"]) <= 0.40 else "丙")
-        )
+        # D-087 的甲層原文是「MDD ≤ 30% **且 CAGR > 0**」——只看 MDD 會把
+        # 「常態空手所以回撤淺」的事件型策略誤判為甲層（LW-C2b/C2c/M3 三格
+        # CAGR 都是負的卻拿到甲）。虧錢不是站得住。
+        row["tier"] = None if m is None else _tier(m["cagr"], m["mdd"])
         row["delta"] = (
             None
             if (m is None or base is None)
@@ -267,14 +342,22 @@ def main() -> None:
         )
         rows.append(row)
 
+    every = _discover_all()
     payload = {
         "cells": rows,
         "benchmark": _BENCH_LONG,
         "done": sum(1 for r in rows if r["metrics"]),
         "total": len(rows),
+        "all_results": every,
+        "infeasible": _INFEASIBLE,
+        "windows": {
+            w: sum(1 for e in every if e["window"] == w)
+            for w in sorted({str(e["window"]) for e in every})
+        },
     }
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"{payload['done']}／{payload['total']} 格完成 → {OUT}\n")
+    print(f"敘事格 {payload['done']}／{payload['total']}；**全部結果 {len(every)} 格** → {OUT}")
+    print(f"  各視窗格數：{payload['windows']}\n")
     for r in rows:
         m = r["metrics"]
         if not m:
