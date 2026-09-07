@@ -96,6 +96,22 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-F1abs", "lw_f1_antonacci"),  # Antonacci 12 個月絕對動能
         ("LW-F1trend", "lw_f1_trend"),  # Faber 200 日均線
     ),
+    "revenue": (  # 營收線優先批：F 系列三格（隔離設計）＋ 兩個營收濾網 ＋ P6 兩條擇時
+        # F1 − F2 才是「營收驚奇值多少」的判定；F3 是更嚴的對照。缺任一格都判不了。
+        ("LW-F1", "lw_f1_revpool"),  # 營收驚奇池 × C1 排序
+        ("LW-F2", "lw_f2_mompool"),  # 動能池（隔離對照）
+        ("LW-F3", "lw_f3_highpool"),  # 52 週高點池（更嚴對照）
+        ("LW-MG1", "lw_mg1_rev"),  # ML 池 ＋ 營收成長濾網
+        ("LW-G1", "lw_g1_ml_revenue"),  # ML ＋ 營收成長濾網
+        ("LW-L2", "lw_l2_rev"),  # 階梯 L2：宇宙加營收篩
+        ("LW-F1abs", "lw_f1_antonacci"),  # P6：Antonacci
+        ("LW-F1trend", "lw_f1_trend"),  # P6：Faber
+    ),
+    "revmom": (  # D-092 P8：營收驚奇 × 動能的隔離三格
+        ("LW-RM-rev", "lw_rm_rev"),
+        ("LW-RM-mom", "lw_rm_mom"),
+        ("LW-RM-both", "lw_rm_both"),  # 判定格
+    ),
     "matrix": (  # D-092 P7：六條文獻規則 × 七個代表性基座
         ("LW-C1-faber", "lw_c1_faber"),
         ("LW-C1-anto", "lw_c1_anto"),
@@ -145,6 +161,8 @@ OUT_SUFFIX = {
     "public": "",
     "f1_timing": "_f1_timing",
     "matrix": "_matrix",
+    "revenue": "_revenue",
+    "revmom": "_revmom",
     "risk": "_risk",
     "turnover": "_turnover",
     "ml": "_ml",
