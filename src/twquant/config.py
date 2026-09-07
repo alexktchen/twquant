@@ -203,6 +203,12 @@ class MlConfig(BaseConfig):
 
     horizon_days: int = 10
     aux_horizons: tuple[int, ...] = (5, 20)
+    # 訓練樣本的標籤（如 "lw" ＝長窗口）。**參與 config hash，也進 model_id**。
+    # 沒有它的話，同一份 config 在不同樣本上訓練會得到同一個 model_id——
+    # `save_model` 的 T-073 防護只在同一個目錄下擋得住，寫到不同 `--out` 就擋不住，
+    # 而 `ml_scores` 按 model_id 索引，兩個模型的分數會混在一起。
+    # 空字串＝預設樣本，既有模型的 id 與 hash 逐位元不變。
+    sample_tag: str = ""
     features: tuple[str, ...] = ()  # 空＝訓練時解析為全部註冊因子
     context_features: tuple[str, ...] = ()
     label: MlLabelConfig = MlLabelConfig()
@@ -220,6 +226,17 @@ class MlConfig(BaseConfig):
             raise ValueError(
                 f"label.max_span_sessions（{span}）須 ≥ horizon_days+1"
                 f"（{self.horizon_days + 1}），否則所有標籤都會變 null"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _sample_tag_is_id_safe(self) -> MlConfig:
+        # tag 會直接進 model_id，而薄因子以**前綴**取分數；含底線或非英數字元
+        # 會讓前綴比對失準（`lgbm_lw_net_h20_` vs `lgbm_net_h20_` 是兩回事，
+        # 但 `lgbm_l_w_...` 這種就說不準了）。
+        if self.sample_tag and not self.sample_tag.isalnum():
+            raise ValueError(
+                f"sample_tag 只能是英數字（會直接進 model_id 與前綴比對），得到 {self.sample_tag!r}"
             )
         return self
 

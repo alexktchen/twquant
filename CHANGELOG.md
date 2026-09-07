@@ -883,3 +883,4 @@
   session 上限未完成，待補跑。
 - 2026-07-04 規格階段：建立文件體系（CLAUDE.md、ARCHITECTURE.md、LOOP.md、
   SPEC-000~007、TASKS.md、DECISIONS.md）。尚無程式碼。
+- 2026-09-07 T-172：`MlConfig.sample_tag` 讓訓練樣本進 model_id 與 trial_scope；空值不進 hash 故既有 id 逐位元不變。D-088 事前登記長窗口三條線

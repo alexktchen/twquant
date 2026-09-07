@@ -1,0 +1,56 @@
+# LW 版（D-088，事前登記）：與 ml_h20_cost_aware.yaml **逐字相同，只多 sample_tag**。
+# 唯一的差別在 CLI 的 `--from`：2020-01-01 → 2015-09-01（長窗口）。
+#
+# 為什麼 2015-09-01：12 個特徵中最晚齊備的是 price.mom_60d（2015-08-26），
+# 而行情資料本身回補到 2015-06-01（10% 漲跌幅上路日，見 D-083）。留 4 天餘裕。
+#
+# **sample_tag 的用途不是註記，是身分**：沒有它的話，本檔與 ml_h20_cost_aware.yaml
+# 產出的 model_id 會逐字相同（hash 只看超參數，不看訓練窗口），
+# 而 ml_scores 按 model_id 索引——兩個模型的分數會混在同一條線裡。
+sample_tag: lw
+
+# T-072 / SPEC-011：唯一預先登記的 H20 成本感知候選。
+horizon_days: 20
+aux_horizons: [10, 40]
+features:
+  - fundamental.revenue_accel
+  - fundamental.revenue_yoy
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.rs_market_20d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+context_features: []
+label:
+  execution: next_open
+  excess: market_mean
+  transform: cost_adjusted_return
+  adv_window_sessions: 20
+  position_notional_twd: 500_000.0
+  downside_penalty: 0.25
+  total_return: true # D-054／D-066：含股利。未還原時 6~8 月有 38.2% 樣本換分位
+  # T-139／T-144：h=20 × 2 的跨距容忍。橫跨資料缺口的標籤設 null——不設時約 8,673 個
+  # 訓練樣本的「20 日報酬」實際橫跨數月，而模型會把它當成真實的極端報酬學進去。
+  max_span_sessions: 42
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 20
+  vault_months: 6
+  days_per_year: 244
+  days_per_month: 21
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+refit:
+  schedule: monthly
+trials_log: research_log
