@@ -172,6 +172,31 @@ OUT_SUFFIX = {
 }
 
 
+# 一格跑一次就好：兩條線同時跑同一個 set 時，用檔案系統的原子建檔當認領。
+# 這比「事先把格子分兩半」穩：任一條線提早結束或某格失敗，另一條會自然接手，
+# 不必有人重新分配。
+_STALE_HOURS = 3.0  # 單格實測約 17 分；3 小時仍無結果即視為那條線死了
+
+
+def _claim(path: pathlib.Path) -> pathlib.Path | None:
+    """原子地認領一格。認領成功回傳 claim 檔路徑；已被別人認領回傳 None。
+
+    **過期的認領要能回收**：若認領檔超過 `_STALE_HOURS` 而對應結果仍不存在，
+    代表認領它的程序死了（本輪已經發生過一次：佇列腳本被就地編輯而中止）。
+    不回收的話那一格會永遠沒人跑，而且是靜默的。
+    """
+    try:
+        path.touch(exist_ok=False)
+        return path
+    except FileExistsError:
+        age_h = (time.time() - path.stat().st_mtime) / 3600.0
+        if age_h < _STALE_HOURS:
+            return None
+        print(f"  （認領已過期 {age_h:.1f} 小時，回收）", flush=True)
+        path.touch()  # 更新時間戳＝改由本行程認領
+        return path
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true")
@@ -208,8 +233,17 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     failures: list[str] = []
+    skipped = 0
     for i, (name, cfg, tag, scale) in enumerate(todo, 1):
         dest = out_dir / f"{name}_{cfg}_{tag}.json"
+        if dest.exists():  # 另一條線在本次 todo 算出來之後跑完了它
+            skipped += 1
+            continue
+        claim = _claim(out_dir / f".claim_{name}_{cfg}_{tag}")
+        if claim is None:
+            skipped += 1
+            print(f"[{i}/{len(todo)}] {name} {tag}：另一條線正在跑，跳過", flush=True)
+            continue
         cmd = [
             sys.executable,
             "-m",
@@ -238,7 +272,12 @@ def main() -> None:
         if r.returncode != 0:
             failures.append(f"{name} {tag}（exit {r.returncode}）")
             print(f"!! {name} {tag} 失敗 exit {r.returncode}", flush=True)
-    print(f"\n完成，共 {(time.perf_counter() - t0) / 60:.0f} 分", flush=True)
+            claim.unlink(missing_ok=True)  # 失敗就放掉，讓另一條線（或重跑）能接手
+    print(
+        f"\n完成，共 {(time.perf_counter() - t0) / 60:.0f} 分"
+        + (f"（另有 {skipped} 格由別條線負責）" if skipped else ""),
+        flush=True,
+    )
     if failures:
         print(f"失敗 {len(failures)} 筆：{'；'.join(failures)}", flush=True)
 
