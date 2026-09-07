@@ -515,6 +515,50 @@ def main() -> None:
             }
         )
 
+    # ── D-085／D-086：股利重跑的對照（進行中）────────────────────────────
+    # **不與主表混在一起**：主表是舊引擎（價格報酬）、這裡是新引擎（含息），
+    # 兩種口徑放進同一張表就是這份報告最該避免的那種靜默不一致。
+    div_cells = []
+    for name, base, prefix, _grp, _desc in SPECS:
+        new_p = ROOT / f"{base}_div" / f"{prefix}_1x.json"
+        old_p = ROOT / base / f"{prefix}_1x.json"
+        if not (new_p.exists() and old_p.exists()):
+            continue
+        nb = json.loads(new_p.read_text(encoding="utf-8"))
+        ob = json.loads(old_p.read_text(encoding="utf-8"))
+        divs = nb.get("dividends") or []
+        div_cells.append(
+            {
+                "name": name,
+                "old_cagr": ob["metrics"]["cagr"],
+                "new_cagr": nb["metrics"]["cagr"],
+                "old_sharpe": ob["metrics"]["sharpe"],
+                "new_sharpe": nb["metrics"]["sharpe"],
+                "old_mdd": ob["metrics"]["mdd"],
+                "new_mdd": nb["metrics"]["mdd"],
+                # 已跑完的前 52 筆缺這一欄（序列化是後來補的）——None 而不是 0，
+                # 那兩者意思完全不同（「沒記錄」vs「沒收到股利」）
+                "div_cash": sum(x["cash"] for x in divs) if divs else None,
+                "div_n": len(divs) if divs else None,
+            }
+        )
+    div_cells.sort(key=lambda r: -r["new_cagr"])
+    total_jobs = 40 * 3  # rerun_all_backtests.py 的 40 格 × 3 個成本情境
+    n_done = (
+        sum(
+            1
+            for base in {b for _n, b, _p, _g, _d in SPECS}
+            for _ in (ROOT / f"{base}_div").glob("*.json")
+        )
+        if True
+        else 0
+    )
+    n_done = sum(
+        len(list((ROOT / f"{b}_div").glob("*.json")))
+        for b in {x[1] for x in SPECS}
+        if (ROOT / f"{b}_div").exists()
+    )
+
     bundle = {
         "generated_for": "SPEC-013 §6 回測總覽",
         "window": {
@@ -523,6 +567,7 @@ def main() -> None:
         },
         "rows": rows,
         "edges": edges,
+        "dividend_rerun": {"done": n_done, "total": total_jobs, "cells": div_cells},
         "benchmarks": _benchmarks(ref_dates or []),
         "missing": missing,
     }
