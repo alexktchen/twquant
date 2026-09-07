@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from 'react'
 import { Panel } from '../ui'
+import { StockName } from './RecommendationsPage'
 import { routeHref, type PlatformRoute } from './routes'
 import {
   readWatchlist,
@@ -51,7 +52,7 @@ export function WatchlistsPage({ route }: { route: PlatformRoute }): JSX.Element
         : <div className="platform-table-wrap"><table className="platform-data-table">
           <thead><tr><th>股票</th><th>研究筆記</th><th>來源 run</th><th /></tr></thead>
           <tbody>{state.entries.map(entry => <tr key={entry.stock_id}>
-            <td><a href={routeHref('stocks', entry.stock_id, route.query)}>{entry.stock_id}</a></td>
+            <td><a href={routeHref('stocks', entry.stock_id, route.query)}>{entry.stock_id}</a><StockName stockId={entry.stock_id} /></td>
             <td><input className="platform-note-input" aria-label={`${entry.stock_id} 的研究筆記`} value={entry.note}
               onChange={event => commit(setNote(state.entries, entry.stock_id, event.target.value))} /></td>
             <td>{entry.run_id ?? '未記錄'}</td>

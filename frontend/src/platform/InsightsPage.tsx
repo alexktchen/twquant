@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react'
 import { apiUrl } from '../api'
 import { Panel } from '../ui'
 import { routeHref, type PlatformRoute } from './routes'
+import { StockName } from './RecommendationsPage'
 
 export type InsightEvidence = {
   evidence_id: string
@@ -73,7 +74,7 @@ function PackCard({ pack, route }: { pack: InsightPack; route: PlatformRoute }) 
   return <section className="platform-run-card">
     <header><div>
       <span className="platform-eyebrow">{pack.analysis ? 'ANALYSIS SAVED' : 'EVIDENCE ONLY'}</span>
-      <h2>{pack.stock_id ? <a href={routeHref('stocks', pack.stock_id, route.query)}>{pack.stock_id}</a> : pack.industry ?? '未指定標的'}</h2>
+      <h2>{pack.stock_id ? <><a href={routeHref('stocks', pack.stock_id, route.query)}>{pack.stock_id}</a><StockName stockId={pack.stock_id} /></> : pack.industry ?? '未指定標的'}</h2>
       <p>截點 {pack.as_of.slice(0, 16).replace('T', ' ')} · run {pack.insight_run_id}</p>
     </div></header>
     {pack.analysis ? <>

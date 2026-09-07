@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from 'react'
 import { routeHref, type PlatformRoute } from './routes'
 import { apiUrl } from '../api'
+import { nameOf, useStockNames } from './stockNames'
 import { Panel } from '../ui'
 
 type Insight = {
@@ -52,6 +53,12 @@ function href(route: PlatformRoute, patch: Record<string, string | null>, page =
   const query = new URLSearchParams(route.query)
   for (const [key, value] of Object.entries(patch)) value ? query.set(key, value) : query.delete(key)
   return routeHref(page as 'overview' | 'recommendations', undefined, query)
+}
+
+/** Show the stock's Chinese name beside its code; absent names simply do not render. */
+export function StockName({ stockId }: { stockId: string }) {
+  const name = nameOf(useStockNames(), stockId)
+  return name ? <span className="platform-stock-name">{name}</span> : null
 }
 
 /** Present saved ML recommendation runs without substituting factor rankings or demo data. */
@@ -114,7 +121,7 @@ function RunCard({ run, route, compact, filtered, dataAsOf }: { run: Run; route:
       <thead><tr><th>排名</th><th>股票</th><th>原始 ML 分數</th><th>分組</th><th>洞悉</th></tr></thead>
       <tbody>{candidates.map(candidate => <tr key={candidate.stock_id}>
         <td>{candidate.rank}</td>
-        <td><a href={routeHref('stocks', candidate.stock_id, context)}>{candidate.stock_id}</a></td>
+        <td><a href={routeHref('stocks', candidate.stock_id, context)}>{candidate.stock_id}</a><StockName stockId={candidate.stock_id} /></td>
         <td>{candidate.score.toFixed(4)}</td><td>{candidate.bucket}</td>
         <td><InsightCell insight={candidate.insight} /></td>
       </tr>)}</tbody></table></div>}
