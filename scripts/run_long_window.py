@@ -27,12 +27,22 @@ START, END = "2017-01-03", "2026-02-28"
 CAPITAL = 80_000_000.0  # D-068，與既有批次同水位（雖不可比，至少資金水位一致）
 COSTS = "costs.yaml"
 SCALES = (("1x", None), ("0x", "0"), ("1.5x", "1.5"))
-CELLS = (
-    ("LW-C1", "lw_c1_breakout"),
-    ("LW-B2", "lw_b2_broad_capw"),
-    ("LW-X1", "lw_x1_simple20"),
-    ("LW-C1abs", "lw_c1_abs_threshold"),  # D-062 的驗證格
-)
+# 兩批格子是**兩次獨立的事前登記**（D-087 與 D-091），寫不同目錄、不同 trial_scope，
+# 不得合併成一批看——D-087 明文「不在本批之後才決定加格」。
+CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
+    "public": (  # D-087：公開因子架構，四格皆無風控
+        ("LW-C1", "lw_c1_breakout"),
+        ("LW-B2", "lw_b2_broad_capw"),
+        ("LW-X1", "lw_x1_simple20"),
+        ("LW-C1abs", "lw_c1_abs_threshold"),  # D-062 的驗證格
+    ),
+    "risk": (  # D-091：風控層能不能把丙層救回來。純公開因子，不需 ML 分數
+        ("LW-R2", "lw_r2_c1_lvgate"),  # C1 ＋ 剔除波動最高 10%
+        ("LW-C4", "lw_c4_voltarget"),  # C1 ＋ 波動率縮放（Barroso–Santa-Clara）
+        ("LW-B1", "lw_b1_large_enhanced"),  # 市值前 100 選 30、市值加權（beta ≈ 1）
+    ),
+}
+OUT_SUFFIX = {"public": "", "risk": "_risk"}
 
 
 def main() -> None:
@@ -46,15 +56,22 @@ def main() -> None:
         action="store_true",
         help="價格報酬口徑（寫入 tracks_lw_nodiv）",
     )
+    ap.add_argument("--set", choices=sorted(CELL_SETS), default="public", help="哪一批登記的格子")
+    ap.add_argument(
+        "--scales", default="1x,0x,1.5x", help="逗號分隔的成本情境子集（如只跑 1x 先看結果）"
+    )
     args = ap.parse_args()
-    out_dir = pathlib.Path(str(OUT) + ("_nodiv" if args.nodiv else ""))
-    jobs = [(n, c, tag, sc) for n, c in CELLS for tag, sc in SCALES]
+    cells = CELL_SETS[args.set]
+    out_dir = pathlib.Path(str(OUT) + OUT_SUFFIX[args.set] + ("_nodiv" if args.nodiv else ""))
+    want = set(args.scales.split(","))
+    scales = [(t, s) for t, s in SCALES if t in want]
+    jobs = [(n, c, tag, sc) for n, c in cells for tag, sc in scales]
     todo = [j for j in jobs if not (out_dir / f"{j[0]}_{j[1]}_{j[2]}.json").exists()]
     print(
-        f"{len(CELLS)} 格 × {len(SCALES)} 情境 = {len(jobs)} 筆；待跑 {len(todo)}（已存在者跳過）"
+        f"[{args.set}] {len(cells)} 格 × {len(scales)} 情境 = {len(jobs)} 筆；待跑 {len(todo)}（已存在者跳過）"
     )
     print(
-        f"視窗 {START} ~ {END}　資金 {CAPITAL:,.0f}　scope lw:long_window"
+        f"視窗 {START} ~ {END}　資金 {CAPITAL:,.0f}　scope 依配置（{args.set}）"
         f"　口徑 {'價格報酬（--no-dividends）' if args.nodiv else '含息'}"
     )
     if args.list:
