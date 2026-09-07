@@ -119,6 +119,20 @@ def bundle_backtest(
             }
             for u in result.unfilled
         ],
+        # D-085：股利明細。**沒有它就無法核對**——權益曲線只看得到「多了一筆錢」，
+        # 看不出那筆錢是哪一天、哪一檔、每股多少配出來的。首次跑完時就是因為缺這一欄，
+        # 報表印出「股利 0 筆」卻同時顯示 CAGR 上升 10pp，兩者無從對帳。
+        "dividends": [
+            {
+                "date": d.date.isoformat(),
+                "stock_id": d.stock_id,
+                "shares": d.shares,
+                "per_share": d.per_share,
+                "cash": d.cash,
+                "event_type": d.event_type,
+            }
+            for d in result.dividends
+        ],
         "final_holdings": [
             {
                 "stock_id": h.stock_id,
@@ -128,6 +142,7 @@ def bundle_backtest(
                 "weight": h.weight,
                 "entry_date": h.entry_date.isoformat() if h.entry_date else None,
                 "avg_cost": h.avg_cost,
+                "dividends": h.dividends,
                 "ret": h.ret,
                 "max_loss": h.max_loss,
             }
