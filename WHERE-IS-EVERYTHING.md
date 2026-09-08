@@ -1,4 +1,4 @@
-# 東西在哪（2026-09-06）
+# 東西在哪（2026-09-07）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
@@ -52,6 +52,8 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | `docs/HANDOFF-2026-09-06-tracks-and-gates.md` | **本輪完整交接**：進度、五個未解問題、產物清單 |
 | `docs/reports/backtest-results.md` | 結果的版控版（與 HTML 同源） |
 | `docs/specs/SPEC-013-two-track-strategies.md` | 雙軌策略的規格 |
+| `docs/reports/volume-lead-price-ic.md` | **量先價行鏈 9 因子 11 年 IC**（2026-09-07）：連買天數正、買超÷量反向、放量 U 型 |
+| `docs/research/PAPERS-KEYLEVELS.md` + DECISIONS **D-077** | 關鍵價位文獻 ＋ K 系列事前登記草稿（待裁決） |
 
 ## 4. 常用指令（都在 worktree 執行）
 
@@ -68,6 +70,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | 跑階梯 | `uv run --all-groups python scripts/run_ladder.py --capital 80000000 --out D:/project/twquant/data/ladder` |
 | 跑軌別 | `uv run --all-groups python scripts/run_tracks.py --tracks C1,C3 --out D:/project/twquant/data/tracks_c` |
 | 判定 | `scripts/t146_verdict.py`（D-066）、`scripts/d071_verdict.py`（D-071）、`scripts/d067_edges.py`（D-067） |
+| 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
 
@@ -93,6 +96,10 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 
 **③ 稀疏閘門相乘會歸零**（D-076）。每日 0~5 檔的事件乘上任何 30% 的池子，
 交集期望 0~1.5 檔。**疊閘門前先算交集大小**——本輪已因此作廢兩批實驗（M2/M3 曝險 3%、GALL 0%）。
+
+**④ 籌碼資料的三個硬邊界**（2026-09-07 實查）：`broker_trades.avg_price` 2022–2026 **全空**（主力成本只能用「淨買股數 × 日 VWAP」近似）；
+`shareholding_dispersion` 只有 **3 個週快照**（07-03／07-09／08-28，週抓沒穩定跑）；FinMind `TaiwanStockHoldingSharesPer`
+（2010 起）**只限 backer/sponsor 付費層**。分點 top-15 淨買超偏散戶（T-016 三因子皆負），「有人先買」要用**連續買超天數**定義。
 
 ## 7. 還在跑的東西
 
