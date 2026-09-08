@@ -113,6 +113,11 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-RM-both", "lw_rm_both"),  # 判定格
     ),
     # D-093：矩陣依基座需不需要 ML 分數拆兩半——**兩半的視窗不同，不能同批跑**。
+    "band_timing": (  # D-095：降周轉基座 × 三條擇時規則，檢定 D-094 的解釋
+        ("LW-C1band-faber", "lw_c1band_faber"),
+        ("LW-C1band-anto", "lw_c1band_anto"),
+        ("LW-C1band-mop", "lw_c1band_mop"),
+    ),
     "matrix_pub": (  # 五個公開因子基座 × 6 規則；2017-01-03 起
         ("LW-C1-faber", "lw_c1_faber"),
         ("LW-C1-anto", "lw_c1_anto"),
@@ -163,6 +168,7 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
 OUT_SUFFIX = {
     "public": "",
     "f1_timing": "_f1_timing",
+    "band_timing": "_bandtiming",
     "matrix_pub": "_matrix",
     "matrix_ml": "_matrix_ml",
     "revenue": "_revenue",
