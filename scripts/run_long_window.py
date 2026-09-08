@@ -113,6 +113,9 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-RM-both", "lw_rm_both"),  # 判定格
     ),
     # D-102：矩陣依基座需不需要 ML 分數拆兩半——**兩半的視窗不同，不能同批跑**。
+    "chip_feat": (  # D-103 第二段：籌碼特徵修正版的 F1
+        ("LW-F1c", "lw_f1c_revpool"),
+    ),
     "conc_timing": (  # D-099：50 檔版的 C1 × 三條擇時規則——檢定集中度假說
         ("LW-C1n50", "lw_c1_n50"),  # 基座（無 overlay），對照 LW-C1
         ("LW-C1n50-faber", "lw_c1n50_faber"),
@@ -174,6 +177,7 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
 OUT_SUFFIX = {
     "public": "",
     "f1_timing": "_f1_timing",
+    "chip_feat": "_chipfeat",
     "conc_timing": "_conctiming",
     "band_timing": "_bandtiming",
     "matrix_pub": "_matrix",

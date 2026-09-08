@@ -128,6 +128,37 @@ def lgbm_lw_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     return _scores_for_model(view, params, "lgbm_lw_dd_h60_")
 
 
+# ── 籌碼特徵修正版（D-103，sample_tag=lwc）────────────────────────────
+# 與 `ml.lgbm_lw_*` 的差別只有一個特徵（`chip.foreign_streak`）。前綴另立而非共用，
+# 理由同 T-172：薄因子以前綴取分數，共用會讓兩個模型的分數混進同一條線。
+
+
+@factor(
+    name="ml.lgbm_lwc_rev_15d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lwc_rev_h15_", "smooth_days": 0},
+)
+def lgbm_lwc_rev_15d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """營收驚奇分數（加 `chip.foreign_streak`）；語意同 `ml.lgbm_lw_rev_15d`。"""
+    return _scores_for_model(view, params, "lgbm_lwc_rev_h15_")
+
+
+@factor(
+    name="ml.lgbm_lwc_dd_60d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lwc_dd_h60_", "smooth_days": 0},
+)
+def lgbm_lwc_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """60 日回撤分數（加 `chip.foreign_streak`）；用途限制同 `ml.lgbm_lw_dd_60d`（只能當閘門）。"""
+    return _scores_for_model(view, params, "lgbm_lwc_dd_h60_")
+
+
 @factor(
     name="ml.lgbm_rev_15d",
     category="ml",
