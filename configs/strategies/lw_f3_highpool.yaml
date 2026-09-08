@@ -1,0 +1,43 @@
+# P5（D-092，事前登記）：與 track_f3_highpool.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+
+# F3「52 週高點池 × C1 技術排序」——F 系列的**更嚴對照格**（D-081 修訂）。
+#
+# 與 F1、F2 **逐字相同，只把池子因子換成 `price.high_52w`**。
+#
+# **這一格是看到單因子 IC 表之後才加的，明確揭露**：修復後的 F 模型 OOS RankIC
+# 是 **+0.0656**，而 `price.high_52w` 單獨對同一個營收驚奇標籤的 OOS RankIC 是
+# **+0.0837**——**一個公開因子單獨就贏過整個模型**。F2 的 `mom_60d`（+0.0627）
+# 已經逼近模型，high_52w 更高。
+#
+# 事後加對照組的方向是**變嚴不是變鬆**：原登記只要贏 M3，D-081 改成要贏 F2，
+# 這一格再要求贏 high_52w。若 F1 連這格都贏不了，「營收驚奇分數有經濟價值」
+# 這句話就沒有立足點。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_f3_highpool
+description: F3：52 週高點池 × C1 技術排序（F 系列的更嚴對照）（長窗口 P5 D-092）
+trial_scope: lw:long_window_all
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+  - factor: price.high_52w
+    keep_pct: 0.3
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+  - { factor: price.rs_market_20d, weight: 0.15 }
+require_all_factors: true
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []

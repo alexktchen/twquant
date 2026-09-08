@@ -1,0 +1,75 @@
+# R 系列（D-075，事前登記於任何訓練之前）：預測「未來 60 日大回撤」，
+# **用途寫死為風控閘門，不是選股器**。
+#
+# 為什麼是這個標的：本輪所有策略的共同痛點不是報酬而是回撤（L0-new −46.1%、
+# A −38.5%、C1 −36.7%），而 T-127 階梯已證明基本面濾網改善報酬但完全改善不了回撤。
+# 所以把「會不會大跌」當成獨立的預測問題，而不是在報酬模型裡多塞一個低波動因子。
+#
+# **標籤定義是寫死的**：相對 t 日收盤的最低點跌幅。**不得改回 run-max 版**——
+# 原版與 price.high_52w 共用「當下價位在區間中的位置」，實測換成本定義後
+# IC 衰減 13~41%，那一段是共用資訊不是預測力。
+#
+# 第一段判準（事前寫定）：OOS 回撤 RankIC ≥ +0.05 且 ≥ 70% 測試窗同號。
+# 門檻高於 F 系列的 +0.02，因為先導 IC 高一個量級；跑不出來即代表先導是樣本內假象。
+#
+# label 的方向：百分位**低＝跌得深**。第二段的閘門剔除分數最低的 10%。
+
+horizon_days: 60
+aux_horizons: []
+
+# 與 ml_f_revenue_surprise.yaml **逐字相同的特徵清單**——兩條線唯一的差別是標籤，
+# 這樣「R 的 IC 比 F 高」才能歸因到標籤本身而不是特徵選擇。
+# price.high_52w 是先導最強的訊號（對照版 IC +0.1194／IR 7.43）。
+# price.rs_market_20d 排除的理由同 F 配置（與 mom_20d 的 z 逐列相同，T-159）。
+features:
+  - chip.foreign_net_10d
+  - chip.inst_net_10d
+  - chip.margin_velocity_5d
+  - chip.short_margin_ratio # 先導：IC −0.1082／IR −7.94，50 期 0 期為正
+  - chip.trust_streak
+  - price.high_52w
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+context_features: []
+
+label:
+  transform: forward_drawdown
+  signal_dates: month_end
+  # 除息當天的價格跳空不是虧損；未還原時會被當成回撤（D-054 的同一個失效模式）。
+  total_return: true
+  # T-139／T-144：h=60 × 2.1 的跨距容忍，與 h20 配置的 42 同比例。
+  # 橫跨資料缺口的「60 日最低點」實際橫跨數年，模型會把它當成真實的極端回撤。
+  max_span_sessions: 126
+
+# **與 ml_h20_cost_aware.yaml 唯一的差異：embargo 20 → 60**（見 D-077）。
+# D-075 原寫「切分完全相同」，但 embargo < horizon 就是洩漏：訓練列在 train_end
+# 的 60 日標籤視窗會蓋掉測試段的前 40 個交易日。config.py 的
+# `_embargo_covers_horizon` 本來就會擋下 embargo 20 + horizon 60 的組合。
+# 這是訓練前、看到任何結果之前對規格內部矛盾的修正，不是事後調門檻。
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 60
+  vault_months: 6
+  days_per_year: 244
+  days_per_month: 21
+
+# 不調參（D-075 明文）。與 ml_h20_cost_aware.yaml 逐字相同。
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+
+refit:
+  schedule: monthly
+trials_log: research_log

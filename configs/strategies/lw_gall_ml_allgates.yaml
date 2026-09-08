@@ -1,0 +1,60 @@
+# P5（D-092，事前登記）：與 track_gall_ml_allgates.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，D-062）、trial_scope。未經部署裁決，勿用於實盤。
+# P2／P5b：model_id 與薄因子已改指**長窗口模型**（D-088 sample_tag=lw）；短窗口 pin 不得混用（T-172）。
+
+# GALL「ML ＋ 全部六個濾網」
+#
+# **家族：G 系列（ML 濾網矩陣）。事前登記見 DECISIONS D-072。**
+#
+# 基準是 L0-new（ML 訊號、20 檔等權、無額外濾網），本格 = 基準 **只加這一個濾網**。
+# 故「這個濾網值多少」= 本格 − L0-new，是乾淨的邊際效果。
+#
+# 六個濾網同時上。**這一格不是用來挑冠軍的**——它回答的是「全部疊起來會不會互相抵銷」。濾網之間可能重複（例如 G2 低波動與 G5 大型股高度相關），疊加的效果通常小於各自邊際效果之和。
+#
+# **判讀規則（D-072 事前寫定）**：本批格數多，「最好的那格」幾乎必然是運氣。
+# 正確讀法是**每個濾網的邊際效果**，不是挑冠軍。挑冠軍即規格搜尋，DSR 會被稀釋。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_gall_ml_allgates
+description: G 系列 GALL：ML + 全部六個濾網一起（長窗口 P5 D-092）
+trial_scope: lw:long_window_all_ml
+universe:
+  markets:
+  - TWSE
+  - TPEX
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+  min_revenue_yoy: 0.1
+  max_revenue_yoy: 1.5
+  min_revenue_streak: 3
+  mktcap_rank_max: 100
+combine: rank_avg
+signals:
+- factor: ml.lgbm_lw_net_20d
+  weight: 0.5
+  params:
+    model_id: lgbm_lw_net_h20_20260225_83890036
+    smooth_days: 10
+- factor: price.flag_hold_50d
+  weight: 0.5
+selection:
+  method: top_n
+  top_n: 20
+weighting: fixed_slot
+max_weight_per_stock: 0.1
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays:
+- vol_target_scaling
+prefilter:
+- factor: price.vol_20d
+  keep_pct: 0.5
+overlay_params:
+  vol_target_scaling:
+    target_vol: 0.2
+    window: 60
+    min_mult: 0.2
+require_all_factors: true

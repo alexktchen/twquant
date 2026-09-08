@@ -53,7 +53,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | `docs/reports/backtest-results.md` | 結果的版控版（與 HTML 同源） |
 | `docs/specs/SPEC-013-two-track-strategies.md` | 雙軌策略的規格 |
 | `docs/reports/volume-lead-price-ic.md` | **量先價行鏈 9 因子 11 年 IC**（2026-09-07）：連買天數正、買超÷量反向、放量 U 型 |
-| `docs/research/PAPERS-KEYLEVELS.md` + DECISIONS **D-077** | 關鍵價位文獻 ＋ K 系列事前登記草稿（待裁決） |
+| `docs/research/PAPERS-KEYLEVELS.md` + DECISIONS **D-093** | 關鍵價位文獻 ＋ K 系列事前登記草稿（待裁決） |
 
 ## 4. 常用指令（都在 worktree 執行）
 

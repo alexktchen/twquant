@@ -43,6 +43,7 @@ from twquant.data.warehouse import Warehouse
 
 # 實際被引用為基準的 ETF。新增基準時要一併加進來，否則它的缺口不會被修。
 BENCHMARKS = ("0050", "0056", "006208")
+# `--symbols` 可覆蓋預設清單：新增基準時不必改程式碼（例：櫃買指數型 006201、中型 100 0051）
 # 預設涵蓋 2023 的缺腿期；`--from/--to` 可指向其他區間（如 0050 的 2025-06 分割停牌）
 DEFAULT_LO, DEFAULT_HI = dt.date(2023, 1, 1), dt.date(2023, 8, 31)
 _TOL = 1e-6
@@ -97,11 +98,17 @@ def _fetch(sid: str, token: str, lo: dt.date, hi: dt.date) -> pl.DataFrame:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--lake", default="D:/project/twquant/data/lake_rebuild")
+    ap.add_argument(
+        "--symbols",
+        default="",
+        help="逗號分隔的代號；空＝預設的三檔基準 ETF",
+    )
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--from", dest="lo", type=dt.date.fromisoformat, default=DEFAULT_LO)
     ap.add_argument("--to", dest="hi", type=dt.date.fromisoformat, default=DEFAULT_HI)
     args = ap.parse_args()
+    syms = tuple(x.strip() for x in args.symbols.split(",") if x.strip()) or BENCHMARKS
     lo, hi = args.lo, args.hi
     if not (args.check or args.write):
         raise SystemExit("請指定 --check 或 --write")
@@ -109,7 +116,7 @@ def main() -> None:
     cfg = ServingConfig(pg_schema="serving")
     token = _token()
     frames = []
-    for i, sid in enumerate(BENCHMARKS):
+    for i, sid in enumerate(syms):
         if i:
             time.sleep(_SLEEP)  # 與正在跑的 T-116 回補共用配額，不得超速
         df = _fetch(sid, token, lo, hi)
@@ -122,7 +129,7 @@ def main() -> None:
             f"SELECT date, stock_id, open, high, low, close, volume, amount "
             f'FROM "{cfg.pg_schema}".prices_daily '
             "WHERE stock_id = ANY(%s) AND date BETWEEN %s AND %s",
-            (list(BENCHMARKS), lo, hi),
+            (list(syms), lo, hi),
         )
         rows = cur.fetchall()
     pg = pl.DataFrame(

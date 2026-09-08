@@ -64,9 +64,26 @@ def universe_ids(view: PitView, signal_date: dt.date, cfg: UniverseConfig) -> li
     at = lf.filter(pl.col("date") == signal_date)
 
     at = at.filter(pl.col("stock_id").str.contains(_COMMON_STOCK))
+    # D-062：相對門檻的切點**在衛生濾網與 min_price 之前**算，母體是「當日有 ADV 的
+    # 四碼普通股全體」。同 T-121 的市值排名母體：「ADV 前 30%」是市場事實，不該隨我們
+    # 調 max_jump_ratio／hygiene_lookback／min_price 而變動——否則換一個無關的參數就會
+    # 讓流動性門檻跟著移，而那個移動不會出現在任何一份結果的說明裡。
+    # 母體與 `scripts/universe_drift.py` 的量測逐字相同，故該處量到的穩定度可直接套用。
+    adv_cut: float | None = None
+    if cfg.min_adv_pctl is not None:
+        # quantile 忽略 null（不足 20 日者），故母體自動等於「有 ADV 的那些」。
+        #
+        # interpolation 用 **linear**，不是 polars 的 "nearest"：切點之後是 `_adv >= cut`，
+        # 而 "nearest"／"lower" 會把切點本身那一檔也留下來，於是 n=10 時保留 4 檔而非 3 檔。
+        # 在 1,800 檔的真實橫斷面上差 0.06% 可忽略，但「保留前 30%」應該字面成立，
+        # 而不是「大約 30% 再多一檔」。`scripts/universe_drift.py` 用同一種，兩邊才可比。
+        cut = at.select(pl.col("_adv").quantile(cfg.min_adv_pctl, "linear")).collect().item()
+        adv_cut = None if cut is None else float(cut)
     at = at.filter(~pl.col("_badw"))
     if cfg.min_adv_twd is not None:
         at = at.filter(pl.col("_adv") >= cfg.min_adv_twd)
+    if adv_cut is not None:
+        at = at.filter(pl.col("_adv") >= adv_cut)
     if cfg.min_price is not None:
         at = at.filter(pl.col("close") >= cfg.min_price)
     ids = sorted(at.select("stock_id").collect()["stock_id"].to_list())

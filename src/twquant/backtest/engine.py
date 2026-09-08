@@ -46,6 +46,23 @@ class Trade:
 
 
 @dataclass(frozen=True)
+class Dividend:
+    """除息／除權當日的現金入帳一筆（D-085 選項 A）。
+
+    `per_share` 由 `corporate_events.adj_factor` 反推：`前收 × (1 − adj_factor)`。
+    **股票股利與權息一律折算成現金**——不是真實現金流，但總報酬正確，
+    且避免產生非整股部位（那會撐破 `PaperBroker` 的 `tol_cash`，擋住實盤）。
+    """
+
+    date: dt.date
+    stock_id: str
+    shares: int
+    per_share: float
+    cash: float
+    event_type: str
+
+
+@dataclass(frozen=True)
 class Unfilled:
     date: dt.date
     stock_id: str
@@ -62,6 +79,7 @@ class _Lot:
     cost_shares: int  # 本輪累計買入股數
     cost_amount: float  # 本輪累計買入價金（不含費用）
     min_close: float  # 持有期間最低收盤（含進場日）
+    dividends: float = 0.0  # 本輪已收到的股利現金（D-085）；歸零出場時隨 lot 一起消失
 
 
 @dataclass(frozen=True)
@@ -75,7 +93,9 @@ class Holding:
     weight: float  # value / final_equity
     entry_date: dt.date | None = None  # 本輪首買日
     avg_cost: float = 0.0  # 本輪加權平均買進價（不含費用）
-    ret: float = 0.0  # last_close / avg_cost − 1
+    # D-085：含息報酬。未計股利時除息會顯示成虧損——那是價格跳空，不是賠錢。
+    dividends: float = 0.0  # 本輪已收到的股利現金
+    ret: float = 0.0  # (last_close + 每股已收股利) / avg_cost − 1
     max_loss: float = 0.0  # 持有期間最低收盤 vs 成本（≤0，MAE）
 
 
@@ -88,6 +108,10 @@ class BacktestResult:
     initial_capital: float
     final_equity: float
     final_holdings: list[Holding] = field(default_factory=list)
+    dividends: list[Dividend] = field(default_factory=list)  # D-085：可稽核的股利明細
+    # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
+    # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
+    credit_dividends: bool = True
 
 
 @dataclass
@@ -98,6 +122,7 @@ class _State:
     lots: dict[str, _Lot] = field(default_factory=dict)  # 本輪持有批次（成本/首買日/MAE）
     ledger: list[Trade] = field(default_factory=list)
     unfilled: list[Unfilled] = field(default_factory=list)
+    dividends: list[Dividend] = field(default_factory=list)
     traded_notional: float = 0.0
 
 
@@ -117,6 +142,76 @@ def _price_panel(wh: TableSource, start: dt.date, end: dt.date) -> dict[dt.date,
     for r in lf.collect().to_dicts():
         by_date.setdefault(r["date"], {})[r["stock_id"]] = r
     return by_date
+
+
+# D-085：只有這三種是「配發給股東的東西」，可折算成現金。
+# **分割／反分割不在此列**：1:4 分割的 adj_factor 是 0.25，照同一條公式會把
+# 七成五的部位價值當成現金發下去——那是憑空生錢。分割要改的是**股數**，
+# 屬另一個缺陷（T-168），本函數明確不碰。
+_DIVIDEND_EVENTS = frozenset({"cash_dividend", "cash_and_stock_dividend", "stock_dividend"})
+
+
+def _dividends_by_date(
+    wh: TableSource, start: dt.date, end: dt.date
+) -> dict[dt.date, list[tuple[str, float, str]]]:
+    """{除息日: [(stock_id, adj_factor, event_type)]}。查無 `corporate_events` → 空表。
+
+    `adj_factor >= 1` 的列一律略過：那不是配發（實測 11 列，多為反分割與資料異常），
+    照公式會算出負的股利。
+    """
+    try:
+        lf = wh.scan("corporate_events")
+    except Exception:  # noqa: BLE001 - 供應層沒有這張表時退回「無股利」，由呼叫端的旗標把關
+        return {}
+    cols = lf.collect_schema().names()
+    if not {"date", "stock_id", "adj_factor"} <= set(cols):
+        return {}
+    et = pl.col("event_type") if "event_type" in cols else pl.lit("unknown")
+    df = (
+        lf.select("date", "stock_id", "adj_factor", et.alias("event_type"))
+        .filter(
+            pl.col("date").is_between(start, end)
+            & pl.col("adj_factor").is_not_null()
+            & (pl.col("adj_factor") > 0.0)
+            & (pl.col("adj_factor") < 1.0)
+            & pl.col("event_type").is_in(list(_DIVIDEND_EVENTS))
+        )
+        .collect()
+    )
+    out: dict[dt.date, list[tuple[str, float, str]]] = {}
+    for r in df.to_dicts():
+        out.setdefault(r["date"], []).append(
+            (str(r["stock_id"]), float(r["adj_factor"]), str(r["event_type"]))
+        )
+    return out
+
+
+def _credit_dividends(state: _State, day: dt.date, events: list[tuple[str, float, str]]) -> None:
+    """除息日把現金入帳。**必須在當日收盤價更新之前呼叫**——每股金額要用
+    除息**前**的收盤（`state.last_close` 此刻仍是昨收）。用除息後的價格會少算。"""
+    for sid, adj, etype in events:
+        shares = state.holdings.get(sid)
+        if not shares:
+            continue
+        prev_close = state.last_close.get(sid)
+        if prev_close is None or prev_close <= 0.0:
+            continue
+        per_share = prev_close * (1.0 - adj)
+        cash = per_share * shares
+        state.cash += cash
+        lot = state.lots.get(sid)
+        if lot is not None:
+            lot.dividends += cash
+        state.dividends.append(
+            Dividend(
+                date=day,
+                stock_id=sid,
+                shares=shares,
+                per_share=per_share,
+                cash=cash,
+                event_type=etype,
+            )
+        )
 
 
 def _limit_up(row: _Row) -> float | None:
@@ -290,8 +385,15 @@ def run_backtest(
     warehouse: TableSource,
     initial_capital: float = 10_000_000.0,
     max_participation: float = 0.05,
+    credit_dividends: bool = True,
 ) -> BacktestResult:
-    """跑回測，回傳 BacktestResult（權益曲線、ledger、unfilled、指標）。"""
+    """跑回測，回傳 BacktestResult（權益曲線、ledger、unfilled、指標）。
+
+    `credit_dividends=False` 關掉 D-085 的股利入帳，回到**價格報酬**口徑。
+    存在的理由是 D-086：含息與不含息兩次相減，才分離得出「股利本身」與
+    「部位變大之後撞參與率上限」——後者實測占了 A 軌 47.3M 期末差裡的 13.6M。
+    **不是預設**：真實投資人收得到股利，關掉它只是為了做對照。
+    """
     from twquant.data import calendar as cal
     from twquant.strategy.build import build_targets, signal_dates
 
@@ -307,8 +409,14 @@ def run_backtest(
     pending: dict[str, float] | None = None
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
+    div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
     for day in sessions:
         day_px = by_date.get(day, {})
+        # D-085：**先入帳再更新收盤**。每股金額要用除息前的收盤，而 `state.last_close`
+        # 此刻仍是昨收；等下面的迴圈跑完就變成除息後的價格了，會少算。
+        todays = div_by_date.get(day)
+        if todays:
+            _credit_dividends(state, day, todays)
         for sid, row in day_px.items():  # 更新最後收盤（停牌沿用）
             if row.get("close") is None:
                 continue
@@ -359,6 +467,9 @@ def run_backtest(
         px = state.last_close.get(sid, 0.0)
         lot = state.lots.get(sid)
         avg = lot.cost_amount / lot.cost_shares if lot and lot.cost_shares > 0 else 0.0
+        div = lot.dividends if lot else 0.0
+        # D-085：每股已收股利攤回單價再比成本；否則除息會顯示成虧損（那是價格跳空）
+        dps = div / sh if sh > 0 else 0.0
         return Holding(
             stock_id=sid,
             shares=sh,
@@ -367,7 +478,8 @@ def run_backtest(
             weight=(sh * px) / final_equity if final_equity > 0 else 0.0,
             entry_date=lot.entry_date if lot else None,
             avg_cost=avg,
-            ret=(px / avg - 1.0) if avg > 0 else 0.0,
+            dividends=div,
+            ret=((px + dps) / avg - 1.0) if avg > 0 else 0.0,
             max_loss=min(0.0, lot.min_close / avg - 1.0) if lot and avg > 0 else 0.0,
         )
 
@@ -383,4 +495,6 @@ def run_backtest(
         initial_capital=initial_capital,
         final_equity=final_equity,
         final_holdings=final_holdings,
+        dividends=state.dividends,
+        credit_dividends=credit_dividends,
     )

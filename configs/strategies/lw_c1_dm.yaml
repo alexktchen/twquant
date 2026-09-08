@@ -1,0 +1,51 @@
+# P7（D-092，事前登記）：純技術面 × Daniel-Moskowitz (2016, JFE)：空頭**且**高波動才降曝險。
+# 與 lw_c1_breakout.yaml **逐字相同，只多一層 overlay**。所有參數固定不掃（Zakamulin 2014）。
+# 六條規則在同一個基座上並排，才分得出「有沒有用」與「哪一條有用」。
+# 未經部署裁決，勿用於實盤。
+
+# lw_c1_breakout——長窗口（D-087 事前登記）。**判準先寫定，不事後挑。**
+#
+# 與 `track_c1_breakout.yaml` **逐字相同，只換兩件事**：
+#   1. 流動性門檻由絕對（`min_adv_twd`）改為相對（`min_adv_pctl: 0.70`，保留 ADV 前 30%）
+#      ——D-062 裁決。絕對門檻的留存率有九成八由當年成交熱度解釋（r = +0.982），
+#      跨期樣本不可比；相對門檻的標準差由 5.29pp 降到 0.42pp。
+#   2. 視窗改為 2017-01-03 ~ 2026-02-28（保險庫邊界不變）。
+#
+# **與既有 113 筆完全不可比**：引擎現在會收股利（D-085），這裡是含息報酬；
+# 而且視窗、宇宙定義都不同。只能與本家族的其他格、以及含息基準比。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_c1_dm
+description: C1 純技術面飆股：52 週高點 × 中期動能 × 異常放量 × 相對強弱（不排大型股、無獲利門檻）（長窗口 D-087）（＋Daniel-Moskowitz (2016, JFE) P7）
+trial_scope: lw:overlay_matrix
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 } # George–Hwang 2004：主訊號
+  - { factor: price.mom_60d, weight: 0.25 } # Jegadeesh–Titman 1993
+  - { factor: volume.turnover_z_20d, weight: 0.25 } # Gervais et al. 2001
+  - { factor: price.rs_market_20d, weight: 0.15 }
+# 四項不齊全即不入選：rank_avg 對「存在的列」求和，缺項者分數虛高（D-061／R12）
+require_all_factors: true
+
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: [crash_risk_gate]
+overlay_params:
+  crash_risk_gate:
+    index_id: TAIEX
+    bear_window: 488
+    vol_window: 60
+    vol_threshold: 0.25
+    floor: 0.0

@@ -4,7 +4,7 @@
 指令：`TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors <因子> --horizons 1,5,10,20,60 --data-dir D:/project/twquant/data`
 
 **本表只填量，不下策略結論。** 起因是使用者提問「量先價行：先有成交量、法人買賣超、券商分點、主力籌碼、主力持股，
-然後股價才發動——有沒有文獻、做不做得出來」。文獻整理在 DECISIONS **D-077** 與
+然後股價才發動——有沒有文獻、做不做得出來」。文獻整理在 DECISIONS **D-093** 與
 [docs/research/PAPERS-KEYLEVELS.md](../research/PAPERS-KEYLEVELS.md)；本文件只記本專案資料上量到什麼。
 
 ## 讀數規則（引用本表前先讀）
@@ -63,5 +63,5 @@ RankIC 均值（日頻 t；括號內 t÷√h）。LS = 前向 h 日報酬第五�
 
 ## 後續
 
-- 事前登記草稿：DECISIONS **D-077**（K 系列：關鍵價位定位 ＋ 回踩站穩後續漲分類，四段式證偽）。
+- 事前登記草稿：DECISIONS **D-093**（K 系列：關鍵價位定位 ＋ 回踩站穩後續漲分類，四段式證偽）。
 - 未做：OOS 窗（D-006 規格）的重跑、市值／產業中性化、成本後版本。做之前各自登記。

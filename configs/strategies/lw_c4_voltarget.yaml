@@ -1,0 +1,59 @@
+# 長窗口版（D-091，事前登記）：與 track_c4_voltarget.yaml **逐字相同，只改三處**——
+# 名稱、流動性門檻（絕對金額 → 相對前 30%，與 D-087 四格一致，D-062）、trial_scope。
+# 問的問題：**風控層能不能把丙層（MDD > 40%）的架構救回乙層或甲層。**
+# 未經部署裁決，勿用於實盤。
+
+# C4「風險管理動能」——與 C1 **逐字相同，只多一個 overlay**。
+#
+# 這個「只差一件事」是刻意的：C4 − C1 這條邊乾淨地量出**波動率縮放值多少**，
+# 不與選股訊號混在一起。同一個做法在 ML 那邊已經用過（X1 − L0 隔離訊號），
+# 而且正是它讓我們發現「架構的貢獻遠大於訊號」。
+#
+# 為什麼是這個 overlay：Barroso & Santa-Clara (2015, JFE)「Momentum Has Its Moments」
+# 用近期已實現波動率縮放動能部位，把組合的事後波動率壓到常數目標，實證上大致讓
+# Sharpe 翻倍、極端左尾大幅收斂。Daniel & Moskowitz (2016, JFE)「Momentum Crashes」
+# 指出動能在空頭＋高波動時崩得最慘——那正是本專案量到的病：
+#   A 軌 MDD −38.5%、ML（L0new）MDD −46.1%、四因子 X1 MDD −33.8%
+# 三者的報酬都不差，差的是拿報酬的方式太貴。
+#
+# target_vol: 0.20 的來源不是調參，是對照組：0050 含息在同窗（2022-07~2026-02）
+# 的年化波動率約 20%（CAGR +40.08%／Sharpe 1.63 → σ ≈ 0.245；取 0.20 略保守）。
+# 目標設成「與市值型 ETF 同一個風險預算」，這樣「有沒有打敗大盤」才是同風險下的比較。
+#
+# window: 60 是估計窗（Barroso–Santa-Clara 原文用 6 個月日報酬；60 個交易日約 3 個月，
+# 在反應速度與估計雜訊之間取中）。min_mult: 0.2 是曝險下限，避免極端行情下完全踏空。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_c4_voltarget
+description: C4 風險管理動能：C1 訊號 × Barroso–Santa-Clara 波動率縮放（隔離「風險管理值多少」）（長窗口 D-091）
+trial_scope: lw:long_window_risk
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 }
+  - { factor: price.mom_60d, weight: 0.25 }
+  - { factor: volume.turnover_z_20d, weight: 0.25 }
+  - { factor: price.rs_market_20d, weight: 0.15 }
+require_all_factors: true
+
+selection: { method: top_n, top_n: 20 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+
+# ← 與 C1 的唯一差異
+overlays: [vol_target_scaling]
+overlay_params:
+  vol_target_scaling:
+    target_vol: 0.20
+    window: 60
+    min_mult: 0.2

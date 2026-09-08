@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import random
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 import pytest
@@ -229,3 +231,116 @@ def test_ac3_guard_catches_lookahead(tmp_path: Path) -> None:
     wh = _warehouse(tmp_path, days=10)
     with pytest.raises(AssertionError, match="前視"):
         assert_no_lookahead("price.bad_lookahead", wh, [dt.date(2026, 6, 5), dt.date(2026, 6, 8)])
+
+
+# ── T-107／T-108（D-051／D-052 建議甲）：MAD = 0 的橫斷面被壓成常數 ──────────
+
+
+def _sparse_frame(day: dt.date, zeros: int, tail: list[float]) -> pl.DataFrame:
+    """稀疏因子的橫斷面：`zeros` 檔同為 0（→ MAD = 0），其餘幾檔有值。"""
+    vals = [0.0] * zeros + tail
+    return pl.DataFrame(
+        {
+            "date": [day] * len(vals),
+            "stock_id": [f"{i:04d}" for i in range(len(vals))],
+            "factor": ["chip.trust_streak"] * len(vals),
+            "value": vals,
+        }
+    )
+
+
+def test_ac1_sparse_factor_is_not_collapsed_to_a_constant() -> None:
+    """AC-1（T-107）：過半同值時，標準化不得把整個橫斷面壓成常數。
+
+    重現的缺陷：`winsorize_mad` 在 MAD = 0 時上下界同為 median，`clip` 使橫斷面變常數，
+    z 全為 0。實測 2025-06-30 的 `chip.trust_streak` 有 16 個相異原始值、**1 個相異 z**
+    ——因子被標準化關掉了，而沒有任何一關報錯（黃金規則 5 的同型失效）。
+    """
+    from twquant.factors.standardize import winsorize_mad, zscore
+
+    df = _sparse_frame(dt.date(2024, 1, 2), zeros=14, tail=[1.0, 2.0, 3.0, 7.0])
+    broken = zscore(winsorize_mad(df))
+    assert broken["value"].n_unique() == 1, "舊路徑確實把橫斷面壓成常數（缺陷重現）"
+
+    fixed = standardize(df)
+    assert fixed["value"].n_unique() == 5, "同分取平均名次 → 4 個非零值＋1 組零值"
+    # 單調：原始值的順序必須被保留（Spearman IC 不變是這個修法的立論基礎）
+    pairs = sorted(zip(df["value"].to_list(), fixed["value"].to_list(), strict=True))
+    assert [b for _, b in pairs] == sorted(b for _, b in pairs)
+
+
+def test_ac2_dense_factor_is_bit_identical_after_the_fix() -> None:
+    """AC-2（T-108）：MAD > 0 的橫斷面走與先前**逐位元相同**的路徑。
+
+    這是修法可以直接上線的前提——既有模型與回測的數字不得被順手改掉。
+    """
+    from twquant.factors.standardize import winsorize_mad, zscore
+
+    rng = random.Random(20260906)
+    day = dt.date(2024, 1, 2)
+    dense = pl.DataFrame(
+        {
+            "date": [day] * 200,
+            "stock_id": [f"{i:04d}" for i in range(200)],
+            "factor": ["price.mom_20d"] * 200,
+            "value": [rng.gauss(0.0, 1.0) for _ in range(200)],
+        }
+    )
+    assert standardize(dense)["value"].to_list() == zscore(winsorize_mad(dense))["value"].to_list()
+
+    # 同一批裡同時有稀疏與密集因子時，路由必須逐 (date, factor) 各走各的
+    mixed = pl.concat([dense, _sparse_frame(day, zeros=14, tail=[1.0, 2.0, 3.0, 7.0])])
+    out = standardize(mixed)
+    assert (
+        out.filter(pl.col("factor") == "price.mom_20d")["value"].to_list()
+        == zscore(winsorize_mad(dense))["value"].to_list()
+    )
+    assert out.filter(pl.col("factor") == "chip.trust_streak")["value"].n_unique() == 5
+
+
+def test_ac3_rank_path_is_invariant_to_the_magnitude_of_outliers() -> None:
+    """AC-3：排名路徑只看**順序**，不看數值大小——這正是它勝過 D-051 option B 的地方。
+
+    option B（MAD = 0 時跳過截尾）把原始尺度直接餵給 z-score，於是一檔離群值
+    有多離群就會改變當日**每一個** z（實測 |z| 中位約 10、p99 17~25）。
+    排名轉換下，把 1e6 換成 8.0 之後每一個 z 逐位元不變。
+
+    另驗標準化的契約仍成立（均值 0、標準差 1），以及無資訊的同分大群靠近 0。
+    """
+    day = dt.date(2024, 1, 2)
+    huge = standardize(_sparse_frame(day, zeros=180, tail=[1.0, 5.0, 900.0, 1e6]))["value"]
+    mild = standardize(_sparse_frame(day, zeros=180, tail=[1.0, 5.0, 6.0, 8.0]))["value"]
+    assert huge.to_list() == mild.to_list(), "同一組順序必須得到同一組 z"
+
+    assert huge.mean() == pytest.approx(0.0, abs=1e-12)
+    assert huge.std() == pytest.approx(1.0, rel=1e-9)
+    # 180 檔同分（無資訊）擠在 0 附近；只有真正有值的少數幾檔被推到尾端
+    assert float(cast("float", huge.abs().min())) < 0.2
+    assert int((huge.abs() > 3.0).sum()) <= 4, "尾端只能是真的有相異值的那幾檔"
+
+    # 對照：option B 在同一組資料上，離群值的大小會改變當日每一個 z
+    from twquant.factors.standardize import zscore
+
+    b_huge = zscore(_sparse_frame(day, zeros=180, tail=[1.0, 5.0, 900.0, 1e6]))["value"]
+    b_mild = zscore(_sparse_frame(day, zeros=180, tail=[1.0, 5.0, 6.0, 8.0]))["value"]
+    assert b_huge.to_list() != b_mild.to_list()
+
+
+def test_ac3_all_identical_cross_section_stays_zero() -> None:
+    """AC-3：整個橫斷面真的只有一個值時，輸出仍是 0——那時候本來就沒有排序可言。"""
+    df = _sparse_frame(dt.date(2024, 1, 2), zeros=20, tail=[])
+    assert standardize(df)["value"].to_list() == [0.0] * 20
+
+
+def test_ac3_non_finite_values_survive_the_rank_path() -> None:
+    """AC-3：非有限值原樣保留（同 `zscore` 的既有契約），由下游 filter 剔除。"""
+    df = _sparse_frame(dt.date(2024, 1, 2), zeros=14, tail=[1.0, 2.0, 3.0, 7.0]).with_columns(
+        pl.when(pl.col("stock_id") == "0000")
+        .then(float("inf"))
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    out = standardize(df)
+    assert out.filter(pl.col("stock_id") == "0000")["value"][0] == float("inf")
+    rest = out.filter(pl.col("stock_id") != "0000")["value"]
+    assert rest.is_finite().all(), "單一非有限值不得污染整個橫斷面"
