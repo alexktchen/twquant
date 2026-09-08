@@ -113,6 +113,11 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-RM-both", "lw_rm_both"),  # 判定格
     ),
     # D-102：矩陣依基座需不需要 ML 分數拆兩半——**兩半的視窗不同，不能同批跑**。
+    "diversify": (  # D-104：分散度階梯——最大的兩個槓桿疊加 ＋ 檔數往上推
+        ("LW-C1n50v", "lw_c1_n50v"),  # 本批主角
+        ("LW-C1n100", "lw_c1_n100"),
+        ("LW-C1n100v", "lw_c1_n100v"),
+    ),
     "chip_feat": (  # D-103 第二段：籌碼特徵修正版的 F1
         ("LW-F1c", "lw_f1c_revpool"),
     ),
@@ -177,6 +182,7 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
 OUT_SUFFIX = {
     "public": "",
     "f1_timing": "_f1_timing",
+    "diversify": "_diversify",
     "chip_feat": "_chipfeat",
     "conc_timing": "_conctiming",
     "band_timing": "_bandtiming",
