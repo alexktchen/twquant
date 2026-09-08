@@ -31,6 +31,10 @@ app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
+# 洞悉分析在 pipeline 的參數：N 為 D-081(b) 的事前登記值；窗口與 sector-flows 預設一致。
+_INSIGHT_TOP_N = 30
+_SECTOR_WINDOW = 20
+
 
 def _force_utf8_output() -> None:
     """Windows 主控台預設 cp950，中文輸出會亂碼；把 stdout/stderr 重設為 UTF-8。"""
@@ -1049,6 +1053,71 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         res = scr.snapshot(scfg, day, day)
         return f"{res['rows']} 列" if res["rows"] else "無可快照資料（尚無當日供應層資料）"
 
+    def _recommendation_step() -> str:
+        # L0 名單（T-225）：對當日全宇宙推論 → 匯出推薦快照。best-effort，不擋主線。
+        # 用哪個模型由 configs/ml.yaml 的 production_ranking_model 明寫（T-224）——
+        # 未綁定時略過而不是自動選，因為八個模型的 train_end 全同、自動選會挑到風控模型。
+        from twquant.reporting.recommendation_export import export_scores
+
+        bound = _load_ml().production_ranking_model
+        if not bound:
+            return "未綁定生產模型（configs/ml.yaml production_ranking_model），略過"
+        root = Path(cfg.data_dir) / "models"
+        mdir = root / bound
+        if not (mdir / "meta.json").exists():
+            return f"找不到綁定的模型 {bound}，略過"
+        scores_path = mdir / f"scores_{day}.parquet"
+        if not scores_path.exists():
+            _ml_score_day(day, mdir, scores_path)
+        result = export_scores(scores_path, mdir, Path(cfg.data_dir), day)
+        return f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}"
+
+    def _insight_step() -> str:
+        # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
+        # 前提是當日已有推薦快照；沒有就是正常的「沒有 L0 名單可分析」，不是錯誤。
+        from twquant.data.serving import store
+        from twquant.insight.client import InsightClient
+        from twquant.insight.config import load_llm_config
+        from twquant.reporting.insight_run import run_id_for_day, run_insights
+        from twquant.reporting.insight_sources import (
+            fetch_industry_of,
+            fetch_industry_rows,
+            fetch_sections,
+        )
+        from twquant.reporting.recommendation_snapshot import select_snapshots
+
+        data_dir = Path(cfg.data_dir)
+        run_id = run_id_for_day(data_dir, day)
+        if run_id is None:
+            return "當日無推薦快照，略過"
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過（display-only）"
+        as_of = select_snapshots(data_dir, run_id=run_id).runs[0].as_of
+        conn = store.connect(scfg)
+        try:
+            industries = fetch_industry_rows(conn, scfg.pg_schema, as_of, _SECTOR_WINDOW)
+            summary = run_insights(
+                data_dir,
+                recommendation_run_id=run_id,
+                top_n=_INSIGHT_TOP_N,
+                client=InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir),
+                now=now_tw(),
+                fetch_sections=lambda sid: fetch_sections(
+                    conn,
+                    scfg.pg_schema,
+                    sid,
+                    as_of,
+                    industries.get(fetch_industry_of(conn, scfg.pg_schema, sid) or ""),
+                ),
+            )
+        finally:
+            conn.close()
+        return (
+            f"分析 {summary.analysed}、缺席 {summary.absent}、新存 {summary.saved}、"
+            f"沿用 {summary.reused}、失敗 {len(summary.failures)}"
+        )
+
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
@@ -1056,6 +1125,8 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
+        PipelineStep("ML 推薦名單", _recommendation_step),
+        PipelineStep("洞悉分析", _insight_step),
     ]
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
 
@@ -2024,6 +2095,96 @@ def archive_restore(
     typer.secho(f"[OK] {day} 還原完成（既有主鍵不覆寫）", fg=typer.colors.GREEN)
 
 
+@app.command(name="recommendations-import")
+def recommendations_import(
+    source: str = typer.Argument(..., help="已存在的推薦快照 JSON（依 SPEC-014 §4 驗證）"),
+    out: str = typer.Option("", help="快照資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """受控匯入既有 ML 推薦快照；不會訓練、推論或改寫既有 run。"""
+    from twquant.reporting.recommendation_snapshot import import_snapshot
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    result = import_snapshot(source, data_dir)
+    action = "已保存" if result.created else "內容相同，保留既有快照"
+    typer.secho(f"[OK] {action}：{result.path}", fg=typer.colors.GREEN)
+
+
+@app.command(name="insights-run")
+def insights_run(
+    run: str = typer.Option(..., help="推薦快照 run_id（先跑 ml export-recommendations）"),
+    top: int = typer.Option(30, help="分析前 N 檔候選（D-081b 事前登記 N=30）"),
+    out: str = typer.Option("", help="資料根目錄；空＝configs/system.yaml data_dir"),
+    window: int = typer.Option(20, help="產業資金流的回看交易日數"),
+) -> None:
+    """對推薦快照的前 N 檔候選組證據包並產生洞悉分析（SPEC-014 §6、PLAN §3.3）。
+
+    每檔獨立：任一檔失敗只記錄，其餘照常完成。LLM 離線或超預算時仍會保存證據包
+    並寫明缺席原因——洞悉是增強不是依賴。相同輸入重跑為冪等，不會產生重複版本。
+    """
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.insight.client import InsightClient
+    from twquant.insight.config import load_llm_config
+    from twquant.reporting.insight_run import run_insights
+    from twquant.reporting.insight_sources import (
+        fetch_industry_of,
+        fetch_industry_rows,
+        fetch_sections,
+    )
+    from twquant.reporting.recommendation_snapshot import select_snapshots
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    catalog = select_snapshots(data_dir, run_id=run)
+    if not catalog.runs:
+        raise typer.BadParameter(f"找不到推薦快照 run_id={run}")
+    as_of = catalog.runs[0].as_of
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        industries = fetch_industry_rows(conn, scfg.pg_schema, as_of, window)
+
+        def sections(stock_id: str) -> dict[str, object]:
+            industry = fetch_industry_of(conn, scfg.pg_schema, stock_id)
+            return fetch_sections(
+                conn, scfg.pg_schema, stock_id, as_of, industries.get(industry or "")
+            )
+
+        client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)
+        summary = run_insights(
+            data_dir,
+            recommendation_run_id=run,
+            top_n=top,
+            client=client,
+            now=now_tw(),
+            fetch_sections=sections,
+        )
+    finally:
+        conn.close()
+
+    typer.secho(
+        f"[OK] {run}：{summary.requested} 檔候選 → 分析 {summary.analysed}、"
+        f"缺席 {summary.absent}、新存 {summary.saved}、沿用 {summary.reused}",
+        fg=typer.colors.GREEN,
+    )
+    for failure in summary.failures:
+        typer.secho(f"  [!] {failure['stock_id']}：{failure['detail']}", fg=typer.colors.YELLOW)
+
+
+@app.command(name="insights-import")
+def insights_import(
+    source: str = typer.Argument(..., help="已存在的洞悉證據包 JSON（依 SPEC-014 §6 驗證）"),
+    out: str = typer.Option("", help="證據包資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """受控匯入既有洞悉證據包；只驗證與保存，不呼叫任何語言模型。"""
+    from twquant.reporting.insight_evidence import import_pack
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    result = import_pack(source, data_dir)
+    action = "已保存" if result.created else "內容相同，保留既有證據包"
+    typer.secho(f"[OK] {action}：{result.path}", fg=typer.colors.GREEN)
+
+
 # ── ML 排序層（SPEC-010，T-067）──────────────────────────────────────
 
 ml_app = typer.Typer(help="ML 排序層（SPEC-010）：研究軌訓練與每日推論")
@@ -2252,14 +2413,13 @@ def ml_train(
     )
 
 
-@ml_app.command("score")
-def ml_score(
-    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（取 train_end < 該日的最新模型）"),
-    models: str = typer.Option("", help="模型根目錄；空＝<data_dir>/models"),
-    out: str = typer.Option("", help="輸出 parquet；空＝<模型目錄>/scores_<date>.parquet"),
-    pg: bool = typer.Option(False, "--pg", help="同時 upsert serving.ml_scores（T-068）"),
-) -> None:
-    """對單日全宇宙推論 → parquet（＋選擇性 upsert ml_scores 表，SPEC-010 §4/§5）。"""
+def _ml_score_day(
+    day: dt.date, model_dir: Path, out_path: Path, *, pg: bool = False
+) -> tuple[int, int]:
+    """對單日全宇宙推論並寫出 parquet；回傳（列數, upsert 列數）。
+
+    由 `ml score` 與每日 pipeline 共用，兩條路徑因此不可能算出不同的分數。
+    """
     import polars as pl
 
     from twquant.conventions import now_tw
@@ -2268,14 +2428,10 @@ def ml_score(
     from twquant.ml import train as mlt
     from twquant.ml.dataset import assemble, cross_rank_pct
 
-    day = dt.date.fromisoformat(date)
-    sys_cfg = _load_system()
-    root = Path(models) if models else Path(sys_cfg.data_dir) / "models"
-    mdir = mls.latest_model_dir(root, day)
-    booster, meta = mls.load_model(mdir, day)
+    booster, meta = mls.load_model(model_dir, day)
     raw_feats = meta.get("features")
     if not isinstance(raw_feats, list) or not raw_feats:
-        raise ValueError(f"{mdir} meta.json 缺 features：模型不可推論，拒用")
+        raise ValueError(f"{model_dir} meta.json 缺 features：模型不可推論，拒用")
     features = [str(f) for f in raw_feats]
     scfg = _load_serving()
     conn = store.connect(scfg)
@@ -2292,7 +2448,7 @@ def ml_score(
         scored = cross_rank_pct(
             mlt.predict_scores(booster, frame, features), "score", "rank_pct"
         ).with_columns(
-            pl.lit(mdir.name).alias("model_id"),
+            pl.lit(model_dir.name).alias("model_id"),
             pl.lit(now_tw()).alias("available_at"),
         )
         inserted = 0
@@ -2304,13 +2460,67 @@ def ml_score(
             inserted = upsert_ml_scores(conn, scfg.pg_schema, scored)
     finally:
         conn.close()
-    out_path = Path(out) if out else mdir / f"scores_{day}.parquet"
     scored.write_parquet(out_path)
+    return scored.height, inserted
+
+
+@ml_app.command("score")
+def ml_score(
+    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（取 train_end < 該日的最新模型）"),
+    models: str = typer.Option("", help="模型根目錄；空＝<data_dir>/models"),
+    model: str = typer.Option("", help="直接指定模型目錄；給了就不自動選（T-224）"),
+    purpose: str = typer.Option(
+        "ranking", help="自動選模型時的用途：ranking／risk_gate／revenue_surprise（T-224）"
+    ),
+    out: str = typer.Option("", help="輸出 parquet；空＝<模型目錄>/scores_<date>.parquet"),
+    pg: bool = typer.Option(False, "--pg", help="同時 upsert serving.ml_scores（T-068）"),
+) -> None:
+    """對單日全宇宙推論 → parquet（＋選擇性 upsert ml_scores 表，SPEC-010 §4/§5）。"""
+    from twquant.ml import score as mls
+
+    day = dt.date.fromisoformat(date)
+    sys_cfg = _load_system()
+    root = Path(models) if models else Path(sys_cfg.data_dir) / "models"
+    # 指定目錄優先；否則按用途自動選，同 train_end 有多個候選時 latest_model_dir 會 raise
+    # 而不是靜默挑第一個（T-224：曾因此挑到回撤風控模型當選股器）。
+    bound = _load_ml().production_ranking_model
+    if model:
+        mdir = Path(model)
+    elif bound:
+        mdir = root / bound
+    else:
+        mdir = mls.latest_model_dir(root, day, purpose=purpose)
+    out_path = Path(out) if out else mdir / f"scores_{day}.parquet"
+    rows, inserted = _ml_score_day(day, mdir, out_path, pg=pg)
     pg_note = f"、PG +{inserted} 列" if pg else ""
     typer.secho(
-        f"[OK] {day}：{scored.height} 檔 → {out_path}（模型 {mdir.name}）{pg_note}",
+        f"[OK] {day}：{rows} 檔 → {out_path}（模型 {mdir.name}）{pg_note}",
         fg=typer.colors.GREEN,
     )
+
+
+@ml_app.command("export-recommendations")
+def ml_export_recommendations(
+    date: str = typer.Option(..., help="推論日 YYYY-MM-DD（讀該日既有的 scores parquet）"),
+    model: str = typer.Option(..., help="模型目錄（讀其 meta.json 取 model_id 與指紋）"),
+    scores: str = typer.Option("", help="推論結果 parquet；空＝<模型目錄>/scores_<date>.parquet"),
+    out: str = typer.Option("", help="快照資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """把**既有**日頻推論結果輸出為推薦快照（SPEC-014 §7、T-213）。
+
+    只讀已產生的 scores parquet 與模型 metadata：不重跑推論、不訓練、不啟動新研究試驗。
+    輸出一律是 mode=research／published_at=None——訓練成功不等於取得發布資格。
+    同一推論日重複執行為冪等；內容不同則拒絕覆寫，失敗時不留半成品。
+    """
+    from twquant.reporting.recommendation_export import export_scores
+
+    day = dt.date.fromisoformat(date)
+    mdir = Path(model)
+    scores_path = Path(scores) if scores else mdir / f"scores_{day}.parquet"
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    result = export_scores(scores_path, mdir, data_dir, day)
+    action = "已保存" if result.created else "內容相同，保留既有快照"
+    typer.secho(f"[OK] {day} {action}：{result.path}", fg=typer.colors.GREEN)
 
 
 def _carry_forward_scores(

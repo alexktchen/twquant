@@ -250,7 +250,7 @@ def _metrics(cell: dict[str, object]) -> dict[str, float] | None:
     return None
 
 
-# 每個輸出目錄 → (視窗, 這批在問什麼)。**視窗不同的格不可直接相比**（D-093）：
+# 每個輸出目錄 → (視窗, 這批在問什麼)。**視窗不同的格不可直接相比**（D-102）：
 # 2019 視窗少了 2018 Q4 那個壓力體制，MDD 會系統性偏淺。
 _DIRS: dict[str, tuple[str, str]] = {
     "tracks_lw_nodiv": ("2017-01-03", "D-087 公開因子四格"),
@@ -262,8 +262,8 @@ _DIRS: dict[str, tuple[str, str]] = {
     "tracks_lw_bandtiming_nodiv": ("2017-01-03", "D-095 降周轉基座 × 擇時（檢定格）"),
     "tracks_lw_conctiming_nodiv": ("2017-01-03", "D-099 50 檔基座 × 擇時（檢定格）"),
     "tracks_lw_revenue_nodiv": ("2017-01-03", "營收線（需 ML 分數的格已改列 2019）"),
-    "tracks_lw_w2019_nodiv": ("2019-05-02", "D-093 配對對照（公開因子四格）"),
-    "tracks_lw_risk_w2019_nodiv": ("2019-05-02", "D-093 配對對照（風控三格）"),
+    "tracks_lw_w2019_nodiv": ("2019-05-02", "D-102 配對對照（公開因子四格）"),
+    "tracks_lw_risk_w2019_nodiv": ("2019-05-02", "D-102 配對對照（風控三格）"),
     "tracks_lw_ml_w2019_nodiv": ("2019-05-02", "D-092 P2 ML 訊號進各載具"),
     "tracks_lw_revenue_w2019_nodiv": ("2019-05-02", "營收線"),
     "tracks_lw_revmom_w2019_nodiv": ("2019-05-02", "D-092 P8 營收 × 動能"),
@@ -362,7 +362,7 @@ def _discover_all() -> list[dict[str, object]]:
 def _window_calibration() -> dict[str, object]:
     """同一份設定在兩個視窗下的差——**這是跨視窗比較能不能做的唯一依據**。
 
-    D-093 只能事前說「2019 視窗少了 2018 Q4，MDD 應該偏淺」；配對對照跑完之後
+    D-102 只能事前說「2019 視窗少了 2018 Q4，MDD 應該偏淺」；配對對照跑完之後
     才知道偏多少。若 MDD 幾乎不動而 CAGR 動很大，那結論是
     「回撤可以跨視窗比、報酬不行」——比籠統地說「都不可比」精確得多。
     """
@@ -427,7 +427,7 @@ _INFEASIBLE: list[dict[str, str]] = [
     },
 ]
 
-# 依 D-093：需要 ML 分數的格**只跑 2019 視窗**（模型的樣本外分數最早 2019-04-30）。
+# 依 D-102：需要 ML 分數的格**只跑 2019 視窗**（模型的樣本外分數最早 2019-04-30）。
 # 它們在 2017 視窗的「缺」是設計，不是漏——先前把同一組格對兩個視窗各算一次，
 # 得到「118/128 未完成」的假象，而真正缺的是 0 格。
 _ML_ONLY_SETS = ("ml", "ml_all", "f1_timing", "revmom", "matrix_ml")

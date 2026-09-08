@@ -56,7 +56,7 @@ uv run --all-groups python -m twquant ml train --config configs/ml_r_drawdown60_
   --from 2017-01-03 --to 2026-08-28 --out "$MODELS" >>"$LOG" 2>&1
 say "R 重訓完 rc=$?"
 
-say "重回填分數（月頻模型一律帶 --carry-forward-to，D-093 的教訓）"
+say "重回填分數（月頻模型一律帶 --carry-forward-to，D-102 的教訓）"
 for d in "$MODELS"/lgbm_lw_*; do
   case "$d" in *_pre_t180) continue;; esac
   case "$d" in

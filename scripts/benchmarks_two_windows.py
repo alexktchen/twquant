@@ -20,7 +20,7 @@ from twquant.reporting.benchmarks import benchmark_series, cumulative_factors
 _WINDOWS = {
     "short": (dt.date(2022, 7, 1), dt.date(2026, 2, 28)),
     "long": (dt.date(2017, 1, 3), dt.date(2026, 2, 28)),
-    # D-093：ML 策略的視窗。基準也要有這一份，否則 ML 的數字沒有同視窗的對照
+    # D-102：ML 策略的視窗。基準也要有這一份，否則 ML 的數字沒有同視窗的對照
     "w2019": (dt.date(2019, 5, 2), dt.date(2026, 2, 28)),
 }
 _ETFS = {

@@ -25,4 +25,8 @@ lgbm: # 只暴露這幾個；決定性旗標（deterministic 等）由 train.py 
   seed: 42
 refit:
   schedule: monthly
-trials_log: research_log # 實驗登記落點（T-013 research_log；trials 計數供 DSR）
+trials_log: research_log
+
+# 每日推論使用的選股模型（T-224）。八個模型的 train_end 全同，自動選會挑到 D-075 的
+# 回撤風控模型，故改為明寫。換模型＝改這一行；空字串＝不綁定，pipeline 會略過而非亂猜。
+production_ranking_model: lgbm_net_h20_20260225_6a798962 # 實驗登記落點（T-013 research_log；trials 計數供 DSR）

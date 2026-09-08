@@ -1,7 +1,7 @@
 """每一格的狀態盤點：跑完／不可行／設計上不在這個視窗。
 
 先前把「同一個 set 對兩個視窗都算一次」當成缺口，得到 118/128 的假象。
-實際上 ML 相關的格**依 D-093 只在 2019 視窗跑**，它們在 2017 視窗的「缺」是設計，不是漏。
+實際上 ML 相關的格**依 D-102 只在 2019 視窗跑**，它們在 2017 視窗的「缺」是設計，不是漏。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sys
 
 D = pathlib.Path("D:/project/twquant/data")
 
-# 依 D-093：需要 ML 分數的格只跑 2019 視窗（模型的樣本外分數最早 2019-04-30）
+# 依 D-102：需要 ML 分數的格只跑 2019 視窗（模型的樣本外分數最早 2019-04-30）
 _ML_ONLY = {"ml", "ml_all", "f1_timing", "revmom", "matrix_ml"}
 # revenue 是混合的：F2/F3/G1/L2 不需要 ML 分數當池子，其餘四格需要
 _REVENUE_2019_ONLY = {"LW-F1", "LW-MG1", "LW-F1abs", "LW-F1trend"}
@@ -64,7 +64,7 @@ def main() -> None:
     for t in infeasible:
         print(f"    {t}：{_INFEASIBLE[t.split('@')[0]]}")
     print(
-        f"設計上不跑　{len(by_design):>4} 格（D-093：ML 格只在 2019；公開因子只在 2017 ＋指定的配對對照）"
+        f"設計上不跑　{len(by_design):>4} 格（D-102：ML 格只在 2019；公開因子只在 2017 ＋指定的配對對照）"
     )
     print(f"**真的缺　　{len(missing):>4} 格**" + ("" if missing else "　← 沒有"))
     for t in missing:

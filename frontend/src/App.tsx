@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   fetchHealth,
   fetchHeartbeat,
@@ -24,7 +24,12 @@ import {
 } from './api'
 import { FALLBACK } from './fallback'
 import { MetaCtx, useMeta, type MetaCtxT } from './hooks'
-import { StockFactorsPage } from './stock'
+import { PlatformShell } from './platform/PlatformShell'
+import { ResearchPages } from './platform/ResearchPages'
+import { routeHref } from './platform/routes'
+import { RecommendationsPage } from './platform/RecommendationsPage'
+import { StockResearch } from './platform/StockResearch'
+import { operationsTabs, parseOperationsTab, type OperationsTabId } from './platform/operationsTabs'
 import { Kpi, Panel, Skeleton } from './ui'
 
 /* ---------- 擷取後台（熱力圖 + 漏抓清單 + 一鍵補抓 / 引導指令）---------- */
@@ -513,8 +518,10 @@ function HolidayPanel({
   )
 }
 
-function Ingest() {
+function Ingest({ tab, onSelectTab }: { tab: string | null; onSelectTab: (tab: OperationsTabId) => void }) {
   const { meta, live } = useMeta()
+  // 頁籤存在 URL：30 秒涵蓋輪詢與 3 秒工作輪詢都改不動使用者正在看的分頁（AC-212-1）。
+  const current = parseOperationsTab(tab)
   const [mx, setMx] = useState<IngestMatrix | null>(null)
   const [gp, setGp] = useState<IngestGaps | null>(null)
   const [hb, setHb] = useState<Heartbeat | null>(null)
@@ -650,126 +657,81 @@ function Ingest() {
         </button>
       </div>
       {err && <div className="text-[12px] text-[var(--crit)]">補抓失敗：{err}</div>}
-      <PipelinePanel hb={hb} busy={busy} onSubmitted={refreshJobs} />
-      {tracks.length > 0 && (
-        <FetchForm
-          tracks={tracks}
-          latest={hb?.latest ?? mx?.latest ?? meta.as_of ?? null}
-          busy={busy}
-          onSubmitted={refreshJobs}
-        />
-      )}
-      {jb && jb.jobs.length > 0 && (
-        <Panel title="背景工作" sub="伺服器端執行 twquant CLI（補抓／每日 pipeline）· 單一併發 · 重啟 API 後清空">
-          <JobList jobs={jb.jobs} />
-        </Panel>
-      )}
-      <HolidayPanel hc={hc} busy={busy} onFetch={runHolidayFetch} />
-      <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
-        {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
-      </Panel>
-      <Panel
-        title="漏抓清單 · 一鍵補抓"
-        sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}
-      >
-        {gp ? <GapList gaps={gp.gaps} busy={busy} onRun={runGap} /> : <Skeleton height={120} />}
-      </Panel>
+      <div className="flex items-center gap-1.5 overflow-x-auto hscroll" role="tablist" aria-label="營運分頁">
+        {operationsTabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`ops-tab-${t.id}`}
+            aria-selected={current === t.id}
+            aria-controls="ops-tabpanel"
+            onClick={() => onSelectTab(t.id)}
+            className={`shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] mono rounded-[2px] border transition-colors ${
+              current === t.id
+                ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]'
+                : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div id="ops-tabpanel" role="tabpanel" aria-labelledby={`ops-tab-${current}`} className="flex flex-col gap-4">
+        {current === 'data' && (
+          <>
+            <Panel title="擷取涵蓋熱力圖" sub={mx ? `近 ${mx.dates.length} 交易日 · dataset × 日` : '載入中…'}>
+              {mx ? <Heatmap mx={mx} /> : <Skeleton height={160} />}
+            </Panel>
+            <HolidayPanel hc={hc} busy={busy} onFetch={runHolidayFetch} />
+          </>
+        )}
+        {current === 'gaps' && (
+          <Panel
+            title="漏抓清單 · 一鍵補抓"
+            sub={gp ? `${gp.runs} 段 · 共 ${gp.total_missing} 交易日` : '載入中…'}
+          >
+            {gp ? <GapList gaps={gp.gaps} busy={busy} onRun={runGap} /> : <Skeleton height={120} />}
+          </Panel>
+        )}
+        {current === 'jobs' && (
+          <>
+            <PipelinePanel hb={hb} busy={busy} onSubmitted={refreshJobs} />
+            {tracks.length > 0 && (
+              <FetchForm
+                tracks={tracks}
+                latest={hb?.latest ?? mx?.latest ?? meta.as_of ?? null}
+                busy={busy}
+                onSubmitted={refreshJobs}
+              />
+            )}
+            <Panel title="背景工作" sub="伺服器端執行 twquant CLI（補抓／每日 pipeline）· 單一併發 · 重啟 API 後清空">
+              {jb && jb.jobs.length > 0 ? (
+                <JobList jobs={jb.jobs} />
+              ) : (
+                <div className="text-[13px] text-[var(--muted)]">目前沒有背景工作。工作清單在 API 重啟後清空。</div>
+              )}
+            </Panel>
+          </>
+        )}
+      </div>
     </div>
   )
 }
 
 /* ---------- shell ---------- */
-const PAGES = [
-  { id: 'stock', label: '個股因子', el: <StockFactorsPage /> },
-  { id: 'ingest', label: '資料後台', el: <Ingest /> },
-]
-
 function Shell() {
   const { meta, live } = useMeta()
-  // 預設落在個股因子頁（PG 直查、毫秒級）；總覽等讀湖頁面切到才算（分鐘級）
-  const [page, setPage] = useState('stock')
-  const cur = useMemo(() => PAGES.find((p) => p.id === page)!, [page])
-  return (
-    <div className="min-h-screen md:flex text-[var(--fg)]">
-      {/* 桌面側欄（md 起）；手機改用下方頂欄 */}
-      <aside className="hidden md:flex w-52 shrink-0 border-r border-[var(--line)] bg-[var(--panel)] flex-col sticky top-0 h-screen">
-        <div className="px-4 py-4 border-b border-[var(--line)]">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} />
-            <span className="font-semibold tracking-wide">twquant</span>
-          </div>
-          <div className="text-[11px] text-[var(--muted)] mt-0.5">台股量化平台 · 監控</div>
-        </div>
-        <nav className="flex flex-col p-2 gap-0.5">
-          {PAGES.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setPage(p.id)}
-              className={`text-left px-3 py-2 rounded text-[13px] transition-colors ${
-                page === p.id ? 'bg-[var(--panel-2)] text-[var(--fg)] font-medium' : 'text-[var(--muted)] hover:text-[var(--fg)] hover:bg-[var(--panel-2)]'
-              }`}
-            >
-              {p.id === page && <span className="inline-block w-1 h-1 rounded-full mr-2 align-middle" style={{ background: 'var(--accent)' }} />}
-              {p.label}
-            </button>
-          ))}
-        </nav>
-        <div className="mt-auto p-4 text-[10px] text-[var(--muted)] border-t border-[var(--line)] leading-relaxed">
-          <div>資料 {live ? '即時' : '快照'} {meta.as_of ?? '—'}</div>
-          <div>TWSE · TPEX · MOPS</div>
-          <div className="mt-1">
-            <span style={{ color: 'var(--up)' }}>紅漲</span> · <span style={{ color: 'var(--down)' }}>綠跌</span>（台股慣例）
-          </div>
-        </div>
-      </aside>
-
-      {/* 手機頂欄（mobile-first）：品牌＋狀態列與橫向捲動頁籤，sticky 常駐 */}
-      <div className="md:hidden sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--bg)]/95 backdrop-blur">
-        <div className="flex items-center gap-2 px-3 pt-2">
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: 'var(--accent)' }} />
-          <span className="font-semibold tracking-wide text-[14px]">twquant</span>
-          <span className="ml-auto flex items-center gap-1.5 text-[10px] mono text-[var(--muted)] whitespace-nowrap">
-            <span
-              className="inline-block w-1.5 h-1.5 rounded-full"
-              style={{ background: live ? 'var(--good)' : 'var(--muted)' }}
-              title={live ? '即時連線 API' : '離線快照 fallback'}
-            />
-            {live ? '即時' : '快照'} {meta.as_of ?? '—'}
-          </span>
-        </div>
-        <nav className="flex gap-1 overflow-x-auto hscroll px-2 py-2">
-          {PAGES.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setPage(p.id)}
-              className={`shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] rounded-[2px] border transition-colors ${
-                page === p.id
-                  ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]'
-                  : 'border-transparent text-[var(--muted)]'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      <main className="flex-1 min-w-0">
-        <header className="hidden md:flex px-6 py-4 border-b border-[var(--line)] items-baseline justify-between">
-          <h1 className="text-[17px] font-semibold tracking-wide">{cur.label}</h1>
-          <span className="text-[12px] mono text-[var(--muted)] flex items-center gap-2">
-            <span
-              className="inline-block w-1.5 h-1.5 rounded-full"
-              style={{ background: live ? 'var(--good)' : 'var(--muted)' }}
-              title={live ? '即時連線 API' : '離線快照 fallback'}
-            />
-            {live ? '即時 · 讀資料湖' : '快照 · 內嵌 data.json'} · lightweight-charts
-          </span>
-        </header>
-        <div className="p-3 md:p-6 max-w-[1180px]">{cur.el}</div>
-      </main>
-    </div>
-  )
+  return <PlatformShell live={live} asOf={meta.as_of}
+    operations={(route) => <Ingest tab={route.query.get('tab')} onSelectTab={(tab) => {
+      const query = new URLSearchParams(route.query)
+      query.set('tab', tab)
+      window.location.hash = routeHref('operations', undefined, query)
+    }} />}
+    daily={(route) => <RecommendationsPage route={route} dataAsOf={meta.as_of} />}
+    research={(route) => <ResearchPages route={route} />}
+    stock={(route) => <StockResearch route={route} />}
+  />
 }
 
 export default function App() {
@@ -778,11 +740,18 @@ export default function App() {
   const [ctx, setCtx] = useState<MetaCtxT>({ meta: FALLBACK.meta, live: false })
   useEffect(() => {
     let alive = true
+    let metaLoaded = false
+    // /api/health 毫秒級且已帶最新行情日：一連上就用它更新資料日。否則在 /api/meta
+    // （掃資料湖，實測 2 分鐘）回來前，頂欄會把內嵌快照的日期當成「已連線」的資料日。
     fetchHealth()
-      .then(() => alive && setCtx((c) => (c.live ? c : { ...c, live: true })))
+      .then((h) => alive && !metaLoaded && setCtx((c) => ({ live: true, meta: { ...c.meta, as_of: h.as_of } })))
       .catch(() => {}) // 探針失敗 → 維持快照模式；meta 若成功仍會翻 live
     fetchMeta()
-      .then((m) => alive && setCtx({ meta: m, live: true }))
+      .then((m) => {
+        if (!alive) return
+        metaLoaded = true
+        setCtx({ meta: m, live: true })
+      })
       .catch(() => {}) // API 不可達 → 維持內嵌 meta
     return () => {
       alive = false

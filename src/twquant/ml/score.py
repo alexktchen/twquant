@@ -35,13 +35,59 @@ def load_model(model_dir: Path, as_of: dt.date) -> tuple[lgb.Booster, dict[str, 
     return lgb.Booster(model_file=str(model_dir / "model.txt")), meta
 
 
-def latest_model_dir(models_root: Path, as_of: dt.date) -> Path:
-    """取 models_root 下 train_end < as_of 的最新模型目錄；無合格者 → raise。"""
-    best: tuple[dt.date, Path] | None = None
+# 模型用途由「它在預測什麼」決定，也就是標籤的 transform。這不是可調參數，
+# 而是分類：選股訊號與風控閘門是不同用途，混用等於拿回撤模型當選股器。
+_PURPOSE_BY_TRANSFORM = {
+    "rank_pct": "ranking",
+    "cost_adjusted_return": "ranking",
+    "forward_drawdown": "risk_gate",  # D-075 的 R 系列：風控閘門，明文不得當選股訊號
+    "revenue_surprise": "revenue_surprise",  # D-074 的 F 系列
+}
+
+
+def model_purpose(meta: dict[str, object]) -> str:
+    """這個模型在預測什麼；未記錄標籤定義的舊 artifact 一律為 unknown。
+
+    優先取 meta 明寫的 `purpose`（新模型應直接記錄），否則由標籤 transform 推斷。
+    """
+    explicit = meta.get("purpose")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    label = meta.get("label")
+    transform = label.get("transform") if isinstance(label, dict) else None
+    if isinstance(transform, str):
+        return _PURPOSE_BY_TRANSFORM.get(transform, "unknown")
+    return "unknown"
+
+
+def latest_model_dir(models_root: Path, as_of: dt.date, *, purpose: str | None = None) -> Path:
+    """取 train_end < as_of 的最新模型目錄；無合格者或無法唯一決定 → raise。
+
+    `purpose` 指定時只考慮該用途的模型（見 `model_purpose`）。
+
+    **同一 train_end 有多個合格模型時一律 raise。** 舊版在此依目錄名排序靜默挑第一個；
+    實務上八個模型的 train_end 全是 2026-02-25，於是每日推論挑到了 `lgbm_dd_h60`——
+    D-075 的回撤風控模型——當成選股器（2026-09-06 實跑抓到）。要用哪一個必須由呼叫端
+    明確指定，不能由排序決定。
+    """
+    eligible: list[tuple[dt.date, Path]] = []
     for meta_path in sorted(models_root.glob("*/meta.json")):
+        meta: dict[str, object] = json.loads(meta_path.read_text(encoding="utf-8"))
         te = _train_end(meta_path)
-        if te < as_of and (best is None or te > best[0]):
-            best = (te, meta_path.parent)
-    if best is None:
-        raise ValueError(f"{models_root} 無可用模型（需 train_end < {as_of}）")
-    return best[1]
+        if te >= as_of:
+            continue
+        if purpose is not None and model_purpose(meta) != purpose:
+            continue
+        eligible.append((te, meta_path.parent))
+    if not eligible:
+        scope = f"、用途 {purpose}" if purpose else ""
+        raise ValueError(f"{models_root} 無可用模型（需 train_end < {as_of}{scope}）")
+    newest = max(te for te, _ in eligible)
+    tied = [path for te, path in eligible if te == newest]
+    if len(tied) > 1:
+        names = "、".join(sorted(path.name for path in tied))
+        raise ValueError(
+            f"同一 train_end {newest} 有 {len(tied)} 個合格模型，無法自動選擇："
+            f"{names}。請以 --model 指定目錄，或用 --purpose 縮小範圍（T-224）"
+        )
+    return tied[0]

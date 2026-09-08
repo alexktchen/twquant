@@ -13,7 +13,9 @@ CLI + DECISIONS）。以 `twquant serve` 啟動；docker-compose 的 `api` 服�
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, cast
 
@@ -26,20 +28,99 @@ from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
+from twquant.reporting.insight_evidence import select_packs
+from twquant.reporting.insight_run import insights_for_run
+from twquant.reporting.platform_artifacts import (
+    ArtifactCatalog,
+    backtest_detail,
+    index_backtests,
+    index_models,
+)
+from twquant.reporting.recommendation_snapshot import (
+    select_candidates,
+    select_snapshots,
+    stock_events,
+)
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
 
 
-def get_warehouse() -> Warehouse:
-    """由 configs/system.yaml 建 Warehouse；data_dir 相對路徑以 repo 根為基準（CWD 無關）。"""
+def _data_root() -> Path:
+    """Resolve the configured data root independently of the server working directory."""
     cfg = load_config(_CONFIG, SystemConfig)
     data_path = Path(cfg.data_dir)
     if not data_path.is_absolute():
         data_path = snap.CONFIGS_DIR.parent / data_path
-    return Warehouse(data_path)
+    return data_path
+
+
+def get_warehouse() -> Warehouse:
+    """由 configs/system.yaml 建 Warehouse；data_dir 相對路徑以 repo 根為基準（CWD 無關）。"""
+    return Warehouse(_data_root())
 
 
 WarehouseDep = Annotated[Warehouse, Depends(get_warehouse)]
+
+
+@dataclass(frozen=True)
+class PlatformArtifactRoots:
+    """Configured, server-owned roots for platform artifact reading."""
+
+    models_root: Path
+    backtest_roots: Mapping[str, Path]
+
+
+_BACKTEST_ROOTS = (
+    "ladder",
+    "ladder10m",
+    "tracks",
+    "tracks_c",
+    "tracks_m",
+    "tracks_g",
+    "tracks_mg",
+)
+_OPAQUE_ID = re.compile(r"^(model|backtest)_[0-9a-f]{20}$")
+# Stock identity stays a string with leading zeroes; no separator can reach the filesystem.
+_PLATFORM_SID = re.compile(r"^[A-Za-z0-9]{1,16}$")
+
+
+def get_platform_artifact_roots() -> PlatformArtifactRoots:
+    """Return fixed artifact roots; clients never select source files or directories."""
+    data_root = _data_root()
+    return PlatformArtifactRoots(
+        models_root=data_root / "models",
+        backtest_roots={name: data_root / name for name in _BACKTEST_ROOTS},
+    )
+
+
+PlatformArtifactRootsDep = Annotated[PlatformArtifactRoots, Depends(get_platform_artifact_roots)]
+RecommendationDataRootDep = Annotated[Path, Depends(_data_root)]
+
+
+def _artifact_catalog_response(catalog: ArtifactCatalog, source: str) -> dict[str, object]:
+    """Serialize a list response from a safe artifact catalog projection."""
+    return {"items": catalog.items, "source": source, "issues": catalog.issues}
+
+
+def _artifact_detail(catalog: ArtifactCatalog, artifact_id: str, kind: str) -> dict[str, object]:
+    """Return a catalog item by opaque ID, never interpreting the ID as a file path."""
+    if _OPAQUE_ID.fullmatch(artifact_id) is None or not artifact_id.startswith(f"{kind}_"):
+        raise HTTPException(status_code=422, detail="artifact_id 格式錯誤")
+    for item in catalog.items:
+        if item.get("artifact_id") == artifact_id:
+            return {"item": item, "issues": catalog.issues}
+    raise HTTPException(status_code=404, detail="找不到指定的 artifact")
+
+
+def _validate_artifact_id(artifact_id: str, kind: str) -> None:
+    """Reject malformed opaque IDs before an artifact catalog is read."""
+    if _OPAQUE_ID.fullmatch(artifact_id) is None or not artifact_id.startswith(f"{kind}_"):
+        raise HTTPException(status_code=422, detail="artifact_id 格式錯誤")
+
+
+def _artifact_storage_error() -> HTTPException:
+    """Return a path-safe server error for unavailable artifact storage."""
+    return HTTPException(status_code=503, detail="artifact 儲存區暫時無法讀取")
 
 
 # openapi_url 也放 /api/ 下，讓 /api/docs 經 nginx/vite 反代時仍能載到 schema。
@@ -59,6 +140,129 @@ app.add_middleware(
 def health(wh: WarehouseDep) -> dict[str, object]:
     """存活探針：回最新行情日。"""
     return {"status": "ok", "as_of": wh.latest_date("prices_daily")}
+
+
+@app.get("/api/platform/models")
+def get_platform_models(roots: PlatformArtifactRootsDep) -> dict[str, object]:
+    """List model metadata projections without loading model weights or starting training."""
+    try:
+        return _artifact_catalog_response(index_models(roots.models_root), "artifact_metadata")
+    except OSError as exc:
+        raise _artifact_storage_error() from exc
+
+
+@app.get("/api/platform/models/{artifact_id}")
+def get_platform_model(artifact_id: str, roots: PlatformArtifactRootsDep) -> dict[str, object]:
+    """Return one model projection resolved only from a server-side opaque-ID catalog."""
+    try:
+        return _artifact_detail(index_models(roots.models_root), artifact_id, "model")
+    except OSError as exc:
+        raise _artifact_storage_error() from exc
+
+
+@app.get("/api/platform/backtests")
+def get_platform_backtests(roots: PlatformArtifactRootsDep) -> dict[str, object]:
+    """List persisted backtest summaries without recalculating a strategy or metric."""
+    try:
+        return _artifact_catalog_response(index_backtests(roots.backtest_roots), "result_bundle")
+    except OSError as exc:
+        raise _artifact_storage_error() from exc
+
+
+@app.get("/api/platform/backtests/{artifact_id}")
+def get_platform_backtest(artifact_id: str, roots: PlatformArtifactRootsDep) -> dict[str, object]:
+    """Return one persisted backtest projection resolved only from an opaque ID."""
+    try:
+        _validate_artifact_id(artifact_id, "backtest")
+        catalog = index_backtests(roots.backtest_roots)
+        if not any(item.get("artifact_id") == artifact_id for item in catalog.items):
+            raise HTTPException(status_code=404, detail="找不到指定的 artifact")
+        detail = backtest_detail(roots.backtest_roots, artifact_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="找不到指定的 artifact")
+        return {"item": detail, "issues": catalog.issues}
+    except OSError as exc:
+        raise _artifact_storage_error() from exc
+
+
+@app.get("/api/platform/recommendations")
+def get_platform_recommendations(
+    data_dir: RecommendationDataRootDep,
+    date: Annotated[dt.date | None, Query()] = None,
+    model: Annotated[str | None, Query()] = None,
+    run: Annotated[str | None, Query()] = None,
+    bucket: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query(max_length=64)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> dict[str, object]:
+    """Read persisted ML recommendation runs; this endpoint never executes inference."""
+    try:
+        catalog = select_snapshots(data_dir, date=date, model_id=model, run_id=run)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
+    runs: list[dict[str, object]] = []
+    start = (page - 1) * page_size
+    for item in catalog.runs:
+        # 洞悉在讀取時 join 進來（PLAN §3.3）；已發布的快照檔案不因此改寫。
+        insights = insights_for_run(data_dir, item.run_id)
+        # Bucket/search filters run over the whole saved run before any page slice,
+        # so a later page can never surface a candidate an earlier filter removed.
+        kept = select_candidates(item, bucket=bucket, query=q)
+        projection = item.model_dump(mode="json")
+        projection["candidate_total"] = len(kept)
+        projection["candidates"] = [
+            {**candidate.model_dump(mode="json"), "insight": insights.get(candidate.stock_id)}
+            for candidate in kept[start : start + page_size]
+        ]
+        runs.append(projection)
+    return {
+        "runs": runs,
+        "issues": catalog.issues,
+        "query": {
+            "date": date.isoformat() if date else None,
+            "model": model,
+            "run": run,
+            "bucket": bucket,
+            "q": q,
+            "page": page,
+            "page_size": page_size,
+        },
+    }
+
+
+@app.get("/api/platform/stocks/{sid}/recommendations")
+def get_platform_stock_recommendations(
+    sid: str, data_dir: RecommendationDataRootDep
+) -> dict[str, object]:
+    """Return one stock's saved recommendation events; unknown stocks are legitimately empty."""
+    if _PLATFORM_SID.fullmatch(sid) is None:
+        raise HTTPException(status_code=422, detail="股票代號格式錯誤")
+    try:
+        events = stock_events(data_dir, sid)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
+    return {"sid": sid, "events": events}
+
+
+@app.get("/api/platform/insights")
+def get_platform_insights(
+    data_dir: RecommendationDataRootDep,
+    stock: Annotated[str | None, Query()] = None,
+    run: Annotated[str | None, Query()] = None,
+) -> dict[str, object]:
+    """Read saved insight evidence packs; this endpoint never calls a language model."""
+    if stock is not None and _PLATFORM_SID.fullmatch(stock) is None:
+        raise HTTPException(status_code=422, detail="股票代號格式錯誤")
+    try:
+        catalog = select_packs(data_dir, stock_id=stock, insight_run_id=run)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="洞悉證據包儲存區暫時無法讀取") from exc
+    return {
+        "packs": [pack.model_dump(mode="json") for pack in catalog.packs],
+        "issues": catalog.issues,
+        "query": {"stock": stock, "run": run},
+    }
 
 
 @app.get("/api/snapshot")

@@ -112,7 +112,7 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-RM-mom", "lw_rm_mom"),
         ("LW-RM-both", "lw_rm_both"),  # 判定格
     ),
-    # D-093：矩陣依基座需不需要 ML 分數拆兩半——**兩半的視窗不同，不能同批跑**。
+    # D-102：矩陣依基座需不需要 ML 分數拆兩半——**兩半的視窗不同，不能同批跑**。
     "conc_timing": (  # D-099：50 檔版的 C1 × 三條擇時規則——檢定集中度假說
         ("LW-C1n50", "lw_c1_n50"),  # 基座（無 overlay），對照 LW-C1
         ("LW-C1n50-faber", "lw_c1n50_faber"),
@@ -231,7 +231,7 @@ def main() -> None:
     )
     # ML 策略跑不了 2017-01-03：walk-forward 的樣本外分數要先有兩年訓練資料，
     # 三個長窗口模型的第一個分數日分別是 2017-09-26／2019-01-30／2019-04-30。
-    # 從更早開跑會在第一個再平衡日就撞上「池子被清空」而中止（D-093）。
+    # 從更早開跑會在第一個再平衡日就撞上「池子被清空」而中止（D-102）。
     ap.add_argument("--start", default=START, help=f"回測起日；空＝{START}")
     ap.add_argument("--out-suffix", default="", help="輸出目錄額外後綴（不同視窗必須分開存）")
     args = ap.parse_args()
