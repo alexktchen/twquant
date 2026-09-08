@@ -259,6 +259,8 @@ _DIRS: dict[str, tuple[str, str]] = {
     "tracks_lw_timing_nodiv": ("2017-01-03", "D-092 P4 擇時"),
     "tracks_lw_all_nodiv": ("2017-01-03", "D-092 P5a 其餘公開因子"),
     "tracks_lw_matrix_nodiv": ("2017-01-03", "D-092 P7 六規則 × 公開因子基座"),
+    "tracks_lw_bandtiming_nodiv": ("2017-01-03", "D-095 降周轉基座 × 擇時（檢定格）"),
+    "tracks_lw_conctiming_nodiv": ("2017-01-03", "D-099 50 檔基座 × 擇時（檢定格）"),
     "tracks_lw_revenue_nodiv": ("2017-01-03", "營收線（需 ML 分數的格已改列 2019）"),
     "tracks_lw_w2019_nodiv": ("2019-05-02", "D-093 配對對照（公開因子四格）"),
     "tracks_lw_risk_w2019_nodiv": ("2019-05-02", "D-093 配對對照（風控三格）"),
@@ -382,7 +384,57 @@ _INFEASIBLE: list[dict[str, str]] = [
         "why": "五道濾網疊起來後實際入選只剩 **3 檔**，單股上限 0.15 讓權重加不到 1，引擎直接 raise。"
         "**這就是答案**：把所有濾網疊在一起，在長窗口的宇宙上沒有東西通得過。",
     },
+    {
+        "code": "LW-MGALL",
+        "window": "2019-05-02",
+        "name": "ML 訊號池 ＋ 五道濾網全上",
+        "why": "同一件事的 ML 基座版，只剩 **2 檔**。兩個基座、兩個視窗，"
+        "疊滿濾網的結果一樣——**這不是巧合，是宇宙容不下那麼多層條件**。",
+    },
 ]
+
+# 依 D-093：需要 ML 分數的格**只跑 2019 視窗**（模型的樣本外分數最早 2019-04-30）。
+# 它們在 2017 視窗的「缺」是設計，不是漏——先前把同一組格對兩個視窗各算一次，
+# 得到「118/128 未完成」的假象，而真正缺的是 0 格。
+_ML_ONLY_SETS = ("ml", "ml_all", "f1_timing", "revmom", "matrix_ml")
+_REVENUE_2019_ONLY = ("LW-F1", "LW-MG1", "LW-F1abs", "LW-F1trend")
+
+
+def _completion() -> dict[str, object]:
+    """三種狀態分開數：跑完／不可行／設計上不在這個視窗。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_rlw", "scripts/run_long_window.py")
+    if spec is None or spec.loader is None:
+        return {}
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    infeasible_codes = {c["code"] for c in _INFEASIBLE}
+    done = by_design = missing = 0
+    missing_list: list[str] = []
+    for k, cells in mod.CELL_SETS.items():
+        for win, suffix in (("2017-01-03", "_nodiv"), ("2019-05-02", "_w2019_nodiv")):
+            d = R / ("tracks_lw" + mod.OUT_SUFFIX[k] + suffix)
+            for name, cfg in cells:
+                if (d / f"{name}_{cfg}_1x.json").exists():
+                    done += 1
+                elif name in infeasible_codes:
+                    pass  # 已在 _INFEASIBLE 逐格列出，不重複計
+                elif (
+                    win.startswith("2017")
+                    and (k in _ML_ONLY_SETS or (k == "revenue" and name in _REVENUE_2019_ONLY))
+                ) or (win.startswith("2019") and k not in _ML_ONLY_SETS and k != "revenue"):
+                    by_design += 1
+                else:
+                    missing += 1
+                    missing_list.append(f"{name}@{win}")
+    return {
+        "done": done,
+        "infeasible": len(_INFEASIBLE),
+        "by_design": by_design,
+        "missing": missing,
+        "missing_list": missing_list,
+    }
 
 
 def main() -> None:
@@ -427,6 +479,7 @@ def main() -> None:
         "total": len(rows),
         "all_results": every,
         "infeasible": _INFEASIBLE,
+        "completion": _completion(),
         "bench_by_window": _bench_by_window(),
         "calibration": _window_calibration(),
         "windows": {
