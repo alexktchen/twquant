@@ -1,4 +1,4 @@
-# 東西在哪（2026-09-06，含研究平台上線）
+# 東西在哪（2026-09-07，含研究平台上線）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
@@ -57,6 +57,8 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | `docs/HANDOFF-2026-09-06-tracks-and-gates.md` | **本輪完整交接**：進度、五個未解問題、產物清單 |
 | `docs/reports/backtest-results.md` | 結果的版控版（與 HTML 同源） |
 | `docs/specs/SPEC-013-two-track-strategies.md` | 雙軌策略的規格 |
+| `docs/reports/volume-lead-price-ic.md` | **量先價行鏈 9 因子 11 年 IC**（2026-09-07）：連買天數正、買超÷量反向、放量 U 型 |
+| `docs/research/PAPERS-KEYLEVELS.md` + DECISIONS **D-093** | 關鍵價位文獻 ＋ K 系列事前登記草稿（待裁決） |
 
 ## 4. 常用指令（都在 worktree 執行）
 
@@ -77,6 +79,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
+| 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
 
@@ -123,6 +126,10 @@ ML 推薦名單與洞悉分析排在供應層之後，根本沒被執行到。
 在 Docker 裡**永遠失敗**——而它是 best-effort，所以只會安靜地什麼都不產出。
 Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗過了」其實只驗到匯出，
 因為 scores parquet 是在**主機**上先產生的，推論那段根本沒被走到。
+
+**⑦ 籌碼資料的三個硬邊界**（2026-09-07 實查）：`broker_trades.avg_price` 2022–2026 **全空**（主力成本只能用「淨買股數 × 日 VWAP」近似）；
+`shareholding_dispersion` 只有 **3 個週快照**（07-03／07-09／08-28，週抓沒穩定跑）；FinMind `TaiwanStockHoldingSharesPer`
+（2010 起）**只限 backer/sponsor 付費層**。分點 top-15 淨買超偏散戶（T-016 三因子皆負），「有人先買」要用**連續買超天數**定義。
 
 ## 7. 還在跑的東西
 
