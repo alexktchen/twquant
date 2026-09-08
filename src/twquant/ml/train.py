@@ -147,12 +147,31 @@ _BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
     (("sample_tag",), ""),  # 空＝預設樣本
 )
 
+# **永遠**不進訓練指紋的欄位——不論它們的值是什麼。
+# 與上面那張表不同：那張是「取回溯相容預設值時才略過」，這張是「這根本不是訓練輸入」。
+#
+# `production_ranking_model` 是**營運綁定**（每日推論要用哪個模型），不是研究參數。
+# 換綁一個模型不會改變任何模型學到了什麼，卻會改變 `training_config_hash`——
+# 而那個 hash 同時是 research_log 的 `params_hash`，也就是 DSR 的試驗計數依據。
+# 讓它進去等於每換一次生產模型就消耗一個試驗名額，而且既有八個模型的 id 全部改變。
+# （合併 PR#65 時由 T-172 的回歸測試抓到：兩個模型目錄名都對不回來。）
+_NOT_TRAINING_INPUTS: tuple[tuple[str, ...], ...] = (("production_ranking_model",),)
+
 
 def _hashable_dump(cfg: MlConfig) -> dict[str, object]:
     """訓練 fingerprint 用的配置字典，剔除取回溯相容預設值的後加欄位。"""
     dump: dict[str, object] = cfg.model_dump(mode="json")
+    node: object
+    for path in _NOT_TRAINING_INPUTS:
+        node = dump
+        for key in path[:-1]:
+            if not isinstance(node, dict):
+                break
+            node = node.get(key)
+        if isinstance(node, dict):
+            node.pop(path[-1], None)
     for path, legacy in _BACKCOMPAT_DEFAULTS:
-        node: object = dump
+        node = dump
         for key in path[:-1]:
             if not isinstance(node, dict):
                 break

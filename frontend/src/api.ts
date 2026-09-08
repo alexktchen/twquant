@@ -142,7 +142,8 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
 }
 
 // 存活探針（毫秒級）：開頁以此判定 live，不等重端點。
-export const fetchHealth = () => getJSON<{ status: string }>('/api/health')
+// 探針毫秒級且已帶最新行情日；shell 先用它顯示資料日，不等分鐘級的 /api/meta。
+export const fetchHealth = () => getJSON<{ status: string; as_of: string | null }>('/api/health')
 export const fetchSnapshot = () => getJSON<Data>('/api/snapshot')
 // 逐段（逐頁）端點：各頁切到才 fetch，重運算（因子/回測/容量）只在該頁被開啟時才算。
 export const fetchMeta = () => getJSON<Meta>('/api/meta')

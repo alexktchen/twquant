@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class ProposedChange(BaseModel):
@@ -40,3 +40,43 @@ class Explanation(BaseModel):
 
     likely_causes: list[str]  # 依可能性排序
     suggested_checks: list[str]
+
+
+class InsightRisk(BaseModel):
+    """One named risk the analysis found, tied to the evidence that raised it."""
+
+    kind: str
+    evidence_ids: list[str] = []
+    note: str = ""
+
+
+class CandidateAnalysis(BaseModel):
+    """一檔候選的結構化洞悉輸出（PRD-002 §5、PLAN §5）。
+
+    這是 LLM 的輸出結構，不是最終分類：`recommended_bucket` 只是**提案欄位**，
+    最終 bucket 由版本化規則計算（D-081c），兩者分開保存。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_schema_version: Literal[2] = 2
+    stance: Literal["support", "neutral", "conflict", "insufficient_data"]
+    supporting_evidence_ids: list[str] = []
+    contradicting_evidence_ids: list[str] = []
+    event_horizon: Literal["short", "medium", "long", "unknown"] = "unknown"
+    risks: list[InsightRisk] = []
+    missing_data: list[str] = []
+    recommended_bucket: Literal["select", "watch", "exclude"]
+    rationale: str
+
+    @model_validator(mode="after")
+    def _stance_matches_its_evidence(self) -> CandidateAnalysis:
+        """一個立場必須被它自己列出的證據撐住，否則就是沒有依據的結論。"""
+        overlap = set(self.supporting_evidence_ids) & set(self.contradicting_evidence_ids)
+        if overlap:
+            raise ValueError(f"evidence 不得同時列為支持與反對：{sorted(overlap)}")
+        if self.stance == "support" and not self.supporting_evidence_ids:
+            raise ValueError("stance=support 必須提供 supporting_evidence_ids")
+        if self.stance == "insufficient_data" and not self.missing_data:
+            raise ValueError("stance=insufficient_data 必須在 missing_data 說明缺什麼")
+        return self

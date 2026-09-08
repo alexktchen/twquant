@@ -216,6 +216,10 @@ class MlConfig(BaseConfig):
     lgbm: MlLgbmConfig = MlLgbmConfig()
     refit: MlRefitConfig = MlRefitConfig()
     trials_log: str = "research_log"
+    # 每日推論要用哪一個選股模型（目錄名）。空＝未綁定：`ml score` 會回到依用途自動選，
+    # 而候選不唯一時寧可 raise 也不猜（T-224）。這是營運綁定不是研究參數——換模型是
+    # 改這一行，不是改程式。
+    production_ranking_model: str = ""
 
     @model_validator(mode="after")
     def _max_span_covers_horizon(self) -> MlConfig:

@@ -26,6 +26,14 @@ _log = logging.getLogger("twquant.insight")
 Backend = Callable[[str, str, str, type, int], tuple[Any, int, int]]
 
 
+class LlmRefusal(Exception):
+    """模型依安全政策拒答（stop_reason="refusal"）。重試不會改變結果，故不重試。"""
+
+    def __init__(self, category: str) -> None:
+        super().__init__(f"refusal:{category}")
+        self.category = category
+
+
 @dataclass(frozen=True)
 class LlmResult:
     parsed: Any
@@ -50,9 +58,22 @@ class InsightClient:
         self._backend = backend
 
     @property
+    def config(self) -> LlmConfig:
+        """The routing/pricing config this client was built with (model ids live only there)."""
+        return self._cfg
+
+    @property
     def available(self) -> bool:
         """有注入 backend 或有 API key 才可用（否則離線降級）。"""
         return self._backend is not None or bool(self._key)
+
+    def unavailable_reason(self, now: dt.datetime) -> str | None:
+        """為什麼這次不能呼叫模型；可以呼叫時回 None（供呼叫端記錄缺席原因）。"""
+        if not self.available:
+            return "LLM 離線（未設定 ANTHROPIC_API_KEY），未產生分析"
+        if today_cost_twd(self._dir, now.date()) >= self._cfg.daily_budget_twd:
+            return f"已達日預算上限 {self._cfg.daily_budget_twd:.0f} TWD，未產生分析"
+        return None
 
     def complete(
         self,
@@ -65,14 +86,33 @@ class InsightClient:
         now: dt.datetime,
         max_tokens: int = 8000,
     ) -> LlmResult | None:
-        if not self.available:
-            _log.info("洞悉層離線（無 API key），略過 task=%s", task)
-            return None
-        if today_cost_twd(self._dir, now.date()) >= self._cfg.daily_budget_twd:
-            _log.warning(
-                "洞悉層日成本已達上限 %.0f TWD，停用（task=%s）", self._cfg.daily_budget_twd, task
-            )
-            return None
+        """呼叫模型並回傳結果；離線、超預算、拒答或連兩次失敗一律回 None。"""
+        return self.complete_detailed(
+            task=task,
+            system=system,
+            user=user,
+            schema=schema,
+            prompt_version=prompt_version,
+            now=now,
+            max_tokens=max_tokens,
+        )[0]
+
+    def complete_detailed(
+        self,
+        *,
+        task: str,
+        system: str,
+        user: str,
+        schema: type,
+        prompt_version: str,
+        now: dt.datetime,
+        max_tokens: int = 8000,
+    ) -> tuple[LlmResult | None, str | None]:
+        """同 complete，但一併回傳「為什麼沒有結果」，讓呼叫端能誠實記錄缺席原因。"""
+        blocked = self.unavailable_reason(now)
+        if blocked is not None:
+            _log.info("洞悉層略過 task=%s：%s", task, blocked)
+            return None, blocked
 
         model = self._cfg.model_for(task)
         backend = self._backend or _anthropic_backend(self._key)
@@ -82,11 +122,15 @@ class InsightClient:
             try:
                 parsed, in_tok, out_tok = backend(model.id, system, user, schema, max_tokens)
                 break
+            except LlmRefusal as refusal:
+                # 政策拒答重試只是再花一次錢拿到同一個答案，直接記錄並放棄。
+                _log.warning("洞悉層被拒答（task=%s category=%s）", task, refusal.category)
+                return None, f"refusal:{refusal.category}"
             except Exception:  # noqa: BLE001  # 記錄後重試/放棄，不讓例外阻塞 pipeline
                 _log.exception("洞悉層呼叫失敗（task=%s attempt=%d）", task, attempt + 1)
                 parsed = None
         if parsed is None:
-            return None
+            return None, "LLM 呼叫或結構化輸出連續失敗，未產生分析"
 
         cost = self._cfg.cost_twd(task, in_tok, out_tok)
         record_usage(
@@ -105,7 +149,7 @@ class InsightClient:
             output_tokens=out_tok,
             cost_twd=cost,
             model_id=model.id,
-        )
+        ), None
 
 
 def _anthropic_backend(api_key: str | None) -> Backend:
@@ -128,6 +172,9 @@ def _anthropic_backend(api_key: str | None) -> Backend:
             messages=[{"role": "user", "content": user}],
             output_format=schema,
         )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            details = getattr(resp, "stop_details", None)
+            raise LlmRefusal(str(getattr(details, "category", None) or "unknown"))
         usage = resp.usage
         return resp.parsed_output, int(usage.input_tokens), int(usage.output_tokens)
 

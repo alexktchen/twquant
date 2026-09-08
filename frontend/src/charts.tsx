@@ -1,6 +1,6 @@
 // 共用圖表：lightweight-charts 包裝（K 線＋副圖 pane、範圍/均線/關鍵價位開關）。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createTextWatermark } from 'lightweight-charts'
+import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers, createTextWatermark } from 'lightweight-charts'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorHistPoint } from './api'
 import { ACC, DOWN, LINE, MUT, UP, num, priceFmt } from './theme'
 import { chipCls } from './ui'
@@ -70,6 +70,15 @@ function volumeProfileLevels(data: Candle[]): { poc: number; vah: number; val: n
   return { poc: lo + (pocI + 0.5) * bw, vah: lo + (hiI + 1) * bw, val: lo + loI * bw }
 }
 
+export type ChartMarker = {
+  /** Trading session the marker sits on; already mapped by the caller, never by the library. */
+  time: string
+  position: 'aboveBar' | 'belowBar'
+  shape: 'circle' | 'arrowUp' | 'square'
+  color: string
+  text: string
+}
+
 export function CandleChart({
   data,
   height = 320,
@@ -79,6 +88,8 @@ export function CandleChart({
   factorPanes,
   mas,
   keyLevels = false,
+  markers,
+  focusTime,
 }: {
   data: Candle[]
   height?: number
@@ -88,6 +99,8 @@ export function CandleChart({
   factorPanes?: FactorPane[]
   mas?: MaLine[]
   keyLevels?: boolean
+  markers?: ChartMarker[]
+  focusTime?: string | null
 }) {
   const box = useRef<HTMLDivElement>(null)
   const legend = useRef<HTMLDivElement>(null)
@@ -224,13 +237,26 @@ export function CandleChart({
       lg.style.opacity = '1'
       lg.innerHTML = html
     })
+    // 推薦標記用 v5 的 createSeriesMarkers（不用已移除的 series.setMarkers）。
+    // 標記由呼叫端算好交易日映射；圖表不自行把事件貼到相鄰 K 棒。
+    if (markers?.length) {
+      createSeriesMarkers(
+        candle,
+        markers.map((m) => ({ time: m.time, position: m.position, shape: m.shape, color: m.color, text: m.text })),
+      )
+    }
+    // 定位推薦日：把該日置於可視區中央；找不到該日就維持原視窗，不亂捲。
+    if (focusTime) {
+      const idx = data.findIndex((k) => k.d === focusTime)
+      if (idx >= 0) chart.timeScale().setVisibleLogicalRange({ from: idx - 25, to: idx + 25 })
+    }
     const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
     ro.observe(el)
     return () => {
       ro.disconnect()
       chart.remove()
     }
-  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels])
+  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels, markers, focusTime])
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -271,6 +297,9 @@ export function RangeCandle({
   composite,
   brokerFlow,
   factorPanes,
+  markers,
+  focusTime,
+  onResetView,
 }: {
   data: Candle[]
   height?: number
@@ -278,7 +307,11 @@ export function RangeCandle({
   composite?: CompositePoint[]
   brokerFlow?: BrokerFlowPoint[]
   factorPanes?: FactorPane[]
+  markers?: ChartMarker[]
+  focusTime?: string | null
+  onResetView?: () => void
 }) {
+  const [markersOn, setMarkersOn] = useState(true)
   const [range, setRange] = useState(() => loadChartSettings().range)
   const [maOn, setMaOn] = useState<number[]>(() => loadChartSettings().maOn)
   const [levelsOn, setLevelsOn] = useState(() => loadChartSettings().levelsOn)
@@ -330,6 +363,11 @@ export function RangeCandle({
         : undefined,
     [factorPanes, cutoff],
   )
+  // 標記同樣裁到目前視窗；超出視窗的事件仍留在事件清單，不會被靜默丟掉。
+  const shownMarkers = useMemo(
+    () => (markers ? markers.filter((m) => m.time >= cutoff) : undefined),
+    [markers, cutoff],
+  )
   return (
     <div>
       <div className="flex flex-wrap items-center gap-1 justify-between mb-1">
@@ -346,6 +384,20 @@ export function RangeCandle({
           >
             關鍵價位
           </button>
+          {markers && markers.length > 0 && (
+            <button
+              onClick={() => setMarkersOn((v) => !v)}
+              className={chipCls(markersOn)}
+              title="顯示或隱藏推薦日標記；標記依實際發布日對應交易日，非交易日發布會標到下一個交易日"
+            >
+              推薦標記
+            </button>
+          )}
+          {focusTime && onResetView && (
+            <button onClick={onResetView} className={chipCls(false)} title="重設為完整可視區間">
+              查看全區間
+            </button>
+          )}
         </div>
         <div className="flex gap-1">
           {([[0, '全部'], [120, '120日'], [60, '60日']] as [number, string][]).map(([r, label]) => (
@@ -370,6 +422,8 @@ export function RangeCandle({
         factorPanes={fpShown}
         mas={masShown.length ? masShown : undefined}
         keyLevels={levelsOn}
+        markers={markersOn && markers?.length ? shownMarkers : undefined}
+        focusTime={focusTime}
       />
     </div>
   )

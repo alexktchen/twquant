@@ -4,7 +4,7 @@
 import { useMemo } from 'react'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorOption, StockFactorHistory, StockSeries } from '../api'
 import { fetchStockBrokerFlow, fetchStockCompositeHistory, fetchStockFactorHistory } from '../api'
-import { RangeCandle } from '../charts'
+import { RangeCandle, type ChartMarker } from '../charts'
 import { useMediaQuery, useResource } from '../hooks'
 import { MAX_FACTOR_PANES } from './store'
 import { ChipRow, TPanel, chip } from './ui'
@@ -16,6 +16,9 @@ export function StockChartPanel({
   factors = [],
   available = [],
   onToggle,
+  markers,
+  focusTime,
+  onResetView,
 }: {
   sid: string
   title: string
@@ -23,6 +26,9 @@ export function StockChartPanel({
   factors?: FactorOption[]
   available?: FactorOption[]
   onToggle?: (f: FactorOption) => void
+  markers?: ChartMarker[]
+  focusTime?: string | null
+  onResetView?: () => void
 }) {
   const emptyC: StockSeries<CompositePoint> = { sid, as_of: null, source: 'pg', rows: [] }
   const emptyB: StockSeries<BrokerFlowPoint> = { sid, as_of: null, source: 'pg', rows: [] }
@@ -87,6 +93,9 @@ export function StockChartPanel({
         composite={hasComp ? cRows : undefined}
         brokerFlow={hasFlow ? fRows : undefined}
         factorPanes={factorPanes.length ? factorPanes : undefined}
+        markers={markers}
+        focusTime={focusTime}
+        onResetView={onResetView}
       />
     </TPanel>
   )

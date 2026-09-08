@@ -1,22 +1,14 @@
 // 個股頁的 localStorage 持久化（單機儀表板免帳號；鍵名不可變更，跨版本沿用）。
 import type { FactorOption } from '../api'
+import { fromIds, readWatchlist, writeWatchlist } from '../platform/watchlist'
 
-/* ---------- 追蹤股 ---------- */
-const WATCH_KEY = 'twquant.watchlist'
+/* ---------- 追蹤股（與「我的追蹤」共用同一份儲存，見 platform/watchlist.ts）---------- */
 export function loadWatch(): string[] {
-  try {
-    const v: unknown = JSON.parse(localStorage.getItem(WATCH_KEY) ?? '[]')
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
+  return readWatchlist().entries.map((e) => e.stock_id)
 }
 export function saveWatch(watch: string[]): void {
-  try {
-    localStorage.setItem(WATCH_KEY, JSON.stringify(watch))
-  } catch {
-    /* 隱私模式等寫入失敗：追蹤僅本次會話有效 */
-  }
+  // 以代號列表覆寫追蹤集合，但保留既有筆記與來源 run；寫入失敗僅本次會話有效。
+  writeWatchlist(fromIds(readWatchlist().entries, watch))
 }
 
 /* ---------- 副圖因子選擇（跨股票、跨重整維持使用者最後選擇）---------- */
