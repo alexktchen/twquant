@@ -1,0 +1,53 @@
+# D-099（事前登記）：C1 的**唯一變更是 top_n 20 → 50**。
+# D-095 已推翻「周轉率決定擇時效果」的解釋（周轉減半只讓傷害從 −6.1pp 縮到 −2.6pp，沒翻正）。
+# 替代解釋是**集中度**：擇時在 B2（50 檔市值加權）上 +14.7pp、在 C1（20 檔等權）上 −6.1pp。
+# 這一格讓 C1 的檔數與 B2 同級，選股訊號完全不動——若擇時在這裡轉正，集中度就是原因。
+# `max_weight_per_stock` 維持 0.10：20 檔等權 5%、50 檔等權 2%，兩者都不觸頂，故非變數。
+
+# lw_c1_breakout——長窗口（D-087 事前登記）。**判準先寫定，不事後挑。**
+#
+# 與 `track_c1_breakout.yaml` **逐字相同，只換兩件事**：
+#   1. 流動性門檻由絕對（`min_adv_twd`）改為相對（`min_adv_pctl: 0.70`，保留 ADV 前 30%）
+#      ——D-062 裁決。絕對門檻的留存率有九成八由當年成交熱度解釋（r = +0.982），
+#      跨期樣本不可比；相對門檻的標準差由 5.29pp 降到 0.42pp。
+#   2. 視窗改為 2017-01-03 ~ 2026-02-28（保險庫邊界不變）。
+#
+# **與既有 113 筆完全不可比**：引擎現在會收股利（D-085），這裡是含息報酬；
+# 而且視窗、宇宙定義都不同。只能與本家族的其他格、以及含息基準比。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_c1n50_mop
+description: C1 純技術面飆股：52 週高點 × 中期動能 × 異常放量 × 相對強弱（不排大型股、無獲利門檻）（長窗口 D-087）（50 檔版，D-099）＋MOP
+trial_scope: lw:concentration_x_timing
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 } # George–Hwang 2004：主訊號
+  - { factor: price.mom_60d, weight: 0.25 } # Jegadeesh–Titman 1993
+  - { factor: volume.turnover_z_20d, weight: 0.25 } # Gervais et al. 2001
+  - { factor: price.rs_market_20d, weight: 0.15 }
+# 四項不齊全即不入選：rank_avg 對「存在的列」求和，缺項者分數虛高（D-061／R12）
+require_all_factors: true
+
+selection: { method: top_n, top_n: 50 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: [tsmom_vol_scaling]
+overlay_params:
+  tsmom_vol_scaling:
+    index_id: TAIEX
+    mom_window: 244
+    vol_window: 60
+    target_vol: 0.20
+    min_mult: 0.2
+    floor: 0.0
