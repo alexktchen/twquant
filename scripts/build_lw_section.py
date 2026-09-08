@@ -273,13 +273,44 @@ _DIRS: dict[str, tuple[str, str]] = {
 }
 
 
-def _tier(cagr: float, mdd: float) -> str:
-    """D-087 的分層。甲層原文是「MDD ≤ 30% **且 CAGR > 0**」——只看 MDD 會把
-    「常態空手所以回撤淺」的事件型策略誤判為甲（LW-C2b／C2c／M3 三格 CAGR 都是負的）。
-    虧錢不是站得住。"""
+def _tier(cagr: float, mdd: float, bench_cagr: float | None = None) -> str:
+    """D-087 的分層，加上 D-101 裁決的**實質性下限**。
+
+    原文是「MDD ≤ 30% 且 CAGR > 0」。`CAGR > 0` 擋掉了負報酬的空手格
+    （LW-C2b／C2c／M3），但擋不掉 **LW-M2 那種 +0.16%、周轉 0.3× 的「幾乎沒參與」**
+    ——它靠不交易拿到 −4.17% 的回撤，而那與「架構在多體制下站得住」完全無關。
+
+    故加一條：**CAGR 須達同視窗基準的一半**。門檻綁基準而非絕對數字，
+    因為兩個視窗的基準相差 4.2pp（2017 +17.91%、2019 +22.13%），
+    固定門檻會讓兩個視窗的甲層不等價。
+    """
     if cagr <= 0:
         return "丙"
+    if bench_cagr is not None and cagr < 0.5 * bench_cagr:
+        return "丙"
     return "甲" if abs(mdd) <= 0.30 else "乙" if abs(mdd) <= 0.40 else "丙"
+
+
+def _vs_blended(cagr: float, mdd: float, bench: dict[str, float]) -> dict[str, float] | None:
+    """對照「持 w 成指數、其餘現金」這個**免費替代方案**。
+
+    策略年化 c、基準年化 b → 只要持 w = c/b 的指數就拿得到同樣的報酬，
+    而回撤只有 w × 基準回撤（現金那部分不會跌）。
+    **策略要有存在意義，回撤必須比這個方案還淺。**
+
+    這比「三項全贏基準」更貼近實際的取捨：任何人都能降低曝險，
+    所以「報酬低但回撤也低」本身不是本事——要低得比按比例縮小還多才是。
+    負報酬的格沒有對應的 w，回 None。
+    """
+    if cagr <= 0 or bench["cagr"] <= 0:
+        return None
+    w = cagr / bench["cagr"]
+    blended_mdd = w * abs(bench["mdd"])
+    return {
+        "weight": w,
+        "blended_mdd": blended_mdd,
+        "gap_pp": (blended_mdd - abs(mdd)) * 100,  # 正＝策略比免費方案好
+    }
 
 
 def _discover_all() -> list[dict[str, object]]:
@@ -310,7 +341,10 @@ def _discover_all() -> list[dict[str, object]]:
                     "mdd": m["mdd"],
                     "sharpe": m["sharpe"],
                     "turnover": m.get("turnover"),
-                    "tier": _tier(m["cagr"], m["mdd"]),
+                    "tier": _tier(m["cagr"], m["mdd"], bench.get(window, {}).get("cagr")),
+                    "vs_blended": (
+                        _vs_blended(m["cagr"], m["mdd"], bench[window]) if window in bench else None
+                    ),
                     "vs_bench": (
                         None
                         if window not in bench
@@ -449,7 +483,7 @@ def main() -> None:
         # D-087 的甲層原文是「MDD ≤ 30% **且 CAGR > 0**」——只看 MDD 會把
         # 「常態空手所以回撤淺」的事件型策略誤判為甲層（LW-C2b/C2c/M3 三格
         # CAGR 都是負的卻拿到甲）。虧錢不是站得住。
-        row["tier"] = None if m is None else _tier(m["cagr"], m["mdd"])
+        row["tier"] = None if m is None else _tier(m["cagr"], m["mdd"], _BENCH_LONG["cagr"])
         row["delta"] = (
             None
             if (m is None or base is None)
