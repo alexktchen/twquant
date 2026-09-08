@@ -273,6 +273,96 @@ _DIRS: dict[str, tuple[str, str]] = {
 }
 
 
+# 籌碼因子的 IC 階梯——**引自另一條研究線**（PR #67，`docs/reports/volume-lead-price-ic.md`）。
+# 全樣本 2015-06-01 ~ 2026-09-07、四碼普通股。`t_cons` 是該文件的 t÷√h 保守讀法
+# （日頻 t 未做視窗重疊修正，h 越大越高估）。
+# **這裡只轉錄，不重算**：那是別條線量的，重算會多消耗一次試驗且無助於判讀。
+_CHIP_IC: list[dict[str, object]] = [
+    {
+        "factor": "chip.foreign_streak",
+        "what": "外資連續買超天數",
+        "kind": "持續性",
+        "ic5": 0.034,
+        "t_cons5": 14.3,
+        "ic20": 0.015,
+        "t_cons20": 3.4,
+    },
+    {
+        "factor": "chip.trust_streak",
+        "what": "投信連續買超天數",
+        "kind": "持續性",
+        "ic5": 0.020,
+        "t_cons5": 7.8,
+        "ic20": 0.016,
+        "t_cons20": 3.2,
+    },
+    {
+        "factor": "chip.foreign_net_10d",
+        "what": "外資 10 日買超 ÷ 成交量",
+        "kind": "量",
+        "ic5": 0.004,
+        "t_cons5": 1.4,
+        "ic20": -0.006,
+        "t_cons20": -1.2,
+    },
+    {
+        "factor": "chip.inst_net_10d",
+        "what": "三大法人 10 日買超 ÷ 成交量",
+        "kind": "量",
+        "ic5": -0.002,
+        "t_cons5": -0.6,
+        "ic20": -0.012,
+        "t_cons20": -2.3,
+    },
+    {
+        "factor": "chip.trust_net_10d",
+        "what": "投信 10 日買超 ÷ 成交量",
+        "kind": "量",
+        "ic5": -0.004,
+        "t_cons5": -1.9,
+        "ic20": -0.009,
+        "t_cons20": -2.5,
+    },
+    {
+        "factor": "chip.margin_velocity_5d",
+        "what": "5 日融資淨增 ÷ 5 日量",
+        "kind": "量",
+        "ic5": -0.006,
+        "t_cons5": -2.8,
+        "ic20": -0.003,
+        "t_cons20": -0.8,
+    },
+    {
+        "factor": "chip.short_margin_ratio",
+        "what": "券資比（融券 ÷ 融資）",
+        "kind": "量",
+        "ic5": -0.012,
+        "t_cons5": -1.7,
+        "ic20": -0.034,
+        "t_cons20": -2.7,
+    },
+]
+
+# 三個長窗口模型各自用了哪些籌碼因子——用來對照上表，找出「用了弱的、漏了強的」。
+_MODEL_CHIPS: dict[str, list[str]] = {
+    "營收驚奇模型": [
+        "chip.foreign_net_10d",
+        "chip.inst_net_10d",
+        "chip.margin_velocity_5d",
+        "chip.short_margin_ratio",
+        "chip.trust_streak",
+    ],
+    "回撤預警模型": [
+        "chip.foreign_net_10d",
+        "chip.inst_net_10d",
+        "chip.margin_velocity_5d",
+        "chip.short_margin_ratio",
+        "chip.trust_streak",
+    ],
+    "成本感知報酬模型": [],
+}
+
+
 def _tier(cagr: float, mdd: float, bench_cagr: float | None = None) -> str:
     """D-087 的分層，加上 D-101 裁決的**實質性下限**。
 
@@ -515,6 +605,8 @@ def main() -> None:
         "infeasible": _INFEASIBLE,
         "completion": _completion(),
         "bench_by_window": _bench_by_window(),
+        "chip_ic": _CHIP_IC,
+        "model_chips": _MODEL_CHIPS,
         "calibration": _window_calibration(),
         "windows": {
             w: sum(1 for e in every if e["window"] == w)
