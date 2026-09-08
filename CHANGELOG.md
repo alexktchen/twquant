@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- 2026-09-09　D-106／D-107　**開金庫**（僅此一次）：事前登記五條預測後跑 2026-03-02~08-31。P1 訊號通過（IC +0.0816，排除標籤污染段後 +0.0624 仍過門檻）、P4／P5 通過（8／8 輸給 0050）、P2 無資訊、P3 通過但僅差 0.0002。金庫內含 7 月體制事件（TAIEX −15.1%），集中型策略放大成 −36~−43%，D-105 的 −37% 地板在未見資料上重現；風控層與擇時 overlay 都沒接住。
 - 2026-09-07 量測：**量先價行鏈的 11 年 IC 階梯**（9 因子，全樣本 2015-06~2026-09，四碼普通股）——投信／外資**連續買超天數**各視窗全正（`foreign_streak` 5 日 t +32、`trust_streak` +17.5），**買超÷成交量** 20 日反向（`trust_net_10d` t −11.3、`inst_net_10d` −10.3），異常量 U 型（`turnover_z_20d` 5 日 t −12、五分位價差正）。報告 [docs/reports/volume-lead-price-ic.md](docs/reports/volume-lead-price-ic.md)、腳本 `scripts/ic_ladder.py`。資料事實：`broker_trades.avg_price` 2022–2026 全空、集保只有 3 個週快照、FinMind 股權分級表為付費層。**D-102 事前登記草稿**（K 系列：關鍵價位定位 ＋ 回踩站穩後續漲分類，四段式證偽）。
 
 - 2026-09-07 修正：Dockerfile 補 `libgomp1`。`python:3.12-slim` 沒帶 OpenMP runtime，`import lightgbm` 會炸在 `libgomp.so.1`，等於每日 pipeline 的 ML 推薦步驟在容器裡永遠失敗（且因為 best-effort 而安靜失敗）。修好後在容器內對 2026-09-07 推論 1961 檔並匯出快照。
