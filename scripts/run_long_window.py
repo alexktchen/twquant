@@ -112,7 +112,27 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-RM-mom", "lw_rm_mom"),
         ("LW-RM-both", "lw_rm_both"),  # 判定格
     ),
-    "matrix": (  # D-092 P7：六條文獻規則 × 七個代表性基座
+    # D-102：矩陣依基座需不需要 ML 分數拆兩半——**兩半的視窗不同，不能同批跑**。
+    "diversify": (  # D-104：分散度階梯——最大的兩個槓桿疊加 ＋ 檔數往上推
+        ("LW-C1n50v", "lw_c1_n50v"),  # 本批主角
+        ("LW-C1n100", "lw_c1_n100"),
+        ("LW-C1n100v", "lw_c1_n100v"),
+    ),
+    "chip_feat": (  # D-103 第二段：籌碼特徵修正版的 F1
+        ("LW-F1c", "lw_f1c_revpool"),
+    ),
+    "conc_timing": (  # D-099：50 檔版的 C1 × 三條擇時規則——檢定集中度假說
+        ("LW-C1n50", "lw_c1_n50"),  # 基座（無 overlay），對照 LW-C1
+        ("LW-C1n50-faber", "lw_c1n50_faber"),
+        ("LW-C1n50-anto", "lw_c1n50_anto"),
+        ("LW-C1n50-mop", "lw_c1n50_mop"),
+    ),
+    "band_timing": (  # D-095：降周轉基座 × 三條擇時規則，檢定 D-094 的解釋
+        ("LW-C1band-faber", "lw_c1band_faber"),
+        ("LW-C1band-anto", "lw_c1band_anto"),
+        ("LW-C1band-mop", "lw_c1band_mop"),
+    ),
+    "matrix_pub": (  # 五個公開因子基座 × 6 規則；2017-01-03 起
         ("LW-C1-faber", "lw_c1_faber"),
         ("LW-C1-anto", "lw_c1_anto"),
         ("LW-C1-mop", "lw_c1_mop"),
@@ -143,6 +163,8 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
         ("LW-R2-mm", "lw_r2_mm"),
         ("LW-R2-dm", "lw_r2_dm"),
         ("LW-R2-bsc", "lw_r2_bsc"),
+    ),
+    "matrix_ml": (  # M1／F1 兩個 ML 基座 × 6 規則；2019-05-02 起（分數起日之後）
         ("LW-M1-faber", "lw_m1_faber"),
         ("LW-M1-anto", "lw_m1_anto"),
         ("LW-M1-mop", "lw_m1_mop"),
@@ -160,7 +182,12 @@ CELL_SETS: dict[str, tuple[tuple[str, str], ...]] = {
 OUT_SUFFIX = {
     "public": "",
     "f1_timing": "_f1_timing",
-    "matrix": "_matrix",
+    "diversify": "_diversify",
+    "chip_feat": "_chipfeat",
+    "conc_timing": "_conctiming",
+    "band_timing": "_bandtiming",
+    "matrix_pub": "_matrix",
+    "matrix_ml": "_matrix_ml",
     "revenue": "_revenue",
     "revmom": "_revmom",
     "risk": "_risk",
@@ -212,9 +239,16 @@ def main() -> None:
     ap.add_argument(
         "--scales", default="1x,0x,1.5x", help="逗號分隔的成本情境子集（如只跑 1x 先看結果）"
     )
+    # ML 策略跑不了 2017-01-03：walk-forward 的樣本外分數要先有兩年訓練資料，
+    # 三個長窗口模型的第一個分數日分別是 2017-09-26／2019-01-30／2019-04-30。
+    # 從更早開跑會在第一個再平衡日就撞上「池子被清空」而中止（D-102）。
+    ap.add_argument("--start", default=START, help=f"回測起日；空＝{START}")
+    ap.add_argument("--out-suffix", default="", help="輸出目錄額外後綴（不同視窗必須分開存）")
     args = ap.parse_args()
     cells = CELL_SETS[args.set]
-    out_dir = pathlib.Path(str(OUT) + OUT_SUFFIX[args.set] + ("_nodiv" if args.nodiv else ""))
+    out_dir = pathlib.Path(
+        str(OUT) + OUT_SUFFIX[args.set] + args.out_suffix + ("_nodiv" if args.nodiv else "")
+    )
     want = set(args.scales.split(","))
     scales = [(t, s) for t, s in SCALES if t in want]
     jobs = [(n, c, tag, sc) for n, c in cells for tag, sc in scales]
@@ -223,7 +257,7 @@ def main() -> None:
         f"[{args.set}] {len(cells)} 格 × {len(scales)} 情境 = {len(jobs)} 筆；待跑 {len(todo)}（已存在者跳過）"
     )
     print(
-        f"視窗 {START} ~ {END}　資金 {CAPITAL:,.0f}　scope 依配置（{args.set}）"
+        f"視窗 {args.start} ~ {END}　資金 {CAPITAL:,.0f}　scope 依配置（{args.set}）"
         f"　口徑 {'價格報酬（--no-dividends）' if args.nodiv else '含息'}"
     )
     if args.list:
@@ -252,7 +286,7 @@ def main() -> None:
             "--strategy",
             str(REPO / "configs" / "strategies" / f"{cfg}.yaml"),
             "--start",
-            START,
+            args.start,
             "--end",
             END,
             "--capital",

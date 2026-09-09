@@ -141,6 +141,66 @@ def _dsr_block() -> dict[str, object]:
     }
 
 
+def _vault() -> dict[str, object]:
+    """金庫期（D-106／D-107）：策略層與訊號層各一份，全部來自跑出來的檔案。
+
+    金庫已於 2026-09-09 開封，**只開這一次**。`touched` 之後永遠是 True。
+    """
+    v: dict[str, object] = {
+        "start": "2026-03-02",
+        "end": "2026-08-31",
+        "touched": True,
+        "opened_on": "2026-09-09",
+        "prereg_commit": "2998ade",
+    }
+    vp, ip = R / "vault_verdict.json", R / "vault_ic.json"
+    if vp.exists():
+        v["strategies"] = json.loads(vp.read_text(encoding="utf-8"))
+    if ip.exists():
+        v["ic"] = json.loads(ip.read_text(encoding="utf-8"))
+    # 逐月報酬（策略 vs 0050）——長條圖用
+    v["monthly"] = _vault_monthly()
+    return v
+
+
+def _vault_monthly() -> dict[str, object]:
+    """金庫期各策略與 0050 的逐月報酬，供圖表使用。"""
+    import psycopg
+
+    d = R / "tracks_vault_nodiv"
+    if not d.exists():
+        return {}
+    with psycopg.connect("postgresql://twquant:twquant@localhost:5433/twquant") as c, c.cursor() as cur:
+        cur.execute(
+            "select date, close from serving.prices_daily where stock_id='0050' "
+            "and date between '2026-03-02' and '2026-08-31' order by date"
+        )
+        b = [(str(r[0]), float(r[1])) for r in cur.fetchall()]
+    bm: dict[str, float] = {}
+    for day, px in b:
+        bm[day[:7]] = px
+    months = sorted(bm)
+    prev = b[0][1]
+    bench: dict[str, float] = {}
+    for m in months:
+        bench[m] = bm[m] / prev - 1
+        prev = bm[m]
+    cells = []
+    for f in sorted(d.glob("*_1x.json")):
+        pkg = json.loads(f.read_text(encoding="utf-8"))
+        eq = pkg["equity"]
+        mm: dict[str, float] = {}
+        for e in eq:
+            mm[str(e[0])[:7]] = float(e[1])
+        prev = float(eq[0][1])
+        r: dict[str, float] = {}
+        for m in months:
+            r[m] = mm[m] / prev - 1
+            prev = mm[m]
+        cells.append({"code": f.name.split("_")[0], "monthly": r})
+    return {"months": months, "benchmark": bench, "cells": cells}
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     bench = json.loads((R / "reports/benchmarks_two_windows.json").read_text(encoding="utf-8"))
@@ -200,7 +260,7 @@ def main() -> None:
                 "regimes": "2018 Q4、2020 COVID、2022 熊市——三個獨立的壓力體制",
             },
         },
-        "vault": {"start": "2026-03-01", "end": "2026-08-28", "touched": False},
+        "vault": _vault(),
         "strategies": strats,
         "models": models,
         "benchmarks": bench,

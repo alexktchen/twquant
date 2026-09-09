@@ -20,6 +20,8 @@ from twquant.reporting.benchmarks import benchmark_series, cumulative_factors
 _WINDOWS = {
     "short": (dt.date(2022, 7, 1), dt.date(2026, 2, 28)),
     "long": (dt.date(2017, 1, 3), dt.date(2026, 2, 28)),
+    # D-102：ML 策略的視窗。基準也要有這一份，否則 ML 的數字沒有同視窗的對照
+    "w2019": (dt.date(2019, 5, 2), dt.date(2026, 2, 28)),
 }
 _ETFS = {
     "0050": "元大台灣50（市值型大盤代理）",
@@ -95,7 +97,9 @@ def main() -> None:
 
     p = Path("D:/project/twquant/data/reports/benchmarks_two_windows.json")
     p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"{'基準':44s} {'短窗口 CAGR':>11s} {'MDD':>8s} | {'長窗口 CAGR':>11s} {'MDD':>8s}")
+    print(
+        f"{'基準':36s} {'短 CAGR':>10s}{'MDD':>9s} |{'長 CAGR':>10s}{'MDD':>9s} |{'2019 CAGR':>10s}{'MDD':>9s}"
+    )
     for k, v in out.items():
         s, lg = v.get("short"), v.get("long")
         f = lambda m, kk: f"{m[kk] * 100:+7.2f}%" if m else "     —  "  # noqa: E731

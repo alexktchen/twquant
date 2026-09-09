@@ -48,6 +48,9 @@ _CONFIG = pathlib.Path(__file__).resolve().parents[1] / "configs" / "serving.yam
 _ENV = pathlib.Path("D:/project/twquant/.env")
 LAKE = "D:/project/twquant/data"
 API = "https://api.finmindtrade.com/api/v4/data"
+# T-180／D-092 P7：Daniel-Moskowitz 的空頭判定要 24 個月（488 個交易日）的指數回看，
+# 而回測從 2017-01-03 起——2015-06 的起點只給得出 393 天，五格全部 raise。
+# 往前推到 2014-06 之後餘裕充足。`--from` 可覆寫（預設維持 T-166 的原值，既有行為不變）。
 LO, HI = dt.date(2015, 6, 1), dt.date(2019, 12, 31)
 AUTHORITATIVE_FROM = dt.date(2020, 1, 2)
 # FinMind 的 data_id → 我們的 index_id
@@ -110,9 +113,19 @@ def _official() -> pl.DataFrame:
 def main() -> None:
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group(required=True)
+    ap.add_argument(
+        "--from",
+        dest="lo",
+        type=dt.date.fromisoformat,
+        default=None,
+        help="回補起日（覆寫預設的 2015-06-01）；只影響抓取範圍，仍不寫權威區間",
+    )
     g.add_argument("--check", action="store_true", help="只比對與報告，不寫")
     g.add_argument("--write", action="store_true", help="驗證通過才寫湖與 PG")
     args = ap.parse_args()
+    if args.lo is not None:
+        global LO
+        LO = args.lo
 
     token = _token()
     fm = pl.concat([_fetch(d, token) for d in _INDICES])

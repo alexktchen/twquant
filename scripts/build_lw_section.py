@@ -101,6 +101,52 @@ CELLS: list[dict[str, object]] = [
         "what": "與四因子精選逐字相同，只改換股規則（同上）。",
         "edge": "同上，但基座是四因子而非技術面。",
     },
+    # ── 分散度階梯（D-104，事前登記）──────────────────────────────
+    {
+        "code": "LW-C1n50v",
+        "dir": "tracks_lw_diversify_nodiv",
+        "batch": "D-104 分散度",
+        "base": "LW-C1",
+        "name": "四因子精選 50 檔 ＋ 剔高波動",
+        "what": "把兩個各自最有效的降回撤做法**疊在一起**："
+        "持股從 20 檔加到 50 檔，同時剔掉波動度最高的一成。",
+        "edge": "**D-104 的主角。** 事前寫定三個分支：ΔMDD ≥ +30pp 是相加、"
+        "+20~30pp 是重疊、< +20pp 是互斥。實際 +17.2pp → **互斥**，"
+        "而且比單獨用剔高波動（LW-R2）還差（t = −0.38）。",
+    },
+    {
+        "code": "LW-C1n100",
+        "dir": "tracks_lw_diversify_nodiv",
+        "batch": "D-104 分散度",
+        "base": "LW-C1n50",
+        "name": "四因子精選 100 檔",
+        "what": "同樣的選股規則，持股數從 50 檔再加到 100 檔。",
+        "edge": "問「檔數還能不能再擠出東西」。相對 50 檔只多 +3.1pp，"
+        "低於事前門檻 +5pp → **飽和，不再增加檔數**。",
+    },
+    {
+        "code": "LW-C1n100v",
+        "dir": "tracks_lw_diversify_nodiv",
+        "batch": "D-104 分散度",
+        "base": "LW-C1n100",
+        "name": "四因子精選 100 檔 ＋ 剔高波動",
+        "what": "100 檔的版本再加上剔除高波動的一成。",
+        "edge": "兩個槓桿都拉到底的那一格。回撤 −38.41%，"
+        "與其他所有分散度做法擠在同一條 −37~−41% 的地板上。",
+    },
+    # ── 籌碼特徵修正（D-103 第二段，事前登記）─────────────────────
+    {
+        "code": "LW-F1c",
+        "dir": "tracks_lw_chipfeat_w2019_nodiv",
+        "batch": "D-103 籌碼特徵",
+        "base": "LW-F1",
+        "name": "營收驚奇池 × 技術排序（模型加籌碼特徵）",
+        "what": "與 LW-F1 逐字相同，只有一個差別：篩池子用的營收驚奇模型"
+        "**多吃一個特徵 `chip.foreign_streak`**（外資連續買賣超天數）。",
+        "edge": "**D-103 第二段。** 第一段量到這個特徵的 IC 很高、加進去 IC 也升了"
+        "（+0.0660 → +0.0673）；第二段問它能不能變成錢。答案是不能："
+        "三項全部略差、t = −0.07 → 丙層，**F／R 維持現行特徵**。",
+    },
     # ── 營收線（D-074 的第二段，長窗口版）──────────────────────────
     {
         "code": "LW-F1",
@@ -218,7 +264,25 @@ CELLS: list[dict[str, object]] = [
     },
 ]
 
-_BENCH_LONG = {"cagr": 0.1791, "mdd": -0.3638, "sharpe": 0.96}  # 0050 不含息，同視窗同口徑
+_BENCH_LONG = {"cagr": 0.1791, "mdd": -0.3638, "sharpe": 0.96}  # 0050 不含息，2017 視窗
+
+
+def _bench_by_window() -> dict[str, dict[str, float]]:
+    """每個視窗各自的 0050（不含息，與策略同口徑）。
+
+    **每一格都要跟自己視窗的基準比**。拿 2017 視窗的基準去比 2019 視窗的策略，
+    等於把「那幾年大盤比較好賺」算成策略的功勞——本輪量到的差是 CAGR 最多 8.4pp。
+    """
+    f = R / "reports/benchmarks_two_windows.json"
+    if not f.exists():
+        return {"2017-01-03": _BENCH_LONG}
+    b = json.loads(f.read_text(encoding="utf-8")).get("0050_px", {})
+    out: dict[str, dict[str, float]] = {}
+    for win, key in (("2017-01-03", "long"), ("2019-05-02", "w2019")):
+        m = b.get(key)
+        if m:
+            out[win] = {"cagr": m["cagr"], "mdd": m["mdd"], "sharpe": m["sharpe"]}
+    return out or {"2017-01-03": _BENCH_LONG}
 
 
 def _metrics(cell: dict[str, object]) -> dict[str, float] | None:
@@ -232,6 +296,319 @@ def _metrics(cell: dict[str, object]) -> dict[str, float] | None:
     return None
 
 
+# 每個輸出目錄 → (視窗, 這批在問什麼)。**視窗不同的格不可直接相比**（D-102）：
+# 2019 視窗少了 2018 Q4 那個壓力體制，MDD 會系統性偏淺。
+_DIRS: dict[str, tuple[str, str]] = {
+    "tracks_lw_nodiv": ("2017-01-03", "D-087 公開因子四格"),
+    "tracks_lw_risk_nodiv": ("2017-01-03", "D-091 風控三格"),
+    "tracks_lw_turnover_nodiv": ("2017-01-03", "D-092 P1 降周轉"),
+    "tracks_lw_timing_nodiv": ("2017-01-03", "D-092 P4 擇時"),
+    "tracks_lw_all_nodiv": ("2017-01-03", "D-092 P5a 其餘公開因子"),
+    "tracks_lw_matrix_nodiv": ("2017-01-03", "D-092 P7 六規則 × 公開因子基座"),
+    "tracks_lw_bandtiming_nodiv": ("2017-01-03", "D-095 降周轉基座 × 擇時（檢定格）"),
+    "tracks_lw_conctiming_nodiv": ("2017-01-03", "D-099 50 檔基座 × 擇時（檢定格）"),
+    "tracks_lw_diversify_nodiv": ("2017-01-03", "D-104 分散度階梯（檢定格）"),
+    "tracks_lw_revenue_nodiv": ("2017-01-03", "營收線（需 ML 分數的格已改列 2019）"),
+    "tracks_lw_w2019_nodiv": ("2019-05-02", "D-102 配對對照（公開因子四格）"),
+    "tracks_lw_risk_w2019_nodiv": ("2019-05-02", "D-102 配對對照（風控三格）"),
+    "tracks_lw_ml_w2019_nodiv": ("2019-05-02", "D-092 P2 ML 訊號進各載具"),
+    "tracks_lw_revenue_w2019_nodiv": ("2019-05-02", "營收線"),
+    "tracks_lw_revmom_w2019_nodiv": ("2019-05-02", "D-092 P8 營收 × 動能"),
+    "tracks_lw_all_ml_w2019_nodiv": ("2019-05-02", "D-092 P5b 其餘 ML 策略"),
+    "tracks_lw_f1_timing_w2019_nodiv": ("2019-05-02", "D-092 P6 F1 × 兩條擇時"),
+    "tracks_lw_matrix_ml_w2019_nodiv": ("2019-05-02", "D-092 P7 六規則 × ML 基座"),
+    "tracks_lw_chipfeat_w2019_nodiv": ("2019-05-02", "D-103 籌碼特徵修正（檢定格）"),
+}
+
+
+# 籌碼因子的 IC 階梯——**引自另一條研究線**（PR #67，`docs/reports/volume-lead-price-ic.md`）。
+# 全樣本 2015-06-01 ~ 2026-09-07、四碼普通股。`t_cons` 是該文件的 t÷√h 保守讀法
+# （日頻 t 未做視窗重疊修正，h 越大越高估）。
+# **這裡只轉錄，不重算**：那是別條線量的，重算會多消耗一次試驗且無助於判讀。
+_CHIP_IC: list[dict[str, object]] = [
+    {
+        "factor": "chip.foreign_streak",
+        "what": "外資連續買超天數",
+        "kind": "持續性",
+        "ic5": 0.034,
+        "t_cons5": 14.3,
+        "ic20": 0.015,
+        "t_cons20": 3.4,
+    },
+    {
+        "factor": "chip.trust_streak",
+        "what": "投信連續買超天數",
+        "kind": "持續性",
+        "ic5": 0.020,
+        "t_cons5": 7.8,
+        "ic20": 0.016,
+        "t_cons20": 3.2,
+    },
+    {
+        "factor": "chip.foreign_net_10d",
+        "what": "外資 10 日買超 ÷ 成交量",
+        "kind": "量",
+        "ic5": 0.004,
+        "t_cons5": 1.4,
+        "ic20": -0.006,
+        "t_cons20": -1.2,
+    },
+    {
+        "factor": "chip.inst_net_10d",
+        "what": "三大法人 10 日買超 ÷ 成交量",
+        "kind": "量",
+        "ic5": -0.002,
+        "t_cons5": -0.6,
+        "ic20": -0.012,
+        "t_cons20": -2.3,
+    },
+    {
+        "factor": "chip.trust_net_10d",
+        "what": "投信 10 日買超 ÷ 成交量",
+        "kind": "量",
+        "ic5": -0.004,
+        "t_cons5": -1.9,
+        "ic20": -0.009,
+        "t_cons20": -2.5,
+    },
+    {
+        "factor": "chip.margin_velocity_5d",
+        "what": "5 日融資淨增 ÷ 5 日量",
+        "kind": "量",
+        "ic5": -0.006,
+        "t_cons5": -2.8,
+        "ic20": -0.003,
+        "t_cons20": -0.8,
+    },
+    {
+        "factor": "chip.short_margin_ratio",
+        "what": "券資比（融券 ÷ 融資）",
+        "kind": "量",
+        "ic5": -0.012,
+        "t_cons5": -1.7,
+        "ic20": -0.034,
+        "t_cons20": -2.7,
+    },
+]
+
+# 三個長窗口模型各自用了哪些籌碼因子——用來對照上表，找出「用了弱的、漏了強的」。
+_MODEL_CHIPS: dict[str, list[str]] = {
+    "營收驚奇模型": [
+        "chip.foreign_net_10d",
+        "chip.inst_net_10d",
+        "chip.margin_velocity_5d",
+        "chip.short_margin_ratio",
+        "chip.trust_streak",
+    ],
+    "回撤預警模型": [
+        "chip.foreign_net_10d",
+        "chip.inst_net_10d",
+        "chip.margin_velocity_5d",
+        "chip.short_margin_ratio",
+        "chip.trust_streak",
+    ],
+    "成本感知報酬模型": [],
+}
+
+
+def _tier(cagr: float, mdd: float, bench_cagr: float | None = None) -> str:
+    """D-087 的分層，加上 D-101 裁決的**實質性下限**。
+
+    原文是「MDD ≤ 30% 且 CAGR > 0」。`CAGR > 0` 擋掉了負報酬的空手格
+    （LW-C2b／C2c／M3），但擋不掉 **LW-M2 那種 +0.16%、周轉 0.3× 的「幾乎沒參與」**
+    ——它靠不交易拿到 −4.17% 的回撤，而那與「架構在多體制下站得住」完全無關。
+
+    故加一條：**CAGR 須達同視窗基準的一半**。門檻綁基準而非絕對數字，
+    因為兩個視窗的基準相差 4.2pp（2017 +17.91%、2019 +22.13%），
+    固定門檻會讓兩個視窗的甲層不等價。
+    """
+    if cagr <= 0:
+        return "丙"
+    if bench_cagr is not None and cagr < 0.5 * bench_cagr:
+        return "丙"
+    return "甲" if abs(mdd) <= 0.30 else "乙" if abs(mdd) <= 0.40 else "丙"
+
+
+def _vs_blended(cagr: float, mdd: float, bench: dict[str, float]) -> dict[str, float] | None:
+    """對照「持 w 成指數、其餘現金」這個**免費替代方案**。
+
+    策略年化 c、基準年化 b → 只要持 w = c/b 的指數就拿得到同樣的報酬，
+    而回撤只有 w × 基準回撤（現金那部分不會跌）。
+    **策略要有存在意義，回撤必須比這個方案還淺。**
+
+    這比「三項全贏基準」更貼近實際的取捨：任何人都能降低曝險，
+    所以「報酬低但回撤也低」本身不是本事——要低得比按比例縮小還多才是。
+    負報酬的格沒有對應的 w，回 None。
+    """
+    if cagr <= 0 or bench["cagr"] <= 0:
+        return None
+    w = cagr / bench["cagr"]
+    blended_mdd = w * abs(bench["mdd"])
+    return {
+        "weight": w,
+        "blended_mdd": blended_mdd,
+        "gap_pp": (blended_mdd - abs(mdd)) * 100,  # 正＝策略比免費方案好
+    }
+
+
+def _discover_all() -> list[dict[str, object]]:
+    """掃過所有輸出目錄，把**每一格**都列出來——不只上面手寫說明的那些。
+
+    手寫清單負責敘事（名稱、在做什麼、對照誰），這裡負責**完整性**：
+    使用者要的是「全部跑過的策略都盤點完」，而手寫清單永遠會落後於實際跑的格數。
+    """
+    bench = _bench_by_window()
+    rows: list[dict[str, object]] = []
+    for dname, (window, batch) in _DIRS.items():
+        d = R / dname
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("*_1x.json")):
+            try:
+                m = json.loads(f.read_text(encoding="utf-8"))["metrics"]
+            except (json.JSONDecodeError, KeyError, OSError):
+                # 只吞這三種：正在寫入的半成品 JSON、缺 metrics 的舊格式、讀檔失敗。
+                # **不吞其他例外**——那會讓真的壞掉靜默變成「這一格沒跑」。
+                continue
+            rows.append(
+                {
+                    "code": f.stem.split("_", 1)[0],
+                    "window": window,
+                    "batch": batch,
+                    "cagr": m["cagr"],
+                    "mdd": m["mdd"],
+                    "sharpe": m["sharpe"],
+                    "turnover": m.get("turnover"),
+                    "tier": _tier(m["cagr"], m["mdd"], bench.get(window, {}).get("cagr")),
+                    "vs_blended": (
+                        _vs_blended(m["cagr"], m["mdd"], bench[window]) if window in bench else None
+                    ),
+                    "vs_bench": (
+                        None
+                        if window not in bench
+                        else {
+                            "cagr_pp": (m["cagr"] - bench[window]["cagr"]) * 100,
+                            "mdd_pp": (abs(bench[window]["mdd"]) - abs(m["mdd"])) * 100,
+                            "sharpe": m["sharpe"] - bench[window]["sharpe"],
+                        }
+                    ),
+                }
+            )
+    return sorted(rows, key=lambda r: (str(r["window"]), -float(r["sharpe"])))
+
+
+def _window_calibration() -> dict[str, object]:
+    """同一份設定在兩個視窗下的差——**這是跨視窗比較能不能做的唯一依據**。
+
+    D-102 只能事前說「2019 視窗少了 2018 Q4，MDD 應該偏淺」；配對對照跑完之後
+    才知道偏多少。若 MDD 幾乎不動而 CAGR 動很大，那結論是
+    「回撤可以跨視窗比、報酬不行」——比籠統地說「都不可比」精確得多。
+    """
+    pairs: list[dict[str, object]] = []
+    for a_dir, b_dir in (
+        ("tracks_lw_nodiv", "tracks_lw_w2019_nodiv"),
+        ("tracks_lw_risk_nodiv", "tracks_lw_risk_w2019_nodiv"),
+    ):
+        da, db = R / a_dir, R / b_dir
+        if not (da.exists() and db.exists()):
+            continue
+        for fa in sorted(da.glob("*_1x.json")):
+            fb = db / fa.name
+            if not fb.exists():
+                continue
+            try:
+                ma = json.loads(fa.read_text(encoding="utf-8"))["metrics"]
+                mb = json.loads(fb.read_text(encoding="utf-8"))["metrics"]
+            except (json.JSONDecodeError, KeyError, OSError):
+                continue
+            pairs.append(
+                {
+                    "code": fa.stem.split("_", 1)[0],
+                    "cagr_2017": ma["cagr"],
+                    "cagr_2019": mb["cagr"],
+                    "mdd_2017": ma["mdd"],
+                    "mdd_2019": mb["mdd"],
+                    "d_cagr_pp": (mb["cagr"] - ma["cagr"]) * 100,
+                    "d_mdd_pp": (abs(ma["mdd"]) - abs(mb["mdd"])) * 100,  # 正＝2019 較淺
+                }
+            )
+    if not pairs:
+        return {"pairs": []}
+    dm = sorted(float(p["d_mdd_pp"]) for p in pairs)
+    dc = sorted(float(p["d_cagr_pp"]) for p in pairs)
+    mid = len(pairs) // 2
+    return {
+        "pairs": pairs,
+        "mdd_median_pp": dm[mid],
+        "mdd_max_pp": dm[-1],
+        "cagr_median_pp": dc[mid],
+        "cagr_max_pp": dc[-1],
+    }
+
+
+# 跑不出來、而「跑不出來」本身就是結果的格。**不是待修的錯**——
+# 放寬設定讓它跑得出來，等於改配置去迎合結果（D-092 明文不調 keep_pct／top_n）。
+_INFEASIBLE: list[dict[str, str]] = [
+    {
+        "code": "LW-MGALLm",
+        "window": "2017-01-03",
+        "name": "動能池 ＋ 五道濾網全上",
+        "why": "五道濾網疊起來後實際入選只剩 **3 檔**，單股上限 0.15 讓權重加不到 1，引擎直接 raise。"
+        "**這就是答案**：把所有濾網疊在一起，在長窗口的宇宙上沒有東西通得過。",
+    },
+    {
+        "code": "LW-MGALL",
+        "window": "2019-05-02",
+        "name": "ML 訊號池 ＋ 五道濾網全上",
+        "why": "同一件事的 ML 基座版，只剩 **2 檔**。兩個基座、兩個視窗，"
+        "疊滿濾網的結果一樣——**這不是巧合，是宇宙容不下那麼多層條件**。",
+    },
+]
+
+# 依 D-102：需要 ML 分數的格**只跑 2019 視窗**（模型的樣本外分數最早 2019-04-30）。
+# 它們在 2017 視窗的「缺」是設計，不是漏——先前把同一組格對兩個視窗各算一次，
+# 得到「118/128 未完成」的假象，而真正缺的是 0 格。
+_ML_ONLY_SETS = ("ml", "ml_all", "f1_timing", "revmom", "matrix_ml")
+_REVENUE_2019_ONLY = ("LW-F1", "LW-MG1", "LW-F1abs", "LW-F1trend")
+
+
+def _completion() -> dict[str, object]:
+    """三種狀態分開數：跑完／不可行／設計上不在這個視窗。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_rlw", "scripts/run_long_window.py")
+    if spec is None or spec.loader is None:
+        return {}
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    infeasible_codes = {c["code"] for c in _INFEASIBLE}
+    done = by_design = missing = 0
+    missing_list: list[str] = []
+    for k, cells in mod.CELL_SETS.items():
+        for win, suffix in (("2017-01-03", "_nodiv"), ("2019-05-02", "_w2019_nodiv")):
+            d = R / ("tracks_lw" + mod.OUT_SUFFIX[k] + suffix)
+            for name, cfg in cells:
+                if (d / f"{name}_{cfg}_1x.json").exists():
+                    done += 1
+                elif name in infeasible_codes:
+                    pass  # 已在 _INFEASIBLE 逐格列出，不重複計
+                elif (
+                    win.startswith("2017")
+                    and (k in _ML_ONLY_SETS or (k == "revenue" and name in _REVENUE_2019_ONLY))
+                ) or (win.startswith("2019") and k not in _ML_ONLY_SETS and k != "revenue"):
+                    by_design += 1
+                else:
+                    missing += 1
+                    missing_list.append(f"{name}@{win}")
+    return {
+        "done": done,
+        "infeasible": len(_INFEASIBLE),
+        "by_design": by_design,
+        "missing": missing,
+        "missing_list": missing_list,
+    }
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     got = {str(c["code"]): _metrics(c) for c in CELLS}
@@ -241,11 +618,10 @@ def main() -> None:
         base = got.get(str(c["base"])) if c["base"] else None
         row = dict(c)
         row["metrics"] = m
-        row["tier"] = (
-            None
-            if m is None
-            else ("甲" if abs(m["mdd"]) <= 0.30 else "乙" if abs(m["mdd"]) <= 0.40 else "丙")
-        )
+        # D-087 的甲層原文是「MDD ≤ 30% **且 CAGR > 0**」——只看 MDD 會把
+        # 「常態空手所以回撤淺」的事件型策略誤判為甲層（LW-C2b/C2c/M3 三格
+        # CAGR 都是負的卻拿到甲）。虧錢不是站得住。
+        row["tier"] = None if m is None else _tier(m["cagr"], m["mdd"], _BENCH_LONG["cagr"])
         row["delta"] = (
             None
             if (m is None or base is None)
@@ -267,14 +643,27 @@ def main() -> None:
         )
         rows.append(row)
 
+    every = _discover_all()
     payload = {
         "cells": rows,
         "benchmark": _BENCH_LONG,
         "done": sum(1 for r in rows if r["metrics"]),
         "total": len(rows),
+        "all_results": every,
+        "infeasible": _INFEASIBLE,
+        "completion": _completion(),
+        "bench_by_window": _bench_by_window(),
+        "chip_ic": _CHIP_IC,
+        "model_chips": _MODEL_CHIPS,
+        "calibration": _window_calibration(),
+        "windows": {
+            w: sum(1 for e in every if e["window"] == w)
+            for w in sorted({str(e["window"]) for e in every})
+        },
     }
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"{payload['done']}／{payload['total']} 格完成 → {OUT}\n")
+    print(f"敘事格 {payload['done']}／{payload['total']}；**全部結果 {len(every)} 格** → {OUT}")
+    print(f"  各視窗格數：{payload['windows']}\n")
     for r in rows:
         m = r["metrics"]
         if not m:

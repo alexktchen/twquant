@@ -5,6 +5,8 @@ set -u
 cd "$(dirname "$0")/.."
 export PYTHONIOENCODING=utf-8
 export TWQUANT_PG_DSN="postgresql://twquant:twquant@localhost:5433/twquant"
+# 基準也要每個視窗各一份——每格都跟自己視窗的 0050 比（D-102）
+uv run --all-groups python scripts/benchmarks_two_windows.py >/dev/null
 uv run --all-groups python scripts/build_lw_section.py
 uv run --all-groups python scripts/timing_all.py >/dev/null
 uv run --all-groups python scripts/build_two_window_report.py >/dev/null

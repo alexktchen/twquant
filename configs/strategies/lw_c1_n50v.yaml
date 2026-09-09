@@ -1,0 +1,48 @@
+# D-104（事前登記）：50 檔 ＋ 事前剔除 vol_20d 最高 10%（兩個最大槓桿疊加）。
+# 與 lw_c1_breakout.yaml **逐字相同，只改分散度相關的設定**——四個技術訊號一個不動。
+# 觸發是 118 格量出來的：最大的兩個單一槓桿都是分散度（剔高波動 ΔMDD +20.4pp、
+# 檔數 20→50 +16.6pp），大於任何因子或 ML 訊號。預測寫在 D-104，跑之前定案。
+# max_weight_per_stock 維持 0.10：50 檔等權 2%、100 檔 1%，都不觸頂，故非變數。
+
+# lw_c1_breakout——長窗口（D-087 事前登記）。**判準先寫定，不事後挑。**
+#
+# 與 `track_c1_breakout.yaml` **逐字相同，只換兩件事**：
+#   1. 流動性門檻由絕對（`min_adv_twd`）改為相對（`min_adv_pctl: 0.70`，保留 ADV 前 30%）
+#      ——D-062 裁決。絕對門檻的留存率有九成八由當年成交熱度解釋（r = +0.982），
+#      跨期樣本不可比；相對門檻的標準差由 5.29pp 降到 0.42pp。
+#   2. 視窗改為 2017-01-03 ~ 2026-02-28（保險庫邊界不變）。
+#
+# **與既有 113 筆完全不可比**：引擎現在會收股利（D-085），這裡是含息報酬；
+# 而且視窗、宇宙定義都不同。只能與本家族的其他格、以及含息基準比。
+#
+# 未經部署裁決，勿用於實盤。
+name: lw_c1_n50v
+description: C1 純技術面飆股：52 週高點 × 中期動能 × 異常放量 × 相對強弱（不排大型股、無獲利門檻）（長窗口 D-087）（50 檔＋剔高波動，D-104）
+trial_scope: lw:diversification
+
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+
+prefilter:
+  - factor: price.vol_20d
+    keep_pct: 0.9
+combine: rank_avg
+signals:
+  - { factor: price.high_52w, weight: 0.35 } # George–Hwang 2004：主訊號
+  - { factor: price.mom_60d, weight: 0.25 } # Jegadeesh–Titman 1993
+  - { factor: volume.turnover_z_20d, weight: 0.25 } # Gervais et al. 2001
+  - { factor: price.rs_market_20d, weight: 0.15 }
+# 四項不齊全即不入選：rank_avg 對「存在的列」求和，缺項者分數虛高（D-061／R12）
+require_all_factors: true
+
+selection: { method: top_n, top_n: 50 }
+weighting: equal
+max_weight_per_stock: 0.10
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+overlays: []
