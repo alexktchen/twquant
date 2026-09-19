@@ -194,6 +194,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-230 | 換股進出清單：由結果包 ledger 產出每個成交日的買進／出清名單 | DECISIONS D-113 §三 | T-131 | — | done（2026-09-19；`reporting/trade_journal.py` 純函數＋8 條 AC 測試（進出分類、加減碼、均價成本與持有交易日、賣超即 raise、決定性、前導零）；`scripts/build_trade_journal.py` 落地單檔 HTML 至 `data/reports/trade_journal.html`（`--out` 強制絕對路徑）。不重跑回測、不增加試驗數。另附 `scripts/d109_scorecard.py`：D-109 五條門檻的診斷計分，拒收結束日 > 2026-08-31 的結果包） |
 | T-231 | 回測引擎每日出場掛鉤：`StrategyConfig.exit_rules`（固定比例停損、跌破 N 日均線、聯集、模型分數門檻 E6／E7）；收盤判斷、隔日開盤出清、出清後留現金；預設空＝既有行為逐位元不變 | DECISIONS D-114 §四／§六 | — | — | todo |
 | T-232 | 先以凍結的回撤模型補逐日分數（只推論）；跑 E0 對照＋E1a／E1b／E2／E3／E5／E6／E7（皆 15 檔；長窗口＋舊金庫期）＋送檢者的 10 檔敏感度，依 D-114 §四 的送檢規則出判定表並對質 §五 的預測 | DECISIONS D-114 §四／§五 | T-231 | — | todo |
+| T-233 | X 系列樣本：由 LW-M1 長窗口 ledger 重建「部位 × 交易日」，加 5 個部位面特徵（`assert_no_lookahead`） | DECISIONS D-115 §二／§四 | T-230 | — | todo |
+| T-234 | X 系列三個標籤（XA 10 日最大下跌／XB triple barrier／XC 賣 vs 抱）、各訓練一次、跑 D-115 §六 三條診斷 | DECISIONS D-115 §三／§五／§六 | T-233 | — | todo |
+| T-235 | 通過診斷者成為 E8a／E8b／E8c 進回測，依 D-115 §七 判定並對質 §八 的預測 | DECISIONS D-115 §七 | T-231、T-232、T-234 | — | todo |
+| T-236 | `docs/research/PAPERS-EXIT.md`：出場／停損／meta-labeling 文獻，逐篇核對出處後入庫 | DECISIONS D-115 §一 | — | — | todo |
 | T-226 | pipeline 重跑同一天會在供應層 OOM；`docker compose run` 還回報 exit 0 | WHERE-IS-EVERYTHING 陷阱⑤ | — | A | todo |
 | T-223 | 消息／公告／法說來源接入（獨立研究線：來源、PIT、成本、fixture 全需新規格） | PRD-002 §4.2/§11 | 另立 SPEC | — | todo |
 
