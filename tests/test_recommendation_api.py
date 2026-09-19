@@ -84,6 +84,18 @@ def test_ac206_2_empty_date_is_not_replaced_by_another_run_and_zero_candidates_i
     assert missing_runs == []
 
 
+def test_ac206_3_runs_are_listed_newest_first(tmp_path: Path) -> None:
+    """不帶日期時最新的 run 排最前——頁面寫的是「最新可得」，第一張卡不能是過期快照。"""
+    save_snapshot(tmp_path, _snapshot("run_old", "2026-09-04", "model_a", [_candidate("0050", 1)]))
+    save_snapshot(tmp_path, _snapshot("run_new", "2026-09-18", "model_a", [_candidate("2330", 1)]))
+    save_snapshot(tmp_path, _snapshot("run_mid", "2026-09-07", "model_a", [_candidate("2317", 1)]))
+
+    response = api.get_platform_recommendations(tmp_path)
+    runs = cast(list[dict[str, Any]], response["runs"])
+
+    assert [run["run_id"] for run in runs] == ["run_new", "run_mid", "run_old"]
+
+
 def test_ac206_1_platform_route_is_read_only() -> None:
     route = next(
         route
