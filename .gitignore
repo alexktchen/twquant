@@ -18,3 +18,6 @@ dist/
 
 # streamlit 本地設定
 .streamlit/
+
+# 執行中腳本的快照副本（bash 會重讀檔案，所以一律跑副本）
+scripts/.run_*.running.sh

@@ -22,3 +22,14 @@
 .platform-stock-name{margin-left:6px;color:var(--muted);font-weight:400}
 @media(max-width:800px){.platform-shell{grid-template-columns:170px minmax(0,1fr)}.platform-content{padding:22px}.platform-topbar{padding:18px 22px}}
 @media(max-width:1050px){.platform-research-layout{grid-template-columns:1fr}.platform-research-layout>section:nth-child(2){max-width:none}}@media(max-width:600px){.platform-shell{display:block}.platform-sidebar{padding:14px;border-right:0;border-bottom:1px solid var(--line)}.platform-brand{font-size:22px;padding:0}.platform-brand-note,.platform-sidebar-foot,.platform-nav-group{display:none}.platform-sidebar nav{display:flex;flex-wrap:wrap;gap:4px;margin-top:12px}.platform-sidebar nav a{padding:10px;font-size:12px;min-height:40px}.platform-content{padding:22px 14px}.platform-topbar{padding:12px 14px}.platform-page-heading h1{font-size:24px}.platform-empty{padding:24px}.platform-page-heading{gap:8px}.platform-metadata-grid{grid-template-columns:1fr}.platform-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.platform-chart-heading{display:block}.platform-chart-heading>span{display:block;margin-top:8px}}
+
+/* D-112 策略持股：金庫成績條。刻意與名單同卡、放在名單上方。 */
+.platform-evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin: .75rem 0; padding: .75rem 1rem; border-left: 3px solid currentColor; opacity: .95; }
+.platform-evidence > div { display: flex; flex-direction: column; gap: .15rem; }
+.platform-evidence dt { font-size: .75rem; letter-spacing: .04em; opacity: .7; }
+.platform-evidence dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.platform-evidence dd span { display: block; font-size: .75rem; font-weight: 400; opacity: .7; }
+.platform-evidence-bad { color: #DC8579; }
+.platform-strategy-note { margin: .5rem 0; font-size: .875rem; opacity: .85; max-width: 68ch; }
+.platform-link-button { background: none; border: 0; padding: .5rem 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+.platform-link-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
