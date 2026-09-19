@@ -104,3 +104,36 @@ def test_ac6_config_rejects_inverted_bands() -> None:
 def test_ac6_config_rejects_bad_keep_pct() -> None:
     with pytest.raises(ValueError, match="risk_gate_keep_pct"):
         RecommendationBucketConfig(risk_gate_keep_pct=1.5)
+
+
+def test_ac7_liquidity_gate_excludes_without_consuming_slots() -> None:
+    """D-113：不在流動性合格名單內者標 ml_liquidity_excluded，且**不佔前 20 名的名額**。"""
+    rows = _rows(30)
+    liquid = frozenset(str(r["stock_id"]) for r in rows) - {"1000", "1002"}
+    b = _buckets(_snap(rows, BucketPolicy(top_n=20, watch_n=25, liquid_ids=liquid)))
+    assert b[0] == "ml_liquidity_excluded"
+    assert b[2] == "ml_liquidity_excluded"
+    assert b.count("ml_top20") == 20
+    assert b[21] == "ml_top20"  # 第 22 名遞補進前 20
+
+
+def test_ac8_liquidity_gate_runs_before_risk_gate() -> None:
+    """同時不合格時標流動性——買不到的股票，回撤預測多深都無關。"""
+    rows = _rows(10)
+    risk = {str(r["stock_id"]): 0.5 for r in rows} | {"1000": 0.01}
+    liquid = frozenset(risk) - {"1000"}
+    policy = BucketPolicy(
+        top_n=3, watch_n=5, risk_gate_keep_pct=0.9, risk_scores=risk, liquid_ids=liquid
+    )
+    assert _buckets(_snap(rows, policy))[0] == "ml_liquidity_excluded"
+
+
+def test_ac9_no_liquidity_list_means_gate_off() -> None:
+    """liquid_ids=None ＝ 閘門未宣告，行為與 D-111 逐字相同。"""
+    b = _buckets(_snap(_rows(30), BucketPolicy(top_n=20, watch_n=25)))
+    assert "ml_liquidity_excluded" not in b
+
+
+def test_ac10_liquidity_config_is_validated() -> None:
+    with pytest.raises(ValueError, match="min_adv_pctl"):
+        RecommendationBucketConfig(liquidity_min_adv_pctl=1.5)

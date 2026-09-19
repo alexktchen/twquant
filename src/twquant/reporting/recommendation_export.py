@@ -33,6 +33,7 @@ _RESEARCH_BUCKET = "ml_candidate"
 _TOP_BUCKET = "ml_top20"
 _WATCH_BUCKET = "ml_watch"
 _RISK_EXCLUDED_BUCKET = "ml_risk_excluded"
+_LIQUIDITY_EXCLUDED_BUCKET = "ml_liquidity_excluded"
 _UNANALYSED = "pending"
 _REQUIRED_COLUMNS = ("date", "stock_id", "score", "available_at")
 
@@ -72,19 +73,24 @@ class BucketPolicy:
     這一層仍然不發明門檻：數字由呼叫端從配置讀進來，本模組只負責套用。
     `risk_scores` 是風控模型的 rank_pct（低分位＝預測跌得深，見 `ml.lgbm_lw_dd_60d`），
     缺席時整條閘門不啟用。
+    `liquid_ids` 是當日通過流動性濾網的代號（D-113，與回測同一支 `universe_ids`）；
+    None＝閘門未宣告。
     """
 
     top_n: int
     watch_n: int
     risk_gate_keep_pct: float = 1.0
     risk_scores: Mapping[str, float] | None = None
+    liquid_ids: frozenset[str] | None = None
 
 
 def _assign_buckets(ordered: list[dict[str, object]], policy: BucketPolicy | None) -> list[str]:
     """依政策給每個候選一個分組；無政策時全部維持 ml_candidate（既有行為）。
 
-    規則（D-111）：
-    1. 風控閘門先剔除——`rank_pct` 低於 `1 - keep_pct` 者標 `ml_risk_excluded`。
+    規則（D-111／D-113）：
+    0. 流動性閘門最先——不在 `liquid_ids` 者標 `ml_liquidity_excluded`，同樣留在快照裡。
+       排在風控之前：買不進去的股票，預測回撤多深都無關。
+    1. 風控閘門剔除——`rank_pct` 低於 `1 - keep_pct` 者標 `ml_risk_excluded`。
        **剔除不是刪除**：那一列照樣留在快照裡，因為「被剔除」本身是資訊。
     2. **查不到風控分數的個股不得晉級**，維持 `ml_candidate`。
        缺資料時放行等於靜默降級（黃金規則 5）；這裡選保守的一邊，且是明寫的規則。
@@ -97,6 +103,9 @@ def _assign_buckets(ordered: list[dict[str, object]], policy: BucketPolicy | Non
     buckets: list[str] = []
     survivors = 0
     for row in ordered:
+        if policy.liquid_ids is not None and str(row["stock_id"]) not in policy.liquid_ids:
+            buckets.append(_LIQUIDITY_EXCLUDED_BUCKET)
+            continue
         if not gate_on:
             survivors += 1
             buckets.append(_band(survivors, policy))

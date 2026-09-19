@@ -47,10 +47,11 @@ const CANDIDATE_BUCKET_LABEL: Record<string, string> = {
   ml_watch: '觀察區（21~50）',
   ml_candidate: '其餘候選',
   ml_risk_excluded: '風控剔除',
+  ml_liquidity_excluded: '流動性剔除',
 }
 const bucketLabel = (bucket: string): string => CANDIDATE_BUCKET_LABEL[bucket] ?? bucket
 /** 固定順序：畫面上的分類列不該隨當頁剛好載到哪些分組而跳動。 */
-const BUCKET_ORDER = ['ml_top20', 'ml_watch', 'ml_candidate', 'ml_risk_excluded'] as const
+const BUCKET_ORDER = ['ml_top20', 'ml_watch', 'ml_candidate', 'ml_risk_excluded', 'ml_liquidity_excluded'] as const
 
 /** Filter keys the daily list keeps in the URL so a shared link restores the same view. */
 export const recommendationFilters = ['date', 'model', 'bucket', 'q', 'run'] as const
