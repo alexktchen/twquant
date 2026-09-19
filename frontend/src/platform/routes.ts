@@ -2,6 +2,7 @@
 export const platformPages = [
   { id: 'overview', label: '今日總覽', group: '每日投資', description: '每日候選與研究工作，從這裡開始。' },
   { id: 'recommendations', label: 'ML 選股', group: '每日投資', description: '查看模型選出的候選、推薦版本與歷史紀錄。' },
+  { id: 'strategies', label: '策略持股', group: '每日投資', description: '已登記策略的每日目標持股，連同它們在未見資料上的成績。' },
   { id: 'watchlists', label: '我的追蹤', group: '每日投資', description: '保存觀察理由，持續追蹤研究結果。' },
   { id: 'stocks', label: '個股研究', group: '市場研究', description: '價量、籌碼與基本面，一起檢視。' },
   { id: 'industries', label: '產業研究', group: '市場研究', description: '觀察產業資金流向、涵蓋範圍與相關股票。' },

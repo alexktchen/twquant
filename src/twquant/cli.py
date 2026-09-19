@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
     from twquant.pipeline import PipelineResult
+    from twquant.reporting.recommendation_export import BucketPolicy
 
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
 
@@ -1011,6 +1012,33 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
             return f"{n} 檔目標（PG 源）"
         return f"{build_targets(strat, wh, day).height} 檔目標"
 
+    def _index_step() -> str:
+        # T-227：指數端點是**月頻**（ingest-index --month），從來沒被接進每日迴圈，
+        # 於是 index_daily 會一路落後 prices_daily 直到有人手動 backfill-index。
+        # 實際後果不是「少一張表」而是**靜默降級**：price.rs_market_20d 整欄空，
+        # LightGBM 把缺欄當 NaN 照樣吐分數，ml score 回報 OK。2026-09-02~09-09 就是這樣。
+        # 只在該日指數尚未進來時才重抓當月（月頻端點，冪等 upsert），已有就不動網路。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        conn = store.connect(scfg)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f'SELECT COUNT(*) FROM "{scfg.pg_schema}"."index_daily" WHERE date = %s',
+                    (day,),
+                )
+                row = cur.fetchone()
+                got = int(row[0]) if row else 0
+        finally:
+            conn.close()
+        if got:
+            return f"{day} 已有 {got} 筆，不重抓"
+        ingest_index(month=f"{day:%Y-%m}")
+        return f"已重抓 {day:%Y-%m} 當月指數"
+
     def _serving_step() -> str:
         # 尾波：鏡射同步 + 物化當日因子 → PG 供應層（display-only，best-effort）。
         # 物化讀取源＝PG 鏡射（PgTableSource，D-026/T-057）：與 CLI serving materialize
@@ -1057,6 +1085,7 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         # L0 名單（T-225）：對當日全宇宙推論 → 匯出推薦快照。best-effort，不擋主線。
         # 用哪個模型由 configs/ml.yaml 的 production_ranking_model 明寫（T-224）——
         # 未綁定時略過而不是自動選，因為八個模型的 train_end 全同、自動選會挑到風控模型。
+        from twquant.errors import DataError
         from twquant.reporting.recommendation_export import export_scores
 
         bound = _load_ml().production_ranking_model
@@ -1066,11 +1095,39 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         mdir = root / bound
         if not (mdir / "meta.json").exists():
             return f"找不到綁定的模型 {bound}，略過"
-        scores_path = mdir / f"scores_{day}.parquet"
-        if not scores_path.exists():
-            _ml_score_day(day, mdir, scores_path)
-        result = export_scores(scores_path, mdir, Path(cfg.data_dir), day)
+        ml_cfg = _load_ml()
+
+        def _score_into_pg(model_name: str) -> Path:
+            # 生產路徑的分數一律寫進 PG：ML 類策略（D-112）與風控閘門（D-111）都從 ml_scores 讀，
+            # 只留 parquet 的話它們每天都會讀不到當日分數。upsert 冪等，重跑安全。
+            model_dir = root / model_name
+            if not (model_dir / "meta.json").exists():
+                raise DataError("ml_score", day, f"找不到模型目錄 {model_name}")
+            path = model_dir / f"scores_{day}.parquet"
+            if not path.exists() or _ml_scores_in_pg(model_name, day) == 0:
+                _ml_score_day(day, model_dir, path, pg=True)
+            return path
+
+        scores_path = _score_into_pg(bound)
+        # 風控閘門與輔助模型也要有當日分數。訓練期它們是「月底出分數、沿用到下個月底」，
+        # 生產改為**每日推論**：D-089 量到回撤模型 94% 是 vol_20d，日頻與月頻差異極小，
+        # 而沿用機制在生產環境一旦斷掉會靜默過期——每日推論配上 T-227 的守衛才會大聲失敗。
+        gate = ml_cfg.recommendation_buckets
+        extra = [gate.risk_gate_model if gate.enabled else "", *ml_cfg.production_aux_models]
+        for name in dict.fromkeys(n for n in extra if n and n != bound):
+            _score_into_pg(name)
+        result = export_scores(scores_path, mdir, Path(cfg.data_dir), day, _bucket_policy(day))
         return f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}"
+
+    def _strategy_targets_step() -> str:
+        # D-112：已登記策略的當日目標持股快照。best-effort，不擋主線。
+        # 排在 ML 推薦名單之後——LW-M1／LW-F1 這類策略要讀當日的 ml_scores。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _strategy_targets_for_day(day, Path(cfg.data_dir))
 
     def _insight_step() -> str:
         # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
@@ -1123,9 +1180,11 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("品質閘門", _gate_step, critical=True),
         PipelineStep("券商買賣超", _broker_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
+        PipelineStep("指數", _index_step),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
+        PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("洞悉分析", _insight_step),
     ]
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
@@ -1455,6 +1514,79 @@ def ic_report(
     )
     if pg_conn is not None:
         pg_conn.close()
+
+
+def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
+    """對已登記的策略逐支算出 `day` 的目標權重並存成不可變快照（D-112）。回傳一行摘要。
+
+    資料來源與回測相同（PG 供應層）：ML 類策略要讀 `ml_scores`，那張表只在 PG。
+    單支失敗會記進快照（status=failed）而不是讓整批中止；整批失敗才往上 raise。
+    """
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.reporting.strategy_targets import (
+        LiveStrategies,
+        LiveStrategy,
+        build_snapshot,
+        save_snapshot,
+    )
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.config import load_strategy
+
+    registry = load_config(_CONFIG_DIR / "strategies_live.yaml", LiveStrategies)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        source = PgTableSource(conn, scfg.pg_schema, cache=True)
+
+        def _compute(strat: LiveStrategy) -> list[tuple[str, float]]:
+            cfg = load_strategy(str(_CONFIG_DIR / "strategies" / f"{strat.config}.yaml"))
+            # held=空：帶狀持有（banded_top_n）需要「目前持股」才有意義，而後端沒有帳戶狀態。
+            # 已登記的 8 支都不是帶狀策略；日後若登記帶狀策略，這裡要先有持股來源。
+            frame = build_targets(cfg, source, day)
+            return [(str(r["stock_id"]), float(r["target_weight"])) for r in frame.to_dicts()]
+
+        snapshot = build_snapshot(day, registry.strategies, _compute, generated_at=now_tw())
+    finally:
+        conn.close()
+    result = save_snapshot(data_dir, snapshot)
+    ok = sum(1 for r in snapshot.strategies if r.status == "ok")
+    flat = sum(1 for r in snapshot.strategies if r.status == "flat")
+    failed = [r.code for r in snapshot.strategies if r.status == "failed"]
+    tail = f"、失敗 {len(failed)}（{'、'.join(failed)}）" if failed else ""
+    return (
+        f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}："
+        f"有名單 {ok}、空手 {flat}{tail}"
+    )
+
+
+@app.command(name="strategy-targets")
+def strategy_targets(
+    date: str = typer.Option("", help="訊號日 YYYY-MM-DD；空＝PG 最新行情日"),
+    out: str = typer.Option("", help="快照資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """對 configs/strategies_live.yaml 登記的每支策略產生目標持股快照（D-112，研究輸出）。"""
+    from twquant.data.serving import store
+
+    if date:
+        day = dt.date.fromisoformat(date)
+    else:
+        scfg = _load_serving()
+        conn = store.connect(scfg)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f'SELECT MAX(date) FROM "{scfg.pg_schema}"."prices_daily"')
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or row[0] is None:
+            typer.secho("PG 無行情，無法決定訊號日。", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        day = row[0]
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    typer.secho(f"[OK] {day} {_strategy_targets_for_day(day, data_dir)}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -2413,6 +2545,68 @@ def ml_train(
     )
 
 
+def _ml_scores_in_pg(model_id: str, day: dt.date) -> int:
+    """`ml_scores` 裡某模型某日的列數；用來判斷當日分數是否已進 PG。"""
+    from twquant.data.serving import store
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT COUNT(*) FROM "{scfg.pg_schema}"."ml_scores" '
+                "WHERE model_id = %s AND date = %s",
+                (model_id, day),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row else 0
+
+
+def _bucket_policy(day: dt.date) -> BucketPolicy | None:
+    """依 configs/ml.yaml 的宣告組出名單分組政策（D-111）；未啟用回 None。
+
+    風控閘門的分數來自 `ml_scores`（D-075 的回撤模型，月頻＋沿用），
+    **整天查無分數即 raise**——閘門宣告了卻沒生效，等於名單少了一層而沒有人被告知。
+    """
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+    from twquant.reporting.recommendation_export import BucketPolicy
+
+    cfg = _load_ml().recommendation_buckets
+    if not cfg.enabled:
+        return None
+    risk: dict[str, float] | None = None
+    if cfg.risk_gate_model:
+        scfg = _load_serving()
+        conn = store.connect(scfg)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f'SELECT stock_id, rank_pct FROM "{scfg.pg_schema}"."ml_scores" '
+                    "WHERE model_id = %s AND date = %s",
+                    (cfg.risk_gate_model, day),
+                )
+                risk = {str(r[0]): float(r[1]) for r in cur.fetchall()}
+        finally:
+            conn.close()
+        if not risk:
+            raise DataError(
+                "recommendation_export",
+                day,
+                f"風控閘門模型 {cfg.risk_gate_model} 在 {day} 沒有任何分數。"
+                "閘門已在 configs/ml.yaml 宣告卻無法生效——名單會少一層風控而沒有人被告知，"
+                "故拒絕匯出。先補該模型當日分數（月頻模型記得 --carry-forward-to）。",
+            )
+    return BucketPolicy(
+        top_n=cfg.top_n,
+        watch_n=cfg.watch_n,
+        risk_gate_keep_pct=cfg.risk_gate_keep_pct,
+        risk_scores=risk,
+    )
+
+
 def _ml_score_day(
     day: dt.date, model_dir: Path, out_path: Path, *, pg: bool = False
 ) -> tuple[int, int]:
@@ -2426,7 +2620,11 @@ def _ml_score_day(
     from twquant.data.serving import store
     from twquant.ml import score as mls
     from twquant.ml import train as mlt
-    from twquant.ml.dataset import assemble, cross_rank_pct
+    from twquant.ml.dataset import (
+        assemble,
+        assert_inference_features_present,
+        cross_rank_pct,
+    )
 
     booster, meta = mls.load_model(model_dir, day)
     raw_feats = meta.get("features")
@@ -2437,6 +2635,8 @@ def _ml_score_day(
     conn = store.connect(scfg)
     try:
         feats = _ml_feature_frames(conn, scfg.pg_schema, features, day, day)
+        # T-227：整欄空的必要特徵會被 LightGBM 當 NaN 吞掉，分數照出、沒有人被告知。
+        assert_inference_features_present(feats, features, day)
         no_labels = pl.DataFrame(
             schema={"date": pl.Date, "stock_id": pl.String, "label": pl.Float64}
         )
@@ -2518,7 +2718,7 @@ def ml_export_recommendations(
     mdir = Path(model)
     scores_path = Path(scores) if scores else mdir / f"scores_{day}.parquet"
     data_dir = Path(out) if out else Path(_load_system().data_dir)
-    result = export_scores(scores_path, mdir, data_dir, day)
+    result = export_scores(scores_path, mdir, data_dir, day, _bucket_policy(day))
     action = "已保存" if result.created else "內容相同，保留既有快照"
     typer.secho(f"[OK] {day} {action}：{result.path}", fg=typer.colors.GREEN)
 

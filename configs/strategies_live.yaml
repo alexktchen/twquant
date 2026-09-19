@@ -1,0 +1,79 @@
+# 後端每天要產出目標持股的策略（D-112）。
+#
+# **這份名單不是「通過的策略」**——D-107 判定沒有任何一支可部署。它是金庫期實測過的那 8 支，
+# 每一支都帶著它在未見資料上的實際成績，頁面必須把成績跟名單一起顯示。
+# vault 區塊由 data/vault_verdict.json 程式化產生（D-107 的數字），不是手抄的；要更新請重新產生。
+# 金庫期 2026-03-02 ~ 2026-08-31；同期 0050：報酬 +0.3223、最深回撤 -0.1588（價格報酬口徑）。
+strategies:
+  - code: LW-B2
+    config: lw_b2_broad_capw
+    label: 全市場多因子（市值加權）
+    note: 全市場四因子選股、市值加權；形狀最接近指數。
+    vault:
+      total_return: 0.257771
+      max_drawdown: -0.154052
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-B1
+    config: lw_b1_large_enhanced
+    label: 大型股增強
+    note: 市值前 100 名內選 30 檔、市值加權。
+    vault:
+      total_return: 0.215104
+      max_drawdown: -0.166813
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-M1
+    config: lw_m1_ml_c1
+    label: ML 訊號進載具
+    note: 四因子精選加上長窗口排序模型的分數，20 檔等權。
+    vault:
+      total_return: 0.226847
+      max_drawdown: -0.351217
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-M1-faber
+    config: lw_m1_faber
+    label: ML 訊號 ＋ 大盤擇時
+    note: 同上，外加 200 日均線擇時；金庫期閘門一次都沒關過。
+    vault:
+      total_return: 0.226847
+      max_drawdown: -0.351217
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-C1
+    config: lw_c1_breakout
+    label: 四因子精選 20 檔
+    note: 技術面突破四訊號，20 檔等權；長窗口回撤最深的一支。
+    vault:
+      total_return: 0.051629
+      max_drawdown: -0.427403
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-C1n50
+    config: lw_c1_n50
+    label: 四因子精選 50 檔
+    note: 同上，持股放寬到 50 檔。
+    vault:
+      total_return: -0.007726
+      max_drawdown: -0.364249
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-R2
+    config: lw_r2_c1_lvgate
+    label: 剔除高波動
+    note: 四因子精選，先剔掉波動度最高的一成。
+    vault:
+      total_return: -0.054570
+      max_drawdown: -0.379385
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794
+  - code: LW-F1
+    config: lw_f1_revpool
+    label: 營收驚奇池 × 技術排序
+    note: 先用營收驚奇模型縮池到前 30%，再以技術訊號排序。
+    vault:
+      total_return: 0.005820
+      max_drawdown: -0.417681
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794

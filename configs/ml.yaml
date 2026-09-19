@@ -34,3 +34,19 @@ production_ranking_model: lgbm_lw_net_h20_20260225_83890036 # D-110：換成長�
 # 訓練涵蓋 2018Q4／2020／2022 三個壓力體制；金庫期（未見資料）+0.0816。
 # **部署的是排序不是策略**——D-107 判定沒有任何一支策略可部署，本綁定不改變那件事。
 # 原綁定 lgbm_net_h20_20260225_6a798962（短窗口）保留在 data/models/，可隨時換回。
+
+# 每天額外要推論並寫進 PG 的模型（D-112）：已登記策略 LW-F1 以營收驚奇模型的分數當池子。
+production_aux_models:
+  - lgbm_lw_rev_h15_20260225_9d4a149c
+
+# ML 選股名單的晉級門檻（D-111）。在此之前所有候選一律 ml_candidate，
+# 於是畫面上「每天推薦 200 檔」——那其實是 API 的 page_size，不是模型選的。
+# 檔數不是新發明的數字：20 是 118 格回測實際用的組合大小，50 是 D-104 分散度階梯的下一個節點。
+recommendation_buckets:
+  enabled: true
+  top_n: 20            # ml_top20：過閘門後的前 20 名，畫面預設只顯示這一組
+  watch_n: 50          # ml_watch：第 21~50 名
+  # 風控閘門用 D-075 的回撤模型，用途寫死為閘門、不得進排序。
+  # 被剔除者標 ml_risk_excluded 而非刪除——被剔除這件事本身是資訊。
+  risk_gate_model: lgbm_lw_dd_h60_20260225_1bd7c6a0
+  risk_gate_keep_pct: 0.9

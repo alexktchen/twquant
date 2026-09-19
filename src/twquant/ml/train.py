@@ -155,7 +155,14 @@ _BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
 # 而那個 hash 同時是 research_log 的 `params_hash`，也就是 DSR 的試驗計數依據。
 # 讓它進去等於每換一次生產模型就消耗一個試驗名額，而且既有八個模型的 id 全部改變。
 # （合併 PR#65 時由 T-172 的回歸測試抓到：兩個模型目錄名都對不回來。）
-_NOT_TRAINING_INPUTS: tuple[tuple[str, ...], ...] = (("production_ranking_model",),)
+# D-111／D-112 又加了兩個同性質的欄位：名單怎麼分組、每天額外推論哪些模型。
+# 兩者都只影響「模型產出之後怎麼用」，與模型學到什麼無關——同樣不得進 hash。
+# （同一個回歸測試再抓到一次：加了欄位，八個既有模型的 id 就全部對不回來。）
+_NOT_TRAINING_INPUTS: tuple[tuple[str, ...], ...] = (
+    ("production_ranking_model",),
+    ("recommendation_buckets",),
+    ("production_aux_models",),
+)
 
 
 def _hashable_dump(cfg: MlConfig) -> dict[str, object]:

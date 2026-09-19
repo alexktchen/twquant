@@ -11,6 +11,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +30,9 @@ if TYPE_CHECKING:  # polars is only needed for the concrete export entry point.
 # 這一層不做任何晉級判斷，所有候選一律標為 ML 研究候選；分組門檻屬研究決策，
 # 不在匯出層發明（發明門檻等於在畫面上偷偷做晉級）。
 _RESEARCH_BUCKET = "ml_candidate"
+_TOP_BUCKET = "ml_top20"
+_WATCH_BUCKET = "ml_watch"
+_RISK_EXCLUDED_BUCKET = "ml_risk_excluded"
 _UNANALYSED = "pending"
 _REQUIRED_COLUMNS = ("date", "stock_id", "score", "available_at")
 
@@ -60,12 +65,70 @@ def read_model_identity(model_dir: str | Path) -> tuple[str, str]:
     return model_id, fingerprint
 
 
+@dataclass(frozen=True)
+class BucketPolicy:
+    """已**宣告**的分組門檻（configs/ml.yaml 的 recommendation_buckets、理由見 D-111）。
+
+    這一層仍然不發明門檻：數字由呼叫端從配置讀進來，本模組只負責套用。
+    `risk_scores` 是風控模型的 rank_pct（低分位＝預測跌得深，見 `ml.lgbm_lw_dd_60d`），
+    缺席時整條閘門不啟用。
+    """
+
+    top_n: int
+    watch_n: int
+    risk_gate_keep_pct: float = 1.0
+    risk_scores: Mapping[str, float] | None = None
+
+
+def _assign_buckets(ordered: list[dict[str, object]], policy: BucketPolicy | None) -> list[str]:
+    """依政策給每個候選一個分組；無政策時全部維持 ml_candidate（既有行為）。
+
+    規則（D-111）：
+    1. 風控閘門先剔除——`rank_pct` 低於 `1 - keep_pct` 者標 `ml_risk_excluded`。
+       **剔除不是刪除**：那一列照樣留在快照裡，因為「被剔除」本身是資訊。
+    2. **查不到風控分數的個股不得晉級**，維持 `ml_candidate`。
+       缺資料時放行等於靜默降級（黃金規則 5）；這裡選保守的一邊，且是明寫的規則。
+    3. 存活者依既有名次切 `ml_top20` / `ml_watch` / `ml_candidate`。
+    """
+    if policy is None:
+        return [_RESEARCH_BUCKET] * len(ordered)
+    gate_on = policy.risk_scores is not None
+    cut = 1.0 - policy.risk_gate_keep_pct
+    buckets: list[str] = []
+    survivors = 0
+    for row in ordered:
+        if not gate_on:
+            survivors += 1
+            buckets.append(_band(survivors, policy))
+            continue
+        assert policy.risk_scores is not None  # gate_on 已保證
+        risk = policy.risk_scores.get(str(row["stock_id"]))
+        if risk is None:
+            buckets.append(_RESEARCH_BUCKET)
+        elif risk < cut:
+            buckets.append(_RISK_EXCLUDED_BUCKET)
+        else:
+            survivors += 1
+            buckets.append(_band(survivors, policy))
+    return buckets
+
+
+def _band(position: int, policy: BucketPolicy) -> str:
+    """存活名單裡的第 `position` 名落在哪一段。"""
+    if position <= policy.top_n:
+        return _TOP_BUCKET
+    if position <= policy.watch_n:
+        return _WATCH_BUCKET
+    return _RESEARCH_BUCKET
+
+
 def snapshot_from_scores(
     rows: list[dict[str, object]],
     *,
     model_id: str,
     day: dt.date,
     artifact_fingerprint: str,
+    policy: BucketPolicy | None = None,
 ) -> RecommendationSnapshot:
     """Build one research snapshot from an inference run's own rows, keeping every candidate.
 
@@ -95,18 +158,20 @@ def snapshot_from_scores(
             "不得以該日截點發布",
         )
     ordered = sorted(rows, key=lambda row: (-float(str(row["score"])), str(row["stock_id"])))
+    # 名次一律是**全宇宙**名次（稽核用，與分組無關）；分組另算，見 _assign_buckets。
+    buckets = _assign_buckets(ordered, policy)
     candidates = [
         {
             "stock_id": row["stock_id"],
             "rank": index,
             "score": float(str(row["score"])),
-            "bucket": _RESEARCH_BUCKET,
+            "bucket": bucket,
             "reason_ref": None,
             "insight_run_id": None,
             "insight_available_at": None,
             "data_status": _UNANALYSED,
         }
-        for index, row in enumerate(ordered, start=1)
+        for index, (row, bucket) in enumerate(zip(ordered, buckets, strict=True), start=1)
     ]
     return RecommendationSnapshot.model_validate(
         {
@@ -134,8 +199,12 @@ def export_scores(
     model_dir: str | Path,
     data_dir: str | Path,
     day: dt.date,
+    policy: BucketPolicy | None = None,
 ) -> SnapshotWriteResult:
-    """Export one saved inference parquet as an immutable research snapshot."""
+    """Export one saved inference parquet as an immutable research snapshot.
+
+    `policy` 由呼叫端從 configs/ml.yaml 讀出（D-111）；None＝全部維持 ml_candidate。
+    """
     import polars as pl
 
     source = Path(scores_path)
@@ -149,5 +218,6 @@ def export_scores(
         model_id=model_id,
         day=day,
         artifact_fingerprint=fingerprint,
+        policy=policy,
     )
     return save_snapshot(data_dir, snapshot)

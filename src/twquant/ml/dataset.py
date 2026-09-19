@@ -15,6 +15,7 @@ import numpy as np
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
+from twquant.errors import DataError
 from twquant.panel import session_index
 
 # 事件表開頭可容忍的空窗（交易日）。約一季——真實的事件表在區間開頭本來就可能
@@ -325,6 +326,40 @@ def assert_feature_coverage(
             "（Phase 1 曾以 3 個空特徵訓練並回報成功）——先補資料或從配置移除，不得靜默訓練。"
         )
     return shares
+
+
+def assert_inference_features_present(
+    features: Mapping[str, pl.DataFrame], required: Sequence[str], day: dt.date
+) -> None:
+    """推論前的特徵存在閘門：任一必要特徵在該日**完全沒有值**即 raise（T-227）。
+
+    與 `assert_feature_coverage` 是兩個不同的問題，門檻刻意不同：
+    訓練看的是「這個特徵在整段樣本裡是不是白佔欄位」，故連近空都要擋；
+    推論看的是「今天這一格資料到了沒」，**稀疏是正常的**（月營收因子本來就只有
+    九成多的股票有值），只有**整欄空**才代表上游斷掉。
+
+    為什麼需要這一關：2026-09-02~09-09 期間 `index_daily` 落後 `prices_daily`
+    六個交易日（指數是月頻 `ingest-index`，從未接進每日迴圈），
+    於是 `price.rs_market_20d` 整欄空，而 LightGBM 把缺欄當 NaN 照樣吐分數，
+    `ml score` 回報「[OK] 1961 檔」——**12 個特徵少 1 個，沒有任何一關報錯**。
+    黃金規則 5：資料有問題就 raise，不得靜默降級。
+    """
+    empty = [
+        name
+        for name in required
+        if (df := features.get(name)) is None
+        or df.height == 0
+        or int(df["value"].is_not_null().sum()) == 0
+    ]
+    if empty:
+        raise DataError(
+            "ml_score",
+            day,
+            f"{day} 這些必要特徵整欄無值：{'、'.join(empty)}。"
+            "模型會把缺欄當 NaN 照樣吐分數，故此處拒絕推論——"
+            "先補上游資料（例如 index_daily 落後會讓 price.rs_market_20d 全空）"
+            "再重跑，不得以殘缺特徵發布名單。",
+        )
 
 
 def assemble(features: Mapping[str, pl.DataFrame], labels: pl.DataFrame) -> pl.DataFrame:
