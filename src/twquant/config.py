@@ -214,9 +214,16 @@ class RecommendationBucketConfig(BaseConfig):
     risk_gate_model: str = ""
     # D-075 寫死 R 系列的用途：prefilter 保留前 90%，即剔除預測回撤最深的一成。
     risk_gate_keep_pct: float = 0.9
+    # D-113：流動性閘門。兩個數字與全部長窗口回測的 universe 區塊逐字相同
+    # （ADV 前 30%、股價 ≥ 10）——名單不得比回測驗過的池子更寬。None＝不套。
+    liquidity_min_adv_pctl: float | None = None
+    liquidity_min_price: float | None = None
 
     @model_validator(mode="after")
     def _bands_are_ordered(self) -> RecommendationBucketConfig:
+        pctl = self.liquidity_min_adv_pctl
+        if pctl is not None and not 0.0 < pctl < 1.0:
+            raise ValueError(f"liquidity_min_adv_pctl 須介於 (0, 1)，得到 {pctl}")
         if self.top_n < 1:
             raise ValueError(f"top_n 須 >= 1，得到 {self.top_n}")
         if self.watch_n < self.top_n:

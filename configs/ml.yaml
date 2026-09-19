@@ -50,3 +50,8 @@ recommendation_buckets:
   # 被剔除者標 ml_risk_excluded 而非刪除——被剔除這件事本身是資訊。
   risk_gate_model: lgbm_lw_dd_h60_20260225_1bd7c6a0
   risk_gate_keep_pct: 0.9
+  # 流動性閘門（D-113，使用者 2026-09-19：「剔除交易量太小的個股」）。
+  # 兩個數字與全部長窗口回測的 universe 區塊逐字相同——20 日成交金額中位數在前 30%、收盤 ≥ 10 元。
+  # 被剔除者標 ml_liquidity_excluded，照樣留在快照裡。
+  liquidity_min_adv_pctl: 0.70
+  liquidity_min_price: 10.0

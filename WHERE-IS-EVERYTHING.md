@@ -81,6 +81,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
+| **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |
+| **D-109 診斷計分** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/d109_scorecard.py --bundles D:/project/twquant/data/tracks_vault_nodiv`（**不是裁決**；結束日 > 2026-08-31 的結果包會被拒收） |
 | 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
@@ -107,6 +109,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
   集中型策略把它放大成 −36~−43%——**D-105 在歷史上量到的 −37% 地板，在未見資料上重現**。
 - **風控層與擇時 overlay 都沒接住**：`LW-M1` 與 `LW-M1-faber` 每一位數字相同
   （200 日閘門在崩盤前一次都沒關過）。
+
+**要怎樣才算通過（D-109，不比 0050）**：回撤 ≤ 25%、Calmar ≥ 0.5、對 0050 相關 ≤ 0.7、曝險 ≥ 50%、壓力段回撤放大 ≤ 1.0×，五條全過；最早 2027-03-01 在第二保留期開一次。現有 8 支的診斷（D-113 §二）：指數型兩支只輸「相關 0.9」，集中型六支只輸「壓力段放大 2.2~2.7×」——缺的是降 beta 的架構，不是新的選股因子。
 
 **部署裁決：沒有任何一支策略可部署。** ML 判定仍為 D-066 乙層——保留為零件，
 **明文禁止重啟特徵工程或調參**。改投組建構屬架構，允許，但見下面第 ⑧ 條。
@@ -175,7 +179,7 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 | `twquant-scheduler-1` | **每日 19:00 跑完整 pipeline** | — |
 
 每日 pipeline 的步驟（依序）：擷取 → 品質閘門 → 券商買賣超 → 訊號生成 → **指數** → 供應層 →
-選股池快照 → **ML 推薦名單**（三個模型推論並寫進 PG，匯出前 20／觀察／風控剔除）→ **策略持股**（8 支）→ 洞悉分析。
+選股池快照 → **ML 推薦名單**（三個模型推論並寫進 PG，匯出前 20／觀察／風控剔除／**流動性剔除** D-113，尚未重建映像）→ **策略持股**（8 支）→ 洞悉分析。
 粗體是 D-111／D-112／T-227 新增或改動的。**第一次由排程觸發的完整執行是 2026-09-21（週一）19:00**，
 在那之前新步驟只被逐一驗過、沒有整條一起跑過——那天晚上值得看一眼
 `docker logs twquant-scheduler-1`、`/api/platform/strategy-targets` 與 ML 選股頁的日期。
