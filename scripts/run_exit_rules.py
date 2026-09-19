@@ -12,13 +12,16 @@
   **第二保留期（2026-09-09 起）不可跑**，`--end` 超過即拒絕。
 - 全部寫同一個 `trial_scope: lw:exit_rules_e`，試驗數進同一本 `data/research_log/`。
 
-輸出目錄固定在主 checkout 的絕對路徑（CLAUDE.md §0.2 的兩個 data/ 陷阱）。
+輸出目錄與 `TWQUANT_DATA_DIR` 都固定在主 checkout 的絕對路徑（CLAUDE.md §0.2 的兩個 data/ 陷阱）。
+**這不是保險起見**：實測第一批 8 個試驗的 `research_log` 全寫進了 worktree 自己的 `data/`，
+那等於 D-114 §四.1 明文禁止的「另開一本讓計數歸零」。`--out` 管得到結果包，管不到登記簿。
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import pathlib
 import subprocess
 import sys
@@ -108,7 +111,8 @@ def main() -> None:
         if args.dry_run:
             print(" ".join(cmd))
             continue
-        rc = subprocess.run(cmd, cwd=REPO, check=False).returncode
+        env = os.environ | {"TWQUANT_DATA_DIR": str(DATA)}  # 研究登記簿寫正本，不寫 worktree
+        rc = subprocess.run(cmd, cwd=REPO, env=env, check=False).returncode
         if rc != 0:
             print(f"[FAIL] {code} 回傳 {rc}——停止，不跳過（失敗要看得見）", file=sys.stderr)
             raise SystemExit(rc)
