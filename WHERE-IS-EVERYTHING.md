@@ -181,7 +181,7 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 **重建映像的正確做法**（兩個坑都踩過）：
 
 ```bash
-# 在一個 HEAD＝要部署的 commit 的目錄裡跑；主 checkout D:\project	wquant 曾落後 main 83 個提交
+# 在一個 HEAD＝要部署的 commit 的目錄裡跑；主 checkout D:/project/twquant 曾落後 main 83 個提交
 git fetch origin && git diff --stat origin/main HEAD    # 必須為空
 docker compose --env-file D:/project/twquant/.env build api frontend
 docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend scheduler
