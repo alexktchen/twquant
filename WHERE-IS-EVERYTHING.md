@@ -161,10 +161,36 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 大型 PG 工作做完**先 pg_dump 再做下一件事**；還原程序與重放腳本見
 `docs/INCIDENT-2026-09-10-docker-reset.md`、`scripts/run_recovery.sh`。
 
-## 7. 還在跑的東西
+## 7. 還在跑的東西（2026-09-19 部署後）
 
-- **長天期回補**：融資融券 `data/staging/finmind_hist_margin`，約 3.9 小時（其餘六個資料集已滿）
-- **連續作業**：`scripts/overnight2.sh`，日誌 `data/overnight.log`
+四個容器，全部在 compose 專案 `twquant`、映像來源＝`main`（`392d00e`，含 #69／#70）：
+
+| 容器 | 做什麼 | 位址 |
+|---|---|---|
+| `twquant-pg-1` | 供應層 PG | `localhost:5433` |
+| `twquant-api-1` | 唯讀 JSON API | `http://localhost:8000/api` |
+| `twquant-frontend-1` | 平台（含「ML 選股」「策略持股」）| `http://localhost:8899` |
+| `twquant-scheduler-1` | **每日 19:00 跑完整 pipeline** | — |
+
+每日 pipeline 的步驟（依序）：擷取 → 品質閘門 → 券商買賣超 → 訊號生成 → **指數** → 供應層 →
+選股池快照 → **ML 推薦名單**（三個模型推論並寫進 PG，匯出前 20／觀察／風控剔除）→ **策略持股**（8 支）→ 洞悉分析。
+粗體是 D-111／D-112／T-227 新增或改動的。**第一次由排程觸發的完整執行是 2026-09-21（週一）19:00**，
+在那之前新步驟只被逐一驗過、沒有整條一起跑過——那天晚上值得看一眼
+`docker logs twquant-scheduler-1`、`/api/platform/strategy-targets` 與 ML 選股頁的日期。
+
+**重建映像的正確做法**（兩個坑都踩過）：
+
+```bash
+# 在一個 HEAD＝要部署的 commit 的目錄裡跑；主 checkout D:/project/twquant 曾落後 main 83 個提交
+git fetch origin && git diff --stat origin/main HEAD    # 必須為空
+docker compose --env-file D:/project/twquant/.env build api frontend
+docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend scheduler
+```
+
+`--env-file` 不可省：少了它 `TWQUANT_DATA_HOST` 會退回 `./data`，容器就掛到 worktree 自己的空資料夾（§1 的兩個 `data/` 陷阱）。
+`--no-deps` 是為了不碰 PG 容器。**不要跑 `docker compose config`**——它會把 `.env` 的密碼印出來。
+
+洞悉分析（LLM）步驟目前是離線降級：`.env` 沒有 `ANTHROPIC_API_KEY`。
 
 ## 8. 備份（事故後）
 

@@ -1,5 +1,6 @@
 # CHANGELOG
 
+- 2026-09-19　**部署**：#69／#70 合併後從 main（`392d00e`）重建映像，api／frontend／scheduler 上線。驗證：`/api/platform/strategy-targets` 200（8 支全 ok）、推薦快照 09-18 排最前且預設前 20 名、容器內推論 1949 檔、兩個頁面在瀏覽器渲染且 console 無錯誤、PG 容器未被重建。未重跑 09-18 的整條 pipeline（已擷取過的日子重跑會在供應層 OOM）；第一次排程執行為 09-21 19:00。
 - 2026-09-19　T-228　**`ml_scores.available_at` 是資訊可得時刻，不是程式執行時刻**：`ml score` 原本寫 `now`，排程 22:00 才跑（或隔天補跑）時就晚於當日 20:00 截點，PitView 判定分數「當時還不存在」，以 ML 分數當閘門的三支策略（LW-M1／LW-M1-faber／LW-F1）在正式環境會**每天**整欄 null 而失敗——回測看得到、生產看不到。改為 `min(now, 當日 19:00)`（`conventions.ml_score_available_at`）；parquet 仍留實際執行時刻供推薦快照匯出使用。第一次實跑策略持股時由 `status=failed` 大聲報出來才發現。
 - 2026-09-19　D-112　**模型與策略接上後端**：生產路徑每日推論三個模型（排序／風控閘門／LW-F1 的池子）並寫進 PG——修掉 D-111 兩個上線即壞的缺口（分數沒進 PG、閘門模型從未被推論）。新增策略持股快照：`configs/strategies_live.yaml` 登記金庫期實測的 8 支，pipeline「策略持股」步驟每日產出不可變快照，`/api/platform/strategy-targets` ＋前端「策略持股」頁；每支策略的金庫成績內嵌在快照裡跟著名單走，`mode` 型別只有 `research`。閘門 965 passed。
 - 2026-09-10　**事故**：Docker 錯誤對話框的「Reset to factory defaults」被執行，`docker_data.vhdx`（PG 約 27 GB、所有容器／映像／卷）被刪；C: 為 NVMe＋TRIM 無法救回。起點是 09-09 晚我併發兩個 `serving materialize` 把 PG 壓垮。以 `data/backup/twquant_serving_20260903.dump` 還原，09-03 之後的 PG 專屬工作以 `scripts/run_recovery.sh` 序列重放（先驗證再寫、任一步失敗即停）。研究產出全在 D:、未受影響。時間線與重放表見 [docs/INCIDENT-2026-09-10-docker-reset.md](docs/INCIDENT-2026-09-10-docker-reset.md)。
