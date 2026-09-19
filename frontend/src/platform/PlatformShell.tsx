@@ -36,7 +36,7 @@ export function PlatformShell({ live, asOf, stock, research, daily, operations }
     <main id="platform-content" className="platform-content" tabIndex={-1}>
       <div className="platform-page-heading"><div><div className="platform-eyebrow">RESEARCH WORKSPACE · {current?.group ?? '平台'}</div><h1>{current?.label ?? '找不到這個頁面'}</h1><p>{current?.description ?? '請確認連結，或回到總覽繼續。'}</p></div><span className="platform-mode">研究模式</span></div>
       <div className="platform-context"><span>查詢日期：{route.query.get('date') ?? '最新可得'}</span>{route.query.get('model') && <span>模型：{route.query.get('model')}</span>}{route.query.get('run') && <span>推薦版本：{route.query.get('run')}</span>}</div>
-      {route.page === 'stocks' ? stock(route) : route.page === 'operations' ? operations(route) : route.page === 'models' || route.page === 'backtests' || route.page === 'industries' || route.page === 'insights' || route.page === 'watchlists' ? research(route) : route.page === 'overview' || route.page === 'recommendations' ? daily(route) : route.page === 'not-found' ? <a href={routeHref('overview')}>回今日總覽 →</a> : <PlatformPending route={route} />}
+      {route.page === 'stocks' ? stock(route) : route.page === 'operations' ? operations(route) : route.page === 'models' || route.page === 'backtests' || route.page === 'industries' || route.page === 'insights' || route.page === 'watchlists' || route.page === 'strategies' ? research(route) : route.page === 'overview' || route.page === 'recommendations' ? daily(route) : route.page === 'not-found' ? <a href={routeHref('overview')}>回今日總覽 →</a> : <PlatformPending route={route} />}
     </main>
     <footer className="platform-footer"><span>本平台為個人研究整理，僅供參考，不構成投資建議；數字以各面板標示的資料日與來源為準。</span><strong>twquant 台股研究工作台</strong></footer>
   </div>

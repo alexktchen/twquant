@@ -28,6 +28,7 @@ from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
+from twquant.reporting import strategy_targets as strategy_targets_mod
 from twquant.reporting.insight_evidence import select_packs
 from twquant.reporting.insight_run import insights_for_run
 from twquant.reporting.platform_artifacts import (
@@ -228,6 +229,28 @@ def get_platform_recommendations(
             "page": page,
             "page_size": page_size,
         },
+    }
+
+
+@app.get("/api/platform/strategy-targets")
+def get_platform_strategy_targets(
+    data_dir: RecommendationDataRootDep,
+    date: Annotated[dt.date | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=30)] = 1,
+) -> dict[str, object]:
+    """讀取已保存的策略持股快照（D-112）。本端點不做任何計算，也不觸發策略執行。
+
+    每支策略的 `vault` 區塊（金庫期實測成績）跟著名單一起回傳——
+    D-107 判定無策略可部署，名單不得在沒有成績的情況下單獨呈現。
+    """
+    try:
+        snapshots, issues = strategy_targets_mod.select_snapshots(data_dir, date=date, limit=limit)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="策略持股快照儲存區暫時無法讀取") from exc
+    return {
+        "snapshots": [snap.model_dump(mode="json") for snap in snapshots],
+        "issues": list(issues),
+        "query": {"date": date.isoformat() if date else None, "limit": limit},
     }
 
 

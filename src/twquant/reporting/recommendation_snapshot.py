@@ -283,4 +283,8 @@ def select_snapshots(
         and (model_id is None or run.model_id == model_id)
         and (run_id is None or run.run_id == run_id)
     ]
+    # 新到舊：頁面寫的是「查詢日期：最新可得」，最上面那張卡就該是最新的 run。
+    # 原本依檔名（＝由舊到新）排，於是不帶日期時永遠先看到最舊、早已過期的快照，
+    # 最新的被壓在最底下（2026-09-19 實際發生：09-18 的名單排在 09-04 的過期快照後面）。
+    runs.sort(key=lambda run: (run.as_of, run.generated_at), reverse=True)
     return RecommendationCatalog(runs=runs, issues=catalog.issues)

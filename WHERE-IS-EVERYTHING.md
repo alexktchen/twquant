@@ -155,6 +155,13 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 **必須另立新的保留期，且在動手前登記**。金庫期分數已寫進 `serving.ml_scores`
 （`available_at` 為訊號日 19:00，非 `now`——否則 PitView 在每個金庫日都看不到自己的分數）。
 
+**⑨ Docker 錯誤對話框的「Reset to factory defaults」會刪掉整個 PG（2026-09-10 實際發生）。**
+那一下刪的是 `docker_data.vhdx`——所有容器、映像、資料卷，含 27 GB 的 PG；C: 是 NVMe＋TRIM，救不回。
+遇到 Docker 起不來**一律按 Quit**，再照 `docs/HANDOFF-2026-09-04-optimization.md` 的殘留 socket 修法處理。
+事故起點是**重運算併發**（兩個 materialize 同時跑把 PG 壓垮）——一次只跑一個。
+大型 PG 工作做完**先 pg_dump 再做下一件事**；還原程序與重放腳本見
+`docs/INCIDENT-2026-09-10-docker-reset.md`、`scripts/run_recovery.sh`。
+
 **⑩ `/api/stocks/{sid}/factors` 對 ETF 會掃整張 `factor_values`（2026-09-19 實測，未修，T-233）。**
 該表主鍵以 `factor` 開頭，端點卻用 `WHERE stock_id = ?` 找最新日：因子宇宙內的股票約 5 秒，
 **不在宇宙的代號（0050 等）150 秒還沒回**（表上只有 `(factor, stock_id, date)` 主鍵與 `(factor, date)` 索引）。個股儀表板已改用
@@ -166,7 +173,9 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 - **長天期回補**：融資融券 `data/staging/finmind_hist_margin`，約 3.9 小時（其餘六個資料集已滿）
 - **連續作業**：`scripts/overnight2.sh`，日誌 `data/overnight.log`
 
-## 8. 沒有備份
+## 8. 備份（事故後）
 
-`data/`（60MB 結果 + 213MB 模型 + 462MB staging）與 PG（27GB）**都沒有備份**。
-結果包可從 PG 重跑產生（數小時），PG 本身重建則要重抓資料。
+- `data/backup/twquant_serving_20260903.dump`（2.40 GB，`pg_dump -n serving -Fc`）——**2026-09-10 事故的還原底**。
+- 重放完成後 `scripts/run_recovery.sh` 最後一步會自動再做一份 `twquant_serving_<日期>_post_recovery.dump`。
+- **仍然沒有排程式備份，也沒有異地副本**——兩份 dump 都在同一顆 D:。每週全量＋rclone 到 Drive 需使用者核可。
+- `data/` 下的研究產出（結果包、模型、報告、快照）只存在 D:，同樣沒有異地副本。

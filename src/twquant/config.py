@@ -198,6 +198,37 @@ class MlRefitConfig(BaseConfig):
     schedule: Literal["monthly"] = "monthly"
 
 
+class RecommendationBucketConfig(BaseConfig):
+    """ML 選股名單的晉級門檻（D-111）。
+
+    匯出層明文禁止自己發明門檻（「發明門檻等於在畫面上偷偷做晉級」），
+    所以門檻宣告在這裡、理由寫在 D-111，匯出層只是套用已宣告的政策。
+    全部候選仍原樣存進快照，本設定只決定 `bucket` 欄位。
+
+    `risk_gate_model` 空字串＝不套風控閘門（分組退化成純排名切點）。
+    """
+
+    enabled: bool = False
+    top_n: int = 20  # 118 格回測的組合幾乎全是 20 檔等權——唯一被實際測過的檔數
+    watch_n: int = 50  # D-104 的分散度階梯測 20→50→100，50 是下一個被測過的節點
+    risk_gate_model: str = ""
+    # D-075 寫死 R 系列的用途：prefilter 保留前 90%，即剔除預測回撤最深的一成。
+    risk_gate_keep_pct: float = 0.9
+
+    @model_validator(mode="after")
+    def _bands_are_ordered(self) -> RecommendationBucketConfig:
+        if self.top_n < 1:
+            raise ValueError(f"top_n 須 >= 1，得到 {self.top_n}")
+        if self.watch_n < self.top_n:
+            raise ValueError(
+                f"watch_n({self.watch_n}) 不得小於 top_n({self.top_n})"
+                "——觀察區是前段之後的延伸，不是另一個更小的切點"
+            )
+        if not 0.0 < self.risk_gate_keep_pct <= 1.0:
+            raise ValueError(f"risk_gate_keep_pct 須介於 (0, 1]，得到 {self.risk_gate_keep_pct}")
+        return self
+
+
 class MlConfig(BaseConfig):
     """ml.yaml 的模型（SPEC-010 §1 為權威）。"""
 
@@ -220,6 +251,12 @@ class MlConfig(BaseConfig):
     # 而候選不唯一時寧可 raise 也不猜（T-224）。這是營運綁定不是研究參數——換模型是
     # 改這一行，不是改程式。
     production_ranking_model: str = ""
+    # 除了排序模型與風控閘門之外，每天還要推論並寫進 PG 的模型（D-112）。
+    # 已登記的策略若以某個模型的分數當池子（如 LW-F1 用營收驚奇模型），那個模型就得列在這裡，
+    # 否則策略每天都讀不到當日分數。
+    production_aux_models: tuple[str, ...] = ()
+    # 名單分組政策（D-111）。預設停用＝既有快照的 bucket 逐字不變。
+    recommendation_buckets: RecommendationBucketConfig = RecommendationBucketConfig()
 
     @model_validator(mode="after")
     def _max_span_covers_horizon(self) -> MlConfig:

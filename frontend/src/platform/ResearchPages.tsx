@@ -1,6 +1,7 @@
 import { ColorType, LineSeries, createChart } from 'lightweight-charts'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { ACC, LINE, MUT, num, pct } from '../theme'
+import { StrategyTargetsPage } from './StrategyTargetsPage'
 import { Panel } from '../ui'
 import { IndustriesPage } from './IndustriesPage'
 import { InsightsPage } from './InsightsPage'
@@ -158,6 +159,7 @@ export function ResearchPages({ route }: { route: PlatformRoute }): JSX.Element 
   if (route.page === 'backtests') return <BacktestCenter route={route} />
   if (route.page === 'industries') return <IndustriesPage route={route} />
   if (route.page === 'insights') return <InsightsPage route={route} />
+  if (route.page === 'strategies') return <StrategyTargetsPage route={route} />
   if (route.page === 'watchlists') return <WatchlistsPage route={route} />
   return <div className="platform-query-state">這個研究頁面尚未接入資料。</div>
 }

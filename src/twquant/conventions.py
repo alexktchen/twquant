@@ -20,6 +20,10 @@ _TW_OFFSET = dt.timedelta(hours=8)
 # 訊號生成 PIT 截點（D-008）：每交易日 20:00。回測 date 型 as_of 一律 coerce 到此時刻。
 SIGNAL_CUTOFF_HOUR = 20
 
+# ML 分數的名目可得時刻：每交易日 19:00（盤後推論），早於 20:00 截點，
+# 故訊號日當天的 PitView 看得到當日分數。回測（`ml backfill-scores`）與金庫驗證用的就是這個語意。
+ML_SCORE_AVAILABLE_HOUR = 19
+
 # 單位常數（SPEC-000 §單位）
 SHARES_PER_LOT = 1000  # 一張 = 1000 股
 
@@ -52,6 +56,24 @@ def as_of_cutoff(date: dt.date | dt.datetime) -> dt.datetime:
     if isinstance(date, dt.datetime):
         return assert_tw_timestamp(date)
     return dt.datetime(date.year, date.month, date.day, SIGNAL_CUTOFF_HOUR, 0, tzinfo=TZ)
+
+
+def ml_score_available_at(day: dt.date, now: dt.datetime) -> dt.datetime:
+    """`ml_scores.available_at` 該寫什麼：`min(now, 當日名目可得時刻)`（T-228）。
+
+    **這一欄是資訊可得時刻，不是程式執行時刻。** 分數是「凍結的模型 × 當日因子」的確定函數，
+    而因子物化走 PitView、已經遵守當日 20:00 截點——所以分數在資訊上屬於截點之前，
+    推論程式實際幾點跑完是營運細節。
+
+    直接寫 `now` 的後果（2026-09-19 實際發生）：排程在 22:00 跑、或隔天補跑，分數的時間戳
+    就晚於當日 20:00 截點，PitView 判定「那個時點這筆分數還不存在」，於是所有以 ML 分數
+    當閘門的策略**每天**都拿到整欄 null。回測看得到、生產看不到——驗證過的語意與上線的語意不一致。
+
+    取 `min` 而不是一律寫名目時刻：提早跑（19:00 前）時不得把時間戳往後推，那才是真的前視。
+    """
+    assert_tw_timestamp(now)
+    nominal = dt.datetime(day.year, day.month, day.day, ML_SCORE_AVAILABLE_HOUR, 0, tzinfo=TZ)
+    return min(now, nominal)
 
 
 def normalize_stock_id(value: str | int) -> str:
