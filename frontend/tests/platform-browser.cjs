@@ -267,6 +267,51 @@ const { chromium } = require('playwright');
     await page.goto('http://twquant.test/#/stocks/2330');
     await page.getByText('沒有任何保存的推薦事件', { exact: false }).waitFor();
     assert.equal(await page.getByRole('button', { name: '推薦標記', exact: true }).count(), 0);
+    // AC-229-4: the stock page is a numbered-panel dashboard fed only by what the API returned.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('http://twquant.test/#/stocks/0050');
+    await page.getByText('元大台灣50 · K 線', { exact: false }).waitFor();
+    assert.equal(await page.locator('.dash-no').count(), 18);
+    assert.deepEqual(await page.locator('.dash-no').allInnerTexts(), Array.from({ length: 18 }, (_, i) => String(i + 1).padStart(2, '0')));
+    // The KPI strip comes from the same fixture bars as the chart: last close 230 on 2026-06-30, 22 sessions.
+    const kpis = await page.locator('.dash-kpis').innerText();
+    assert.match(kpis, /230\.0/);
+    assert.match(kpis, /2026-06-30/);
+    assert.match(kpis, /22 日/);
+    // Sources the fixture answers with 503 say so; nothing is filled in with a made-up figure.
+    await page.getByRole('heading', { name: '法人行為計量', exact: true }).waitFor();
+    const inst = page.locator('.dash-panel', { has: page.getByRole('heading', { name: '法人行為計量', exact: true }) });
+    await inst.getByText('資料讀取失敗', { exact: false }).waitFor();
+    assert.doesNotMatch(await inst.innerText(), /\d+ 張/);
+    const coverage = page.locator('.dash-panel', { has: page.getByRole('heading', { name: '資料完整度', exact: true }) });
+    assert.match(await coverage.innerText(), /日 K[\s\S]*22 筆[\s\S]*法人[\s\S]*讀取失敗/);
+    // Too few bars for MA60 is stated rather than guessed.
+    const readings = page.locator('.dash-panel', { has: page.getByRole('heading', { name: '技術摘要', exact: true }) });
+    assert.match(await readings.innerText(), /資料不足（需 60 日）/);
+    assert.match(await readings.innerText(), /非預測訊號/);
+    // KD / MACD are opt-in panes on the same chart.
+    await page.getByRole('button', { name: 'MACD', exact: true }).click();
+    await page.getByRole('button', { name: 'KD', exact: true }).click();
+    await page.getByText('元大台灣50 · K 線', { exact: false }).waitFor();
+    await page.getByRole('button', { name: 'MACD', exact: true }).click();
+    await page.getByRole('button', { name: 'KD', exact: true }).click();
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), `${width}: stock dashboard overflow`);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // AC-229-5: with no stock in the URL the page is a search entry; a code keeps its leading zero.
+    await page.goto('http://twquant.test/#/stocks');
+    await page.getByRole('heading', { name: '台股個股研究儀表板', exact: true }).waitFor();
+    assert.equal(await page.locator('.dash-no').count(), 0);
+    await page.getByRole('combobox', { name: '股票代號或名稱' }).fill('找不到的名字');
+    await page.getByRole('button', { name: '開始分析', exact: true }).click();
+    await page.getByRole('alert').getByText('找不到「找不到的名字」', { exact: false }).waitFor();
+    assert.equal(new URL(page.url()).hash, '#/stocks');
+    await page.getByRole('combobox', { name: '股票代號或名稱' }).fill('0050');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => location.hash === '#/stocks/0050');
+    await page.getByText('元大台灣50 · K 線', { exact: false }).waitFor();
     // AC-209-1: the industry table mirrors the API and names its own window and coverage.
     await page.goto('http://twquant.test/#/industries');
     await page.getByRole('heading', { name: '產業資金流向', exact: true }).waitFor();
@@ -456,6 +501,6 @@ const { chromium } = require('playwright');
       await page.getByText(marker, { exact: false }).first().waitFor();
     }
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220 and AC-220b: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-229-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220 and AC-220b: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
