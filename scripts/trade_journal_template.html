@@ -63,6 +63,7 @@ const pct=x=>x==null?'—':(x>=0?'+':'')+(x*100).toFixed(1)+'%';
 const money=x=>x>=1e8?(x/1e8).toFixed(2)+' 億':x>=1e4?Math.round(x/1e4).toLocaleString()+' 萬':Math.round(x).toLocaleString();
 const lots=s=>(Math.abs(s)/1000).toLocaleString()+' 張';
 const nm=id=>`<span class="id">${esc(id)}</span>${esc(N[id]||'')}`;
+const WHY=r=>!r?'':`<span class="id">${esc(r==='stop_loss'?'停損':r.startsWith('below_ma_')?'跌破'+r.slice(9)+'日線':r.startsWith('score_below:')?'模型說賣':r)}</span>　`;
 const REASON={limit_up:'漲停買不到',limit_down:'跌停賣不掉',participation:'超過成交量上限',cash:'現金不足',lot:'不足一張',price_jump:'異常跳價'};
 const sel=$('sel');
 D.strategies.forEach((s,i)=>sel.add(new Option(`${s.code}｜${s.description||s.name}（${s.start} ~ ${s.end}）`,i)));
@@ -83,7 +84,7 @@ function render(){
   $('days').innerHTML=[...s.days].reverse().filter(d=>adj||d.moves.some(m=>m.action==='enter'||m.action==='exit')).map(d=>{
     const ins=d.moves.filter(m=>m.action==='enter'),outs=d.moves.filter(m=>m.action==='exit');
     const rowIn=m=>`<div class="row"><div>${nm(m.stock_id)}</div><div class="r">${m.price.toFixed(2)} × ${lots(m.shares)}　${money(m.amount)}</div></div>`;
-    const rowOut=m=>`<div class="row"><div>${nm(m.stock_id)}</div><div class="r"><span class="${m.ret>0?'pos':'neg'}">${pct(m.ret)}</span>　持有 ${m.held_sessions} 日　${m.price.toFixed(2)}</div></div>`;
+    const rowOut=m=>`<div class="row"><div>${nm(m.stock_id)}</div><div class="r">${WHY(m.reason)}<span class="${m.ret>0?'pos':'neg'}">${pct(m.ret)}</span>　持有 ${m.held_sessions} 日　${m.price.toFixed(2)}</div></div>`;
     let extra='';
     if(adj){
       const a=d.moves.filter(m=>m.action==='add'),t=d.moves.filter(m=>m.action==='trim');

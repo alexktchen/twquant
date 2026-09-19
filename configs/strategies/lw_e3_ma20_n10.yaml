@@ -1,0 +1,46 @@
+# E 系列（D-114 §四，**事前登記**）：每日出場機制。未經部署裁決，勿用於實盤。
+#
+# 選股與 `lw_m1_ml_c1.yaml` 逐字相同（同模型、同宇宙、同月頻進場）——**只改兩處**：
+# 持股 20 → 10 檔（使用者 2026-09-19：「持股不用到50檔那麼多 我根本不是ETF 就10~15就很多了」），
+# 以及下面的 `exit_rules`。出場語意：收盤觸發 → 隔日開盤出清 → 留現金到下一個再平衡日。
+#
+# E3：收盤跌破 20 日均線即出場。
+# **10 檔敏感度版本**：只報、不參與 D-114 §四 的送檢挑選。
+name: lw_e3_ma20_n10
+description: E3 MA20（10 檔，D-114 事前登記）
+trial_scope: lw:exit_rules_e
+universe:
+  markets:
+  - TWSE
+  - TPEX
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+- factor: ml.lgbm_lw_net_20d
+  keep_pct: 0.3
+  params:
+    model_id: lgbm_lw_net_h20_20260225_83890036
+combine: rank_avg
+signals:
+- factor: price.high_52w
+  weight: 0.35
+- factor: price.mom_60d
+  weight: 0.25
+- factor: volume.turnover_z_20d
+  weight: 0.25
+- factor: price.rs_market_20d
+  weight: 0.15
+require_all_factors: true
+selection:
+  method: top_n
+  top_n: 10
+weighting: equal
+max_weight_per_stock: 0.1
+rebalance:
+  schedule: monthly
+  day: MON
+  execution: next_open
+exit_rules:
+  - kind: below_ma
+    window: 20

@@ -110,6 +110,8 @@ def bundle_backtest(
                 "tax": t.tax,
                 "slippage": t.slippage,
             }
+            # T-231：只有出場規則造成的成交才帶 reason——既有策略的結果包逐位元不變
+            | ({} if t.reason == "rebalance" else {"reason": t.reason})
             for t in result.ledger
         ],
         "unfilled": [

@@ -35,6 +35,8 @@ class JournalMove:
     entry_date: str | None = None
     held_sessions: int | None = None
     ret: float | None = None
+    # 出場規則造成的賣出才有值（T-231，如 stop_loss／below_ma_20）；一般再平衡為 None
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -113,7 +115,9 @@ def _net_move(
     avg_before = pos.cost_amount / pos.cost_shares if pos.cost_shares else 0.0
     gross = 0.0
     volume = 0
+    reason: str | None = None
     for t in trades:
+        reason = t.get("reason") or reason
         qty, price = int(t["shares"]), float(t["price"])
         if t["side"] == "buy":
             if pos.shares == 0:
@@ -153,6 +157,7 @@ def _net_move(
         price=price,
         amount=abs(delta) * price,
         shares_after=pos.shares,
+        reason=reason,
         **exit_fields,
     )
 
