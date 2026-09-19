@@ -81,6 +81,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
+| **跑 E 系列（出場規則）** | `uv run --all-groups python scripts/run_exit_rules.py --window long`（`--window vault` 跑舊金庫期；`--n10 <代號>` 只能帶一支）|
+| **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
 | **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |
 | **D-109 診斷計分** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/d109_scorecard.py --bundles D:/project/twquant/data/tracks_vault_nodiv`（**不是裁決**；結束日 > 2026-08-31 的結果包會被拒收） |
 | 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
