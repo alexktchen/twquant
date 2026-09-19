@@ -28,7 +28,7 @@ test('AC-201-2: serialized navigation preserves explicit context without mutatin
 })
 
 test('AC-201-3: navigation exposes all product areas with unique valid destinations', () => {
-  assert.deepEqual(platformPages.map(p => p.id), ['overview', 'recommendations', 'watchlists', 'stocks', 'industries', 'insights', 'models', 'backtests', 'operations'])
+  assert.deepEqual(platformPages.map(p => p.id), ['overview', 'recommendations', 'strategies', 'watchlists', 'stocks', 'industries', 'insights', 'models', 'backtests', 'operations'])
   assert.equal(new Set(platformPages.map(p => p.id)).size, platformPages.length)
   for (const page of platformPages) {
     assert.equal(parseRoute(routeHref(page.id)).page, page.id)

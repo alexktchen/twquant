@@ -38,20 +38,24 @@ const { chromium } = require('playwright');
       generated_at: '2026-06-20T20:05:00+08:00', published_at: null, mode: 'research', artifact_fingerprint: 'fp-1',
     };
     const allCandidates = [
-      { stock_id: '0050', rank: 1, score: 0.812, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending',
+      { stock_id: '0050', rank: 1, score: 0.812, bucket: 'ml_top20', reason_ref: null, insight_run_id: null, data_status: 'pending',
         insight: { insight_run_id: 'ins_a', stance: 'conflict', recommended_bucket: 'watch', absent_reason: null, support_n: 2, contradict_n: 1, gap_n: 1 } },
-      { stock_id: '2330', rank: 2, score: 0.744, bucket: 'watch', reason_ref: null, insight_run_id: null, data_status: 'pending',
+      { stock_id: '2330', rank: 2, score: 0.744, bucket: 'ml_watch', reason_ref: null, insight_run_id: null, data_status: 'pending',
         insight: { insight_run_id: 'ins_b', stance: null, recommended_bucket: null, absent_reason: 'LLM 離線，未產生分析', support_n: 0, contradict_n: 0, gap_n: 3 } },
-      { stock_id: '0056', rank: 3, score: 0.701, bucket: 'top_decile', reason_ref: null, insight_run_id: null, data_status: 'pending', insight: null },
+      { stock_id: '0056', rank: 3, score: 0.701, bucket: 'ml_top20', reason_ref: null, insight_run_id: null, data_status: 'pending', insight: null },
     ];
     // Mirrors the server contract: filters apply to the whole run before any page slice.
     const recommendations = url => {
       const [date, bucket, q] = ['date', 'bucket', 'q'].map(key => url.searchParams.get(key));
       const query = { date, model: url.searchParams.get('model'), run: url.searchParams.get('run'), bucket, q, page: 1, page_size: 200 };
       if (date === '2026-09-03') return { runs: [], issues: [], query };
-      if (date === '2026-09-04') return { runs: [{ ...runBase, run_id: 'run_zero', as_of: '2026-09-04T20:00:00+08:00', candidates: [], candidate_total: 0 }], issues: [], query };
+      if (date === '2026-09-04') return { runs: [{ ...runBase, run_id: 'run_zero', as_of: '2026-09-04T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 0, bucket_counts: {} }], issues: [], query };
+      // A pre-D-111 snapshot: it has candidates, but none carries a promotion bucket.
+      if (date === '2026-09-05') return { runs: [{ ...runBase, run_id: 'run_legacy', as_of: '2026-09-05T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 1949, bucket_counts: { ml_candidate: 1949 } }], issues: [], query };
       const kept = allCandidates.filter(c => (!bucket || c.bucket === bucket) && (!q || c.stock_id.includes(q)));
-      return { runs: [{ ...runBase, candidates: kept, candidate_total: kept.length }], issues: [], query };
+      const bucketCounts = {};
+      for (const c of allCandidates) bucketCounts[c.bucket] = (bucketCounts[c.bucket] ?? 0) + 1;
+      return { runs: [{ ...runBase, candidates: kept, candidate_total: kept.length, candidate_total_all: allCandidates.length, bucket_counts: bucketCounts }], issues: [], query };
     };
     // A connected-mode fixture: /api/health succeeds so the stock page runs in live mode.
     // Deliberately different from the embedded snapshot's 2026-06-30 so the two are distinguishable.
@@ -119,6 +123,12 @@ const { chromium } = require('playwright');
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
       if (url.pathname === '/api/sector-flows') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ flows: sectorFlows(Number(url.searchParams.get('window')) || 20) }) });
+      if (url.pathname === '/api/platform/strategy-targets') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ snapshots: [{
+        schema_version: 1, run_id: 'stgt_20260620_0123456789abcdef', as_of: '2026-06-20T20:00:00+08:00', generated_at: '2026-06-20T20:30:00+08:00', mode: 'research',
+        strategies: [
+          { code: 'LW-B2', config: 'lw_b2_broad_capw', label: '全市場多因子（市值加權）', note: '', status: 'ok', detail: null, exposure: 0.3, targets: [{ stock_id: '0050', target_weight: 0.25, rank: 1 }, { stock_id: '2330', target_weight: 0.05, rank: 2 }], vault: { total_return: 0.2578, max_drawdown: -0.1541, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 } },
+          { code: 'LW-M1', config: 'lw_m1_ml_c1', label: 'ML 訊號進載具', note: '', status: 'failed', detail: 'ConfigError: 串接閘門的因子在該日全為 null', exposure: 0, targets: [], vault: { total_return: 0.2268, max_drawdown: -0.3512, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 } },
+        ] }], issues: [], query: { date: null, limit: 1 } }) });
       if (url.pathname === '/api/platform/insights') return route.fulfill({ contentType: 'application/json', body: JSON.stringify(url.searchParams.get('stock') === '2330' ? { packs: [], issues: [] } : insightPacks) });
       if (url.pathname === '/api/ingest-matrix') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
         datasets: [{ key: 'prices', table: 'prices_daily', source: 'twse', label: '日行情', span: '2022-01-03~2026-06-30', days: 1100, window_missing: 0 }],
@@ -224,15 +234,20 @@ const { chromium } = require('playwright');
     await page.getByRole('link', { name: '展開完整清單 →' }).click();
     await page.getByRole('heading', { name: 'ML 選股', exact: true }).waitFor();
     assert.match(await page.locator('#platform-content').innerText(), /0\.8120/);
-    await page.getByRole('link', { name: 'watch', exact: true }).click();
-    await page.waitForFunction(() => location.hash.includes('bucket=watch'));
+    // D-111: with no bucket in the URL the list is the promoted top group only, not the whole universe.
+    assert.equal(await page.getByRole('link', { name: '2330', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('link', { name: '前 20 名', exact: true }).getAttribute('aria-current'), 'true');
+    await page.getByRole('link', { name: '觀察區（21~50）', exact: true }).click();
+    await page.waitForFunction(() => location.hash.includes('bucket=ml_watch'));
     await page.getByRole('link', { name: '2330', exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: '0050', exact: true }).count(), 0);
     await page.reload(); // AC-206-1: the filtered view is restored from the URL alone.
     await page.getByRole('link', { name: '2330', exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: '0050', exact: true }).count(), 0);
     await page.getByRole('link', { name: '全部', exact: true }).click();
+    await page.waitForFunction(() => location.hash.includes('bucket=all')); // 'all' is an explicit choice, not the default
     await page.getByRole('link', { name: '0050', exact: true }).waitFor();
+    await page.getByRole('link', { name: '2330', exact: true }).waitFor();
     await page.getByRole('searchbox', { name: '搜尋股票代號' }).fill('233');
     await page.waitForFunction(() => location.hash.includes('q=233'));
     await page.getByRole('link', { name: '2330', exact: true }).waitFor();
@@ -348,8 +363,17 @@ const { chromium } = require('playwright');
     // The legacy #ingest entry point still lands on operations.
     await page.goto('http://twquant.test/#ingest');
     await page.getByRole('heading', { name: '資料與工作', exact: true }).first().waitFor();
+    // D-112: strategy targets never appear without their held-out record, and a failed strategy says why.
+    await page.goto('http://twquant.test/#/strategies');
+    await page.getByRole('heading', { name: '全市場多因子（市值加權）', exact: true }).waitFor();
+    const strategies = await page.locator('#platform-content').innerText();
+    assert.match(strategies, /研究輸出，不是買賣建議/);
+    assert.match(strategies, /金庫期報酬[\s\S]*\+25\.8%[\s\S]*同期 0050 \+32\.2%/);
+    assert.match(strategies, /未通過部署裁決/);
+    assert.match(strategies, /25\.00%/); // 0050 keeps its leading zero and its weight
+    assert.match(strategies, /這支策略今天算不出名單[\s\S]*串接閘門/); // failure is stated, not shown as a flat day
     // AC-220: the analysis reaches the daily list as a derived field, and its bucket stays a suggestion.
-    await page.goto('http://twquant.test/#/recommendations');
+    await page.goto('http://twquant.test/#/recommendations?bucket=all');
     await page.getByRole('link', { name: '0050', exact: true }).waitFor();
     const table = await page.locator('#platform-content').innerText();
     assert.match(table, /矛盾/);
@@ -363,7 +387,8 @@ const { chromium } = require('playwright');
     await page.getByText('營收成長支持基本面', { exact: false }).waitFor();
     await page.getByText('可得時間為估計', { exact: false }).first().waitFor();
     // AC-220b: the new pages show each stock's Chinese name beside its code.
-    await page.goto('http://twquant.test/#/recommendations');
+    // 2330 sits in the watch group, which the default top-20 view leaves out (D-111).
+    await page.goto('http://twquant.test/#/recommendations?bucket=all');
     await page.getByRole('link', { name: '0050', exact: true }).waitFor();
     const named = await page.locator('#platform-content').innerText();
     assert.match(named, /元大台灣50/);
@@ -377,13 +402,17 @@ const { chromium } = require('playwright');
     // AC-206-2: zero candidates, nothing generated and read failure stay distinguishable.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-04');
     await page.getByText('合法地沒有候選股票', { exact: false }).waitFor();
+    // T-234: a snapshot saved before D-111 has candidates but no promotion bucket — a different state from an empty run.
+    await page.goto('http://twquant.test/#/recommendations?date=2026-09-05');
+    await page.getByText('D-111 之前產生的', { exact: false }).waitFor();
+    assert.equal(await page.getByText('合法地沒有候選股票', { exact: false }).count(), 0);
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-03');
     await page.getByText('2026-09-03 尚未產生推薦快照。', { exact: false }).waitFor();
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-02');
     await page.getByText('推薦快照無法讀取', { exact: false }).waitFor();
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['今日總覽', 'ML 選股', '我的追蹤', '產業研究', '洞悉與證據', '模型中心', '回測中心', '資料與工作']) {
+      for (const name of ['今日總覽', 'ML 選股', '策略持股', '我的追蹤', '產業研究', '洞悉與證據', '模型中心', '回測中心', '資料與工作']) {
         await page.getByRole('link', { name, exact: true }).click();
         // A page whose panel repeats the page title matches twice; the h1 is the first.
         await page.getByRole('heading', { name, exact: true }).first().waitFor();
@@ -432,7 +461,7 @@ const { chromium } = require('playwright');
     assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), 'mobile journey overflow');
     await page.setViewportSize({ width: 1280, height: 900 });
     // Keyboard: every page is reachable by focusing a nav link and pressing Enter.
-    for (const name of ['今日總覽', 'ML 選股', '我的追蹤', '個股研究', '產業研究', '洞悉與證據', '模型中心', '回測中心', '資料與工作']) {
+    for (const name of ['今日總覽', 'ML 選股', '策略持股', '我的追蹤', '個股研究', '產業研究', '洞悉與證據', '模型中心', '回測中心', '資料與工作']) {
       await page.getByRole('link', { name, exact: true }).focus();
       await page.keyboard.press('Enter');
       await page.getByRole('heading', { name, exact: true }).first().waitFor();

@@ -96,6 +96,31 @@ def test_ac206_3_runs_are_listed_newest_first(tmp_path: Path) -> None:
     assert [run["run_id"] for run in runs] == ["run_new", "run_mid", "run_old"]
 
 
+def test_ac206_4_unfiltered_totals_survive_a_bucket_filter(tmp_path: Path) -> None:
+    """篩選後為零時，仍看得出這個 run 其實有候選、各在哪個分組（T-234）。"""
+    save_snapshot(
+        tmp_path,
+        _snapshot(
+            "run_a",
+            "2026-09-04",
+            "model_a",
+            [_candidate("0050", 1), _candidate("2330", 2), _candidate("2317", 3)],
+        ),
+    )
+    save_snapshot(tmp_path, _snapshot("run_zero", "2026-09-05", "model_a", []))
+
+    response = api.get_platform_recommendations(tmp_path, bucket="ml_top20")
+    runs = {run["run_id"]: run for run in cast(list[dict[str, Any]], response["runs"])}
+
+    # 舊快照：篩「前 20 名」為零，但看得出它有 3 檔、全部在舊的單一分組裡。
+    assert runs["run_a"]["candidate_total"] == 0
+    assert runs["run_a"]["candidate_total_all"] == 3
+    assert runs["run_a"]["bucket_counts"] == {_candidate("0050", 1)["bucket"]: 3}
+    # 真的空的 run：兩個數字都是零，且沒有任何分組——與上面是不同的狀態。
+    assert runs["run_zero"]["candidate_total_all"] == 0
+    assert runs["run_zero"]["bucket_counts"] == {}
+
+
 def test_ac206_1_platform_route_is_read_only() -> None:
     route = next(
         route

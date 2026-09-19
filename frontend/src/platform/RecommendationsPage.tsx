@@ -34,7 +34,7 @@ function InsightCell({ insight }: { insight: Insight | null }) {
     {insight.recommended_bucket && <span className="platform-suggestion">LLM 提議：{BUCKET_LABEL[insight.recommended_bucket]}</span>}
   </span>
 }
-type Run = { run_id: string; model_id: string; as_of: string; generated_at: string; published_at: string | null; mode: 'research' | 'reconstructed'; artifact_fingerprint: string; candidates: Candidate[]; candidate_total: number }
+type Run = { run_id: string; model_id: string; as_of: string; generated_at: string; published_at: string | null; mode: 'research' | 'reconstructed'; artifact_fingerprint: string; candidates: Candidate[]; candidate_total: number; candidate_total_all: number; bucket_counts: Record<string, number> }
 type Query = { date: string | null; model: string | null; run: string | null; bucket: string | null; q: string | null; page: number; page_size: number }
 type Response = { runs: Run[]; issues: { run_id: string; detail: string }[]; query: Query }
 
@@ -91,7 +91,6 @@ export function RecommendationsPage({ route, dataAsOf }: { route: PlatformRoute;
   }, [identity]) // Every request input is encoded in identity; route is read synchronously per run.
   const compact = route.page === 'overview'
   const title = compact ? '今日研究候選' : '每日 ML 選股'
-  const filtered = route.query.get('bucket') !== ALL_BUCKETS || Boolean(route.query.get('q'))
   const controls = <Filters route={route} data={data} />
   if (error) return <Panel title={title}><div className="platform-query-state platform-query-error">推薦快照無法讀取：{error}<br />這是讀取錯誤，不是「今天沒有推薦」；頁面不會改用綜合因子排名或示範資料補位。</div></Panel>
   if (!data) return <Panel title={title}><div className="platform-query-state">正在讀取已保存的推薦快照…</div></Panel>
@@ -101,7 +100,7 @@ export function RecommendationsPage({ route, dataAsOf }: { route: PlatformRoute;
   </div></Panel>
   return <div className="platform-recommendations">
     <Panel title={title} sub={`${data.runs.length} 個保存 run`}>{controls}
-      {data.runs.map(run => <RunCard key={run.run_id} run={run} route={route} compact={compact} filtered={filtered} dataAsOf={dataAsOf} />)}
+      {data.runs.map(run => <RunCard key={run.run_id} run={run} route={route} compact={compact} dataAsOf={dataAsOf} />)}
     </Panel>
     {data.issues.length > 0 && <div className="platform-artifact-issues">有 {data.issues.length} 份推薦快照無法讀取，已列為問題項而非丟棄。</div>}
   </div>
@@ -109,12 +108,15 @@ export function RecommendationsPage({ route, dataAsOf }: { route: PlatformRoute;
 
 function Filters({ route, data }: { route: PlatformRoute; data: Response | null }) {
   const active = route.query.get('bucket')
+  // 已知分組照固定順序；資料裡若有別的分組（舊快照、重建的快照）接在後面，不讓它們變成點不到的死角。
+  const present = new Set((data?.runs ?? []).flatMap(run => Object.keys(run.bucket_counts ?? {})))
+  const extra = [...present].filter(bucket => !(BUCKET_ORDER as readonly string[]).includes(bucket)).sort()
   return <div className="platform-filter-row">
     <div className="platform-filter-group">
       <label>日期<input type="date" aria-label="推薦日期" value={route.query.get('date') ?? ''} onChange={e => { window.location.hash = href(route, { date: e.target.value || null }) }} /></label>
       <label>搜尋<input type="search" aria-label="搜尋股票代號" placeholder="股票代號" value={route.query.get('q') ?? ''} onChange={e => { window.location.hash = href(route, { q: e.target.value || null }) }} /></label>
       <span className="platform-bucket-filter">分類
-        {BUCKET_ORDER.map(bucket => <a key={bucket} href={href(route, { bucket })} aria-current={(active ?? DEFAULT_BUCKET) === bucket ? 'true' : undefined}>{bucketLabel(bucket)}</a>)}
+        {[...BUCKET_ORDER, ...extra].map(bucket => <a key={bucket} href={href(route, { bucket })} aria-current={(active ?? DEFAULT_BUCKET) === bucket ? 'true' : undefined}>{bucketLabel(bucket)}</a>)}
         <a href={href(route, { bucket: ALL_BUCKETS })} aria-current={active === ALL_BUCKETS ? 'true' : undefined}>全部</a>
       </span>
     </div>
@@ -122,7 +124,7 @@ function Filters({ route, data }: { route: PlatformRoute; data: Response | null 
   </div>
 }
 
-function RunCard({ run, route, compact, filtered, dataAsOf }: { run: Run; route: PlatformRoute; compact: boolean; filtered: boolean; dataAsOf: string | null }) {
+function RunCard({ run, route, compact, dataAsOf }: { run: Run; route: PlatformRoute; compact: boolean; dataAsOf: string | null }) {
   const day = run.as_of.slice(0, 10)
   const stale = dataAsOf != null && day < dataAsOf
   const candidates = compact ? run.candidates.slice(0, 10) : run.candidates
@@ -134,8 +136,8 @@ function RunCard({ run, route, compact, filtered, dataAsOf }: { run: Run; route:
     </div><a href={routeHref('models', undefined, context)}>查看來源模型 →</a></header>
     {stale && <div className="platform-stale-note">快照過期：這個 run 的資料截點是 {day}，行情資料已到 {dataAsOf}。這是舊快照，不是今日推薦。</div>}
     {run.candidate_total === 0 ? <div className="platform-query-state">
-      {!filtered ? '此 run 已保存，合法地沒有候選股票（零筆，不是讀取失敗）。'
-        : (route.query.get('bucket') ?? DEFAULT_BUCKET) === DEFAULT_BUCKET
+      {run.candidate_total_all === 0 ? '此 run 已保存，合法地沒有候選股票（零筆，不是讀取失敗）。'
+        : !route.query.get('q') && (route.query.get('bucket') ?? DEFAULT_BUCKET) === DEFAULT_BUCKET && !(DEFAULT_BUCKET in run.bucket_counts)
           ? <>這份快照是 D-111 之前產生的，當時每個候選一律標 <code>ml_candidate</code>、沒有晉級分組，所以「前 20 名」是空的。
             <a href={href(route, { bucket: ALL_BUCKETS })}>看全部候選</a>，或重新匯出這一天的快照以套用分組。</>
           : '目前的分類／搜尋條件下沒有符合的候選；清除條件可看回完整名單。'}
