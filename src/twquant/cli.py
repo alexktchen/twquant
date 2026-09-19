@@ -2626,6 +2626,7 @@ def _ml_score_day(
         cross_rank_pct,
     )
 
+    ran_at = now_tw()
     booster, meta = mls.load_model(model_dir, day)
     raw_feats = meta.get("features")
     if not isinstance(raw_feats, list) or not raw_feats:
@@ -2649,15 +2650,25 @@ def _ml_score_day(
             mlt.predict_scores(booster, frame, features), "score", "rank_pct"
         ).with_columns(
             pl.lit(model_dir.name).alias("model_id"),
-            pl.lit(now_tw()).alias("available_at"),
+            # parquet 留**實際執行時刻**：推薦快照的匯出以它當 generated_at，
+            # 並要求它不早於當日截點（資料到齊後才推論）。
+            pl.lit(ran_at).alias("available_at"),
         )
         inserted = 0
         if pg:
+            from twquant.conventions import ml_score_available_at
             from twquant.data.serving.ml_store import upsert_ml_scores
             from twquant.data.serving.schema import ensure_schema
 
             ensure_schema(conn, scfg.pg_schema)  # ml_scores 首寫時可能尚未建表（冪等）
-            inserted = upsert_ml_scores(conn, scfg.pg_schema, scored)
+            # PG 寫**資訊可得時刻**（T-228）——與 parquet 那一欄是兩個不同的問題。
+            inserted = upsert_ml_scores(
+                conn,
+                scfg.pg_schema,
+                scored.with_columns(
+                    pl.lit(ml_score_available_at(day, ran_at)).alias("available_at")
+                ),
+            )
     finally:
         conn.close()
     scored.write_parquet(out_path)
@@ -2776,7 +2787,7 @@ def ml_backfill_scores(
 
     import polars as pl
 
-    from twquant.conventions import TZ
+    from twquant.conventions import ML_SCORE_AVAILABLE_HOUR, TZ
     from twquant.data.serving import store
     from twquant.data.serving.ml_store import upsert_ml_scores
     from twquant.data.serving.schema import ensure_schema
@@ -2789,7 +2800,7 @@ def ml_backfill_scores(
         pl.lit(str(meta["model_id"])).alias("model_id"),
         pl.col("date")
         .cast(pl.Datetime("us"))
-        .dt.offset_by("19h")
+        .dt.offset_by(f"{ML_SCORE_AVAILABLE_HOUR}h")
         .dt.replace_time_zone(str(TZ))
         .alias("available_at"),
     )
