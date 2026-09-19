@@ -166,6 +166,46 @@ class RebalanceConfig(BaseConfig):
     execution: Literal["next_open", "close"] = "next_open"
 
 
+class ExitRuleConfig(BaseConfig):
+    """一條每日出場規則（T-231／D-114 §四）。收盤判斷、隔日開盤出清、出清後留現金。
+
+    三種 `kind` 各用各的參數；填了不屬於該 kind 的參數即 raise——
+    寫了卻不生效的配置正是 `scripts/audit_silent.py` 要抓的那一類。
+    """
+
+    kind: Literal["stop_loss", "below_ma", "score_below"]
+    pct: float | None = None  # stop_loss：收盤（含已收股利）較本輪均價的跌幅，小數
+    window: int | None = None  # below_ma：均線天數（含當日）
+    factor: str | None = None  # score_below：因子名（如 ml.lgbm_lw_net_20d）
+    params: dict[str, object] = Field(default_factory=dict)  # score_below：傳給因子的參數
+    threshold: float | None = None  # score_below：因子值低於此即出場
+
+    @model_validator(mode="after")
+    def _params_match_kind(self) -> ExitRuleConfig:
+        given = {
+            "pct": self.pct is not None,
+            "window": self.window is not None,
+            "factor": self.factor is not None,
+            "threshold": self.threshold is not None,
+            "params": bool(self.params),
+        }
+        allowed = {
+            "stop_loss": {"pct"},
+            "below_ma": {"window"},
+            "score_below": {"factor", "threshold", "params"},
+        }[self.kind]
+        required = allowed - {"params"}
+        missing = sorted(k for k in required if not given[k])
+        extra = sorted(k for k, on in given.items() if on and k not in allowed)
+        if missing or extra:
+            raise ValueError(f"exit_rules[{self.kind}] 缺 {missing}、多 {extra}")
+        if self.pct is not None and not 0.0 < self.pct < 1.0:
+            raise ValueError(f"stop_loss.pct 須介於 (0, 1)，得到 {self.pct}")
+        if self.window is not None and self.window < 2:
+            raise ValueError(f"below_ma.window 須 >= 2，得到 {self.window}")
+        return self
+
+
 class StrategyConfig(BaseConfig):
     """完整策略配置（SPEC-003 §1）。同一份 YAML 供回測與生產。"""
 
@@ -198,6 +238,8 @@ class StrategyConfig(BaseConfig):
     # `build.py` 原本寫死傳 `{}`，那樣配置檔寫什麼都不生效且不會報錯
     # ——正是 `scripts/audit_silent.py` 的 no-op 配置那一類缺陷。
     overlay_params: dict[str, dict[str, object]] = Field(default_factory=dict)
+    # 每日出場規則（T-231）。空＝既有行為；任一條觸發即隔日開盤出清。
+    exit_rules: list[ExitRuleConfig] = Field(default_factory=list)
     max_weight_per_stock: float = 0.05
 
     @model_validator(mode="after")

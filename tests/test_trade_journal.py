@@ -115,3 +115,13 @@ def test_ac7_overselling_raises_instead_of_being_smoothed_over() -> None:
 def test_ac8_stock_id_keeps_leading_zero() -> None:
     days = build_journal(_bundle([_t("2024-01-02", "0050", "buy", 1000, 100.0)]))
     assert days[0].moves[0].stock_id == "0050"
+
+
+def test_ac9_exit_rule_reason_is_carried_to_the_move() -> None:
+    ledger = [
+        _t("2024-01-02", "2330", "buy", 1000, 500.0),
+        _t("2024-01-04", "2330", "sell", 1000, 440.0) | {"reason": "stop_loss"},
+    ]
+    days = build_journal(_bundle(ledger))
+    assert days[0].moves[0].reason is None
+    assert days[1].moves[0].reason == "stop_loss"

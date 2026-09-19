@@ -103,6 +103,10 @@ def backtest_params_hash(
     strategy_payload = strategy.model_dump(
         mode="json", exclude={"name", "description", "trial_scope"}
     )
+    # T-231：`exit_rules` 是後加欄位。空值不進 hash——否則既有全部試驗的 hash 會因為
+    # 多了一個空欄位而一起改變，DSR 的 distinct 計數就對不回研究登記簿。
+    if not strategy_payload.get("exit_rules"):
+        strategy_payload.pop("exit_rules", None)
     payload = {
         "strategy": strategy_payload,
         "cost": cost.model_dump(mode="json"),
