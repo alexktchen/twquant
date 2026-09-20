@@ -606,3 +606,94 @@ def forward_drawdown_labels(
         .pipe(cross_rank_pct, "_dd", "label")
         .select("date", "stock_id", "label")
     )
+
+
+def triple_barrier_labels(
+    prices: pl.DataFrame,
+    *,
+    horizon: int,
+    up: float,
+    down: float,
+    adjusted: bool = False,
+    max_span_sessions: int | None = None,
+) -> pl.DataFrame:
+    """S 系列買進標籤（D-120 §三）：t+1 開盤進場後 `horizon` 個交易日內，收盤**先**碰到
+    `+up`（在碰到 `−down` 之前）＝1；先碰下緣、或期滿兩邊都沒碰＝0。
+
+    輸入需含 (date, stock_id, open, close)；`adjusted=True` 另需 `adj`（總報酬價，D-054）。
+    輸出 (date, stock_id, label)，label ∈ {0.0, 1.0, null}。
+
+    **這是絕對標籤，刻意不做橫斷面轉換**——既有標籤全是「比同日其他股票好多少」，
+    所以崩盤日照樣有前 1%；這個標籤在崩盤日會整片是 0，模型才學得到「現在不是時候」。
+
+    往後不足 `horizon` 列者為 null（沒有答案），不得記 0——那會把「資料到期」教成「沒漲」。
+    同一根收盤不可能同時碰到上下緣，故不需要 tie-break。
+    """
+    if horizon < 1:
+        raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
+    if up <= 0.0 or down <= 0.0:
+        raise ValueError(f"up／down 須 > 0，得到 up={up}、down={down}")
+    if max_span_sessions is not None and max_span_sessions < horizon + 1:
+        raise ValueError(
+            f"max_span_sessions({max_span_sessions}) 不得小於 horizon+1({horizon + 1})"
+        )
+    need = {"open", "close"} | ({"adj"} if adjusted else set())
+    missing = sorted(need - set(prices.columns))
+    if missing:
+        raise ValueError(f"triple_barrier_labels 缺欄位：{missing}")
+    adj = pl.col("adj") if adjusted else pl.lit(1.0)
+    frame = prices.sort("stock_id", "date")
+    if max_span_sessions is not None:
+        frame = session_index(frame).sort("stock_id", "date")
+
+    def _fwd(col: str, k: int) -> pl.Expr:
+        p = pl.col(col) / adj
+        return pl.when(p > 0.0).then(p).otherwise(None).shift(-k).over("stock_id", order_by="date")
+
+    entry = _fwd("open", 1)
+    first_up = pl.lit(None, dtype=pl.Int32)
+    first_dn = pl.lit(None, dtype=pl.Int32)
+    for k in range(horizon, 0, -1):  # 由遠到近覆寫，最後留下的是**最早**碰到的那一天
+        ret = _fwd("close", k) / entry - 1.0
+        first_up = pl.when(ret >= up).then(pl.lit(k, dtype=pl.Int32)).otherwise(first_up)
+        first_dn = pl.when(ret <= -down).then(pl.lit(k, dtype=pl.Int32)).otherwise(first_dn)
+    complete = _fwd("close", horizon).is_not_null() & entry.is_not_null()
+    if max_span_sessions is not None:
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        span = sidx.shift(-horizon).over("stock_id", order_by="date") - sidx
+        complete = complete & (span <= max_span_sessions)
+    frame = frame.with_columns(_up=first_up, _dn=first_dn, _ok=complete)
+    won = pl.col("_up").is_not_null() & (pl.col("_dn").is_null() | (pl.col("_up") < pl.col("_dn")))
+    return (
+        frame.with_columns(
+            pl.when(pl.col("_ok")).then(won.cast(pl.Float64)).otherwise(None).alias("label")
+        )
+        .select("date", "stock_id", "label")
+        .sort("date", "stock_id")
+    )
+
+
+def liquid_pool(
+    prices: pl.DataFrame, *, adv_window: int, min_adv_pctl: float | None, min_price: float | None
+) -> pl.DataFrame:
+    """每日流動性合格的 (date, stock_id)（T-248）：與 `strategy.universe.universe_ids` 同定義——
+    `adv_window` 日成交金額中位數在當日第 `min_adv_pctl` 百分位（linear 內插）以上、收盤 ≥ `min_price`。
+
+    訓練樣本與回測宇宙用同一把尺：買進模型只會被拿來排這個池子裡的股票，
+    拿池外的冷門股去訓練，學到的是用不到的東西，還會稀釋校準。
+    **與 `universe_ids` 的已知差異**：這裡不做衛生濾網（跳價／缺口）與市場別濾網——
+    那兩者剔除的是個別異常日，不改變池子的量級；差異寫明，不假裝相同。
+    輸入需含 (date, stock_id, close, amount)。
+    """
+    frame = prices.sort("stock_id", "date").with_columns(
+        _adv=pl.col("amount").rolling_median(adv_window, min_samples=adv_window).over("stock_id")
+    )
+    keep = pl.col("_adv").is_not_null()
+    if min_adv_pctl is not None:
+        frame = frame.with_columns(
+            _cut=pl.col("_adv").quantile(min_adv_pctl, "linear").over("date")
+        )
+        keep = keep & (pl.col("_adv") >= pl.col("_cut"))
+    if min_price is not None:
+        keep = keep & (pl.col("close") >= min_price)
+    return frame.filter(keep).select("date", "stock_id").sort("date", "stock_id")
