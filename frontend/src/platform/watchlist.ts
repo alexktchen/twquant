@@ -10,6 +10,8 @@ export type WatchEntry = {
   stock_id: string
   note: string
   run_id: string | null
+  /** 買進價（D-116）：只存在這台瀏覽器，永不送到伺服器。null＝未填。 */
+  entry_price: number | null
 }
 
 /** ok = usable; legacy = old array upgraded in memory; corrupt = present but unreadable. */
@@ -25,10 +27,14 @@ export type WatchState = {
 function entryFrom(value: unknown): WatchEntry | null {
   const row = value as Record<string, unknown> | null
   if (!row || typeof row.stock_id !== 'string' || row.stock_id === '') return null
+  // 欄位缺席（D-116 之前存的資料）＝未填；出現卻不是正數＝損毀，不得默默當成未填。
+  const price = row.entry_price ?? null
+  if (price !== null && !(typeof price === 'number' && Number.isFinite(price) && price > 0)) return null
   return {
     stock_id: row.stock_id,
     note: typeof row.note === 'string' ? row.note : '',
     run_id: typeof row.run_id === 'string' ? row.run_id : null,
+    entry_price: price,
   }
 }
 
@@ -53,7 +59,7 @@ export function parseWatchlist(raw: string | null): WatchState {
       return { entries: [], status: 'corrupt', detail: '舊版自選含非字串項目，已保留原值未覆寫' }
     }
     return {
-      entries: ids.map(stock_id => ({ stock_id, note: '', run_id: null })),
+      entries: ids.map(stock_id => ({ stock_id, note: '', run_id: null, entry_price: null })),
       status: 'legacy',
       detail: '讀到舊版自選格式；下次修改時才會升級寫入，現在不動原值',
     }
@@ -78,19 +84,24 @@ export function serializeWatchlist(entries: WatchEntry[]): string {
 export function toggleWatch(entries: WatchEntry[], stock_id: string, run_id: string | null = null): WatchEntry[] {
   return entries.some(entry => entry.stock_id === stock_id)
     ? entries.filter(entry => entry.stock_id !== stock_id)
-    : [...entries, { stock_id, note: '', run_id }]
+    : [...entries, { stock_id, note: '', run_id, entry_price: null }]
 }
 
 /** Set the research note for a watched stock; unknown stocks are added with that note. */
 export function setNote(entries: WatchEntry[], stock_id: string, note: string): WatchEntry[] {
   return entries.some(entry => entry.stock_id === stock_id)
     ? entries.map(entry => (entry.stock_id === stock_id ? { ...entry, note } : entry))
-    : [...entries, { stock_id, note, run_id: null }]
+    : [...entries, { stock_id, note, run_id: null, entry_price: null }]
+}
+
+/** Set or clear (null) the local entry price of a watched stock. */
+export function setEntryPrice(entries: WatchEntry[], stock_id: string, entry_price: number | null): WatchEntry[] {
+  return entries.map(entry => (entry.stock_id === stock_id ? { ...entry, entry_price } : entry))
 }
 
 /** Replace the watched set from a plain id list while preserving existing notes and runs. */
 export function fromIds(entries: WatchEntry[], ids: string[]): WatchEntry[] {
-  return ids.map(stock_id => entries.find(entry => entry.stock_id === stock_id) ?? { stock_id, note: '', run_id: null })
+  return ids.map(stock_id => entries.find(entry => entry.stock_id === stock_id) ?? { stock_id, note: '', run_id: null, entry_price: null })
 }
 
 /** Read the watchlist, turning a blocked storage read into an explicit corrupt state. */
