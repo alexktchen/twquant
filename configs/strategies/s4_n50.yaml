@@ -1,0 +1,29 @@
+# 第四輪 S4（D-128，**事前登記**）：滿手 50 檔、進場門檻 0.55。未經部署裁決，勿用於實盤。
+#
+# 與前三輪的三個差別：持股 15→50、門檻 0.70→0.55、特徵 16→41。
+# 0.55 ＝ 對稱 ±1σ 邊界的損益兩平 0.50 ＋ 台股來回成本（約佔上緣 5%）＋ 2.5pp 邊際。
+# 判準換成「正期望值＋足夠筆數」，勝率只報不判（D-128 §四）。
+name: s4_n50
+description: S4：買進機率 >= 0.55、滿手 50 檔、41 特徵（D-128 事前登記）
+trial_scope: lw:slots_s
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_lw_tb_up_20d
+    weight: 1.0
+    params:
+      model_id: __MODEL__
+slots:
+  n: 50
+  entry_threshold: 0.55
+# 出場沿用 D-124 §七 的 H（與標籤逐項對齊）——這一輪改的是進場與檔數，不是出場。
+# 停利／停損的幅度由標籤決定；標籤是 ±1σ，故此處用 take_profit/stop_loss 的固定值無法對齊，
+# 改以時間出場為主、固定停損為輔（±15% 是使用者的單檔容忍度）。
+exit_rules:
+  - kind: stop_loss
+    pct: 0.15
+  - kind: time_stop
+    sessions: 20

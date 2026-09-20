@@ -616,6 +616,8 @@ def triple_barrier_labels(
     down: float,
     adjusted: bool = False,
     max_span_sessions: int | None = None,
+    vol_scaled: bool = False,
+    vol_window: int | None = None,
 ) -> pl.DataFrame:
     """S 系列買進標籤（D-120 §三）：t+1 開盤進場後 `horizon` 個交易日內，收盤**先**碰到
     `+up`（在碰到 `−down` 之前）＝1；先碰下緣、或期滿兩邊都沒碰＝0。
@@ -628,6 +630,13 @@ def triple_barrier_labels(
 
     往後不足 `horizon` 列者為 null（沒有答案），不得記 0——那會把「資料到期」教成「沒漲」。
     同一根收盤不可能同時碰到上下緣，故不需要 tie-break。
+
+    `vol_scaled=True`（T-260／D-127）：上下緣改為 `up × σ`／`down × σ`，
+    σ＝該檔在訊號日（含）以前 `vol_window` 日報酬標準差 × √horizon（該視野的預期波動）。
+    **為什麼需要**：固定百分比的邊界對高波動股天生容易碰到，模型會學成「挑波動大的」
+    而不是「挑會漲的」——D-126 實測平靜日前 15 名先跌 10% 的比例（50.6%）遠高於先漲（33.4%）。
+    標準化之後，碰到邊界的難度對每檔股票、每個時期一致，模型只能靠方向取勝。
+    σ 算不出來或為 0（上市未滿 `vol_window` 日、或價格完全不動）→ 該列無標籤，**不補值**。
     """
     if horizon < 1:
         raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
@@ -637,6 +646,8 @@ def triple_barrier_labels(
         raise ValueError(
             f"max_span_sessions({max_span_sessions}) 不得小於 horizon+1({horizon + 1})"
         )
+    if vol_scaled and (vol_window is None or vol_window < 2):
+        raise ValueError(f"vol_scaled=True 需要 vol_window >= 2，得到 {vol_window}")
     need = {"open", "close"} | ({"adj"} if adjusted else set())
     missing = sorted(need - set(prices.columns))
     if missing:
@@ -650,14 +661,34 @@ def triple_barrier_labels(
         p = pl.col(col) / adj
         return pl.when(p > 0.0).then(p).otherwise(None).shift(-k).over("stock_id", order_by="date")
 
+    if vol_scaled:
+        window = int(cast("int", vol_window))
+        px_now = pl.col("close") / adj
+        daily = (px_now / px_now.shift(1).over("stock_id", order_by="date") - 1.0).over(
+            "stock_id", order_by="date"
+        )
+        # 只用訊號日（含）以前的報酬：rolling 本身向後看，無前視
+        sigma = daily.rolling_std(window, min_samples=window).over("stock_id", order_by="date") * (
+            horizon**0.5
+        )
+        frame = frame.with_columns(
+            _sigma=pl.when(sigma > 0.0).then(sigma).otherwise(None),
+        )
+        up_barrier, dn_barrier = pl.col("_sigma") * up, pl.col("_sigma") * down
+    else:
+        frame = frame.with_columns(_sigma=pl.lit(1.0))
+        up_barrier, dn_barrier = pl.lit(up), pl.lit(down)
+
     entry = _fwd("open", 1)
     first_up = pl.lit(None, dtype=pl.Int32)
     first_dn = pl.lit(None, dtype=pl.Int32)
     for k in range(horizon, 0, -1):  # 由遠到近覆寫，最後留下的是**最早**碰到的那一天
         ret = _fwd("close", k) / entry - 1.0
-        first_up = pl.when(ret >= up).then(pl.lit(k, dtype=pl.Int32)).otherwise(first_up)
-        first_dn = pl.when(ret <= -down).then(pl.lit(k, dtype=pl.Int32)).otherwise(first_dn)
-    complete = _fwd("close", horizon).is_not_null() & entry.is_not_null()
+        first_up = pl.when(ret >= up_barrier).then(pl.lit(k, dtype=pl.Int32)).otherwise(first_up)
+        first_dn = pl.when(ret <= -dn_barrier).then(pl.lit(k, dtype=pl.Int32)).otherwise(first_dn)
+    complete = (
+        _fwd("close", horizon).is_not_null() & entry.is_not_null() & pl.col("_sigma").is_not_null()
+    )
     if max_span_sessions is not None:
         sidx = pl.col("_sidx").cast(pl.Int64)
         span = sidx.shift(-horizon).over("stock_id", order_by="date") - sidx

@@ -217,3 +217,38 @@ def test_ac10_partial_fill_does_not_masquerade_as_an_exit(tmp_path: Path) -> Non
     )
     assert any(u.reason == "participation" for u in res.unfilled)
     assert {t.reason for t in res.ledger} == {"rebalance"}
+
+
+# ── D-124 §七：H 策略要的兩條出場規則 ────────────────────────────────────────────
+
+
+def test_ac16_take_profit_sells_after_the_gain_is_reached(tmp_path: Path) -> None:
+    res = _run(tmp_path, [{"kind": "take_profit", "pct": 0.10}])
+    sell = _exit_sells(res, "2330")[0]
+    assert sell.reason == "take_profit"
+    buys = [
+        t for t in res.ledger if t.stock_id == "2330" and t.side == "buy" and t.date < sell.date
+    ]
+    avg = sum(t.price * t.shares for t in buys) / sum(t.shares for t in buys)
+    i = (sell.date - BASE).days - 1
+    assert _close("2330", i) / avg - 1.0 >= 0.10  # 觸發日收盤已達停利
+    assert _close("2330", i - 1) / avg - 1.0 < 0.10  # 前一天還沒
+
+
+def test_ac17_time_stop_sells_after_n_sessions_held(tmp_path: Path) -> None:
+    res = _run(tmp_path, [{"kind": "time_stop", "sessions": 7}])
+    first_buy = min(t.date for t in res.ledger if t.side == "buy")
+    sells = [t for t in res.ledger if t.reason == "time_stop"]
+    assert sells
+    # 買進日算第 0 天：持有滿 7 個交易日的收盤觸發，第 8 個交易日開盤賣
+    assert min(t.date for t in sells) == first_buy + dt.timedelta(days=8)
+
+
+def test_ac18_new_rule_params_are_validated() -> None:
+    for bad in (
+        {"kind": "take_profit"},
+        {"kind": "time_stop"},
+        {"kind": "time_stop", "sessions": 0},
+    ):
+        with pytest.raises(ValueError):
+            ExitRuleConfig.model_validate(bad)

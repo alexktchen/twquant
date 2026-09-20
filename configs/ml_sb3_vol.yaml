@@ -1,0 +1,74 @@
+# SB3：第三輪買進模型（D-127，**事前登記**）。未經部署裁決，勿用於實盤。
+#
+# 回答的問題：「明天開盤買進，未來 20 個交易日內，收盤會不會**先漲 1σ**（在跌 1σ 之前）？」
+# 絕對標籤、二元目標。**與第二輪（ml_sb_up20.yaml）的唯一差別是標籤的邊界改成波動度的倍數**，
+# 外加 7 個籌碼特徵。D-126 量到固定 ±10% 讓高波動股天生容易碰到，模型學成「挑波動大的」
+# ——平靜日前 15 名先跌 10% 佔 50.6%、先漲只佔 33.4%。標準化之後碰邊界的難度一致，模型只能靠方向取勝。
+# （既有模型的標籤全是對全市場平均的超額報酬：2020-03-19、2025-04-09 兩個崩盤日的第 99 百分位
+#   分數反而比平常高，做不到「沒有好股票就空手」。）
+#
+# 與 ml_h20_cost_aware_lw.yaml 的差異只有：標籤、三個大盤狀態特徵、排序模型分位當特徵、樣本限縮到
+# 流動性合格池。12 個個股特徵、切分、LightGBM 超參數逐字相同——**不調參、不搜尋，只訓練這一次**。
+sample_tag: lw3
+horizon_days: 20
+aux_horizons: []
+features:
+  - fundamental.revenue_accel
+  - fundamental.revenue_yoy
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.rs_market_20d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+  # 籌碼（D-127 §三）：本專案量過短期方向 IC 最強的那一類，見 docs/reports/volume-lead-price-ic.md
+  - chip.foreign_streak
+  - chip.trust_streak
+  - chip.foreign_net_10d
+  - chip.trust_net_10d
+  - chip.inst_net_10d
+  - chip.margin_velocity_5d
+  - chip.short_margin_ratio
+# 指數在這裡是輸入特徵，不是比較基準（D-114「驗收不出現指數」不因此牴觸）
+context_features:
+  - ctx.taiex_ma20_dev
+  - ctx.taiex_vol20
+  - ctx.breadth_ma20
+context_window: 20
+# 排序模型的 walk-forward **樣本外**分位（`ml backfill-scores` 寫進 ml_scores 的那一份）。
+# 2017-09-26 以前沒有分數 → 該欄為 null，由 LightGBM 原生處理。
+model_score_features:
+  ml.lgbm_lw_net_20d: lgbm_lw_net_h20_20260225_83890036
+# 訓練樣本＝回測會用到的那個池子（ADV 前 30%、股價 ≥ 10，與全部 LW／E／S 系列的 universe 同兩個數字）
+sample_min_adv_pctl: 0.70
+sample_min_price: 10.0
+label:
+  transform: triple_barrier
+  vol_scaled: true   # 上下緣＝k × σ，不是固定百分比
+  vol_window: 20
+  barrier_up: 1.0    # ＝1σ（D-127 §二）：σ 是該檔自己的 20 日報酬標準差 × √20
+  barrier_down: 1.0  # 對稱；上下同一個 k，只問「先碰哪一邊」
+  adv_window_sessions: 20
+  total_return: true
+  max_span_sessions: 42
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 21   # 標籤用到 t+1 開盤 ~ t+20 收盤，隔離 21 個交易日
+  vault_months: 6
+  days_per_year: 244
+  days_per_month: 21
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+refit:
+  schedule: monthly
+trials_log: research_log

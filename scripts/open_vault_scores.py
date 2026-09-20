@@ -95,7 +95,9 @@ def main() -> None:
             .alias("available_at"),
         )
         got = sorted(scored["date"].unique().to_list())
-        print(f"\n{name}\n  訊號日 {len(got)}（{got[0]} ~ {got[-1]}）、{scored.height} 列", flush=True)
+        print(
+            f"\n{name}\n  訊號日 {len(got)}（{got[0]} ~ {got[-1]}）、{scored.height} 列", flush=True
+        )
         if monthly:
             scored = _carry_forward_scores(scored, [d for d in cal if d >= got[0]], got)
             print(f"  沿用後 {scored['date'].n_unique()} 個交易日、{scored.height} 列", flush=True)

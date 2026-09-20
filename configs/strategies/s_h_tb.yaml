@@ -1,0 +1,30 @@
+# S 系列 H 策略（D-124 §七，**事前登記**）。未經部署裁決，勿用於實盤。
+#
+# 每日補位：每天收盤後，以校準後的「20 日內先漲 10% 的機率」挑候選，機率 >= 0.70 才買，
+# 補到滿手 15 檔為止；沒人過門檻就空手。沒有再平衡日、沒有月底強制換股。
+# 進場分數是**絕對機率**（薄因子 ml.lgbm_lw_tb_up_20d 回傳 score 而非 rank_pct）。
+name: s_h_tb
+description: S-H：買進機率 >= 0.70、滿手 15 檔（D-124 事前登記）
+trial_scope: lw:slots_s
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_lw_tb_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_lw_tb_h20_20260225_a7cee0de_cal
+slots:
+  n: 15
+  entry_threshold: 0.70
+# H＝高勝率、小賺就跑：出場與標籤逐項對齊（同樣的 +10%、同樣的 −10%、同樣的 20 日），
+# 這樣回測的逐筆勝率與模型的命中率量的是同一件事。
+exit_rules:
+  - kind: take_profit
+    pct: 0.10
+  - kind: stop_loss
+    pct: 0.10
+  - kind: time_stop
+    sessions: 20

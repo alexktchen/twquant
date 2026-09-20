@@ -173,8 +173,10 @@ class ExitRuleConfig(BaseConfig):
     寫了卻不生效的配置正是 `scripts/audit_silent.py` 要抓的那一類。
     """
 
-    kind: Literal["stop_loss", "below_ma", "score_below", "trailing_ma"]
-    pct: float | None = None  # stop_loss：收盤（含已收股利）較本輪均價的跌幅，小數
+    kind: Literal["stop_loss", "below_ma", "score_below", "trailing_ma", "take_profit", "time_stop"]
+    # stop_loss：收盤（含已收股利）較本輪均價的**跌**幅；take_profit：**漲**幅。皆為正的小數
+    pct: float | None = None
+    sessions: int | None = None  # time_stop：買進後持有滿幾個交易日即賣（買進日算第 0 天）
     window: int | None = None  # below_ma／trailing_ma：均線天數（含當日）
     # trailing_ma：本輪未實現報酬**曾經**達到此值之後，跌破均線才賣（D-120 S0：讓獲利奔跑）
     min_peak_gain: float | None = None
@@ -188,6 +190,7 @@ class ExitRuleConfig(BaseConfig):
             "pct": self.pct is not None,
             "window": self.window is not None,
             "min_peak_gain": self.min_peak_gain is not None,
+            "sessions": self.sessions is not None,
             "factor": self.factor is not None,
             "threshold": self.threshold is not None,
             "params": bool(self.params),
@@ -196,6 +199,8 @@ class ExitRuleConfig(BaseConfig):
             "stop_loss": {"pct"},
             "below_ma": {"window"},
             "trailing_ma": {"window", "min_peak_gain"},
+            "take_profit": {"pct"},
+            "time_stop": {"sessions"},
             "score_below": {"factor", "threshold", "params"},
         }[self.kind]
         required = allowed - {"params"}
@@ -204,7 +209,9 @@ class ExitRuleConfig(BaseConfig):
         if missing or extra:
             raise ValueError(f"exit_rules[{self.kind}] 缺 {missing}、多 {extra}")
         if self.pct is not None and not 0.0 < self.pct < 1.0:
-            raise ValueError(f"stop_loss.pct 須介於 (0, 1)，得到 {self.pct}")
+            raise ValueError(f"{self.kind}.pct 須介於 (0, 1)，得到 {self.pct}")
+        if self.sessions is not None and self.sessions < 1:
+            raise ValueError(f"time_stop.sessions 須 >= 1，得到 {self.sessions}")
         if self.window is not None and self.window < 2:
             raise ValueError(f"{self.kind}.window 須 >= 2，得到 {self.window}")
         if self.min_peak_gain is not None and self.min_peak_gain <= 0.0:

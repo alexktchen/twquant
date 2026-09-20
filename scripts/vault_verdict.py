@@ -19,13 +19,38 @@ VAULT_LO, VAULT_HI = dt.date(2026, 3, 2), dt.date(2026, 8, 31)
 
 # 代號 → (金庫包, 長窗口包, 短窗口包)。短窗口缺兩支是**登記時的疏漏**，照實記，不換判準。
 CELLS = [
-    ("LW-C1", "LW-C1_lw_c1_breakout_1x", "LW-C1_lw_c1_breakout_1x", "tracks_c/C1_track_c1_breakout_1x"),
-    ("LW-R2", "LW-R2_lw_r2_c1_lvgate_1x", "LW-R2_lw_r2_c1_lvgate_1x", "tracks_fr/R2_track_r2_c1_lvgate_1x"),
-    ("LW-B1", "LW-B1_lw_b1_large_enhanced_1x", "LW-B1_lw_b1_large_enhanced_1x", "tracks/B1_track_b1_large_enhanced_1x"),
-    ("LW-B2", "LW-B2_lw_b2_broad_capw_1x", "LW-B2_lw_b2_broad_capw_1x", "tracks/B2_track_b2_broad_capw_1x"),
+    (
+        "LW-C1",
+        "LW-C1_lw_c1_breakout_1x",
+        "LW-C1_lw_c1_breakout_1x",
+        "tracks_c/C1_track_c1_breakout_1x",
+    ),
+    (
+        "LW-R2",
+        "LW-R2_lw_r2_c1_lvgate_1x",
+        "LW-R2_lw_r2_c1_lvgate_1x",
+        "tracks_fr/R2_track_r2_c1_lvgate_1x",
+    ),
+    (
+        "LW-B1",
+        "LW-B1_lw_b1_large_enhanced_1x",
+        "LW-B1_lw_b1_large_enhanced_1x",
+        "tracks/B1_track_b1_large_enhanced_1x",
+    ),
+    (
+        "LW-B2",
+        "LW-B2_lw_b2_broad_capw_1x",
+        "LW-B2_lw_b2_broad_capw_1x",
+        "tracks/B2_track_b2_broad_capw_1x",
+    ),
     ("LW-C1n50", "LW-C1n50_lw_c1_n50_1x", "LW-C1n50_lw_c1_n50_1x", None),
     ("LW-M1", "LW-M1_lw_m1_ml_c1_1x", "LW-M1_lw_m1_ml_c1_1x", "tracks_m/M1_track_m1_ml_c1_1x"),
-    ("LW-F1", "LW-F1_lw_f1_revpool_1x", "LW-F1_lw_f1_revpool_1x", "tracks_fr/F1_track_f1_revpool_1x"),
+    (
+        "LW-F1",
+        "LW-F1_lw_f1_revpool_1x",
+        "LW-F1_lw_f1_revpool_1x",
+        "tracks_fr/F1_track_f1_revpool_1x",
+    ),
     ("LW-M1-faber", "LW-M1-faber_lw_m1_faber_1x", "LW-M1-faber_lw_m1_faber_1x", None),
 ]
 # 長窗口那一批分散在多個目錄；逐一找
@@ -73,9 +98,7 @@ def _bench() -> dict[str, float]:
                 (VAULT_LO, VAULT_HI),
             )
             got = cur.fetchall()
-        px = pl.DataFrame(
-            {"date": [r[0] for r in got], "close": [float(r[1]) for r in got]}
-        )
+        px = pl.DataFrame({"date": [r[0] for r in got], "close": [float(r[1]) for r in got]})
     finally:
         conn.close()
     v = px["close"].to_numpy()
@@ -150,7 +173,11 @@ def main() -> None:
                     {"code": c, **v, "long_cagr": lc, "short_cagr": sc, "closer": n, "beat_0050": w}
                     for c, v, lc, sc, n, w in rows
                 ],
-                "p2": {"comparable": comparable, "closer_long": closer_long, "closer_short": closer_short},
+                "p2": {
+                    "comparable": comparable,
+                    "closer_long": closer_long,
+                    "closer_short": closer_short,
+                },
                 "p5": {"lost_to_0050": 8 - beat},
             },
             ensure_ascii=False,

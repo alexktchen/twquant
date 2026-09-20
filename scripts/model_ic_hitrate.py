@@ -52,7 +52,9 @@ def _measure(model_dir: Path) -> tuple[dict[str, object], str]:
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--models", required=True, help="模型庫根目錄（給絕對路徑，見 CLAUDE.md §0.2）")
+    parser.add_argument(
+        "--models", required=True, help="模型庫根目錄（給絕對路徑，見 CLAUDE.md §0.2）"
+    )
     parser.add_argument("--catalog", default=str(_CONFIG), help="要比對的模型目錄檔")
     args = parser.parse_args()
 

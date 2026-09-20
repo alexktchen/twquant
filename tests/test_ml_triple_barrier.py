@@ -122,3 +122,113 @@ def test_ac11_warmup_rows_are_null_not_zero() -> None:
     index, prices = _market()
     first = market_state_features(index, prices, window=20).sort("date").head(1)
     assert first["ctx.taiex_ma20_dev"][0] is None
+
+
+# ── T-260／D-127：波動度標準化的邊界 ──────────────────────────────────────────
+
+
+def _vol_px(n: int, daily: float, sid: str = "2330") -> pl.DataFrame:
+    """前半段以 ±daily 鋸齒走（製造已知的日波動），最後一天起直線上漲。"""
+    closes = [100.0 * (1 + daily * (1 if i % 2 else -1)) for i in range(n)]
+    return _px(closes, sid=sid)
+
+
+def test_ac12_barrier_scales_with_each_stocks_own_volatility() -> None:
+    """同樣漲 3%：低波動股碰到上緣（1σ），高波動股沒碰到。"""
+    quiet = _vol_px(30, 0.002, "1101")  # 日波動 0.2% → 20 日 σ ≈ 0.9%
+    wild = _vol_px(30, 0.03, "2330")  # 日波動 3% → 20 日 σ ≈ 13%
+    both = pl.concat([quiet, wild])
+    # 第 25 天起兩檔都漲 3%，持續到期末
+    both = both.with_columns(
+        pl.when(pl.col("date") >= D0 + dt.timedelta(days=25))
+        .then(pl.col("close") * 1.03)
+        .otherwise(pl.col("close"))
+        .alias("close")
+    ).with_columns(pl.col("close").alias("open"))
+    out = triple_barrier_labels(both, horizon=4, up=1.0, down=1.0, vol_window=20, vol_scaled=True)
+    # 訊號日 index 23 → t+1（index 24）開盤進場，仍是跳空前的價格；跳空發生在 index 25 起
+    day = D0 + dt.timedelta(days=23)
+    got = {r["stock_id"]: r["label"] for r in out.filter(pl.col("date") == day).to_dicts()}
+    assert got["1101"] == 1.0  # 低波動：3% 遠超過它的 1σ
+    assert got["2330"] == 0.0  # 高波動：3% 還不到它的 1σ
+
+
+def test_ac13_vol_scaled_needs_enough_history_and_nonzero_vol() -> None:
+    out = triple_barrier_labels(
+        _vol_px(30, 0.01), horizon=4, up=1.0, down=1.0, vol_window=20, vol_scaled=True
+    )
+    assert out.filter(pl.col("date") < D0 + dt.timedelta(days=20))["label"].null_count() > 0
+    flat = triple_barrier_labels(  # 價格完全不動 → σ=0 → 無標籤，不得當成 0
+        _px([100.0] * 30), horizon=4, up=1.0, down=1.0, vol_window=20, vol_scaled=True
+    )
+    assert flat["label"].null_count() == flat.height
+
+
+def test_ac14_vol_scaled_has_no_lookahead() -> None:
+    px = _vol_px(40, 0.01)
+    a = triple_barrier_labels(px, horizon=4, up=1.0, down=1.0, vol_window=20, vol_scaled=True)
+    cut = D0 + dt.timedelta(days=30)
+    poked = px.with_columns(
+        pl.when(pl.col("date") > cut)
+        .then(pl.col("close") * 5)
+        .otherwise(pl.col("close"))
+        .alias("close")
+    )
+    b = triple_barrier_labels(poked, horizon=4, up=1.0, down=1.0, vol_window=20, vol_scaled=True)
+    early = pl.col("date") <= cut - dt.timedelta(days=5)
+    assert a.filter(early).equals(b.filter(early))
+
+
+def test_ac15_vol_window_required_when_scaled() -> None:
+    with pytest.raises(ValueError, match="vol_window"):
+        triple_barrier_labels(_px([100.0] * 10), horizon=4, up=1.0, down=1.0, vol_scaled=True)
+
+
+def test_ac16_vol_scaled_config_round_trips_and_is_validated() -> None:
+    """D-127：`vol_scaled` 必須是配置欄位，且與 transform 相符（寫了卻不生效是 no-op 缺陷）。"""
+    from pydantic import ValidationError
+
+    from twquant.config import MlLabelConfig
+
+    ok = MlLabelConfig.model_validate(
+        {
+            "transform": "triple_barrier",
+            "barrier_up": 1.0,
+            "barrier_down": 1.0,
+            "vol_scaled": True,
+            "vol_window": 20,
+            "total_return": True,
+        }
+    )
+    assert ok.vol_scaled and ok.vol_window == 20
+    with pytest.raises(ValidationError, match="vol_window"):  # 開了卻沒給視窗
+        MlLabelConfig.model_validate(
+            {
+                "transform": "triple_barrier",
+                "barrier_up": 1.0,
+                "barrier_down": 1.0,
+                "vol_scaled": True,
+                "total_return": True,
+            }
+        )
+    with pytest.raises(ValidationError, match="triple_barrier"):  # 用在別的標籤上
+        MlLabelConfig.model_validate(
+            {
+                "transform": "forward_drawdown",
+                "vol_scaled": True,
+                "vol_window": 20,
+                "total_return": True,
+            }
+        )
+
+
+def test_ac17_shipped_third_round_config_loads() -> None:
+    from pathlib import Path
+
+    from twquant.config import MlConfig, load_config
+
+    cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / "ml_sb3_vol.yaml", MlConfig)
+    assert cfg.label.vol_scaled and cfg.label.vol_window == 20
+    assert cfg.label.barrier_up == 1.0 and cfg.label.barrier_down == 1.0
+    assert len(cfg.features) == 19  # 12 個股價量／基本面 ＋ 7 籌碼
+    assert "chip.foreign_streak" in cfg.features

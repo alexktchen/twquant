@@ -170,7 +170,10 @@ def _vault_monthly() -> dict[str, object]:
     d = R / "tracks_vault_nodiv"
     if not d.exists():
         return {}
-    with psycopg.connect("postgresql://twquant:twquant@localhost:5433/twquant") as c, c.cursor() as cur:
+    with (
+        psycopg.connect("postgresql://twquant:twquant@localhost:5433/twquant") as c,
+        c.cursor() as cur,
+    ):
         cur.execute(
             "select date, close from serving.prices_daily where stock_id='0050' "
             "and date between '2026-03-02' and '2026-08-31' order by date"

@@ -88,7 +88,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
 | **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |
 | **D-109 診斷計分** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/d109_scorecard.py --bundles D:/project/twquant/data/tracks_vault_nodiv`（**不是裁決**；結束日 > 2026-08-31 的結果包會被拒收） |
-| **模型勝率重算**（卡片上的數字） | `uv run --all-groups python scripts/model_ic_hitrate.py --models D:/project/twquant/data/models`——印出可貼回 `configs/model_catalog.yaml` 的區塊；指紋與模型不符會以非零碼結束（D-122） |
+| **模型勝率重算**（卡片上的數字） | `uv run --all-groups python scripts/model_ic_hitrate.py --models D:/project/twquant/data/models`——印出可貼回 `configs/model_catalog.yaml` 的區塊；指紋與模型不符會以非零碼結束（D-124） |
 | 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
@@ -259,6 +259,14 @@ FinMind 免費層**不支援**全市場單日查詢（實測回 `Your level is r
 近期估值 staging **沒有現成載入器**（`load_finmind_chip.py` 只支援 institutional／margin，
 `load_finmind_history_tables.py` 刻意只寫 2020 之前），這輪是照 `load_finmind_chip.py`
 的規則臨時寫一支（重疊不覆寫＋零值分布比對）。
+
+**⑩ 「回報成功」不等於資料進去了——請直接查 PG 的逐年天數。** 2026-09-20 實際發生：`load_finmind_chip.py` 回報
+「已寫入湖與 PG：266 萬列」，但 2020~2024 的籌碼資料一列都沒進 PG——它只用「資料湖有沒有這一天」判斷，
+而當時湖有 5,329 日、PG 只有 1,620 日。已修（湖與 PG 各自算）。**任何補資料之後都要自己查一次**：
+```sql
+select extract(year from date)::int y, count(distinct date) from serving.<表> group by 1 order by 1;
+```
+拿它跟 `prices_daily` 的同一查詢逐年對，數字不一樣就是有缺口。
 
 **⚠ 多個 session 同時操作同一個 PG。** 這一輪一開始有另一個 session 在跑
 `scripts/.run_recovery.running.sh`（09-10 事故的 15 步重放）與 `materialize_long_history.py`，

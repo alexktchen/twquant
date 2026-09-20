@@ -162,6 +162,8 @@ _BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
     (("sample_tag",), ""),  # 空＝預設樣本
     # T-248：以下皆為「未使用時等同於欄位不存在」
     (("label", "barrier_up"), None),
+    (("label", "vol_scaled"), False),
+    (("label", "vol_window"), None),
     (("label", "barrier_down"), None),
     (("context_window",), 20),  # context_features 為空時不生效；非空時 20 即登記值
     (("model_score_features",), {}),

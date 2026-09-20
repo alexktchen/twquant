@@ -63,3 +63,29 @@ def test_ac2_prefixes_do_not_cross(tmp_path: Path) -> None:
     assert fs.fn is not None and fl.fn is not None
     assert fs.fn(view, dict(fs.params))["value"].to_list() == [0.10]
     assert fl.fn(view, dict(fl.params))["value"].to_list() == [0.90]
+
+
+def test_ac5_tb_factor_returns_the_probability_not_the_rank(tmp_path: Path) -> None:
+    """D-124：每日補位的進場門檻是**絕對機率**。薄因子若回 rank_pct，崩盤日照樣有 0.99。"""
+    rows = [
+        {
+            "date": _DAY,
+            "stock_id": sid,
+            "model_id": "lgbm_lw_tb_h20_20260225_a7cee0de_cal",
+            "score": prob,
+            "rank_pct": rank,
+            "available_at": dt.datetime.combine(_DAY, dt.time(18), tzinfo=TZ),
+        }
+        for sid, prob, rank in (("2330", 0.12, 1.0), ("0050", 0.05, 0.5))
+    ]
+    wh = Warehouse(tmp_path)
+    wh.write(
+        "clean",
+        "ml_scores",
+        pl.DataFrame(rows).with_columns(pl.col("available_at").cast(schemas.TW_DT)),
+    )
+    fdef = get("ml.lgbm_lw_tb_up_20d")
+    assert fdef.fn is not None and fdef.params["model_prefix"] == "lgbm_lw_tb_h20_"
+    out = fdef.fn(wh.view(dt.date(2026, 1, 6)), dict(fdef.params)).sort("stock_id")
+    assert out["stock_id"].to_list() == ["0050", "2330"]
+    assert out["value"].to_list() == [0.05, 0.12]  # 全市場最高也只有 12%——沒人過 70% 門檻
