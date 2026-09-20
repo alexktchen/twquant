@@ -21,7 +21,12 @@ if TYPE_CHECKING:
 
     import polars as pl
 
-    from twquant.config import MlConfig, ServingConfig, SystemConfig
+    from twquant.config import (
+        MlConfig,
+        RecommendationBucketConfig,
+        ServingConfig,
+        SystemConfig,
+    )
     from twquant.data.http import HttpClient
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.insight.client import InsightClient
@@ -2604,7 +2609,44 @@ def _bucket_policy(day: dt.date) -> BucketPolicy | None:
         watch_n=cfg.watch_n,
         risk_gate_keep_pct=cfg.risk_gate_keep_pct,
         risk_scores=risk,
+        liquid_ids=_liquid_ids(day, cfg),
     )
+
+
+def _liquid_ids(day: dt.date, cfg: RecommendationBucketConfig) -> frozenset[str] | None:
+    """D-113：當日通過流動性濾網的代號；兩個門檻皆未宣告回 None（閘門不啟用）。
+
+    刻意重用回測的 `universe_ids`（同一個 ADV 定義、同一個百分位母體），
+    名單的「流動性合格」才與回測驗過的池子是同一件事。**空集合即 raise**——
+    那代表當日行情沒進 PG，而不是「今天沒有一檔夠流動」。
+    """
+    if cfg.liquidity_min_adv_pctl is None and cfg.liquidity_min_price is None:
+        return None
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.errors import DataError
+    from twquant.strategy.config import UniverseConfig
+    from twquant.strategy.universe import universe_ids
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        view = PgTableSource(conn, scfg.pg_schema).view(day)
+        ucfg = UniverseConfig(
+            min_adv_twd=None,
+            min_adv_pctl=cfg.liquidity_min_adv_pctl,
+            min_price=cfg.liquidity_min_price,
+        )
+        ids = frozenset(universe_ids(view, day, ucfg))
+    finally:
+        conn.close()
+    if not ids:
+        raise DataError(
+            "recommendation_export",
+            day,
+            f"流動性閘門在 {day} 沒有留下任何一檔——多半是當日行情尚未進 PG，拒絕匯出。",
+        )
+    return ids
 
 
 def _ml_score_day(

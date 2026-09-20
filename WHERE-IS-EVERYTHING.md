@@ -1,4 +1,4 @@
-# 東西在哪（2026-09-07，含研究平台上線）
+# 東西在哪（2026-09-19，資料補到 09-18）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
@@ -13,6 +13,8 @@
 - 現況：**83 筆回測完成，沒有任何策略打敗 0050 含息（+40.08%／Sharpe 1.63）**
 - **研究平台已上線**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）。
   操作看 [docs/OPERATIONS-platform-console.md](docs/OPERATIONS-platform-console.md)
+- **資料到 2026-09-18**（2026-09-19 補完，見第 9 節）：十一張來源表與 factor_values／
+  composite_daily／screener_daily／broker_flow_daily 全部到最後一個交易日
 
 ## 1. ⚠ 最容易踩的陷阱：有兩個 `data/`
 
@@ -80,6 +82,10 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
+| **跑 E 系列（出場規則）** | `uv run --all-groups python scripts/run_exit_rules.py --window long`（`--window vault` 跑舊金庫期；`--n10 <代號>` 只能帶一支）|
+| **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
+| **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |
+| **D-109 診斷計分** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/d109_scorecard.py --bundles D:/project/twquant/data/tracks_vault_nodiv`（**不是裁決**；結束日 > 2026-08-31 的結果包會被拒收） |
 | 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
@@ -106,6 +112,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
   集中型策略把它放大成 −36~−43%——**D-105 在歷史上量到的 −37% 地板，在未見資料上重現**。
 - **風控層與擇時 overlay 都沒接住**：`LW-M1` 與 `LW-M1-faber` 每一位數字相同
   （200 日閘門在崩盤前一次都沒關過）。
+
+**要怎樣才算通過（D-114 修訂 D-109，驗收裡沒有任何指數）**：第二保留期最大回撤 ≤ 20%、成本後年化報酬 > 0；最早 2027-03-01 開一次。已知結構缺口：引擎只在月頻再平衡日做決定，「看壞就賣」沒被每日檢查過——下一步是 E 系列每日出場機制（T-231／T-232，已事前登記、尚未實作），其後是 X 系列出場模型（D-115，T-233~T-235，同樣已登記未實作）。
 
 **部署裁決：沒有任何一支策略可部署。** ML 判定仍為 D-066 乙層——保留為零件，
 **明文禁止重啟特徵工程或調參**。改投組建構屬架構，允許，但見下面第 ⑧ 條。
@@ -162,16 +170,42 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 大型 PG 工作做完**先 pg_dump 再做下一件事**；還原程序與重放腳本見
 `docs/INCIDENT-2026-09-10-docker-reset.md`、`scripts/run_recovery.sh`。
 
-**⑩ `/api/stocks/{sid}/factors` 對 ETF 會掃整張 `factor_values`（2026-09-19 實測，未修，T-233）。**
+**⑩ `/api/stocks/{sid}/factors` 對 ETF 會掃整張 `factor_values`（2026-09-19 實測，未修，T-242）。**
 該表主鍵以 `factor` 開頭，端點卻用 `WHERE stock_id = ?` 找最新日：因子宇宙內的股票約 5 秒，
 **不在宇宙的代號（0050 等）150 秒還沒回**（表上只有 `(factor, stock_id, date)` 主鍵與 `(factor, date)` 索引）。個股儀表板已改用
 `/factors/history?days=1` 逐因子查（走主鍵，0050 為 0.1 秒），但「因子」頁籤仍打舊端點——
 **不要在 ETF 頁面開「因子」頁籤**，也不要拿這個端點做批次查詢。
 
-## 7. 還在跑的東西
+## 7. 還在跑的東西（2026-09-19 部署後）
 
-- **長天期回補**：融資融券 `data/staging/finmind_hist_margin`，約 3.9 小時（其餘六個資料集已滿）
-- **連續作業**：`scripts/overnight2.sh`，日誌 `data/overnight.log`
+四個容器，全部在 compose 專案 `twquant`、映像來源＝`main`（`392d00e`，含 #69／#70）：
+
+| 容器 | 做什麼 | 位址 |
+|---|---|---|
+| `twquant-pg-1` | 供應層 PG | `localhost:5433` |
+| `twquant-api-1` | 唯讀 JSON API | `http://localhost:8000/api` |
+| `twquant-frontend-1` | 平台（含「ML 選股」「策略持股」）| `http://localhost:8899` |
+| `twquant-scheduler-1` | **每日 19:00 跑完整 pipeline** | — |
+
+每日 pipeline 的步驟（依序）：擷取 → 品質閘門 → 券商買賣超 → 訊號生成 → **指數** → 供應層 →
+選股池快照 → **ML 推薦名單**（三個模型推論並寫進 PG，匯出前 20／觀察／風控剔除／**流動性剔除** D-113，尚未重建映像）→ **策略持股**（8 支）→ 洞悉分析。
+粗體是 D-111／D-112／T-227 新增或改動的。**第一次由排程觸發的完整執行是 2026-09-21（週一）19:00**，
+在那之前新步驟只被逐一驗過、沒有整條一起跑過——那天晚上值得看一眼
+`docker logs twquant-scheduler-1`、`/api/platform/strategy-targets` 與 ML 選股頁的日期。
+
+**重建映像的正確做法**（兩個坑都踩過）：
+
+```bash
+# 在一個 HEAD＝要部署的 commit 的目錄裡跑；主 checkout D:/project/twquant 曾落後 main 83 個提交
+git fetch origin && git diff --stat origin/main HEAD    # 必須為空
+docker compose --env-file D:/project/twquant/.env build api frontend
+docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend scheduler
+```
+
+`--env-file` 不可省：少了它 `TWQUANT_DATA_HOST` 會退回 `./data`，容器就掛到 worktree 自己的空資料夾（§1 的兩個 `data/` 陷阱）。
+`--no-deps` 是為了不碰 PG 容器。**不要跑 `docker compose config`**——它會把 `.env` 的密碼印出來。
+
+洞悉分析（LLM）步驟目前是離線降級：`.env` 沒有 `ANTHROPIC_API_KEY`。
 
 ## 8. 備份（事故後）
 
@@ -179,3 +213,55 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 - 重放完成後 `scripts/run_recovery.sh` 最後一步會自動再做一份 `twquant_serving_<日期>_post_recovery.dump`。
 - **仍然沒有排程式備份，也沒有異地副本**——兩份 dump 都在同一顆 D:。每週全量＋rclone 到 Drive 需使用者核可。
 - `data/` 下的研究產出（結果包、模型、報告、快照）只存在 D:，同樣沒有異地副本。
+- **2026-09-19 19:46：`twquant_serving_20260919-1936_complete.dump`（4.53 GB）** ——資料補到 09-18、
+  09-02~09-18 已物化之後的第一份完整備份（`pg_restore --list` 驗到 19 張表）。同日 15:53 的
+  `..._post_recovery.dump` 是**補資料進行到一半**的快照（分點只到 09-14 上下、估值全缺、
+  因子停在 09-02），留著當事故還原點，不要當成現況。
+
+## 9. 2026-09-19 資料補完（補到 09-18）
+
+09-10 的 Docker reset 之後資料停在 09-09、衍生層停在 09-02。這一輪全部補齊：
+
+| 到 2026-09-18 | prices_daily、institutional_daily、margin_daily、broker_trades、stock_valuation、index_daily、shareholding_dispersion、factor_values、composite_daily、factor_cross_stats、screener_daily、broker_flow_daily |
+|---|---|
+| **不是缺口、是正常** | corporate_events 09-07（最後一個實際事件）、monthly_revenue 2026-08-31（9 月營收 10/10 才公告）、financial_statements 2026-06-30（Q3 法定申報期限 11/14） |
+
+**⚠ `factor_values` 在 2026-09-01／09-02 之間有斷階：09-01 以前每天 26 個因子，09-02 起 37 個。**
+不是資料不夠——那些因子現在都算得出來，是當初物化那幾天時來源表還沒進 PG，而
+`materialize._compute_universe` 把 `DataError` 記成 DEBUG 就丟掉（黃金規則 5 的漏洞）。
+更早的歷史更破：2020-04-16~2026-08 只有 **21** 個因子，2015-06~2020-04-15 有 31~37 個
+（那段是 09-19 被停掉的重物化做的）。**要消掉斷階＝重物化 2020-04-16~2026-09-01**，
+實測 **10.6 秒/日**（不是 `materialize_long_history.py` docstring 那個 3.7 秒/日，那是 2015-2019
+的資料量），1,570 個交易日約 **4.6 小時**。未做。
+
+**物化一律用 `scripts/materialize_long_history.py`，不要用 `serving materialize`。**
+後者含 3 個 `chip.broker_*` 因子，實測單一個因子單日就跑超過 10 分鐘（每天無條件掃 5,700 萬列，
+T-150 未修）。前者排除 broker 與 ml 共 12 個因子、剩 37 個，13 天只要 4.9 分鐘。
+那 3 個 broker 因子本來就不在任何一天的 `factor_values` 裡，排除不改變現況。
+
+**這一輪修掉的兩個會靜默產生錯數字的缺陷**（`scripts/audit_data.py` 抓到，現在 critical 0）：
+- `6949` 沛爾生醫 2026-09-07 **面額變更 1490 → 74.5（1:20）沒有進 `corporate_events`**
+  ——那天會被當成 −95% 的真實報酬。分割清單 staging（`data/staging/finmind_splits.json`）
+  停在事件發生前，**每次補資料都要重抓它**（FinMind `TaiwanStockSplitPrice` 不帶 `data_id`
+  ＝全市場，1 個請求、全史只有 35 筆）。
+- `2938` 床的世界（09-16 上市）在 `stock_meta` 沒有 `market`，會被市場濾網靜默排除。
+  跑 `ingest-meta` 修好。**順帶治好** `price.industry_mom_6m` 與 `price.industry_rs_20d`
+  ——它們本來每天丟 `ComputeError` 被 `_compute_universe` 吞掉，meta 一更新就正常。
+
+**`stock_valuation` 不在任何每日擷取路徑裡。** `ingest/builtins.py` 只註冊 twse／tpex（出
+prices／institutional／margin）與 tdcc（週）。估值只能靠 `scripts/backfill_finmind.py
+TaiwanStockPER` **逐檔**回補：2,067 檔 × 6.42 秒 ＝ **3.6 小時**只為了 13 個交易日。
+FinMind 免費層**不支援**全市場單日查詢（實測回 `Your level is register`）。官方 TWSE BWIBBU
+端點一天一個請求就有全市場，做成正式來源並接進 `_run_daily_pipeline` 是待辦。
+近期估值 staging **沒有現成載入器**（`load_finmind_chip.py` 只支援 institutional／margin，
+`load_finmind_history_tables.py` 刻意只寫 2020 之前），這輪是照 `load_finmind_chip.py`
+的規則臨時寫一支（重疊不覆寫＋零值分布比對）。
+
+**⚠ 多個 session 同時操作同一個 PG。** 這一輪一開始有另一個 session 在跑
+`scripts/.run_recovery.running.sh`（09-10 事故的 15 步重放）與 `materialize_long_history.py`，
+兩邊同時下 `serving sync` 直接吃到 PG `DeadlockDetected`、整個 transaction rollback。
+**動手前先看有沒有別人在跑**：
+```bash
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*twquant*' } | Select-Object ProcessId,CreationDate,CommandLine | Format-Table -AutoSize"
+```
+recovery 重放本身有 `logs/recovery.lock` 互斥鎖，但那只擋它自己的第二份，擋不住別的指令。

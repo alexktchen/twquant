@@ -267,7 +267,7 @@ const { chromium } = require('playwright');
     await page.goto('http://twquant.test/#/stocks/2330');
     await page.getByText('沒有任何保存的推薦事件', { exact: false }).waitFor();
     assert.equal(await page.getByRole('button', { name: '推薦標記', exact: true }).count(), 0);
-    // AC-229-4: the stock page is a numbered-panel dashboard fed only by what the API returned.
+    // AC-238-4: the stock page is a numbered-panel dashboard fed only by what the API returned.
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('http://twquant.test/#/stocks/0050');
     await page.getByText('元大台灣50 · K 線', { exact: false }).waitFor();
@@ -300,7 +300,7 @@ const { chromium } = require('playwright');
       assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), `${width}: stock dashboard overflow`);
     }
     await page.setViewportSize({ width: 1280, height: 900 });
-    // AC-229-5: with no stock in the URL the page is a search entry; a code keeps its leading zero.
+    // AC-238-5: with no stock in the URL the page is a search entry; a code keeps its leading zero.
     await page.goto('http://twquant.test/#/stocks');
     await page.getByRole('heading', { name: '台股個股研究儀表板', exact: true }).waitFor();
     assert.equal(await page.locator('.dash-no').count(), 0);
@@ -501,6 +501,6 @@ const { chromium } = require('playwright');
       await page.getByText(marker, { exact: false }).first().waitFor();
     }
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-229-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220 and AC-220b: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-238-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220 and AC-220b: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--ink:#1d1d1b;--mute:#6b6a64;--line:#e2e0d8;--in:#b3261e;--out:#1b7a3d;--tag:#efede6;--warn:#fff4d6;--warnink:#6b4e00}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--card:#21211f;--ink:#ecebe6;--mute:#a09f98;--line:#35342f;--in:#ff8a80;--out:#7bd88f;--tag:#2c2b28;--warn:#3a3016;--warnink:#f1d98a}}
+:root[data-theme="dark"]{--bg:#171716;--card:#21211f;--ink:#ecebe6;--mute:#a09f98;--line:#35342f;--in:#ff8a80;--out:#7bd88f;--tag:#2c2b28;--warn:#3a3016;--warnink:#f1d98a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:24px;margin:0 0 4px}
+.sub{color:var(--mute);margin:0 0 16px}
+.warn{background:var(--warn);color:var(--warnink);border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 16px}
+select,label.chk{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit}
+label.chk{display:flex;gap:6px;align-items:center;cursor:pointer}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:0 0 8px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.stat span{color:var(--mute);font-size:12.5px}
+.note{color:var(--mute);font-size:13px;margin:0 0 20px}
+.day{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:0 0 14px;overflow:hidden}
+.day>header{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;padding:10px 14px;border-bottom:1px solid var(--line)}
+.day>header b{font-size:16px;font-variant-numeric:tabular-nums}
+.day>header span{color:var(--mute);font-size:13px}
+.cols{display:grid;grid-template-columns:1fr 1fr}
+@media (max-width:640px){.cols{grid-template-columns:1fr}}
+.col{padding:10px 14px;min-width:0}
+.col+.col{border-left:1px solid var(--line)}
+@media (max-width:640px){.col+.col{border-left:0;border-top:1px solid var(--line)}}
+.col h3{margin:0 0 6px;font-size:13px;font-weight:600}
+.col.in h3{color:var(--in)}.col.out h3{color:var(--out)}
+.row{display:flex;gap:8px;justify-content:space-between;padding:3px 0;font-size:14px;font-variant-numeric:tabular-nums}
+.row .id{color:var(--mute);margin-right:6px}
+.row .r{color:var(--mute);white-space:nowrap;text-align:right}
+.pos{color:var(--in)}.neg{color:var(--out)}
+.extra{padding:8px 14px;border-top:1px solid var(--line);font-size:13px;color:var(--mute)}
+.extra span{display:inline-block;background:var(--tag);border-radius:6px;padding:1px 7px;margin:2px 4px 2px 0}
+.empty{color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>__TITLE__</h1>
+<p class="sub">由回測成交紀錄整理：每個成交日新買進哪幾檔、出清哪幾檔。台股慣例：紅＝買進／賺、綠＝賣出／賠。</p>
+<div class="warn"><b>RESEARCH ONLY · 未通過部署裁決。</b>這是回測裡「當時會怎麼換股」的紀錄，不是買賣建議；沒有任何一支策略通過部署裁決（D-107）。</div>
+<div class="bar">
+  <select id="sel" aria-label="策略"></select>
+  <label class="chk"><input type="checkbox" id="adj"> 顯示加碼／減碼與未成交</label>
+</div>
+<div class="stats" id="stats"></div>
+<p class="note" id="note"></p>
+<div id="days"></div>
+</main>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D=JSON.parse(document.getElementById('data').textContent),N=D.names;
+const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct=x=>x==null?'—':(x>=0?'+':'')+(x*100).toFixed(1)+'%';
+const money=x=>x>=1e8?(x/1e8).toFixed(2)+' 億':x>=1e4?Math.round(x/1e4).toLocaleString()+' 萬':Math.round(x).toLocaleString();
+const lots=s=>(Math.abs(s)/1000).toLocaleString()+' 張';
+const nm=id=>`<span class="id">${esc(id)}</span>${esc(N[id]||'')}`;
+const WHY=r=>!r?'':`<span class="id">${esc(r==='stop_loss'?'停損':r.startsWith('below_ma_')?'跌破'+r.slice(9)+'日線':r.startsWith('score_below:')?'模型說賣':r)}</span>　`;
+const REASON={limit_up:'漲停買不到',limit_down:'跌停賣不掉',participation:'超過成交量上限',cash:'現金不足',lot:'不足一張',price_jump:'異常跳價'};
+const sel=$('sel');
+D.strategies.forEach((s,i)=>sel.add(new Option(`${s.code}｜${s.description||s.name}（${s.start} ~ ${s.end}）`,i)));
+function median(a){if(!a.length)return null;const b=[...a].sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2}
+function render(){
+  const s=D.strategies[sel.value],adj=$('adj').checked;
+  const mv=s.days.flatMap(d=>d.moves),ex=mv.filter(m=>m.action==='exit'&&m.ret!=null);
+  const wins=ex.filter(m=>m.ret>0).length,tdays=s.days.filter(d=>d.moves.length).length;
+  const stat=(v,l)=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+  $('stats').innerHTML=stat(tdays,`成交日（共 ${s.n_sessions} 個交易日）`)+stat(mv.filter(m=>m.action==='enter').length,'新買進檔次')
+    +stat(ex.length,'出清檔次')+stat(ex.length?Math.round(wins/ex.length*100)+'%':'—','出清時賺錢的比例')
+    +stat(median(ex.map(m=>m.held_sessions))??'—','持有交易日（中位數）')+stat(pct(median(ex.map(m=>m.ret))),'出清報酬（中位數）');
+  const u=s.universe||{},rb=s.rebalance||{},sch={daily:'每日',weekly:'每週',biweekly:'每兩週',monthly:'每月'}[rb.schedule]||rb.schedule;
+  const liq=[u.min_adv_pctl!=null?`20 日成交金額中位數在全市場前 ${Math.round((1-u.min_adv_pctl)*100)}%`:null,u.min_adv_twd!=null?`20 日成交金額中位數 ≥ ${money(u.min_adv_twd)}`:null,u.min_price!=null?`股價 ≥ ${u.min_price} 元`:null].filter(Boolean).join('、');
+  $('note').innerHTML=`再平衡頻率：<b>${esc(sch)}</b>（訊號日收盤後決定、隔日開盤成交），所以只有再平衡日才會換股。`
+    +(liq?`已剔除成交量太小的個股：${esc(liq)}。`:'<b>這支策略沒有流動性濾網。</b>')
+    +` 起始資金 ${money(s.initial_capital)}；全期年化 ${pct(s.metrics.cagr)}、最大回撤 ${pct(s.metrics.mdd)}。出清報酬為價格報酬，不含費用與股利。`;
+  $('days').innerHTML=[...s.days].reverse().filter(d=>adj||d.moves.some(m=>m.action==='enter'||m.action==='exit')).map(d=>{
+    const ins=d.moves.filter(m=>m.action==='enter'),outs=d.moves.filter(m=>m.action==='exit');
+    const rowIn=m=>`<div class="row"><div>${nm(m.stock_id)}</div><div class="r">${m.price.toFixed(2)} × ${lots(m.shares)}　${money(m.amount)}</div></div>`;
+    const rowOut=m=>`<div class="row"><div>${nm(m.stock_id)}</div><div class="r">${WHY(m.reason)}<span class="${m.ret>0?'pos':'neg'}">${pct(m.ret)}</span>　持有 ${m.held_sessions} 日　${m.price.toFixed(2)}</div></div>`;
+    let extra='';
+    if(adj){
+      const a=d.moves.filter(m=>m.action==='add'),t=d.moves.filter(m=>m.action==='trim');
+      if(a.length)extra+=`<div class="extra">加碼：${a.map(m=>`<span>${nm(m.stock_id)} +${lots(m.shares)}</span>`).join('')}</div>`;
+      if(t.length)extra+=`<div class="extra">減碼：${t.map(m=>`<span>${nm(m.stock_id)} −${lots(m.shares)}</span>`).join('')}</div>`;
+      if(d.unfilled.length)extra+=`<div class="extra">未成交：${d.unfilled.map(x=>`<span>${nm(x.stock_id)} ${x.side==='buy'?'買':'賣'} ${lots(x.shares)}・${esc(REASON[x.reason]||x.reason)}</span>`).join('')}</div>`;
+    }
+    return `<section class="day"><header><b>${d.date}</b><span>買進 ${ins.length} 檔・出清 ${outs.length} 檔・當日收盤後持有 ${d.n_holdings_after} 檔</span></header>
+<div class="cols"><div class="col in"><h3>新買進</h3>${ins.map(rowIn).join('')||'<div class="empty">無</div>'}</div>
+<div class="col out"><h3>出清</h3>${outs.map(rowOut).join('')||'<div class="empty">無</div>'}</div></div>${extra}</section>`}).join('')||'<p class="empty">這段期間沒有成交。</p>';
+}
+sel.onchange=render;$('adj').onchange=render;render();
+</script>
+</body>
+</html>

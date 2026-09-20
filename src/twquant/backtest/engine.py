@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
+from twquant.backtest.exits import HeldPosition, exit_reasons, ma_column
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 
@@ -43,6 +44,7 @@ class Trade:
     commission: float
     tax: float
     slippage: float
+    reason: str = "rebalance"  # 出場規則造成的成交記規則名（T-231）
 
 
 @dataclass(frozen=True)
@@ -126,7 +128,9 @@ class _State:
     traded_notional: float = 0.0
 
 
-def _price_panel(wh: TableSource, start: dt.date, end: dt.date) -> dict[dt.date, dict[str, _Row]]:
+def _price_panel(
+    wh: TableSource, start: dt.date, end: dt.date, ma_windows: tuple[int, ...] = ()
+) -> dict[dt.date, dict[str, _Row]]:
     """載入 [start,end] 的日行情，附前收與 20 日 ADV，組成 {date: {stock_id: row}}。"""
     lf = (
         wh.scan("prices_daily")
@@ -135,6 +139,9 @@ def _price_panel(wh: TableSource, start: dt.date, end: dt.date) -> dict[dt.date,
         .with_columns(
             _prev_close=pl.col("close").shift(1).over("stock_id", order_by="date"),
             _adv=pl.col("amount").rolling_median(20).over("stock_id"),
+            # T-231：均線用**未還原**收盤（含當日）——與看盤軟體上的均線同一條；
+            # 除息日的跳空因此可能觸發跌破，這是規則本身的性質，不在此修飾。
+            **{ma_column(w): pl.col("close").rolling_mean(w).over("stock_id") for w in ma_windows},
         )
         .filter((pl.col("date") >= start) & (pl.col("date") <= end))
     )
@@ -285,6 +292,7 @@ def _fill(
     row: _Row,
     cost_cfg: CostConfig,
     max_participation: float,
+    reason: str = "rebalance",
 ) -> None:
     side = "buy" if delta > 0 else "sell"
     price = float(row["open"])
@@ -305,8 +313,11 @@ def _fill(
         available_cash=state.cash,
         cost_cfg=cost_cfg,
     )
-    for sh, reason in d.unfilled:
-        _unfill(state, sid, side, sh, day, reason)
+    # 迴圈變數不得叫 reason：那會**蓋掉本函數的 `reason` 參數**，
+    # 於是部分成交（如撞到參與率上限）的再平衡單會被記成 `participation`，
+    # 在結果包裡長得跟出場規則造成的成交一模一樣（T-231 實測 E0 有 8 筆）。
+    for sh, why in d.unfilled:
+        _unfill(state, sid, side, sh, day, why)
     if d.filled_shares <= 0 or d.cost is None:
         return
 
@@ -345,8 +356,20 @@ def _fill(
             commission=c.commission,
             tax=c.tax,
             slippage=c.slippage,
+            reason=reason,
         )
     )
+
+
+def _held(state: _State) -> dict[str, HeldPosition]:
+    """把持股與本輪成本攤成出場判斷要的形狀。"""
+    out: dict[str, HeldPosition] = {}
+    for sid, sh in state.holdings.items():
+        lot = state.lots.get(sid)
+        avg = lot.cost_amount / lot.cost_shares if lot and lot.cost_shares > 0 else 0.0
+        dps = lot.dividends / sh if lot and sh > 0 else 0.0
+        out[sid] = HeldPosition(shares=sh, avg_cost=avg, dividends_per_share=dps)
+    return out
 
 
 def _unfill(state: _State, sid: str, side: str, shares: int, day: dt.date, reason: str) -> None:
@@ -402,11 +425,14 @@ def run_backtest(
     if not sessions:
         raise ValueError(f"[{start},{end}] 無交易日")
     sig_dates = set(signal_dates(strategy_cfg.rebalance, calendar, start, end))
-    by_date = _price_panel(warehouse, start, end)
+    exit_rules = strategy_cfg.exit_rules
+    ma_windows = tuple(sorted({int(r.window) for r in exit_rules if r.window is not None}))
+    by_date = _price_panel(warehouse, start, end, ma_windows)
 
     state = _State(cash=initial_capital)
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
+    exits_pending: dict[str, str] = {}
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
     div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
@@ -437,6 +463,14 @@ def run_backtest(
         if pending is not None:
             _execute(state, pending, day, day_px, cost_cfg, max_participation)
             pending = None
+            exits_pending = {}  # 再平衡日由選股全權決定，前一晚的出場旗標作廢
+        elif exits_pending:
+            for sid, why in sorted(exits_pending.items()):
+                qty = state.holdings.get(sid, 0)
+                px_row = day_px.get(sid)
+                if qty > 0 and px_row is not None and px_row.get("open") is not None:
+                    _fill(state, sid, -qty, day, px_row, cost_cfg, max_participation, why)
+            exits_pending = {}  # 沒賣掉的（跌停／量不足）今晚會再被判一次
 
         pos_value = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
         equity_curve.append(
@@ -452,6 +486,9 @@ def run_backtest(
             # SPEC-012：banding 需要「昨天在不在裡面」；狀態留在引擎，build_targets 保持純函數
             tdf = build_targets(strategy_cfg, warehouse, day, held=frozenset(state.holdings))
             pending = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
+
+        if exit_rules and state.holdings and pending is None:
+            exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
 
     equity_series = [e.equity for e in equity_curve]
     mean_equity = sum(equity_series) / len(equity_series)
