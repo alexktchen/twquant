@@ -82,6 +82,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
+| **補某一天的推薦快照** | `TWQUANT_DATA_DIR=D:/project/twquant/data ... python -m twquant ml score --date <日> --model <模型目錄> [--pg]` 再 `... ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data`（同 run_id 已存在不同內容會 raise；要重出先把舊檔改名為 `.superseded-...`）|
+| **持股出場檢查** | 平台「我的追蹤」頁；API `GET /api/platform/exit-check?ids=2330,2317`（規則清單在 `configs/exit_check.yaml`，門檻在 E 系列策略配置）|
 | **跑 E 系列（出場規則）** | `uv run --all-groups python scripts/run_exit_rules.py --window long`（`--window vault` 跑舊金庫期；`--n10 <代號>` 只能帶一支）|
 | **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
 | **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |

@@ -84,6 +84,7 @@ _BACKTEST_ROOTS = (
 _OPAQUE_ID = re.compile(r"^(model|backtest)_[0-9a-f]{20}$")
 # Stock identity stays a string with leading zeroes; no separator can reach the filesystem.
 _PLATFORM_SID = re.compile(r"^[A-Za-z0-9]{1,16}$")
+_EXIT_CHECK_MAX_IDS = 60  # 一次查詢的持股上限；「我的追蹤」不是全市場掃描的入口
 
 
 def get_platform_artifact_roots() -> PlatformArtifactRoots:
@@ -260,6 +261,30 @@ def get_platform_strategy_targets(
         "issues": list(issues),
         "query": {"date": date.isoformat() if date else None, "limit": limit},
     }
+
+
+@app.get("/api/platform/exit-check")
+def get_platform_exit_check(
+    ids: Annotated[str, Query(min_length=1, max_length=600)],
+) -> dict[str, object]:
+    """持股出場檢查（D-116）：E 系列每一條出場規則對這些股票**今天**的狀態。
+
+    買進價不進 API——停損由前端用本機保存的買進價去算，這裡只回收盤與門檻。
+    算不出來的規則回 `triggered: null` 並附原因，不回 false。
+    """
+    from twquant.monitoring import exit_check as ec
+
+    wanted = [part.strip() for part in ids.split(",") if part.strip()]
+    if not wanted or len(wanted) > _EXIT_CHECK_MAX_IDS:
+        raise HTTPException(status_code=422, detail=f"ids 須為 1~{_EXIT_CHECK_MAX_IDS} 個股票代號")
+    if any(_PLATFORM_SID.fullmatch(sid) is None for sid in wanted):
+        raise HTTPException(status_code=422, detail="股票代號格式錯誤")
+    check_cfg = load_config(snap.CONFIGS_DIR / "exit_check.yaml", ec.ExitCheckConfig)
+    return _stock_ep(
+        lambda: ec.exit_check(
+            stock_api.serving_cfg(), check_cfg, snap.CONFIGS_DIR / "strategies", wanted
+        )
+    )
 
 
 @app.get("/api/platform/stocks/{sid}/recommendations")

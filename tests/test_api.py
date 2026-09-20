@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from fastapi import HTTPException
 
@@ -77,3 +79,26 @@ def test_backtest_start_not_before_end(snapshot_wh: Warehouse) -> None:
     with pytest.raises(HTTPException) as ei:
         api.get_backtest(snapshot_wh, start="2025-12-31", end="2025-08-01")
     assert ei.value.status_code == 400
+
+
+def test_ac_d116_exit_check_validates_ids_and_passes_them_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """依本 repo 慣例直接呼叫端點函數，不走 TestClient。"""
+    from twquant.monitoring import api, exit_check
+
+    seen: list[list[str]] = []
+
+    def fake(_cfg: object, _check: object, _dir: object, ids: list[str]) -> dict[str, object]:
+        seen.append(list(ids))
+        return {"mode": "research", "stocks": [{"stock_id": i} for i in ids]}
+
+    monkeypatch.setattr(exit_check, "exit_check", fake)
+    out = api.get_platform_exit_check("0050, 2330")
+    stocks = cast("list[dict[str, object]]", out["stocks"])
+    assert [s["stock_id"] for s in stocks] == ["0050", "2330"]
+    assert seen == [["0050", "2330"]]  # 前導零保留、空白去除
+    for bad in ("23;30", ",", ",".join(str(1000 + i) for i in range(61))):
+        with pytest.raises(HTTPException) as err:
+            api.get_platform_exit_check(bad)
+        assert err.value.status_code == 422

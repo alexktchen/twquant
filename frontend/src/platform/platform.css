@@ -36,3 +36,13 @@
 .platform-strategy-note { margin: .5rem 0; font-size: .875rem; opacity: .85; max-width: 68ch; }
 .platform-link-button { background: none; border: 0; padding: .5rem 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
 .platform-link-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+/* 持股出場檢查（D-116）：三態必須一眼分得出來——紅=已觸發、綠=未觸發、灰=無法判斷。 */
+.platform-exit-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.platform-exit-chip { display: inline-flex; flex-direction: column; padding: 2px 8px; border-radius: 6px; font-size: 12px; line-height: 1.35; border: 1px solid transparent; }
+.platform-exit-chip small { font-size: 11px; opacity: 0.8; }
+.platform-exit-sell { background: rgba(220, 53, 53, 0.14); border-color: rgba(220, 53, 53, 0.55); color: #d23a3a; font-weight: 600; }
+.platform-exit-hold { background: rgba(40, 160, 90, 0.10); border-color: rgba(40, 160, 90, 0.35); }
+.platform-exit-unknown { background: transparent; border: 1px dashed rgba(128, 128, 128, 0.7); opacity: 0.85; }
+.platform-exit-date { display: block; font-size: 11px; opacity: 0.7; }
+.platform-price-input { width: 7.5em; }

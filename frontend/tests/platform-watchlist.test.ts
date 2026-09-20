@@ -44,8 +44,8 @@ test('AC-211-1: adding, removing and noting round-trips through the stored forma
 
   assert.equal(restored.status, 'ok')
   assert.deepEqual(restored.entries, [
-    { stock_id: '0050', note: '等回踩月線', run_id: 'run_a' },
-    { stock_id: '2330', note: '', run_id: null },
+    { stock_id: '0050', note: '等回踩月線', run_id: 'run_a', entry_price: null },
+    { stock_id: '2330', note: '', run_id: null, entry_price: null },
   ])
   // Removing a stock removes only that stock.
   assert.deepEqual(toggleWatch(restored.entries, '0050').map(e => e.stock_id), ['2330'])
@@ -56,9 +56,9 @@ test('AC-211-1: a star toggle from the stock page keeps notes written elsewhere'
   const afterStar = fromIds(entries, ['0050', '2330'])
 
   assert.deepEqual(afterStar, [
-    { stock_id: '0050', note: '觀察營收', run_id: 'run_a' },
-    { stock_id: '2330', note: '', run_id: null },
+    { stock_id: '0050', note: '觀察營收', run_id: 'run_a', entry_price: null },
+    { stock_id: '2330', note: '', run_id: null, entry_price: null },
   ])
   // Dropping a stock through the star drops its note with it, and nothing else.
-  assert.deepEqual(fromIds(afterStar, ['2330']), [{ stock_id: '2330', note: '', run_id: null }])
+  assert.deepEqual(fromIds(afterStar, ['2330']), [{ stock_id: '2330', note: '', run_id: null, entry_price: null }])
 })
