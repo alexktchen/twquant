@@ -207,7 +207,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-249 | 賣出模型 SS：SB 進場訊號後展開 120 個持有日的樣本、部位狀態＋均線＋籌碼特徵、鏡像標籤、診斷 | DECISIONS D-120 §四／§六 | T-248 | — | 暫停（2026-09-20；SB 診斷未過，D-121，待裁決） |
 | T-250 | S0／S1／S2 長窗口＋舊金庫期回測、判定、對質預測 | DECISIONS D-120 §七／§八 | T-247、T-249 | — | 暫停（2026-09-20；SB 診斷未過，D-121，待裁決） |
 | T-258 | `scripts/benchmarks_two_windows.py` 有兩個 ruff 錯（BLE001 盲捕 Exception、B007 未用的迴圈變數），使 `python -m twquant check` 在 main 上即為紅——不在任何進行中任務的範圍內 | — | — | — | todo |
-| T-259 | 把 `finmind_hist_institutional`／`finmind_hist_margin` staging 載進 PG（2005~2026，重疊不覆寫官方），重新物化 7 個籌碼因子；載入前後各 pg_dump | DECISIONS D-127 §三 | — | — | todo |
+| T-259 | 把 `finmind_hist_institutional`／`finmind_hist_margin` staging 載進 PG（2005~2026，重疊不覆寫官方），重新物化 7 個籌碼因子；載入前後各 pg_dump | DECISIONS D-127 §三 | — | — | done（2026-09-20）。載入 2005~2026 法人與融資：PG 補 +225 萬列／1,351 日（法人）、+234 萬列／1,414 日（融資）；重疊與官方資料比對**兩表皆 0 筆不一致**。逐年驗證：2015~2026 每年天數與 prices_daily 完全一致。**過程中抓到並修掉載入器的靜默失敗**：它只用「湖有沒有」判斷要不要寫，而寫入目標是湖＋PG——湖有 5,329 日、PG 只有 1,620 日，於是 3,709 日被整個跳過且回報「已寫入湖與 PG」。改為兩個儲存體各自算（純函數 `write_targets` ＋ 4 條測試，其中一條重現當天的形狀）。載入前後各一份 pg_dump（4.55 GB）） |
 | T-260 | 波動度標準化的 triple-barrier 標籤（`k × σ`，σ＝20 日報酬標準差 × √20）＋診斷 A（標籤基礎率的月間波動 < 現行一半） | DECISIONS D-127 §二 | — | — | todo |
 | T-261 | 訓練 SB3（23 特徵：12 個股＋3 大盤＋1 排序分位＋7 籌碼）、校準、診斷 B（挑得出方向）與 C（訊號分布 ≥ 50% 月份） | DECISIONS D-127 §三／§四 | T-259、T-260 | — | todo |
 | T-262 | 三條診斷全過才跑 H／L 回測（H 的停利停損改為 ±kσ）並判定、對質 D-127 §六 的預測 | DECISIONS D-127 §五／§六 | T-261 | — | todo |

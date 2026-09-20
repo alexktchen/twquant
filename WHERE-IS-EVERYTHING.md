@@ -260,6 +260,14 @@ FinMind 免費層**不支援**全市場單日查詢（實測回 `Your level is r
 `load_finmind_history_tables.py` 刻意只寫 2020 之前），這輪是照 `load_finmind_chip.py`
 的規則臨時寫一支（重疊不覆寫＋零值分布比對）。
 
+**⑩ 「回報成功」不等於資料進去了——請直接查 PG 的逐年天數。** 2026-09-20 實際發生：`load_finmind_chip.py` 回報
+「已寫入湖與 PG：266 萬列」，但 2020~2024 的籌碼資料一列都沒進 PG——它只用「資料湖有沒有這一天」判斷，
+而當時湖有 5,329 日、PG 只有 1,620 日。已修（湖與 PG 各自算）。**任何補資料之後都要自己查一次**：
+```sql
+select extract(year from date)::int y, count(distinct date) from serving.<表> group by 1 order by 1;
+```
+拿它跟 `prices_daily` 的同一查詢逐年對，數字不一樣就是有缺口。
+
 **⚠ 多個 session 同時操作同一個 PG。** 這一輪一開始有另一個 session 在跑
 `scripts/.run_recovery.running.sh`（09-10 事故的 15 步重放）與 `materialize_long_history.py`，
 兩邊同時下 `serving sync` 直接吃到 PG `DeadlockDetected`、整個 transaction rollback。
