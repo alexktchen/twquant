@@ -232,3 +232,20 @@ def test_ac17_shipped_third_round_config_loads() -> None:
     assert cfg.label.barrier_up == 1.0 and cfg.label.barrier_down == 1.0
     assert len(cfg.features) == 19  # 12 個股價量／基本面 ＋ 7 籌碼
     assert "chip.foreign_streak" in cfg.features
+
+
+def test_ac18_label_zero_lumps_down_first_with_no_touch() -> None:
+    """標籤是二元的：0 同時代表「先觸下緣」與「兩邊都沒碰」。
+
+    D-129 的診斷 B 登記的統計量是「上緣比例 − **下緣**比例」，
+    用 `1 - label.mean()` 當下緣比例會把「沒碰到」算進去——
+    2026-09-21 實測：前 15 名真實是 37.8% 上／27.8% 下／34.4% 沒碰，
+    錯誤算法得到 38.8% vs 61.2%（−21.5pp，判未通過），正確算法是 +10.0pp（t=+3.78，通過）。
+    """
+    flat = _px([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0])
+    out = triple_barrier_labels(flat, horizon=5, up=0.10, down=0.10)
+    assert out.filter(pl.col("date") == D0)["label"][0] == 0.0  # 沒碰到任何邊界也是 0
+    down = _px([100.0, 100.0, 85.0, 85.0, 85.0, 85.0, 85.0, 85.0])
+    assert triple_barrier_labels(down, horizon=5, up=0.10, down=0.10).filter(
+        pl.col("date") == D0
+    )["label"][0] == 0.0  # 先跌也是 0——兩者在標籤裡無法區分
