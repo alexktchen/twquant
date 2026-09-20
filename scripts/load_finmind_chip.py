@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime as dt
 import pathlib
 import sys
@@ -32,6 +33,37 @@ from twquant.data.serving import store
 from twquant.data.serving.sync import upsert
 from twquant.data.sources.finmind import institutional_net, margin_balances
 from twquant.data.warehouse import Warehouse
+
+_HERE = pathlib.Path(__file__).resolve().parent
+
+
+@dataclasses.dataclass(frozen=True)
+class WriteTargets:
+    """要寫進湖、要寫進 PG 的日期（**各自算**）與要做一致性比對的日期。
+
+    2026-09-20 的教訓：兩個儲存體的內容可以不同步。只用湖判斷「新不新」，
+    湖有而 PG 沒有的日期就會被跳過，而且回報成功——正是黃金規則 5 要消滅的失敗模式。
+    """
+
+    to_lake: list[dt.date]
+    to_pg: list[dt.date]
+    overlap: list[dt.date]  # 湖已有 → 與官方資料逐列比對
+
+    @property
+    def nothing_to_write(self) -> bool:
+        return not self.to_lake and not self.to_pg
+
+
+def write_targets(
+    *, days: list[dt.date], lake_has: set[dt.date], pg_has: set[dt.date]
+) -> WriteTargets:
+    """由「來源有哪些日期」與「兩個儲存體各有哪些」算出要寫的日期。純函數。"""
+    return WriteTargets(
+        to_lake=[d for d in days if d not in lake_has],
+        to_pg=[d for d in days if d not in pg_has],
+        overlap=[d for d in days if d in lake_has],
+    )
+
 
 _SPEC = {
     "institutional": (
@@ -68,6 +100,22 @@ def _to_frame(mapped: list[dict], hour: int, value_cols: list[str]) -> pl.DataFr
     ).select(["date", "stock_id", *value_cols, "available_at"])
 
 
+def _pg_dates(cfg: ServingConfig, table: str, start: dt.date, end: dt.date) -> set[dt.date]:
+    """PG 裡該表在 [start, end] 已有的日期。表不存在＝一天都沒有（而不是「全部都有」）。"""
+    with store.connect(cfg) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT to_regclass(%s)",
+            (f"{cfg.pg_schema}.{table}",),
+        )
+        if cur.fetchone()[0] is None:
+            return set()
+        cur.execute(
+            f'SELECT DISTINCT date FROM "{cfg.pg_schema}"."{table}" WHERE date BETWEEN %s AND %s',
+            (start, end),
+        )
+        return {r[0] for r in cur.fetchall()}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("kind", choices=list(_SPEC))
@@ -90,11 +138,16 @@ def main() -> None:
     )
 
     wh = Warehouse(args.lake)
-    existing = set(wh.dates_in_range(table, days[0], days[-1]))
-    overlap = [d for d in days if d in existing]
-    fresh = [d for d in days if d not in existing]
+    cfg = ServingConfig(pg_schema="serving")
+    lake_has = set(wh.dates_in_range(table, days[0], days[-1]))
+    pg_has = _pg_dates(cfg, table, days[0], days[-1])
+    targets = write_targets(days=days, lake_has=lake_has, pg_has=pg_has)
+    overlap = targets.overlap
     print(
-        f"湖已有 {len(existing):,} 日；重疊 {len(overlap):,} 日、新增 {len(fresh):,} 日", flush=True
+        f"湖已有 {len(lake_has):,} 日、PG 已有 {len(pg_has):,} 日；"
+        f"要寫湖 {len(targets.to_lake):,} 日、要寫 PG {len(targets.to_pg):,} 日"
+        f"（重疊比對 {len(overlap):,} 日）",
+        flush=True,
     )
 
     # 重疊日期：逐 (date, stock_id) 比對，任何不一致即 raise
@@ -121,18 +174,25 @@ def main() -> None:
         print("--check 完成，未寫入。", flush=True)
         return
 
-    out = df.filter(pl.col("date").is_in(fresh))
-    if out.is_empty():
-        print("無新增日期可寫。", flush=True)
+    if targets.nothing_to_write:
+        print("湖與 PG 都已涵蓋，無須寫入。", flush=True)
         return
-    wh.write("clean", table, out, source="finmind")
-    cfg = ServingConfig(pg_schema="serving")
     spec = sch.spec_of(table)
-    with store.connect(cfg) as conn, conn.cursor() as cur:
-        upsert(cur, cfg.pg_schema, spec, out.select([c for c, _ in spec.columns]))
-        conn.commit()
+    n_lake = n_pg = 0
+    if targets.to_lake:
+        lake_rows = df.filter(pl.col("date").is_in(targets.to_lake))
+        wh.write("clean", table, lake_rows, source="finmind")
+        n_lake = lake_rows.height
+    if targets.to_pg:
+        pg_rows = df.filter(pl.col("date").is_in(targets.to_pg))
+        with store.connect(cfg) as conn, conn.cursor() as cur:
+            upsert(cur, cfg.pg_schema, spec, pg_rows.select([c for c, _ in spec.columns]))
+            conn.commit()
+        n_pg = pg_rows.height
     print(
-        f"已寫入湖與 PG：{out.height:,} 列、{len(fresh):,} 日；耗時 {(time.perf_counter() - t0) / 60:.1f} 分鐘",
+        f"已寫入：湖 {n_lake:,} 列／{len(targets.to_lake):,} 日、"
+        f"PG {n_pg:,} 列／{len(targets.to_pg):,} 日；"
+        f"耗時 {(time.perf_counter() - t0) / 60:.1f} 分鐘",
         flush=True,
     )
 
