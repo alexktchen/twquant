@@ -219,7 +219,7 @@ def test_ac10_partial_fill_does_not_masquerade_as_an_exit(tmp_path: Path) -> Non
     assert {t.reason for t in res.ledger} == {"rebalance"}
 
 
-# ── D-122 §七：H 策略要的兩條出場規則 ────────────────────────────────────────────
+# ── D-124 §七：H 策略要的兩條出場規則 ────────────────────────────────────────────
 
 
 def test_ac16_take_profit_sells_after_the_gain_is_reached(tmp_path: Path) -> None:

@@ -35,7 +35,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 |---|---|---|
 | **回測結果包** | `data/ladder/`（80M）、`data/ladder10m/`（10M）、`data/tracks/`（雙軌）、`data/tracks_c*/`（C 軌）、`data/tracks_m*/`（M 系列）、`data/tracks_g/`（G 矩陣）、`data/tracks_mg/`（MG） | 約 60MB／104 個 JSON |
 | **報告** | `data/reports/backtest_report.html`（含三張圖）、`all_backtests.json`（唯一資料源） | — |
-| **模型** | `data/models/lgbm_net_h20_20260225_6a798962`（**現行**） | 213MB（含舊模型） |
+| **模型** | `data/models/lgbm_lw_net_h20_20260225_83890036`（**現行排序**，D-110）、`lgbm_lw_dd_h60_20260225_1bd7c6a0`（風控閘門）、`lgbm_lw_rev_h15_20260225_9d4a149c`（LW-F1 池子） | 213MB（含舊模型） |
 | **研究登記簿（DSR）** | `data/research_log/` | 241 檔／1,884 筆 |
 | 長天期回補原始檔 | `data/staging/finmind_hist_*` | 462MB |
 | **推薦快照** | `data/recommendations/<run_id>.json` | 2026-09-04 一份／1943 檔候選 |
@@ -88,6 +88,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
 | **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |
 | **D-109 診斷計分** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/d109_scorecard.py --bundles D:/project/twquant/data/tracks_vault_nodiv`（**不是裁決**；結束日 > 2026-08-31 的結果包會被拒收） |
+| **模型勝率重算**（卡片上的數字） | `uv run --all-groups python scripts/model_ic_hitrate.py --models D:/project/twquant/data/models`——印出可貼回 `configs/model_catalog.yaml` 的區塊；指紋與模型不符會以非零碼結束（D-124） |
 | 多因子 IC 階梯 | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/ic_ladder.py --factors a,b --data-dir D:/project/twquant/data`（**--data-dir 必給絕對路徑**） |
 
 **所有指令都要 `uv run --all-groups`**，直接 `python` 會缺套件（polars 等）。
@@ -137,7 +138,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 **④ `ml score` 挑錯模型——已修（T-224）。** 現有 8 個模型的 train_end **全部是 2026-02-25**，
 舊版 `latest_model_dir` 同分時取排序最前者＝`lgbm_dd_h60`（D-075 的**回撤風控**模型）當選股器。
 現在候選不唯一會 **raise 並列出候選**，並可用 `--purpose` 過濾。每日推論用哪個模型由
-`configs/ml.yaml` 的 **`production_ranking_model`** 明寫（目前 `lgbm_net_h20_20260225_6a798962`）
+`configs/ml.yaml` 的 **`production_ranking_model`** 明寫（目前 `lgbm_lw_net_h20_20260225_83890036`，D-110 自 2026-09-09 換成長窗口版；每個模型的人話名稱、描述與勝率登記在 `configs/model_catalog.yaml`）
 ——換模型改這一行。L0 產生鏈已掛進每日 pipeline（T-225）。
 
 **⑤ 重跑「已擷取過的某一天」的 pipeline 會 OOM（2026-09-07 實測）。** 正常的每日前進式

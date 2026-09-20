@@ -1,0 +1,96 @@
+# 模型目錄（D-122；SPEC-014 §10）——每日名單卡片上的人話名稱、描述與勝率。
+#
+# **數字只能是量測過的結果。** 讀取層不重算 IC（SPEC-014 §3 禁止 GET 觸發研究運算），
+# 前端不得寫死任何數字；要更新就重跑量測再改這個檔：
+#
+#     uv run python scripts/model_ic_hitrate.py --models D:/project/twquant/data/models
+#
+# `artifact_fingerprint` 是登記數字時那一版模型的指紋（meta.json）。推薦快照存的是同一個值，
+# 兩者不符＝模型重訓過而數字還是舊的 → API 不回傳數字、卡片明示過期。T-180 就是這樣讓
+# d088 報告與 D-110 的對照表留著重訓前的 +0.0637 至今。
+#
+# 文字一律用雙引號＋行尾反斜線折行：YAML 的 `>-` 會把換行折成空白，中文句子中間會多出空格。
+
+hit_rate_definition: "IC 勝率＝當天橫斷面 RankIC > 0 的訊號日比例，量的是「當天排序方向對不對」，\
+  不是「買了會賺的比率」。D-061：日勝率（組合報酬為正的交易日）與逐筆勝率（平倉往返為正）\
+  是另外兩件事——同一個訊號在實際載具上的逐筆勝率是 47%。"
+
+models:
+  lgbm_lw_net_h20_20260225_83890036:
+    name: 長窗口排序模型
+    role: ranking
+    artifact_fingerprint: dcfbf21c2d9bf2af
+    description: "每天把全市場排一次序，預測 20 個交易日後「扣完成本、相對當日市場均值」的超額報酬。\
+      12 個特徵（動能、反轉、隔夜與盤中報酬、波動、量能、月營收 YoY 與加速），訓練資料自 2015-09 起，\
+      涵蓋 2018Q4、2020、2022 三個壓力體制。D-110 起的生產排序模型。"
+    caveat: "部署的是排序，不是策略：同一個訊號放進集中型長多載具，在未見資料上仍是 −37% 等級的回撤，\
+      逐筆勝率 47%（D-107、D-112）。"
+    measurements:
+      - label: 樣本外
+        rank_ic: 0.066105
+        hit_rate: 0.859795
+        n_days: 2047
+        period_start: 2017-09-26
+        period_end: 2026-02-25
+        measured_on: 2026-09-20
+        source: scripts/model_ic_hitrate.py
+      - label: 未見資料（金庫期）
+        rank_ic: 0.0816
+        hit_rate: 0.73
+        n_days: 111
+        period_start: 2026-03-02
+        period_end: 2026-08-31
+        measured_on: 2026-09-09
+        source: scripts/vault_ic.py（D-107 P1；排除標籤可及段後 +0.0624／68%）
+
+  lgbm_net_h20_20260225_6a798962:
+    name: 短窗口排序模型（已換下）
+    role: retired
+    artifact_fingerprint: 7fa35dd6f3638bba
+    description: "與長窗口版同一份配方、同樣 12 個特徵，差別只在訓練資料自 2020 起，\
+      壓力體制只涵蓋 2022 熊市尾巴。共同的 983 個交易日上輸長窗口版。"
+    caveat: "D-110 已由長窗口版接手；卡片上看到這個模型，代表那是 2026-09-09 之前產生的舊快照。"
+    measurements:
+      - label: 樣本外
+        rank_ic: 0.045227
+        hit_rate: 0.778230
+        n_days: 983
+        period_start: 2022-02-08
+        period_end: 2026-02-25
+        measured_on: 2026-09-20
+        source: scripts/model_ic_hitrate.py
+
+  lgbm_lw_dd_h60_20260225_1bd7c6a0:
+    name: 60 日回撤風控模型
+    role: risk_gate
+    artifact_fingerprint: 83d477c678fac5d4
+    description: "月底出分數，預測未來 60 個交易日的最大回撤。名單用它剔除預測回撤最深的一成\
+      （分組「風控剔除」）；用途由 D-075 寫死為閘門，不得進排序。"
+    caveat: "+0.42 不可單獨引用：光按 20 日波動度排序就有 −0.3926、98% 的日子同號，\
+      模型相對最強單因子的增量只有 +0.0263（D-089）。"
+    measurements:
+      - label: 樣本外
+        rank_ic: 0.423540
+        hit_rate: 0.975610
+        n_days: 82
+        period_start: 2019-04-30
+        period_end: 2026-01-30
+        measured_on: 2026-09-20
+        source: scripts/model_ic_hitrate.py
+
+  lgbm_lw_rev_h15_20260225_9d4a149c:
+    name: 營收驚奇模型
+    role: aux
+    artifact_fingerprint: e1a7ecd15a35d187
+    description: "月底出分數，預測下一次月營收公布的驚奇方向；供已登記策略 LW-F1 當池子，\
+      不參與每日名單的篩選（D-112）。"
+    caveat: "2025 年只有 42% 的訊號日為正，金庫期也弱於基礎排序線——D-088 判定未通過。"
+    measurements:
+      - label: 樣本外
+        rank_ic: 0.065960
+        hit_rate: 0.678571
+        n_days: 84
+        period_start: 2019-02-27
+        period_end: 2026-01-30
+        measured_on: 2026-09-20
+        source: scripts/model_ic_hitrate.py

@@ -144,10 +144,7 @@ def main() -> None:
         sc = _scores(model_id)
         daily, mean, pos = _ic(sc, lab)
         out[label] = (mean, pos, daily.height)
-        print(
-            f"{label:16s} h={h:2d}  訊號日 {daily.height:4d}  "
-            f"RankIC {mean:+.4f}  為正 {pos:.0%}"
-        )
+        print(f"{label:16s} h={h:2d}  訊號日 {daily.height:4d}  RankIC {mean:+.4f}  為正 {pos:.0%}")
         if daily.height >= 6:
             print(
                 "    逐月：",
@@ -218,8 +215,7 @@ def main() -> None:
     }
     payload = {
         "models": {
-            label: {"ic": mean, "pos": pos, "n": n}
-            for label, (mean, pos, n) in out.items()
+            label: {"ic": mean, "pos": pos, "n": n} for label, (mean, pos, n) in out.items()
         },
         "base_cuts": cuts,
         "base_monthly": monthly,

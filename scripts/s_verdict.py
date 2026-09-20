@@ -1,9 +1,9 @@
-"""D-122 §七：S 系列判定——**逐筆交易**的勝率與盈虧比。
+"""D-124 §七：S 系列判定——**逐筆交易**的勝率與盈虧比。
 
     uv run --all-groups python scripts/s_verdict.py --bundles D:/project/twquant/data/tracks_s_long_nodiv
 
 與 `e_verdict.py` 的差別：那支看組合層級的回撤與 Calmar；本支看**每一筆交易**——
-使用者的目標是「每次出手勝率 70~80%，錯了停損、對了抱緊」（D-122 §〇），
+使用者的目標是「每次出手勝率 70~80%，錯了停損、對了抱緊」（D-124 §〇），
 組合回撤只報不判。一筆＝一次進場到出清（由 `reporting.trade_journal` 的 exit 事件界定）。
 
 判準（事前登記、不得事後修改）：

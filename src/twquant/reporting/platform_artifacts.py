@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from twquant.config import ModelCatalogConfig
 from twquant.errors import DataError
 from twquant.reporting.result_bundle import read_bundle
 
@@ -138,6 +139,35 @@ def _model_projection(meta: dict[str, object], artifact_id: str, state: str) -> 
         "ended_at": None,
         "execution_status": "unavailable",
         "qualification": "unreviewed",
+    }
+
+
+def model_info_projection(
+    catalog: ModelCatalogConfig, model_id: str, artifact_fingerprint: str
+) -> dict[str, object] | None:
+    """Project one registered model card (SPEC-014 §10); never recompute or borrow numbers.
+
+    未登記的 model_id 回 None——卡片寧可說「尚未登記」，也不套用另一個模型的目錄項。
+    指紋不符＝同一個 model_id 重訓過，登記的數字對應的是上一版：名稱與描述仍然成立，
+    數字不成立，故整組拿掉並標記 stale（D-122 §三，T-180 的教訓）。
+    """
+    entry = catalog.models.get(model_id)
+    if entry is None:
+        return None
+    stale = entry.artifact_fingerprint != artifact_fingerprint
+    return {
+        "name": entry.name,
+        "role": entry.role,
+        "description": entry.description,
+        "caveat": entry.caveat,
+        # 口徑跟著數字一起走：86% 少了這一句就會被讀成「買了八成六會賺」（D-061）。
+        "hit_rate_note": catalog.hit_rate_definition,
+        "artifact_fingerprint": entry.artifact_fingerprint,
+        "run_fingerprint": artifact_fingerprint,
+        "stale": stale,
+        "measurements": []
+        if stale
+        else [measurement.model_dump(mode="json") for measurement in entry.measurements],
     }
 
 

@@ -66,7 +66,7 @@ def test_ac2_prefixes_do_not_cross(tmp_path: Path) -> None:
 
 
 def test_ac5_tb_factor_returns_the_probability_not_the_rank(tmp_path: Path) -> None:
-    """D-122：每日補位的進場門檻是**絕對機率**。薄因子若回 rank_pct，崩盤日照樣有 0.99。"""
+    """D-124：每日補位的進場門檻是**絕對機率**。薄因子若回 rank_pct，崩盤日照樣有 0.99。"""
     rows = [
         {
             "date": _DAY,

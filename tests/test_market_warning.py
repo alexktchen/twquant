@@ -1,4 +1,4 @@
-"""T-254／D-122 §四：大跌預警的特徵、事件合併與 walk-forward 無前視。"""
+"""T-256／D-124 §四：大跌預警的特徵、事件合併與 walk-forward 無前視。"""
 
 from __future__ import annotations
 

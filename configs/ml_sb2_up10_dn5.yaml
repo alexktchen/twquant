@@ -1,4 +1,4 @@
-# SB2：S 系列買進模型的不對稱標籤版（D-122 §二，**事前登記**）。與 ml_sb_up20.yaml 逐字相同，只改 barrier_down。未經部署裁決，勿用於實盤。
+# SB2：S 系列買進模型的不對稱標籤版（D-124 §二，**事前登記**）。與 ml_sb_up20.yaml 逐字相同，只改 barrier_down。未經部署裁決，勿用於實盤。
 #
 # 回答的問題：「明天開盤買進，未來 20 個交易日內，收盤會不會**先**漲 10%（在跌 10% 之前）？」
 # 絕對標籤、二元目標——不跟同日其他股票比，所以崩盤日會整片是 0，模型才學得到「現在不是時候」。
@@ -39,7 +39,7 @@ sample_min_price: 10.0
 label:
   transform: triple_barrier
   barrier_up: 0.10    # 使用者 2026-09-20：「20日漲10%」
-  barrier_down: 0.05  # D-122 (c)：不對稱——下緣就是使用者說的「提早停損」
+  barrier_down: 0.05  # D-124 (c)：不對稱——下緣就是使用者說的「提早停損」
   adv_window_sessions: 20
   total_return: true
   max_span_sessions: 42

@@ -1,4 +1,4 @@
-"""D-122 §〇／§一／§二：買進模型第二輪診斷——校準、門檻、SB／SB2 二選一。
+"""D-124 §〇／§一／§二：買進模型第二輪診斷——校準、門檻、SB／SB2 二選一。
 
     uv run --all-groups python scripts/s2_buy_diagnostics.py \
         --model SB=<模型目錄> --config SB=configs/ml_sb_up20.yaml \
@@ -6,7 +6,7 @@
 
 對每個模型：walk-forward isotonic 校準 → 校準診斷（十組、差距 ≤ 10pp、樣本 < 1,000 的組只列不判）
 → 校準後機率 ≥ 70%（H）與 ≥ 80%（L）的列數與**實際成功率**。
-然後依 D-122 §〇 寫死的規則二選一：過 70% 門檻的列數較多者，且其實際成功率 ≥ 70%、列數 ≥ 1,000。
+然後依 D-124 §〇 寫死的規則二選一：過 70% 門檻的列數較多者，且其實際成功率 ≥ 70%、列數 ≥ 1,000。
 每個模型的校準後分數另存為 `<模型目錄>/oos_calibrated.parquet`（供回測使用）。
 
 門檻全部事前登記、不得事後修改。不看任何報酬。需要 TWQUANT_PG_DSN（只用來取交易日曆）。
@@ -32,11 +32,11 @@ DEV_END = dt.date(2026, 8, 31)
 N_BINS = 10
 MAX_GAP = 0.10
 MIN_BIN_N = 1_000
-CAL_EMBARGO = 21  # D-122 §一
-CAL_MIN_WINDOWS = 4  # D-122 §一
-THRESHOLDS = {"H": 0.70, "L": 0.80}  # D-122 §七
-SELECT_MIN_ROWS = 1_000  # D-122 §〇
-SELECT_MIN_SUCCESS = 0.70  # D-122 §〇
+CAL_EMBARGO = 21  # D-124 §一
+CAL_MIN_WINDOWS = 4  # D-124 §一
+THRESHOLDS = {"H": 0.70, "L": 0.80}  # D-124 §七
+SELECT_MIN_ROWS = 1_000  # D-124 §〇
+SELECT_MIN_SUCCESS = 0.70  # D-124 §〇
 
 
 def _sessions(dsn: str, start: str, end: str) -> list[dt.date]:
@@ -127,7 +127,7 @@ def main() -> None:
     configs = dict(c.split("=", 1) for c in args.config)
     results = [_one(n, Path(d), configs[n], dsn) for n, d in models.items()]
 
-    print("\n══ 二選一（D-122 §〇：過 70% 門檻列數較多者；須校準通過、成功率 ≥ 70%、列數 ≥ 1,000）")
+    print("\n══ 二選一（D-124 §〇：過 70% 門檻列數較多者；須校準通過、成功率 ≥ 70%、列數 ≥ 1,000）")
     eligible = [
         r
         for r in results
@@ -145,7 +145,7 @@ def main() -> None:
             why.append(f"成功率 {float(r['succ_H']):.1%} < 70%")  # type: ignore[arg-type]
         print(f"  {r['name']}：{'合格' if not why else '不合格（' + '、'.join(why) + '）'}")
     if not eligible:
-        print("**沒有合格的買進模型。** 依 D-122 §〇，買進這條線停下來，不進回測。")
+        print("**沒有合格的買進模型。** 依 D-124 §〇，買進這條線停下來，不進回測。")
         return
     winner = max(eligible, key=lambda r: int(r["n_H"]))  # type: ignore[call-overload]
     print(f"**帶進回測：{winner['name']}**")

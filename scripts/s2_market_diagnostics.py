@@ -1,4 +1,4 @@
-"""D-122 §三／§四：市場狀態閘門（b1）與大跌預警（b2）的診斷。**通過才准掛進回測。**
+"""D-124 §三／§四：市場狀態閘門（b1）與大跌預警（b2）的診斷。**通過才准掛進回測。**
 
     uv run --all-groups python scripts/s2_market_diagnostics.py --model <帶進回測的買進模型目錄>
 
@@ -6,7 +6,7 @@ b1：緩跌日過門檻者的實際成功率須**低於**其餘日子（以月�
 b2：樣本外事件至少 2/3 有「事件期間過半日子預警亮著」，且非事件日誤報率 ≤ 20%；
     另須贏過同樣亮燈比例的笨規則「TAIEX 在 20 日線下」。
 **12 年只有 9 個大跌事件——b2 通過也只代表「沒有被推翻」。**
-門檻與數字全部取自 D-122，事前登記、不得事後修改。不看任何報酬。
+門檻與數字全部取自 D-124，事前登記、不得事後修改。不看任何報酬。
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ from twquant.ml.market_warning import (
 from twquant.ml.regime import CALM, GRIND, PANIC, market_regime
 
 DEV_END = dt.date(2026, 8, 31)
-ENTRY_THRESHOLD = 0.70  # D-122 §七 H
+ENTRY_THRESHOLD = 0.70  # D-124 §七 H
 MIN_T = 2.0
-REGIME = {"ma_window": 60, "vol_window": 20, "vol_lookback": 250, "vol_pctl": 0.90}  # D-122 §三
-WARN = WarningConfig(  # D-122 §四
+REGIME = {"ma_window": 60, "vol_window": 20, "vol_lookback": 250, "vol_pctl": 0.90}  # D-124 §三
+WARN = WarningConfig(  # D-124 §四
     horizon=20,
     drop=0.10,
     long_window=60,

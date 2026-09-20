@@ -1,4 +1,4 @@
-"""T-251／T-254（D-122）：walk-forward isotonic 校準、邏輯斯迴歸、市場狀態分類。"""
+"""T-253／T-256（D-124）：walk-forward isotonic 校準、邏輯斯迴歸、市場狀態分類。"""
 
 from __future__ import annotations
 

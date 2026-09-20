@@ -197,7 +197,7 @@ def lgbm_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     return _scores_for_model(view, params, "lgbm_dd_h60_")
 
 
-# ── S 系列買進模型（D-120／D-122）──────────────────────────────────────────
+# ── S 系列買進模型（D-120／D-124）──────────────────────────────────────────
 # **回傳的是機率本身（`score`），不是橫斷面分位。** 每日補位的進場門檻是絕對的
 # （「校準後機率 ≥ 70%」）；若回 rank_pct，崩盤日照樣有 0.99，門檻形同虛設。
 # `ml_scores.score` 裡放的必須是**校準後**的機率（model_id 以 `_cal` 結尾的那一份）。
