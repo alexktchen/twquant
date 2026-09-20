@@ -1,11 +1,12 @@
 // 全站調色盤與數字格式（單一真相源；圖表與各頁共用）。
 import type { StockMetaMap } from './api'
 
-export const UP = '#e5484d' // 台股：紅漲
-export const DOWN = '#2ea36b' // 綠跌
-export const ACC = '#e0a83b'
-export const MUT = '#8b98a5'
-export const LINE = '#232a33'
+export const UP = '#f0484e' // 台股：紅漲
+export const DOWN = '#22b573' // 綠跌
+export const ACC = '#4c8dff'
+export const WARN = '#f5a524' // 圖上的強調線（POC、累計線）：與藍色主色區隔
+export const MUT = '#8893a7'
+export const LINE = '#1f2a3c'
 
 export const pct = (x: number, d = 1) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(d)}%`
 export const num = (x: number, d = 0) =>
