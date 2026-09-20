@@ -130,3 +130,30 @@ T-215 用固定 HTTP fixtures 驗證每日選股→個股 K 線／推薦日→�
 不在因子宇宙的代號（如 0050）會掃整張表——實測 150 秒未回（當時 PG 另有其他工作階段的重查詢，CPU 佔用無法單獨歸因，
 只記回應時間）。儀表板因此改用
 逐因子查詢（走主鍵；0050 為 0.1 秒）。「因子」頁籤仍呼叫舊端點，屬後端問題，見 T-244。
+
+## 10. 模型資訊卡（T-251）
+
+每日名單（`#/overview` 與 `#/recommendations`）的每張 run 卡片，在模型代號之外要印出
+**人話名稱、一行描述與勝率**（D-122）。代號仍是身分：`<h2>` 維持 `model_id`，§4 的 AC-206 不變。
+
+**數字的唯一來源是 `configs/model_catalog.yaml`。** 讀取層不得重算 IC（§3 已禁 GET 觸發研究運算），
+前端不得寫死任何數字。目錄項欄位：`name`、`role`（ranking／risk_gate／aux／retired）、`description`、
+選填 `caveat`、`artifact_fingerprint`，以及一組以上的 `measurements`
+（`label`、`rank_ic`、`hit_rate`、`n_days`、`period_start`、`period_end`、`measured_on`、`source`）。
+
+**勝率的口徑必須與數字同時出現。** 卡片上的勝率一律是 **IC 勝率**（當天橫斷面 RankIC > 0 的訊號日比例），
+每張卡片印出 `hit_rate_definition` 那一句；D-061 的日勝率與逐筆勝率不在這裡出現，也不得混稱為「勝率」。
+
+**過期防護（T-180 的教訓，D-122 §三）**：目錄項登記模型的 `artifact_fingerprint`，推薦快照存的是同一個指紋。
+兩者不符＝模型重訓過而數字還是舊的，API **不回傳 measurements**，只回名稱與描述並標記 `stale`，
+卡片明示「登記的數字對應的是另一版模型」。未登記的 `model_id` 回 `model_info: null`，
+卡片明示尚未登記——不借用其他模型的數字，也不留白。
+
+- AC-251-1：登記過的模型，其 run 卡片顯示人話名稱、角色、一行描述，以及每組量測的 IC 勝率、RankIC、
+  訊號日數、期間與量測日；口徑說明與數字同時出現。未登記的 model_id 顯示「尚未登記說明」，
+  不顯示任何數字，也不套用其他模型的目錄項。
+- AC-251-2：目錄項的 `artifact_fingerprint` 與 run 的指紋不符時，回應不含 measurements 且 `stale` 為真，
+  名稱與描述照常；一致時 `stale` 為否且數字齊全。
+- AC-251-3：`model_catalog.yaml` 以 pydantic 驗證（`extra="forbid"`）：`hit_rate` 介於 [0, 1]、`n_days` ≥ 1、
+  `period_start` ≤ `period_end` ≤ `measured_on`、`measurements` 非空、指紋為 16 位十六進位；
+  目錄檔缺席時 API 仍照常回傳 runs，`model_info` 一律 null（少一塊資訊，不是整頁壞掉）。
