@@ -202,7 +202,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-238 | 前端瀏覽器測試（`npm run test:browser`）自 D-111 起為紅：fixture 仍用舊分組名，預設 `ml_top20` 過濾後斷言 `/0\.8120/` 找不到 | DECISIONS D-116 §六.2 | — | — | done（2026-09-20；由 T-245 修掉——同一個紅燈，平行的另一條線先修好了。合併 T-245 後 `npm run test:browser` PASS） |
 | T-239 | 確認排程 19:00 觸發時 ML 匯出不會因 parquet 時間戳早於 20:00 截點被守衛擋下（看 2026-09-21 晚上第一次完整執行的 log） | DECISIONS D-116 §六 末段 | — | — | todo |
 | T-246 | 出場後追回：`exit_reentry`（訊號消失且仍在本月目標名單 → 隔日開盤買回原目標權重）；跑 R2／R3／R6／R7 長窗口＋金庫期並與 E 系列合併判定 | DECISIONS D-119 | T-231 | — | 作廢（2026-09-20；由 D-120 取代，從未實作） |
-| T-247 | 回測引擎「每日補位」模式：`slots`、絕對進場門檻、無月底強制換股、賣出規則未觸發才可進場；既有月頻模式逐位元不變 | DECISIONS D-120 §五 | T-231 | — | todo |
+| T-247 | 回測引擎「每日補位」模式：`slots`、絕對進場門檻、無月底強制換股、賣出規則未觸發才可進場；既有月頻模式逐位元不變 | DECISIONS D-120 §五 | T-231 | — | done（2026-09-20；先寫 9 條 AC 測試確認紅燈後實作。`StrategyConfig.slots`（`n`、`entry_threshold`）：進場分數取唯一 signal 的**原始值**、門檻是絕對的；`strategy/slots.py::slot_candidates` 沒人過門檻回空 list＝空手（正常結果，不 raise）。引擎每日收盤：先判賣出→數空位（只算真的空著的）→候選扣掉已持有與 `entry_blocked`（自身賣出規則已觸發者）→隔日開盤先賣後買，每格＝當時權益÷n；無月底換股。新出場規則 `trailing_ma`（本輪未實現報酬曾達 `min_peak_gain` 之後跌破均線才賣＝D-120 的 S0），`_Lot` 記最高收盤。`slots` 為 None 時不進 params_hash、既有模式不變。完整 check 全綠 1019 passed） |
 | T-248 | 買進模型 SB：triple-barrier 標籤（20 日、先 +10% 於 −10% 之前）、加大盤狀態特徵、訓練一次、校準＋「會不會空手」診斷 | DECISIONS D-120 §三／§六 | — | — | todo |
 | T-249 | 賣出模型 SS：SB 進場訊號後展開 120 個持有日的樣本、部位狀態＋均線＋籌碼特徵、鏡像標籤、診斷 | DECISIONS D-120 §四／§六 | T-248 | — | todo |
 | T-250 | S0／S1／S2 長窗口＋舊金庫期回測、判定、對質預測 | DECISIONS D-120 §七／§八 | T-247、T-249 | — | todo |
