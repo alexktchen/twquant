@@ -210,7 +210,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-252 | (c) SB2：不對稱標籤（先 +10% 於 −5% 之前），訓練一次；SB／SB2 依寫死的規則只帶一個進回測 | DECISIONS D-122 §二 | T-251 | — | todo |
 | T-253 | (b1) 市場狀態閘門（季線下＝弱勢；弱勢且波動 ≥ 250 日第 90 百分位＝恐慌；其餘弱勢＝緩跌不開新倉）＋診斷 | DECISIONS D-122 §三 | T-252 | — | todo |
 | T-254 | (b2) 大跌預警：5 特徵邏輯斯迴歸、walk-forward、事件級診斷（只有 9 個事件，最多「未被推翻」） | DECISIONS D-122 §四 | — | — | todo |
-| T-255 | S0／S0g／S0gw 回測（只跑通過診斷的元件）與判定 | DECISIONS D-122 §五 | T-251~T-254 | — | todo |
+| T-255 | 兩種進場策略的回測：H（≥70%、停利 +10%／標籤下緣停損／20 日時間出場，判逐筆勝率 ≥ 70%）與 L（≥80%、停損 −15%、+50% 後破 20 日線賣，判盈虧比 ≥ 2）；各跑不掛閘門與掛通過診斷之閘門兩格；引擎新增 `take_profit`／`time_stop` | DECISIONS D-122 §七 | T-251~T-254 | — | todo |
 | T-226 | pipeline 重跑同一天會在供應層 OOM；`docker compose run` 還回報 exit 0 | WHERE-IS-EVERYTHING 陷阱⑤ | — | A | todo |
 | T-223 | 消息／公告／法說來源接入（獨立研究線：來源、PIT、成本、fixture 全需新規格） | PRD-002 §4.2/§11 | 另立 SPEC | — | todo |
 | T-240 | 技術指標純函數（SMA／KD／MACD／交叉／量價分布／量能多空）＋ K 線 KD／MACD 副圖與截圖鉤子；`charts.tsx` 的量價分布改用同一份純函數 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §9 AC-240-1 | T-208 | — | done（2026-09-19；先寫 Node AC 測試確認 `indicators.ts` 缺席紅燈後實作。不前視性質 `f(data[:t]) == f(data)[:t]` 與 bit-identical 皆有測試。K 線預設視窗由「全部」改 120 日，設定加版本欄，升版只重設 range 一次；要定位的推薦日早於視窗時暫時顯示完整區間，「點日期定位」不因短視窗失效） |
