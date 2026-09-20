@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -212,6 +213,13 @@ def get_platform_recommendations(
         kept = select_candidates(item, bucket=bucket, query=q)
         projection = item.model_dump(mode="json")
         projection["candidate_total"] = len(kept)
+        # 篩選**之前**的全貌（T-243）。只有篩選後的數量時，前端分不出三件不同的事：
+        # 這個 run 合法地沒有候選／有候選但不在這個分組／這是沒有晉級分組的舊快照。
+        # D-111 把預設分類改成「前 20 名」之後，一個真的空的 run 曾被誤報成舊快照。
+        projection["candidate_total_all"] = len(item.candidates)
+        projection["bucket_counts"] = dict(
+            sorted(Counter(candidate.bucket for candidate in item.candidates).items())
+        )
         projection["candidates"] = [
             {**candidate.model_dump(mode="json"), "insight": insights.get(candidate.stock_id)}
             for candidate in kept[start : start + page_size]
