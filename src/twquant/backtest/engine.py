@@ -82,6 +82,7 @@ class _Lot:
     cost_amount: float  # 本輪累計買入價金（不含費用）
     min_close: float  # 持有期間最低收盤（含進場日）
     max_close: float = 0.0  # 持有期間最高收盤（trailing_ma 用，T-247）
+    sessions_held: int = 0  # 買進後經過的交易日數（買進日＝0；time_stop 用，T-255）
     dividends: float = 0.0  # 本輪已收到的股利現金（D-085）；歸零出場時隨 lot 一起消失
 
 
@@ -378,6 +379,7 @@ def _held(state: _State) -> dict[str, HeldPosition]:
             avg_cost=avg,
             dividends_per_share=dps,
             peak_close=lot.max_close if lot else 0.0,
+            sessions_held=lot.sessions_held if lot else 0,
         )
     return out
 
@@ -477,6 +479,8 @@ def run_backtest(
             if lot is not None:
                 lot.min_close = min(lot.min_close, new_c)
                 lot.max_close = max(lot.max_close, new_c)
+                if lot.entry_date != day:  # 買進當天不算；之後每個有行情的交易日 +1
+                    lot.sessions_held += 1
             state.last_close[sid] = new_c
 
         if pending is not None:

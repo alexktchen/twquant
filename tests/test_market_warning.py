@@ -55,7 +55,7 @@ def test_ac1_label_is_forward_drawdown_and_tail_is_null() -> None:
 
 
 def test_ac2_events_are_merged_by_gap() -> None:
-    labels = [0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    labels: list[float | None] = [0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     days = [D0 + dt.timedelta(days=i) for i in range(len(labels))]
     assert event_spans(days, labels, gap=2) == [(1, 4), (9, 9)]
 

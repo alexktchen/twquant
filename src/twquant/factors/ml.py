@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 
 
 def _scores_for_model(
-    view: PitView, params: dict[str, object], default_prefix: str
+    view: PitView,
+    params: dict[str, object],
+    default_prefix: str,
+    value_col: str = "rank_pct",
 ) -> pl.DataFrame:
     """從 PIT-safe ml_scores 取精確模型或同系列最新分數。"""
     prefix = str(params.get("model_prefix", default_prefix))
@@ -30,7 +33,7 @@ def _scores_for_model(
     out = (
         scores.sort(["date", "stock_id", "model_id"], descending=[False, False, True])
         .unique(subset=["date", "stock_id"], keep="first", maintain_order=True)
-        .select("date", "stock_id", pl.col("rank_pct").alias("value"))
+        .select("date", "stock_id", pl.col(value_col).alias("value"))
         .collect()
         .sort(["date", "stock_id"])
     )
@@ -192,3 +195,22 @@ def lgbm_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     未證明它能排序「誰會漲得多」；把風控訊號拿去選股是換了問題還沿用結論。
     """
     return _scores_for_model(view, params, "lgbm_dd_h60_")
+
+
+# ── S 系列買進模型（D-120／D-122）──────────────────────────────────────────
+# **回傳的是機率本身（`score`），不是橫斷面分位。** 每日補位的進場門檻是絕對的
+# （「校準後機率 ≥ 70%」）；若回 rank_pct，崩盤日照樣有 0.99，門檻形同虛設。
+# `ml_scores.score` 裡放的必須是**校準後**的機率（model_id 以 `_cal` 結尾的那一份）。
+
+
+@factor(
+    name="ml.lgbm_lw_tb_up_20d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"model_prefix": "lgbm_lw_tb_h20_", "smooth_days": 0},
+)
+def lgbm_lw_tb_up_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """20 日內「先漲 10%」的校準後機率（絕對值，不可當橫斷面排序因子用）。"""
+    return _scores_for_model(view, params, "lgbm_lw_tb_h20_", value_col="score")

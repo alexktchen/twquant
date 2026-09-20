@@ -54,7 +54,7 @@ def isotonic_fit(scores: np.ndarray, labels: np.ndarray) -> IsotonicModel:
 
 def isotonic_predict(model: IsotonicModel, scores: np.ndarray) -> np.ndarray:
     """線性內插；超出訓練範圍者夾在兩端（不外插——外插會吐出 [0,1] 以外的機率）。"""
-    return np.interp(scores, model.x, model.y)
+    return np.asarray(np.interp(scores, model.x, model.y), dtype=float)
 
 
 def walk_forward_calibrate(

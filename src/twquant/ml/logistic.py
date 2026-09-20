@@ -45,4 +45,5 @@ def fit_logistic(x: np.ndarray, y: np.ndarray, *, l2: float, max_iter: int) -> L
 
 def predict_logistic(model: LogisticModel, x: np.ndarray) -> np.ndarray:
     z = (x - model.mean) / model.std
-    return 1.0 / (1.0 + np.exp(-np.clip(model.intercept + z @ model.coef, -30, 30)))
+    out = 1.0 / (1.0 + np.exp(-np.clip(model.intercept + z @ model.coef, -30, 30)))
+    return np.asarray(out, dtype=float)

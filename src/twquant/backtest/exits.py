@@ -28,6 +28,7 @@ class HeldPosition:
     avg_cost: float  # 本輪加權平均買進價（不含費用）
     dividends_per_share: float  # D-085：已收股利攤回單價，否則除息會被當成虧損
     peak_close: float = 0.0  # 本輪持有期間最高收盤（trailing_ma 用）
+    sessions_held: int = 0  # 買進後經過幾個交易日（買進日＝0；time_stop 用）
 
 
 def ma_column(window: int) -> str:
@@ -75,6 +76,14 @@ def exit_reasons(
                 hit = (float(close) + pos.dividends_per_share) / pos.avg_cost - 1.0 <= -_req(
                     rule.pct
                 )
+            elif rule.kind == "take_profit":
+                pos = held[sid]
+                if pos.avg_cost <= 0.0:
+                    continue
+                gain = (float(close) + pos.dividends_per_share) / pos.avg_cost - 1.0
+                hit = gain >= _req(rule.pct)
+            elif rule.kind == "time_stop":
+                hit = held[sid].sessions_held >= int(_req(rule.sessions))
             elif rule.kind == "below_ma":
                 ma = day_px[sid].get(ma_column(int(_req(rule.window))))
                 hit = ma is not None and float(close) < float(ma)

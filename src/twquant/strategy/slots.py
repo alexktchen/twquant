@@ -29,16 +29,15 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
         raise ConfigError(f"策略「{cfg.name}」未設 slots，不能取每日補位候選")
     signal = cfg.signals[0]
     view = wh.view(day)
-    uni = universe_ids(view, day, cfg.universe)
-    if not uni:
-        return []
+    # 先套絕對門檻、再算宇宙：門檻嚴的策略大多數日子沒有任何人過門檻，
+    # 而宇宙過濾要掃全市場 20 日滾動——順序對調不改結果，只省掉白做的工。
     df = compute(
         [signal.factor], view, dates=[day], params={signal.factor: dict(signal.params)}
-    ).filter(
-        pl.col("stock_id").is_in(uni)
-        & pl.col("value").is_not_null()
-        & (pl.col("value") >= cfg.slots.entry_threshold)
-    )
+    ).filter(pl.col("value").is_not_null() & (pl.col("value") >= cfg.slots.entry_threshold))
+    if df.is_empty():
+        return []
+    uni = universe_ids(view, day, cfg.universe)
+    df = df.filter(pl.col("stock_id").is_in(uni))
     rows = sorted(
         ((str(r["stock_id"]), float(r["value"])) for r in df.to_dicts()),
         key=lambda item: (-item[1], item[0]),
