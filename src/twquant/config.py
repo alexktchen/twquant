@@ -138,6 +138,10 @@ class MlLabelConfig(BaseConfig):
     # triple_barrier 專用；其他 transform 下必須留空（寫了卻不生效的配置是 no-op 缺陷）
     barrier_up: float | None = Field(default=None, gt=0.0)
     barrier_down: float | None = Field(default=None, gt=0.0)
+    # D-127：上下緣改為 `barrier × σ`（σ＝該檔 vol_window 日報酬標準差 × √horizon）。
+    # 固定百分比的邊界讓高波動股天生容易碰到，模型會學成「挑波動大的」而非「挑會漲的」。
+    vol_scaled: bool = False
+    vol_window: int | None = Field(default=None, ge=2)
     # 訊號日：daily ＝每個交易日一列（既有模型）；month_end ＝每個日曆月的最後一個
     # 交易日（D-074／D-075）。月營收在次月約 10 日公布，月底是唯一對所有個股都站在
     # 「本月已公布、下月未公布」邊界上的日子。
@@ -168,6 +172,13 @@ class MlLabelConfig(BaseConfig):
             raise ValueError(
                 f"barrier_up／barrier_down 只用於 triple_barrier，transform={self.transform}"
             )
+        if self.vol_scaled:
+            if self.transform != "triple_barrier":
+                raise ValueError(f"vol_scaled 只用於 triple_barrier，transform={self.transform}")
+            if self.vol_window is None:
+                raise ValueError("vol_scaled=True 須同時給 vol_window")
+        elif self.vol_window is not None:
+            raise ValueError("vol_window 只在 vol_scaled=True 時有意義")
         return self
 
     @property

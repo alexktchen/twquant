@@ -2491,6 +2491,8 @@ def ml_train(
             down=cast("float", cfg.label.barrier_down),
             adjusted=cast("bool", cfg.label.total_return),
             max_span_sessions=cfg.label.max_span_sessions,
+            vol_scaled=cfg.label.vol_scaled,
+            vol_window=cfg.label.vol_window,
         )
     elif cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
