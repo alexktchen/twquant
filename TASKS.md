@@ -199,7 +199,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-235 | 通過診斷者成為 E8a／E8b／E8c 進回測，依 D-115 §七 判定並對質 §八 的預測 | DECISIONS D-115 §七 | T-231、T-232、T-234 | — | todo |
 | T-236 | `docs/research/PAPERS-EXIT.md`：出場／停損／meta-labeling 文獻，逐篇核對出處後入庫 | DECISIONS D-115 §一 | — | — | todo |
 | T-237 | 持股出場檢查：`/api/platform/exit-check` ＋「我的追蹤」頁的買進價與逐條規則狀態 | DECISIONS D-116 §三 | T-231 | — | done（2026-09-20；後端 9 條＋端點 1 條、前端 7 條測試，皆先紅後綠。`monitoring/exit_check.py`：`derive_exit_check` 純函數，規則由 `configs/exit_check.yaml` 指向 E 系列策略配置讀出（不另寫數字）；買進價不進 API、停損在前端算；算不出來一律 `triggered: null`（均線歷史不足／分數缺席／分數落後於行情日）。實機驗過三態：台積電全綠、台光電（買進價 5900）停損 15%＋破 10／20 日線為紅、宜鼎未填買進價為灰。順帶：nginx 加 `Cache-Control: no-cache`；修 `RecommendationsPage` 的 TS6133；補 `platform-routing` 測試漏掉的 strategies 頁。後端 check 全綠 1009 passed；前端單元 28／28） |
-| T-238 | 前端瀏覽器測試（`npm run test:browser`）自 D-111 起為紅：fixture 仍用舊分組名，預設 `ml_top20` 過濾後斷言 `/0\.8120/` 找不到 | DECISIONS D-116 §六.2 | — | — | todo |
+| T-238 | 前端瀏覽器測試（`npm run test:browser`）自 D-111 起為紅：fixture 仍用舊分組名，預設 `ml_top20` 過濾後斷言 `/0\.8120/` 找不到 | DECISIONS D-116 §六.2 | — | — | done（2026-09-20；由 T-245 修掉——同一個紅燈，平行的另一條線先修好了。合併 T-245 後 `npm run test:browser` PASS） |
 | T-239 | 確認排程 19:00 觸發時 ML 匯出不會因 parquet 時間戳早於 20:00 截點被守衛擋下（看 2026-09-21 晚上第一次完整執行的 log） | DECISIONS D-116 §六 末段 | — | — | todo |
 | T-226 | pipeline 重跑同一天會在供應層 OOM；`docker compose run` 還回報 exit 0 | WHERE-IS-EVERYTHING 陷阱⑤ | — | A | todo |
 | T-223 | 消息／公告／法說來源接入（獨立研究線：來源、PIT、成本、fixture 全需新規格） | PRD-002 §4.2/§11 | 另立 SPEC | — | todo |
@@ -208,6 +208,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-242 | 個股儀表板衍生層與原件：`readings.ts`（技術摘要、類別分數、因子卡、選股池狀態、資料完整度）、`search.ts`、`exporting.ts`、`DashPrimitives.tsx`（雷達／甜甜圈／儀表／量價熱區／量表）、`useStockData.ts` | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §9 AC-240-2～3 | T-240 | — | done（2026-09-19；先寫測試後實作，Node 單測新增 12 條，合計 33 條全綠。**實機驗證抓到一個既有後端問題並繞開**：`/api/stocks/{sid}/factors` 對不在因子宇宙的 0050 掃整張 `factor_values`，150 秒未回（當時 PG 另有其他重查詢，CPU 佔用不單獨歸因）；因子卡改由 `/factors/history?days=1` 逐因子組出，0050 為 0.1 秒、2330 約 5 秒。後端修正另立 T-244） |
 | T-243 | 個股頁改儀表板版面：指令列、KPI 列、工具列（追蹤／K 線 PNG／日 K CSV／列印）、快速選擇、18 個編號面板、無代號時的搜尋入口；移除被取代的 `StockPicker.tsx`／`StockHeader.tsx` | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §9 AC-240-4～5 | T-241, T-242 | — | done（2026-09-19；瀏覽器測試新增 AC-240-4／5 段落並全數通過，既有 AC-207／208 斷言未改。以真實 PG 資料在 1600／1280／375px 截圖核對 2330、0050 與入口頁：無 console 錯誤、無橫向溢出。前端閘門：`npm test` 33 passed、`npm run test:browser` PASS、`tsc -b` 與 build 通過、oxlint 無新增警告。**已知偏離**：T-240～T-243 是同一次交付、一起上閘門，非測試 diff 合計約 1,700 行，超過 §8「單張 400 行先拆單」的門檻——使用者直接指定整頁改版，此處照實記錄而非事後假裝逐張分開做。**未跑後端 `python -m twquant check`**：本批零 Python 變更，且當時另有工作階段正在 PG 上跑重查詢，不疊加負載） |
 | T-244 | 【後端】`/api/stocks/{sid}/factors` 對非因子宇宙代號掃整張 `factor_values`（主鍵以 factor 開頭，`WHERE stock_id = ?` 用不到）；改為逐因子查詢或補 `(stock_id, date)` 索引，並讓「因子」頁籤不再卡住 | SPEC-009 §4；[SPEC-014](docs/specs/SPEC-014-platform-console.md) §9 已知限制 | — | A | todo（補索引是 27 GB 表上的重操作，須排在沒有其他 PG 工作時，並先 dump） |
+| T-245 | 修掉 D-111／D-112 在前端閘門留下的三處紅燈（`tsc -b` TS6133、Node 單測 AC-201-3、瀏覽器測試停在 AC-206）與一個語意回歸（篩選後為零時分不出「沒有候選」與「候選在別的分組」） | DECISIONS D-118 選項 A | T-227 | — | done（2026-09-19，原編 T-234、PR #74；2026-09-20 併入儀表板分支。**合併時抓到一個 git 沒報的語意衝突**：#79 為了消 TS6133 把 `Filters` 的 `data` 從解構拿掉，本任務則讓 `Filters` 真的用上 `data`，兩邊自動合併後 `tsc -b` 報 TS2304；恢復解構後前端閘門全綠：Node 單測 40 passed、`tsc -b`＋build 通過、瀏覽器 AC 全數 PASS） |
 
 ## 完成紀錄
 

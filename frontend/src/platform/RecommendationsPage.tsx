@@ -107,7 +107,7 @@ export function RecommendationsPage({ route, dataAsOf }: { route: PlatformRoute;
   </div>
 }
 
-function Filters({ route }: { route: PlatformRoute; data: Response | null }) {
+function Filters({ route, data }: { route: PlatformRoute; data: Response | null }) {
   const active = route.query.get('bucket')
   // 已知分組照固定順序；資料裡若有別的分組（舊快照、重建的快照）接在後面，不讓它們變成點不到的死角。
   const present = new Set((data?.runs ?? []).flatMap(run => Object.keys(run.bucket_counts ?? {})))
