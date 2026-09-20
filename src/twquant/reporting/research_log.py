@@ -107,6 +107,8 @@ def backtest_params_hash(
     # 多了一個空欄位而一起改變，DSR 的 distinct 計數就對不回研究登記簿。
     if not strategy_payload.get("exit_rules"):
         strategy_payload.pop("exit_rules", None)
+    if strategy_payload.get("slots") is None:  # T-247：同理，未啟用時不進 hash
+        strategy_payload.pop("slots", None)
     payload = {
         "strategy": strategy_payload,
         "cost": cost.model_dump(mode="json"),

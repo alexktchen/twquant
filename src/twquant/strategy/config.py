@@ -173,9 +173,11 @@ class ExitRuleConfig(BaseConfig):
     寫了卻不生效的配置正是 `scripts/audit_silent.py` 要抓的那一類。
     """
 
-    kind: Literal["stop_loss", "below_ma", "score_below"]
+    kind: Literal["stop_loss", "below_ma", "score_below", "trailing_ma"]
     pct: float | None = None  # stop_loss：收盤（含已收股利）較本輪均價的跌幅，小數
-    window: int | None = None  # below_ma：均線天數（含當日）
+    window: int | None = None  # below_ma／trailing_ma：均線天數（含當日）
+    # trailing_ma：本輪未實現報酬**曾經**達到此值之後，跌破均線才賣（D-120 S0：讓獲利奔跑）
+    min_peak_gain: float | None = None
     factor: str | None = None  # score_below：因子名（如 ml.lgbm_lw_net_20d）
     params: dict[str, object] = Field(default_factory=dict)  # score_below：傳給因子的參數
     threshold: float | None = None  # score_below：因子值低於此即出場
@@ -185,6 +187,7 @@ class ExitRuleConfig(BaseConfig):
         given = {
             "pct": self.pct is not None,
             "window": self.window is not None,
+            "min_peak_gain": self.min_peak_gain is not None,
             "factor": self.factor is not None,
             "threshold": self.threshold is not None,
             "params": bool(self.params),
@@ -192,6 +195,7 @@ class ExitRuleConfig(BaseConfig):
         allowed = {
             "stop_loss": {"pct"},
             "below_ma": {"window"},
+            "trailing_ma": {"window", "min_peak_gain"},
             "score_below": {"factor", "threshold", "params"},
         }[self.kind]
         required = allowed - {"params"}
@@ -202,8 +206,21 @@ class ExitRuleConfig(BaseConfig):
         if self.pct is not None and not 0.0 < self.pct < 1.0:
             raise ValueError(f"stop_loss.pct 須介於 (0, 1)，得到 {self.pct}")
         if self.window is not None and self.window < 2:
-            raise ValueError(f"below_ma.window 須 >= 2，得到 {self.window}")
+            raise ValueError(f"{self.kind}.window 須 >= 2，得到 {self.window}")
+        if self.min_peak_gain is not None and self.min_peak_gain <= 0.0:
+            raise ValueError(f"trailing_ma.min_peak_gain 須 > 0，得到 {self.min_peak_gain}")
         return self
+
+
+class SlotsConfig(BaseConfig):
+    """每日補位模式（T-247／D-120 §五）。給了它，`rebalance`／`selection`／`weighting` 一律不用。
+
+    進場分數＝唯一那個 signal 因子的**原始值**（不做橫斷面標準化）——門檻是絕對的，
+    這正是「沒有夠好的候選就空手」與相對排名的差別。
+    """
+
+    n: int = Field(ge=1)  # 滿手檔數；每格＝成交當時權益 ÷ n
+    entry_threshold: float  # 因子原始值 >= 此值才是候選
 
 
 class StrategyConfig(BaseConfig):
@@ -240,6 +257,8 @@ class StrategyConfig(BaseConfig):
     overlay_params: dict[str, dict[str, object]] = Field(default_factory=dict)
     # 每日出場規則（T-231）。空＝既有行為；任一條觸發即隔日開盤出清。
     exit_rules: list[ExitRuleConfig] = Field(default_factory=list)
+    # 每日補位模式（T-247）。None＝既有的排程再平衡模式。
+    slots: SlotsConfig | None = None
     max_weight_per_stock: float = 0.05
 
     @model_validator(mode="after")
@@ -249,6 +268,10 @@ class StrategyConfig(BaseConfig):
         total = sum(s.weight for s in self.signals)
         if abs(total - 1.0) > 1e-9:
             raise ValueError(f"signals 權重加總須為 1，實際 {total}")
+        if self.slots is not None and len(self.signals) != 1:
+            raise ValueError(
+                f"slots 模式須恰好一個 signal（進場分數取其原始值），得到 {len(self.signals)} 個"
+            )
         return self
 
 

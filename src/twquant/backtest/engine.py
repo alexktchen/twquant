@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
-from twquant.backtest.exits import HeldPosition, exit_reasons, ma_column
+from twquant.backtest.exits import HeldPosition, entry_blocked, exit_reasons, ma_column
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 
@@ -81,6 +81,7 @@ class _Lot:
     cost_shares: int  # 本輪累計買入股數
     cost_amount: float  # 本輪累計買入價金（不含費用）
     min_close: float  # 持有期間最低收盤（含進場日）
+    max_close: float = 0.0  # 持有期間最高收盤（trailing_ma 用，T-247）
     dividends: float = 0.0  # 本輪已收到的股利現金（D-085）；歸零出場時隨 lot 一起消失
 
 
@@ -330,7 +331,11 @@ def _fill(
         lot = state.lots.get(sid)
         if lot is None:  # 本輪首買（部位 0→>0）
             state.lots[sid] = _Lot(
-                entry_date=day, cost_shares=qty, cost_amount=price * qty, min_close=floor0
+                entry_date=day,
+                cost_shares=qty,
+                cost_amount=price * qty,
+                min_close=floor0,
+                max_close=max(price, float(day_close)) if day_close is not None else price,
             )
         else:  # 加碼併入均價
             lot.cost_shares += qty
@@ -368,7 +373,12 @@ def _held(state: _State) -> dict[str, HeldPosition]:
         lot = state.lots.get(sid)
         avg = lot.cost_amount / lot.cost_shares if lot and lot.cost_shares > 0 else 0.0
         dps = lot.dividends / sh if lot and sh > 0 else 0.0
-        out[sid] = HeldPosition(shares=sh, avg_cost=avg, dividends_per_share=dps)
+        out[sid] = HeldPosition(
+            shares=sh,
+            avg_cost=avg,
+            dividends_per_share=dps,
+            peak_close=lot.max_close if lot else 0.0,
+        )
     return out
 
 
@@ -419,12 +429,19 @@ def run_backtest(
     """
     from twquant.data import calendar as cal
     from twquant.strategy.build import build_targets, signal_dates
+    from twquant.strategy.slots import slot_candidates
 
     calendar = cal.load(warehouse)
     sessions = calendar.between(start, end)
     if not sessions:
         raise ValueError(f"[{start},{end}] 無交易日")
-    sig_dates = set(signal_dates(strategy_cfg.rebalance, calendar, start, end))
+    slot_cfg = strategy_cfg.slots
+    # 每日補位模式沒有「再平衡日」：進出都由每天收盤的判斷決定（T-247）
+    sig_dates = (
+        set()
+        if slot_cfg is not None
+        else set(signal_dates(strategy_cfg.rebalance, calendar, start, end))
+    )
     exit_rules = strategy_cfg.exit_rules
     ma_windows = tuple(sorted({int(r.window) for r in exit_rules if r.window is not None}))
     by_date = _price_panel(warehouse, start, end, ma_windows)
@@ -433,6 +450,7 @@ def run_backtest(
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
     exits_pending: dict[str, str] = {}
+    entries_pending: list[str] = []
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
     div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
@@ -458,6 +476,7 @@ def run_backtest(
             lot = state.lots.get(sid)
             if lot is not None:
                 lot.min_close = min(lot.min_close, new_c)
+                lot.max_close = max(lot.max_close, new_c)
             state.last_close[sid] = new_c
 
         if pending is not None:
@@ -471,6 +490,22 @@ def run_backtest(
                 if qty > 0 and px_row is not None and px_row.get("open") is not None:
                     _fill(state, sid, -qty, day, px_row, cost_cfg, max_participation, why)
             exits_pending = {}  # 沒賣掉的（跌停／量不足）今晚會再被判一次
+
+        if slot_cfg is not None and entries_pending:  # 先賣後買：賣出的現金當天就能用
+            pv = _portfolio_value(state, day_px)
+            for sid in entries_pending:
+                if len(state.holdings) >= slot_cfg.n:
+                    break
+                px_row = day_px.get(sid)
+                if sid in state.holdings or px_row is None or px_row.get("open") is None:
+                    continue
+                o = float(px_row["open"])
+                want = int((pv / slot_cfg.n) // (o * _LOT)) * _LOT if o > 0 else 0
+                if want == 0:  # 一格的金額買不起一張：記下來，不靜默略過（T-135 同理）
+                    _unfill(state, sid, "buy", int(pv / slot_cfg.n / o) if o > 0 else 0, day, "lot")
+                    continue
+                _fill(state, sid, want, day, px_row, cost_cfg, max_participation, "entry")
+            entries_pending = []
 
         pos_value = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
         equity_curve.append(
@@ -489,6 +524,18 @@ def run_backtest(
 
         if exit_rules and state.holdings and pending is None:
             exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
+
+        if slot_cfg is not None:
+            # 空位只算「現在真的空著的」：今晚才判定要賣的，明天賣不賣得掉還不知道（跌停）
+            free = slot_cfg.n - len(state.holdings)
+            if free > 0:
+                cands = [
+                    sid
+                    for sid, _ in slot_candidates(strategy_cfg, warehouse, day)
+                    if sid not in state.holdings
+                ]
+                blocked = entry_blocked(exit_rules, cands, day_px, warehouse, day)
+                entries_pending = [sid for sid in cands if sid not in blocked][:free]
 
     equity_series = [e.equity for e in equity_curve]
     mean_equity = sum(equity_series) / len(equity_series)

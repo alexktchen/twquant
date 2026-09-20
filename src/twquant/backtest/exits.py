@@ -27,6 +27,7 @@ class HeldPosition:
     shares: int
     avg_cost: float  # 本輪加權平均買進價（不含費用）
     dividends_per_share: float  # D-085：已收股利攤回單價，否則除息會被當成虧損
+    peak_close: float = 0.0  # 本輪持有期間最高收盤（trailing_ma 用）
 
 
 def ma_column(window: int) -> str:
@@ -36,8 +37,8 @@ def ma_column(window: int) -> str:
 
 def rule_label(rule: ExitRuleConfig) -> str:
     """寫進成交紀錄的出場原因。"""
-    if rule.kind == "below_ma":
-        return f"below_ma_{rule.window}"
+    if rule.kind in ("below_ma", "trailing_ma"):
+        return f"{rule.kind}_{rule.window}"
     if rule.kind == "score_below":
         return f"score_below:{rule.factor}"
     return rule.kind
@@ -77,6 +78,16 @@ def exit_reasons(
             elif rule.kind == "below_ma":
                 ma = day_px[sid].get(ma_column(int(_req(rule.window))))
                 hit = ma is not None and float(close) < float(ma)
+            elif rule.kind == "trailing_ma":
+                pos = held[sid]
+                ma = day_px[sid].get(ma_column(int(_req(rule.window))))
+                peak = (
+                    (pos.peak_close + pos.dividends_per_share) / pos.avg_cost - 1.0
+                    if pos.avg_cost > 0.0
+                    else 0.0
+                )
+                armed = peak >= _req(rule.min_peak_gain)  # 曾經漲到過門檻才上膛
+                hit = armed and ma is not None and float(close) < float(ma)
             else:
                 score = scores.get(sid)
                 hit = score is not None and score < _req(rule.threshold)
@@ -101,3 +112,22 @@ def _scores(
     df = compute([factor], wh.view(day), dates=[day], params={factor: dict(rule.params)})
     df = df.filter(pl.col("stock_id").is_in(ids) & pl.col("value").is_not_null())
     return {str(r["stock_id"]): float(r["value"]) for r in df.to_dicts()}
+
+
+def entry_blocked(
+    rules: Sequence[ExitRuleConfig],
+    ids: Sequence[str],
+    day_px: Mapping[str, Mapping[str, Any]],
+    wh: TableSource,
+    day: dt.date,
+) -> set[str]:
+    """候選裡「買了隔天就會被自己的賣出規則賣掉」的那些（T-247）。
+
+    只看**不需要部位**就能判斷的規則（below_ma／score_below）。停損與 trailing_ma 相對於
+    買進價與持有期高點，對還沒買的股票沒有定義——新部位的未實現報酬是 0，兩者都不會觸發。
+    """
+    free = [r for r in rules if r.kind in ("below_ma", "score_below")]
+    if not free or not ids:
+        return set()
+    fresh = {sid: HeldPosition(shares=0, avg_cost=0.0, dividends_per_share=0.0) for sid in ids}
+    return set(exit_reasons(free, fresh, day_px, wh, day))
