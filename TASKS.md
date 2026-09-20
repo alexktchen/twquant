@@ -207,6 +207,10 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-249 | 賣出模型 SS：SB 進場訊號後展開 120 個持有日的樣本、部位狀態＋均線＋籌碼特徵、鏡像標籤、診斷 | DECISIONS D-120 §四／§六 | T-248 | — | 暫停（2026-09-20；SB 診斷未過，D-121，待裁決） |
 | T-250 | S0／S1／S2 長窗口＋舊金庫期回測、判定、對質預測 | DECISIONS D-120 §七／§八 | T-247、T-249 | — | 暫停（2026-09-20；SB 診斷未過，D-121，待裁決） |
 | T-258 | `scripts/benchmarks_two_windows.py` 有兩個 ruff 錯（BLE001 盲捕 Exception、B007 未用的迴圈變數），使 `python -m twquant check` 在 main 上即為紅——不在任何進行中任務的範圍內 | — | — | — | todo |
+| T-259 | 把 `finmind_hist_institutional`／`finmind_hist_margin` staging 載進 PG（2005~2026，重疊不覆寫官方），重新物化 7 個籌碼因子；載入前後各 pg_dump | DECISIONS D-127 §三 | — | — | todo |
+| T-260 | 波動度標準化的 triple-barrier 標籤（`k × σ`，σ＝20 日報酬標準差 × √20）＋診斷 A（標籤基礎率的月間波動 < 現行一半） | DECISIONS D-127 §二 | — | — | todo |
+| T-261 | 訓練 SB3（23 特徵：12 個股＋3 大盤＋1 排序分位＋7 籌碼）、校準、診斷 B（挑得出方向）與 C（訊號分布 ≥ 50% 月份） | DECISIONS D-127 §三／§四 | T-259、T-260 | — | todo |
+| T-262 | 三條診斷全過才跑 H／L 回測（H 的停利停損改為 ±kσ）並判定、對質 D-127 §六 的預測 | DECISIONS D-127 §五／§六 | T-261 | — | todo |
 | T-253 | (a) 買進機率的 walk-forward isotonic 校準＋校準診斷；門檻改為損益兩平＋10pp | DECISIONS D-124 §零／§一 | T-248 | — | todo |
 | T-254 | (c) SB2：不對稱標籤（先 +10% 於 −5% 之前），訓練一次；SB／SB2 依寫死的規則只帶一個進回測 | DECISIONS D-124 §二 | T-253 | — | todo |
 | T-255 | (b1) 市場狀態閘門（季線下＝弱勢；弱勢且波動 ≥ 250 日第 90 百分位＝恐慌；其餘弱勢＝緩跌不開新倉）＋診斷 | DECISIONS D-124 §三 | T-254 | — | todo |
