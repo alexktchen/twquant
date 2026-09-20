@@ -108,7 +108,7 @@ export function RecommendationsPage({ route, dataAsOf }: { route: PlatformRoute;
   </div>
 }
 
-function Filters({ route, data }: { route: PlatformRoute; data: Response | null }) {
+function Filters({ route }: { route: PlatformRoute; data: Response | null }) {
   const active = route.query.get('bucket')
   return <div className="platform-filter-row">
     <div className="platform-filter-group">

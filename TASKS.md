@@ -198,6 +198,9 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-234 | X 系列三個標籤（XA 10 日最大下跌／XB triple barrier／XC 賣 vs 抱）、各訓練一次、跑 D-115 §六 三條診斷 | DECISIONS D-115 §三／§五／§六 | T-233 | — | todo |
 | T-235 | 通過診斷者成為 E8a／E8b／E8c 進回測，依 D-115 §七 判定並對質 §八 的預測 | DECISIONS D-115 §七 | T-231、T-232、T-234 | — | todo |
 | T-236 | `docs/research/PAPERS-EXIT.md`：出場／停損／meta-labeling 文獻，逐篇核對出處後入庫 | DECISIONS D-115 §一 | — | — | todo |
+| T-237 | 持股出場檢查：`/api/platform/exit-check` ＋「我的追蹤」頁的買進價與逐條規則狀態 | DECISIONS D-116 §三 | T-231 | — | done（2026-09-20；後端 9 條＋端點 1 條、前端 7 條測試，皆先紅後綠。`monitoring/exit_check.py`：`derive_exit_check` 純函數，規則由 `configs/exit_check.yaml` 指向 E 系列策略配置讀出（不另寫數字）；買進價不進 API、停損在前端算；算不出來一律 `triggered: null`（均線歷史不足／分數缺席／分數落後於行情日）。實機驗過三態：台積電全綠、台光電（買進價 5900）停損 15%＋破 10／20 日線為紅、宜鼎未填買進價為灰。順帶：nginx 加 `Cache-Control: no-cache`；修 `RecommendationsPage` 的 TS6133；補 `platform-routing` 測試漏掉的 strategies 頁。後端 check 全綠 1009 passed；前端單元 28／28） |
+| T-238 | 前端瀏覽器測試（`npm run test:browser`）自 D-111 起為紅：fixture 仍用舊分組名，預設 `ml_top20` 過濾後斷言 `/0\.8120/` 找不到 | DECISIONS D-116 §六.2 | — | — | todo |
+| T-239 | 確認排程 19:00 觸發時 ML 匯出不會因 parquet 時間戳早於 20:00 截點被守衛擋下（看 2026-09-21 晚上第一次完整執行的 log） | DECISIONS D-116 §六 末段 | — | — | todo |
 | T-226 | pipeline 重跑同一天會在供應層 OOM；`docker compose run` 還回報 exit 0 | WHERE-IS-EVERYTHING 陷阱⑤ | — | A | todo |
 | T-223 | 消息／公告／法說來源接入（獨立研究線：來源、PIT、成本、fixture 全需新規格） | PRD-002 §4.2/§11 | 另立 SPEC | — | todo |
 

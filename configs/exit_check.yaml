@@ -1,0 +1,26 @@
+# 持股出場檢查（D-116／T-237）：平台「我的追蹤」頁對每一檔持股逐條顯示的出場規則。
+#
+# **這裡不寫任何門檻數字。** 每一條都指向 D-114 事前登記的 E 系列策略配置，
+# 門檻由那份配置的 `exit_rules` 讀出——同一個數字只活在一個地方。
+# E5（停損 20% 或跌破 20 日線）是 E1b 與 E3 的聯集，兩條都已單獨列出，故不重複。
+#
+# RESEARCH ONLY：這些規則尚未通過 D-114 的長窗口送檢，更未經第二保留期驗收。
+rules:
+  - code: E1a
+    label: 停損 15%
+    strategy: lw_e1a_sl15
+  - code: E1b
+    label: 停損 20%
+    strategy: lw_e1b_sl20
+  - code: E2
+    label: 跌破 10 日線
+    strategy: lw_e2_ma10
+  - code: E3
+    label: 跌破 20 日線
+    strategy: lw_e3_ma20
+  - code: E6
+    label: 排序模型說賣（掉出前 30%）
+    strategy: lw_e6_rank_out
+  - code: E7
+    label: 回撤模型說賣（最危險一成）
+    strategy: lw_e7_dd_gate
