@@ -15,7 +15,7 @@ function bars(n: number): Bar[] {
 
 const near = (a: number | null, b: number, eps = 1e-9) => assert.ok(a !== null && Math.abs(a - b) < eps, `${a} vs ${b}`)
 
-test('AC-238-1: SMA, KD and MACD match a hand calculation', () => {
+test('AC-240-1: SMA, KD and MACD match a hand calculation', () => {
   assert.deepEqual(sma([1, 2, 3, 4, 5], 3), [null, null, 2, 3, 4])
   // KD(3): RSV=(C-L3)/(H3-L3)*100, K=2/3*K'+1/3*RSV, D=2/3*D'+1/3*K, both seeded at 50.
   const b: Bar[] = [
@@ -47,7 +47,7 @@ test('AC-238-1: SMA, KD and MACD match a hand calculation', () => {
   near(m[3]!.osc, m[3]!.dif - m[3]!.dea!)
 })
 
-test('AC-238-1: indicators never look ahead — f(data[:t]) equals f(data)[:t]', () => {
+test('AC-240-1: indicators never look ahead — f(data[:t]) equals f(data)[:t]', () => {
   const all = bars(90)
   for (const t of [30, 61, 89]) {
     const head = all.slice(0, t)
@@ -60,13 +60,13 @@ test('AC-238-1: indicators never look ahead — f(data[:t]) equals f(data)[:t]',
   assert.deepEqual(volumeProfile(all), volumeProfile(all))
 })
 
-test('AC-238-1: crosses report direction and skip warm-up gaps', () => {
+test('AC-240-1: crosses report direction and skip warm-up gaps', () => {
   const a = [null, 1, 3, 3, 1, 1]
   const b = [null, 2, 2, 2, 2, null]
   assert.deepEqual(crosses(a, b), [{ i: 2, kind: 'golden' }, { i: 4, kind: 'death' }])
 })
 
-test('AC-238-1: volume profile conserves volume and brackets the POC inside the value area', () => {
+test('AC-240-1: volume profile conserves volume and brackets the POC inside the value area', () => {
   const data = bars(60)
   const vp = volumeProfile(data)!
   const total = data.reduce((s, x) => s + (x.v ?? 0), 0)
@@ -77,7 +77,7 @@ test('AC-238-1: volume profile conserves volume and brackets the POC inside the 
   assert.equal(volumeProfile(data.map(x => ({ ...x, v: 0 }))), null)
 })
 
-test('AC-238-1: up/down volume compares each close with the previous close', () => {
+test('AC-240-1: up/down volume compares each close with the previous close', () => {
   const b: Bar[] = [
     { d: 'a', o: 1, h: 1, l: 1, c: 10, v: 5 }, { d: 'b', o: 1, h: 1, l: 1, c: 11, v: 100 },
     { d: 'c', o: 1, h: 1, l: 1, c: 9, v: 40 }, { d: 'd', o: 1, h: 1, l: 1, c: 9, v: 7 },
@@ -86,7 +86,7 @@ test('AC-238-1: up/down volume compares each close with the previous close', () 
   assert.equal(upDownVolume(b.slice(0, 1), 3), null)
 })
 
-test('AC-238-2: readings state missing inputs instead of inventing a value', () => {
+test('AC-240-2: readings state missing inputs instead of inventing a value', () => {
   const short = technicalReadings({ bars: bars(30), brokerFlow: null, institutional: null, margin: null })
   const trend = short.find(r => r.key === 'trend')!
   assert.equal(trend.tone, 'muted')
@@ -115,7 +115,7 @@ test('AC-238-2: readings state missing inputs instead of inventing a value', () 
   assert.match(trendOf(line(-1)).value, /空頭排列/)
 })
 
-test('AC-238-2: factor categories average only the factors that have a percentile', () => {
+test('AC-240-2: factor categories average only the factors that have a percentile', () => {
   const f = (factor: string, category: string, pct: number | null) => ({ factor, zh: factor, category, value: 1, z: 0, pct, direction: 1, signed_z: 0 })
   const scores = categoryScores([f('a', 'price', 0.8), f('b', 'price', 0.4), f('c', 'chip', null), f('d', 'fundamental', 0.5)])
   near(scores.find(s => s.category === 'price')!.value, 0.6)
@@ -124,7 +124,7 @@ test('AC-238-2: factor categories average only the factors that have a percentil
   assert.equal(scores.find(s => s.category === 'price')!.n, 2)
 })
 
-test('AC-238-2: pool signals list every pool and mark membership by string id', () => {
+test('AC-240-2: pool signals list every pool and mark membership by string id', () => {
   const pool = (key: string, ids: string[], total = ids.length) => ({ key, name: key, rule: '', note: '', total, members: ids.map(stock_id => ({ stock_id, name: null, close: null, chg: null, yoy: null, conc: null, accum_ratio: null, streak: 3 })) })
   const signals = poolSignals([pool('main_accum', ['0050', '2330']), pool('main_distrib', ['2317'], 40)], '0050')
   assert.deepEqual(signals.map(s => [s.key, s.state]), [['main_accum', 'in'], ['main_distrib', 'unknown']])
@@ -134,7 +134,7 @@ test('AC-238-2: pool signals list every pool and mark membership by string id', 
   assert.equal(poolSignals([pool('main_accum', ['50'])], '0050')[0].state, 'out') // "0050" is never coerced to 50.
 })
 
-test('AC-238-2: coverage rows keep failed, empty and loaded sources apart', () => {
+test('AC-240-2: coverage rows keep failed, empty and loaded sources apart', () => {
   const rows = coverageRows([
     { label: '日 K', rows: 120, target: 120, asOf: '2026-09-18', live: true },
     { label: '法人', rows: 0, target: 120, asOf: null, live: true },
@@ -145,7 +145,7 @@ test('AC-238-2: coverage rows keep failed, empty and loaded sources apart', () =
   assert.equal(rows[2].ratio, null)
 })
 
-test('AC-238-3: stock search keeps leading zeroes and only resolves known or well-formed codes', () => {
+test('AC-240-3: stock search keeps leading zeroes and only resolves known or well-formed codes', () => {
   const meta = { '0050': { name: '元大台灣50' }, '2330': { name: '台積電' }, '00878': { name: '國泰永續高股息' } }
   assert.equal(resolveStockQuery('0050', meta), '0050')
   assert.equal(resolveStockQuery(' 0050 元大台灣50 ', meta), '0050')
@@ -157,12 +157,12 @@ test('AC-238-3: stock search keeps leading zeroes and only resolves known or wel
   assert.equal(resolveStockQuery('', meta), null)
 })
 
-test('AC-238-3: the CSV export states the volume unit and never fills a missing volume with zero', () => {
+test('AC-240-3: the CSV export states the volume unit and never fills a missing volume with zero', () => {
   const csv = ohlcCsv([{ d: '2026-09-17', o: 10, h: 12, l: 9, c: 11, v: 15000 }, { d: '2026-09-18', o: 11, h: 11.5, l: 10, c: 10.5 }])
   assert.equal(csv, '\uFEFFdate,open,high,low,close,volume_shares\n2026-09-17,10,12,9,11,15000\n2026-09-18,11,11.5,10,10.5,\n')
 })
 
-test('AC-238-2: the factor card keeps only materialised factors and signs z by direction', () => {
+test('AC-240-2: the factor card keeps only materialised factors and signs z by direction', () => {
   const options = [
     { factor: 'price.reversal_5d', zh: '5日短期反轉', direction: -1 },
     { factor: 'chip.trust_streak', zh: '投信連買天數', direction: 1 },

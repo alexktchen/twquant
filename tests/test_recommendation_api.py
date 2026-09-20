@@ -97,7 +97,7 @@ def test_ac206_3_runs_are_listed_newest_first(tmp_path: Path) -> None:
 
 
 def test_ac206_4_unfiltered_totals_survive_a_bucket_filter(tmp_path: Path) -> None:
-    """篩選後為零時，仍看得出這個 run 其實有候選、各在哪個分組（T-243）。"""
+    """篩選後為零時，仍看得出這個 run 其實有候選、各在哪個分組（T-245）。"""
     save_snapshot(
         tmp_path,
         _snapshot(
