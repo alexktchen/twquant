@@ -103,3 +103,32 @@ def test_pg_view_pit_cutoff_and_missing_table() -> None:
     finally:
         _drop(conn)
         conn.close()
+
+
+def test_scan_survives_a_column_that_is_null_for_the_first_hundred_rows() -> None:
+    """`stock_meta.delist_date` 前面上百列都是 null、後面才出現日期（2026-09-20 實際發生）。
+
+    polars 預設只看前 100 列推斷型別，會把該欄定成 Null，再遇到日期就 ComputeError
+    ——而 `stock_meta` 是每一次宇宙過濾都要讀的表，整個回測與每日 pipeline 會一起倒。
+    """
+    conn = _connect_or_skip()
+    from twquant.data.serving.pg_view import PgTableSource
+
+    try:
+        _drop(conn)
+        with conn.cursor() as cur:
+            cur.execute(f'CREATE SCHEMA "{_SCHEMA}"')
+            cur.execute(f'CREATE TABLE "{_SCHEMA}"."late_dates" (id int, gone date)')
+            cur.executemany(
+                f'INSERT INTO "{_SCHEMA}"."late_dates" VALUES (%s, %s)',
+                [(i, None) for i in range(150)] + [(150, dt.date(2026, 9, 1))],
+            )
+        conn.commit()
+        df = PgTableSource(conn, _SCHEMA).scan("late_dates").collect().sort("id")
+        assert df.height == 151
+        assert df["gone"].dtype == pl.Date
+        assert df["gone"][150] == dt.date(2026, 9, 1)
+        assert df["gone"].null_count() == 150
+    finally:
+        _drop(conn)
+        conn.close()
