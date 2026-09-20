@@ -68,7 +68,10 @@ class PgTableSource:
         query = f'SELECT * FROM "{self._schema}"."{table}"'
         if self._since is not None and self._date_col(table):
             query += f" WHERE date >= '{self._since.isoformat()}'"
-        df = pl.read_database(query, self._conn)
+        # infer_schema_length=None：看完**全部**列才定型別。預設只看前 100 列——某欄若前面全是
+        # null、後面才出現值（`stock_meta.delist_date` 2026-09-20 實際發生），會被定成 Null 型，
+        # 再遇到日期就 ComputeError；而 stock_meta 是每次宇宙過濾都要讀的表。
+        df = pl.read_database(query, self._conn, infer_schema_length=None)
         if df.is_empty():
             raise DataError(table, None, f"PG serving 無資料：{self._schema}.{table}")
         if "available_at" in df.columns:
