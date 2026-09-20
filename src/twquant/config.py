@@ -127,9 +127,17 @@ class MlLabelConfig(BaseConfig):
     # D-074／D-075 新增兩個**換預測標的**的標籤（非調參）：
     #   revenue_surprise ＝下次公布的月營收 YoY 對「本月 YoY ＋ 加速度」的橫斷面殘差
     #   forward_drawdown ＝未來 horizon 個交易日、相對 t 日收盤的最低點跌幅
+    #   triple_barrier ＝t+1 開盤進場後 horizon 日內，收盤先碰 +barrier_up（於 −barrier_down 之前）＝1（D-120）
     transform: Literal[
-        "rank_pct", "cost_adjusted_return", "revenue_surprise", "forward_drawdown"
+        "rank_pct",
+        "cost_adjusted_return",
+        "revenue_surprise",
+        "forward_drawdown",
+        "triple_barrier",
     ] = "rank_pct"
+    # triple_barrier 專用；其他 transform 下必須留空（寫了卻不生效的配置是 no-op 缺陷）
+    barrier_up: float | None = Field(default=None, gt=0.0)
+    barrier_down: float | None = Field(default=None, gt=0.0)
     # 訊號日：daily ＝每個交易日一列（既有模型）；month_end ＝每個日曆月的最後一個
     # 交易日（D-074／D-075）。月營收在次月約 10 日公布，月底是唯一對所有個股都站在
     # 「本月已公布、下月未公布」邊界上的日子。
@@ -149,6 +157,18 @@ class MlLabelConfig(BaseConfig):
     # ——它只是一個看起來很大的數字，會被模型當成真實極端報酬學進去。
     # None ＝不啟用（既有配置逐位元不變）；啟用與否由配置顯式決定。
     max_span_sessions: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _barriers_match_transform(self) -> MlLabelConfig:
+        given = self.barrier_up is not None or self.barrier_down is not None
+        if self.transform == "triple_barrier":
+            if self.barrier_up is None or self.barrier_down is None:
+                raise ValueError("triple_barrier 須同時給 barrier_up 與 barrier_down")
+        elif given:
+            raise ValueError(
+                f"barrier_up／barrier_down 只用於 triple_barrier，transform={self.transform}"
+            )
+        return self
 
     @property
     def is_price_based(self) -> bool:
@@ -250,6 +270,13 @@ class MlConfig(BaseConfig):
     sample_tag: str = ""
     features: tuple[str, ...] = ()  # 空＝訓練時解析為全部註冊因子
     context_features: tuple[str, ...] = ()
+    # 大盤狀態特徵的滾動視窗（T-248）；context_features 為空時不生效
+    context_window: int = Field(default=20, ge=2)
+    # 把**別的模型**的樣本外分位當特徵：{特徵欄名: model_id}（T-248）。只准 walk-forward 樣本外分數
+    model_score_features: dict[str, str] = Field(default_factory=dict)
+    # 訓練樣本限縮到流動性合格池（與回測 universe 同兩個門檻）；None＝全部四碼普通股（既有行為）
+    sample_min_adv_pctl: float | None = Field(default=None, gt=0.0, lt=1.0)
+    sample_min_price: float | None = Field(default=None, gt=0.0)
     label: MlLabelConfig = MlLabelConfig()
     split: MlSplitConfig = MlSplitConfig()
     lgbm: MlLgbmConfig = MlLgbmConfig()

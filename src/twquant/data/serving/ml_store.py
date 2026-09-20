@@ -186,3 +186,52 @@ def upsert_ml_scores(conn: Any, schema: str, frame: pl.DataFrame) -> int:
         inserted = cur.rowcount
     conn.commit()
     return int(inserted)
+
+
+def read_prices_barrier(conn: Any, schema: str, start: object, end: object) -> pl.DataFrame:
+    """prices_daily 的 (date, stock_id, open, close, amount) 切片（T-248：triple-barrier 標籤
+    要開盤進場價與逐日收盤，流動性樣本池要成交金額）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, stock_id, open, close, amount FROM "{schema}"."prices_daily" '
+            "WHERE date BETWEEN %s AND %s AND close IS NOT NULL",
+            (start, end),
+        )
+        rows = cur.fetchall()
+    schema_ = {
+        "date": pl.Date,
+        "stock_id": pl.String,
+        "open": pl.Float64,
+        "close": pl.Float64,
+        "amount": pl.Float64,
+    }
+    return pl.DataFrame(rows, schema=schema_, orient="row")
+
+
+def read_index_close(
+    conn: Any, schema: str, index_id: str, start: object, end: object
+) -> pl.DataFrame:
+    """index_daily 的 (date, close) 切片（T-248：大盤狀態特徵）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, close FROM "{schema}"."index_daily" '
+            "WHERE index_id = %s AND date BETWEEN %s AND %s AND close IS NOT NULL ORDER BY date",
+            (index_id, start, end),
+        )
+        rows = cur.fetchall()
+    return pl.DataFrame(rows, schema={"date": pl.Date, "close": pl.Float64}, orient="row")
+
+
+def read_model_rank_pct(
+    conn: Any, schema: str, model_id: str, start: object, end: object
+) -> pl.DataFrame:
+    """ml_scores 的 (date, stock_id, rank_pct) 切片（T-248：別的模型的樣本外分位當特徵）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, stock_id, rank_pct FROM "{schema}"."ml_scores" '
+            "WHERE model_id = %s AND date BETWEEN %s AND %s",
+            (model_id, start, end),
+        )
+        rows = cur.fetchall()
+    schema_ = {"date": pl.Date, "stock_id": pl.String, "rank_pct": pl.Float64}
+    return pl.DataFrame(rows, schema=schema_, orient="row")
