@@ -34,9 +34,18 @@ _DETERMINISM: dict[str, object] = {
 }
 
 
-def _params(lgbm: MlLgbmConfig) -> dict[str, object]:
+# 標籤型態決定目標函數，不是可調參數：二元標籤要的是機率，用回歸會吐出 [0,1] 以外的數字。
+OBJECTIVE_BY_TRANSFORM: dict[str, str] = {"triple_barrier": "binary"}
+
+
+def objective_for(transform: str) -> str:
+    """標籤 transform 對應的 LightGBM objective；未列者＝既有的 regression。"""
+    return OBJECTIVE_BY_TRANSFORM.get(transform, "regression")
+
+
+def _params(lgbm: MlLgbmConfig, objective: str = "regression") -> dict[str, object]:
     return {
-        "objective": "regression",
+        "objective": objective,
         "num_leaves": lgbm.num_leaves,
         "learning_rate": lgbm.learning_rate,
         "min_data_in_leaf": lgbm.min_data_in_leaf,
@@ -46,7 +55,12 @@ def _params(lgbm: MlLgbmConfig) -> dict[str, object]:
     }
 
 
-def fit_ranker(frame: pl.DataFrame, feature_cols: Sequence[str], lgbm: MlLgbmConfig) -> lgb.Booster:
+def fit_ranker(
+    frame: pl.DataFrame,
+    feature_cols: Sequence[str],
+    lgbm: MlLgbmConfig,
+    objective: str = "regression",
+) -> lgb.Booster:
     """對 label 非 null 列訓練 LightGBM 回歸（目標＝橫斷面百分位）。特徵缺值原生處理。"""
     data = frame.filter(pl.col("label").is_not_null())
     if data.is_empty():
@@ -56,7 +70,7 @@ def fit_ranker(frame: pl.DataFrame, feature_cols: Sequence[str], lgbm: MlLgbmCon
         label=data["label"].to_numpy(),
         feature_name=list(feature_cols),
     )
-    return lgb.train(_params(lgbm), ds, num_boost_round=lgbm.n_estimators)
+    return lgb.train(_params(lgbm, objective), ds, num_boost_round=lgbm.n_estimators)
 
 
 def predict_scores(
@@ -96,6 +110,7 @@ def walk_forward_train(
     feature_cols: Sequence[str],
     lgbm: MlLgbmConfig,
     progress: Callable[[str], None] | None = None,
+    objective: str = "regression",
 ) -> MlTrainResult:
     """逐窗：以 ≤ train_end 訓練 → 對 [test_start, test_end] 推論（樣本外）。
 
@@ -106,7 +121,7 @@ def walk_forward_train(
     for i, s in enumerate(splits, start=1):
         train = frame.filter(pl.col("date").is_between(s.train_start, s.train_end))
         test = frame.filter(pl.col("date").is_between(s.test_start, s.test_end))
-        booster = fit_ranker(train, feature_cols, lgbm)
+        booster = fit_ranker(train, feature_cols, lgbm, objective)
         scored = predict_scores(booster, test, feature_cols).join(
             test.select("date", "stock_id", "label"), on=["date", "stock_id"], how="left"
         )
@@ -145,6 +160,13 @@ def walk_forward_train(
 # 它就必須進 hash，列進這裡即是掩蓋一次真正的模型變更。
 _BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
     (("sample_tag",), ""),  # 空＝預設樣本
+    # T-248：以下皆為「未使用時等同於欄位不存在」
+    (("label", "barrier_up"), None),
+    (("label", "barrier_down"), None),
+    (("context_window",), 20),  # context_features 為空時不生效；非空時 20 即登記值
+    (("model_score_features",), {}),
+    (("sample_min_adv_pctl",), None),
+    (("sample_min_price",), None),
 )
 
 # **永遠**不進訓練指紋的欄位——不論它們的值是什麼。
@@ -259,6 +281,7 @@ _ID_KIND: dict[str, str] = {
     "cost_adjusted_return": "net_",
     "revenue_surprise": "rev_",  # D-074
     "forward_drawdown": "dd_",  # D-075
+    "triple_barrier": "tb_",  # D-120
 }
 
 # research_log 的 trial_scope（DSR 的家族鍵）。第一段 IC 檢驗記在 ML 家族，
@@ -268,6 +291,7 @@ _TRIAL_SCOPE: dict[str, str] = {
     "cost_adjusted_return": "ml:net_h{h}",
     "revenue_surprise": "ml:revenue_surprise",
     "forward_drawdown": "ml:drawdown_h{h}",
+    "triple_barrier": "ml:triple_barrier_h{h}",
 }
 
 

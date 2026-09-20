@@ -123,6 +123,7 @@ def check(
 #: `research_log`（＝DSR 的試驗計數）與各式落地仍會分岔——實測本輪的兩筆 `ml_train`
 #: 就寫進了 worktree，差點讓試驗帳本一分為二。此環境變數讓所有寫入路徑一次對齊。
 _DATA_DIR_ENV = "TWQUANT_DATA_DIR"
+_CONTEXT_INDEX_ID = "TAIEX"  # 大盤狀態特徵用的指數（T-248；與 index_trend_gate 同一個）
 
 
 def _load_system() -> SystemConfig:
@@ -2377,12 +2378,16 @@ def ml_train(
     from twquant.data.serving import store
     from twquant.data.serving.ml_store import (
         read_corporate_events,
+        read_index_close,
+        read_model_rank_pct,
         read_monthly_revenue,
+        read_prices_barrier,
         read_prices_close,
         read_prices_open,
         read_prices_training,
     )
     from twquant.ml import train as mlt
+    from twquant.ml.context import CONTEXT_FEATURES, market_state_features
     from twquant.ml.dataset import (
         assemble,
         assert_feature_coverage,
@@ -2391,8 +2396,10 @@ def ml_train(
         excess_rank_labels,
         forward_drawdown_labels,
         forward_open_returns,
+        liquid_pool,
         month_end_signal_dates,
         revenue_surprise_labels,
+        triple_barrier_labels,
     )
     from twquant.ml.splits import walk_forward_splits
 
@@ -2416,6 +2423,7 @@ def ml_train(
             "cost_adjusted_return": read_prices_training,
             "forward_drawdown": read_prices_close,  # D-075：回撤以收盤價為基準
             "revenue_surprise": read_prices_close,  # 只用來取交易日曆，欄位不進標籤
+            "triple_barrier": read_prices_barrier,  # D-120：開盤進場價＋逐日收盤＋成交金額
         }
         px = _readers.get(cfg.label.transform, read_prices_open)(conn, scfg.pg_schema, start, end)
         events = (
@@ -2426,6 +2434,20 @@ def ml_train(
             if cfg.label.transform == "revenue_surprise"
             else None
         )
+        unknown_ctx = sorted(set(cfg.context_features) - set(CONTEXT_FEATURES))
+        if unknown_ctx:
+            raise typer.BadParameter(
+                f"未知的 context_features：{unknown_ctx}；可用：{CONTEXT_FEATURES}"
+            )
+        index_px = (
+            read_index_close(conn, scfg.pg_schema, _CONTEXT_INDEX_ID, start, end)
+            if cfg.context_features
+            else None
+        )
+        model_scores = {
+            col: read_model_rank_pct(conn, scfg.pg_schema, mid, start, end)
+            for col, mid in cfg.model_score_features.items()
+        }
     finally:
         conn.close()
     # 標籤宇宙＝四碼普通股（cloud.stock_pattern，同 screener/雲端白名單）：prices 含
@@ -2461,6 +2483,15 @@ def ml_train(
             adjusted=cast("bool", cfg.label.total_return),
             max_span_sessions=cfg.label.max_span_sessions,
         )
+    elif cfg.label.transform == "triple_barrier":
+        labels = triple_barrier_labels(
+            px,
+            horizon=cfg.horizon_days,
+            up=cast("float", cfg.label.barrier_up),
+            down=cast("float", cfg.label.barrier_down),
+            adjusted=cast("bool", cfg.label.total_return),
+            max_span_sessions=cfg.label.max_span_sessions,
+        )
     elif cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
         labels = cost_adjusted_return_labels(
@@ -2487,6 +2518,33 @@ def ml_train(
     sparsest = sorted(shares.items(), key=lambda kv: kv[1])[:5]
     typer.echo("特徵覆蓋最低 5 個：" + "、".join(f"{n} {v:.0%}" for n, v in sparsest))
     frame = assemble(feats, labels)
+    # T-248：個股因子以外的三種欄位。全部 left join——缺值交給 LightGBM 原生處理，但整欄空要擋。
+    if index_px is not None:
+        ctx = market_state_features(
+            index_px, px.select("date", "stock_id", "close"), window=cfg.context_window
+        )
+        frame = frame.join(ctx.select("date", *cfg.context_features), on="date", how="left")
+    for col, scores in model_scores.items():
+        if scores.is_empty():
+            raise typer.BadParameter(
+                f"model_score_features[{col}]：ml_scores 查無 {cfg.model_score_features[col]} 的任何分數"
+            )
+        frame = frame.join(scores.rename({"rank_pct": col}), on=["date", "stock_id"], how="left")
+    features = [*features, *cfg.context_features, *cfg.model_score_features]
+    if cfg.sample_min_adv_pctl is not None or cfg.sample_min_price is not None:
+        if "amount" not in px.columns or "close" not in px.columns:
+            raise typer.BadParameter(
+                "sample_min_* 需要 close 與 amount；此 transform 的價格讀取器沒有提供"
+            )
+        pool = liquid_pool(
+            px,
+            adv_window=cfg.label.adv_window_sessions,
+            min_adv_pctl=cfg.sample_min_adv_pctl,
+            min_price=cfg.sample_min_price,
+        )
+        before = frame.height
+        frame = frame.join(pool, on=["date", "stock_id"], how="inner")
+        typer.echo(f"流動性樣本池：{before} → {frame.height} 列")
     if cfg.label.signal_dates == "month_end":
         # 月頻標籤下，其餘交易日的列全是 label null 的空殼——留著只會讓
         # walk_forward_train 對它們逐日推論（十倍以上的無用計算），且讓
@@ -2507,10 +2565,15 @@ def ml_train(
         f" ~ {cast('dt.date | None', labeled['date'].max())}）、"
         f"{len(splits)} 窗"
     )
-    result = mlt.walk_forward_train(frame, splits, features, cfg.lgbm, progress=typer.echo)
+    objective = mlt.objective_for(cfg.label.transform)
+    result = mlt.walk_forward_train(
+        frame, splits, features, cfg.lgbm, progress=typer.echo, objective=objective
+    )
     ic = mlt.oos_rank_ic(result.oos_scores)
     train_end = days[-cfg.split.vault_days - 1] if cfg.split.vault_days else days[-1]
-    deploy = mlt.fit_ranker(frame.filter(pl.col("date") <= train_end), features, cfg.lgbm)
+    deploy = mlt.fit_ranker(
+        frame.filter(pl.col("date") <= train_end), features, cfg.lgbm, objective
+    )
     model_id = mlt.make_model_id(train_end, cfg, cost_cfg=cost_cfg)
     mdir = (Path(out) if out else Path(sys_cfg.data_dir) / "models") / model_id
     mlt.save_model(
@@ -2534,6 +2597,7 @@ def ml_train(
             "ml_config_hash": config_hash(cfg),
             "cost_config_hash": config_hash(cost_cfg) if cost_cfg is not None else None,
             "label": cfg.label.model_dump(mode="json"),
+            "objective": objective,
             "horizon_days": cfg.horizon_days,
             "lightgbm_version": lightgbm.__version__,
             "oos_rank_ic": ic,
