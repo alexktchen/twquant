@@ -46,3 +46,17 @@
 .platform-exit-unknown { background: transparent; border: 1px dashed rgba(128, 128, 128, 0.7); opacity: 0.85; }
 .platform-exit-date { display: block; font-size: 11px; opacity: 0.7; }
 .platform-price-input { width: 7.5em; }
+
+/* D-122 模型資訊卡：run 卡片上的人話名稱、描述與 IC 勝率。口徑與數字一律同框。 */
+.platform-model-card { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--panel-2); }
+.platform-model-card p { margin: 0; font: inherit; font-size: 12px; line-height: 1.75; color: var(--fg); }
+.platform-model-headline { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.platform-model-headline strong { font-size: 14px; }
+.platform-model-role { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 10px; color: var(--muted); }
+.platform-model-card .platform-model-desc { margin-top: 4px; color: var(--muted); }
+.platform-model-metrics { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.platform-model-metrics li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.platform-model-metric-label { min-width: 9rem; color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+.platform-model-card .platform-model-note { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.platform-model-card .platform-model-caveat { margin-top: 6px; padding-left: 9px; border-left: 2px solid var(--warn); font-size: 11px; color: var(--muted); }
+.platform-model-card .platform-model-stale { margin-top: 8px; padding-left: 9px; border-left: 2px solid var(--crit); font-size: 11px; color: var(--muted); }

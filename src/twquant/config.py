@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 from pathlib import Path
@@ -352,6 +353,84 @@ class MlConfig(BaseConfig):
             raise ValueError(
                 f"split.embargo_days（{self.split.embargo_days}）須 ≥ "
                 f"horizon_days（{self.horizon_days}），否則標籤洩漏進測試期"
+            )
+        return self
+
+
+class ModelMeasurement(BaseConfig):
+    """模型的一次量測：數字、期間與出處（D-122）。**沒有出處的數字不准上畫面。**
+
+    `hit_rate` 一律是 **IC 勝率**——當天橫斷面 RankIC > 0 的訊號日比例。D-061 的
+    日勝率（組合報酬為正的交易日）與逐筆勝率（平倉往返為正）是另外兩件事，
+    不得填進這個欄位；三者在同一張卡片上差十幾到四十個百分點。
+    """
+
+    label: str  # 畫面上這組數字的名字，如「樣本外」「未見資料（金庫期）」
+    rank_ic: float
+    hit_rate: float
+    n_days: int
+    period_start: dt.date
+    period_end: dt.date
+    measured_on: dt.date
+    source: str  # 重算指令或報告路徑——數字要能被重算，否則沒人知道它何時過期
+
+    @model_validator(mode="after")
+    def _numbers_are_possible(self) -> ModelMeasurement:
+        if not 0.0 <= self.hit_rate <= 1.0:
+            raise ValueError(f"hit_rate 是比例，須介於 [0, 1]，得到 {self.hit_rate}")
+        if self.n_days < 1:
+            raise ValueError(f"n_days 須 >= 1，得到 {self.n_days}")
+        if self.period_end < self.period_start:
+            raise ValueError(
+                f"period_end（{self.period_end}）不得早於 period_start（{self.period_start}）"
+            )
+        if self.measured_on < self.period_end:
+            raise ValueError(
+                f"measured_on（{self.measured_on}）不得早於 period_end（{self.period_end}）"
+                "——量測不可能發生在被量測的期間結束之前"
+            )
+        if not self.source.strip():
+            raise ValueError("source 不得為空：數字要能被重算，否則下一次重訓不會有人發現它過期")
+        return self
+
+
+class ModelCatalogEntry(BaseConfig):
+    """一個模型在畫面上的人話身分（D-122）。代號仍是身分，這裡是註解。"""
+
+    name: str
+    role: Literal["ranking", "risk_gate", "aux", "retired"]
+    description: str
+    caveat: str = ""
+    # 登記時那一版模型的指紋（meta.json 的 artifact_fingerprint）。推薦快照存的是同一個值；
+    # 不符＝模型重訓過而數字還是舊的——T-180 就是這樣讓三份文件留著重訓前的 IC 至今。
+    artifact_fingerprint: str = Field(pattern=r"^[0-9a-f]{16}$")
+    measurements: tuple[ModelMeasurement, ...] = ()
+
+    @model_validator(mode="after")
+    def _card_says_something(self) -> ModelCatalogEntry:
+        if not self.name.strip() or not self.description.strip():
+            raise ValueError("name 與 description 不得為空——卡片上不印空白註解")
+        if not self.measurements:
+            raise ValueError("measurements 不得為空：沒有量測過的模型不在卡片上給數字")
+        return self
+
+
+class ModelCatalogConfig(BaseConfig):
+    """model_catalog.yaml（SPEC-014 §10）：卡片上人話名稱、描述與勝率的唯一來源。
+
+    讀取層不重算 IC（SPEC-014 §3 禁止 GET 觸發研究運算），前端不寫死數字；
+    要更新數字就跑 `scripts/model_ic_hitrate.py` 改這個檔。
+    """
+
+    hit_rate_definition: str = ""
+    models: dict[str, ModelCatalogEntry] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _registered_models_need_a_definition(self) -> ModelCatalogConfig:
+        if self.models and not self.hit_rate_definition.strip():
+            raise ValueError(
+                "hit_rate_definition 不得為空：有登記模型就會有百分比上畫面，"
+                "而 D-061 的三個勝率必須在畫面上分辨得出來"
             )
         return self
 

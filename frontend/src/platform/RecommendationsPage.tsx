@@ -34,7 +34,9 @@ function InsightCell({ insight }: { insight: Insight | null }) {
     {insight.recommended_bucket && <span className="platform-suggestion">LLM 提議：{BUCKET_LABEL[insight.recommended_bucket]}</span>}
   </span>
 }
-type Run = { run_id: string; model_id: string; as_of: string; generated_at: string; published_at: string | null; mode: 'research' | 'reconstructed'; artifact_fingerprint: string; candidates: Candidate[]; candidate_total: number; candidate_total_all: number; bucket_counts: Record<string, number> }
+type Measurement = { label: string; rank_ic: number; hit_rate: number; n_days: number; period_start: string; period_end: string; measured_on: string; source: string }
+type ModelInfo = { name: string; role: string; description: string; caveat: string; hit_rate_note: string; artifact_fingerprint: string; run_fingerprint: string; stale: boolean; measurements: Measurement[] }
+type Run = { run_id: string; model_id: string; as_of: string; generated_at: string; published_at: string | null; mode: 'research' | 'reconstructed'; artifact_fingerprint: string; candidates: Candidate[]; candidate_total: number; candidate_total_all: number; bucket_counts: Record<string, number>; model_info?: ModelInfo | null }
 type Query = { date: string | null; model: string | null; run: string | null; bucket: string | null; q: string | null; page: number; page_size: number }
 type Response = { runs: Run[]; issues: { run_id: string; detail: string }[]; query: Query }
 
@@ -79,6 +81,37 @@ function href(route: PlatformRoute, patch: Record<string, string | null>, page =
 export function StockName({ stockId }: { stockId: string }) {
   const name = nameOf(useStockNames(), stockId)
   return name ? <span className="platform-stock-name">{name}</span> : null
+}
+
+/** 模型角色的人話名稱；代號仍是身分，這裡只是註解（D-122）。 */
+const MODEL_ROLE_LABEL: Record<string, string> = {
+  ranking: '排序（生產）', risk_gate: '風控閘門', aux: '輔助（策略池）', retired: '已換下',
+}
+const signed = (value: number): string => `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(4)}`
+
+/** 模型的人話名稱、描述與勝率。數字全部來自 configs/model_catalog.yaml，這裡不算任何東西。 */
+function ModelCard({ info }: { info: ModelInfo | null }) {
+  if (info === null) return <p className="platform-model-card platform-muted">
+    這個模型還沒有登記說明（configs/model_catalog.yaml）；卡片不借用其他模型的名稱或數字。
+  </p>
+  return <div className="platform-model-card">
+    <p className="platform-model-headline">
+      <strong>{info.name}</strong><span className="platform-model-role">{MODEL_ROLE_LABEL[info.role] ?? info.role}</span>
+    </p>
+    <p className="platform-model-desc">{info.description}</p>
+    {/* 指紋不符＝模型重訓過而登記的數字還是舊的。寧可少一塊資訊，不要一塊看不出過期的資訊。 */}
+    {info.stale ? <p className="platform-model-stale">
+      登記的數字對應的是另一版模型（登記 {info.artifact_fingerprint}、這份快照 {info.run_fingerprint}），已隱藏勝率而不是照舊顯示。
+    </p> : <ul className="platform-model-metrics">{info.measurements.map(m => <li key={m.label}>
+      <span className="platform-model-metric-label">{m.label}</span>
+      <strong>IC 勝率 {(m.hit_rate * 100).toFixed(1)}%</strong>
+      <span>RankIC {signed(m.rank_ic)}</span>
+      <span className="platform-muted">{m.n_days} 個訊號日 · {m.period_start} ~ {m.period_end} · {m.measured_on} 以 {m.source} 量測</span>
+    </li>)}</ul>}
+    {/* 口徑與數字同框：86% 少了這一句會被讀成「買了八成六會賺」（D-061）。 */}
+    {!info.stale && info.measurements.length > 0 && <p className="platform-model-note">{info.hit_rate_note}</p>}
+    {info.caveat && <p className="platform-model-caveat">{info.caveat}</p>}
+  </div>
 }
 
 /** Present saved ML recommendation runs without substituting factor rankings or demo data. */
@@ -135,6 +168,7 @@ function RunCard({ run, route, compact, dataAsOf }: { run: Run; route: PlatformR
       <span className="platform-eyebrow">{run.mode === 'research' ? 'RESEARCH ONLY' : 'RECONSTRUCTED'}{run.published_at ? '' : ' · 未發布'}</span>
       <h2>{run.model_id}</h2><p>{day} · run {run.run_id}</p>
     </div><a href={routeHref('models', undefined, context)}>查看來源模型 →</a></header>
+    <ModelCard info={run.model_info ?? null} />
     {stale && <div className="platform-stale-note">快照過期：這個 run 的資料截點是 {day}，行情資料已到 {dataAsOf}。這是舊快照，不是今日推薦。</div>}
     {run.candidate_total === 0 ? <div className="platform-query-state">
       {run.candidate_total_all === 0 ? '此 run 已保存，合法地沒有候選股票（零筆，不是讀取失敗）。'

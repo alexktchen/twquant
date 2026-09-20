@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from twquant.config import ServingConfig, SystemConfig, load_config
+from twquant.config import ModelCatalogConfig, ServingConfig, SystemConfig, load_config
 from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
@@ -37,6 +37,7 @@ from twquant.reporting.platform_artifacts import (
     backtest_detail,
     index_backtests,
     index_models,
+    model_info_projection,
 )
 from twquant.reporting.recommendation_snapshot import (
     select_candidates,
@@ -98,6 +99,17 @@ def get_platform_artifact_roots() -> PlatformArtifactRoots:
 
 PlatformArtifactRootsDep = Annotated[PlatformArtifactRoots, Depends(get_platform_artifact_roots)]
 RecommendationDataRootDep = Annotated[Path, Depends(_data_root)]
+
+
+def get_model_catalog() -> ModelCatalogConfig:
+    """Load the registered model cards (D-122); an absent catalog is empty, never an error."""
+    path = snap.CONFIGS_DIR / "model_catalog.yaml"
+    return load_config(path, ModelCatalogConfig) if path.exists() else ModelCatalogConfig()
+
+
+# 預設 None：FastAPI 走依賴注入（HTTP 請求一律拿到已驗證的目錄），直接呼叫端點的測試
+# 則明示自己要哪一份目錄，不必被迫載入 repo 的正式配置。
+ModelCatalogDep = Annotated[ModelCatalogConfig | None, Depends(get_model_catalog)]
 
 
 def _artifact_catalog_response(catalog: ArtifactCatalog, source: str) -> dict[str, object]:
@@ -198,12 +210,15 @@ def get_platform_recommendations(
     q: Annotated[str | None, Query(max_length=64)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
+    model_catalog: ModelCatalogDep = None,
 ) -> dict[str, object]:
     """Read persisted ML recommendation runs; this endpoint never executes inference."""
     try:
         catalog = select_snapshots(data_dir, date=date, model_id=model, run_id=run)
     except OSError as exc:
         raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
+    # 目錄缺席＝每張卡片沒有人話說明（model_info 為 null），名單本身照常（AC-251-3）。
+    registry = model_catalog if model_catalog is not None else ModelCatalogConfig()
     runs: list[dict[str, object]] = []
     start = (page - 1) * page_size
     for item in catalog.runs:
@@ -225,6 +240,10 @@ def get_platform_recommendations(
             {**candidate.model_dump(mode="json"), "insight": insights.get(candidate.stock_id)}
             for candidate in kept[start : start + page_size]
         ]
+        # 卡片上的人話名稱、描述與勝率（D-122）。純查表：數字在配置裡，這裡不算 IC。
+        projection["model_info"] = model_info_projection(
+            registry, item.model_id, item.artifact_fingerprint
+        )
         runs.append(projection)
     return {
         "runs": runs,

@@ -36,7 +36,16 @@ const { chromium } = require('playwright');
       // Older than the offline snapshot's market date, so the stale state is exercised.
       run_id: 'run_a', model_id: 'lgbm_rank_v2', as_of: '2026-06-20T20:00:00+08:00',
       generated_at: '2026-06-20T20:05:00+08:00', published_at: null, mode: 'research', artifact_fingerprint: 'fp-1',
+      // T-251/D-122: the registered model card. Numbers arrive measured; the page never computes them.
+      model_info: {
+        name: '長窗口排序模型', role: 'ranking', description: '每天把全市場排一次序，預測 20 個交易日後扣完成本的超額報酬。',
+        caveat: '部署的是排序，不是策略。', hit_rate_note: 'IC 勝率＝當天橫斷面 RankIC > 0 的訊號日比例，不是買了會賺的比率（D-061）。',
+        artifact_fingerprint: 'fp-1', run_fingerprint: 'fp-1', stale: false,
+        measurements: [{ label: '樣本外', rank_ic: 0.066105, hit_rate: 0.859795, n_days: 2047, period_start: '2017-09-26', period_end: '2026-02-25', measured_on: '2026-09-20', source: 'scripts/model_ic_hitrate.py' }],
+      },
     };
+    // A model that was retrained after the numbers were registered: description stays, numbers go.
+    const staleModelInfo = { ...runBase.model_info, run_fingerprint: 'fp-2', stale: true, measurements: [] };
     const allCandidates = [
       { stock_id: '0050', rank: 1, score: 0.812, bucket: 'ml_top20', reason_ref: null, insight_run_id: null, data_status: 'pending',
         insight: { insight_run_id: 'ins_a', stance: 'conflict', recommended_bucket: 'watch', absent_reason: null, support_n: 2, contradict_n: 1, gap_n: 1 } },
@@ -49,9 +58,9 @@ const { chromium } = require('playwright');
       const [date, bucket, q] = ['date', 'bucket', 'q'].map(key => url.searchParams.get(key));
       const query = { date, model: url.searchParams.get('model'), run: url.searchParams.get('run'), bucket, q, page: 1, page_size: 200 };
       if (date === '2026-09-03') return { runs: [], issues: [], query };
-      if (date === '2026-09-04') return { runs: [{ ...runBase, run_id: 'run_zero', as_of: '2026-09-04T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 0, bucket_counts: {} }], issues: [], query };
+      if (date === '2026-09-04') return { runs: [{ ...runBase, run_id: 'run_zero', as_of: '2026-09-04T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 0, bucket_counts: {}, model_info: null }], issues: [], query };
       // A pre-D-111 snapshot: it has candidates, but none carries a promotion bucket.
-      if (date === '2026-09-05') return { runs: [{ ...runBase, run_id: 'run_legacy', as_of: '2026-09-05T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 1949, bucket_counts: { ml_candidate: 1949 } }], issues: [], query };
+      if (date === '2026-09-05') return { runs: [{ ...runBase, run_id: 'run_legacy', as_of: '2026-09-05T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 1949, bucket_counts: { ml_candidate: 1949 }, model_info: staleModelInfo }], issues: [], query };
       const kept = allCandidates.filter(c => (!bucket || c.bucket === bucket) && (!q || c.stock_id.includes(q)));
       const bucketCounts = {};
       for (const c of allCandidates) bucketCounts[c.bucket] = (bucketCounts[c.bucket] ?? 0) + 1;
@@ -230,6 +239,15 @@ const { chromium } = require('playwright');
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('http://twquant.test/#/overview');
     await page.getByRole('heading', { name: 'lgbm_rank_v2', exact: true }).waitFor();
+    // AC-251-1: the card names the model in plain language and prints the hit rate with its definition.
+    await page.getByText('長窗口排序模型', { exact: false }).waitFor();
+    const overviewCard = await page.locator('.platform-model-card').first().innerText();
+    assert.match(overviewCard, /排序（生產）/);
+    assert.match(overviewCard, /IC 勝率 86\.0%/);
+    assert.match(overviewCard, /RankIC \+0\.0661/);
+    assert.match(overviewCard, /2047 個訊號日 · 2017-09-26 ~ 2026-02-25/);
+    assert.match(overviewCard, /不是買了會賺的比率/); // 口徑與數字同框（D-061）
+    assert.match(overviewCard, /部署的是排序，不是策略/);
     await page.getByText('快照過期', { exact: false }).waitFor();
     await page.getByRole('link', { name: '展開完整清單 →' }).click();
     await page.getByRole('heading', { name: 'ML 選股', exact: true }).waitFor();
@@ -447,9 +465,16 @@ const { chromium } = require('playwright');
     // AC-206-2: zero candidates, nothing generated and read failure stay distinguishable.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-04');
     await page.getByText('合法地沒有候選股票', { exact: false }).waitFor();
+    // AC-251-1: an unregistered model says so; it never borrows another model's card.
+    await page.getByText('還沒有登記說明', { exact: false }).waitFor();
+    assert.equal(await page.getByText('IC 勝率', { exact: false }).count(), 0);
     // T-245: a snapshot saved before D-111 has candidates but no promotion bucket — a different state from an empty run.
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-05');
     await page.getByText('D-111 之前產生的', { exact: false }).waitFor();
+    // AC-251-2: retrained model — the description survives, the stale numbers do not.
+    await page.getByText('長窗口排序模型', { exact: false }).waitFor();
+    await page.getByText('登記的數字對應的是另一版模型', { exact: false }).waitFor();
+    assert.equal(await page.getByText('IC 勝率', { exact: false }).count(), 0);
     assert.equal(await page.getByText('合法地沒有候選股票', { exact: false }).count(), 0);
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-03');
     await page.getByText('2026-09-03 尚未產生推薦快照。', { exact: false }).waitFor();
@@ -530,6 +555,6 @@ const { chromium } = require('playwright');
       await page.getByText(marker, { exact: false }).first().waitFor();
     }
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-240-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220 and AC-220b: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-240-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220, AC-220b and AC-251-1/2: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, model cards whose hit rate always carries its definition and whose stale numbers drop out, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
