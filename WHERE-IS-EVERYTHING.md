@@ -78,6 +78,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | 跑軌別 | `uv run --all-groups python scripts/run_tracks.py --tracks C1,C3 --out D:/project/twquant/data/tracks_c` |
 | 判定 | `scripts/t146_verdict.py`（D-066）、`scripts/d071_verdict.py`（D-071）、`scripts/d067_edges.py`（D-067） |
 | **前端閘門**（後端 gate 不涵蓋） | `cd frontend && npm test && npm run test:browser` |
+| **前端開發預覽** | `cd frontend && npm run dev -- --port 5175`（`/api` 反代到 :8000）。個股頁是儀表板：`#/stocks` 為搜尋入口、`#/stocks/<代號>` 為 18 面板，規格見 SPEC-014 §9 |
 | **產生洞悉證據包** | `uv run --all-groups python -m twquant insights-run --run <run_id> --top 30 --out D:/project/twquant/data` |
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
@@ -170,6 +171,12 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 事故起點是**重運算併發**（兩個 materialize 同時跑把 PG 壓垮）——一次只跑一個。
 大型 PG 工作做完**先 pg_dump 再做下一件事**；還原程序與重放腳本見
 `docs/INCIDENT-2026-09-10-docker-reset.md`、`scripts/run_recovery.sh`。
+
+**⑩ `/api/stocks/{sid}/factors` 對 ETF 會掃整張 `factor_values`（2026-09-19 實測，未修，T-244）。**
+該表主鍵以 `factor` 開頭，端點卻用 `WHERE stock_id = ?` 找最新日：因子宇宙內的股票約 5 秒，
+**不在宇宙的代號（0050 等）150 秒還沒回**（表上只有 `(factor, stock_id, date)` 主鍵與 `(factor, date)` 索引）。個股儀表板已改用
+`/factors/history?days=1` 逐因子查（走主鍵，0050 為 0.1 秒），但「因子」頁籤仍打舊端點——
+**不要在 ETF 頁面開「因子」頁籤**，也不要拿這個端點做批次查詢。
 
 ## 7. 還在跑的東西（2026-09-19 部署後）
 

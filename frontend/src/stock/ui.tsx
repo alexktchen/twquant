@@ -1,36 +1,39 @@
-// 個股因子頁專屬 UI 原件（終端風精煉版）。
+// 個股頁專屬 UI 原件（儀表板風：圓角面板、可選編號徽章、標題列細分隔線）。
 // 只影響個股頁：其他頁沿用 src/ui.tsx 的 Panel/chipCls，樣式演進互不牽動。
 import { DOWN, UP } from '../theme'
+import './dashboard.css'
 
-/* ---------- 終端風面板：方角、標題列含 accent tick、細分隔線 ---------- */
+/* ---------- 儀表板面板：no＝面板編號徽章（裝飾，不進標題的無障礙名稱）---------- */
 export function TPanel({
+  no,
   title,
   sub,
   children,
   className = '',
 }: {
+  no?: string
   title?: string
   sub?: string
   children: React.ReactNode
   className?: string
 }) {
   return (
-    <section className={`bg-[var(--panel)] border border-[var(--line)] rounded-sm ${className}`}>
+    <section className={`dash-panel ${className}`}>
       {title && (
-        <header className="flex items-center gap-2 min-w-0 px-3 md:px-4 py-2 border-b border-[var(--line)]">
-          <span className="w-[3px] self-stretch my-[3px] shrink-0 bg-[var(--accent)]" aria-hidden />
-          <h3 className="text-[12px] font-semibold tracking-[0.06em] whitespace-nowrap">{title}</h3>
-          {sub && <span className="ml-auto min-w-0 truncate text-[10px] mono text-[var(--muted)]" title={sub}>{sub}</span>}
+        <header className="dash-head">
+          {no && <span className="dash-no" aria-hidden>{no}</span>}
+          <h3>{title}</h3>
+          {sub && <span className="dash-sub" title={sub}>{sub}</span>}
         </header>
       )}
-      <div className="p-3 md:p-4">{children}</div>
+      <div className="dash-body">{children}</div>
     </section>
   )
 }
 
 /* ---------- chip：方角＋不換行（手機橫向捲動列用）---------- */
 export const chip = (active: boolean) =>
-  `shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] mono rounded-[2px] border transition-colors ${
+  `shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] mono rounded-[5px] border transition-colors ${
     active
       ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--panel-2)]'
       : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--fg)]'

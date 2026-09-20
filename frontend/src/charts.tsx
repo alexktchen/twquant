@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers, createTextWatermark } from 'lightweight-charts'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorHistPoint } from './api'
-import { ACC, DOWN, LINE, MUT, UP, num, priceFmt } from './theme'
+import { kd, macd, volumeProfile } from './stock/indicators.ts'
+import { ACC, DOWN, LINE, MUT, UP, WARN, num, priceFmt } from './theme'
 import { chipCls } from './ui'
 
 const baseChart = (el: HTMLDivElement, height: number) =>
@@ -15,60 +16,27 @@ const baseChart = (el: HTMLDivElement, height: number) =>
       fontFamily: 'ui-monospace, "Cascadia Code", Consolas, monospace',
       fontSize: 11,
     },
-    grid: { vertLines: { color: 'rgba(35,42,51,0.45)' }, horzLines: { color: LINE } },
+    grid: { vertLines: { color: 'rgba(31,42,60,0.5)' }, horzLines: { color: LINE } },
     rightPriceScale: { borderColor: LINE },
     timeScale: { borderColor: LINE, rightOffset: 2, fixLeftEdge: true, fixRightEdge: true },
     crosshair: {
       mode: CrosshairMode.Normal,
-      vertLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#1b212a' },
-      horzLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#1b212a' },
+      vertLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#172031' },
+      horzLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#172031' },
     },
     handleScale: { axisPressedMouseMove: { time: true, price: false } },
   })
 
 /* ---------- candlestick + 選配副圖（v5 原生 pane：量 / 綜合因子 / 主力買賣超 / 因子z）---------- */
-const VOL_UP = 'rgba(229,72,77,0.45)', VOL_DOWN = 'rgba(46,163,107,0.45)'
+const VOL_UP = 'rgba(240,72,78,0.45)', VOL_DOWN = 'rgba(34,181,115,0.45)'
 // 因子副圖：一因子一 pane，畫方向化 z（z×direction，正=順風）
 export type FactorPane = { label: string; direction: number; series: FactorHistPoint[] }
 // 主圖疊加均線：由呼叫端以「完整史料」計算再裁切，視窗首日的均值才正確
 export type MaLine = { label: string; color: string; points: { time: string; value: number }[] }
 
-/* 量價分布關鍵價位（volume profile）：把視窗內每日成交量按當日 H–L 區間比例攤進價格
-   bins，取 POC（最大量價位）與 70% 價值區頂/底。純視覺化確認層，非預測因子
-   （依據 docs/research/PAPERS-KEYLEVELS.md §C）。 */
-function volumeProfileLevels(data: Candle[]): { poc: number; vah: number; val: number } | null {
-  const pts = data.filter((k) => (k.v ?? k.amt ?? 0) > 0)
-  if (pts.length < 10) return null
-  let lo = Infinity, hi = -Infinity
-  for (const k of pts) { lo = Math.min(lo, k.l); hi = Math.max(hi, k.h) }
-  if (!(hi > lo)) return null
-  const N = 24, bw = (hi - lo) / N
-  const vol = Array.from({ length: N }, () => 0)
-  for (const k of pts) {
-    const v = k.v ?? k.amt ?? 0
-    const span = k.h - k.l
-    const a = Math.max(0, Math.min(N - 1, Math.floor((k.l - lo) / bw)))
-    if (span <= 0) { vol[a] += v; continue }
-    const b = Math.max(a, Math.min(N - 1, Math.floor((k.h - lo) / bw - 1e-9)))
-    for (let i = a; i <= b; i++) {
-      const bLo = lo + i * bw
-      const ov = Math.min(bLo + bw, k.h) - Math.max(bLo, k.l)
-      if (ov > 0) vol[i] += v * (ov / span)
-    }
-  }
-  const total = vol.reduce((s, x) => s + x, 0)
-  if (total <= 0) return null
-  let pocI = 0
-  for (let i = 1; i < N; i++) if (vol[i] > vol[pocI]) pocI = i
-  // 由 POC 向兩側擴張（每步取量較大側）直到涵蓋 70% 成交量
-  let acc = vol[pocI], loI = pocI, hiI = pocI
-  while (acc < total * 0.7 && (loI > 0 || hiI < N - 1)) {
-    const dn = loI > 0 ? vol[loI - 1] : -1
-    const up = hiI < N - 1 ? vol[hiI + 1] : -1
-    if (up >= dn) { hiI++; acc += vol[hiI] } else { loI--; acc += vol[loI] }
-  }
-  return { poc: lo + (pocI + 0.5) * bw, vah: lo + (hiI + 1) * bw, val: lo + loI * bw }
-}
+// 技術指標副圖的輸入：由 RangeCandle 以「完整史料」算好再裁切，視窗首日的值才正確。
+export type KdPanePoint = { time: string; k: number; d: number }
+export type MacdPanePoint = { time: string; dif: number; dea: number | null; osc: number | null }
 
 export type ChartMarker = {
   /** Trading session the marker sits on; already mapped by the caller, never by the library. */
@@ -90,6 +58,9 @@ export function CandleChart({
   keyLevels = false,
   markers,
   focusTime,
+  kdPane,
+  macdPane,
+  onReady,
 }: {
   data: Candle[]
   height?: number
@@ -101,9 +72,15 @@ export function CandleChart({
   keyLevels?: boolean
   markers?: ChartMarker[]
   focusTime?: string | null
+  kdPane?: KdPanePoint[]
+  macdPane?: MacdPanePoint[]
+  /** 圖建立後交出截圖函數（下載 PNG 用），圖銷毀時交出 null；不列入 effect deps，換 callback 不重建圖。 */
+  onReady?: (shot: (() => HTMLCanvasElement) | null) => void
 }) {
   const box = useRef<HTMLDivElement>(null)
   const legend = useRef<HTMLDivElement>(null)
+  const ready = useRef(onReady)
+  ready.current = onReady
   useEffect(() => {
     const el = box.current
     if (!el) return
@@ -131,9 +108,9 @@ export function CandleChart({
 
     // 關鍵價位（視窗內量價分布）：POC 實線 + 70% 價值區頂/底虛線，標在主圖價格軸
     if (keyLevels) {
-      const lv = volumeProfileLevels(data)
+      const lv = volumeProfile(data)
       if (lv) {
-        candle.createPriceLine({ price: lv.poc, color: ACC, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `POC ${priceFmt(lv.poc)}` })
+        candle.createPriceLine({ price: lv.poc, color: WARN, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `POC ${priceFmt(lv.poc)}` })
         candle.createPriceLine({ price: lv.vah, color: MUT, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `VA頂 ${priceFmt(lv.vah)}` })
         candle.createPriceLine({ price: lv.val, color: MUT, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `VA底 ${priceFmt(lv.val)}` })
       }
@@ -150,6 +127,8 @@ export function CandleChart({
     let cumS: any = null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let nbarS: any = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let kS: any = null, dS: any = null, difS: any = null, deaS: any = null, oscS: any = null
 
     if (volume) {
       const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'right' }, pane)
@@ -178,7 +157,7 @@ export function CandleChart({
       nbar.setData(brokerFlow.map((p) => ({ time: p.date, value: Math.round(p.net / 1000), color: p.net >= 0 ? VOL_UP : VOL_DOWN })))
       nbarS = nbar
       let cum = 0
-      cumS = chart.addSeries(LineSeries, { priceScaleId: 'cum', color: ACC, lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, pane)
+      cumS = chart.addSeries(LineSeries, { priceScaleId: 'cum', color: WARN, lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, pane)
       cumS.setData(brokerFlow.map((p) => { cum += Math.round(p.net / 1000); return { time: p.date, value: cum } }))
       stretch.push(2.4)
       titles.push('主力買賣超（張 ｜ 線＝累計）')
@@ -199,6 +178,33 @@ export function CandleChart({
       }))
       stretch.push(1.8)
       titles.push(`${fp.label}（方向化z ｜ 正=順風）`)
+      pane++
+    }
+
+    // KD 副圖：K／D 兩線＋高低檔參考線（數值由 indicators.ts 算好傳入）
+    if (kdPane && kdPane.length > 1) {
+      const fmt = { type: 'price' as const, precision: 1, minMove: 0.1 }
+      kS = chart.addSeries(LineSeries, { color: WARN, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, priceFormat: fmt }, pane)
+      dS = chart.addSeries(LineSeries, { color: ACC, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, priceFormat: fmt }, pane)
+      kS.setData(kdPane.map((p) => ({ time: p.time, value: p.k })))
+      dS.setData(kdPane.map((p) => ({ time: p.time, value: p.d })))
+      for (const level of KD_GUIDES) kS.createPriceLine({ price: level, color: MUT, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '' })
+      stretch.push(1.8)
+      titles.push(`KD（橙＝K ｜ 藍＝D ｜ 虛線 ${KD_GUIDES.join('／')}）`)
+      pane++
+    }
+
+    // MACD 副圖：OSC 柱＋DIF／訊號線
+    if (macdPane && macdPane.length > 1) {
+      const fmt = { type: 'price' as const, precision: 2, minMove: 0.01 }
+      oscS = chart.addSeries(HistogramSeries, { priceFormat: fmt, priceScaleId: 'right', base: 0, priceLineVisible: false, lastValueVisible: false }, pane)
+      oscS.setData(macdPane.filter((p) => p.osc !== null).map((p) => ({ time: p.time, value: p.osc as number, color: (p.osc as number) >= 0 ? VOL_UP : VOL_DOWN })))
+      difS = chart.addSeries(LineSeries, { color: ACC, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, priceFormat: fmt }, pane)
+      difS.setData(macdPane.map((p) => ({ time: p.time, value: p.dif })))
+      deaS = chart.addSeries(LineSeries, { color: WARN, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, priceFormat: fmt }, pane)
+      deaS.setData(macdPane.filter((p) => p.dea !== null).map((p) => ({ time: p.time, value: p.dea as number })))
+      stretch.push(1.8)
+      titles.push('MACD（柱＝OSC ｜ 藍＝DIF ｜ 橙＝訊號線）')
       pane++
     }
 
@@ -234,6 +240,15 @@ export function CandleChart({
       if (nb) html += `　<span style="color:${MUT}">主力當日</span> <b style="color:${nb.value >= 0 ? UP : DOWN}">${nb.value >= 0 ? '+' : ''}${num(nb.value)}</b> 張`
       const cc = cumS && param.seriesData?.get(cumS)
       if (cc) html += `　<span style="color:${MUT}">主力累計</span> <b style="color:${cc.value >= 0 ? UP : DOWN}">${cc.value >= 0 ? '+' : ''}${num(cc.value)}</b> 張`
+      const kv = kS && param.seriesData?.get(kS)
+      const dv = dS && param.seriesData?.get(dS)
+      if (kv && dv) html += `　<span style="color:${MUT}">KD</span> ${Number(kv.value).toFixed(1)}／${Number(dv.value).toFixed(1)}`
+      const df = difS && param.seriesData?.get(difS)
+      const de = deaS && param.seriesData?.get(deaS)
+      const os = oscS && param.seriesData?.get(oscS)
+      if (df) html += `　<span style="color:${MUT}">DIF</span> ${Number(df.value).toFixed(2)}`
+      if (de) html += `　<span style="color:${MUT}">MACD</span> ${Number(de.value).toFixed(2)}`
+      if (os) html += `　<span style="color:${MUT}">OSC</span> <b style="color:${os.value >= 0 ? UP : DOWN}">${Number(os.value).toFixed(2)}</b>`
       lg.style.opacity = '1'
       lg.innerHTML = html
     })
@@ -252,11 +267,13 @@ export function CandleChart({
     }
     const ro = new ResizeObserver(() => box.current && chart.applyOptions({ width: box.current.clientWidth }))
     ro.observe(el)
+    ready.current?.(() => chart.takeScreenshot())
     return () => {
+      ready.current?.(null)
       ro.disconnect()
       chart.remove()
     }
-  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels, markers, focusTime])
+  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels, markers, focusTime, kdPane, macdPane])
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -272,24 +289,32 @@ export function CandleChart({
 /* ---------- range chips (slice history) + 主圖均線/關鍵價位開關 ---------- */
 /* 開關設定 localStorage 持久化：跨股票、跨重整維持使用者最後選擇（不隨換股/換頁重置）。 */
 const CHART_SETTINGS_KEY = 'twquant.chartSettings'
-type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean }
+// 設定版本：v2 起預設視窗由「全部」改為 120 日（半寬的儀表板面板塞十年 K 棒看不出近況）。
+// 舊版會在首次掛載就把預設值寫進 localStorage，無法分辨是不是使用者自己選的，故升版時只重設 range 一次。
+const CHART_SETTINGS_VERSION = 2
+const DEFAULT_RANGE = 120
+type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean; kdOn: boolean; macdOn: boolean }
 function loadChartSettings(): ChartSettings {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(CHART_SETTINGS_KEY) ?? 'null')
     if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>
       return {
-        range: typeof o.range === 'number' ? o.range : 0,
+        range: o.v === CHART_SETTINGS_VERSION && typeof o.range === 'number' ? o.range : DEFAULT_RANGE,
         maOn: Array.isArray(o.maOn) ? o.maOn.filter((x): x is number => typeof x === 'number') : [5, 20],
         levelsOn: typeof o.levelsOn === 'boolean' ? o.levelsOn : true,
+        kdOn: o.kdOn === true,
+        macdOn: o.macdOn === true,
       }
     }
   } catch {
     /* 壞資料：退回預設 */
   }
-  return { range: 0, maOn: [5, 20], levelsOn: true }
+  return { range: DEFAULT_RANGE, maOn: [5, 20], levelsOn: true, kdOn: false, macdOn: false }
 }
-const MA_DEFS: [number, string][] = [[5, '#f2c94c'], [10, '#5aa2f7'], [20, '#e578d1'], [60, '#9b8cff']]
+const MA_DEFS: [number, string][] = [[5, '#f2c94c'], [10, '#5aa2f7'], [20, '#e578d1'], [60, '#2dd4bf']]
+const KD_GUIDES = [80, 20] // KD 高／低檔參考線（與 readings.ts 的 kdHigh／kdLow 同值）
+const INDICATOR_PANE_H = 90 // 每開一個 KD／MACD 副圖加高多少，主圖才不會被壓扁
 export function RangeCandle({
   data,
   height,
@@ -300,6 +325,7 @@ export function RangeCandle({
   markers,
   focusTime,
   onResetView,
+  onReady,
 }: {
   data: Candle[]
   height?: number
@@ -310,22 +336,29 @@ export function RangeCandle({
   markers?: ChartMarker[]
   focusTime?: string | null
   onResetView?: () => void
+  onReady?: (shot: (() => HTMLCanvasElement) | null) => void
 }) {
   const [markersOn, setMarkersOn] = useState(true)
   const [range, setRange] = useState(() => loadChartSettings().range)
   const [maOn, setMaOn] = useState<number[]>(() => loadChartSettings().maOn)
   const [levelsOn, setLevelsOn] = useState(() => loadChartSettings().levelsOn)
+  const [kdOn, setKdOn] = useState(() => loadChartSettings().kdOn)
+  const [macdOn, setMacdOn] = useState(() => loadChartSettings().macdOn)
   useEffect(() => {
     try {
-      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ range, maOn, levelsOn }))
+      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ v: CHART_SETTINGS_VERSION, range, maOn, levelsOn, kdOn, macdOn }))
     } catch {
       /* 隱私模式等寫入失敗：設定僅本次會話有效 */
     }
-  }, [range, maOn, levelsOn])
+  }, [range, maOn, levelsOn, kdOn, macdOn])
   const toggleMa = (w: number) => setMaOn((cur) => (cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w]))
   // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，
   // 每次 render 產生新陣列會導致父層任何 state 變動（如搜尋框打字）都整座圖砍掉重建。
-  const shown = useMemo(() => (range > 0 ? data.slice(-range) : data), [data, range])
+  // 要定位的推薦日若早於目前視窗，就暫時顯示完整區間——否則「點日期定位」在短視窗下會默默失效。
+  const shown = useMemo(() => {
+    const windowed = range > 0 ? data.slice(-range) : data
+    return focusTime && windowed.length > 0 && focusTime < windowed[0].d ? data : windowed
+  }, [data, range, focusTime])
   // 副圖切到與主圖同一時間窗（日期字串可字典序比較）
   const cutoff = shown.length ? shown[0].d : ''
   // 均線以「完整史料」滾動平均後才裁切到視窗——視窗首日的均值才正確
@@ -363,6 +396,18 @@ export function RangeCandle({
         : undefined,
     [factorPanes, cutoff],
   )
+  // KD／MACD 同均線：以完整史料遞推後才裁到視窗（指數平滑有記憶，從視窗首日起算會算錯）。
+  const kdShown = useMemo(() => {
+    if (!kdOn) return undefined
+    const pts = kd(data)
+    return data.flatMap((k, i) => (pts[i] && k.d >= cutoff ? [{ time: k.d, k: pts[i]!.k, d: pts[i]!.d }] : []))
+  }, [data, kdOn, cutoff])
+  const macdShown = useMemo(() => {
+    if (!macdOn) return undefined
+    const pts = macd(data.map((k) => k.c))
+    return data.flatMap((k, i) => (pts[i] && k.d >= cutoff ? [{ time: k.d, ...pts[i]! }] : []))
+  }, [data, macdOn, cutoff])
+  const extraH = ((kdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0) + ((macdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0)
   // 標記同樣裁到目前視窗；超出視窗的事件仍留在事件清單，不會被靜默丟掉。
   const shownMarkers = useMemo(
     () => (markers ? markers.filter((m) => m.time >= cutoff) : undefined),
@@ -383,6 +428,12 @@ export function RangeCandle({
             title="視窗內量價分布的關鍵價位：POC＝最大量價位（實線）、VA頂/VA底＝70% 價值區（虛線）"
           >
             關鍵價位
+          </button>
+          <button onClick={() => setKdOn((v) => !v)} className={chipCls(kdOn)} title="KD 隨機指標副圖（9 日 RSV、1/3 平滑）">
+            KD
+          </button>
+          <button onClick={() => setMacdOn((v) => !v)} className={chipCls(macdOn)} title="MACD 副圖（12／26／9，以收盤價計）">
+            MACD
           </button>
           {markers && markers.length > 0 && (
             <button
@@ -415,7 +466,7 @@ export function RangeCandle({
       </div>
       <CandleChart
         data={shown}
-        height={height}
+        height={height === undefined ? undefined : height + extraH}
         volume={volume}
         composite={compShown}
         brokerFlow={flowShown}
@@ -424,6 +475,9 @@ export function RangeCandle({
         keyLevels={levelsOn}
         markers={markersOn && markers?.length ? shownMarkers : undefined}
         focusTime={focusTime}
+        kdPane={kdShown}
+        macdPane={macdShown}
+        onReady={onReady}
       />
     </div>
   )

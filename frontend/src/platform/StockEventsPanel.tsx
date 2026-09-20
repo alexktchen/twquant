@@ -18,7 +18,9 @@ function EventRows({ events }: { events: StockEvent[] }) {
  *
  * Absence of events is shown as absence; it is never rendered as a neutral or negative signal.
  */
-export function StockEventsPanel({ groups, pending, loading, error, selectedDay, onSelectDay }: {
+export function StockEventsPanel({ no, groups, pending, loading, error, selectedDay, onSelectDay }: {
+  /** Dashboard panel number badge; decorative, so the heading name stays 推薦事件. */
+  no?: string
   groups: MarkerGroup[]
   pending: StockEvent[]
   loading: boolean
@@ -28,11 +30,11 @@ export function StockEventsPanel({ groups, pending, loading, error, selectedDay,
 }): JSX.Element {
   const [open, setOpen] = useState<string | null>(null)
   const total = groups.reduce((sum, group) => sum + group.events.length, 0) + pending.length
-  if (error) return <TPanel title="推薦事件"><div className="text-[13px] text-[var(--crit)]">{error}（讀取失敗，不代表這檔沒有被推薦過）</div></TPanel>
-  if (loading) return <TPanel title="推薦事件"><div className="text-[13px] text-[var(--muted)]">讀取推薦事件…</div></TPanel>
-  if (total === 0) return <TPanel title="推薦事件"><div className="text-[13px] text-[var(--muted)]">這檔股票沒有任何保存的推薦事件；圖上因此沒有標記。</div></TPanel>
+  if (error) return <TPanel no={no} title="推薦事件"><div className="text-[13px] text-[var(--crit)]">{error}（讀取失敗，不代表這檔沒有被推薦過）</div></TPanel>
+  if (loading) return <TPanel no={no} title="推薦事件"><div className="text-[13px] text-[var(--muted)]">讀取推薦事件…</div></TPanel>
+  if (total === 0) return <TPanel no={no} title="推薦事件"><div className="text-[13px] text-[var(--muted)]">這檔股票沒有任何保存的推薦事件；圖上因此沒有標記。</div></TPanel>
   return (
-    <TPanel title="推薦事件" sub={`${total} 筆 · 標記依實際發布日`}>
+    <TPanel no={no} title="推薦事件" sub={`${total} 筆 · 標記依實際發布日`}>
       <div className="overflow-x-auto">
         <table className="platform-data-table">
           <thead><tr><th>發布日</th><th>對應 K 棒</th><th>筆數</th><th>最佳名次</th><th>類型</th><th /></tr></thead>
