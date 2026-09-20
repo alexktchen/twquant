@@ -202,3 +202,18 @@ def test_ac9_params_hash_unchanged_without_rules_and_changes_with_them() -> None
     with_rule = _hash(_cfg([{"kind": "stop_loss", "pct": 0.15}]))
     other = _hash(_cfg([{"kind": "stop_loss", "pct": 0.20}]))
     assert len({base, with_rule, other}) == 3
+
+
+def test_ac10_partial_fill_does_not_masquerade_as_an_exit(tmp_path: Path) -> None:
+    """撞到參與率上限的再平衡單仍是 `rebalance`——不得被未成交原因蓋掉（T-231 迴圈變數遮蔽）。"""
+    res = run_backtest(
+        _cfg(),
+        ct.CostConfig(),
+        BASE + dt.timedelta(days=25),
+        BASE + dt.timedelta(days=N_DAYS - 1),
+        _wh(tmp_path),
+        initial_capital=10_000_000.0,
+        max_participation=0.002,  # 逼出部分成交（仍成交得了，只是被砍量）
+    )
+    assert any(u.reason == "participation" for u in res.unfilled)
+    assert {t.reason for t in res.ledger} == {"rebalance"}

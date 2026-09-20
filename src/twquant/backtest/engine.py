@@ -313,8 +313,11 @@ def _fill(
         available_cash=state.cash,
         cost_cfg=cost_cfg,
     )
-    for sh, reason in d.unfilled:
-        _unfill(state, sid, side, sh, day, reason)
+    # 迴圈變數不得叫 reason：那會**蓋掉本函數的 `reason` 參數**，
+    # 於是部分成交（如撞到參與率上限）的再平衡單會被記成 `participation`，
+    # 在結果包裡長得跟出場規則造成的成交一模一樣（T-231 實測 E0 有 8 筆）。
+    for sh, why in d.unfilled:
+        _unfill(state, sid, side, sh, day, why)
     if d.filled_shares <= 0 or d.cost is None:
         return
 
