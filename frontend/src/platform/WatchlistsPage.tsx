@@ -82,7 +82,8 @@ export function WatchlistsPage({ route }: { route: PlatformRoute }): JSX.Element
           </tr>)}</tbody>
         </table></div>}
       <p className="platform-source-note">
-        <strong>RESEARCH ONLY · 出場規則尚未通過送檢。</strong>
+        <strong>RESEARCH ONLY · 這些出場規則在長窗口回測全數未通過（D-117）。</strong>
+        七年回測裡沒有一條贏過「不出場」；跌破均線就賣會讓報酬少一半、回撤反而更深。這裡顯示的是規則的狀態，不是賣出建議。
         紅＝該規則今天收盤已觸發（回測語意是隔日開盤賣出）；灰＝無法判斷，不代表沒事；綠＝未觸發。
         買進價只存在這台瀏覽器，不會送到伺服器；停損用它在本機計算。
       </p>
