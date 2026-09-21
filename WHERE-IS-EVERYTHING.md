@@ -86,6 +86,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **持股出場檢查** | 平台「我的追蹤」頁；API `GET /api/platform/exit-check?ids=2330,2317`（規則清單在 `configs/exit_check.yaml`，門檻在 E 系列策略配置）|
 | **跑 E 系列（出場規則）** | `uv run --all-groups python scripts/run_exit_rules.py --window long`（`--window vault` 跑舊金庫期；`--n10 <代號>` 只能帶一支）|
 | **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
+| **五輪研究總結報告** | `uv run --all-groups python scripts/build_rounds_report.py --out D:/project/twquant/data/reports/rounds_report.html`（只讀結果包、不重跑；每一格用它自己登記下的判定）|
 | **換股進出清單** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/build_trade_journal.py --bundles <結果包或目錄> --out D:/project/twquant/data/reports/trade_journal.html`（只讀 ledger、不重跑回測） |
 | **D-109 診斷計分** | `TWQUANT_PG_DSN=... uv run --all-groups python scripts/d109_scorecard.py --bundles D:/project/twquant/data/tracks_vault_nodiv`（**不是裁決**；結束日 > 2026-08-31 的結果包會被拒收） |
 | **模型勝率重算**（卡片上的數字） | `uv run --all-groups python scripts/model_ic_hitrate.py --models D:/project/twquant/data/models`——印出可貼回 `configs/model_catalog.yaml` 的區塊；指紋與模型不符會以非零碼結束（D-124） |
