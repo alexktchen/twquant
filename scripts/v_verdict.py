@@ -21,7 +21,9 @@ import numpy as np
 
 DATA = pathlib.Path("D:/project/twquant/data")
 DEV_END = dt.date(2026, 8, 31)
-MAX_MDD, MIN_CALMAR = -0.25, 0.67  # D-133 §三
+# D-133 §三 的門檻。回撤是負數，「≤ −25%」指的是**幅度**不超過 25%，故比較是 mdd >= -0.25。
+# 照字面寫成 mdd <= -0.25 會讓愈深的回撤愈容易過——基線 E0 的 −41.4% 也會「通過」。
+MDD_FLOOR, MIN_CALMAR = -0.25, 0.67
 
 CELLS: tuple[tuple[str, str, str], ...] = (
     ("E0", "tracks_e_long_nodiv/E0_lw_e0_ctrl_1x.json", "基線：無 overlay"),
@@ -34,7 +36,9 @@ CELLS: tuple[tuple[str, str, str], ...] = (
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
-    print(f"判準（D-133 §三，事前登記）：MDD ≤ {MAX_MDD:.0%}　Calmar ≥ {MIN_CALMAR}　年化 > 0\n")
+    print(
+        f"判準（D-133 §三，事前登記）：回撤幅度 ≤ {abs(MDD_FLOOR):.0%}　Calmar ≥ {MIN_CALMAR}　年化 > 0\n"
+    )
     print(
         f"{'格':<4}{'年化':>9}{'最大回撤':>11}{'Calmar':>9}{'持股比例':>10}{'低曝險日':>10}  判定"
     )
@@ -53,8 +57,11 @@ def main() -> None:
         eq = np.array([e[1] for e in b["equity"]], dtype=float)
         pos = np.array([e[3] for e in b["equity"]], dtype=float)
         expo = pos / eq
-        ok = m["mdd"] <= MAX_MDD and m["calmar"] >= MIN_CALMAR and m["cagr"] > 0.0
+        ok = m["mdd"] >= MDD_FLOOR and m["calmar"] >= MIN_CALMAR and m["cagr"] > 0.0
         if code == "E0":
+            # 基線必須不達標，否則就是比較方向寫反了（−41.4% 不可能達標）
+            if ok:
+                raise SystemExit(f"基線 E0 竟達標（MDD {m['mdd']:.1%}）——判定方向寫反，拒絕輸出")
             verdict = "基線（不判）"
         else:
             verdict = "通過" if ok else "未通過"
