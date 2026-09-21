@@ -208,6 +208,7 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-250 | S0／S1／S2 長窗口＋舊金庫期回測、判定、對質預測 | DECISIONS D-120 §七／§八 | T-247、T-249 | — | 暫停（2026-09-20；SB 診斷未過，D-121，待裁決） |
 | T-258 | `scripts/benchmarks_two_windows.py` 有兩個 ruff 錯（BLE001 盲捕 Exception、B007 未用的迴圈變數），使 `python -m twquant check` 在 main 上即為紅——不在任何進行中任務的範圍內 | — | — | — | todo |
 | T-273 | 整批補算因子工具（`scripts/backfill_factors_bulk.py`）＋ CLI `--factors`／`--trim-lookback`：逐日路徑單日 3m21s，整批 223 秒算完 2,760 天 | DECISIONS D-138 §六 | — | — | done |
+| T-274 | E0 ＋ 嚴格流動性（LQ1 日均 3 億、LQ2 日均 10 億），與 E0 逐項對照 | DECISIONS D-140 §三 | — | — | todo |
 | T-271 | 分點因子 `chip.broker_*` 整批物化：逐日路徑單日 > 10 分鐘（expanding 隔日沖統計掃全歷史），1,144 天要 190+ 小時——改寫成一次掃完整個面板 | DECISIONS D-138 §五 | — | — | todo |
 | T-272 | 把五支震盪指標加進模型特徵並重訓，比較樣本外 IC（D-138 的方向選擇有事後成分，須靠樣本外驗證）| DECISIONS D-138 §一 | T-270 | — | todo |
 | T-270 | `serving.prices_daily` 有 1,185 列 `close <= 0`，全部集中在 2021-01-04 ~ 2021-02-26（含 5703、5205 等四碼普通股）——查來源並修，在那之前任何用收盤價當分母的計算都要顯式排除 | DECISIONS D-135 | — | — | todo |
