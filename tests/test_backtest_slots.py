@@ -192,3 +192,61 @@ def test_ac9_slot_config_is_validated() -> None:
         )
     with pytest.raises(ValueError):
         StrategyConfig.model_validate(base | {"slots": {"n": 0, "entry_threshold": 0.5}})
+
+
+# ── entry_filters（D-137）：只擋進場，不賣出持股 ────────────────────────────
+#
+# 這個區別不是潔癖：同一條「跌破 MA20」當進場濾網是每筆期望值 +0.96pp，
+# 當出場規則卻砍掉八成期望值（D-136／D-117）。共用一個欄位就表達不出這件事。
+
+
+def _cfg_entry_filter(
+    entry_filters: list[dict[str, object]] | None = None,
+    exit_rules: list[dict[str, object]] | None = None,
+) -> StrategyConfig:
+    return StrategyConfig.model_validate(
+        {
+            "name": "slot_ef",
+            "signals": [{"factor": "price.mom_20d", "weight": 1.0}],
+            "universe": {"min_adv_twd": None, "min_price": None, "max_jump_ratio": None},
+            "overlays": [],
+            "exit_rules": exit_rules or [],
+            "entry_filters": entry_filters or [],
+            "slots": {"n": 2, "entry_threshold": 0.05},
+        }
+    )
+
+
+def test_ac10_entry_filter_never_sells_a_holding(tmp_path: Path) -> None:
+    """**關鍵**：同一條 below_ma 當出場規則會賣，當進場濾網不會賣。"""
+    rule = {"kind": "below_ma", "window": 20}
+    as_exit = _run(tmp_path, _cfg_entry_filter(exit_rules=[rule]))
+    as_filter = _run(tmp_path, _cfg_entry_filter(entry_filters=[rule]))
+    label = "below_ma_20"  # rule_label 會把視窗接在後面
+    assert any(t.reason == label for t in as_exit.ledger if t.side == "sell"), (
+        "前提不成立：當出場規則時本來就沒賣出過，這個測試證明不了任何事"
+    )
+    assert not [t for t in as_filter.ledger if t.side == "sell" and t.reason == label]
+
+
+def test_ac11_entry_filter_rejects_position_dependent_rules() -> None:
+    with pytest.raises(ValueError, match="entry_filters 只接受"):
+        _cfg_entry_filter(entry_filters=[{"kind": "stop_loss", "pct": 0.2}])
+    with pytest.raises(ValueError, match="entry_filters 只接受"):
+        _cfg_entry_filter(
+            entry_filters=[{"kind": "trailing_ma", "window": 20, "min_peak_gain": 0.5}]
+        )
+
+
+def test_ac12_entry_filters_actually_reach_the_engine(tmp_path: Path) -> None:
+    """接線驗證：一條「擋光光」的濾網必須讓買進歸零。
+
+    用 below_ma 驗不到——這個夾具裡入選的兩檔本來就在均線之上，濾網沒東西可擋，
+    結果與無濾網相同，既證明不了生效也證明不了失效。改用一定會觸發的 score_below：
+    門檻設在所有分數之上，每個候選都該被擋下。若 `entry_filters` 沒接到引擎，
+    這裡會照常買進（正是 `scripts/audit_silent.py` 追的無作用配置）。
+    """
+    block_all = {"kind": "score_below", "factor": "price.mom_20d", "threshold": 999.0}
+    assert [t for t in _run(tmp_path, _cfg_entry_filter()).ledger if t.side == "buy"]
+    blocked = _run(tmp_path, _cfg_entry_filter(entry_filters=[block_all]))
+    assert not [t for t in blocked.ledger if t.side == "buy"]

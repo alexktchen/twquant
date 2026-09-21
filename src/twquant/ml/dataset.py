@@ -768,7 +768,7 @@ def down_probability_labels(
         return pl.when(p > 0.0).then(p).otherwise(None).shift(-k).over("stock_id", order_by="date")
 
     entry = _fwd("open", 1)
-    hit = pl.lit(False)  # noqa: FBT003 - polars 運算式，不是布林旗標
+    hit = pl.lit(False)
     for k in range(1, horizon + 1):
         hit = hit | ((_fwd("close", k) / entry - 1.0) <= -drop)
     complete = _fwd("close", horizon).is_not_null() & entry.is_not_null()

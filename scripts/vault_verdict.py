@@ -11,8 +11,8 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from twquant.config import ServingConfig  # noqa: E402
-from twquant.data.serving import store  # noqa: E402
+from twquant.config import ServingConfig
+from twquant.data.serving import store
 
 DATA = Path("D:/project/twquant/data")
 VAULT_LO, VAULT_HI = dt.date(2026, 3, 2), dt.date(2026, 8, 31)

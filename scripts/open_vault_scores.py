@@ -20,14 +20,14 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from twquant.cli import _carry_forward_scores, _load_serving, _ml_feature_frames  # noqa: E402
-from twquant.conventions import TZ  # noqa: E402
-from twquant.data.serving import store  # noqa: E402
-from twquant.data.serving.ml_store import upsert_ml_scores  # noqa: E402
-from twquant.data.serving.schema import ensure_schema  # noqa: E402
-from twquant.ml import score as mls  # noqa: E402
-from twquant.ml import train as mlt  # noqa: E402
-from twquant.ml.dataset import assemble, cross_rank_pct  # noqa: E402
+from twquant.cli import _carry_forward_scores, _load_serving, _ml_feature_frames
+from twquant.conventions import TZ
+from twquant.data.serving import store
+from twquant.data.serving.ml_store import upsert_ml_scores
+from twquant.data.serving.schema import ensure_schema
+from twquant.ml import score as mls
+from twquant.ml import train as mlt
+from twquant.ml.dataset import assemble, cross_rank_pct
 
 MODELS = Path("D:/project/twquant/data/models")
 # （模型目錄, 是否月頻）——月頻的判定來自訓練期的訊號日節奏，不是猜的
