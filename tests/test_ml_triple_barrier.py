@@ -246,6 +246,9 @@ def test_ac18_label_zero_lumps_down_first_with_no_touch() -> None:
     out = triple_barrier_labels(flat, horizon=5, up=0.10, down=0.10)
     assert out.filter(pl.col("date") == D0)["label"][0] == 0.0  # 沒碰到任何邊界也是 0
     down = _px([100.0, 100.0, 85.0, 85.0, 85.0, 85.0, 85.0, 85.0])
-    assert triple_barrier_labels(down, horizon=5, up=0.10, down=0.10).filter(
-        pl.col("date") == D0
-    )["label"][0] == 0.0  # 先跌也是 0——兩者在標籤裡無法區分
+    assert (
+        triple_barrier_labels(down, horizon=5, up=0.10, down=0.10).filter(pl.col("date") == D0)[
+            "label"
+        ][0]
+        == 0.0
+    )  # 先跌也是 0——兩者在標籤裡無法區分

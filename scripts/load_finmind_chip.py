@@ -21,6 +21,7 @@ import datetime as dt
 import pathlib
 import sys
 import time
+from typing import Any
 
 import polars as pl
 
@@ -76,8 +77,8 @@ _SPEC = {
 }
 
 
-def _load_staging(staging: pathlib.Path) -> list[dict]:
-    rows: list[dict] = []
+def _load_staging(staging: pathlib.Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     files = sorted(staging.glob("*.parquet"))
     for f in files:
         df = pl.read_parquet(f)
@@ -88,7 +89,7 @@ def _load_staging(staging: pathlib.Path) -> list[dict]:
     return rows
 
 
-def _to_frame(mapped: list[dict], hour: int, value_cols: list[str]) -> pl.DataFrame:
+def _to_frame(mapped: list[dict[str, Any]], hour: int, value_cols: list[str]) -> pl.DataFrame:
     df = pl.DataFrame(mapped)
     return df.with_columns(
         pl.col("date")

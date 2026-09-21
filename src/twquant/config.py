@@ -134,7 +134,10 @@ class MlLabelConfig(BaseConfig):
         "revenue_surprise",
         "forward_drawdown",
         "triple_barrier",
+        "down_probability",
     ] = "rank_pct"
+    # down_probability（D-131）：未來 horizon 日內最大跌幅達此值即為 1。其他 transform 下須留空
+    drop_threshold: float | None = Field(default=None, gt=0.0, lt=1.0)
     # triple_barrier 專用；其他 transform 下必須留空（寫了卻不生效的配置是 no-op 缺陷）
     barrier_up: float | None = Field(default=None, gt=0.0)
     barrier_down: float | None = Field(default=None, gt=0.0)
@@ -171,6 +174,11 @@ class MlLabelConfig(BaseConfig):
         elif given:
             raise ValueError(
                 f"barrier_up／barrier_down 只用於 triple_barrier，transform={self.transform}"
+            )
+        if (self.transform == "down_probability") != (self.drop_threshold is not None):
+            raise ValueError(
+                f"down_probability 須給 drop_threshold，其他 transform 須留空；"
+                f"transform={self.transform}、drop_threshold={self.drop_threshold}"
             )
         if self.vol_scaled:
             if self.transform != "triple_barrier":

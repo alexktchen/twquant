@@ -728,3 +728,59 @@ def liquid_pool(
     if min_price is not None:
         keep = keep & (pl.col("close") >= min_price)
     return frame.filter(keep).select("date", "stock_id").sort("date", "stock_id")
+
+
+def down_probability_labels(
+    prices: pl.DataFrame,
+    *,
+    horizon: int,
+    drop: float,
+    adjusted: bool = False,
+    max_span_sessions: int | None = None,
+) -> pl.DataFrame:
+    """D-131：個股下跌機率的標籤——t+1 開盤進場後 `horizon` 個交易日內，
+    收盤相對進場價的最大跌幅 ≤ `−drop` 記 1，否則 0。
+
+    與 `forward_drawdown_labels` 的差別：那個回傳**橫斷面百分位**（相對，用來排序），
+    這個回傳 **0/1**（絕對）——「這檔會不會跌 10%」才答得出來，
+    而「相對其他股票跌得比較多」回答不了風險預警的問題。
+
+    與 `triple_barrier_labels` 的差別：**先漲不取消後跌**。這裡只問有沒有跌到，
+    不問先碰哪一邊——那才是「會不會下跌」的字面意思。
+
+    往後不足 `horizon` 列者為 null（沒有答案），不得記 0。
+    """
+    if horizon < 1:
+        raise ValueError(f"horizon 須 ≥ 1，得到 {horizon}")
+    if drop <= 0.0:
+        raise ValueError(f"drop 須 > 0，得到 {drop}")
+    need = {"open", "close"} | ({"adj"} if adjusted else set())
+    missing = sorted(need - set(prices.columns))
+    if missing:
+        raise ValueError(f"down_probability_labels 缺欄位：{missing}")
+    adj = pl.col("adj") if adjusted else pl.lit(1.0)
+    frame = prices.sort("stock_id", "date")
+    if max_span_sessions is not None:
+        frame = session_index(frame).sort("stock_id", "date")
+
+    def _fwd(col: str, k: int) -> pl.Expr:
+        p = pl.col(col) / adj
+        return pl.when(p > 0.0).then(p).otherwise(None).shift(-k).over("stock_id", order_by="date")
+
+    entry = _fwd("open", 1)
+    hit = pl.lit(False)  # noqa: FBT003 - polars 運算式，不是布林旗標
+    for k in range(1, horizon + 1):
+        hit = hit | ((_fwd("close", k) / entry - 1.0) <= -drop)
+    complete = _fwd("close", horizon).is_not_null() & entry.is_not_null()
+    if max_span_sessions is not None:
+        sidx = pl.col("_sidx").cast(pl.Int64)
+        complete = complete & (
+            sidx.shift(-horizon).over("stock_id", order_by="date") - sidx <= max_span_sessions
+        )
+    return (
+        frame.with_columns(
+            pl.when(complete).then(hit.cast(pl.Float64)).otherwise(None).alias("label")
+        )
+        .select("date", "stock_id", "label")
+        .sort("date", "stock_id")
+    )

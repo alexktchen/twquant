@@ -2395,6 +2395,7 @@ def ml_train(
         cost_adjusted_return_labels,
         excess_rank_labels,
         forward_drawdown_labels,
+        down_probability_labels,
         forward_open_returns,
         liquid_pool,
         month_end_signal_dates,
@@ -2424,6 +2425,7 @@ def ml_train(
             "forward_drawdown": read_prices_close,  # D-075：回撤以收盤價為基準
             "revenue_surprise": read_prices_close,  # 只用來取交易日曆，欄位不進標籤
             "triple_barrier": read_prices_barrier,  # D-120：開盤進場價＋逐日收盤＋成交金額
+            "down_probability": read_prices_barrier,  # D-131：同上
         }
         px = _readers.get(cfg.label.transform, read_prices_open)(conn, scfg.pg_schema, start, end)
         events = (
@@ -2493,6 +2495,14 @@ def ml_train(
             max_span_sessions=cfg.label.max_span_sessions,
             vol_scaled=cfg.label.vol_scaled,
             vol_window=cfg.label.vol_window,
+        )
+    elif cfg.label.transform == "down_probability":
+        labels = down_probability_labels(
+            px,
+            horizon=cfg.horizon_days,
+            drop=cast("float", cfg.label.drop_threshold),
+            adjusted=cast("bool", cfg.label.total_return),
+            max_span_sessions=cfg.label.max_span_sessions,
         )
     elif cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
