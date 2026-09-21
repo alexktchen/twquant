@@ -1,13 +1,17 @@
-"""D-133 §三：第七輪 V 系列判定——三條門檻**同時**成立才算通過。
+"""D-133 第七輪 V 系列：**只揭露，不判通過與否**（D-135）。
 
     uv run --all-groups python scripts/v_verdict.py
 
-1. 最大回撤 ≤ −25%
-2. Calmar ≥ 0.67（＝E0 基線，不得用犧牲報酬換回撤）
-3. 年化 > 0
+D-133 §三 原本以「組合最大回撤 ≤ 25%」判定。**該判準已於 D-135 撤銷**——
+使用者更正 15%／20% 這類數字指的是**單檔停損**，組合回撤不是他的判準
+（「我不要組合 我要單一股票」）。故本腳本不再輸出通過／未通過，只揭露數字。
 
-門檻逐字取自 D-133 §三，事前登記、不得事後修改。對照組 E0 只列不判（它是基線本身）。
-另列平均持股比例與「曝險 < 50% 的交易日佔比」——沒有這兩個數，看不出減碼是真的在動還是從未觸發。
+這一輪值得保留的知識：波動度減碼確實能壓低組合回撤，代價是報酬。
+**要看的是 Calmar 有沒有跟著上升**——若各格 Calmar 都停在基線附近，
+表示減碼只是沿著風險報酬線移動、沒有創造價值，那就不值得為它增加複雜度。
+
+另列平均曝險與「曝險 < 50% 的交易日佔比」：沒有這兩個數，
+看不出減碼是真的在動，還是倍數一直卡在 1.0 從未觸發（`lw_mg3_voltgt` 就是後者）。
 """
 
 from __future__ import annotations
@@ -21,9 +25,7 @@ import numpy as np
 
 DATA = pathlib.Path("D:/project/twquant/data")
 DEV_END = dt.date(2026, 8, 31)
-# D-133 §三 的門檻。回撤是負數，「≤ −25%」指的是**幅度**不超過 25%，故比較是 mdd >= -0.25。
-# 照字面寫成 mdd <= -0.25 會讓愈深的回撤愈容易過——基線 E0 的 −41.4% 也會「通過」。
-MDD_FLOOR, MIN_CALMAR = -0.25, 0.67
+BASELINE_CALMAR = 0.67  # E0 基線，作為「減碼有沒有創造價值」的參照線，**不是門檻**
 
 CELLS: tuple[tuple[str, str, str], ...] = (
     ("E0", "tracks_e_long_nodiv/E0_lw_e0_ctrl_1x.json", "基線：無 overlay"),
@@ -36,17 +38,16 @@ CELLS: tuple[tuple[str, str, str], ...] = (
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
+    print("D-135：組合回撤不是使用者的判準，本表只揭露不判定。")
+    print(f"要看 Calmar 有沒有高過基線 {BASELINE_CALMAR}——沒有就表示只是沿風險報酬線移動。\n")
     print(
-        f"判準（D-133 §三，事前登記）：回撤幅度 ≤ {abs(MDD_FLOOR):.0%}　Calmar ≥ {MIN_CALMAR}　年化 > 0\n"
+        f"{'格':<4}{'年化':>9}{'組合回撤':>11}{'Calmar':>9}{'平均曝險':>10}{'低曝險日':>10}  Calmar 增減"
     )
-    print(
-        f"{'格':<4}{'年化':>9}{'最大回撤':>11}{'Calmar':>9}{'持股比例':>10}{'低曝險日':>10}  判定"
-    )
-    passed, missing = [], []
+    missing: list[str] = []
     for code, rel, note in CELLS:
         path = DATA / rel
         if not path.exists():
-            # 「還沒跑」不是「沒通過」——混為一談會讓未完成的批次看起來像有結論
+            # 「還沒跑」不是結論——混為一談會讓未完成的批次看起來像有答案
             print(f"{code:<4}{'（結果包不存在，尚未跑完）':>34}")
             missing.append(code)
             continue
@@ -55,31 +56,14 @@ def main() -> None:
             raise SystemExit(f"{path.name} 結束於 {b['end']}，越過第二保留期邊界")
         m = b["metrics"]
         eq = np.array([e[1] for e in b["equity"]], dtype=float)
-        pos = np.array([e[3] for e in b["equity"]], dtype=float)
-        expo = pos / eq
-        ok = m["mdd"] >= MDD_FLOOR and m["calmar"] >= MIN_CALMAR and m["cagr"] > 0.0
-        if code == "E0":
-            # 基線必須不達標，否則就是比較方向寫反了（−41.4% 不可能達標）
-            if ok:
-                raise SystemExit(f"基線 E0 竟達標（MDD {m['mdd']:.1%}）——判定方向寫反，拒絕輸出")
-            verdict = "基線（不判）"
-        else:
-            verdict = "通過" if ok else "未通過"
-            if ok:
-                passed.append(code)
+        expo = np.array([e[3] for e in b["equity"]], dtype=float) / eq
+        delta = "—" if code == "E0" else f"{m['calmar'] - BASELINE_CALMAR:+.2f}"
         print(
             f"{code:<4}{m['cagr']:>+9.1%}{m['mdd']:>+11.1%}{m['calmar']:>9.2f}"
-            f"{expo.mean():>10.0%}{float((expo < 0.5).mean()):>10.0%}  {verdict}　{note}"
+            f"{expo.mean():>10.0%}{float((expo < 0.5).mean()):>10.0%}  {delta:<8}{note}"
         )
-    print()
     if missing:
-        raise SystemExit(
-            f"**尚未判定**：{'、'.join(missing)} 的結果包還沒產生，先跑完 `scripts/run_vol_target.py`。"
-        )
-    if passed:
-        print(f"**通過：{'、'.join(passed)}。**")
-    else:
-        print("**四格全部未通過。** 依 D-133 §五，不得加第五格、不得改參數重掃。")
+        print(f"\n尚未跑完：{'、'.join(missing)}")
 
 
 if __name__ == "__main__":
