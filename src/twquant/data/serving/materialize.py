@@ -172,14 +172,20 @@ def materialize_day(
     cfg: ServingConfig,
     as_of: dt.date | None = None,
     factors: Sequence[str] | None = None,
+    *,
+    trim_lookback: bool = False,
 ) -> MaterializeResult:
-    """物化單一交易日（as_of 預設為最新行情日）。factors 見 `_compute_universe`（T-094）。"""
+    """物化單一交易日（as_of 預設為最新行情日）。factors 見 `_compute_universe`（T-094）。
+
+    `trim_lookback=True` 依各因子宣告的 `lookback_days` 裁切歷史（T-083）——
+    只算幾支短視窗因子時差別極大：全歷史模式要掃 `broker_trades` 的 5,770 萬列。
+    """
     day = as_of or source.latest_date("prices_daily")
     if day is None:
         raise DataError("prices_daily", None, "無行情資料，無法物化因子")
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
-        return _materialize_on(source, conn, cfg, day, factors)
+        return _materialize_on(source, conn, cfg, day, factors, trim_lookback=trim_lookback)
 
 
 def materialize_range(
@@ -188,9 +194,14 @@ def materialize_range(
     start: dt.date,
     end: dt.date,
     factors: Sequence[str] | None = None,
+    *,
+    trim_lookback: bool = False,
 ) -> list[MaterializeResult]:
     """逐日物化 [start, end]（僅有行情資料的交易日）；as_of 逐日推進，維持 PIT。"""
     days = source.dates_in_range("prices_daily", start, end)
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
-        return [_materialize_on(source, conn, cfg, d, factors) for d in days]
+        return [
+            _materialize_on(source, conn, cfg, d, factors, trim_lookback=trim_lookback)
+            for d in days
+        ]

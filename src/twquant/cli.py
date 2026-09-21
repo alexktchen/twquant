@@ -2073,27 +2073,50 @@ def serving_materialize(
     date: str = typer.Option("today", help="單日 YYYY-MM-DD 或 today（= 最新行情日）"),
     from_: str = typer.Option("", "--from", help="範圍起（含）YYYY-MM-DD"),
     to: str = typer.Option("", "--to", help="範圍迄（含）YYYY-MM-DD"),
+    factors: str = typer.Option(
+        "", help="逗號分隔的因子名；空＝全部。與 composite 集合部分重疊會被拒"
+    ),
+    trim_lookback: bool = typer.Option(
+        False, "--trim-lookback", help="依各因子宣告的 lookback_days 裁切歷史（T-083）"
+    ),
 ) -> None:
     """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。
 
     讀取源改為 PG serving 鏡射表（D-026，全面停用 parquet）：`PgTableSource` 結構滿足
     `PitView` 需要的介面，因子函數不變、只是不再讀本地資料湖。
+
+    **補算少數新因子時務必同時給 `--factors` 與 `--trim-lookback`**：全因子、全歷史模式下
+    單日實測超過 10 分鐘，瓶頸是 `chip.broker_*` 的 expanding 統計要掃 `broker_trades`
+    全部 5,770 萬列（D-138 §五）。只算短視窗因子時兩者合計可差好幾個量級。
     """
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.data.serving import materialize as smat
     from twquant.data.serving import store
     from twquant.data.serving.pg_view import PgTableSource
+    from twquant.errors import TwquantError
+    from twquant.factors.registry import list_factors
 
     cfg = _load_serving()
     conn = store.connect(cfg)
     try:
         source = PgTableSource(conn, cfg.pg_schema)
+        names = [f.strip() for f in factors.split(",") if f.strip()] or None
+        if names:
+            unknown = sorted(set(names) - set(list_factors()))
+            if unknown:
+                raise TwquantError(f"未註冊的因子：{', '.join(unknown)}")
         if from_ and to:
             results = smat.materialize_range(
-                source, cfg, dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+                source,
+                cfg,
+                dt.date.fromisoformat(from_),
+                dt.date.fromisoformat(to),
+                names,
+                trim_lookback=trim_lookback,
             )
         else:
             day = None if date == "today" else dt.date.fromisoformat(date)
-            results = [smat.materialize_day(source, cfg, day)]
+            results = [smat.materialize_day(source, cfg, day, names, trim_lookback=trim_lookback)]
     finally:
         conn.close()
     for r in results:

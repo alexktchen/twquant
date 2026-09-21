@@ -335,3 +335,42 @@ def test_ac3_materialized_value_matches_compute(tmp_path: Path) -> None:
     finally:
         _drop(conn)
         conn.close()
+
+
+# ── D-138：materialize_day／range 透傳 trim_lookback ────────────────────────
+#
+# 這兩個包裝函數原本不接 trim_lookback，CLI 也沒開出來，於是「只補算幾支短視窗因子」
+# 只能走全因子、全歷史路徑——實測單日 3 分 21 秒。透傳後才有辦法在合理時間內補算。
+
+
+def test_d138_materialize_day_passes_trim_lookback_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from twquant.config import ServingConfig
+    from twquant.data.serving import materialize as smat
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    seen: list[bool] = []
+
+    def spy(*a: Any, trim_lookback: bool = False, **kw: Any) -> smat.MaterializeResult:
+        seen.append(trim_lookback)
+        return smat.MaterializeResult(dt.date(2026, 6, 24), 0, 0, 0)
+
+    monkeypatch.setattr(smat, "_materialize_on", spy)
+    # 用字串路徑指定 patch 目標：在測試裡 import 這兩個模組只為了 patch，
+    # 會讓 mypy 抱怨套件沒有顯式匯出它們。
+    monkeypatch.setattr("twquant.data.serving.store.connect", lambda _cfg: _NullConn())
+    monkeypatch.setattr("twquant.data.serving.schema.ensure_schema", lambda *_a: None)
+    cfg = ServingConfig(pg_schema=_SCHEMA)
+    smat.materialize_day(wh, cfg, dt.date(2026, 6, 24), ["price.mom_20d"], trim_lookback=True)
+    smat.materialize_day(wh, cfg, dt.date(2026, 6, 24), ["price.mom_20d"])
+    assert seen == [True, False]
+
+
+class _NullConn:
+    def __enter__(self) -> _NullConn:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        return None

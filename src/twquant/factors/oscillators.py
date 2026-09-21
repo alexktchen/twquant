@@ -25,6 +25,13 @@
 而「K 在 D 之上」（狀態）也只有 −0.12pp。有效的是**強度**（K 多高）不是**轉折**，
 故本模組只提供連續值，不提供交叉的布林旗標。
 
+**`lookback_days` 為什麼遠大於視窗**：KD／RSI／MACD 用 `ewm_mean`，那是**無限記憶**的遞迴——
+值取決於「從多久以前開始算」，不是只看視窗內。實測裁切歷史後 RSI 與全史版差到 **28.3**
+（0~100 的量尺上），KD 差 0.52。故三支 EWM 因子一律宣告 250 個交易日：
+以 RSI 的 alpha=1/14 計，(13/14)^500 ≈ 1e-16，初始條件的殘留已低於浮點精度，
+逐日、裁切、整批三種算法才會得到同一個值。滾動窗的兩支布林也提高到 60，
+避免停牌造成的曆日缺口讓 20 日窗湊不滿。
+
 上表是**探索**（一次測 18 個條件），不是驗證過的結論——方向的選擇有事後成分，
 真正的驗證要靠模型在樣本外的表現。
 """
@@ -63,7 +70,7 @@ def _finish(lf: pl.LazyFrame) -> pl.DataFrame:
     category="price",
     direction=1,  # 量到的是超買較好（+3.16pp），與教科書相反，見模組 docstring
     tables=_TABLES,
-    lookback_days=40,
+    lookback_days=250,
     params={"window": 9, "smooth": 3},
     anchor_invariant=True,
 )
@@ -90,7 +97,7 @@ def kd_k_9(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     category="price",
     direction=1,  # 超買 +2.86pp、超賣 −2.50pp
     tables=_TABLES,
-    lookback_days=45,
+    lookback_days=250,
     params={"window": 14},
     anchor_invariant=True,
 )
@@ -112,7 +119,7 @@ def rsi_14(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     category="price",
     direction=1,  # 站上上軌 +2.07pp
     tables=_TABLES,
-    lookback_days=30,
+    lookback_days=60,
     params={"window": 20, "n_std": 2.0},
     anchor_invariant=True,
 )
@@ -135,7 +142,7 @@ def bollinger_pctb_20(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     category="price",
     direction=1,  # 帶寬收縮 −1.23pp，故「寬」較好
     tables=_TABLES,
-    lookback_days=30,
+    lookback_days=60,
     params={"window": 20, "n_std": 2.0},
     anchor_invariant=True,
 )
@@ -154,7 +161,7 @@ def bollinger_width_20(view: PitView, params: dict[str, object]) -> pl.DataFrame
     category="price",
     direction=1,  # 柱狀為正 +0.75pp
     tables=_TABLES,
-    lookback_days=60,
+    lookback_days=250,
     params={"fast": 12, "slow": 26, "signal": 9},
     anchor_invariant=True,
 )
