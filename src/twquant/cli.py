@@ -162,13 +162,26 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
         tables=tables,
         tolerant=tolerant,
         on_start=_announce,
+        retries=2 if tolerant else 0,  # T-276：容錯模式（每日排程）才重試
     )
-    for o in outcomes:
-        if o.status == "success":
-            typer.secho(f"[OK] {o.source_tag}/{o.table}：{o.rows} 列已存入", fg=typer.colors.GREEN)
+    ok = [o for o in outcomes if o.status == "success"]
+    bad = [o for o in outcomes if o.status != "success"]
+    for o in ok:
+        typer.secho(f"[OK] {o.source_tag}/{o.table}：{o.rows} 列已存入", fg=typer.colors.GREEN)
+    # T-276：**有表成功就代表當天有交易**，那麼失敗的表就不是休市，是真的沒抓到。
+    # 兩者原本都印成黃色 [SKIP]，於是 `margin_daily` 連兩天沒進來也沒人發現
+    # （2026-09-21／22，停在 09-18）。休市時全部的表都會失敗，用這個差異分開它們。
+    for o in bad:
+        if ok:
+            typer.secho(
+                f"[FAILED] {o.source_tag}/{o.table}：{o.detail}"
+                f"　← 同日其他 {len(ok)} 張表有資料，**這天有交易**，不是休市",
+                fg=typer.colors.RED,
+                bold=True,
+            )
         else:
             typer.secho(f"[SKIP] {o.source_tag}/{o.table}：{o.detail}", fg=typer.colors.YELLOW)
-    return sum(1 for o in outcomes if o.status == "success")
+    return len(ok)
 
 
 @app.command()
