@@ -39,6 +39,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | **研究登記簿（DSR）** | `data/research_log/` | 241 檔／1,884 筆 |
 | 長天期回補原始檔 | `data/staging/finmind_hist_*` | 462MB |
 | **推薦快照** | `data/recommendations/<run_id>.json` | 2026-09-04 一份／1943 檔候選 |
+| **紙上交易帳本** | `data/paper_trading/<軌別>/events.jsonl`（D-142，append-only ＋ SHA-256 雜湊鏈） | 每交易日一列 |
 | **洞悉證據包** | `data/insights/<insight_run_id>.json` | 目前 0 份（頁面正確顯示尚未產生） |
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
@@ -83,6 +84,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
 | **補某一天的推薦快照** | `TWQUANT_DATA_DIR=D:/project/twquant/data ... python -m twquant ml score --date <日> --model <模型目錄> [--pg]` 再 `... ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data`（同 run_id 已存在不同內容會 raise；要重出先把舊檔改名為 `.superseded-...`）|
+| **紙上交易：記今天** | `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant paper-trade --date <日> --out D:/project/twquant/data`（已接進每日 pipeline，平常不用手跑；append-only，重跑同一天安全，**不得回填**）|
+| **紙上交易：驗鏈** | `uv run --all-groups python -m twquant paper-verify --out D:/project/twquant/data`——雜湊鏈被動過就以非零碼結束。規則與判讀門檻見 `DECISIONS.md` 的 **D-142**，配置在 `configs/paper_trading.yaml` |
 | **持股出場檢查** | 平台「我的追蹤」頁；API `GET /api/platform/exit-check?ids=2330,2317`（規則清單在 `configs/exit_check.yaml`，門檻在 E 系列策略配置）|
 | **跑 E 系列（出場規則）** | `uv run --all-groups python scripts/run_exit_rules.py --window long`（`--window vault` 跑舊金庫期；`--n10 <代號>` 只能帶一支）|
 | **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
@@ -123,6 +126,19 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 
 完整報告（含 118 格盤點、圖表、八次事前登記的戰績）：
 `scripts/refresh_report.sh` 重新產生，發佈於 Artifact「886 天與 2227 天」。
+
+**2026-09-22：研究改以紙上交易向前累積（D-142 事前登記）。**
+
+八輪加工沒有一輪改善 E0（D-141，在 `claude/d122-s-round2` 分支上）。收尾決定是停止在開發期
+資料上加工，改記新資料。D-142 把它變成制度：帳本 append-only ＋ 雜湊鏈、**拒絕回填**、
+選股事件補記超過 3 天即拒絕，判讀門檻與時程在看到任何數字之前就寫死。
+
+- 規則與門檻：`DECISIONS.md` 的 **D-142**；配置 `configs/paper_trading.yaml`
+- 程式：`src/twquant/reporting/paper_ledger.py`（帳本）、`paper_trading.py`（每日一步）
+- **執行語意與回測同源**：引擎公開 `execute_at_open` 等名字，並有一條逐筆比對
+  `run_backtest` 的測試——否則「前向 vs 回測」的比較是假的
+- **production 帳本尚未開軌**：D-142 仍在待裁決；開軌日與資本一旦寫入就不能改，
+  要改只能另開新軌。開軌只需跑一次 `paper-trade`
 
 ## 6. 動手前一定要知道的三件事
 

@@ -586,3 +586,14 @@ def run_backtest(
         dividends=state.dividends,
         credit_dividends=credit_dividends,
     )
+
+
+# ── 給紙上交易帳本用的公開名字（D-142／T-278）────────────────────────────────
+# 紙上交易必須用**同一套**執行語意：同樣的整張進位、先賣後買、參與率與漲跌停、
+# 成本扣現金、跳價防衛。複製一份遲早會走鐘（而且走鐘的方式是靜默的——前向紀錄
+# 會慢慢變得跟回測不可比），所以這裡把既有實作換個名字公開，不另寫一份。
+# 純運算不變：這三個名字一樣不寫檔，落地由 reporting/ 負責。
+ExecutionState = _State
+execute_at_open = _execute
+force_exit_on_price_jump = _forced_exit
+price_panel = _price_panel

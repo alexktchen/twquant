@@ -1,0 +1,39 @@
+# 紙上交易追蹤（D-142 事前登記，2026-09-22）。
+#
+# **這份配置在追蹤期間不得修改。** 要換模型、換配置、換成本、換資本，都是另開一條新軌
+# （D-142 §六.1），舊軌繼續跑到底。改這裡等於把紙上交易變回回測。
+#
+# 選股規則整份沿用 configs/strategies/lw_e0_ctrl.yaml（E0）——八輪加工沒有一輪改善它
+# （D-141 §一／§三）。模型是 configs/ml.yaml 的 production_ranking_model（D-110）。
+schema_version: 1
+registration: D-142
+strategy: lw_e0_ctrl
+model_id: lgbm_lw_net_h20_20260225_83890036
+
+# 與 E0 回測逐字相同的執行假設（data/tracks_e_long_nodiv/E0_lw_e0_ctrl_1x.json）：
+# 股利不計入、參與率上限 5%。成本本身讀 configs/costs.yaml，不在這裡複製一份。
+credit_dividends: false
+max_participation: 0.05
+
+# 補記時效（D-142 §四.4）。選股事件 3 天：涵蓋週末與一次排程器故障，
+# 再久就等於「知道結果才寫名單」。純標記不含決策，故放寬到 30 天。
+max_record_lag_days: 3
+max_mark_lag_days: 30
+
+tracks:
+  - code: PT-E0-80M
+    label: E0 紙上交易（對齊回測資本）
+    capital_twd: 80000000
+    note: 與 E0 回測的 initial_capital 逐字相同；只有同資本才比得出「前向 vs 回測」的差。
+  - code: PT-E0-RETAIL
+    label: E0 紙上交易（散戶資本）
+    capital_twd: 2250000
+    note: 15 檔 × 15 萬——T-148 已經在用的散戶基準。與 80M 軌的差額就是「整張買不起」的代價。
+
+# D-142 §五 的判讀門檻。**看到數字之後不得修改。**
+verdict:
+  min_signal_days: 250       # L1 訊號層最少訊號日（約一年）
+  min_closed_trades: 200     # L2 投組層最少已平倉筆數
+  min_months: 12             # L2 另需滿 12 個月
+  forward_rank_ic: 0.03      # L1 前向 RankIC 平均門檻（同 D-006／D-107）
+  month_block_t: 2.0         # 兩層共用的月區塊 t 門檻
