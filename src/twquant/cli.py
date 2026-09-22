@@ -660,6 +660,9 @@ def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
 @app.command()
 def scheduler(
     at: str = typer.Option("19:00", help="每日觸發時刻 HH:MM（台北）"),
+    catch_up: bool = typer.Option(
+        True, "--catch-up/--no-catch-up", help="啟動時若今天尚未跑過且已過 at，立刻補跑（T-275）"
+    ),
 ) -> None:
     """常駐排程：每日於 at 時刻跑完整 pipeline（擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照）。
 
@@ -671,11 +674,28 @@ def scheduler(
     import time
 
     from twquant.conventions import now_tw
+    from twquant.pipeline import read_heartbeat
 
     hh, mm = (int(x) for x in at.split(":"))
     typer.secho(
         f"排程啟動：每日 {at} (Asia/Taipei) 觸發完整 pipeline", fg=typer.colors.CYAN, bold=True
     )
+    # T-275：啟動時若今天的 pipeline 還沒跑過就立刻補跑。
+    # 原本只算「下一個 hh:mm」，於是容器在觸發時刻之後重啟就等到明天——
+    # 那天會有原始資料卻沒有因子／模型分數／選股名單，且隔天只算隔天，洞不會自己補。
+    # 2026-09-21、09-22 實際發生（factor_values 停在 09-18，使用者回報「都沒有跑」）。
+    # 判據用 heartbeat（pipeline 成功才寫），故重啟多次不會重跑同一天。
+    if catch_up:
+        today = now_tw().date()
+        hb = read_heartbeat(_load_system().data_dir)
+        if hb is not None and hb.day == today.isoformat():
+            typer.secho(f"啟動補跑：{today} 已有 heartbeat，略過", fg=typer.colors.CYAN)
+        elif _seconds_until(now_tw(), hh, mm) > 23 * 3600:
+            typer.secho(f"啟動補跑：{today} 尚未跑過且已過 {at}，立即執行", fg=typer.colors.YELLOW)
+            try:
+                _echo_pipeline_result(_run_daily_pipeline(today))
+            except Exception as exc:  # noqa: BLE001  # 補跑失敗不擋排程主線
+                typer.secho(f"[啟動補跑失敗] {exc}", fg=typer.colors.RED)
     while True:
         delay = _seconds_until(now_tw(), hh, mm)
         typer.secho(f"下次觸發：{delay / 3600:.1f} 小時後", fg=typer.colors.CYAN)
