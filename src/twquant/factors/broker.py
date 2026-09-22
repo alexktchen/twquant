@@ -49,11 +49,13 @@ def _trades(view: PitView) -> pl.LazyFrame:
     )
 
 
-def _daytrade_state(view: PitView) -> pl.LazyFrame:
-    """每個分點的 expanding 隔日沖統計，以事件的**結算日**（買進後的次一交易日）為時間鍵。
+def daytrade_events(view: PitView) -> pl.LazyFrame:
+    """每個分點在各結算日的**當日**買超事件數與隔日沖次數（尚未累計）。
 
-    回傳 (broker_id, resolve_date, n_buys, n_flip, ratio)：至 resolve_date 為止累計的
-    「買超事件數」與「次一交易日在同檔轉為賣超」的次數。
+    拆出來是為了讓分段計算可行（T-271）：`broker_trades` 有 5,770 萬列，
+    一次展開會把 PostgreSQL 連同 Docker 一起壓垮（2026-09-22 實際發生）。
+    分段時每段各自算事件（本函數，純區域聚合），再把各段接起來做一次累計
+    （`cumulate_events`）——累計是對一個「每分點每日一列」的小表做，撐得住。
     """
     t = _trades(view)
     sess = _sessions(view)
@@ -76,7 +78,17 @@ def _daytrade_state(view: PitView) -> pl.LazyFrame:
         .with_columns(pl.col("_flip").fill_null(0))
         .group_by(["broker_id", "resolve_date"])
         .agg(pl.len().alias("_b"), pl.col("_flip").sum().alias("_f"))
-        .sort(["broker_id", "resolve_date"])
+    )
+    return events
+
+
+def cumulate_events(events: pl.LazyFrame) -> pl.LazyFrame:
+    """把逐日事件累計成 expanding 統計：(broker_id, resolve_date, n_buys, n_flip, ratio)。
+
+    只看過去（`cum_sum` 沿 resolve_date 遞增），故逐日算與整批算等價。
+    """
+    return (
+        events.sort(["broker_id", "resolve_date"])
         .with_columns(
             n_buys=pl.col("_b").cum_sum().over("broker_id"),
             n_flip=pl.col("_f").cum_sum().over("broker_id"),
@@ -84,7 +96,11 @@ def _daytrade_state(view: PitView) -> pl.LazyFrame:
         .with_columns(ratio=pl.col("n_flip") / pl.col("n_buys"))
         .select("broker_id", "resolve_date", "n_buys", "n_flip", "ratio")
     )
-    return events
+
+
+def _daytrade_state(view: PitView) -> pl.LazyFrame:
+    """至各結算日為止的 expanding 隔日沖統計（＝事件 → 累計）。"""
+    return cumulate_events(daytrade_events(view))
 
 
 def daytrade_ratio(view: PitView) -> pl.DataFrame:
@@ -99,12 +115,19 @@ def daytrade_ratio(view: PitView) -> pl.DataFrame:
     )
 
 
-def _clean_daily(view: PitView, params: dict[str, object]) -> pl.LazyFrame:
-    """排除隔日沖分點後，每檔每日的主力淨買超、買方／賣方分點數。"""
+def clean_daily(
+    view: PitView, params: dict[str, object], *, state: pl.LazyFrame | None = None
+) -> pl.LazyFrame:
+    """排除隔日沖分點後，每檔每日的主力淨買超、買方／賣方分點數。
+
+    `state` 可注入（T-271 分段計算）：分段時每段只讀自己那一段的 `broker_trades`，
+    但隔日沖判定要用**全期**累計統計，否則早期分段會把還沒累積夠事件的分點誤判成正常。
+    不給就當場從 `view` 算（既有行為）。
+    """
     min_ratio = _num(params, "daytrade_min_ratio", 0.5)
     min_events = _num(params, "daytrade_min_events", 30)
     t = _trades(view).sort("date")
-    state = _daytrade_state(view).sort("resolve_date")
+    state = (state if state is not None else _daytrade_state(view)).sort("resolve_date")
     flagged = (
         t.join_asof(
             state,
@@ -132,6 +155,58 @@ def _int(params: dict[str, object], key: str, default: int) -> int:
     return int(raw) if isinstance(raw, int | float | str) else default
 
 
+# ── 面板數學（T-271）：因子本體與分段腳本共用同一份，避免兩套實作漂移 ──────
+# 輸入一律是 `clean_daily` 的輸出（每檔每日一列），故這三個函數與資料量無關。
+
+
+def concentration_values(daily: pl.LazyFrame, vol: pl.LazyFrame, window: int) -> pl.LazyFrame:
+    """Σwindow 日主力淨買超 ÷ Σwindow 日成交量。"""
+    return (
+        daily.join(vol, on=["date", "stock_id"], how="inner")
+        .sort(["stock_id", "date"])
+        .with_columns(
+            _n=pl.col("_net").rolling_sum(window).over("stock_id"),
+            _v=pl.col("volume").rolling_sum(window).over("stock_id"),
+        )
+        .with_columns(
+            value=pl.when(pl.col("_v") > 0).then(pl.col("_n") / pl.col("_v")).otherwise(None)
+        )
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .sort(["date", "stock_id"])
+    )
+
+
+def count_diff_values(daily: pl.LazyFrame, window: int) -> pl.LazyFrame:
+    """Σwindow 日（賣方分點數 − 買方分點數）÷ Σwindow 日總分點數。"""
+    return (
+        daily.sort(["stock_id", "date"])
+        .with_columns(
+            _d=(pl.col("_ns") - pl.col("_nb")).rolling_sum(window).over("stock_id"),
+            _t=(pl.col("_ns") + pl.col("_nb")).rolling_sum(window).over("stock_id"),
+        )
+        .with_columns(
+            value=pl.when(pl.col("_t") > 0).then(pl.col("_d") / pl.col("_t")).otherwise(None)
+        )
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .sort(["date", "stock_id"])
+    )
+
+
+def persistence_values(daily: pl.LazyFrame, window: int) -> pl.LazyFrame:
+    """近 window 日主力淨買超為正的天數比例。"""
+    return (
+        daily.sort(["stock_id", "date"])
+        .with_columns(
+            value=(pl.col("_net") > 0).cast(pl.Float64).rolling_mean(window).over("stock_id")
+        )
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .sort(["date", "stock_id"])
+    )
+
+
 @factor(
     name="chip.broker_concentration_20d",
     category="chip",
@@ -143,23 +218,8 @@ def _int(params: dict[str, object], key: str, default: int) -> int:
 def broker_concentration_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """Σ20 日主力淨買超 ÷ Σ20 日成交量（分子排除隔日沖分點）。"""
     w = _int(params, "window", 20)
-    daily = _clean_daily(view, params)
     vol = view.table("prices_daily").select("date", "stock_id", "volume")
-    return (
-        daily.join(vol, on=["date", "stock_id"], how="inner")
-        .sort(["stock_id", "date"])
-        .with_columns(
-            _n=pl.col("_net").rolling_sum(w).over("stock_id"),
-            _v=pl.col("volume").rolling_sum(w).over("stock_id"),
-        )
-        .with_columns(
-            value=pl.when(pl.col("_v") > 0).then(pl.col("_n") / pl.col("_v")).otherwise(None)
-        )
-        .select("date", "stock_id", "value")
-        .drop_nulls("value")
-        .sort(["date", "stock_id"])
-        .collect()
-    )
+    return concentration_values(clean_daily(view, params), vol, w).collect()
 
 
 @factor(
@@ -173,21 +233,7 @@ def broker_concentration_20d(view: PitView, params: dict[str, object]) -> pl.Dat
 def broker_count_diff_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """Σ5 日（賣方分點數 − 買方分點數）÷ Σ5 日總分點數：少數人吸多數人的籌碼為正。"""
     w = _int(params, "window", 5)
-    return (
-        _clean_daily(view, params)
-        .sort(["stock_id", "date"])
-        .with_columns(
-            _d=(pl.col("_ns") - pl.col("_nb")).rolling_sum(w).over("stock_id"),
-            _t=(pl.col("_ns") + pl.col("_nb")).rolling_sum(w).over("stock_id"),
-        )
-        .with_columns(
-            value=pl.when(pl.col("_t") > 0).then(pl.col("_d") / pl.col("_t")).otherwise(None)
-        )
-        .select("date", "stock_id", "value")
-        .drop_nulls("value")
-        .sort(["date", "stock_id"])
-        .collect()
-    )
+    return count_diff_values(clean_daily(view, params), w).collect()
 
 
 @factor(
@@ -201,12 +247,4 @@ def broker_count_diff_5d(view: PitView, params: dict[str, object]) -> pl.DataFra
 def broker_persistence_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """近 10 日主力淨買超為正的天數比例（0～1）。"""
     w = _int(params, "window", 10)
-    return (
-        _clean_daily(view, params)
-        .sort(["stock_id", "date"])
-        .with_columns(value=(pl.col("_net") > 0).cast(pl.Float64).rolling_mean(w).over("stock_id"))
-        .select("date", "stock_id", "value")
-        .drop_nulls("value")
-        .sort(["date", "stock_id"])
-        .collect()
-    )
+    return persistence_values(clean_daily(view, params), w).collect()
