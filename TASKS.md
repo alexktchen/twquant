@@ -209,6 +209,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-258 | `scripts/benchmarks_two_windows.py` 有兩個 ruff 錯（BLE001 盲捕 Exception、B007 未用的迴圈變數），使 `python -m twquant check` 在 main 上即為紅——不在任何進行中任務的範圍內 | — | — | — | todo |
 | T-273 | 整批補算因子工具（`scripts/backfill_factors_bulk.py`）＋ CLI `--factors`／`--trim-lookback`：逐日路徑單日 3m21s，整批 223 秒算完 2,760 天 | DECISIONS D-138 §六 | — | — | done |
 | T-274 | E0 ＋ 嚴格流動性（LQ1／LQ2） | DECISIONS D-140 §三 | — | — | done（D-140 §八~十一：LQ1 年化 +17.6%／回撤 −59.1%，比 E0 差很多；LQ2 宇宙最少僅 6 檔、不可執行）|
+| T-275 | 排程器在 19:00 之後啟動會整天跳過完整 pipeline：啟動時只補匯入、不補加工，且把觸發點排到明天 → 當天有原始資料但沒有因子／分數／選股名單（2026-09-21、09-22 實際發生）。應改為「啟動時若當天 pipeline 未跑過即立刻補跑」，並補前幾個交易日的洞 | — | — | — | todo |
+| T-276 | `margin_daily` 抓取失敗被當成「非交易日」靜默跳過：排程器連兩天回報『沒有符合條件的資料』，手動重跑卻正常進 1,297 列 → 暫時性失敗不該與休市同路徑，須重試並在仍失敗時告警 | — | — | — | todo |
 | T-271 | 分點因子 `chip.broker_*` 整批物化：逐日路徑單日 > 10 分鐘（expanding 隔日沖統計掃全歷史），1,144 天要 190+ 小時——改寫成一次掃完整個面板 | DECISIONS D-138 §五 | — | — | todo |
 | T-272 | 震盪指標加進模型重訓 | DECISIONS D-139 | T-270 | — | cancelled（預篩 `scripts/factor_prescreen.py`：五支 IC 全負 −0.005~−0.049、與現有特徵相關 0.60~0.84，不值得重訓；D-141 §六 列為已排除方向）|
 | T-270 | `serving.prices_daily` 有 1,185 列 `close <= 0`，全部集中在 2021-01-04 ~ 2021-02-26（含 5703、5205 等四碼普通股）——查來源並修，在那之前任何用收盤價當分母的計算都要顯式排除 | DECISIONS D-135 | — | — | todo |

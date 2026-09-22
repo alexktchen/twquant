@@ -110,6 +110,12 @@ def main() -> None:
     ap.add_argument("--from", dest="start", required=True)
     ap.add_argument("--to", dest="end", required=True)
     ap.add_argument("--verify-days", type=int, default=3, help="抽樣比對幾天（0＝不驗，不建議）")
+    ap.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="只驗證不寫入，且略過 anchor_invariant 的宣告檢查——"
+        "用來替『尚未宣告』的因子取得證據，決定該不該宣告",
+    )
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     if not os.environ.get("TWQUANT_PG_DSN"):
@@ -117,7 +123,7 @@ def main() -> None:
     names = [f.strip() for f in args.factors.split(",") if f.strip()]
     start, end = dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end)
     not_invariant = [n for n in names if not get(n).anchor_invariant]
-    if not_invariant:
+    if not_invariant and not args.verify_only:
         raise SystemExit(
             f"這些因子未宣告 anchor_invariant，不得整批補算：{', '.join(not_invariant)}"
             "——expanding 統計（如 chip.broker_*）逐日與整批結果不同。"
@@ -142,11 +148,21 @@ def main() -> None:
         if bulk.is_empty():
             raise SystemExit("整批計算結果為空——不寫入任何東西")
 
+        if not_invariant:
+            print(
+                f"（--verify-only：{', '.join(not_invariant)} 尚未宣告 anchor_invariant，"
+                "本次只取證據、不寫入）",
+                flush=True,
+            )
         if args.verify_days:
             all_days = sorted(bulk["date"].unique().to_list())
             step = max(1, len(all_days) // (args.verify_days + 1))
             _verify(bulk, source, names, all_days[step::step][: args.verify_days])
 
+        if args.verify_only:
+            print()
+            print("[OK] 只驗證模式：比對全數通過，未寫入任何資料。")
+            return
         merged = _standardise(bulk)
         rows = merged.select("factor", "stock_id", "date", "value", "z", "pct")
         cross = merged.group_by(["date", "factor"]).agg(
