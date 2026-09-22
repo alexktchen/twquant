@@ -53,6 +53,12 @@ def main() -> None:
     ap.add_argument("--from", dest="lo", type=dt.date.fromisoformat, required=True)
     ap.add_argument("--to", dest="hi", type=dt.date.fromisoformat, required=True)
     ap.add_argument("--shard", default="0/1", help="i/n：只跑日期序號 %% n == i 的日子")
+    ap.add_argument(
+        "--factors",
+        default="",
+        help="逗號分隔；只物化這些因子（單支補算用）。留空＝全部（扣除 broker 與 ml）。"
+        "所選子集仍須完整包含 composite 集合，理由見 D-057",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     i, n = (int(x) for x in args.shard.split("/"))
@@ -61,6 +67,11 @@ def main() -> None:
 
     cfg = load_config(_CONFIG, ServingConfig)
     factors = factors_to_build()
+    if args.factors:
+        wanted = [f.strip() for f in args.factors.split(",") if f.strip()]
+        if unknown := sorted(set(wanted) - set(factors)):
+            raise SystemExit(f"--factors 含未註冊或被排除的因子：{unknown}（可用：{factors}）")
+        factors = sorted(wanted)
     missing = set(cfg.composite_factors) - set(factors)
     if missing:
         # 部分重疊時 `_materialize_on` 會 raise；在這裡先擋，訊息比它清楚（D-057）

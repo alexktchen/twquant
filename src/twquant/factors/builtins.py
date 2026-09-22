@@ -17,6 +17,7 @@ from twquant.factors import (  # 匯入觸發 @factor 註冊
     patterns,
     price,
     quality,
+    volatility,
     volume,
 )
 
@@ -30,5 +31,6 @@ __all__ = [
     "patterns",
     "price",
     "quality",
+    "volatility",
     "volume",
 ]

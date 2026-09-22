@@ -204,7 +204,7 @@ Calmar、平均曝險、最大單筆虧損；並與 E0、V1 並列。
 
 | 名稱 | 公式 | lookback | direction |
 |---|---|---:|---:|
-| `price.atr_14` | `TR = max(H−L, \|H−C₋₁\|, \|L−C₋₁\|)`；Wilder EMA₁₄；**輸出 `ATR/close`** | 20 | −1 |
+| `price.atr_14` | `TR = max(H−L, \|H−C₋₁\|, \|L−C₋₁\|)`；Wilder EMA₁₄；**輸出 `ATR/close`** | ~~20~~ **250**（見下註） | −1 |
 | `price.parkinson_20` | `√( 1/(4·ln2·n) · Σ ln(H/L)² )`，n=20 | 25 | −1 |
 | `price.garman_klass_20` | `σ² = 1/n · Σ[0.5·ln(H/L)² − (2ln2−1)·ln(C/O)²]`；`σ² < 0 → null` | 25 | −1 |
 | `price.upside_vol_20` | `√( 1/n · Σ_{r>0} r² )` | 25 | +1 |
@@ -212,6 +212,16 @@ Calmar、平均曝險、最大單筆虧損；並與 E0、V1 並列。
 | `price.vol_asym_20` | `ln(upside_vol_20 / downside_vol_20)`；任一為 0 → null | 25 | +1 |
 | `price.ret_skew_60` | 60 日日報酬的樣本偏度 g₁ | 70 | −1 |
 | `price.jump_count_60` | 過去 60 日內 `\|r_t\| > 3·σ₂₀(t−1)` 的天數 ÷ 60 | 85 | +1 |
+
+**`atr_14` 的 lookback 更正（2026-09-22，T-284 實作時，於任何訓練與物化之前）**：
+上表原寫 20，那是我寫登記時的疏漏。Wilder 遞迴是**無限記憶**，值取決於「從哪天開始算」
+——D-138 已實測裁切歷史會讓 RSI 與全史版差到 28.3（0~100 的量尺上），故該模組的三支
+EWM 因子一律宣告 250。`atr_14` 同理，改為 **250**。**公式不變**，改的是正確性參數；
+lookback 太短會讓逐日、裁切、整批三種算法得到不同的值，那是缺陷不是選擇。
+
+**實作時測試抓到的一個缺陷（記錄在案）**：`atr_14` 原本在個股上市第 1 天就給得出值
+（`max_horizontal` 會忽略 null，第一天的 TR 退化成 H−L）——那是**用一天的資料充數**，
+違反「窗內不足回 null」。已補列位置閘門：累積不足 `window` 筆真實區間回 null。
 
 共同規則：只走 `view.table(...)`（黃金規則 1）；窗內不足回 null，**不得用短窗充數**；
 分母為零回 null（`panel.safe_ratio`），**不填 0／50**；`anchor_invariant=True`；
