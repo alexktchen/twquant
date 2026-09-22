@@ -18,24 +18,24 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from twquant.cli import _load_ml, _load_serving, _ml_features_resolved  # noqa: E402
-from twquant.backtest.costs import CostConfig  # noqa: E402
-from twquant.config import load_config  # noqa: E402
-from twquant.data.serving import store  # noqa: E402
-from twquant.data.serving.ml_store import (  # noqa: E402
+from twquant.backtest.costs import CostConfig
+from twquant.cli import _load_ml, _load_serving
+from twquant.config import load_config
+from twquant.data.serving import store
+from twquant.data.serving.ml_store import (
     read_corporate_events,
     read_monthly_revenue,
     read_prices_close,
     read_prices_training,
 )
-from twquant.ml.dataset import (  # noqa: E402
+from twquant.ml.dataset import (
     attach_adjustment,
     cost_adjusted_return_labels,
     forward_drawdown_labels,
     month_end_signal_dates,
     revenue_surprise_labels,
 )
-from twquant.ml.evaluate import daily_rank_ic  # noqa: E402
+from twquant.ml.evaluate import daily_rank_ic
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs"
 VAULT_LO, VAULT_HI = dt.date(2026, 3, 2), dt.date(2026, 9, 8)

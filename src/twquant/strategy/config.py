@@ -166,6 +166,11 @@ class RebalanceConfig(BaseConfig):
     execution: Literal["next_open", "close"] = "next_open"
 
 
+# 不需要部位就能判斷的規則：可以用來擋進場。停損／trailing_ma 相對於買進價與持有期高點，
+# 對還沒買的股票沒有定義，故不在此列。`backtest.exits.entry_blocked` 用同一份名單。
+POSITION_FREE_KINDS: frozenset[str] = frozenset({"below_ma", "score_below"})
+
+
 class ExitRuleConfig(BaseConfig):
     """一條每日出場規則（T-231／D-114 §四）。收盤判斷、隔日開盤出清、出清後留現金。
 
@@ -264,6 +269,11 @@ class StrategyConfig(BaseConfig):
     overlay_params: dict[str, dict[str, object]] = Field(default_factory=dict)
     # 每日出場規則（T-231）。空＝既有行為；任一條觸發即隔日開盤出清。
     exit_rules: list[ExitRuleConfig] = Field(default_factory=list)
+    # 只擋進場、**不賣出持股**的條件（D-137）。與 exit_rules 分開是必要的：
+    # 實測同一條「站上 MA20」當進場濾網是每筆期望值 +0.96pp，當出場規則卻是 −80%
+    # （D-136／D-117：任何把波動剪掉的規則會連上漲一起剪掉）。共用同一個欄位就做不到這個區分。
+    # 只接受不需要部位就能判斷的規則；stop_loss 這類相對於買進價的條件對還沒買的股票沒有定義。
+    entry_filters: list[ExitRuleConfig] = Field(default_factory=list)
     # 每日補位模式（T-247）。None＝既有的排程再平衡模式。
     slots: SlotsConfig | None = None
     max_weight_per_stock: float = 0.05
@@ -275,6 +285,13 @@ class StrategyConfig(BaseConfig):
         total = sum(s.weight for s in self.signals)
         if abs(total - 1.0) > 1e-9:
             raise ValueError(f"signals 權重加總須為 1，實際 {total}")
+        bad = sorted({r.kind for r in self.entry_filters} - POSITION_FREE_KINDS)
+        if bad:
+            raise ValueError(
+                f"entry_filters 只接受不需要部位就能判斷的規則 "
+                f"{sorted(POSITION_FREE_KINDS)}，得到 {bad}"
+                "——停損這類相對於買進價的條件，對還沒買的股票沒有定義"
+            )
         if self.slots is not None and len(self.signals) != 1:
             raise ValueError(
                 f"slots 模式須恰好一個 signal（進場分數取其原始值），得到 {len(self.signals)} 個"

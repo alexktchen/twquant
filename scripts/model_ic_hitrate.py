@@ -22,8 +22,8 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from twquant.config import ModelCatalogConfig, load_config  # noqa: E402
-from twquant.ml.evaluate import daily_rank_ic  # noqa: E402
+from twquant.config import ModelCatalogConfig, load_config
+from twquant.ml.evaluate import daily_rank_ic
 
 _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "model_catalog.yaml"
 
@@ -76,7 +76,7 @@ def main() -> None:
             )
         for key, value in block.items():
             print(f"    {key}: {value}")
-        print(f"    measured_on: <今天>")
+        print("    measured_on: <今天>")
 
     if drifted:
         print(f"\n指紋不符：{'、'.join(drifted)}", file=sys.stderr)

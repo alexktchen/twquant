@@ -74,6 +74,59 @@ def _calibrated(model_dir: Path, config: str, dsn: str) -> pl.DataFrame:
     return out
 
 
+def attach_outcomes(oos: pl.DataFrame, dsn: str, cfg_label: object) -> pl.DataFrame:
+    """把標籤的 0 拆成「先觸下緣」與「兩邊都沒碰」。
+
+    標籤本身是二元的，分不出這兩者；而診斷 B 登記的統計量是「上緣比例 − **下緣**比例」。
+    這裡用與 `triple_barrier_labels` 逐字相同的邊界重算一次三態，只多輸出 `outcome`。
+    """
+    horizon = int(getattr(cfg_label, "horizon_days", 0) or 20)
+    k_up = float(getattr(cfg_label.label, "barrier_up", 1.0) or 1.0)
+    k_dn = float(getattr(cfg_label.label, "barrier_down", 1.0) or 1.0)
+    window = int(getattr(cfg_label.label, "vol_window", 20) or 20)
+    scaled = bool(getattr(cfg_label.label, "vol_scaled", False))
+    lo = oos["date"].min()
+    hi = oos["date"].max()
+    with psycopg.connect(dsn) as conn:
+        rows = conn.execute(
+            "SELECT date, stock_id, open, close FROM serving.prices_daily "
+            "WHERE stock_id ~ '^[1-9][0-9]{3}$' AND date >= %s - 400 AND date <= %s + 90 "
+            "AND close IS NOT NULL AND open IS NOT NULL",
+            (lo, hi),
+        ).fetchall()
+    px = pl.DataFrame(
+        rows,
+        schema={"date": pl.Date, "stock_id": pl.String, "open": pl.Float64, "close": pl.Float64},
+        orient="row",
+    ).sort("stock_id", "date")
+    if scaled:
+        daily = (pl.col("close") / pl.col("close").shift(1) - 1.0).over("stock_id", order_by="date")
+        sigma = daily.rolling_std(window, min_samples=window).over("stock_id", order_by="date") * (
+            horizon**0.5
+        )
+        px = px.with_columns(_s=pl.when(sigma > 0).then(sigma).otherwise(None))
+    else:
+        px = px.with_columns(_s=pl.lit(1.0))
+    entry = pl.col("open").shift(-1).over("stock_id", order_by="date")
+    up = pl.lit(None, dtype=pl.Int32)
+    dn = pl.lit(None, dtype=pl.Int32)
+    for k in range(horizon, 0, -1):
+        r = pl.col("close").shift(-k).over("stock_id", order_by="date") / entry - 1.0
+        up = pl.when(r >= pl.col("_s") * k_up).then(pl.lit(k, dtype=pl.Int32)).otherwise(up)
+        dn = pl.when(r <= -pl.col("_s") * k_dn).then(pl.lit(k, dtype=pl.Int32)).otherwise(dn)
+    px = px.with_columns(_up=up, _dn=dn).with_columns(
+        outcome=pl.when(
+            pl.col("_up").is_not_null()
+            & (pl.col("_dn").is_null() | (pl.col("_up") < pl.col("_dn")))
+        )
+        .then(pl.lit("up"))
+        .when(pl.col("_dn").is_not_null())
+        .then(pl.lit("down"))
+        .otherwise(pl.lit("none"))
+    )
+    return oos.join(px.select("date", "stock_id", "outcome"), on=["date", "stock_id"], how="left")
+
+
 def _monthly_base(oos: pl.DataFrame) -> pl.Series:
     """每月「全市場先觸上緣」的比例。"""
     return (
@@ -113,6 +166,8 @@ def main() -> None:
     base = pl.read_parquet(Path(args.baseline) / "oos_calibrated.parquet")
 
     judged = cal.filter(pl.col("p_cal").is_not_null() & pl.col("label").is_not_null())
+    _cfg = _load_ml(args.config)
+    judged = attach_outcomes(judged, dsn, _cfg)
     n_days, n_months = judged["date"].n_unique(), judged["date"].dt.strftime("%Y-%m").n_unique()
     print(
         f"樣本外 {judged.height:,} 列、{n_days} 個交易日、{n_months} 個月"
@@ -132,17 +187,29 @@ def main() -> None:
 
     ranked = judged.with_columns(rk=pl.col("p_cal").rank("ordinal", descending=True).over("date"))
     top = ranked.filter(pl.col("rk") <= TOP_N)
+    if "outcome" not in top.columns:
+        raise SystemExit(
+            "診斷 B 需要三態結果欄 `outcome`（up／down／none）。"
+            "**不得用 1 − label 當「先觸下緣」**：label=0 同時包含「先觸下緣」與「兩邊都沒碰」，"
+            "2026-09-21 就因此把 +10.0pp 的優勢算成 −21.5pp、誤判未通過。"
+        )
     monthly = (
         top.with_columns(m=pl.col("date").dt.strftime("%Y-%m"))
         .group_by("m")
-        .agg(edge=pl.col("label").mean() * 2 - 1)  # 上緣比例 − 下緣比例（二元標籤下等價）
+        .agg(
+            edge=(pl.col("outcome") == "up").mean() - (pl.col("outcome") == "down").mean(),
+        )
         .sort("m")
     )
     edges = monthly["edge"].to_list()
     t = _welch(edges)
     ok_b = t is not None and t >= MIN_T and sum(edges) / len(edges) > 0
+    up_share = float((top["outcome"] == "up").mean())
+    dn_share = float((top["outcome"] == "down").mean())
     print(f"【B】模型挑得出方向（每日前 {TOP_N} 名，須 t ≥ {MIN_T}）")
-    print(f"  上緣比例 {top['label'].mean():.1%}　下緣比例 {1 - top['label'].mean():.1%}")
+    print(
+        f"  先觸上緣 {up_share:.1%}　先觸下緣 {dn_share:.1%}　都沒碰 {1 - up_share - dn_share:.1%}"
+    )
     print(
         f"  月平均優勢 {sum(edges) / len(edges):+.1%}（{len(edges)} 個月）　t = {t if t is None else f'{t:+.2f}'}"
     )

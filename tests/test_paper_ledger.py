@@ -230,7 +230,7 @@ def test_ac6_a_correction_is_a_new_event_not_a_rewrite(tmp_path: Path) -> None:
     append_event(
         tmp_path,
         CODE,
-        LedgerNote(text="T-277 修正：滑價曾少算，自本日起正確"),
+        LedgerNote(text="T-279 修正：滑價曾少算，自本日起正確"),
         day=later,
         recorded_at=_at(later),
         cfg=cfg,

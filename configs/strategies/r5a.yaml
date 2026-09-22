@@ -1,0 +1,25 @@
+# 第五輪 R5a（D-129，**事前登記**）：回到已驗證的排序訊號。未經部署裁決，勿用於實盤。
+#
+# 進場＝排序模型的當日分位 ≥ 0.93（每天全宇宙前 7%）——**每天都有候選**，
+# 這正是第二~四輪的絕對機率模型做不到的事（訊號只在崩盤後出現）。
+# 分數用 rank_pct（相對），不是機率；把排序分數當絕對機率用是前幾輪的錯誤（D-126 §一）。
+# 出場：僅停損 −15%
+name: r5a
+description: R5a：排序分位 >= 0.93、40 檔、僅停損 −15%（D-129 事前登記）
+trial_scope: lw:slots_s
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_lw_net_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_lw_net_h20_20260225_83890036
+slots:
+  n: 40
+  entry_threshold: 0.93
+exit_rules:
+  - kind: stop_loss
+    pct: 0.15

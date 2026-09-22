@@ -44,12 +44,30 @@ class MaterializeResult:
     factors: int  # 成功物化的因子數
 
 
+def read_since(as_of: dt.date, names: Sequence[str]) -> dt.date:
+    """讀 PG 時的安全時間下界：涵蓋 `names` 裡最長的宣告回看窗（T-278）。
+
+    **沒有下界時 `PgTableSource` 是整張表全掃**——`ml_scores` 有 3,283 萬列，
+    每個 ml 因子讀一次就是一次全掃，實測單日 pipeline 卡在
+    `SELECT * FROM serving.ml_scores`、吃掉 7.5 GB（2026-09-21／22 整天沒有名單即此）。
+
+    跨度沿用 `factors.compute` 的 `lookback_days × _TRIM_SAFETY + _TRIM_BUFFER_DAYS`，
+    不另立一套——兩套常數會漂移，而漂移的後果是因子少讀了歷史卻不會報錯。
+    """
+    from twquant.factors.compute import _TRIM_BUFFER_DAYS, _TRIM_SAFETY
+    from twquant.factors.registry import get
+
+    longest = max((get(n).lookback_days for n in names), default=0)
+    return as_of - dt.timedelta(days=longest * _TRIM_SAFETY + _TRIM_BUFFER_DAYS)
+
+
 def _compute_universe(
     source: TableSource,
     as_of: dt.date,
     factors: Sequence[str] | None = None,
     *,
     trim_lookback: bool = False,
+    exclude: Sequence[str] = (),
 ) -> pl.DataFrame | None:
     """算全宇宙全因子並附 pct / z / signed_z；無可算資料回 None。
 
@@ -66,6 +84,12 @@ def _compute_universe(
     from twquant.factors.standardize import standardize
 
     names = list(factors) if factors is not None else list_factors()
+    # 明確指定 factors 時不套排除清單：那是呼叫端刻意點名的，靜默拿掉會很難察覺
+    if factors is None and exclude:
+        skipped = sorted(set(names) & set(exclude))
+        names = [n for n in names if n not in set(exclude)]
+        if skipped:
+            _log.info("%s：依 serving.exclude_factors 略過 %s", as_of, ", ".join(skipped))
     for name in names:
         get(name)  # 未註冊 → TwquantError（在 try 之外，不得被吞）
     view = source.view(as_of)
@@ -130,7 +154,9 @@ def _materialize_on(
                 "請把 composite 因子補齊（子集完整包含即可重算 composite_daily），"
                 "或改用全因子物化。"
             )
-    merged = _compute_universe(source, as_of, factors, trim_lookback=trim_lookback)
+    merged = _compute_universe(
+        source, as_of, factors, trim_lookback=trim_lookback, exclude=cfg.exclude_factors
+    )
     if merged is None:
         return MaterializeResult(as_of, 0, 0, 0)
 
@@ -172,14 +198,20 @@ def materialize_day(
     cfg: ServingConfig,
     as_of: dt.date | None = None,
     factors: Sequence[str] | None = None,
+    *,
+    trim_lookback: bool = False,
 ) -> MaterializeResult:
-    """物化單一交易日（as_of 預設為最新行情日）。factors 見 `_compute_universe`（T-094）。"""
+    """物化單一交易日（as_of 預設為最新行情日）。factors 見 `_compute_universe`（T-094）。
+
+    `trim_lookback=True` 依各因子宣告的 `lookback_days` 裁切歷史（T-083）——
+    只算幾支短視窗因子時差別極大：全歷史模式要掃 `broker_trades` 的 5,770 萬列。
+    """
     day = as_of or source.latest_date("prices_daily")
     if day is None:
         raise DataError("prices_daily", None, "無行情資料，無法物化因子")
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
-        return _materialize_on(source, conn, cfg, day, factors)
+        return _materialize_on(source, conn, cfg, day, factors, trim_lookback=trim_lookback)
 
 
 def materialize_range(
@@ -188,9 +220,14 @@ def materialize_range(
     start: dt.date,
     end: dt.date,
     factors: Sequence[str] | None = None,
+    *,
+    trim_lookback: bool = False,
 ) -> list[MaterializeResult]:
     """逐日物化 [start, end]（僅有行情資料的交易日）；as_of 逐日推進，維持 PIT。"""
     days = source.dates_in_range("prices_daily", start, end)
     with store.connect(cfg) as conn:
         sch.ensure_schema(conn, cfg.pg_schema)
-        return [_materialize_on(source, conn, cfg, d, factors) for d in days]
+        return [
+            _materialize_on(source, conn, cfg, d, factors, trim_lookback=trim_lookback)
+            for d in days
+        ]

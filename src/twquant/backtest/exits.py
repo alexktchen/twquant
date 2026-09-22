@@ -135,7 +135,9 @@ def entry_blocked(
     只看**不需要部位**就能判斷的規則（below_ma／score_below）。停損與 trailing_ma 相對於
     買進價與持有期高點，對還沒買的股票沒有定義——新部位的未實現報酬是 0，兩者都不會觸發。
     """
-    free = [r for r in rules if r.kind in ("below_ma", "score_below")]
+    from twquant.strategy.config import POSITION_FREE_KINDS  # 執行期匯入：避免循環相依
+
+    free = [r for r in rules if r.kind in POSITION_FREE_KINDS]
     if not free or not ids:
         return set()
     fresh = {sid: HeldPosition(shares=0, avg_cost=0.0, dividends_per_share=0.0) for sid in ids}

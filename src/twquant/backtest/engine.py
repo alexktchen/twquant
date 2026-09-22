@@ -445,7 +445,16 @@ def run_backtest(
         else set(signal_dates(strategy_cfg.rebalance, calendar, start, end))
     )
     exit_rules = strategy_cfg.exit_rules
-    ma_windows = tuple(sorted({int(r.window) for r in exit_rules if r.window is not None}))
+    # 進場濾網的均線也要算，否則欄位不存在、濾網靜默失效
+    ma_windows = tuple(
+        sorted(
+            {
+                int(r.window)
+                for r in (*exit_rules, *strategy_cfg.entry_filters)
+                if r.window is not None
+            }
+        )
+    )
     by_date = _price_panel(warehouse, start, end, ma_windows)
 
     state = _State(cash=initial_capital)
@@ -538,7 +547,9 @@ def run_backtest(
                     for sid, _ in slot_candidates(strategy_cfg, warehouse, day)
                     if sid not in state.holdings
                 ]
-                blocked = entry_blocked(exit_rules, cands, day_px, warehouse, day)
+                blocked = entry_blocked(
+                    [*exit_rules, *strategy_cfg.entry_filters], cands, day_px, warehouse, day
+                )
                 entries_pending = [sid for sid in cands if sid not in blocked][:free]
 
     equity_series = [e.equity for e in equity_curve]
@@ -588,7 +599,7 @@ def run_backtest(
     )
 
 
-# ── 給紙上交易帳本用的公開名字（D-142／T-278）────────────────────────────────
+# ── 給紙上交易帳本用的公開名字（D-142／T-280）────────────────────────────────
 # 紙上交易必須用**同一套**執行語意：同樣的整張進位、先賣後買、參與率與漲跌停、
 # 成本扣現金、跳價防衛。複製一份遲早會走鐘（而且走鐘的方式是靜默的——前向紀錄
 # 會慢慢變得跟回測不可比），所以這裡把既有實作換個名字公開，不另寫一份。

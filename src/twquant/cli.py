@@ -39,7 +39,7 @@ _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
 # 洞悉分析在 pipeline 的參數：N 為 D-081(b) 的事前登記值；窗口與 sector-flows 預設一致。
 _INSIGHT_TOP_N = 30
-# 紙上交易的行情回看：前收與 20 日 ADV 中位數都在這個窗內（D-142／T-278）。
+# 紙上交易的行情回看：前收與 20 日 ADV 中位數都在這個窗內（D-142／T-280）。
 _PAPER_LOOKBACK_DAYS = 90
 _SECTOR_WINDOW = 20
 
@@ -1064,7 +1064,14 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         ssync.sync_all(wh, scfg)
         conn = store.connect(scfg)
         try:
-            m = smat.materialize_day(PgTableSource(conn, scfg.pg_schema), scfg, day)
+            # since＋cache 缺一不可：沒有 since 每張表都全掃（ml_scores 3,283 萬列），
+            # 沒有 cache 則每個因子各掃一次。兩者都沒給時，單日物化會卡住（T-278）。
+            import twquant.factors.builtins  # noqa: F401  # 觸發註冊，才問得到 lookback
+            from twquant.factors.registry import list_factors
+
+            names = [n for n in list_factors() if n not in set(scfg.exclude_factors)]
+            src = PgTableSource(conn, scfg.pg_schema, cache=True, since=smat.read_since(day, names))
+            m = smat.materialize_day(src, scfg, day)
         finally:
             conn.close()
         return f"鏡射同步 + 物化 {m.factor_rows} 因子列"
@@ -1616,7 +1623,7 @@ def _file_fingerprint(path: Path) -> str:
 
 
 def _paper_trading_for_day(day: dt.date, data_dir: Path) -> str:
-    """把 `day` 這一天記進每一條紙上交易軌（D-142／T-278）。回傳一行摘要。
+    """把 `day` 這一天記進每一條紙上交易軌（D-142／T-280）。回傳一行摘要。
 
     **名單不在這裡算**：再平衡日的目標持股直接讀當日已保存的策略持股快照（D-112），
     也就是平台頁面上看到的同一份。快照不在就記成 `skipped`——如果這裡改成「自己算一次」，
@@ -2289,27 +2296,50 @@ def serving_materialize(
     date: str = typer.Option("today", help="單日 YYYY-MM-DD 或 today（= 最新行情日）"),
     from_: str = typer.Option("", "--from", help="範圍起（含）YYYY-MM-DD"),
     to: str = typer.Option("", "--to", help="範圍迄（含）YYYY-MM-DD"),
+    factors: str = typer.Option(
+        "", help="逗號分隔的因子名；空＝全部。與 composite 集合部分重疊會被拒"
+    ),
+    trim_lookback: bool = typer.Option(
+        False, "--trim-lookback", help="依各因子宣告的 lookback_days 裁切歷史（T-083）"
+    ),
 ) -> None:
     """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。
 
     讀取源改為 PG serving 鏡射表（D-026，全面停用 parquet）：`PgTableSource` 結構滿足
     `PitView` 需要的介面，因子函數不變、只是不再讀本地資料湖。
+
+    **補算少數新因子時務必同時給 `--factors` 與 `--trim-lookback`**：全因子、全歷史模式下
+    單日實測超過 10 分鐘，瓶頸是 `chip.broker_*` 的 expanding 統計要掃 `broker_trades`
+    全部 5,770 萬列（D-138 §五）。只算短視窗因子時兩者合計可差好幾個量級。
     """
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.data.serving import materialize as smat
     from twquant.data.serving import store
     from twquant.data.serving.pg_view import PgTableSource
+    from twquant.errors import TwquantError
+    from twquant.factors.registry import list_factors
 
     cfg = _load_serving()
     conn = store.connect(cfg)
     try:
         source = PgTableSource(conn, cfg.pg_schema)
+        names = [f.strip() for f in factors.split(",") if f.strip()] or None
+        if names:
+            unknown = sorted(set(names) - set(list_factors()))
+            if unknown:
+                raise TwquantError(f"未註冊的因子：{', '.join(unknown)}")
         if from_ and to:
             results = smat.materialize_range(
-                source, cfg, dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+                source,
+                cfg,
+                dt.date.fromisoformat(from_),
+                dt.date.fromisoformat(to),
+                names,
+                trim_lookback=trim_lookback,
             )
         else:
             day = None if date == "today" else dt.date.fromisoformat(date)
-            results = [smat.materialize_day(source, cfg, day)]
+            results = [smat.materialize_day(source, cfg, day, names, trim_lookback=trim_lookback)]
     finally:
         conn.close()
     for r in results:
@@ -2609,6 +2639,7 @@ def ml_train(
         assert_feature_coverage,
         attach_adjustment,
         cost_adjusted_return_labels,
+        down_probability_labels,
         excess_rank_labels,
         forward_drawdown_labels,
         forward_open_returns,
@@ -2640,6 +2671,7 @@ def ml_train(
             "forward_drawdown": read_prices_close,  # D-075：回撤以收盤價為基準
             "revenue_surprise": read_prices_close,  # 只用來取交易日曆，欄位不進標籤
             "triple_barrier": read_prices_barrier,  # D-120：開盤進場價＋逐日收盤＋成交金額
+            "down_probability": read_prices_barrier,  # D-131：同上
         }
         px = _readers.get(cfg.label.transform, read_prices_open)(conn, scfg.pg_schema, start, end)
         events = (
@@ -2709,6 +2741,14 @@ def ml_train(
             max_span_sessions=cfg.label.max_span_sessions,
             vol_scaled=cfg.label.vol_scaled,
             vol_window=cfg.label.vol_window,
+        )
+    elif cfg.label.transform == "down_probability":
+        labels = down_probability_labels(
+            px,
+            horizon=cfg.horizon_days,
+            drop=cast("float", cfg.label.drop_threshold),
+            adjusted=cast("bool", cfg.label.total_return),
+            max_span_sessions=cfg.label.max_span_sessions,
         )
     elif cfg.label.transform == "cost_adjusted_return":
         cost_cfg = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)

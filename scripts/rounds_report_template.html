@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>五輪研究總結</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--ink:#1d1d1b;--mute:#6b6a64;--line:#e2e0d8;--up:#b3261e;--dn:#1b7a3d;--warn:#fff4d6;--warnink:#6b4e00;--ok:#1b7a3d;--bad:#b3261e;--grid:#ebe9e2}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--card:#21211f;--ink:#ecebe6;--mute:#a09f98;--line:#35342f;--up:#ff8a80;--dn:#7bd88f;--warn:#3a3016;--warnink:#f1d98a;--ok:#7bd88f;--bad:#ff8a80;--grid:#2c2b28}}
+:root[data-theme="dark"]{--bg:#171716;--card:#21211f;--ink:#ecebe6;--mute:#a09f98;--line:#35342f;--up:#ff8a80;--dn:#7bd88f;--warn:#3a3016;--warnink:#f1d98a;--ok:#7bd88f;--bad:#ff8a80;--grid:#2c2b28}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif}
+main{max-width:1060px;margin:0 auto;padding:28px 16px 80px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:34px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:15px;margin:20px 0 6px}
+.sub{color:var(--mute);margin:0 0 18px;font-size:14px}
+.warn{background:var(--warn);color:var(--warnink);border-radius:8px;padding:11px 14px;margin:0 0 20px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 14px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+th{color:var(--mute);font-weight:600;font-size:12.5px}
+tbody tr:hover{background:var(--grid)}
+.pass{color:var(--ok);font-weight:600}.fail{color:var(--bad);font-weight:600}
+.pos{color:var(--up)}.neg{color:var(--dn)}
+.wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.note{color:var(--mute);font-size:13px;margin:6px 0 0}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12.5px;color:var(--mute);margin:6px 0 0}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.tick{fill:var(--mute);font-size:10.5px}
+.gl{stroke:var(--grid);stroke-width:1}
+.axis{stroke:var(--line);stroke-width:1}
+.big{font-size:22px;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0 0}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+.kpi span{display:block;color:var(--mute);font-size:12px}
+ul{margin:6px 0;padding-left:20px}li{margin:3px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>五輪研究總結</h1>
+<p class="sub" id="sub"></p>
+<div class="warn"><b>RESEARCH ONLY · 沒有任何一輪通過事前登記的判準。</b>
+本頁所有數字皆由程式從結果包算出，未手抄。逐筆報酬已扣手續費與證交稅（<span id="rt"></span>），滑價已反映在權益曲線裡。
+回測資料上界 2026-08-31；第二保留期（2026-09-09 起）未被碰過。</div>
+
+<h2>一、五輪在做什麼，結果如何</h2>
+<div class="card"><div class="wrap"><table id="main-table"></table></div>
+<div class="legend"><span><i style="background:var(--ok)"></i>達標</span><span><i style="background:var(--bad)"></i>未達標</span>
+<span>判定欄是<b>每一格在它自己登記下</b>的結果（滑鼠移上去看理由）——不得用後來才登記的判準回頭判舊結果</span></div>
+<p class="note" id="r5a-note"></p></div>
+
+<h2>二、纏了四輪的問題：訊號只在崩盤後出現</h2>
+<p class="sub">每一格「有進場的月份數」（共 89 個月）。前四輪不論怎麼改標籤、加特徵、加檔數，都只在個位數的月份出手。</p>
+<div class="card"><div id="months-chart"></div></div>
+
+<h2>三、第五輪解決了它</h2>
+<p class="sub">改用排序訊號（每天取前 7%）之後，進場分散到每一年。下圖是各格逐年的進場筆數。</p>
+<div class="card"><div id="years-chart"></div></div>
+
+<h2>四、權益曲線</h2>
+<p class="sub">起點皆為 1.0（價格報酬口徑，不含股利）。注意 R5a／R5b 的曲線高，但回撤也最深。</p>
+<div class="card"><div id="equity-chart"></div><div class="legend" id="equity-legend"></div></div>
+
+<h2>五、報酬分布：為什麼「平均」會騙人</h2>
+<p class="sub">R5b 的中位數是 −15.8%，平均卻是 +6.6%——多數被停損，少數大贏家把平均拉起來。這種右偏分布下，月區塊檢定量到的是「那個月有沒有大贏家出場」。</p>
+<div class="card"><div id="dist-chart"></div></div>
+
+<h2>六、一個不舒服的觀察：最簡單的配置分數最高</h2>
+<div class="card">
+<p class="sub" style="margin-top:0">若把第四輪才登記的判準（≥300 筆、月區塊 t ≥ 2、期望值與年化為正）<b>回頭套用</b>到第一輪那幾格：</p>
+<div class="wrap"><table id="retro-table"></table></div>
+<p class="note"><b>這不是判定，是觀察。</b>拿後來才登記的判準回頭判舊結果，正是登記制度要防的事後挑選——
+LW-M1 與 E0 從未在這組判準下被登記過，而且 D-107 已依金庫期判定它們不可部署（回撤 −35.1%）。
+但這個觀察本身值得記下來：<b>五輪精心設計的配置，沒有一個在月區塊檢定上贏過「排序模型＋定期換股＋完全不出場」。</b>
+要認真主張它，必須另立事前登記、在第二保留期驗證。</p>
+</div>
+
+<h2>七、確定知道的四件事</h2>
+<div class="card">
+<ul>
+<li><b>排序訊號是真的，加上籌碼之後更強。</b>籌碼資料補齊（2005–2026）後，33 個訓練窗的樣本外 IC 落在 +0.09 ~ +0.21，全部為正。</li>
+<li><b>絕對門檻是結構性死路。</b>不論標籤怎麼改、檔數怎麼加，訊號都擠在崩盤後——崩盤時所有股票一起動，模型判斷「夠好」的依據有一半以上來自波動度。</li>
+<li><b>排序訊號 + 每日補位，結構上解決了那個問題。</b>R5b 進場分布 84/89 個月、761 筆交易、年化 +13.5%。</li>
+<li><b>「對了抱緊」是這套方法的核心。</b>R5b 平均獲利 +67.6%、平均虧損 −18.5%；代價是組合回撤 −39.5%，遠超過 15~20% 的單檔容忍度。</li>
+</ul></div>
+
+<h2>八、我自己犯的兩個錯（都已修）</h2>
+<div class="card">
+<ul>
+<li><b>診斷統計量算錯，差點讓結論反過來。</b>登記寫的是「先漲比例 − 先跌比例」，我寫成「1 − 先漲比例」，把「兩邊都沒碰」算進了先跌。真實值是先漲 37.8%／先跌 27.8%／都沒碰 34.4%，優勢 +10.8 個百分點（t = +3.78，通過），被我算成 −21.5 個百分點（未通過）。已修，並讓腳本在拿不到三態資料時直接報錯。</li>
+<li><b>資料載入靜默失敗。</b>載入器回報「已寫入湖與 PG：266 萬列」，但 2020–2024 的籌碼資料一列都沒進資料庫——它只用「資料湖有沒有這一天」判斷。已修，兩個儲存體各自判斷，並加了 4 條測試。</li>
+</ul></div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D=JSON.parse(document.getElementById('data').textContent),C=D.cells;
+const pct=(x,d=1)=>x==null?'—':(x>=0?'+':'')+(x*100).toFixed(d)+'%';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cls=x=>x==null?'':x>=0?'pos':'neg';
+document.getElementById('sub').textContent=`產生於 ${D.generated_at.slice(0,16).replace('T',' ')}　回測區間涵蓋 2018-11 ~ 2026-02　共 ${C.length} 個配置`;
+document.getElementById('rt').textContent=(D.round_trip_cost*100).toFixed(2)+'%';
+
+// 一、主表
+const undecidable=c=>c.code==='R5a';
+const cols=[['輪','round'],['配置','label'],['交易筆數','n_trades'],['進場月份','entry_months'],
+  ['每筆期望值','expectancy'],['中位數','median_ret'],['月區塊 t','month_t'],['勝率','win_rate'],
+  ['年化','ann'],['最大回撤','mdd'],['持股比例','exposure']];
+let h='<thead><tr>'+cols.map(c=>`<th>${c[0]}</th>`).join('')+'<th>判定</th></tr></thead><tbody>';
+for(const c of C){
+  const u=undecidable(c);
+  const cell=(k)=>{
+    if(u&&['expectancy','median_ret','month_t','win_rate'].includes(k))return '<td class="fail">不可判定</td>';
+    const v=c[k];
+    if(k==='round')return `<td>${v}</td>`;
+    if(k==='label')return `<td><b>${esc(c.code)}</b><br><small style="color:var(--mute)">${esc(c.note)}</small></td>`;
+    if(k==='n_trades'||k==='entry_months')return `<td>${v}</td>`;
+    if(k==='month_t')return `<td class="${v>=2?'pass':'fail'}">${v==null?'—':(v>=0?'+':'')+v.toFixed(2)}</td>`;
+    if(k==='win_rate'||k==='exposure')return `<td>${v==null?'—':(v*100).toFixed(1)+'%'}</td>`;
+    return `<td class="${cls(v)}">${pct(v)}</td>`;
+  };
+  const ok=c.verdict==='通過';
+  h+='<tr>'+cols.map(x=>cell(x[1])).join('')+`<td class="${ok?'pass':'fail'}" title="${esc(c.verdict_why)}">${esc(c.verdict)}</td></tr>`;
+}
+document.getElementById('main-table').innerHTML=h+'</tbody>';
+const a=C.find(c=>c.code==='R5a');
+if(a)document.getElementById('r5a-note').innerHTML=
+ `<b>為什麼 R5a 不可判定：</b>它唯一的出場是停損，所以「已結束交易」100% 是輸家——贏家 ${a.open_positions} 檔全部還抱在手上，未實現報酬中位 <b>${pct(a.open_ret_median)}</b>。逐筆統計在這種設定下沒有意義，這是判定方法的缺口，不是策略的性質。`;
+
+// 共用繪圖工具
+const SVG=(w,h)=>`<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+const PAL=['#4f7cba','#c98b3a','#7a9e5a','#b3565b','#8a6fa8','#4a9a9a','#a87a5a','#7a7a8a','#5a9ac0','#c07a9a','#6a8a4a','#b06a4a'];
+
+// 二、進場月份數（橫條）
+(()=>{const w=980,bh=22,pad=170,h=C.length*bh+40;
+ const mx=Math.max(...C.map(c=>c.entry_months),89);
+ let s=SVG(w,h);
+ for(let i=0;i<=4;i++){const x=pad+(w-pad-30)*i/4;s+=`<line class="gl" x1="${x}" y1="14" x2="${x}" y2="${h-22}"/><text class="tick" x="${x}" y="${h-8}" text-anchor="middle">${Math.round(mx*i/4)}</text>`;}
+ C.forEach((c,i)=>{const y=18+i*bh,bw=(w-pad-30)*c.entry_months/mx;
+  s+=`<text class="tick" x="${pad-8}" y="${y+13}" text-anchor="end">${esc(c.code)}</text>`;
+  s+=`<rect x="${pad}" y="${y+3}" width="${Math.max(bw,1)}" height="${bh-8}" rx="2" fill="${c.round==='5'?'#4f7cba':'#c98b3a'}" opacity="${c.round==='5'?1:.75}"/>`;
+  s+=`<text class="tick" x="${pad+bw+6}" y="${y+13}">${c.entry_months}</text>`;});
+ s+=`<text class="tick" x="${pad}" y="10">共 89 個月；藍＝第五輪（排序訊號），橘＝前四輪（絕對門檻）</text></svg>`;
+ document.getElementById('months-chart').innerHTML=s;})();
+
+// 三、逐年進場筆數（分組長條）
+(()=>{const years=[...new Set(C.flatMap(c=>c.entry_years))].sort();
+ const pick=C.filter(c=>['L','S4n40','R5b'].includes(c.code));
+ const w=980,h=250,pad=44,bw=(w-pad-20)/years.length;
+ const counts=pick.map(c=>years.map(y=>c.entry_years.includes(y)?1:0));
+ // 需要逐年筆數 → 用 entry_years 只有有無；改用月份數近似不精確，故此圖改為「該年有沒有進場」
+ let s=SVG(w,h);
+ const rows=pick.length,rh=(h-60)/rows;
+ pick.forEach((c,r)=>{const y0=24+r*rh;
+  s+=`<text class="tick" x="4" y="${y0+rh/2}">${esc(c.code)}</text>`;
+  years.forEach((y,i)=>{const x=pad+i*bw,on=c.entry_years.includes(y);
+   s+=`<rect x="${x+2}" y="${y0+4}" width="${bw-4}" height="${rh-12}" rx="2" fill="${on?PAL[r]:'var(--grid)'}" opacity="${on?.9:1}"/>`;});});
+ years.forEach((y,i)=>{s+=`<text class="tick" x="${pad+i*bw+bw/2}" y="${h-14}" text-anchor="middle">${y}</text>`;});
+ s+=`<text class="tick" x="4" y="14">有色＝該年有進場；灰＝整年一筆都沒有</text></svg>`;
+ document.getElementById('years-chart').innerHTML=s;})();
+
+// 四、權益曲線
+(()=>{const pick=C.filter(c=>['LW-M1','E0','L','S4n40','R5a','R5b'].includes(c.code));
+ const all=pick.flatMap(c=>c.curve);const lo=Math.min(...all.map(p=>p[1])),hi=Math.max(...all.map(p=>p[1]));
+ const t0=new Date(pick[0].curve[0][0]).getTime(),t1=new Date(pick[0].curve.at(-1)[0]).getTime();
+ const w=980,h=300,padL=46,padB=26;
+ const X=d=>padL+(w-padL-14)*(new Date(d).getTime()-t0)/(t1-t0);
+ const Y=v=>10+(h-padB-10)*(1-(Math.log(v)-Math.log(lo))/(Math.log(hi)-Math.log(lo)));
+ let s=SVG(w,h);
+ [1,2,4,8,16,32].filter(v=>v>=lo&&v<=hi).forEach(v=>{const y=Y(v);
+  s+=`<line class="gl" x1="${padL}" y1="${y}" x2="${w-14}" y2="${y}"/><text class="tick" x="${padL-6}" y="${y+3}" text-anchor="end">${v}×</text>`;});
+ for(let yr=2019;yr<=2026;yr++){const x=X(yr+'-01-01');if(x>padL&&x<w)s+=`<text class="tick" x="${x}" y="${h-8}" text-anchor="middle">${yr}</text>`;}
+ let lg='';
+ pick.forEach((c,i)=>{const d=c.curve.map(p=>`${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ');
+  s+=`<polyline points="${d}" fill="none" stroke="${PAL[i]}" stroke-width="1.8"/>`;
+  lg+=`<span><i style="background:${PAL[i]}"></i>${esc(c.code)}　${pct(c.ann)}／年　回撤 ${pct(c.mdd)}</span>`;});
+ s+=`<line class="axis" x1="${padL}" y1="${h-padB}" x2="${w-14}" y2="${h-padB}"/></svg>`;
+ document.getElementById('equity-chart').innerHTML=s;
+ document.getElementById('equity-legend').innerHTML=lg;})();
+
+// 六、回頭套用第四輪判準（僅供觀察）
+(()=>{const rows=C.filter(c=>c.month_t!=null&&c.code!=='R5a');
+ let h='<thead><tr><th>配置</th><th>交易筆數</th><th>月區塊 t</th><th>每筆期望值</th><th>年化</th><th>四條全過？</th><th>它自己登記下的判定</th></tr></thead><tbody>';
+ for(const c of rows.sort((a,b)=>(b.month_t)-(a.month_t))){
+   const all=c.n_trades>=300&&c.expectancy>0&&c.month_t>=2&&c.ann>0;
+   h+=`<tr><td><b>${esc(c.code)}</b>　<small style="color:var(--mute)">輪 ${c.round}</small></td><td>${c.n_trades}</td>`+
+      `<td class="${c.month_t>=2?'pass':'fail'}">${(c.month_t>=0?'+':'')+c.month_t.toFixed(2)}</td>`+
+      `<td class="${cls(c.expectancy)}">${pct(c.expectancy)}</td><td class="${cls(c.ann)}">${pct(c.ann)}</td>`+
+      `<td class="${all?'pass':'fail'}">${all?'是':'否'}</td><td class="${c.verdict==='通過'?'pass':'fail'}">${esc(c.verdict)}</td></tr>`;}
+ document.getElementById('retro-table').innerHTML=h+'</tbody>';})();
+
+// 五、報酬分布（R5b vs S4n40）
+(()=>{const pick=C.filter(c=>['R5b','S4n40','L'].includes(c.code)&&c.rets.length);
+ const bins=[[-Infinity,-.25],[-.25,-.15],[-.15,-.05],[-.05,.05],[.05,.15],[.15,.25],[.25,.5],[.5,1],[1,Infinity]];
+ const labs=['<−25%','−25~−15%','−15~−5%','−5~+5%','+5~15%','+15~25%','+25~50%','+50~100%','>+100%'];
+ const w=980,h=230,padL=44,padB=38,bw=(w-padL-14)/bins.length;
+ const data=pick.map(c=>bins.map(b=>c.rets.filter(r=>r>b[0]&&r<=b[1]).length/c.rets.length));
+ const mx=Math.max(...data.flat());
+ let s=SVG(w,h),lg='';
+ pick.forEach((c,r)=>{data[r].forEach((v,i)=>{const bh=(h-padB-16)*v/mx,x=padL+i*bw+r*(bw/pick.length-2)+2;
+  s+=`<rect x="${x}" y="${h-padB-bh}" width="${bw/pick.length-3}" height="${Math.max(bh,0.5)}" fill="${PAL[r]}" opacity=".85"/>`;});
+  lg+=`<span><i style="background:${PAL[r]}"></i>${esc(c.code)}　中位 ${pct(c.median_ret)}　平均 ${pct(c.expectancy)}</span>`;});
+ labs.forEach((l,i)=>{s+=`<text class="tick" x="${padL+i*bw+bw/2}" y="${h-padB+14}" text-anchor="middle">${l}</text>`;});
+ s+=`<line class="axis" x1="${padL}" y1="${h-padB}" x2="${w-14}" y2="${h-padB}"/>`;
+ s+=`<text class="tick" x="${padL}" y="12">縱軸＝該區間佔全部交易的比例（已扣手續費與稅）</text></svg>`;
+ document.getElementById('dist-chart').innerHTML=s+`<div class="legend">${lg}</div>`;})();
+</script>
+</main>
+</body>
+</html>

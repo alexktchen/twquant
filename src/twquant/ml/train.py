@@ -35,7 +35,7 @@ _DETERMINISM: dict[str, object] = {
 
 
 # 標籤型態決定目標函數，不是可調參數：二元標籤要的是機率，用回歸會吐出 [0,1] 以外的數字。
-OBJECTIVE_BY_TRANSFORM: dict[str, str] = {"triple_barrier": "binary"}
+OBJECTIVE_BY_TRANSFORM: dict[str, str] = {"triple_barrier": "binary", "down_probability": "binary"}
 
 
 def objective_for(transform: str) -> str:
@@ -163,6 +163,7 @@ _BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
     # T-248：以下皆為「未使用時等同於欄位不存在」
     (("label", "barrier_up"), None),
     (("label", "vol_scaled"), False),
+    (("label", "drop_threshold"), None),
     (("label", "vol_window"), None),
     (("label", "barrier_down"), None),
     (("context_window",), 20),  # context_features 為空時不生效；非空時 20 即登記值
@@ -284,6 +285,7 @@ _ID_KIND: dict[str, str] = {
     "revenue_surprise": "rev_",  # D-074
     "forward_drawdown": "dd_",  # D-075
     "triple_barrier": "tb_",  # D-120
+    "down_probability": "dp_",  # D-131
 }
 
 # research_log 的 trial_scope（DSR 的家族鍵）。第一段 IC 檢驗記在 ML 家族，
@@ -294,6 +296,7 @@ _TRIAL_SCOPE: dict[str, str] = {
     "revenue_surprise": "ml:revenue_surprise",
     "forward_drawdown": "ml:drawdown_h{h}",
     "triple_barrier": "ml:triple_barrier_h{h}",
+    "down_probability": "ml:down_prob_h{h}",
 }
 
 
