@@ -209,6 +209,8 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-258 | `scripts/benchmarks_two_windows.py` 有兩個 ruff 錯（BLE001 盲捕 Exception、B007 未用的迴圈變數），使 `python -m twquant check` 在 main 上即為紅——不在任何進行中任務的範圍內 | — | — | — | todo |
 | T-273 | 整批補算因子工具（`scripts/backfill_factors_bulk.py`）＋ CLI `--factors`／`--trim-lookback`：逐日路徑單日 3m21s，整批 223 秒算完 2,760 天 | DECISIONS D-138 §六 | — | — | done |
 | T-274 | E0 ＋ 嚴格流動性（LQ1／LQ2） | DECISIONS D-140 §三 | — | — | done（D-140 §八~十一：LQ1 年化 +17.6%／回撤 −59.1%，比 E0 差很多；LQ2 宇宙最少僅 6 檔、不可執行）|
+| T-277 | 地端因子排除設定 `serving.exclude_factors`：`chip.broker_*` 每天掃 broker_trades 全部 5,770 萬列、單日 > 10 分鐘且歷來 0 列產出，卻佔掉整條 pipeline | DECISIONS — | — | — | done |
+| T-278 | 每日 pipeline 的 `PgTableSource` 未給 `since`／`cache`：每個因子各全掃一次 `ml_scores`（3,283 萬列），實測卡住吃掉 7.5 GB。改為依最長宣告回看算下界＋快取後，單日物化 **374 秒**完成 | DECISIONS — | — | — | done |
 | T-275 | 排程器在 19:00 之後啟動會整天跳過完整 pipeline：啟動時只補匯入、不補加工，且把觸發點排到明天 → 當天有原始資料但沒有因子／分數／選股名單（2026-09-21、09-22 實際發生）。應改為「啟動時若當天 pipeline 未跑過即立刻補跑」，並補前幾個交易日的洞 | — | — | — | todo |
 | T-276 | `margin_daily` 抓取失敗被當成「非交易日」靜默跳過：排程器連兩天回報『沒有符合條件的資料』，手動重跑卻正常進 1,297 列 → 暫時性失敗不該與休市同路徑，須重試並在仍失敗時告警 | — | — | — | todo |
 | T-271 | 分點因子 `chip.broker_*` 整批物化：逐日路徑單日 > 10 分鐘（expanding 隔日沖統計掃全歷史），1,144 天要 190+ 小時——改寫成一次掃完整個面板 | DECISIONS D-138 §五 | — | — | todo |

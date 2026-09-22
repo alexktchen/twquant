@@ -374,3 +374,35 @@ class _NullConn:
 
     def __exit__(self, *_a: object) -> None:
         return None
+
+
+def test_t277_exclude_factors_skips_them_but_explicit_subset_still_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-277：`serving.exclude_factors` 擋掉全因子模式下的指定因子。
+
+    但**明確點名的子集不受排除清單影響**——那是呼叫端刻意要算的，
+    靜默拿掉會讓「我明明指定了它卻沒算」變成一個查不出來的缺陷。
+    """
+    import twquant.factors.builtins  # noqa: F401
+    from twquant.data.serving import materialize as smat
+    from twquant.factors import compute as compute_mod
+
+    wh = Warehouse(tmp_path)
+    wh.write("clean", "prices_daily", _prices(25, _STOCKS))
+    as_of = dt.date(2026, 6, 24)
+    real = compute_mod.compute
+    seen: list[str] = []
+
+    def spy(names: list[str], view: Any, dates: Any = None, **kw: Any) -> pl.DataFrame:
+        seen.extend(names)
+        return real(names, view, dates=dates, **kw)
+
+    monkeypatch.setattr(compute_mod, "compute", spy)
+    smat._compute_universe(wh, as_of, exclude=["price.mom_20d"])
+    assert "price.mom_20d" not in seen, "排除清單沒有生效"
+    assert "price.reversal_5d" in seen, "排除清單誤傷了其他因子"
+
+    seen.clear()
+    smat._compute_universe(wh, as_of, factors=["price.mom_20d"], exclude=["price.mom_20d"])
+    assert seen == ["price.mom_20d"], "明確點名的子集不該被排除清單拿掉"

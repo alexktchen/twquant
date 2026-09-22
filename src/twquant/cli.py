@@ -1062,7 +1062,14 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         ssync.sync_all(wh, scfg)
         conn = store.connect(scfg)
         try:
-            m = smat.materialize_day(PgTableSource(conn, scfg.pg_schema), scfg, day)
+            # since＋cache 缺一不可：沒有 since 每張表都全掃（ml_scores 3,283 萬列），
+            # 沒有 cache 則每個因子各掃一次。兩者都沒給時，單日物化會卡住（T-278）。
+            import twquant.factors.builtins  # noqa: F401  # 觸發註冊，才問得到 lookback
+            from twquant.factors.registry import list_factors
+
+            names = [n for n in list_factors() if n not in set(scfg.exclude_factors)]
+            src = PgTableSource(conn, scfg.pg_schema, cache=True, since=smat.read_since(day, names))
+            m = smat.materialize_day(src, scfg, day)
         finally:
             conn.close()
         return f"鏡射同步 + 物化 {m.factor_rows} 因子列"

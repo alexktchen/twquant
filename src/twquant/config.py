@@ -81,6 +81,12 @@ class ServingConfig(BaseConfig):
     pool_min: int = 1
     pool_max: int = 8
     factor_history_days: int = 1100  # factor_values 保留窗（≈3 年）
+    # 地端物化要略過的因子（T-277）。與 `cloud.exclude_factors` 分開：那個只管雲端。
+    # 用途是擋掉「跑很久卻產不出東西」的因子——`chip.broker_*` 的隔日沖判定是 expanding
+    # 統計，每天都要掃 broker_trades 全部 5,770 萬列，實測單日 > 10 分鐘且**歷來一列都沒寫成功**，
+    # 卻佔掉整條每日 pipeline 的時間（2026-09-21／22 因此整天沒有選股名單）。
+    # 等 T-271 的整批路徑做好再移除。
+    exclude_factors: tuple[str, ...] = ()
     # D-035：不設 DuckDB 降級——雲端無資料湖，PG 不可用即 503（不假裝有資料，黃金規則 5）
     # D-020：綜合分（composite_daily）只納入的實證有效子集（非全因子等權）。
     composite_factors: tuple[str, ...] = DEFAULT_COMPOSITE_FACTORS
