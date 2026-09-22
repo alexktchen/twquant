@@ -445,7 +445,16 @@ def run_backtest(
         else set(signal_dates(strategy_cfg.rebalance, calendar, start, end))
     )
     exit_rules = strategy_cfg.exit_rules
-    ma_windows = tuple(sorted({int(r.window) for r in exit_rules if r.window is not None}))
+    # 進場濾網的均線也要算，否則欄位不存在、濾網靜默失效
+    ma_windows = tuple(
+        sorted(
+            {
+                int(r.window)
+                for r in (*exit_rules, *strategy_cfg.entry_filters)
+                if r.window is not None
+            }
+        )
+    )
     by_date = _price_panel(warehouse, start, end, ma_windows)
 
     state = _State(cash=initial_capital)
@@ -538,7 +547,9 @@ def run_backtest(
                     for sid, _ in slot_candidates(strategy_cfg, warehouse, day)
                     if sid not in state.holdings
                 ]
-                blocked = entry_blocked(exit_rules, cands, day_px, warehouse, day)
+                blocked = entry_blocked(
+                    [*exit_rules, *strategy_cfg.entry_filters], cands, day_px, warehouse, day
+                )
                 entries_pending = [sid for sid in cands if sid not in blocked][:free]
 
     equity_series = [e.equity for e in equity_curve]

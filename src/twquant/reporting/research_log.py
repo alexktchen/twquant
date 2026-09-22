@@ -109,6 +109,8 @@ def backtest_params_hash(
         strategy_payload.pop("exit_rules", None)
     if strategy_payload.get("slots") is None:  # T-247：同理，未啟用時不進 hash
         strategy_payload.pop("slots", None)
+    if not strategy_payload.get("entry_filters"):  # D-138：同理
+        strategy_payload.pop("entry_filters", None)
     payload = {
         "strategy": strategy_payload,
         "cost": cost.model_dump(mode="json"),

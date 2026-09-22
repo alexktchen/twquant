@@ -97,7 +97,7 @@ def test_ac7_logistic_recovers_direction_and_stays_in_unit_interval() -> None:
     model = fit_logistic(x, y, l2=1e-6, max_iter=50)
     assert model.coef[0] > 0 > model.coef[1]
     out = predict_logistic(model, x)
-    assert 0.0 < out.min() and out.max() < 1.0
+    assert out.min() > 0.0 and out.max() < 1.0
     assert abs(out.mean() - y.mean()) < 0.02
 
 
