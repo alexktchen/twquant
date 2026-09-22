@@ -39,6 +39,8 @@ _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
 # 洞悉分析在 pipeline 的參數：N 為 D-081(b) 的事前登記值；窗口與 sector-flows 預設一致。
 _INSIGHT_TOP_N = 30
+# 紙上交易的行情回看：前收與 20 日 ADV 中位數都在這個窗內（D-142／T-280）。
+_PAPER_LOOKBACK_DAYS = 90
 _SECTOR_WINDOW = 20
 
 
@@ -1142,6 +1144,16 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
             return "PG 不可達，略過"
         return _strategy_targets_for_day(day, Path(cfg.data_dir))
 
+    def _paper_trading_step() -> str:
+        # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
+        # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _paper_trading_for_day(day, Path(cfg.data_dir))
+
     def _insight_step() -> str:
         # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
         # 前提是當日已有推薦快照；沒有就是正常的「沒有 L0 名單可分析」，不是錯誤。
@@ -1198,6 +1210,7 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
         PipelineStep("策略持股", _strategy_targets_step),
+        PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("洞悉分析", _insight_step),
     ]
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
@@ -1600,6 +1613,209 @@ def strategy_targets(
         day = row[0]
     data_dir = Path(out) if out else Path(_load_system().data_dir)
     typer.secho(f"[OK] {day} {_strategy_targets_for_day(day, data_dir)}", fg=typer.colors.GREEN)
+
+
+def _file_fingerprint(path: Path) -> str:
+    """配置檔內容的 SHA-256。規則變了指紋就變，帳本因此攔得住「偷偷改規則繼續記」。"""
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _paper_trading_for_day(day: dt.date, data_dir: Path) -> str:
+    """把 `day` 這一天記進每一條紙上交易軌（D-142／T-280）。回傳一行摘要。
+
+    **名單不在這裡算**：再平衡日的目標持股直接讀當日已保存的策略持股快照（D-112），
+    也就是平台頁面上看到的同一份。快照不在就記成 `skipped`——如果這裡改成「自己算一次」，
+    那就等於允許事後補算名單，帳本的全部意義都沒了（D-142 §四）。
+
+    沒有當日行情就什麼都不寫（休市不是洞）。真正的洞由報告比對帳本日期與 `prices_daily`
+    的交易日找出來，不靠這裡猜。
+    """
+    from twquant.backtest.costs import CostConfig
+    from twquant.backtest.engine import price_panel
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.errors import TwquantError
+    from twquant.reporting import paper_ledger as pl_
+    from twquant.reporting.paper_trading import assert_trackable, is_signal_day, step_day
+    from twquant.reporting.strategy_targets import select_snapshots
+    from twquant.strategy.config import load_strategy
+
+    paper_path = _CONFIG_DIR / "paper_trading.yaml"
+    costs_path = _CONFIG_DIR / "costs.yaml"
+    cfg = load_config(paper_path, pl_.PaperTradingConfig)
+    strategy_path = _CONFIG_DIR / "strategies" / f"{cfg.strategy}.yaml"
+    strat = load_strategy(str(strategy_path))
+    assert_trackable(strat)
+    cost_cfg = load_config(costs_path, CostConfig)
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        # 回看 90 天足夠算前收與 20 日 ADV 中位數（`price_panel` 的全部需求）。
+        source = PgTableSource(
+            conn, scfg.pg_schema, cache=True, since=day - dt.timedelta(days=_PAPER_LOOKBACK_DAYS)
+        )
+        rows = price_panel(source, day, day).get(day, {})
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT DISTINCT date FROM "{scfg.pg_schema}"."prices_daily" '
+                "WHERE date >= %s AND date <= %s ORDER BY date",
+                (day.replace(day=1), day),
+            )
+            sessions = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+    if not rows:
+        return f"{day} 沒有行情（休市或尚未擷取），未寫入任何一條軌"
+
+    signal_day = is_signal_day(strat, day, sessions)
+    targets: list[pl_.OrderRow] | None = None
+    blocked = ""
+    if signal_day:
+        snapshots, _ = select_snapshots(data_dir, date=day, limit=1)
+        runs = [r for s in snapshots for r in s.strategies if r.config == cfg.strategy]
+        if not runs:
+            blocked = f"再平衡日但當日策略持股快照沒有 {cfg.strategy}（pipeline 未跑完？）"
+        elif runs[0].status == "failed":
+            blocked = f"再平衡日但策略算不出來：{runs[0].detail}"
+        else:  # status=flat 是合法的空手日，名單就是空的
+            targets = [
+                pl_.OrderRow(stock_id=t.stock_id, target_weight=t.target_weight)
+                for t in runs[0].targets
+            ]
+
+    now = now_tw()
+    summary: list[str] = []
+    for track in cfg.tracks:
+        state = pl_.load_track(data_dir, track.code)
+        if not state.opened:
+            pl_.append_event(
+                data_dir,
+                track.code,
+                pl_.TrackOpened(
+                    code=track.code,
+                    label=track.label,
+                    registration=cfg.registration,
+                    strategy=cfg.strategy,
+                    strategy_fingerprint=_file_fingerprint(strategy_path),
+                    cost_fingerprint=_file_fingerprint(costs_path),
+                    model_id=cfg.model_id,
+                    capital_twd=track.capital_twd,
+                    start_date=day,
+                    credit_dividends=cfg.credit_dividends,
+                ),
+                day=day,
+                recorded_at=now,
+                cfg=cfg,
+            )
+            state = pl_.load_track(data_dir, track.code)
+            summary.append(f"{track.code} 開軌")
+        if state.last_date is not None and day <= state.last_date and state.seq > 1:
+            summary.append(f"{track.code} 已記過")
+            continue
+        if blocked:
+            pl_.append_event(
+                data_dir,
+                track.code,
+                pl_.SkippedDay(reason=blocked),
+                day=day,
+                recorded_at=now,
+                cfg=cfg,
+            )
+            summary.append(f"{track.code} 略過")
+            continue
+        try:
+            record = step_day(
+                state,
+                day,
+                rows,
+                targets=targets,
+                cost_cfg=cost_cfg,
+                max_participation=cfg.max_participation,
+            )
+        except TwquantError as exc:
+            # 算不出來也是一種結果：記下原因，不讓這一天憑空消失（黃金規則 5）。
+            pl_.append_event(
+                data_dir,
+                track.code,
+                pl_.SkippedDay(reason=f"{type(exc).__name__}: {exc}"[:500]),
+                day=day,
+                recorded_at=now,
+                cfg=cfg,
+            )
+            summary.append(f"{track.code} 失敗")
+            continue
+        pl_.append_event(data_dir, track.code, record, day=day, recorded_at=now, cfg=cfg)
+        summary.append(
+            f"{track.code} 權益 {record.equity:,.0f}"
+            f"（持股 {len(record.holdings)}、成交 {len(record.fills)}"
+            f"{'、換股日' if signal_day else ''}）"
+        )
+    return ("再平衡日：" if signal_day else "") + "；".join(summary)
+
+
+@app.command(name="paper-trade")
+def paper_trade(
+    date: str = typer.Option("", help="交易日 YYYY-MM-DD；空＝PG 最新行情日"),
+    out: str = typer.Option("", help="帳本資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """把某一天記進紙上交易帳本（D-142）。append-only，不得回填，重跑同一天是安全的。"""
+    from twquant.data.serving import store
+
+    if date:
+        day = dt.date.fromisoformat(date)
+    else:
+        scfg = _load_serving()
+        conn = store.connect(scfg)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f'SELECT MAX(date) FROM "{scfg.pg_schema}"."prices_daily"')
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or row[0] is None:
+            typer.secho("PG 無行情，無法決定交易日。", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        day = row[0]
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    typer.secho(f"[OK] {day} {_paper_trading_for_day(day, data_dir)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="paper-verify")
+def paper_verify(
+    out: str = typer.Option("", help="帳本資料根目錄；空＝configs/system.yaml data_dir"),
+) -> None:
+    """驗每一條軌的雜湊鏈。被動過就以非零碼結束——這是帳本可信度的唯一憑據。"""
+    from twquant.config import load_config
+    from twquant.errors import TwquantError
+    from twquant.reporting import paper_ledger as pl_
+
+    cfg = load_config(_CONFIG_DIR / "paper_trading.yaml", pl_.PaperTradingConfig)
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    bad = 0
+    for track in cfg.tracks:
+        events = pl_.read_events(pl_.ledger_path(data_dir, track.code))
+        if not events:
+            typer.secho(f"  [--] {track.code}：尚未開軌", fg=typer.colors.YELLOW)
+            continue
+        try:
+            pl_.verify_chain(events)
+        except TwquantError as exc:
+            bad += 1
+            typer.secho(f"  [BAD] {track.code}：{exc}", fg=typer.colors.RED)
+            continue
+        state = pl_.replay(events)
+        typer.secho(
+            f"  [OK] {track.code}：{len(events)} 筆、{state.start_date} ~ {state.last_date}、"
+            f"權益 {state.equity:,.0f}、已平倉 {len(state.closed)} 筆、洞 {len(state.skipped)} 天",
+            fg=typer.colors.GREEN,
+        )
+    if bad:
+        raise typer.Exit(1)
 
 
 @app.command()
