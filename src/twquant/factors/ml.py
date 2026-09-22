@@ -214,3 +214,26 @@ def lgbm_dd_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
 def lgbm_lw_tb_up_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     """20 日內「先漲 10%」的校準後機率（絕對值，不可當橫斷面排序因子用）。"""
     return _scores_for_model(view, params, "lgbm_lw_tb_h20_", value_col="score")
+
+
+# ── 第九輪右尾模型（D-143）────────────────────────────────────────────────
+# A／B 兩臂的 model_id 只差 sample_tag（`lgbm_taila_tu_h60_*` vs `lgbm_tailb_tu_h60_*`），
+# 共用前綴會互相命中——**故本因子強制要求 `model_id`**，不接受前綴回退。
+
+
+@factor(
+    name="ml.lgbm_tail_up_60d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"smooth_days": 0},
+)
+def lgbm_tail_up_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """60 個交易日內最大漲幅 ≥ +50% 的機率（絕對值，不可當橫斷面排序因子用）。"""
+    if params.get("model_id") is None:
+        raise ValueError(
+            "ml.lgbm_tail_up_60d 須指定 model_id：A／B 兩臂前綴相近，"
+            "前綴回退會讓兩臂的分數互相命中（D-143 §三）"
+        )
+    return _scores_for_model(view, params, "lgbm_tail", value_col="score")

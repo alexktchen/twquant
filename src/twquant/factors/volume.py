@@ -70,3 +70,34 @@ def turnover_z_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="volume.adv_20d",
+    category="volume",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=25,
+    params={"window": 20},
+    anchor_invariant=True,
+)
+def adv_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """ADV：過去 window 日成交金額的**中位數**（D-005 的唯一定義，TWD）。
+
+    中位數而非平均：單日爆量（除權息、借殼、當沖行情）會把平均拉高好幾倍，
+    而參與率上限要問的是「平常吃得下多少」。窗內不足即 null，不用短窗充數。
+
+    **回傳的是絕對金額**，不是分位——D-143 §三 的規則臂要「取成交額前 15」，
+    每日補位的進場分數吃的是原始值。
+    """
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    return (
+        view.table("prices_daily")
+        .select("date", "stock_id", "amount")
+        .sort(["stock_id", "date"])
+        .with_columns(value=pl.col("amount").rolling_median(window).over("stock_id"))
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )

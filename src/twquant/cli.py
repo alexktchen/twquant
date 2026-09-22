@@ -2430,6 +2430,7 @@ def ml_train(
         liquid_pool,
         month_end_signal_dates,
         revenue_surprise_labels,
+        tail_up_labels,
         triple_barrier_labels,
     )
     from twquant.ml.splits import walk_forward_splits
@@ -2456,6 +2457,7 @@ def ml_train(
             "revenue_surprise": read_prices_close,  # 只用來取交易日曆，欄位不進標籤
             "triple_barrier": read_prices_barrier,  # D-120：開盤進場價＋逐日收盤＋成交金額
             "down_probability": read_prices_barrier,  # D-131：同上
+            "tail_up": read_prices_barrier,  # D-143：同上（開盤進場價＋逐日收盤）
         }
         px = _readers.get(cfg.label.transform, read_prices_open)(conn, scfg.pg_schema, start, end)
         events = (
@@ -2525,6 +2527,14 @@ def ml_train(
             max_span_sessions=cfg.label.max_span_sessions,
             vol_scaled=cfg.label.vol_scaled,
             vol_window=cfg.label.vol_window,
+        )
+    elif cfg.label.transform == "tail_up":
+        labels = tail_up_labels(
+            px,
+            horizon=cfg.horizon_days,
+            up=cast("float", cfg.label.barrier_up),
+            adjusted=cast("bool", cfg.label.total_return),
+            max_span_sessions=cfg.label.max_span_sessions,
         )
     elif cfg.label.transform == "down_probability":
         labels = down_probability_labels(

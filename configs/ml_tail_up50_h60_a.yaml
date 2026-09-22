@@ -1,0 +1,61 @@
+# D-143 第九輪 **A 臂**：只換標籤，其餘逐字不動。
+#
+# 與 `ml_h20_cost_aware_lw.yaml`（現行生產模型的配方）的差別**只有標籤與其連帶項**：
+#   transform  cost_adjusted_return → tail_up（右尾：未來 60 日最大漲幅 ≥ +50%）
+#   horizon    20 → 60（D-143 §一：飆股事件平均 33 天走完，60 天涵蓋絕大多數）
+#   embargo    20 → 60（config 強制 embargo ≥ horizon，否則標籤的前向視窗會洩進測試段）
+#   max_span   42 → 122（沿用既有的 h×2＋2 比例）
+# 特徵、LGBM 超參、切分規則、seed **逐字相同**——這樣 A 臂與生產模型的差異才只能
+# 歸因於「問的問題換了」這一件事（但見 D-143 §十 預測 7：整批重物化讓資料也變了，
+# 故 A 臂**不可**直接與生產模型的 OOS RankIC +0.0661 比大小）。
+#
+# sample_tag 不是註記而是身分：沒有它，model_id 的 hash 只看超參數，
+# 兩臂的分數會混進同一條 ml_scores 線裡。
+sample_tag: taila
+
+horizon_days: 60
+aux_horizons: [20, 40]
+features:
+  - fundamental.revenue_accel
+  - fundamental.revenue_yoy
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.rs_market_20d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+context_features: []
+label:
+  execution: next_open
+  excess: market_mean
+  transform: tail_up
+  barrier_up: 0.50
+  adv_window_sessions: 20
+  position_notional_twd: 500_000.0
+  downside_penalty: 0.25
+  total_return: true # D-054／D-066：含股利。未表態時 `ml train` 會拒絕執行
+  max_span_sessions: 122
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 60
+  # vault_months: 0 ——第一個金庫（2026-03~08）已於 D-107 開封用掉，第二保留期（2026-09-01 起）
+  # 依 D-109／D-114 最早 2027-03-01 才開。本輪的證據一律是 walk-forward 樣本外，
+  # 且 D-143 §六 明文「不是保留期證據」；資料上界由 `ml train --to` 給定。
+  vault_months: 0
+  days_per_year: 244
+  days_per_month: 21
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+refit:
+  schedule: monthly
+trials_log: research_log

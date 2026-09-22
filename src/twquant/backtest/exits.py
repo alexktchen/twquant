@@ -40,6 +40,8 @@ def rule_label(rule: ExitRuleConfig) -> str:
     """寫進成交紀錄的出場原因。"""
     if rule.kind in ("below_ma", "trailing_ma"):
         return f"{rule.kind}_{rule.window}"
+    if rule.kind == "trailing_pct":
+        return f"trailing_pct_{rule.pct}"
     if rule.kind == "score_below":
         return f"score_below:{rule.factor}"
     return rule.kind
@@ -87,6 +89,18 @@ def exit_reasons(
             elif rule.kind == "below_ma":
                 ma = day_px[sid].get(ma_column(int(_req(rule.window))))
                 hit = ma is not None and float(close) < float(ma)
+            elif rule.kind == "trailing_pct":
+                # D-143 §四 的 ratchet：浮盈曾達 min_peak_gain 之後，自持有期最高收盤
+                # 回落 pct 即出場。與 trailing_ma 的差別是停損線跟著高點走、不跟均線走
+                # ——均線在急漲後會落後很多，回吐的幅度不受控。
+                pos = held[sid]
+                if pos.avg_cost <= 0.0 or pos.peak_close <= 0.0:
+                    continue
+                peak_gain = (pos.peak_close + pos.dividends_per_share) / pos.avg_cost - 1.0
+                drawdown = (float(close) + pos.dividends_per_share) / (
+                    pos.peak_close + pos.dividends_per_share
+                ) - 1.0
+                hit = peak_gain >= _req(rule.min_peak_gain) and drawdown <= -_req(rule.pct)
             elif rule.kind == "trailing_ma":
                 pos = held[sid]
                 ma = day_px[sid].get(ma_column(int(_req(rule.window))))

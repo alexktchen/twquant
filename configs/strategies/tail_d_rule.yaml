@@ -1,0 +1,40 @@
+# D-143 第九輪 **D 臂（規則臂）**。**不訓練、不具晉升資格、in-sample。**
+#
+# 存在的目的只有一個：回答「模型有沒有贏過一條簡單規則」。這三條規則是 2026-09-22
+# 的**事後探索**挑出來的（D-143 §二），看過結果才選的，所以它有 in-sample 優勢、
+# 與 A／B 不可比大小——但若 A／B 連它都贏不了，那就是這條路線的答案。
+#
+# ⚠ `price.vol_20d` 註冊為 direction=-1（低波動異象），故 **side: bottom 才是高波動那端**。
+# 這個方向很容易寫反，寫反的話整條規則的意思就相反了。
+name: tail_d_rule
+description: 第九輪 D 臂（規則對照）：波動前20% ∩ 60日動能前20% ∩ 52週高前10%，取成交額前 15
+trial_scope: lw:slots_tail
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+prefilter:
+  - factor: price.vol_20d
+    keep_pct: 0.2
+    side: bottom # direction=-1 → bottom ＝ 高波動
+  - factor: price.mom_60d
+    keep_pct: 0.2
+    side: top
+  - factor: price.high_52w
+    keep_pct: 0.1
+    side: top
+signals:
+  - factor: volume.adv_20d
+    weight: 1.0
+slots:
+  n: 15
+  entry_threshold: 0.0 # 池內取成交額最大的 15 檔
+exit_rules:
+  - kind: stop_loss
+    pct: 0.15
+  - kind: trailing_pct
+    pct: 0.10
+    min_peak_gain: 0.20
+  - kind: time_stop
+    sessions: 60

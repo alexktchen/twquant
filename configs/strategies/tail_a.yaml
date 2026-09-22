@@ -1,0 +1,37 @@
+# D-143 第九輪 A 臂（12 特徵，只換標籤）。**RESEARCH ONLY，未經部署裁決，勿用於實盤。**
+#
+# 每日補位：每天收盤後用右尾模型的機率排序，取前 15 名補到滿手；沒有再平衡日、
+# 沒有月底強制換股。進場分數是**絕對機率**（薄因子回 score 而非 rank_pct）。
+#
+# entry_threshold: 0.0 是刻意的——D-143 §三 登記的是「每日機率前 15 名」，
+# **沒有絕對門檻**。設了門檻就變成另一個假設（要另立登記），而且會讓 A／B／D
+# 三臂在不同日子持有不同檔數、無法比較。
+#
+# 出場（D-143 §四 的 ratchet，事前寫死）：初始停損 −15%；浮盈曾達 +20% 後改為
+# 自持有期高點回落 10%；60 個交易日時間上限。順序決定成交紀錄裡記哪一條原因。
+#
+# 成交假設由引擎既有行為滿足：隔日開盤漲停不成交、記 unfilled（engine.py 模組 docstring）。
+name: tail_a
+description: 第九輪 A 臂（12 特徵，只換標籤）：右尾機率前 15、ratchet 出場
+trial_scope: lw:slots_tail
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70 # D-143 §五：宇宙 ADV 前 30%，與 E0 相同（D-140 已證更嚴格更差）
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_60d
+    weight: 1.0
+    params:
+      model_id: REPLACE_AFTER_TRAINING
+slots:
+  n: 15
+  entry_threshold: 0.0
+exit_rules:
+  - kind: stop_loss
+    pct: 0.15
+  - kind: trailing_pct
+    pct: 0.10
+    min_peak_gain: 0.20
+  - kind: time_stop
+    sessions: 60
