@@ -235,7 +235,7 @@ class ExitRuleConfig(BaseConfig):
 
 
 class ExposureTargetConfig(BaseConfig):
-    """每日曝險目標（T-286／D-145 §二）：把 V1 的 `vol_target_scaling` 帶進每日補位模式。
+    """每日曝險目標（T-286／D-146 §二）：把 V1 的 `vol_target_scaling` 帶進每日補位模式。
 
     V1 的 overlay 只在月頻再平衡路徑生效，每日補位從不呼叫它。這裡用**同一個**波動估計
     （`strategy.overlays._realized_vol`，持股等權組合近 window 日的年化波動）算倍數

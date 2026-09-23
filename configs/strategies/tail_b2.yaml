@@ -1,4 +1,4 @@
-# D-145 第十輪 B′ 臂：tail_b 特徵、2022-03 起訓練（C 的配對基準）。**RESEARCH ONLY，未經部署裁決，勿用於實盤。**
+# D-146 第十輪 B′ 臂：tail_b 特徵、2022-03 起訓練（C 的配對基準）。**RESEARCH ONLY，未經部署裁決，勿用於實盤。**
 # 與 tail_b 逐字相同，只換模型（B′：20 特徵、2022-03 起訓練）。存在的理由是讓 C 可比。
 #
 # 每日補位：每天收盤後用右尾模型的機率排序，取前 15 名補到滿手；沒有再平衡日、
@@ -24,7 +24,7 @@ signals:
   - factor: ml.lgbm_tail_up_60d
     weight: 1.0
     params:
-      model_id: REPLACE_AFTER_TRAINING
+      model_id: lgbm_tailb2_tu_h60_20260430_83674195
 slots:
   n: 15
   entry_threshold: 0.0

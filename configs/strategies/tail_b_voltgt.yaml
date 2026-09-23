@@ -1,4 +1,4 @@
-# D-145 第十輪 **E 臂**：tail_b ＋ 每日曝險目標。**RESEARCH ONLY，未經部署裁決，勿用於實盤。**
+# D-146 第十輪 **E 臂**：tail_b ＋ 每日曝險目標。**RESEARCH ONLY，未經部署裁決，勿用於實盤。**
 #
 # 與 tail_b 逐字相同，只多 `slots.exposure_target`——V1 的 vol_target_scaling 只在月頻再平衡路徑
 # 生效，每日補位從不呼叫它；T-286 讓 slots 模式也吃同一個倍數：新進場每格 pv×mult/n，

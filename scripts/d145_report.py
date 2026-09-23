@@ -1,4 +1,4 @@
-"""D-145 §四：第十輪報告——**只報數字、不判**。
+"""D-146 §四：第十輪報告——**只報數字、不判**。
 
     TWQUANT_PG_DSN=... uv run --all-groups python scripts/d145_report.py \
         --bundles D:/project/twquant/data/tracks_tail10
@@ -7,7 +7,7 @@
 每格揭露年化、最大回撤、Calmar、平均曝險、低曝險日佔比、命中率倍率、每筆淨期望、筆數、
 月區塊 t、年化周轉、成本佔初始資金比，並與 tail_b（D-143 B 臂）、E0、V1 並列。
 
-C／B′ 的窗口只有兩年（2024-03 ~ 2026-02）——D-145 §三 事前寫明「只看方向、不看大小」，
+C／B′ 的窗口只有兩年（2024-03 ~ 2026-02）——D-146 §三 事前寫明「只看方向、不看大小」，
 表尾會再印一次這句話，免得看數字的人忘了。
 """
 
@@ -77,7 +77,7 @@ def main() -> None:
         if dt.date.fromisoformat(str(b["end"])) > DEV_END:
             raise SystemExit(f"{p.name} 結束於 {b['end']}，越過第二保留期邊界")
     print(f"來回成本（手續費×2 ＋ 證交稅）＝ {rt:.3%}；逐筆報酬另扣此數")
-    print("**本輪不設門檻（D-145 §〇）——以下全部只報不判。**\n")
+    print("**本輪不設門檻（D-146 §〇）——以下全部只報不判。**\n")
     outcomes = pl.DataFrame()
     if not args.no_lift:
         lo = min(dt.date.fromisoformat(str(b["start"])) for _, b in bundles)
@@ -127,7 +127,7 @@ def main() -> None:
     for name, (a, m, c) in REFERENCE.items():
         print(f"  {name:36} 年化 {a:+.1%}　回撤 {m:.1%}　Calmar {c:.2f}")
     print(
-        "\n提醒（D-145 §三 事前寫定）：C 與 B′ 的回測窗只有兩年、約 8 個 walk-forward 視窗，"
+        "\n提醒（D-146 §三 事前寫定）：C 與 B′ 的回測窗只有兩年、約 8 個 walk-forward 視窗，"
         "**只看方向、不看大小**；回撤與年化的差異視為雜訊。"
     )
 

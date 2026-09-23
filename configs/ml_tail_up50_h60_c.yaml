@@ -1,4 +1,4 @@
-# D-145 第十輪 **C 臂**：B 臂的 20 支 ＋ 3 支有長歷史的分點因子（2022-03 起）。
+# D-146 第十輪 **C 臂**：B 臂的 20 支 ＋ 3 支有長歷史的分點因子（2022-03 起）。
 # 訓練窗由 CLI 的 `--from 2022-03-01` 給定；配對基準是 ml_tail_up50_h60_b2.yaml（同窗口、無分點）。
 # 事後探索：broker_concentration_20d 疊在波動前 20% 之上把飆股率 13.1% → 17.2%（負向篩選為主），
 # 看過才挑的，不得當通過證據。
@@ -44,7 +44,7 @@ features:
   - price.vol_asym_20
   - price.ret_skew_60
   - price.jump_count_60
-  # ↓ D-145 §三：分點三支（只有這三支有 2022-03 起的歷史）
+  # ↓ D-146 §三：分點三支（只有這三支有 2022-03 起的歷史）
   - chip.broker_concentration_20d
   - chip.broker_count_diff_5d
   - chip.broker_persistence_10d
@@ -63,7 +63,7 @@ split:
   train_min_years: 2.0
   test_months: 3
   embargo_days: 60
-  # vault_months: 4 ——**不是金庫，是標籤的尾巴保護**（T-281 實作時才發現，見 D-143 §十 註）。
+  # vault_months: 4 ——**不是金庫，是標籤的尾巴保護**（T-288 實作時才發現，見 D-143 §十 註）。
   # h=60 的標籤需要往後 60 個交易日，故資料上界前約三個月的訊號日一律沒有標籤；
   # 若不保留尾巴，最後一個測試窗會整段是 null，`walk_forward_train` 直接 raise。
   # 4 個月 × 21 日＝84 個交易日 > 60，留 24 日餘裕。兩臂同值，可比性不受影響。

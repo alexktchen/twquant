@@ -650,7 +650,7 @@ def run_backtest(
             exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
 
         if slot_cfg is not None and slot_cfg.exposure_target is not None:
-            # T-286／D-145 §二：每日曝險目標。倍數用 V1 同一個波動估計（持股等權組合），
+            # T-286／D-146 §二：每日曝險目標。倍數用 V1 同一個波動估計（持股等權組合），
             # 空手時沒有東西可估 → 1.0（新進場全額）。減碼與出場同一天判、隔日開盤執行。
             et = slot_cfg.exposure_target
             held_ids = sorted(sid for sid, sh in state.holdings.items() if sh > 0)
