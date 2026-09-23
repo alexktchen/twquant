@@ -2729,6 +2729,7 @@ def ml_train(
         liquid_pool,
         month_end_signal_dates,
         revenue_surprise_labels,
+        state_pool,
         tail_up_labels,
         triple_barrier_labels,
     )
@@ -2896,6 +2897,12 @@ def ml_train(
         before = frame.height
         frame = frame.join(pool, on=["date", "stock_id"], how="inner")
         typer.echo(f"流動性樣本池：{before} → {frame.height} 列")
+    if cfg.sample_state is not None:
+        # D-151：只在某種狀態的股票上訓練、也只在那裡預測——walk-forward 的測試列同樣只剩這些
+        spool = state_pool(px, cfg.sample_state, adjusted=cast("bool", cfg.label.total_return))
+        before = frame.height
+        frame = frame.join(spool, on=["date", "stock_id"], how="inner")
+        typer.echo(f"狀態樣本池（{cfg.sample_state.kind}）：{before} → {frame.height} 列")
     if cfg.label.signal_dates == "month_end":
         # 月頻標籤下，其餘交易日的列全是 label null 的空殼——留著只會讓
         # walk_forward_train 對它們逐日推論（十倍以上的無用計算），且讓

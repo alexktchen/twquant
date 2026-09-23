@@ -1,0 +1,81 @@
+# D-151 第十二輪 模型 A：安靜股 → 20 日內漲 30%（2015 起）。**RESEARCH ONLY，只報不判。**
+# 只在指定狀態的股票上訓練、也只在那裡預測（sample_state）。切分與 LightGBM 參數逐字沿用第九輪。
+sample_tag: quietA
+horizon_days: 20
+aux_horizons: [5, 10]
+features:
+  - fundamental.revenue_accel
+  - fundamental.revenue_yoy
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.rs_market_20d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+  - price.atr_14
+  - price.parkinson_20
+  - price.garman_klass_20
+  - price.upside_vol_20
+  - price.downside_vol_20
+  - price.vol_asym_20
+  - price.ret_skew_60
+  - price.jump_count_60
+  # 法人／融資（2015 起完整）
+  - chip.foreign_net_10d
+  - chip.foreign_streak
+  - chip.inst_net_10d
+  - chip.trust_net_10d
+  - chip.trust_streak
+  - chip.margin_velocity_5d
+  - chip.short_margin_ratio
+  # 評價／規模
+  - fundamental.earnings_yield
+  - fundamental.log_market_cap
+  # 族群與位置：「同產業已在動、自己還沒動」、距 52 週高
+  - price.industry_rs_20d
+  - price.industry_mom_6m
+  - price.high_52w
+  # D-151 §三 新增的盤整型態（布林壓縮、均線糾結、大量區支撐）
+  - price.bb_squeeze_120
+  - price.ma_tangle
+  - price.vp_poc_dist_60
+  - price.vp_support_hold_20
+  - price.vp_near_share_60
+context_features: [ctx.taiex_ma20_dev, ctx.taiex_vol20, ctx.breadth_ma20]
+sample_state: # 安靜股：過去 60 日還原報酬 < +20% 且 20 日波動在同日全體百分位 < 70%
+  kind: quiet
+  past_window: 60
+  max_past_ret: 0.20
+  vol_window: 20
+  max_vol_pctl: 0.70
+label:
+  execution: next_open
+  excess: market_mean
+  transform: tail_up # t+1 開盤進場後 20 日內任一收盤 ≥ +30%
+  barrier_up: 0.30
+  adv_window_sessions: 20
+  position_notional_twd: 500_000.0
+  downside_penalty: 0.25
+  total_return: true # 還原價（D-054）
+  max_span_sessions: 42 # 20 日窗的跨距上限，比照第九輪（60 日 → 122）
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 20 # ＝horizon
+  vault_months: 4 # 最終模型只用 2026-04-30 以前；保留段 05-01~08-03 見 D-151 §八
+  days_per_year: 244
+  days_per_month: 21
+lgbm: # 逐字同第九輪，不調（D-151 §一）
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+refit:
+  schedule: monthly
+trials_log: research_log

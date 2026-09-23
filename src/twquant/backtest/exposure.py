@@ -17,7 +17,6 @@ import polars as pl
 
 from twquant.backtest.metrics import _TRADING_DAYS
 from twquant.errors import DataError
-from twquant.ml.dataset import attach_adjustment
 from twquant.portfolio.core import ewma_vol_series, vol_context, vol_multiplier, vol_triggered
 
 if TYPE_CHECKING:
@@ -76,6 +75,10 @@ def held_basket_returns(
     與停牌同樣處理——那天沒有報酬，下一個有成交的日子的報酬跨過缺口。
     某個交易日沒有任何一檔持股有報酬 → raise，不跳過。
     """
+    # 函式內匯入：`ml.dataset` 在模組層匯入 `backtest.costs`，會觸發 `backtest/__init__` →
+    # engine → 本模組，放在模組層就是循環匯入（先 import ml.dataset 的程序——如 `ml train`——會炸）
+    from twquant.ml.dataset import attach_adjustment
+
     days = _window(sessions, day, n_returns)
     px = (
         view.table("prices_daily")
