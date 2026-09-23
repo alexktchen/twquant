@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         SystemConfig,
     )
     from twquant.data.http import HttpClient
+    from twquant.data.serving.pg_view import PgTableSource
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.data.warehouse import TableSource
     from twquant.insight.client import InsightClient
@@ -1089,7 +1090,6 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         from twquant.data.serving import materialize as smat
         from twquant.data.serving import store
         from twquant.data.serving import sync as ssync
-        from twquant.data.serving.pg_view import PgTableSource
 
         scfg = _load_serving()
         if not scfg.enabled:
@@ -1105,16 +1105,7 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
             from twquant.factors.registry import list_factors
 
             names = [n for n in list_factors() if n not in set(scfg.exclude_factors)]
-            # ml_scores 另按它自己的讀取者縮窗：薄因子只要當天分數，不該被 850 天的回看
-            # 拖著整批載入（2026-09-23 因此 OOM）。
-            src = PgTableSource(
-                conn,
-                scfg.pg_schema,
-                cache=True,
-                since=smat.read_since(day, names),
-                table_since=smat.read_since_by_table(day, names),
-            )
-            m = smat.materialize_day(src, scfg, day)
+            m = smat.materialize_day(_daily_pg_source(conn, scfg.pg_schema, day, names), scfg, day)
         finally:
             conn.close()
         return f"鏡射同步 + 物化 {m.factor_rows} 因子列"
@@ -1608,6 +1599,28 @@ def _best_effort(names: Sequence[str], run: Callable[[str], object]) -> list[str
     return failed
 
 
+def _daily_pg_source(
+    conn: object, schema: str, day: dt.date, names: Sequence[str]
+) -> PgTableSource:
+    """每日路徑讀 PG 的來源：cache＋涵蓋 `names` 最長回看的下界＋`ml_scores` 按表縮窗。
+
+    少了下界就是整張表全掃：`ml_scores` 4,160 萬列整批載入，程序在 15 GB 被 OOM 砍掉。
+    2026-09-23 發生兩次——先在物化（T-294），修好之後換成策略持股快照（T-299），
+    因為兩處各自組參數、只修了一處。每日路徑一律經過這裡建來源。
+    """
+    from twquant.data.serving import materialize as smat
+    from twquant.data.serving.pg_view import PgTableSource
+
+    return PgTableSource(
+        conn,
+        schema,
+        cache=True,
+        since=smat.read_since(day, names),
+        # 薄因子只要當天分數，不該被 850 天的 `fundamental.sue` 拖著整批載入
+        table_since=smat.read_since_by_table(day, names),
+    )
+
+
 def _live_targets(
     cfg: StrategyConfig, source: TableSource, day: dt.date
 ) -> list[tuple[str, float]]:
@@ -1633,10 +1646,11 @@ def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
     資料來源與回測相同（PG 供應層）：ML 類策略要讀 `ml_scores`，那張表只在 PG。
     單支失敗會記進快照（status=failed）而不是讓整批中止；整批失敗才往上 raise。
     """
+    import twquant.factors.builtins  # noqa: F401  # 觸發註冊，才問得到 lookback
     from twquant.config import load_config
     from twquant.conventions import now_tw
     from twquant.data.serving import store
-    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.factors.registry import list_factors
     from twquant.reporting.strategy_targets import (
         LiveStrategies,
         LiveStrategy,
@@ -1649,7 +1663,9 @@ def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
     scfg = _load_serving()
     conn = store.connect(scfg)
     try:
-        source = PgTableSource(conn, scfg.pg_schema, cache=True)
+        # 全部已註冊因子（不扣物化的排除清單）：TAIL-B 的訊號 ml.lgbm_tail_up_60d 在排除
+        # 清單裡，策略照樣要讀它；下界取最長回看，涵蓋宇宙與進場濾網的滾動窗。
+        source = _daily_pg_source(conn, scfg.pg_schema, day, list(list_factors()))
 
         def _compute(strat: LiveStrategy) -> list[tuple[str, float]]:
             cfg = load_strategy(str(_CONFIG_DIR / "strategies" / f"{strat.config}.yaml"))
