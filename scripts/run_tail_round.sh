@@ -18,7 +18,7 @@ for arm in a b; do
   say "訓練 ${arm} 臂"
   uv run --all-groups python -m twquant ml train \
       --config "configs/ml_tail_up50_h60_${arm}.yaml" \
-      --from 2015-09-01 --to 2026-02-28 \
+      --from 2015-09-01 --to 2026-08-31 \
       --out "$DATA/models" >>"$LOG" 2>&1
   rc=$?
   say "${arm} 臂訓練結束 rc=$rc"
