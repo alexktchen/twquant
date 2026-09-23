@@ -163,13 +163,16 @@ def insights_for_run(data_dir: str | Path, recommendation_run_id: str) -> dict[s
     return joined
 
 
-def run_id_for_day(data_dir: str | Path, day: dt.date) -> str | None:
+def run_id_for_day(
+    data_dir: str | Path, day: dt.date, *, model_id: str | None = None
+) -> str | None:
     """The saved recommendation run for one trading day, or None when none was produced.
 
     The nightly pipeline uses this to decide whether there is anything to analyse. Returning
     None is a normal outcome, not a failure: no snapshot simply means no L0 list that day.
+    `model_id` 限定模型（T-301）：研究模型的 run 比生產名單晚產生，不限定就會被挑中。
     """
-    catalog = select_snapshots(data_dir, date=day)
+    catalog = select_snapshots(data_dir, date=day, model_id=model_id)
     if not catalog.runs:
         return None
     return max(catalog.runs, key=lambda run: run.generated_at).run_id

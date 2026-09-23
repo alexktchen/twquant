@@ -53,10 +53,23 @@ const { chromium } = require('playwright');
         insight: { insight_run_id: 'ins_b', stance: null, recommended_bucket: null, absent_reason: 'LLM 離線，未產生分析', support_n: 0, contradict_n: 0, gap_n: 3 } },
       { stock_id: '0056', rank: 3, score: 0.701, bucket: 'ml_top20', reason_ref: null, insight_run_id: null, data_status: 'pending', insight: null },
     ];
+    // T-301: every model with saved runs, and the server-resolved model/day (resolve=1).
+    const tailModel = 'lgbm_tail_v1';
+    const available = { models: [
+      { model_id: 'lgbm_rank_v2', name: '長窗口排序模型', role: 'ranking', lane: 'production', dates: ['2026-06-20'] },
+      { model_id: tailModel, name: null, role: null, lane: 'research_live', dates: ['2026-06-20', '2026-06-19'] },
+    ] };
     // Mirrors the server contract: filters apply to the whole run before any page slice.
     const recommendations = url => {
       const [date, bucket, q] = ['date', 'bucket', 'q'].map(key => url.searchParams.get(key));
-      const query = { date, model: url.searchParams.get('model'), run: url.searchParams.get('run'), bucket, q, page: 1, page_size: 200 };
+      const model = url.searchParams.get('model');
+      const query = { date, model, run: url.searchParams.get('run'), bucket, q, page: 1, page_size: 200 };
+      const extra = { available, resolved: { model: model ?? 'lgbm_rank_v2', date: date ?? '2026-06-20', model_defaulted: !model, date_defaulted: !date } };
+      if (model === tailModel) return { ...extra, runs: [{ ...runBase, run_id: 'run_tail', model_id: tailModel, as_of: `${date ?? '2026-06-20'}T20:00:00+08:00`, model_info: null, lane: 'research_live',
+        candidates: [{ ...allCandidates[2], stock_id: '3017', rank: 1, score: 0.342 }], candidate_total: 1, candidate_total_all: 1, bucket_counts: { ml_top20: 1 } }], issues: [], query };
+      return { ...extra, ...legacyRecommendations(url, date, bucket, q, query) };
+    };
+    const legacyRecommendations = (url, date, bucket, q, query) => {
       if (date === '2026-09-03') return { runs: [], issues: [], query };
       if (date === '2026-09-04') return { runs: [{ ...runBase, run_id: 'run_zero', as_of: '2026-09-04T20:00:00+08:00', candidates: [], candidate_total: 0, candidate_total_all: 0, bucket_counts: {}, model_info: null }], issues: [], query };
       // A pre-D-111 snapshot: it has candidates, but none carries a promotion bucket.
@@ -64,7 +77,7 @@ const { chromium } = require('playwright');
       const kept = allCandidates.filter(c => (!bucket || c.bucket === bucket) && (!q || c.stock_id.includes(q)));
       const bucketCounts = {};
       for (const c of allCandidates) bucketCounts[c.bucket] = (bucketCounts[c.bucket] ?? 0) + 1;
-      return { runs: [{ ...runBase, candidates: kept, candidate_total: kept.length, candidate_total_all: allCandidates.length, bucket_counts: bucketCounts }], issues: [], query };
+      return { runs: [{ ...runBase, lane: 'production', candidates: kept, candidate_total: kept.length, candidate_total_all: allCandidates.length, bucket_counts: bucketCounts }], issues: [], query };
     };
     // A connected-mode fixture: /api/health succeeds so the stock page runs in live mode.
     // Deliberately different from the embedded snapshot's 2026-06-30 so the two are distinguishable.
@@ -127,18 +140,44 @@ const { chromium } = require('playwright');
       ],
       issues: [],
     };
-    page.on('pageerror', error => errors.push(error.message));
-    // All HTTP is fulfilled locally; the test never reaches data services.
-    await page.route('**/*', route => {
-      const url = new URL(route.request().url());
-      if (url.pathname === '/api/sector-flows') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ flows: sectorFlows(Number(url.searchParams.get('window')) || 20) }) });
-      if (url.pathname === '/api/platform/strategy-targets') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ snapshots: [{
+    // T-300: the latest day carries tracking; 06-19 is a pre-T-300 snapshot (no kind/score/tracking); 06-18 has none.
+    const vaultB2 = { total_return: 0.2578, max_drawdown: -0.1541, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 };
+    const tailResearch = { decision: 'D-143 §十一', window_start: '2017-01-03', window_end: '2026-02-28', cagr: 0.128, max_drawdown: -0.397, calmar: 0.32 };
+    const tailNote = '每日補位型：列的是右尾機率前 15 名，今天若有空位會買誰，不是實際持股。';
+    const strategyTargets = date => {
+      const base = { issues: [], query: { date, limit: 1 }, available_dates: ['2026-06-20', '2026-06-19'], tracking_lookback: 20 };
+      if (date === '2026-06-18') return { ...base, snapshots: [] };
+      if (date === '2026-06-19') return { ...base, snapshots: [{
+        schema_version: 1, run_id: 'stgt_20260619_0123456789abcdef', as_of: '2026-06-19T20:00:00+08:00', generated_at: '2026-06-19T20:30:00+08:00', mode: 'research',
+        strategies: [
+          { code: 'TAIL-B', config: 'tail_b', label: '右尾飆股（第九輪 B 臂）', note: tailNote, status: 'ok', detail: null, exposure: 0.1333, kind: 'slots',
+            targets: [{ stock_id: '2221', target_weight: 0.0667, rank: 1, score: null }, { stock_id: '3017', target_weight: 0.0667, rank: 2, score: null }], vault: null, research: tailResearch },
+        ] }] };
+      return { ...base, snapshots: [{
         schema_version: 1, run_id: 'stgt_20260620_0123456789abcdef', as_of: '2026-06-20T20:00:00+08:00', generated_at: '2026-06-20T20:30:00+08:00', mode: 'research',
         strategies: [
-          { code: 'LW-B2', config: 'lw_b2_broad_capw', label: '全市場多因子（市值加權）', note: '', status: 'ok', detail: null, exposure: 0.3, targets: [{ stock_id: '0050', target_weight: 0.25, rank: 1 }, { stock_id: '2330', target_weight: 0.05, rank: 2 }], vault: { total_return: 0.2578, max_drawdown: -0.1541, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 } },
-          { code: 'LW-M1', config: 'lw_m1_ml_c1', label: 'ML 訊號進載具', note: '', status: 'failed', detail: 'ConfigError: 串接閘門的因子在該日全為 null', exposure: 0, targets: [], vault: { total_return: 0.2268, max_drawdown: -0.3512, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 } },
-          { code: 'TAIL-B', config: 'tail_b', label: '右尾飆股（第九輪 B 臂）', note: '每日補位型：列的是右尾機率前 15 名', status: 'ok', detail: null, exposure: 0.0667, targets: [{ stock_id: '3017', target_weight: 0.0667, rank: 1 }], vault: null, research: { decision: 'D-143 §十一', window_start: '2017-01-03', window_end: '2026-02-28', cagr: 0.128, max_drawdown: -0.397, calmar: 0.32 } },
-        ] }], issues: [], query: { date: null, limit: 1 } }) });
+          { code: 'LW-B2', config: 'lw_b2_broad_capw', label: '全市場多因子（市值加權）', note: '', status: 'ok', detail: null, exposure: 0.3, kind: 'rebalance',
+            targets: [{ stock_id: '0050', target_weight: 0.25, rank: 1, score: null, entered: false, streak_days: 20, streak_open: 'lookback' }, { stock_id: '2330', target_weight: 0.05, rank: 2, score: null, entered: true, streak_days: 1, streak_open: null }],
+            vault: vaultB2, tracking: { previous_as_of: '2026-06-19', status: 'compared', entered: ['2330'], exited: [{ stock_id: '2317', target_weight: 0.05, rank: 2, score: null }] } },
+          { code: 'LW-M1', config: 'lw_m1_ml_c1', label: 'ML 訊號進載具', note: '', status: 'failed', detail: 'ConfigError: 串接閘門的因子在該日全為 null', exposure: 0, targets: [], vault: { total_return: 0.2268, max_drawdown: -0.3512, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 },
+            kind: 'rebalance', tracking: { previous_as_of: '2026-06-19', status: 'current_failed', entered: [], exited: [] } },
+          { code: 'TAIL-B', config: 'tail_b', label: '右尾飆股（第九輪 B 臂）', note: tailNote, status: 'ok', detail: null, exposure: 0.1333, kind: 'slots',
+            targets: [{ stock_id: '3017', target_weight: 0.0667, rank: 1, score: 0.342, entered: false, streak_days: 2, streak_open: 'history' }, { stock_id: '3055', target_weight: 0.0667, rank: 2, score: 0.301, entered: true, streak_days: 1, streak_open: null }],
+            vault: null, research: tailResearch, tracking: { previous_as_of: '2026-06-19', status: 'compared', entered: ['3055'], exited: [{ stock_id: '2221', target_weight: 0.0667, rank: 1, score: null }] } },
+        ] }] };
+    };
+    page.on('pageerror', error => errors.push(error.message));
+    // All HTTP is fulfilled locally; the test never reaches data services.
+    // One handler for the whole run: swapping handlers (unroute + route) while the delayed /api/meta
+    // below is still pending lets both fulfil the same request ("Route is already handled").
+    let allSourcesDown = false;
+    await page.route('**/*', route => {
+      const url = new URL(route.request().url());
+      if (allSourcesDown) return url.pathname.startsWith('/api/')
+        ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"Fixture: all sources down"}' })
+        : route.fulfill({ contentType: 'text/html', body: html });
+      if (url.pathname === '/api/sector-flows') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ flows: sectorFlows(Number(url.searchParams.get('window')) || 20) }) });
+      if (url.pathname === '/api/platform/strategy-targets') return route.fulfill({ contentType: 'application/json', body: JSON.stringify(strategyTargets(url.searchParams.get('date'))) });
       if (url.pathname === '/api/platform/insights') return route.fulfill({ contentType: 'application/json', body: JSON.stringify(url.searchParams.get('stock') === '2330' ? { packs: [], issues: [] } : insightPacks) });
       if (url.pathname === '/api/ingest-matrix') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
         datasets: [{ key: 'prices', table: 'prices_daily', source: 'twse', label: '日行情', span: '2022-01-03~2026-06-30', days: 1100, window_missing: 0 }],
@@ -241,7 +280,7 @@ const { chromium } = require('playwright');
     await page.goto('http://twquant.test/#/overview');
     await page.getByRole('heading', { name: 'lgbm_rank_v2', exact: true }).waitFor();
     // AC-251-1: the card names the model in plain language and prints the hit rate with its definition.
-    await page.getByText('長窗口排序模型', { exact: false }).waitFor();
+    await page.locator('.platform-model-card').getByText('長窗口排序模型', { exact: false }).waitFor();
     const overviewCard = await page.locator('.platform-model-card').first().innerText();
     assert.match(overviewCard, /排序（生產）/);
     assert.match(overviewCard, /IC 勝率 86\.0%/);
@@ -439,6 +478,57 @@ const { chromium } = require('playwright');
     // D-147: a strategy without a vault record shows its research-period record, labelled as not unseen data.
     assert.match(strategies, /研究期年化[\s\S]*\+12\.8%[\s\S]*研究期最深回撤[\s\S]*-39\.7%/);
     assert.match(strategies, /不是未見資料/);
+    // AC-300-1/2/5: new rows carry a text badge, exits are listed, open streaks print a floor and say why.
+    const b2 = page.locator('#strategy-LW-B2');
+    assert.match(await b2.innerText(), /與前一份快照（2026-06-19）相比：新進 1／移出 1/);
+    assert.match(await b2.locator('tr.platform-row-new').innerText(), /2330[\s\S]*新進/);
+    assert.match(await b2.innerText(), /今日移出：2317/);
+    assert.match(await b2.innerText(), /≥20 天[\s\S]*只往回看 20 份快照/);
+    assert.match(await b2.innerText(), /每月再平衡一次/);
+    const tail = page.locator('#strategy-TAIL-B');
+    const tailText = await tail.innerText();
+    // AC-300-3: a slot strategy is listed by model score and never described as a monthly rebalance.
+    assert.doesNotMatch(tailText, /每月再平衡/);
+    assert.match(tailText, /今天若有空位會買進的前 2 名/);
+    assert.match(tailText, /0\.342[\s\S]*0\.301/);
+    assert.match(tailText, /最早一份快照（2026-06-19）/);
+    assert.match(await page.locator('.platform-change-strip').innerText(), /TAIL-B\s*新進 1／移出 1/);
+    // AC-300-5: long notes fold away; the list and its record stay on screen.
+    assert.equal(await tail.locator('details.platform-note-details').count(), 1);
+    assert.doesNotMatch(tailText, /今天若有空位會買誰，不是實際持股。/);
+    await tail.getByText('策略說明', { exact: true }).click();
+    await tail.getByText(tailNote, { exact: true }).waitFor();
+    // AC-300-4: step back one saved day; a pre-T-300 slot snapshot says its order is by code.
+    await page.getByRole('link', { name: /前一天 2026-06-19/ }).click();
+    await page.waitForFunction(() => location.hash.includes('date=2026-06-19'));
+    await page.getByText('依代號排列，順位不代表分數高低', { exact: false }).waitFor();
+    assert.doesNotMatch(await page.locator('#platform-content').innerText(), /每月再平衡/);
+    await page.goto('http://twquant.test/#/strategies?date=2026-06-18');
+    await page.getByText('2026-06-18 尚未產生策略持股快照。', { exact: false }).waitFor();
+    await page.getByRole('link', { name: /後一天 2026-06-19/ }).waitFor(); // navigation survives an empty day
+    await page.goto('http://twquant.test/#/strategies');
+    await page.getByRole('heading', { name: '右尾飆股（第九輪 B 臂）', exact: true }).waitFor();
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert(!await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), `${width}: strategies overflow`);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // AC-301-2/4: the daily list defaults to the production model's latest day and switches model from a menu.
+    await page.goto('http://twquant.test/#/recommendations');
+    await page.getByRole('heading', { name: 'lgbm_rank_v2', exact: true }).waitFor();
+    const modelMenu = page.getByRole('combobox', { name: '模型' });
+    assert.equal(await modelMenu.inputValue(), 'lgbm_rank_v2');
+    assert.match(await modelMenu.innerText(), /長窗口排序模型（生產排序）[\s\S]*lgbm_tail_v1（研究模型）/);
+    assert.equal(await page.getByText('研究模型。', { exact: false }).count(), 0);
+    await modelMenu.selectOption('lgbm_tail_v1');
+    await page.waitForFunction(() => location.hash.includes('model=lgbm_tail_v1'));
+    await page.getByRole('heading', { name: 'lgbm_tail_v1', exact: true }).waitFor();
+    const tailCard = await page.locator('#platform-content').innerText();
+    assert.match(tailCard, /研究模型。[\s\S]*D-150[\s\S]*不計算這些名單事後的報酬或勝率（D-148）/);
+    assert.match(tailCard, /3017/);
+    await page.getByRole('link', { name: /前一天 2026-06-19/ }).click();
+    await page.waitForFunction(() => location.hash.includes('date=2026-06-19') && location.hash.includes('model=lgbm_tail_v1'));
+    await page.getByRole('link', { name: '回到最新', exact: true }).waitFor();
     // AC-220: the analysis reaches the daily list as a derived field, and its bucket stays a suggestion.
     await page.goto('http://twquant.test/#/recommendations?bucket=all');
     await page.getByRole('link', { name: '0050', exact: true }).waitFor();
@@ -476,7 +566,7 @@ const { chromium } = require('playwright');
     await page.goto('http://twquant.test/#/recommendations?date=2026-09-05');
     await page.getByText('D-111 之前產生的', { exact: false }).waitFor();
     // AC-251-2: retrained model — the description survives, the stale numbers do not.
-    await page.getByText('長窗口排序模型', { exact: false }).waitFor();
+    await page.locator('.platform-model-card').getByText('長窗口排序模型', { exact: false }).waitFor();
     await page.getByText('登記的數字對應的是另一版模型', { exact: false }).waitFor();
     assert.equal(await page.getByText('IC 勝率', { exact: false }).count(), 0);
     assert.equal(await page.getByText('合法地沒有候選股票', { exact: false }).count(), 0);
@@ -541,12 +631,7 @@ const { chromium } = require('playwright');
       await page.getByRole('heading', { name, exact: true }).first().waitFor();
     }
     // AC-215-1: every page states a real source or an explicit not-generated state when data is gone.
-    await page.unroute('**/*');
-    await page.route('**/*', route => {
-      const url = new URL(route.request().url());
-      if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"Fixture: all sources down"}' });
-      return route.fulfill({ contentType: 'text/html', body: html });
-    });
+    allSourcesDown = true;
     for (const [path, marker] of [
       ['#/overview', '推薦快照無法讀取'],
       ['#/recommendations', '推薦快照無法讀取'],
@@ -559,6 +644,6 @@ const { chromium } = require('playwright');
       await page.getByText(marker, { exact: false }).first().waitFor();
     }
     assert.deepEqual(errors, []);
-    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-240-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220, AC-220b and AC-251-1/2: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, model cards whose hit rate always carries its definition and whose stale numbers drop out, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
+    console.log('PASS AC-201-1/2/3, AC-204-1/2, AC-206-1/2, AC-207-1/2, AC-208-1/2, AC-240-4/5, AC-209-1, AC-210-1, AC-211-1, AC-212-1, AC-215-1, AC-220, AC-220b, AC-251-1/2, AC-300-1/2/3/4/5 and AC-301-2/4: deep links, research artifacts, persisted equity chart, shared daily run with restorable filters, distinct empty/zero/error states, stock research tabs with a persistent K-line, quote identity isolation, recommendation-day markers with forward mapping, grouping, pending events, locate/reset/toggle, industry flows with explicit window and coverage, insight evidence with citations, gaps and stated absent analyses, legacy-compatible watchlist notes with explicit corruption handling, operations tabs that survive polling, derived insight fields whose suggested bucket stays a suggestion, Chinese stock names beside codes, model cards whose hit rate always carries its definition and whose stale numbers drop out, strategy lists marked with new entries, exits and streaks and navigable by saved day, a model menu with research models labelled, responsive navigation and keyboard focus, plus the full desktop/mobile/keyboard journey and an all-sources-down pass (offline HTTP fixtures; no network).');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

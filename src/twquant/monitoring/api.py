@@ -24,7 +24,13 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from twquant.config import ModelCatalogConfig, ServingConfig, SystemConfig, load_config
+from twquant.config import (
+    MlConfig,
+    ModelCatalogConfig,
+    ServingConfig,
+    SystemConfig,
+    load_config,
+)
 from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
@@ -40,10 +46,16 @@ from twquant.reporting.platform_artifacts import (
     model_info_projection,
 )
 from twquant.reporting.recommendation_snapshot import (
+    MlRoles,
+    filter_runs,
+    index_snapshots,
+    model_days,
+    resolve_view,
     select_candidates,
-    select_snapshots,
     stock_events,
 )
+from twquant.reporting.strategy_targets import LiveStrategies, StrategyDisplay, TargetKind
+from twquant.strategy.config import StrategyConfig
 
 _CONFIG = snap.CONFIGS_DIR / "system.yaml"
 
@@ -110,6 +122,33 @@ def get_model_catalog() -> ModelCatalogConfig:
 # 預設 None：FastAPI 走依賴注入（HTTP 請求一律拿到已驗證的目錄），直接呼叫端點的測試
 # 則明示自己要哪一份目錄，不必被迫載入 repo 的正式配置。
 ModelCatalogDep = Annotated[ModelCatalogConfig | None, Depends(get_model_catalog)]
+
+
+def get_ml_roles() -> MlRoles:
+    """生產排序模型與上架研究模型（configs/ml.yaml，T-301）。"""
+    cfg = load_config(snap.CONFIGS_DIR / "ml.yaml", MlConfig)
+    return MlRoles(
+        production=cfg.production_ranking_model,
+        research_live=frozenset(cfg.research_live_models) - {cfg.production_ranking_model},
+    )
+
+
+# 預設 None 的理由同上：直接呼叫端點的測試明示自己要的分工，None＝沒有任何分工。
+MlRolesDep = Annotated[MlRoles | None, Depends(get_ml_roles)]
+
+
+def get_strategy_display() -> StrategyDisplay:
+    """策略持股頁的回看上限，與每支已登記策略的名單性質（補 T-300 之前快照缺的 kind）。"""
+    registry = load_config(snap.CONFIGS_DIR / "strategies_live.yaml", LiveStrategies)
+    kinds: dict[str, TargetKind] = {}
+    for strat in registry.strategies:
+        path = snap.CONFIGS_DIR / "strategies" / f"{strat.config}.yaml"
+        cfg = load_config(path, StrategyConfig)
+        kinds[strat.config] = "slots" if cfg.slots is not None else "rebalance"
+    return StrategyDisplay(lookback=registry.tracking_lookback, kinds=kinds)
+
+
+StrategyDisplayDep = Annotated[StrategyDisplay | None, Depends(get_strategy_display)]
 
 
 def _artifact_catalog_response(catalog: ArtifactCatalog, source: str) -> dict[str, object]:
@@ -210,18 +249,41 @@ def get_platform_recommendations(
     q: Annotated[str | None, Query(max_length=64)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
+    resolve: Annotated[bool, Query()] = False,
     model_catalog: ModelCatalogDep = None,
+    roles: MlRolesDep = None,
 ) -> dict[str, object]:
-    """Read persisted ML recommendation runs; this endpoint never executes inference."""
+    """Read persisted ML recommendation runs; this endpoint never executes inference.
+
+    `resolve=1`（T-301）：沒指定的模型用生產模型、沒指定的日期用該模型最新一天；
+    不帶時行為與 AC-206 相同（符合條件的全部 run）。
+    """
     try:
-        catalog = select_snapshots(data_dir, date=date, model_id=model, run_id=run)
+        catalog = index_snapshots(data_dir)
     except OSError as exc:
         raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
     # 目錄缺席＝每張卡片沒有人話說明（model_info 為 null），名單本身照常（AC-251-3）。
     registry = model_catalog if model_catalog is not None else ModelCatalogConfig()
+    lanes = roles if roles is not None else MlRoles()
+    want_model, want_date = model, date
+    if resolve:
+        want_model, want_date = resolve_view(
+            catalog.runs, lanes, date=date, model_id=model, run_id=run
+        )
+    selected = (
+        []
+        if resolve and want_model is None
+        else filter_runs(catalog.runs, date=want_date, model_id=want_model, run_id=run)
+    )
+    available = []
+    for entry in model_days(catalog.runs, lanes):
+        card = registry.models.get(str(entry["model_id"]))
+        available.append(
+            {**entry, "name": card.name if card else None, "role": card.role if card else None}
+        )
     runs: list[dict[str, object]] = []
     start = (page - 1) * page_size
-    for item in catalog.runs:
+    for item in selected:
         # 洞悉在讀取時 join 進來（PLAN §3.3）；已發布的快照檔案不因此改寫。
         insights = insights_for_run(data_dir, item.run_id)
         # Bucket/search filters run over the whole saved run before any page slice,
@@ -244,10 +306,18 @@ def get_platform_recommendations(
         projection["model_info"] = model_info_projection(
             registry, item.model_id, item.artifact_fingerprint
         )
+        projection["lane"] = lanes.lane(item.model_id)
         runs.append(projection)
     return {
         "runs": runs,
         "issues": catalog.issues,
+        "available": {"models": available},
+        "resolved": {
+            "model": want_model,
+            "date": want_date.isoformat() if want_date else None,
+            "model_defaulted": model is None and run is None,
+            "date_defaulted": date is None and run is None,
+        },
         "query": {
             "date": date.isoformat() if date else None,
             "model": model,
@@ -265,20 +335,32 @@ def get_platform_strategy_targets(
     data_dir: RecommendationDataRootDep,
     date: Annotated[dt.date | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=30)] = 1,
+    display: StrategyDisplayDep = None,
 ) -> dict[str, object]:
-    """讀取已保存的策略持股快照（D-112）。本端點不做任何計算，也不觸發策略執行。
+    """讀取已保存的策略持股快照（D-112）。本端點不觸發策略執行、不讀行情。
 
     每支策略的 `vault` 區塊（金庫期實測成績）跟著名單一起回傳——
     D-107 判定無策略可部署，名單不得在沒有成績的情況下單獨呈現。
+    T-300：另附與前一份快照比出的新進／移出、每檔的連續天數，以及全部快照的日期
+    ——只比名單成員，不算任何報酬（D-148）。
     """
+    shown = display or StrategyDisplay(
+        lookback=LiveStrategies.model_fields["tracking_lookback"].default, kinds={}
+    )
     try:
-        snapshots, issues = strategy_targets_mod.select_snapshots(data_dir, date=date, limit=limit)
+        found, issues = strategy_targets_mod.load_snapshots(data_dir)
     except OSError as exc:
         raise HTTPException(status_code=503, detail="策略持股快照儲存區暫時無法讀取") from exc
+    series = strategy_targets_mod.daily_series(found)
+    picked = [s for s in found if date is None or s.as_of.date() == date][:limit]
     return {
-        "snapshots": [snap.model_dump(mode="json") for snap in snapshots],
+        "snapshots": [
+            strategy_targets_mod.project_snapshot(item, series, shown) for item in picked
+        ],
         "issues": list(issues),
         "query": {"date": date.isoformat() if date else None, "limit": limit},
+        "available_dates": [item.as_of.date().isoformat() for item in series],
+        "tracking_lookback": shown.lookback,
     }
 
 
@@ -308,13 +390,17 @@ def get_platform_exit_check(
 
 @app.get("/api/platform/stocks/{sid}/recommendations")
 def get_platform_stock_recommendations(
-    sid: str, data_dir: RecommendationDataRootDep
+    sid: str, data_dir: RecommendationDataRootDep, roles: MlRolesDep = None
 ) -> dict[str, object]:
-    """Return one stock's saved recommendation events; unknown stocks are legitimately empty."""
+    """Return one stock's saved recommendation events; unknown stocks are legitimately empty.
+
+    研究模型的 run 不列入（T-301）：這裡的事件與圖上標記講的是生產名單。
+    """
     if _PLATFORM_SID.fullmatch(sid) is None:
         raise HTTPException(status_code=422, detail="股票代號格式錯誤")
+    research = roles.research_live if roles is not None else frozenset()
     try:
-        events = stock_events(data_dir, sid)
+        events = stock_events(data_dir, sid, exclude_models=research)
     except OSError as exc:
         raise HTTPException(status_code=503, detail="推薦快照儲存區暫時無法讀取") from exc
     return {"sid": sid, "events": events}

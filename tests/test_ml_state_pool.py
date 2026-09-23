@@ -23,7 +23,8 @@ _HOT = MlSampleStateConfig(kind="hot", past_window=20, min_past_ret=0.30)
 
 
 def _days(n: int) -> list[dt.date]:
-    out, d = [], dt.date(2025, 1, 6)
+    out: list[dt.date] = []
+    d = dt.date(2025, 1, 6)
     while len(out) < n:
         if d.weekday() < 5:
             out.append(d)

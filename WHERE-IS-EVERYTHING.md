@@ -18,6 +18,10 @@
   V1 瞄準絕對波動 16%，右尾策略專挑高波動股，76% 的日子曝險不到一半。分點因子在右尾上有增益（倍率 +0.32×）
 - **TAIL-B（第九輪 B 臂）已上架**平台「策略持股」頁（D-147）：列的是**今日候選前 15**，不是實際持股；
   模型每日推論（`configs/ml.yaml` 的 `research_live_models`，失敗不擋正式名單）
+- **策略持股頁標新進／移出／連續天數、可切日期（T-300）；ML 選股頁有模型選單、可切日期（T-301／D-150）**：
+  研究模型（`research_live_models`）每天也匯出推薦快照（只套流動性閘門）。部署後補 09-23 的右尾模型名單：
+  `ml export-recommendations --date 2026-09-23 --model D:/project/twquant/data/models/lgbm_tailb_tu_h60_20260430_7ab9b0f9 --out D:/project/twquant/data`。
+  **重跑 T-300 之前的日子的策略持股會被拒絕覆寫**（快照多了 `kind`／`score`）——要重出先把舊檔改名 `.superseded-…`
 - **第二保留期（2026-09-09 起）已登記第九輪 B 臂**（D-148，`configs/holdout2.yaml`）：最早 2027-03-01 開、只開一次。
   **開啟前不得對保留期做任何績效統計**——包括把 TAIL-B 每日候選的後續漲跌算成勝率。判讀：`scripts/holdout2_tail.py`
 - **`factor_values` 斷階已修**（2026-09-23，11 小時整批重物化 50 支 × 2,746 日）：
@@ -232,7 +236,7 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 要用 `MSYS_NO_PATHCONV=1` 或雙斜線 `//tmp/x.dump`。
 
 
-**⑭ 研究回測的模型分數會讓每日 pipeline OOM（2026-09-23 實際發生，T-294 已修）。** `ml backfill-scores` 把研究模型的樣本外分數寫進生產同一張 `serving.ml_scores`；每日物化原本用全體最長回看（850 天）讀每張表，於是四年半的 ml_scores 整批進記憶體。表長到 4,162 萬列時程序在 15.3 GB 被砍。T-294 讓 ml_scores 只讀 30 天，但**研究分數仍在表內**（T-295）。**另一個教訓**：`docker exec … | tail` 的結束碼是 tail 的——要看 pipeline 真的成功，查 heartbeat 或 `dmesg`（`wsl -d docker-desktop dmesg | grep -i oom`）。
+**⑭ 研究回測的模型分數會讓每日 pipeline OOM（2026-09-23 發生兩次，T-294／T-299 已修）。** `ml backfill-scores` 把研究模型的樣本外分數寫進生產同一張 `serving.ml_scores`；每日物化原本用全體最長回看（850 天）讀每張表，於是四年半的 ml_scores 整批進記憶體。表長到 4,162 萬列時程序在 15.3 GB 被砍。T-294 讓 ml_scores 只讀 30 天——但只修了物化，同一天重跑又在**策略持股快照**被砍（T-299）。**每日路徑讀 PG 一律經過 `cli._daily_pg_source`**，不要自己組 `PgTableSource`。研究分數仍在表內（T-295）。**另一個教訓**：`docker exec … | tail` 的結束碼是 tail 的——要看 pipeline 真的成功，查 heartbeat 或 `dmesg`（`wsl -d docker-desktop dmesg | grep -i oom`）。
 
 ## 7. 還在跑的東西（2026-09-19 部署後）
 
