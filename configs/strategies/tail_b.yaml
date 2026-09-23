@@ -23,7 +23,7 @@ signals:
   - factor: ml.lgbm_tail_up_60d
     weight: 1.0
     params:
-      model_id: REPLACE_AFTER_TRAINING
+      model_id: lgbm_tailb_tu_h60_20260430_7ab9b0f9
 slots:
   n: 15
   entry_threshold: 0.0
