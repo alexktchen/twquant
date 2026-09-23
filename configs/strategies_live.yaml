@@ -77,3 +77,16 @@ strategies:
       max_drawdown: -0.417681
       benchmark_total_return: 0.322340
       benchmark_max_drawdown: -0.158794
+  - code: LW-E0
+    config: lw_e0_ctrl
+    label: E0 排序模型 15 檔（紙上交易追蹤中）
+    note: >-
+      八輪加工沒有一輪改善它（D-141 §三）：排序模型＋月頻換股＋完全不出場、15 檔等權。
+      自 D-142 起以紙上交易向前累積新資料。**金庫成績不是乾淨的樣本外**——E0 是
+      2026-09-19（D-114）才定義的，那時金庫已開封十天，故下面的數字與這條軌要累積的
+      前向紀錄不是同一回事。
+    vault:
+      total_return: 0.353896
+      max_drawdown: -0.344966
+      benchmark_total_return: 0.322340
+      benchmark_max_drawdown: -0.158794

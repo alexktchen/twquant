@@ -1,25 +1,28 @@
-# 東西在哪（2026-09-23，資料補到 09-22；第九輪已結案）
+# 東西在哪（2026-09-23，資料到 09-22；第九輪已結案、第十輪進行中）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
-> 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
-> 需要時再讀。
+> **這一輪的來龍去脈在 [docs/HANDOFF-2026-09-23-eight-rounds-and-pipeline.md](docs/HANDOFF-2026-09-23-eight-rounds-and-pipeline.md)**——
+> 動手前先讀它的「一、使用者是誰、要什麼」與「四、我犯的錯」。
+> 更早的在 [docs/HANDOFF-2026-09-09-long-window-and-vault.md](docs/HANDOFF-2026-09-09-long-window-and-vault.md)。
 
 ## 0. 三十秒版本
 
-- 程式碼在 worktree：`D:/project/twquant/.claude/worktrees/strange-kalam-3ec702`
-  （平台工單 T-200~T-215 在 `.claude/worktrees/beautiful-elbakyan-405956`，branch `claude/codex-platform-console-cb66ad`）
+- 最新 worktree：`D:/project/twquant/.claude/worktrees/priceless-tereshkova-839f0d`，branch `claude/d122-s-round2`
 - **資料一律在主 checkout**：`D:/project/twquant/data/`（不進 git，但都在本機）
-- 報告：`D:/project/twquant/data/reports/backtest_report.html`
-- 現況：**83 筆回測完成，沒有任何策略打敗 0050 含息（+40.08%／Sharpe 1.63）**
-- **研究平台已上線**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）。
-  操作看 [docs/OPERATIONS-platform-console.md](docs/OPERATIONS-platform-console.md)
-- **第九輪（右尾／飆股）已結案**：訊號通過（命中率倍率 **3.23×**）、**容器仍不行**（回撤 −39.7%~−54.1%，
-  過不了使用者的 35%）。判定見 DECISIONS **D-143 §十一**，交接見
-  [docs/HANDOFF-2026-09-23-tail-round.md](docs/HANDOFF-2026-09-23-tail-round.md)
-- **`factor_values` 的斷階已修**（2026-09-23，11 小時整批重物化 50 支 × 2,746 日）：
-  單日因子數 2023-06-15 從 21 → **54**。波動類新增 8 支（T-284）
-- **資料到 2026-09-18**（2026-09-19 補完，見第 9 節）：十一張來源表與 factor_values／
-  composite_daily／screener_daily／broker_flow_daily 全部到最後一個交易日
+- **八輪加工已封檔（D-141）**：八輪沒有一輪改善 **E0**（年化 +27.8%／回撤 −41.4%／Calmar 0.67）。
+  唯一被獨立驗證的是排序模型的金庫期 IC **+0.0816**。**不要在同一個問題上再加工。**
+- **第九輪起換了問題（右尾／飆股，D-143）**：訊號通過（命中率倍率 **3.23×**、1,005 筆分布在 100 個月），
+  **容器仍不行**（回撤 −39.7%~−54.1%、Calmar 0.26~0.32，低於 E0 與 V1）。交接見
+  [docs/HANDOFF-2026-09-23-tail-round.md](docs/HANDOFF-2026-09-23-tail-round.md)。
+  **第十輪（D-146）進行中**：右尾訊號 ＋ 每日曝險目標、分點因子入模——**不設門檻、只報數字**
+- **`factor_values` 斷階已修**（2026-09-23，11 小時整批重物化 50 支 × 2,746 日）：
+  單日因子數 2023-06-15 從 21 → **54**；波動類新增 8 支（T-284）
+- **使用者的目標**：散戶買個股、每日選股 10~15 檔、**15~20% 是單檔停損不是組合回撤**（我誤讀三次）、
+  追**每筆期望值**不追勝率（D-136：隨機進場也有 74% 勝率）。
+- **研究平台**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）
+- **資料到 2026-09-22**：9/21、9/22 因每日 pipeline 卡死而缺名單，已修（T-275~T-278）並補跑
+- **待合併**：PR #91（pipeline 修復＋分點因子）。合併後要重建映像，T-275／T-276 才在容器裡生效
+- **未修**：T-270（`prices_daily` 1,185 列 OHLCV 全為 0，2021-01~02）
 
 ## 1. ⚠ 最容易踩的陷阱：有兩個 `data/`
 
@@ -44,6 +47,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | **研究登記簿（DSR）** | `data/research_log/` | 241 檔／1,884 筆 |
 | 長天期回補原始檔 | `data/staging/finmind_hist_*` | 462MB |
 | **推薦快照** | `data/recommendations/<run_id>.json` | 2026-09-04 一份／1943 檔候選 |
+| **紙上交易帳本** | `data/paper_trading/<軌別>/events.jsonl`（D-142，append-only ＋ SHA-256 雜湊鏈） | 每交易日一列 |
 | **洞悉證據包** | `data/insights/<insight_run_id>.json` | 目前 0 份（頁面正確顯示尚未產生） |
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
@@ -88,6 +92,8 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
 | **補某一天的推薦快照** | `TWQUANT_DATA_DIR=D:/project/twquant/data ... python -m twquant ml score --date <日> --model <模型目錄> [--pg]` 再 `... ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data`（同 run_id 已存在不同內容會 raise；要重出先把舊檔改名為 `.superseded-...`）|
+| **紙上交易：記今天** | `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant paper-trade --date <日> --out D:/project/twquant/data`（已接進每日 pipeline，平常不用手跑；append-only，重跑同一天安全，**不得回填**）|
+| **紙上交易：驗鏈** | `uv run --all-groups python -m twquant paper-verify --out D:/project/twquant/data`——雜湊鏈被動過就以非零碼結束。規則與判讀門檻見 `DECISIONS.md` 的 **D-142**，配置在 `configs/paper_trading.yaml` |
 | **持股出場檢查** | 平台「我的追蹤」頁；API `GET /api/platform/exit-check?ids=2330,2317`（規則清單在 `configs/exit_check.yaml`，門檻在 E 系列策略配置）|
 | **跑 E 系列（出場規則）** | `uv run --all-groups python scripts/run_exit_rules.py --window long`（`--window vault` 跑舊金庫期；`--n10 <代號>` 只能帶一支）|
 | **E 系列判定** | `uv run --all-groups python scripts/e_verdict.py --bundles D:/project/twquant/data/tracks_e_long_nodiv`（送檢規則寫死在程式裡）|
@@ -130,6 +136,19 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 
 完整報告（含 118 格盤點、圖表、八次事前登記的戰績）：
 `scripts/refresh_report.sh` 重新產生，發佈於 Artifact「886 天與 2227 天」。
+
+**2026-09-22：研究改以紙上交易向前累積（D-142 事前登記）。**
+
+八輪加工沒有一輪改善 E0（D-141，在 `claude/d122-s-round2` 分支上）。收尾決定是停止在開發期
+資料上加工，改記新資料。D-142 把它變成制度：帳本 append-only ＋ 雜湊鏈、**拒絕回填**、
+選股事件補記超過 3 天即拒絕，判讀門檻與時程在看到任何數字之前就寫死。
+
+- 規則與門檻：`DECISIONS.md` 的 **D-142**；配置 `configs/paper_trading.yaml`
+- 程式：`src/twquant/reporting/paper_ledger.py`（帳本）、`paper_trading.py`（每日一步）
+- **執行語意與回測同源**：引擎公開 `execute_at_open` 等名字，並有一條逐筆比對
+  `run_backtest` 的測試——否則「前向 vs 回測」的比較是假的
+- **production 帳本尚未開軌**：D-142 仍在待裁決；開軌日與資本一旦寫入就不能改，
+  要改只能另開新軌。開軌只需跑一次 `paper-trade`
 
 ## 6. 動手前一定要知道的三件事
 
@@ -240,6 +259,7 @@ docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend s
 洞悉分析（LLM）步驟目前是離線降級：`.env` 沒有 `ANTHROPIC_API_KEY`。
 
 ## 8. 備份（事故後）
+- **2026-09-22 22:10：`twquant_serving_20260922-2210_post-crash-verify.dump`（5.5 GB）**——分點因子整批計算把 PG 連同 Docker 壓垮，WAL 當機復原完整、所有表列數與崩潰前一致之後做的。**目前最新的完整備份。**
 
 - `data/backup/twquant_serving_20260903.dump`（2.40 GB，`pg_dump -n serving -Fc`）——**2026-09-10 事故的還原底**。
 - 重放完成後 `scripts/run_recovery.sh` 最後一步會自動再做一份 `twquant_serving_<日期>_post_recovery.dump`。

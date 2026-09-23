@@ -263,3 +263,73 @@ def test_data_dir_env_override_beats_relative_config(monkeypatch: pytest.MonkeyP
     # 空字串＝未設，不得把 data_dir 洗成空
     monkeypatch.setenv(_cli._DATA_DIR_ENV, "   ")
     assert _cli._load_system().data_dir == "data"
+
+
+# ── T-275：排程器啟動補跑 ──────────────────────────────────────────────
+#
+# 原本只算「下一個 hh:mm」：容器在觸發時刻之後重啟就等到明天，那天會有原始資料
+# 卻沒有因子／模型分數／選股名單，而且隔天只算隔天，洞不會自己補。
+# 下面三條分別釘住「已過觸發時刻就補」「還沒到就不補」「今天跑過就不重跑」。
+
+
+def _run_scheduler_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+    *,
+    now: dt.datetime,
+    heartbeat_day: str | None,
+) -> list[dt.date]:
+    """跑排程器的啟動段，回傳它實際觸發 pipeline 的日期清單。"""
+    import twquant.cli as cli
+    from twquant.pipeline import Heartbeat
+
+    ran: list[dt.date] = []
+    monkeypatch.setattr(cli, "now_tw", lambda: now, raising=False)
+    monkeypatch.setattr("twquant.conventions.now_tw", lambda: now)
+    monkeypatch.setattr(
+        "twquant.pipeline.read_heartbeat",
+        lambda _d: (
+            None if heartbeat_day is None else Heartbeat(day=heartbeat_day, git_hash="", ts="")
+        ),
+    )
+
+    def _fake_pipeline(day: dt.date, **_kw: object) -> None:
+        ran.append(day)
+
+    monkeypatch.setattr(cli, "_run_daily_pipeline", _fake_pipeline)
+    monkeypatch.setattr(cli, "_echo_pipeline_result", lambda _r: None)
+    # 進入 while True 之前就停：用 sleep 丟例外中斷，只驗啟動段
+    monkeypatch.setattr("time.sleep", lambda _s: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        cli.scheduler(at="19:00", catch_up=True)
+    return ran
+
+
+def test_t275_catches_up_when_started_after_the_trigger_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    ran = _run_scheduler_once(
+        monkeypatch, tmp_path, now=dt.datetime(2026, 9, 22, 19, 10, tzinfo=TZ), heartbeat_day=None
+    )
+    assert ran == [dt.date(2026, 9, 22)], "19:10 啟動、當天沒跑過 → 應立刻補跑"
+
+
+def test_t275_does_not_catch_up_before_the_trigger_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    ran = _run_scheduler_once(
+        monkeypatch, tmp_path, now=dt.datetime(2026, 9, 22, 8, 0, tzinfo=TZ), heartbeat_day=None
+    )
+    assert ran == [], "08:00 啟動、19:00 還沒到 → 不該補跑（等排程即可）"
+
+
+def test_t275_does_not_rerun_when_today_already_has_a_heartbeat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    ran = _run_scheduler_once(
+        monkeypatch,
+        tmp_path,
+        now=dt.datetime(2026, 9, 22, 19, 10, tzinfo=TZ),
+        heartbeat_day="2026-09-22",
+    )
+    assert ran == [], "今天已有 heartbeat → 重啟多次不該重跑同一天"
