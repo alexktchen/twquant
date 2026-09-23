@@ -127,6 +127,18 @@ def bundle_backtest(
         # D-085：股利明細。**沒有它就無法核對**——權益曲線只看得到「多了一筆錢」，
         # 看不出那筆錢是哪一天、哪一檔、每股多少配出來的。首次跑完時就是因為缺這一欄，
         # 報表印出「股利 0 筆」卻同時顯示 CAGR 上升 10pp，兩者無從對帳。
+        # T-168：分割調整明細。分割不是交易所以不進 ledger，但**不記就不能重建**
+        # ——下游都從 ledger 推部位，看到「買 11,000 卻賣 205,000」只能 raise。
+        "splits": [
+            {
+                "date": sp.date.isoformat(),
+                "stock_id": sp.stock_id,
+                "adj_factor": sp.adj_factor,
+                "shares_before": sp.shares_before,
+                "shares_after": sp.shares_after,
+            }
+            for sp in result.splits
+        ],
         "dividends": [
             {
                 "date": d.date.isoformat(),

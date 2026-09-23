@@ -17,6 +17,7 @@ from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy,
 from twquant.backtest.exits import HeldPosition, entry_blocked, exit_reasons, ma_column
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
+from twquant.strategy.overlays import _realized_vol
 
 if TYPE_CHECKING:
     from twquant.data.warehouse import TableSource
@@ -45,6 +46,19 @@ class Trade:
     tax: float
     slippage: float
     reason: str = "rebalance"  # 出場規則造成的成交記規則名（T-231）
+
+
+@dataclass(frozen=True)
+class SplitAdjustment:
+    """分割造成的股數變動（T-168）。**不是交易，故不進 ledger**——但也不能不記：
+    所有從 ledger 重建部位的下游（診斷、換股清單、判定）都會看到「買 11,000 卻賣 205,000」
+    而 raise。比照股利獨立成表，讓它可稽核也可重建。"""
+
+    date: dt.date
+    stock_id: str
+    adj_factor: float
+    shares_before: int
+    shares_after: int
 
 
 @dataclass(frozen=True)
@@ -113,6 +127,7 @@ class BacktestResult:
     final_equity: float
     final_holdings: list[Holding] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)  # D-085：可稽核的股利明細
+    splits: list[SplitAdjustment] = field(default_factory=list)  # T-168：可稽核的分割調整
     # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
     # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
     credit_dividends: bool = True
@@ -126,8 +141,10 @@ class _State:
     lots: dict[str, _Lot] = field(default_factory=dict)  # 本輪持有批次（成本/首買日/MAE）
     ledger: list[Trade] = field(default_factory=list)
     unfilled: list[Unfilled] = field(default_factory=list)
+    splits: list[SplitAdjustment] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)
     traded_notional: float = 0.0
+    exposure_mult: float = 1.0  # T-286：每日曝險目標的倍數；無 exposure_target 時恆為 1.0
 
 
 def _price_panel(
@@ -158,6 +175,11 @@ def _price_panel(
 # 七成五的部位價值當成現金發下去——那是憑空生錢。分割要改的是**股數**，
 # 屬另一個缺陷（T-168），本函數明確不碰。
 _DIVIDEND_EVENTS = frozenset({"cash_dividend", "cash_and_stock_dividend", "stock_dividend"})
+# T-168：分割／反分割改的是**股數**不是現金。不處理的話 1:20 分割當天價格掉 95%，
+# D-029 的跳價防護會把部位強制出清並記成 −94% 的真實虧損（D-143 實測 5314 與 6919
+# 正是這樣各賠掉一格）。標籤那一側早就還原了（`attach_adjustment` 連乘全部 adj_factor），
+# 只有回測沒跟上——模型用乾淨資料訓練、回測卻吃假虧損，是不對稱的失效。
+_SPLIT_EVENTS = frozenset({"split", "reverse_split"})
 
 
 def _dividends_by_date(
@@ -193,6 +215,76 @@ def _dividends_by_date(
             (str(r["stock_id"]), float(r["adj_factor"]), str(r["event_type"]))
         )
     return out
+
+
+def _splits_by_date(
+    wh: TableSource, start: dt.date, end: dt.date
+) -> dict[dt.date, list[tuple[str, float]]]:
+    """{分割日: [(stock_id, adj_factor)]}。查無 `corporate_events` → 空表。
+
+    與 `_dividends_by_date` 的差別：**不限 adj_factor < 1**——反分割的因子大於 1
+    （實測 2.0~7.0），那正是要調整的另一個方向。
+    """
+    try:
+        lf = wh.scan("corporate_events")
+    except Exception:  # noqa: BLE001 - 供應層沒有這張表時退回「無分割」，與股利同一處置
+        return {}
+    cols = lf.collect_schema().names()
+    if not {"date", "stock_id", "adj_factor", "event_type"} <= set(cols):
+        return {}
+    df = (
+        lf.select("date", "stock_id", "adj_factor", "event_type")
+        .filter(
+            pl.col("date").is_between(start, end)
+            & pl.col("adj_factor").is_not_null()
+            & (pl.col("adj_factor") > 0.0)
+            & pl.col("event_type").is_in(list(_SPLIT_EVENTS))
+        )
+        .collect()
+    )
+    out: dict[dt.date, list[tuple[str, float]]] = {}
+    for r in df.to_dicts():
+        out.setdefault(r["date"], []).append((str(r["stock_id"]), float(r["adj_factor"])))
+    return out
+
+
+def _apply_splits(state: _State, day: dt.date, events: list[tuple[str, float]]) -> None:
+    """分割日調整股數與成本基礎（T-168）。**必須在當日收盤價更新之前呼叫**，
+    否則 D-029 的跳價防護會先把部位當成資料異常清掉。
+
+    1:20 分割的 `adj_factor` 是 0.05：持股與成本股數 × 1/0.05、持有期高低點 × 0.05、
+    `last_close` × 0.05。同步縮放，權益在分割前後連續（`cost_amount` 不動——
+    同一筆錢換到更多股，均價自然變成原來的 0.05 倍）。
+
+    股數取整到最近的整數：台股分割配發整股，不足一股的畸零部分實務上折現金，
+    這裡直接忽略（誤差 < 1 股，對 15 檔部位的權益影響在 1e-6 量級）。
+    """
+    for sid, adj in events:
+        if adj <= 0.0:
+            continue
+        prev_close = state.last_close.get(sid)
+        if prev_close is not None:
+            state.last_close[sid] = prev_close * adj
+        shares = state.holdings.get(sid)
+        if shares:
+            after = round(shares / adj)
+            state.holdings[sid] = after
+            state.splits.append(
+                SplitAdjustment(
+                    date=day,
+                    stock_id=sid,
+                    adj_factor=adj,
+                    shares_before=shares,
+                    shares_after=after,
+                )
+            )
+        lot = state.lots.get(sid)
+        if lot is not None:
+            # 均價是 cost_amount / cost_shares 推出來的：同一筆錢換到更多股，
+            # 故調的是股數、不是金額（調金額會讓成本憑空變動）
+            lot.cost_shares = round(lot.cost_shares / adj)
+            lot.max_close *= adj
+            lot.min_close *= adj
 
 
 def _credit_dividends(state: _State, day: dt.date, events: list[tuple[str, float, str]]) -> None:
@@ -461,10 +553,13 @@ def run_backtest(
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
     exits_pending: dict[str, str] = {}
+    trims_pending: dict[str, int] = {}  # T-286：明早要減碼的股數
     entries_pending: list[str] = []
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
     div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
+    # 分割與 `credit_dividends` 無關：不調股數就是錯的會計，沒有「要不要」的選項
+    split_by_date = _splits_by_date(warehouse, start, end)
     for day in sessions:
         day_px = by_date.get(day, {})
         # D-085：**先入帳再更新收盤**。每股金額要用除息前的收盤，而 `state.last_close`
@@ -472,6 +567,10 @@ def run_backtest(
         todays = div_by_date.get(day)
         if todays:
             _credit_dividends(state, day, todays)
+        # T-168：分割在收盤更新之前調整股數，否則跳價防護會先把部位清掉
+        todays_split = split_by_date.get(day)
+        if todays_split:
+            _apply_splits(state, day, todays_split)
         for sid, row in day_px.items():  # 更新最後收盤（停牌沿用）
             if row.get("close") is None:
                 continue
@@ -504,6 +603,17 @@ def run_backtest(
                     _fill(state, sid, -qty, day, px_row, cost_cfg, max_participation, why)
             exits_pending = {}  # 沒賣掉的（跌停／量不足）今晚會再被判一次
 
+        if slot_cfg is not None and trims_pending:  # T-286：減碼賣出，走與出場同一條成交路徑
+            for sid, q in sorted(trims_pending.items()):
+                have = state.holdings.get(sid, 0)
+                px_row = day_px.get(sid)
+                q = min(q, have)
+                if q > 0 and px_row is not None and px_row.get("open") is not None:
+                    _fill(
+                        state, sid, -q, day, px_row, cost_cfg, max_participation, "exposure_target"
+                    )
+            trims_pending = {}  # 沒賣掉的（跌停／量不足）今晚會再算一次
+
         if slot_cfg is not None and entries_pending:  # 先賣後買：賣出的現金當天就能用
             pv = _portfolio_value(state, day_px)
             for sid in entries_pending:
@@ -513,9 +623,10 @@ def run_backtest(
                 if sid in state.holdings or px_row is None or px_row.get("open") is None:
                     continue
                 o = float(px_row["open"])
-                want = int((pv / slot_cfg.n) // (o * _LOT)) * _LOT if o > 0 else 0
+                per_slot = pv * state.exposure_mult / slot_cfg.n  # T-286：倍數 1.0 時即既有行為
+                want = int(per_slot // (o * _LOT)) * _LOT if o > 0 else 0
                 if want == 0:  # 一格的金額買不起一張：記下來，不靜默略過（T-135 同理）
-                    _unfill(state, sid, "buy", int(pv / slot_cfg.n / o) if o > 0 else 0, day, "lot")
+                    _unfill(state, sid, "buy", int(per_slot / o) if o > 0 else 0, day, "lot")
                     continue
                 _fill(state, sid, want, day, px_row, cost_cfg, max_participation, "entry")
             entries_pending = []
@@ -537,6 +648,28 @@ def run_backtest(
 
         if exit_rules and state.holdings and pending is None:
             exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
+
+        if slot_cfg is not None and slot_cfg.exposure_target is not None:
+            # T-286／D-146 §二：每日曝險目標。倍數用 V1 同一個波動估計（持股等權組合），
+            # 空手時沒有東西可估 → 1.0（新進場全額）。減碼與出場同一天判、隔日開盤執行。
+            et = slot_cfg.exposure_target
+            held_ids = sorted(sid for sid, sh in state.holdings.items() if sh > 0)
+            mult = 1.0
+            if held_ids:
+                realized = _realized_vol(warehouse.view(day), day, held_ids, et.window)
+                if realized > 0.0:
+                    mult = max(et.min_mult, min(1.0, et.target_vol / realized))
+            state.exposure_mult = mult
+            pos_now = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
+            pv_now = state.cash + pos_now
+            if pv_now > 0.0 and pos_now > 0.0 and pos_now / pv_now > mult + 1.0 / slot_cfg.n:
+                sell_frac = 1.0 - (mult * pv_now) / pos_now
+                for sid in held_ids:
+                    if sid in exits_pending:  # 整檔要出場的，不再另外減碼
+                        continue
+                    q = int((state.holdings[sid] * sell_frac) // _LOT) * _LOT
+                    if q > 0:
+                        trims_pending[sid] = q
 
         if slot_cfg is not None:
             # 空位只算「現在真的空著的」：今晚才判定要賣的，明天賣不賣得掉還不知道（跌停）
@@ -590,6 +723,7 @@ def run_backtest(
         equity=equity_curve,
         ledger=state.ledger,
         unfilled=state.unfilled,
+        splits=state.splits,
         metrics=metrics,
         initial_capital=initial_capital,
         final_equity=final_equity,

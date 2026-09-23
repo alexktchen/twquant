@@ -35,7 +35,11 @@ _DETERMINISM: dict[str, object] = {
 
 
 # 標籤型態決定目標函數，不是可調參數：二元標籤要的是機率，用回歸會吐出 [0,1] 以外的數字。
-OBJECTIVE_BY_TRANSFORM: dict[str, str] = {"triple_barrier": "binary", "down_probability": "binary"}
+OBJECTIVE_BY_TRANSFORM: dict[str, str] = {
+    "triple_barrier": "binary",
+    "down_probability": "binary",
+    "tail_up": "binary",  # D-143：右尾是二元事件（有沒有飆），不是連續報酬
+}
 
 
 def objective_for(transform: str) -> str:
@@ -286,6 +290,7 @@ _ID_KIND: dict[str, str] = {
     "forward_drawdown": "dd_",  # D-075
     "triple_barrier": "tb_",  # D-120
     "down_probability": "dp_",  # D-131
+    "tail_up": "tu_",  # D-143
 }
 
 # research_log 的 trial_scope（DSR 的家族鍵）。第一段 IC 檢驗記在 ML 家族，
@@ -297,6 +302,7 @@ _TRIAL_SCOPE: dict[str, str] = {
     "forward_drawdown": "ml:drawdown_h{h}",
     "triple_barrier": "ml:triple_barrier_h{h}",
     "down_probability": "ml:down_prob_h{h}",
+    "tail_up": "ml:tail_up_h{h}",  # D-143（barrier 值進 config hash，不另入家族鍵）
 }
 
 

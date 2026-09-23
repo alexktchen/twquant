@@ -178,12 +178,20 @@ class ExitRuleConfig(BaseConfig):
     寫了卻不生效的配置正是 `scripts/audit_silent.py` 要抓的那一類。
     """
 
-    kind: Literal["stop_loss", "below_ma", "score_below", "trailing_ma", "take_profit", "time_stop"]
+    kind: Literal[
+        "stop_loss",
+        "below_ma",
+        "score_below",
+        "trailing_ma",
+        "trailing_pct",
+        "take_profit",
+        "time_stop",
+    ]
     # stop_loss：收盤（含已收股利）較本輪均價的**跌**幅；take_profit：**漲**幅。皆為正的小數
     pct: float | None = None
     sessions: int | None = None  # time_stop：買進後持有滿幾個交易日即賣（買進日算第 0 天）
     window: int | None = None  # below_ma／trailing_ma：均線天數（含當日）
-    # trailing_ma：本輪未實現報酬**曾經**達到此值之後，跌破均線才賣（D-120 S0：讓獲利奔跑）
+    # trailing_ma／trailing_pct：本輪未實現報酬**曾經**達到此值之後才上膛（D-120 S0：讓獲利奔跑）
     min_peak_gain: float | None = None
     factor: str | None = None  # score_below：因子名（如 ml.lgbm_lw_net_20d）
     params: dict[str, object] = Field(default_factory=dict)  # score_below：傳給因子的參數
@@ -204,6 +212,8 @@ class ExitRuleConfig(BaseConfig):
             "stop_loss": {"pct"},
             "below_ma": {"window"},
             "trailing_ma": {"window", "min_peak_gain"},
+            # D-143 §四 的 ratchet：上膛後自持有期高點回落 pct 即出場（與均線無關）
+            "trailing_pct": {"pct", "min_peak_gain"},
             "take_profit": {"pct"},
             "time_stop": {"sessions"},
             "score_below": {"factor", "threshold", "params"},
@@ -220,8 +230,23 @@ class ExitRuleConfig(BaseConfig):
         if self.window is not None and self.window < 2:
             raise ValueError(f"{self.kind}.window 須 >= 2，得到 {self.window}")
         if self.min_peak_gain is not None and self.min_peak_gain <= 0.0:
-            raise ValueError(f"trailing_ma.min_peak_gain 須 > 0，得到 {self.min_peak_gain}")
+            raise ValueError(f"{self.kind}.min_peak_gain 須 > 0，得到 {self.min_peak_gain}")
         return self
+
+
+class ExposureTargetConfig(BaseConfig):
+    """每日曝險目標（T-286／D-146 §二）：把 V1 的 `vol_target_scaling` 帶進每日補位模式。
+
+    V1 的 overlay 只在月頻再平衡路徑生效，每日補位從不呼叫它。這裡用**同一個**波動估計
+    （`strategy.overlays._realized_vol`，持股等權組合近 window 日的年化波動）算倍數
+    `mult = clip(target_vol / realized, min_mult, 1.0)`：新進場每格 `pv × mult / n`；
+    現有持股在 `positions_value / pv` 超過 `mult` **一格（1/n）**以上時等比減碼到 `mult`。
+    帶寬取一格是推導不是調參——小於一格的差距只是整張進位的噪音，追它會把周轉率灌爆。
+    """
+
+    target_vol: float = Field(gt=0.0)  # 年化目標波動
+    window: int = Field(ge=2)  # 波動估計窗（交易日）
+    min_mult: float = Field(gt=0.0, le=1.0)  # 倍數下限；避免極端行情下曝險歸零而完全踏空
 
 
 class SlotsConfig(BaseConfig):
@@ -233,6 +258,7 @@ class SlotsConfig(BaseConfig):
 
     n: int = Field(ge=1)  # 滿手檔數；每格＝成交當時權益 ÷ n
     entry_threshold: float  # 因子原始值 >= 此值才是候選
+    exposure_target: ExposureTargetConfig | None = None  # T-286：None ＝ 永遠滿倉（既有行為）
 
 
 class StrategyConfig(BaseConfig):

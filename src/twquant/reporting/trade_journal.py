@@ -72,11 +72,25 @@ def build_journal(bundle: dict[str, Any]) -> list[JournalDay]:
     for u in bundle.get("unfilled", []):
         unfilled_by_day.setdefault(str(u["date"]), []).append(dict(u))
 
+    # T-168：分割改股數但不是交易，不在 ledger 裡。不套用的話這裡會把
+    # 「11,000 股分割成 220,000 後賣掉 205,000」判成賣超而 raise。
+    # 套用的是**股數與成本股數**（cost_amount 不動）——同一筆錢換到更多股，
+    # 均價自然縮放，出場報酬才算得對。
+    splits_by_day: dict[str, list[dict[str, Any]]] = {}
+    for sp in bundle.get("splits", []):
+        splits_by_day.setdefault(str(sp["date"]), []).append(dict(sp))
+
     book: dict[str, _Pos] = {}
     days: list[JournalDay] = []
-    for day in sorted(set(by_day) | set(unfilled_by_day)):
+    for day in sorted(set(by_day) | set(unfilled_by_day) | set(splits_by_day)):
         if day not in session_idx:
             raise DataError("trade_journal", None, f"{day} 有成交紀錄卻不在權益曲線的交易日內")
+        for sp in splits_by_day.get(day, []):
+            pos = book.get(str(sp["stock_id"]))
+            if pos is not None and pos.shares > 0:
+                adj = float(sp["adj_factor"])
+                pos.shares = int(sp["shares_after"])
+                pos.cost_shares = round(pos.cost_shares / adj) if adj > 0 else pos.cost_shares
         moves = [
             _net_move(book, sid, trades, day, session_idx)
             for sid, trades in sorted(_group(by_day.get(day, [])).items())

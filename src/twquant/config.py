@@ -134,6 +134,8 @@ class MlLabelConfig(BaseConfig):
     #   revenue_surprise ＝下次公布的月營收 YoY 對「本月 YoY ＋ 加速度」的橫斷面殘差
     #   forward_drawdown ＝未來 horizon 個交易日、相對 t 日收盤的最低點跌幅
     #   triple_barrier ＝t+1 開盤進場後 horizon 日內，收盤先碰 +barrier_up（於 −barrier_down 之前）＝1（D-120）
+    #   tail_up ＝t+1 開盤進場後 horizon 日內，收盤最大漲幅 ≥ barrier_up ＝1（D-143，右尾；
+    #     與 triple_barrier 的差別是**先跌不取消後漲**——路徑交給出場規則管，不混進標籤）
     transform: Literal[
         "rank_pct",
         "cost_adjusted_return",
@@ -141,6 +143,7 @@ class MlLabelConfig(BaseConfig):
         "forward_drawdown",
         "triple_barrier",
         "down_probability",
+        "tail_up",
     ] = "rank_pct"
     # down_probability（D-131）：未來 horizon 日內最大跌幅達此值即為 1。其他 transform 下須留空
     drop_threshold: float | None = Field(default=None, gt=0.0, lt=1.0)
@@ -177,9 +180,16 @@ class MlLabelConfig(BaseConfig):
         if self.transform == "triple_barrier":
             if self.barrier_up is None or self.barrier_down is None:
                 raise ValueError("triple_barrier 須同時給 barrier_up 與 barrier_down")
+        elif self.transform == "tail_up":
+            # 右尾只有上緣：給了 barrier_down 是寫了卻不生效的配置（no-op 缺陷）
+            if self.barrier_up is None:
+                raise ValueError("tail_up 須給 barrier_up")
+            if self.barrier_down is not None:
+                raise ValueError("tail_up 沒有下緣，不得給 barrier_down（它不會生效）")
         elif given:
             raise ValueError(
-                f"barrier_up／barrier_down 只用於 triple_barrier，transform={self.transform}"
+                f"barrier_up／barrier_down 只用於 triple_barrier 與 tail_up，"
+                f"transform={self.transform}"
             )
         if (self.transform == "down_probability") != (self.drop_threshold is not None):
             raise ValueError(

@@ -41,9 +41,23 @@ def _average_holding_sessions(result: BacktestResult) -> float:
     entries: dict[str, int] = {}
     durations: list[int] = []
 
+    # T-168：分割不是交易、不進 ledger，但它改股數。不併進來的話這裡會看到
+    # 「買 11,000 卻賣 205,000」而 raise（D-143 實測 5314 正是如此）。
+    # 同一天分割先於成交：引擎在當日收盤後調股數，成交發生在**隔日**開盤。
+    splits_by_day: dict[dt.date, list[tuple[str, int]]] = {}
+    for sp in result.splits:
+        splits_by_day.setdefault(sp.date, []).append((sp.stock_id, sp.shares_after))
+
+    def _apply_splits_for(day: dt.date) -> None:
+        for sid, after in splits_by_day.pop(day, []):
+            if positions.get(sid):
+                positions[sid] = after
+
     for trade in result.ledger:
         if trade.date not in session_index:
             raise ValueError(f"ledger 交易日 {trade.date} 不在 equity curve")
+        for d in sorted(d for d in splits_by_day if d <= trade.date):
+            _apply_splits_for(d)
         current = positions.get(trade.stock_id, 0)
         if trade.side == "buy":
             if current == 0:
