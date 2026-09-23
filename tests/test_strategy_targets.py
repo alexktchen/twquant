@@ -165,7 +165,10 @@ def test_ac10_live_registry_loads_and_every_strategy_config_exists() -> None:
     assert registry.strategies, "登記表不得為空"
     for strat in registry.strategies:
         assert (root / "strategies" / f"{strat.config}.yaml").exists(), strat.config
-        assert strat.vault is not None, f"{strat.code} 缺金庫成績——名單不得在沒有成績時呈現"
+        # D-147：成績可以是金庫期或研究期（標明類型），但不得兩者皆無
+        assert strat.vault is not None or strat.research is not None, (
+            f"{strat.code} 沒有任何成績——名單不得在沒有成績時呈現"
+        )
 
 
 def test_ac11_api_serves_saved_snapshots_with_evidence(tmp_path: Path) -> None:
@@ -191,3 +194,21 @@ def test_ac11_api_with_no_snapshots_is_empty_not_error(tmp_path: Path) -> None:
 
     body = api.get_platform_strategy_targets(tmp_path, date=None, limit=1)
     assert body["snapshots"] == [] and body["issues"] == []
+
+
+def test_ac12_registry_rejects_a_strategy_without_any_evidence() -> None:
+    """D-147：「名單不得在沒有成績時呈現」由登記表本身把關——連載入都載不進來。"""
+    with pytest.raises(ValueError, match="沒有任何成績"):
+        LiveStrategies.model_validate(
+            {"strategies": [{"code": "X", "config": "x", "label": "裸策略"}]}
+        )
+
+
+def test_ac13_research_evidence_is_carried_into_the_run() -> None:
+    """研究期成績跟金庫成績一樣，一律跟著名單走（頁面靠它標明「不是金庫期」）。"""
+    root = Path(__file__).resolve().parents[1] / "configs"
+    registry = load_config(root / "strategies_live.yaml", LiveStrategies)
+    tail = next(s for s in registry.strategies if s.code == "TAIL-B")
+    assert tail.vault is None, "TAIL-B 沒有金庫期成績，不得假造"
+    assert tail.research is not None and tail.research.decision.startswith("D-143")
+    assert tail.research.max_drawdown < 0

@@ -325,6 +325,10 @@ class MlConfig(BaseConfig):
     # 已登記的策略若以某個模型的分數當池子（如 LW-F1 用營收驚奇模型），那個模型就得列在這裡，
     # 否則策略每天都讀不到當日分數。
     production_aux_models: tuple[str, ...] = ()
+    # D-147：平台上架的**研究策略**所用的模型，每日推論寫進 PG。與上面兩個鍵的差別：
+    # 這些在正式名單匯出**之後**才打分，失敗只寫進步驟摘要、不擋名單——
+    # 生產名單（與風控閘門）不得依賴一個研究模型能不能跑。
+    research_live_models: tuple[str, ...] = ()
     # 名單分組政策（D-111）。預設停用＝既有快照的 bucket 逐字不變。
     recommendation_buckets: RecommendationBucketConfig = RecommendationBucketConfig()
 

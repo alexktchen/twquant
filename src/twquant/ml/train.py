@@ -191,6 +191,7 @@ _NOT_TRAINING_INPUTS: tuple[tuple[str, ...], ...] = (
     ("production_ranking_model",),
     ("recommendation_buckets",),
     ("production_aux_models",),
+    ("research_live_models",),  # D-147：上架研究策略用的模型清單，屬部署不屬模型身分
 )
 
 
