@@ -24,6 +24,9 @@ exclude_factors:
   - chip.broker_concentration_20d
   - chip.broker_count_diff_5d
   - chip.broker_persistence_10d
+  # D-147：右尾模型的薄因子強制要求 model_id（A／B 兩臂前綴相近），用預設參數每天物化只會 raise；
+  # 它的分數本來就在 ml_scores，策略直接讀那裡。
+  - ml.lgbm_tail_up_60d
 composite_factors:
   - price.reversal_5d
   - price.residual_reversal_5d

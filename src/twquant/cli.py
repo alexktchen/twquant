@@ -1105,7 +1105,15 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
             from twquant.factors.registry import list_factors
 
             names = [n for n in list_factors() if n not in set(scfg.exclude_factors)]
-            src = PgTableSource(conn, scfg.pg_schema, cache=True, since=smat.read_since(day, names))
+            # ml_scores 另按它自己的讀取者縮窗：薄因子只要當天分數，不該被 850 天的回看
+            # 拖著整批載入（2026-09-23 因此 OOM）。
+            src = PgTableSource(
+                conn,
+                scfg.pg_schema,
+                cache=True,
+                since=smat.read_since(day, names),
+                table_since=smat.read_since_by_table(day, names),
+            )
             m = smat.materialize_day(src, scfg, day)
         finally:
             conn.close()
