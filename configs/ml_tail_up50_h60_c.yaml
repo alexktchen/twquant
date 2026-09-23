@@ -1,0 +1,84 @@
+# D-145 第十輪 **C 臂**：B 臂的 20 支 ＋ 3 支有長歷史的分點因子（2022-03 起）。
+# 訓練窗由 CLI 的 `--from 2022-03-01` 給定；配對基準是 ml_tail_up50_h60_b2.yaml（同窗口、無分點）。
+# 事後探索：broker_concentration_20d 疊在波動前 20% 之上把飆股率 13.1% → 17.2%（負向篩選為主），
+# 看過才挑的，不得當通過證據。
+#
+# 與 `ml_h20_cost_aware_lw.yaml`（現行生產模型的配方）的差別**只有標籤與其連帶項**：
+#   transform  cost_adjusted_return → tail_up（右尾：未來 60 日最大漲幅 ≥ +50%）
+#   horizon    20 → 60（D-143 §一：飆股事件平均 33 天走完，60 天涵蓋絕大多數）
+#   embargo    20 → 60（config 強制 embargo ≥ horizon，否則標籤的前向視窗會洩進測試段）
+#   max_span   42 → 122（沿用既有的 h×2＋2 比例）
+# **與 A 臂的差別只有特徵**：12 → 20（加 T-284 的波動 8 支）。LGBM 超參、切分、seed、
+# 標籤逐字相同，故 B−A 的差異只能歸因於「補上波動這個空白維度」。
+#
+# 為什麼是波動：2026-09-22 的探索量到 `price.vol_20d` 前 10% 的飆股率 13.85%（基礎率
+# 5.88% 的 2.36 倍），是所有單因子最高；而本專案 43 個因子裡波動只有它一支。
+# `price.vol_asym_20`（上下行波動比）是這批的核心——`vol_20d` 不分方向，模型因此
+# 分不出「會動」與「會漲」，那正是 D-126／D-132 兩度量到的病根。
+#
+# sample_tag 不是註記而是身分：沒有它，model_id 的 hash 只看超參數，
+# 兩臂的分數會混進同一條 ml_scores 線裡。
+sample_tag: tailc
+
+horizon_days: 60
+aux_horizons: [20, 40]
+features:
+  - fundamental.revenue_accel
+  - fundamental.revenue_yoy
+  - price.intraday_ret_20d
+  - price.mom_20d
+  - price.mom_60d
+  - price.overnight_ret_20d
+  - price.residual_reversal_5d
+  - price.reversal_5d
+  - price.rs_market_20d
+  - price.vol_20d
+  - volume.turnover_z_20d
+  - volume.vol_ratio_5d
+  # ↓ T-284（D-143 §十）：波動類 8 支
+  - price.atr_14
+  - price.parkinson_20
+  - price.garman_klass_20
+  - price.upside_vol_20
+  - price.downside_vol_20
+  - price.vol_asym_20
+  - price.ret_skew_60
+  - price.jump_count_60
+  # ↓ D-145 §三：分點三支（只有這三支有 2022-03 起的歷史）
+  - chip.broker_concentration_20d
+  - chip.broker_count_diff_5d
+  - chip.broker_persistence_10d
+context_features: []
+label:
+  execution: next_open
+  excess: market_mean
+  transform: tail_up
+  barrier_up: 0.50
+  adv_window_sessions: 20
+  position_notional_twd: 500_000.0
+  downside_penalty: 0.25
+  total_return: true # D-054／D-066：含股利。未表態時 `ml train` 會拒絕執行
+  max_span_sessions: 122
+split:
+  train_min_years: 2.0
+  test_months: 3
+  embargo_days: 60
+  # vault_months: 4 ——**不是金庫，是標籤的尾巴保護**（T-281 實作時才發現，見 D-143 §十 註）。
+  # h=60 的標籤需要往後 60 個交易日，故資料上界前約三個月的訊號日一律沒有標籤；
+  # 若不保留尾巴，最後一個測試窗會整段是 null，`walk_forward_train` 直接 raise。
+  # 4 個月 × 21 日＝84 個交易日 > 60，留 24 日餘裕。兩臂同值，可比性不受影響。
+  # 第一個金庫（2026-03~08）已於 D-107 開封用掉；第二保留期（2026-09-01 起）依 D-109／D-114
+  # 最早 2027-03-01 才開，本輪一律是 walk-forward 樣本外，且 D-143 §六 明文「不是保留期證據」。
+  vault_months: 4
+  days_per_year: 244
+  days_per_month: 21
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  min_data_in_leaf: 100
+  feature_fraction: 0.8
+  n_estimators: 400
+  seed: 42
+refit:
+  schedule: monthly
+trials_log: research_log

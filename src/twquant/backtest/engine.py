@@ -17,6 +17,7 @@ from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy,
 from twquant.backtest.exits import HeldPosition, entry_blocked, exit_reasons, ma_column
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
+from twquant.strategy.overlays import _realized_vol
 
 if TYPE_CHECKING:
     from twquant.data.warehouse import TableSource
@@ -143,6 +144,7 @@ class _State:
     splits: list[SplitAdjustment] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)
     traded_notional: float = 0.0
+    exposure_mult: float = 1.0  # T-286：每日曝險目標的倍數；無 exposure_target 時恆為 1.0
 
 
 def _price_panel(
@@ -551,6 +553,7 @@ def run_backtest(
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
     exits_pending: dict[str, str] = {}
+    trims_pending: dict[str, int] = {}  # T-286：明早要減碼的股數
     entries_pending: list[str] = []
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
@@ -600,6 +603,17 @@ def run_backtest(
                     _fill(state, sid, -qty, day, px_row, cost_cfg, max_participation, why)
             exits_pending = {}  # 沒賣掉的（跌停／量不足）今晚會再被判一次
 
+        if slot_cfg is not None and trims_pending:  # T-286：減碼賣出，走與出場同一條成交路徑
+            for sid, q in sorted(trims_pending.items()):
+                have = state.holdings.get(sid, 0)
+                px_row = day_px.get(sid)
+                q = min(q, have)
+                if q > 0 and px_row is not None and px_row.get("open") is not None:
+                    _fill(
+                        state, sid, -q, day, px_row, cost_cfg, max_participation, "exposure_target"
+                    )
+            trims_pending = {}  # 沒賣掉的（跌停／量不足）今晚會再算一次
+
         if slot_cfg is not None and entries_pending:  # 先賣後買：賣出的現金當天就能用
             pv = _portfolio_value(state, day_px)
             for sid in entries_pending:
@@ -609,9 +623,10 @@ def run_backtest(
                 if sid in state.holdings or px_row is None or px_row.get("open") is None:
                     continue
                 o = float(px_row["open"])
-                want = int((pv / slot_cfg.n) // (o * _LOT)) * _LOT if o > 0 else 0
+                per_slot = pv * state.exposure_mult / slot_cfg.n  # T-286：倍數 1.0 時即既有行為
+                want = int(per_slot // (o * _LOT)) * _LOT if o > 0 else 0
                 if want == 0:  # 一格的金額買不起一張：記下來，不靜默略過（T-135 同理）
-                    _unfill(state, sid, "buy", int(pv / slot_cfg.n / o) if o > 0 else 0, day, "lot")
+                    _unfill(state, sid, "buy", int(per_slot / o) if o > 0 else 0, day, "lot")
                     continue
                 _fill(state, sid, want, day, px_row, cost_cfg, max_participation, "entry")
             entries_pending = []
@@ -633,6 +648,28 @@ def run_backtest(
 
         if exit_rules and state.holdings and pending is None:
             exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
+
+        if slot_cfg is not None and slot_cfg.exposure_target is not None:
+            # T-286／D-145 §二：每日曝險目標。倍數用 V1 同一個波動估計（持股等權組合），
+            # 空手時沒有東西可估 → 1.0（新進場全額）。減碼與出場同一天判、隔日開盤執行。
+            et = slot_cfg.exposure_target
+            held_ids = sorted(sid for sid, sh in state.holdings.items() if sh > 0)
+            mult = 1.0
+            if held_ids:
+                realized = _realized_vol(warehouse.view(day), day, held_ids, et.window)
+                if realized > 0.0:
+                    mult = max(et.min_mult, min(1.0, et.target_vol / realized))
+            state.exposure_mult = mult
+            pos_now = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
+            pv_now = state.cash + pos_now
+            if pv_now > 0.0 and pos_now > 0.0 and pos_now / pv_now > mult + 1.0 / slot_cfg.n:
+                sell_frac = 1.0 - (mult * pv_now) / pos_now
+                for sid in held_ids:
+                    if sid in exits_pending:  # 整檔要出場的，不再另外減碼
+                        continue
+                    q = int((state.holdings[sid] * sell_frac) // _LOT) * _LOT
+                    if q > 0:
+                        trims_pending[sid] = q
 
         if slot_cfg is not None:
             # 空位只算「現在真的空著的」：今晚才判定要賣的，明天賣不賣得掉還不知道（跌停）

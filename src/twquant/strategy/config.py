@@ -234,6 +234,21 @@ class ExitRuleConfig(BaseConfig):
         return self
 
 
+class ExposureTargetConfig(BaseConfig):
+    """每日曝險目標（T-286／D-145 §二）：把 V1 的 `vol_target_scaling` 帶進每日補位模式。
+
+    V1 的 overlay 只在月頻再平衡路徑生效，每日補位從不呼叫它。這裡用**同一個**波動估計
+    （`strategy.overlays._realized_vol`，持股等權組合近 window 日的年化波動）算倍數
+    `mult = clip(target_vol / realized, min_mult, 1.0)`：新進場每格 `pv × mult / n`；
+    現有持股在 `positions_value / pv` 超過 `mult` **一格（1/n）**以上時等比減碼到 `mult`。
+    帶寬取一格是推導不是調參——小於一格的差距只是整張進位的噪音，追它會把周轉率灌爆。
+    """
+
+    target_vol: float = Field(gt=0.0)  # 年化目標波動
+    window: int = Field(ge=2)  # 波動估計窗（交易日）
+    min_mult: float = Field(gt=0.0, le=1.0)  # 倍數下限；避免極端行情下曝險歸零而完全踏空
+
+
 class SlotsConfig(BaseConfig):
     """每日補位模式（T-247／D-120 §五）。給了它，`rebalance`／`selection`／`weighting` 一律不用。
 
@@ -243,6 +258,7 @@ class SlotsConfig(BaseConfig):
 
     n: int = Field(ge=1)  # 滿手檔數；每格＝成交當時權益 ÷ n
     entry_threshold: float  # 因子原始值 >= 此值才是候選
+    exposure_target: ExposureTargetConfig | None = None  # T-286：None ＝ 永遠滿倉（既有行為）
 
 
 class StrategyConfig(BaseConfig):
