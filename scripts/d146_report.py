@@ -1,6 +1,6 @@
 """D-146 §四：第十輪報告——**只報數字、不判**。
 
-    TWQUANT_PG_DSN=... uv run --all-groups python scripts/d145_report.py \
+    TWQUANT_PG_DSN=... uv run --all-groups python scripts/d146_report.py \
         --bundles D:/project/twquant/data/tracks_tail10
 
 使用者 2026-09-23：「不設門檻、只報數字，跑這一輪」。本腳本沒有任何通過／未通過標籤；
@@ -17,6 +17,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import os
 import pathlib
 import sys
 
@@ -73,9 +74,19 @@ def main() -> None:
     if not paths:
         raise SystemExit(f"{args.bundles} 底下沒有結果包")
     bundles = [(p, json.loads(p.read_text(encoding="utf-8"))) for p in paths]
+    holdout = os.environ.get("TWQUANT_HOLDOUT_OPEN")  # 只有 scripts/holdout2_tail.py 會設
     for p, b in bundles:
         if dt.date.fromisoformat(str(b["end"])) > DEV_END:
-            raise SystemExit(f"{p.name} 結束於 {b['end']}，越過第二保留期邊界")
+            if not holdout:
+                raise SystemExit(f"{p.name} 結束於 {b['end']}，越過第二保留期邊界")
+            # D-148：保留期判讀。**環境變數本身不是通行證**——再核一次開啟日，
+            # 否則任何人在 2027-03-01 之前設了它就能對保留期做績效統計（D-109 §一 禁止）。
+            from twquant.conventions import now_tw
+            from twquant.reporting.holdout import HoldoutRegistration
+
+            reg = load_config(CONFIGS / "holdout2.yaml", HoldoutRegistration)
+            if now_tw().date() < reg.opens_on:
+                raise SystemExit(f"保留期最早 {reg.opens_on} 才能開（{reg.registration}）")
     print(f"來回成本（手續費×2 ＋ 證交稅）＝ {rt:.3%}；逐筆報酬另扣此數")
     print("**本輪不設門檻（D-146 §〇）——以下全部只報不判。**\n")
     outcomes = pl.DataFrame()

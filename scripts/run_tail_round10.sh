@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D-145 第十輪：訓練 C／B′（2022-03 起）→ 回填分數 → 回測 E／C／B′ → 只報不判。
+# D-146 第十輪：訓練 C／B′（2022-03 起）→ 回填分數 → 回測 E／C／B′ → 只報不判。
 # 前提：T-286（slots 模式的每日曝險目標）已合入且閘門全綠。
 set -u
 REPO="D:/project/twquant/.claude/worktrees/quant-trading-strategies-268d12"
@@ -12,7 +12,7 @@ B="$DATA/tracks_tail10"
 mkdir -p "$B"
 say() { echo "=== $(date +%H:%M:%S) $*" | tee -a "$LOG"; }
 
-# ── 1. 訓練 C 與 B′（同窗口 2022-03-01 起；D-145 §三）─────────────────────
+# ── 1. 訓練 C 與 B′（同窗口 2022-03-01 起；D-146 §三）─────────────────────
 for arm in c b2; do
   say "訓練 ${arm} 臂（--from 2022-03-01）"
   uv run --all-groups python -m twquant ml train \
@@ -41,7 +41,7 @@ PY
     || say "backfill-scores rc=$?（若已存在同 model_id 的分數屬正常）"
 done
 
-# ── 3. 回測：E 臂全窗口；C／B′ 兩年窗（D-145 §三）───────────────────────────
+# ── 3. 回測：E 臂全窗口；C／B′ 兩年窗（D-146 §三）───────────────────────────
 bt() {  # name start end
   local dest="$B/${1}_1x.json"
   [ -f "$dest" ] && { say "$1 已存在，跳過"; return 0; }
@@ -56,5 +56,5 @@ bt tail_b2       2024-03-01 2026-02-28
 
 # ── 4. 只報不判 ───────────────────────────────────────────────────────────────
 say "報告"
-uv run --all-groups python scripts/d145_report.py --bundles "$B" 2>&1 | tee -a "$LOG"
+uv run --all-groups python scripts/d146_report.py --bundles "$B" 2>&1 | tee -a "$LOG"
 say "第十輪全部完成。日誌：$LOG"
