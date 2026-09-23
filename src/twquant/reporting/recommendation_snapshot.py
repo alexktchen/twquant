@@ -237,12 +237,20 @@ def select_candidates(
     )
 
 
-def stock_events(data_dir: str | Path, stock_id: str) -> list[dict[str, object]]:
-    """Return one stock's saved recommendation events in as_of order; no events yields []."""
+def stock_events(
+    data_dir: str | Path, stock_id: str, *, exclude_models: frozenset[str] = frozenset()
+) -> list[dict[str, object]]:
+    """Return one stock's saved recommendation events in as_of order; no events yields [].
+
+    `exclude_models`：研究模型的 run 不進個股頁的推薦事件（T-301）——那張表與圖上標記
+    講的是生產名單；研究模型的名單在 ML 選股頁按模型看。
+    """
     wanted = normalize_stock_id(stock_id)
     catalog = index_snapshots(data_dir)
     events: list[dict[str, object]] = []
     for run in sorted(catalog.runs, key=lambda item: (item.as_of, item.run_id)):
+        if run.model_id in exclude_models:
+            continue
         for candidate in run.candidates:
             if candidate.stock_id != wanted:
                 continue
@@ -276,9 +284,21 @@ def select_snapshots(
 ) -> RecommendationCatalog:
     """Apply date, model and run filters before callers perform any pagination."""
     catalog = index_snapshots(data_dir)
-    runs = [
+    runs = filter_runs(catalog.runs, date=date, model_id=model_id, run_id=run_id)
+    return RecommendationCatalog(runs=runs, issues=catalog.issues)
+
+
+def filter_runs(
+    runs: list[RecommendationSnapshot],
+    *,
+    date: dt.date | None = None,
+    model_id: str | None = None,
+    run_id: str | None = None,
+) -> list[RecommendationSnapshot]:
+    """日期／模型／run 篩選，新到舊。"""
+    kept = [
         run
-        for run in catalog.runs
+        for run in runs
         if (date is None or run.as_of.date() == date)
         and (model_id is None or run.model_id == model_id)
         and (run_id is None or run.run_id == run_id)
@@ -286,5 +306,75 @@ def select_snapshots(
     # 新到舊：頁面寫的是「查詢日期：最新可得」，最上面那張卡就該是最新的 run。
     # 原本依檔名（＝由舊到新）排，於是不帶日期時永遠先看到最舊、早已過期的快照，
     # 最新的被壓在最底下（2026-09-19 實際發生：09-18 的名單排在 09-04 的過期快照後面）。
-    runs.sort(key=lambda run: (run.as_of, run.generated_at), reverse=True)
-    return RecommendationCatalog(runs=runs, issues=catalog.issues)
+    kept.sort(key=lambda run: (run.as_of, run.generated_at), reverse=True)
+    return kept
+
+
+Lane = Literal["production", "research_live"]
+
+
+@dataclass(frozen=True)
+class MlRoles:
+    """configs/ml.yaml 的模型分工裡，讀取端用得到的兩件（T-301）。"""
+
+    production: str = ""
+    research_live: frozenset[str] = frozenset()
+
+    def lane(self, model_id: str) -> Lane | None:
+        """生產排序模型、上架研究模型，或兩者皆非（例如已換下的舊模型）。"""
+        if self.production and model_id == self.production:
+            return "production"
+        if model_id in self.research_live:
+            return "research_live"
+        return None
+
+
+def model_days(runs: list[RecommendationSnapshot], roles: MlRoles) -> list[dict[str, object]]:
+    """每個有快照的模型與它的日期（新到舊）——模型選單與「前一天／後一天」的依據。
+
+    生產模型排第一，其餘依最新日期、再依代號。
+    """
+    days: dict[str, set[dt.date]] = {}
+    for run in runs:
+        days.setdefault(run.model_id, set()).add(run.as_of.date())
+    order = sorted(
+        days,
+        key=lambda m: (roles.lane(m) != "production", -max(days[m]).toordinal(), m),
+    )
+    return [
+        {
+            "model_id": model,
+            "lane": roles.lane(model),
+            "dates": [d.isoformat() for d in sorted(days[model], reverse=True)],
+        }
+        for model in order
+    ]
+
+
+def resolve_view(
+    runs: list[RecommendationSnapshot],
+    roles: MlRoles,
+    *,
+    date: dt.date | None,
+    model_id: str | None,
+    run_id: str | None,
+) -> tuple[str | None, dt.date | None]:
+    """補齊頁面沒指定的模型與日期（SPEC-014 AC-301-2）。
+
+    給了 run 就用那個 run 的模型與日期；否則模型預設為生產模型（它沒有任何快照時取
+    最新一份快照的模型），日期預設為該模型最新的一天。沒有任何快照時兩者皆 None。
+    """
+    if run_id is not None:
+        for run in runs:
+            if run.run_id == run_id:
+                return model_id or run.model_id, date or run.as_of.date()
+    if model_id is None:
+        newest = filter_runs(runs)
+        if roles.production and any(r.model_id == roles.production for r in runs):
+            model_id = roles.production
+        elif newest:
+            model_id = newest[0].model_id
+    if date is None and model_id is not None:
+        own = filter_runs(runs, model_id=model_id)
+        date = own[0].as_of.date() if own else None
+    return model_id, date
