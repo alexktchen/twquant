@@ -5,8 +5,9 @@ import { nameOf, useStockNames } from './stockNames'
 import { Panel } from '../ui'
 
 type Vault = { total_return: number; max_drawdown: number; benchmark_total_return: number; benchmark_max_drawdown: number }
+type Research = { decision: string; window_start: string; window_end: string; cagr: number; max_drawdown: number; calmar: number }
 type Target = { stock_id: string; target_weight: number; rank: number }
-type Run = { code: string; config: string; label: string; note: string; status: 'ok' | 'flat' | 'failed'; detail: string | null; exposure: number; targets: Target[]; vault: Vault | null }
+type Run = { code: string; config: string; label: string; note: string; status: 'ok' | 'flat' | 'failed'; detail: string | null; exposure: number; targets: Target[]; vault: Vault | null; research?: Research | null }
 type Snapshot = { run_id: string; as_of: string; generated_at: string; mode: 'research'; strategies: Run[] }
 type Response = { snapshots: Snapshot[]; issues: { run_id: string; detail: string }[] }
 
@@ -32,7 +33,16 @@ function StockName({ stockId }: { stockId: string }) {
  * 金庫成績條：這支策略在「從沒被看過的半年」裡實際交出什麼。
  * 刻意放在名單上方、每一張卡都有——D-107 判定沒有任何一支可部署，名單不得脫離成績單獨出現。
  */
-function Evidence({ vault }: { vault: Vault | null }) {
+function Evidence({ vault, research }: { vault: Vault | null; research?: Research | null }) {
+  if (!vault && research) return <>
+    {/* D-147：研究期成績不是金庫期——整段期間研究者看過、也參與了設計，必須跟數字一起講清楚。 */}
+    <div className="platform-stale-note">這支策略沒有金庫期成績。以下是研究期（{research.decision}，walk-forward 樣本外）的回測成績——那段期間研究者看過、也參與了設計，不是未見資料。</div>
+    <dl className="platform-evidence">
+      <div><dt>研究期年化</dt><dd>{pct(research.cagr)}<span>{research.window_start} ~ {research.window_end}</span></dd></div>
+      <div><dt>研究期最深回撤</dt><dd>{pct(research.max_drawdown)}</dd></div>
+      <div><dt>Calmar</dt><dd>{research.calmar.toFixed(2)}<span>年化 ÷ 最深回撤</span></dd></div>
+    </dl>
+  </>
   if (!vault) return <div className="platform-stale-note">這支策略沒有金庫期成績紀錄——無法判斷它在未見資料上的表現。</div>
   const worseReturn = vault.total_return < vault.benchmark_total_return
   const deeperDrawdown = vault.max_drawdown < vault.benchmark_max_drawdown
@@ -54,7 +64,7 @@ function RunCard({ run, day }: { run: Run; day: string }) {
       <h2>{run.label}</h2><p>{run.code} · {run.config}</p>
     </div><a href={routeHref('backtests')}>查看回測紀錄 →</a></header>
     {run.note && <p className="platform-strategy-note">{run.note}</p>}
-    <Evidence vault={run.vault} />
+    <Evidence vault={run.vault} research={run.research} />
     {run.status === 'failed' && <div className="platform-query-state platform-query-error">這支策略今天算不出名單：{run.detail}<br />這是計算失敗，不是「今天空手」；其餘策略不受影響。</div>}
     {run.status === 'flat' && <div className="platform-query-state">{run.detail ?? '空手日'}——策略規則下今天沒有合格標的，這是合法結果。</div>}
     {run.status === 'ok' && <>

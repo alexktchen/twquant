@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 import typer
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     import polars as pl
 
@@ -29,9 +29,11 @@ if TYPE_CHECKING:
     )
     from twquant.data.http import HttpClient
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
+    from twquant.data.warehouse import TableSource
     from twquant.insight.client import InsightClient
     from twquant.pipeline import PipelineResult
     from twquant.reporting.recommendation_export import BucketPolicy
+    from twquant.strategy.config import StrategyConfig
 
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
 
@@ -1165,7 +1167,15 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         for name in dict.fromkeys(n for n in extra if n and n != bound):
             _score_into_pg(name)
         result = export_scores(scores_path, mdir, Path(cfg.data_dir), day, _bucket_policy(day))
-        return f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}"
+        msg = f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}"
+        # D-147：上架研究策略的模型。**在正式名單存檔之後**才跑，失敗寫進摘要、不擋名單。
+        research = [n for n in dict.fromkeys(ml_cfg.research_live_models) if n != bound]
+        if research:
+            failed = _best_effort(research, _score_into_pg)
+            msg += f"；研究模型 {len(research) - len(failed)}/{len(research)} 已打分"
+            if failed:
+                msg += f"（⚠ 失敗：{'；'.join(failed)}）"
+        return msg
 
     def _strategy_targets_step() -> str:
         # D-112：已登記策略的當日目標持股快照。best-effort，不擋主線。
@@ -1464,7 +1474,7 @@ def ic_report(
     import polars as pl
 
     import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
-    from twquant.data.warehouse import TableSource, Warehouse
+    from twquant.data.warehouse import Warehouse
     from twquant.factors.compute import compute
     from twquant.factors.ic import compute_event_study, compute_ic_report
     from twquant.reporting.research_log import append_research_log, trials_count
@@ -1575,6 +1585,40 @@ def ic_report(
         pg_conn.close()
 
 
+def _best_effort(names: Sequence[str], run: Callable[[str], object]) -> list[str]:
+    """逐一執行，回傳失敗清單（`名稱：原因`）。**不是吞錯**：呼叫端必須把清單寫進摘要。
+
+    只用在研究用途（D-147 的上架研究模型）：它失敗不該拖垮同一步裡的生產輸出，
+    但失敗本身要看得見——所以回傳而不是記 DEBUG。
+    """
+    failed: list[str] = []
+    for name in names:
+        try:
+            run(name)
+        except Exception as exc:  # noqa: BLE001 - 失敗逐條回傳並寫進步驟摘要，不是靜默略過
+            failed.append(f"{name}：{exc}")
+    return failed
+
+
+def _live_targets(
+    cfg: StrategyConfig, source: TableSource, day: dt.date
+) -> list[tuple[str, float]]:
+    """登記在平台上的一支策略在 `day` 的名單（D-112；每日補位型見 D-147）。
+
+    月頻型走 `build_targets`，給的是目標權重。**每日補位型沒有目標權重**——它的實際持股
+    取決於歷史進出場（出場規則、ratchet），而後端沒有帳戶狀態。能誠實給出的只有
+    「今天若有空位會買誰」：過門檻的候選前 n 名、每格 1/n。頁面上必須這樣標示。
+    """
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.slots import slot_candidates
+
+    if cfg.slots is not None:
+        n = cfg.slots.n
+        return [(sid, 1.0 / n) for sid, _ in slot_candidates(cfg, source, day)[:n]]
+    frame = build_targets(cfg, source, day)
+    return [(str(r["stock_id"]), float(r["target_weight"])) for r in frame.to_dicts()]
+
+
 def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
     """對已登記的策略逐支算出 `day` 的目標權重並存成不可變快照（D-112）。回傳一行摘要。
 
@@ -1591,7 +1635,6 @@ def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
         build_snapshot,
         save_snapshot,
     )
-    from twquant.strategy.build import build_targets
     from twquant.strategy.config import load_strategy
 
     registry = load_config(_CONFIG_DIR / "strategies_live.yaml", LiveStrategies)
@@ -1604,8 +1647,7 @@ def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
             cfg = load_strategy(str(_CONFIG_DIR / "strategies" / f"{strat.config}.yaml"))
             # held=空：帶狀持有（banded_top_n）需要「目前持股」才有意義，而後端沒有帳戶狀態。
             # 已登記的 8 支都不是帶狀策略；日後若登記帶狀策略，這裡要先有持股來源。
-            frame = build_targets(cfg, source, day)
-            return [(str(r["stock_id"]), float(r["target_weight"])) for r in frame.to_dicts()]
+            return _live_targets(cfg, source, day)
 
         snapshot = build_snapshot(day, registry.strategies, _compute, generated_at=now_tw())
     finally:
@@ -1967,7 +2009,7 @@ def backtest(
     from twquant.backtest.diagnostics import summarize_backtest
     from twquant.backtest.engine import run_backtest
     from twquant.config import load_config
-    from twquant.data.warehouse import TableSource, Warehouse
+    from twquant.data.warehouse import Warehouse
     from twquant.reporting.research_log import append_research_log, backtest_log_entries
     from twquant.strategy.config import load_strategy
 

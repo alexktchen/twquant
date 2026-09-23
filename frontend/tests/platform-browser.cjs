@@ -137,6 +137,7 @@ const { chromium } = require('playwright');
         strategies: [
           { code: 'LW-B2', config: 'lw_b2_broad_capw', label: '全市場多因子（市值加權）', note: '', status: 'ok', detail: null, exposure: 0.3, targets: [{ stock_id: '0050', target_weight: 0.25, rank: 1 }, { stock_id: '2330', target_weight: 0.05, rank: 2 }], vault: { total_return: 0.2578, max_drawdown: -0.1541, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 } },
           { code: 'LW-M1', config: 'lw_m1_ml_c1', label: 'ML 訊號進載具', note: '', status: 'failed', detail: 'ConfigError: 串接閘門的因子在該日全為 null', exposure: 0, targets: [], vault: { total_return: 0.2268, max_drawdown: -0.3512, benchmark_total_return: 0.3223, benchmark_max_drawdown: -0.1588 } },
+          { code: 'TAIL-B', config: 'tail_b', label: '右尾飆股（第九輪 B 臂）', note: '每日補位型：列的是右尾機率前 15 名', status: 'ok', detail: null, exposure: 0.0667, targets: [{ stock_id: '3017', target_weight: 0.0667, rank: 1 }], vault: null, research: { decision: 'D-143 §十一', window_start: '2017-01-03', window_end: '2026-02-28', cagr: 0.128, max_drawdown: -0.397, calmar: 0.32 } },
         ] }], issues: [], query: { date: null, limit: 1 } }) });
       if (url.pathname === '/api/platform/insights') return route.fulfill({ contentType: 'application/json', body: JSON.stringify(url.searchParams.get('stock') === '2330' ? { packs: [], issues: [] } : insightPacks) });
       if (url.pathname === '/api/ingest-matrix') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
@@ -435,6 +436,9 @@ const { chromium } = require('playwright');
     assert.match(strategies, /未通過部署裁決/);
     assert.match(strategies, /25\.00%/); // 0050 keeps its leading zero and its weight
     assert.match(strategies, /這支策略今天算不出名單[\s\S]*串接閘門/); // failure is stated, not shown as a flat day
+    // D-147: a strategy without a vault record shows its research-period record, labelled as not unseen data.
+    assert.match(strategies, /研究期年化[\s\S]*\+12\.8%[\s\S]*研究期最深回撤[\s\S]*-39\.7%/);
+    assert.match(strategies, /不是未見資料/);
     // AC-220: the analysis reaches the daily list as a derived field, and its bucket stays a suggestion.
     await page.goto('http://twquant.test/#/recommendations?bucket=all');
     await page.getByRole('link', { name: '0050', exact: true }).waitFor();

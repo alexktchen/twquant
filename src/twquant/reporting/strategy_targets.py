@@ -48,6 +48,21 @@ class VaultEvidence(BaseConfig):
     benchmark_max_drawdown: float
 
 
+class ResearchEvidence(BaseConfig):
+    """沒有金庫期成績的上架策略所帶的成績（D-147）：walk-forward 樣本外回測。
+
+    **不是金庫期**——每個測試窗的模型只用更早的資料訓練，但整段期間研究者都看過、
+    也參與了設計。頁面必須把這一點跟數字一起講清楚。
+    """
+
+    decision: str = Field(min_length=1)  # 數字的出處（如 "D-143 §十一"）
+    window_start: dt.date
+    window_end: dt.date
+    cagr: float
+    max_drawdown: float = Field(le=0.0)
+    calmar: float
+
+
 class LiveStrategy(BaseConfig):
     """一支已登記、每天要產出目標持股的策略（configs/strategies_live.yaml 的一列）。"""
 
@@ -56,6 +71,7 @@ class LiveStrategy(BaseConfig):
     label: str = Field(min_length=1)
     note: str = ""
     vault: VaultEvidence | None = None
+    research: ResearchEvidence | None = None  # D-147：沒有金庫期成績時的替代成績（須標明）
 
 
 class LiveStrategies(BaseConfig):
@@ -69,6 +85,13 @@ class LiveStrategies(BaseConfig):
         dup = sorted({c for c in codes if codes.count(c) > 1})
         if dup:
             raise ValueError(f"strategies_live.yaml 的 code 重複：{dup}")
+        # D-112「名單不得在沒有成績時呈現」：原本只由一條測試守著；D-147 把它搬進登記表本身，
+        # 並允許兩種**標明類型**的成績——金庫期（未見資料）或研究期（walk-forward 樣本外）。
+        bare = [s.code for s in self.strategies if s.vault is None and s.research is None]
+        if bare:
+            raise ValueError(
+                f"strategies_live.yaml 有策略沒有任何成績：{bare}——名單不得脫離成績呈現"
+            )
         return self
 
 
@@ -100,6 +123,7 @@ class StrategyRun(BaseModel):
     exposure: float = 0.0
     targets: tuple[TargetRow, ...] = ()
     vault: VaultEvidence | None = None
+    research: ResearchEvidence | None = None
 
     @model_validator(mode="after")
     def _status_matches_payload(self) -> StrategyRun:
@@ -174,6 +198,7 @@ def _run(
         label=strat.label,
         note=strat.note,
         vault=strat.vault,
+        research=strat.research,
         status=status,
         detail=detail,
         exposure=float(sum(t.target_weight for t in targets)),
