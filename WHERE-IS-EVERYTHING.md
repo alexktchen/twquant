@@ -18,6 +18,10 @@
   V1 瞄準絕對波動 16%，右尾策略專挑高波動股，76% 的日子曝險不到一半。分點因子在右尾上有增益（倍率 +0.32×）
 - **TAIL-B（第九輪 B 臂）已上架**平台「策略持股」頁（D-147）：列的是**今日候選前 15**，不是實際持股；
   模型每日推論（`configs/ml.yaml` 的 `research_live_models`，失敗不擋正式名單）
+- **策略持股頁標新進／移出／連續天數、可切日期（T-300）；ML 選股頁有模型選單、可切日期（T-301／D-150）**：
+  研究模型（`research_live_models`）每天也匯出推薦快照（只套流動性閘門）。部署後補 09-23 的右尾模型名單：
+  `ml export-recommendations --date 2026-09-23 --model D:/project/twquant/data/models/lgbm_tailb_tu_h60_20260430_7ab9b0f9 --out D:/project/twquant/data`。
+  **重跑 T-300 之前的日子的策略持股會被拒絕覆寫**（快照多了 `kind`／`score`）——要重出先把舊檔改名 `.superseded-…`
 - **第二保留期（2026-09-09 起）已登記第九輪 B 臂**（D-148，`configs/holdout2.yaml`）：最早 2027-03-01 開、只開一次。
   **開啟前不得對保留期做任何績效統計**——包括把 TAIL-B 每日候選的後續漲跌算成勝率。判讀：`scripts/holdout2_tail.py`
 - **`factor_values` 斷階已修**（2026-09-23，11 小時整批重物化 50 支 × 2,746 日）：

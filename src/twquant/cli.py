@@ -10,7 +10,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from twquant.insight.client import InsightClient
     from twquant.pipeline import PipelineResult
     from twquant.reporting.recommendation_export import BucketPolicy
+    from twquant.reporting.recommendation_snapshot import SnapshotWriteResult
+    from twquant.reporting.strategy_targets import TargetList
     from twquant.strategy.config import StrategyConfig
 
 app = typer.Typer(add_completion=False, help="台股量化平台 CLI。")
@@ -1165,13 +1167,22 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         extra = [gate.risk_gate_model if gate.enabled else "", *ml_cfg.production_aux_models]
         for name in dict.fromkeys(n for n in extra if n and n != bound):
             _score_into_pg(name)
-        result = export_scores(scores_path, mdir, Path(cfg.data_dir), day, _bucket_policy(day))
+        policy = _bucket_policy(day)
+        result = export_scores(scores_path, mdir, Path(cfg.data_dir), day, policy)
         msg = f"{'已保存' if result.created else '內容相同，沿用'} {result.path.name}"
         # D-147：上架研究策略的模型。**在正式名單存檔之後**才跑，失敗寫進摘要、不擋名單。
+        # D-150：打分之後也匯出成推薦快照（只套流動性閘門），ML 選股頁才看得到它每天的名單。
         research = [n for n in dict.fromkeys(ml_cfg.research_live_models) if n != bound]
         if research:
-            failed = _best_effort(research, _score_into_pg)
-            msg += f"；研究模型 {len(research) - len(failed)}/{len(research)} 已打分"
+            research_policy = _research_bucket_policy(policy)
+            saved, failed = _score_and_export_research(
+                research,
+                _score_into_pg,
+                lambda path, name: export_scores(
+                    path, root / name, Path(cfg.data_dir), day, research_policy
+                ),
+            )
+            msg += f"；研究模型 {len(saved)}/{len(research)} 已打分並匯出名單"
             if failed:
                 msg += f"（⚠ 失敗：{'；'.join(failed)}）"
         return msg
@@ -1211,7 +1222,8 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         from twquant.reporting.recommendation_snapshot import select_snapshots
 
         data_dir = Path(cfg.data_dir)
-        run_id = run_id_for_day(data_dir, day)
+        # 只分析生產模型的名單：研究模型的 run 較晚產生，不限定就會被當成當日名單（T-301）。
+        run_id = run_id_for_day(data_dir, day, model_id=_load_ml().production_ranking_model or None)
         if run_id is None:
             return "當日無推薦快照，略過"
         scfg = _load_serving()
@@ -1599,6 +1611,23 @@ def _best_effort(names: Sequence[str], run: Callable[[str], object]) -> list[str
     return failed
 
 
+def _score_and_export_research(
+    names: Sequence[str],
+    score: Callable[[str], Path],
+    export: Callable[[Path, str], SnapshotWriteResult],
+) -> tuple[list[str], list[str]]:
+    """D-150：研究模型逐一打分、再把分數匯出成推薦快照。回傳（已匯出的檔名, 失敗訊息）。
+
+    失敗逐條回傳、不中斷其餘模型（同 `_best_effort`）：生產名單已經在這之前存好了。
+    """
+    saved: list[str] = []
+
+    def one(name: str) -> None:
+        saved.append(export(score(name), name).path.name)
+
+    return saved, _best_effort(names, one)
+
+
 def _daily_pg_source(
     conn: object, schema: str, day: dt.date, names: Sequence[str]
 ) -> PgTableSource:
@@ -1621,23 +1650,29 @@ def _daily_pg_source(
     )
 
 
-def _live_targets(
-    cfg: StrategyConfig, source: TableSource, day: dt.date
-) -> list[tuple[str, float]]:
+def _live_targets(cfg: StrategyConfig, source: TableSource, day: dt.date) -> TargetList:
     """登記在平台上的一支策略在 `day` 的名單（D-112；每日補位型見 D-147）。
 
     月頻型走 `build_targets`，給的是目標權重。**每日補位型沒有目標權重**——它的實際持股
     取決於歷史進出場（出場規則、ratchet），而後端沒有帳戶狀態。能誠實給出的只有
     「今天若有空位會買誰」：過門檻的候選前 n 名、每格 1/n。頁面上必須這樣標示。
+    補位型另帶排序用的模型分數（T-300）：權重全是 1/n，快照的順位要依分數。
     """
+    from twquant.reporting.strategy_targets import TargetList
     from twquant.strategy.build import build_targets
     from twquant.strategy.slots import slot_candidates
 
     if cfg.slots is not None:
         n = cfg.slots.n
-        return [(sid, 1.0 / n) for sid, _ in slot_candidates(cfg, source, day)[:n]]
+        picks = slot_candidates(cfg, source, day)[:n]
+        return TargetList(
+            rows=[(sid, 1.0 / n) for sid, _ in picks], kind="slots", scores=dict(picks)
+        )
     frame = build_targets(cfg, source, day)
-    return [(str(r["stock_id"]), float(r["target_weight"])) for r in frame.to_dicts()]
+    return TargetList(
+        rows=[(str(r["stock_id"]), float(r["target_weight"])) for r in frame.to_dicts()],
+        kind="rebalance",
+    )
 
 
 def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
@@ -1667,7 +1702,7 @@ def _strategy_targets_for_day(day: dt.date, data_dir: Path) -> str:
         # 清單裡，策略照樣要讀它；下界取最長回看，涵蓋宇宙與進場濾網的滾動窗。
         source = _daily_pg_source(conn, scfg.pg_schema, day, list(list_factors()))
 
-        def _compute(strat: LiveStrategy) -> list[tuple[str, float]]:
+        def _compute(strat: LiveStrategy) -> TargetList:
             cfg = load_strategy(str(_CONFIG_DIR / "strategies" / f"{strat.config}.yaml"))
             # held=空：帶狀持有（banded_top_n）需要「目前持股」才有意義，而後端沒有帳戶狀態。
             # 已登記的 8 支都不是帶狀策略；日後若登記帶狀策略，這裡要先有持股來源。
@@ -3000,11 +3035,12 @@ def _ml_scores_in_pg(model_id: str, day: dt.date) -> int:
     return int(row[0]) if row else 0
 
 
-def _bucket_policy(day: dt.date) -> BucketPolicy | None:
+def _bucket_policy(day: dt.date, *, risk_gate: bool = True) -> BucketPolicy | None:
     """依 configs/ml.yaml 的宣告組出名單分組政策（D-111）；未啟用回 None。
 
     風控閘門的分數來自 `ml_scores`（D-075 的回撤模型，月頻＋沿用），
     **整天查無分數即 raise**——閘門宣告了卻沒生效，等於名單少了一層而沒有人被告知。
+    `risk_gate=False` 只給研究模型的名單用（D-150），不查風控分數。
     """
     from twquant.data.serving import store
     from twquant.errors import DataError
@@ -3014,7 +3050,7 @@ def _bucket_policy(day: dt.date) -> BucketPolicy | None:
     if not cfg.enabled:
         return None
     risk: dict[str, float] | None = None
-    if cfg.risk_gate_model:
+    if risk_gate and cfg.risk_gate_model:
         scfg = _load_serving()
         conn = store.connect(scfg)
         try:
@@ -3042,6 +3078,27 @@ def _bucket_policy(day: dt.date) -> BucketPolicy | None:
         risk_scores=risk,
         liquid_ids=_liquid_ids(day, cfg),
     )
+
+
+def _research_bucket_policy(base: BucketPolicy | None) -> BucketPolicy | None:
+    """D-150：研究模型名單的分組＝生產政策拿掉風控閘門，流動性閘門與檔數照舊。
+
+    風控閘門的回撤模型九成是 20 日波動度，而右尾模型要找的正是高波動股——
+    套上去等於替研究策略加一條沒有登記過的選股規則。流動性閘門與 TAIL-B 的宇宙逐字相同，
+    所以研究模型的「前 20 名」前 15 檔就是策略持股頁上 TAIL-B 那一天的候選。
+    """
+    if base is None:
+        return None
+    return replace(base, risk_gate_keep_pct=1.0, risk_scores=None)
+
+
+def _export_policy(model_name: str, day: dt.date) -> BucketPolicy | None:
+    """`ml export-recommendations` 依模型選政策：研究模型不查風控分數（D-150）。"""
+    ml_cfg = _load_ml()
+    research = set(ml_cfg.research_live_models) - {ml_cfg.production_ranking_model}
+    if model_name in research:
+        return _research_bucket_policy(_bucket_policy(day, risk_gate=False))
+    return _bucket_policy(day)
 
 
 def _liquid_ids(day: dt.date, cfg: RecommendationBucketConfig) -> frozenset[str] | None:
@@ -3202,7 +3259,7 @@ def ml_export_recommendations(
     mdir = Path(model)
     scores_path = Path(scores) if scores else mdir / f"scores_{day}.parquet"
     data_dir = Path(out) if out else Path(_load_system().data_dir)
-    result = export_scores(scores_path, mdir, data_dir, day, _bucket_policy(day))
+    result = export_scores(scores_path, mdir, data_dir, day, _export_policy(mdir.name, day))
     action = "已保存" if result.created else "內容相同，保留既有快照"
     typer.secho(f"[OK] {day} {action}：{result.path}", fg=typer.colors.GREEN)
 
