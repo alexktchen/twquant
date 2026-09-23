@@ -7,7 +7,7 @@
 
 ## 0. 三十秒版本
 
-- 最新 worktree：`D:/project/twquant/.claude/worktrees/priceless-tereshkova-839f0d`，branch `claude/d122-s-round2`
+- 最新 worktree：`D:/project/twquant/.claude/worktrees/quant-trading-strategies-268d12`，branch `claude/round11-conditional-vol`（第十一輪結果＋第十二輪進行中）
 - **資料一律在主 checkout**：`D:/project/twquant/data/`（不進 git，但都在本機）
 - **八輪加工已封檔（D-141）**：八輪沒有一輪改善 **E0**（年化 +27.8%／回撤 −41.4%／Calmar 0.67）。
   唯一被獨立驗證的是排序模型的金庫期 IC **+0.0816**。**不要在同一個問題上再加工。**
@@ -16,6 +16,14 @@
   [docs/HANDOFF-2026-09-23-tail-round.md](docs/HANDOFF-2026-09-23-tail-round.md)。
   **第十輪（D-146 §七）已結案**：把 V1 的減碼容器套到右尾策略上**更差**（Calmar 0.32 → 0.17）——
   V1 瞄準絕對波動 16%，右尾策略專挑高波動股，76% 的日子曝險不到一半。分點因子在右尾上有增益（倍率 +0.32×）
+- **⚠ 第九輪「訊號通過」已撤回（D-143 §十二）**：那 3 倍命中率幾乎全是「已經在飆」——TAIL-B 進場時過去 60 日
+  中位已漲 +65%，對**同日同波動×同漲幅**的配對基準只有 **1.08×**（`scripts/d143_matched_lift.py`）。
+  **任何命中率倍率一律附配對基準**，只贏全市場的不算模型優勢。平台上的 TAIL-B 名單＝動能熱門股清單。
+- **第十一輪（D-149 §七）已結案**：「只在波動異常時減碼」沒有用——F1（看持股）Calmar 0.29、F2（看大盤）0.17，
+  都不如 tail_b 的 0.32；唯一改善的是 F3「波動越大買越少」0.41。D-004 的估計器首次實作（`portfolio.core.vol_context`）。
+- **第十二輪（D-151）進行中**：只在**安靜股**上找起漲跡象（模型 A，20 日 +30%）、只在**已飆股**上找下跌風險
+  （模型 B，20 日再跌 15%），另有分點版（A′／B′）與同窗對照（A₂₂／B₂₂）。`scripts/run_round12.sh` 一條龍
+  （物化 → 備份 → 訓練 → `scripts/d151_report.py`）；**保留段 2026-05-01~08-03 在 walk-forward 凍結 commit 後開一次**（§八）。
 - **TAIL-B（第九輪 B 臂）已上架**平台「策略持股」頁（D-147）：列的是**今日候選前 15**，不是實際持股；
   模型每日推論（`configs/ml.yaml` 的 `research_live_models`，失敗不擋正式名單）
 - **策略持股頁標新進／移出／連續天數、可切日期（T-300）；ML 選股頁有模型選單、可切日期（T-301／D-150）**：
@@ -237,6 +245,20 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 
 
 **⑭ 研究回測的模型分數會讓每日 pipeline OOM（2026-09-23 發生兩次，T-294／T-299 已修）。** `ml backfill-scores` 把研究模型的樣本外分數寫進生產同一張 `serving.ml_scores`；每日物化原本用全體最長回看（850 天）讀每張表，於是四年半的 ml_scores 整批進記憶體。表長到 4,162 萬列時程序在 15.3 GB 被砍。T-294 讓 ml_scores 只讀 30 天——但只修了物化，同一天重跑又在**策略持股快照**被砍（T-299）。**每日路徑讀 PG 一律經過 `cli._daily_pg_source`**，不要自己組 `PgTableSource`。研究分數仍在表內（T-295）。**另一個教訓**：`docker exec … | tail` 的結束碼是 tail 的——要看 pipeline 真的成功，查 heartbeat 或 `dmesg`（`wsl -d docker-desktop dmesg | grep -i oom`）。
+
+**⑮ 命中率倍率一律附配對基準（D-143 §十二）。** 挑最熱、最會動的股票，60 日內大漲的機率天生就高（大跌也是）。
+只跟全市場比會把動能／波動效應誤認成模型優勢——第九輪就是這樣宣布了一個 1.08× 的「3 倍訊號」。
+
+**⑯ `ml.dataset` 與 `backtest` 會循環匯入。** `ml.dataset` 在模組層匯入 `backtest.costs`（觸發 `backtest/__init__`
+→ engine → exposure）；`backtest.exposure` 因此必須在**函式內**匯入 `attach_adjustment`。先匯入 ml.dataset 的程序
+（`ml train`）才會炸，同程序先匯入過 backtest 的測試抓不到——`tests/test_ml_state_pool.py::test_ac7` 用子程序守著。
+
+**⑰ 給配置加選配欄位會讓凍結指紋／模型 id 變掉。** `StrategyConfig` 加欄位 → 加進 `reporting/holdout.py` 的
+`_INERT_EXTENSIONS`（否則第二金庫的指紋測試紅）；`MlConfig` 加欄位 → 加進 `ml/train.py` 的 `_BACKCOMPAT_DEFAULTS`
+（否則既有模型的目錄名對不回來）。只能列「預設值＝不存在時的行為」的欄位。
+
+**⑱ 研究腳本一律設 `TWQUANT_DATA_DIR=D:/project/twquant/data`。** 否則研究登記簿（DSR 試驗數）寫進 worktree 自己的
+`data/`——第九、十輪的 14 筆曾因此不在正本，2026-09-23 已搬回（572 → 586）。`run_tail_round11.sh`／`run_round12.sh` 已設。
 
 ## 7. 還在跑的東西（2026-09-19 部署後）
 

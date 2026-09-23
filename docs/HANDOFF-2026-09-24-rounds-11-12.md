@@ -1,0 +1,60 @@
+# 交接：2026-09-23 晚 ~ 09-24 凌晨——兩次 OOM、第十一輪結案、第九輪更正、第十二輪開跑
+
+分支：`claude/round11-conditional-vol`（worktree `quant-trading-strategies-268d12`）。
+已合併 main 到 `3adb025`（PR #95 T-299、PR #96 T-300／T-301）。
+
+## 1. 生產面（都已處理）
+
+| 事件 | 處置 | 狀態 |
+|---|---|---|
+| 每日 pipeline 第二次 OOM（15.2 GB）：策略持股快照沒有讀取下界，整張 `ml_scores`（4,160 萬列）載入 | T-299：`cli._daily_pg_source` 讓物化與策略快照共用縮窗來源（PR #95） | ✅ 已部署、09-23 補跑 `PIPELINE_RC=0`、heartbeat 09-23 |
+| 平台上看不到 TAIL-B | 先用修正後的程式在本機補 09-23 的策略持股快照；正式 pipeline 重跑得到「內容相同，沿用」 | ✅ |
+| 第九、十輪 14 筆研究登記寫進 worktree 的 `data/` | 搬回正本（572 → 586）；腳本改設 `TWQUANT_DATA_DIR` | ✅（陷阱 ⑱） |
+
+**部署方式**（不要從主 checkout 建映像——它停在 PR #64）：`git worktree add --detach <暫存> origin/main` →
+`docker compose -p twquant --env-file D:/project/twquant/.env build api` → `up -d --no-deps api scheduler` → 移除暫存。
+
+## 2. 研究面
+
+### 第十一輪（D-149）已結案——「只在波動異常時減碼」沒有用
+
+F1（看持股）Calmar 0.29、F2（看大盤）0.17，都不如不減碼的 tail_b（0.32）；F3（波動越大買越少）0.41。
+五條預測對一條半。詳見 D-149 §七。D-004 的估計器首次有實作（`portfolio.core`），`vol_scale` 語意不變、補了測試。
+
+### 第九輪「訊號通過」撤回（D-143 §十二）——使用者指出的
+
+TAIL-B 挑的股票進場時過去 60 日中位已漲 +65%；對**同日同波動×同漲幅**的股票只好 **1.08×**。
+那 3 倍是動能／波動效應。**以後任何倍率一律附配對基準**（陷阱 ⑮、記憶 `twquant-tail-model-is-momentum-screen`）。
+
+### 第十二輪（D-151）進行中
+
+換問法：**只在安靜股上找起漲跡象**（A：20 日內漲 30%）、**只在已飆股上找下跌風險**（B：20 日內再跌 15%，
+t+1 開盤基準）。加分點版 A′／B′ 與同窗對照 A₂₂／B₂₂。新增 5 支盤整型態因子（布林壓縮、均線糾結、量價分布大量區）。
+十一條預測＋保留段三條預測都在 D-151 裡，寫在任何結果之前。
+
+**正在跑**：`scripts/run_round12.sh`（日誌 `data/logs/round12_*.log`）
+1. 物化 5 支新因子 2015-06-01 ~ 2026-08-31（約 80 分鐘；完成會留 `data/logs/round12_materialized.ok`，重跑會跳過）
+2. `pg_dump` → `data/backup/twquant_serving_<時間>_post-remat-d151.dump`
+3. 依序訓練 A、B、A₂₂、A′、B₂₂、B′（模型目錄 `data/models/lgbm_{quietA,hotB,...}_{tu,dp}_h20_*`）
+4. `scripts/d151_report.py` walk-forward 報告
+
+**接下來（照 D-151 §八 的程序，不得跳步）**：
+1. 把 walk-forward 結果寫進 D-151（§十二），**模型與報告算法凍結、commit**。
+2. **然後才開保留段一次**：`scripts/d151_report.py --vault --arm ...`（同一組 `--arm` 參數）。
+3. 保留段結果寫進 D-151，逐條對預測（十一條＋V1~V3）。
+4. A 或 B 的配對倍率 ≥ 1.2× → 第十三輪登記「A 進場、B 出場」的組合；< 1.2× → 不組合、不做 ensemble（§十一），
+   該做的是補資料（重大訊息、集保大戶、日內資料）。
+
+## 3. 等使用者決定的事
+
+1. **PG 搬到 Windows 原生**：使用者詢問；建議先做每日自動備份（常設設定需同意），再擇期搬。
+   安裝（UAC）與 Defender 排除要使用者自己做；資料搬遷、切換、核對我可以做。
+2. **每日自動 `pg_dump` 排程**（需同意）。
+3. **T-295**：研究模型的樣本外分數移出生產 `ml_scores`（大量刪除需同意）。
+4. **ensemble**（D-151 §十一）：條件式，看第十二輪結果。
+5. **2015 年以前資料當第三金庫**（方案 ①，未被否決）。
+
+## 4. 這一輪學到、已寫進 WHERE-IS-EVERYTHING 的陷阱
+
+⑮ 倍率附配對基準；⑯ `ml.dataset`↔`backtest` 循環匯入（`exposure` 必須函式內匯入）；
+⑰ 加選配欄位要登記 `_INERT_EXTENSIONS`／`_BACKCOMPAT_DEFAULTS`；⑱ 研究腳本設 `TWQUANT_DATA_DIR`。
