@@ -1,0 +1,21 @@
+# 第二保留期（D-109）開啟時一併判讀的凍結清單——D-148 事前登記，2026-09-23。
+#
+# **開啟前不得修改。** 這份檔案的每一個指紋都由 tests/test_holdout2_registration.py 守著：
+# 策略或成本配置被改動 → 閘門紅；開啟日 scripts/holdout2_tail.py 另核對模型檔的 sha256。
+# 要換模型、換配置、換成本，就是另一個東西——另立裁決、另立登記，不得覆寫這裡。
+#
+# 保留期起點是 2026-09-09（D-109 §一：09-01~09-08 已在 D-107 用過，併入開發期）。
+# 最早 2027-03-01 開，且須 ≥ 120 個交易日（D-109 §二）。只能開一次。
+registration: D-148
+holdout_start: 2026-09-09
+opens_on: 2027-03-01
+min_sessions: 120
+entries:
+  - code: TAIL-B
+    strategy: tail_b
+    model_id: lgbm_tailb_tu_h60_20260430_7ab9b0f9
+    # data/models/<model_id>/model.txt 的 sha256（模型檔不進 git，由判讀腳本在開啟日核對）
+    model_sha256: f181f2320a0a7e89e2c203d43a797d668fe1b577a6d46e1b74263db7f1a210e6
+    strategy_fingerprint: 8cb5011a59bc0ae73ffd0d75485bbcbaf02f7f9b19ae643010ea8fb03719b74c
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 80000000
