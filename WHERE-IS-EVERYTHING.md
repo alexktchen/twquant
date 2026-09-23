@@ -1,20 +1,22 @@
-# 東西在哪（2026-09-19，資料補到 09-18）
+# 東西在哪（2026-09-23，資料到 09-22）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
-> 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
-> 需要時再讀。
+> **這一輪的來龍去脈在 [docs/HANDOFF-2026-09-23-eight-rounds-and-pipeline.md](docs/HANDOFF-2026-09-23-eight-rounds-and-pipeline.md)**——
+> 動手前先讀它的「一、使用者是誰、要什麼」與「四、我犯的錯」。
+> 更早的在 [docs/HANDOFF-2026-09-09-long-window-and-vault.md](docs/HANDOFF-2026-09-09-long-window-and-vault.md)。
 
 ## 0. 三十秒版本
 
-- 程式碼在 worktree：`D:/project/twquant/.claude/worktrees/strange-kalam-3ec702`
-  （平台工單 T-200~T-215 在 `.claude/worktrees/beautiful-elbakyan-405956`，branch `claude/codex-platform-console-cb66ad`）
+- 最新 worktree：`D:/project/twquant/.claude/worktrees/priceless-tereshkova-839f0d`，branch `claude/d122-s-round2`
 - **資料一律在主 checkout**：`D:/project/twquant/data/`（不進 git，但都在本機）
-- 報告：`D:/project/twquant/data/reports/backtest_report.html`
-- 現況：**83 筆回測完成，沒有任何策略打敗 0050 含息（+40.08%／Sharpe 1.63）**
-- **研究平台已上線**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）。
-  操作看 [docs/OPERATIONS-platform-console.md](docs/OPERATIONS-platform-console.md)
-- **資料到 2026-09-18**（2026-09-19 補完，見第 9 節）：十一張來源表與 factor_values／
-  composite_daily／screener_daily／broker_flow_daily 全部到最後一個交易日
+- **研究已封檔（D-141）**：八輪沒有一輪改善 **E0**（年化 +27.8%／回撤 −41.4%／Calmar 0.67）。
+  唯一被獨立驗證的是排序模型的金庫期 IC **+0.0816**。**不要在開發期資料上再加工。**
+- **使用者的目標**：散戶買個股、每日選股 10~15 檔、**15~20% 是單檔停損不是組合回撤**（我誤讀三次）、
+  追**每筆期望值**不追勝率（D-136：隨機進場也有 74% 勝率）。
+- **研究平台**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）
+- **資料到 2026-09-22**：9/21、9/22 因每日 pipeline 卡死而缺名單，已修（T-275~T-278）並補跑
+- **待合併**：PR #91（pipeline 修復＋分點因子）。合併後要重建映像，T-275／T-276 才在容器裡生效
+- **未修**：T-270（`prices_daily` 1,185 列 OHLCV 全為 0，2021-01~02）
 
 ## 1. ⚠ 最容易踩的陷阱：有兩個 `data/`
 
@@ -213,6 +215,7 @@ docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend s
 洞悉分析（LLM）步驟目前是離線降級：`.env` 沒有 `ANTHROPIC_API_KEY`。
 
 ## 8. 備份（事故後）
+- **2026-09-22 22:10：`twquant_serving_20260922-2210_post-crash-verify.dump`（5.5 GB）**——分點因子整批計算把 PG 連同 Docker 壓垮，WAL 當機復原完整、所有表列數與崩潰前一致之後做的。**目前最新的完整備份。**
 
 - `data/backup/twquant_serving_20260903.dump`（2.40 GB，`pg_dump -n serving -Fc`）——**2026-09-10 事故的還原底**。
 - 重放完成後 `scripts/run_recovery.sh` 最後一步會自動再做一份 `twquant_serving_<日期>_post_recovery.dump`。
