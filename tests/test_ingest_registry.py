@@ -19,7 +19,7 @@ from twquant.data.ingest.orchestrator import run_ingest
 from twquant.data.ingest.ports import IngestSink, SourcePort
 from twquant.data.ingest.registry import SourceSpec, get, list_specs, register
 from twquant.data.warehouse import Warehouse
-from twquant.errors import TwquantError
+from twquant.errors import DataError, TwquantError
 
 _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "system.yaml"
 
@@ -100,3 +100,101 @@ def test_orchestrator_source_and_sink_are_swappable(tmp_path: Path) -> None:
     assert writes == [("clean", "prices_daily", "fake", 3)]
     assert outcomes[0].status == "success"
     assert outcomes[0].rows == 3
+
+
+# ── T-276：暫時性抓取失敗不該與休市同路徑 ──────────────────────────────
+#
+# TWSE 對「這天沒開市」與「這次抓失敗」回的是同一種 stat != 'OK'，兩者都被包成
+# 同一個 DataError、都印成黃色 [SKIP]。於是 margin_daily 連兩天沒進來也沒人發現
+# （2026-09-21／22，停在 09-18；手動重跑立刻進 1,297 列）。
+
+
+class _RecordingSink:
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, int]] = []
+
+    def write(self, layer: str, table: str, df: pl.DataFrame, source: str | None = None) -> None:
+        self.writes.append((table, df.height))
+
+    def partition_exists(
+        self, layer: str, table: str, date: dt.date, source: str | None = None
+    ) -> bool:
+        return False
+
+    def source_dates(self, table: str, source: str, layer: str = "clean") -> list[dt.date]:
+        return []
+
+    def latest_date(self, table: str, layer: str = "clean") -> dt.date | None:
+        return None
+
+
+class _FlakySource:
+    """前 `fail_times` 次丟 DataError，之後成功——模擬暫時性失敗。"""
+
+    name = "flaky"
+
+    def __init__(self, fail_times: int) -> None:
+        self.fail_times = fail_times
+        self.calls = 0
+
+    @property
+    def tables(self) -> list[str]:
+        return ["margin_daily"]
+
+    def load(self, table: str, period: dt.date) -> pl.DataFrame:
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise DataError(table, period, "TWSE 回應 stat='很抱歉，沒有符合條件的資料'")
+        return pl.DataFrame({"a": [1] * 7})
+
+
+def test_t276_retries_a_transient_failure(tmp_path: Path) -> None:
+    src = _FlakySource(fail_times=2)
+    sink = _RecordingSink()
+    cfg = load_config(_CONFIG, SystemConfig)
+    outcomes = run_ingest(
+        [SourceSpec("flaky", lambda c: src, "daily")],
+        cfg,
+        sink,
+        dt.date(2026, 9, 22),
+        data_dir=tmp_path,
+        tolerant=True,
+        retries=2,
+        sleep=lambda _s: None,
+    )
+    assert src.calls == 3, "應重試兩次後成功"
+    assert outcomes[0].status == "success"
+    assert sink.writes == [("margin_daily", 7)]
+
+
+def test_t276_gives_up_after_the_retries_and_says_so(tmp_path: Path) -> None:
+    """重試用完仍失敗時，detail 要寫明重試過——否則看起來跟「沒試過」一樣。"""
+    src = _FlakySource(fail_times=99)
+    cfg = load_config(_CONFIG, SystemConfig)
+    outcomes = run_ingest(
+        [SourceSpec("flaky", lambda c: src, "daily")],
+        cfg,
+        _RecordingSink(),
+        dt.date(2026, 9, 22),
+        data_dir=tmp_path,
+        tolerant=True,
+        retries=2,
+        sleep=lambda _s: None,
+    )
+    assert src.calls == 3
+    assert outcomes[0].status == "failed"
+    assert "已重試 2 次" in outcomes[0].detail
+
+
+def test_t276_retries_default_to_zero_so_existing_callers_are_unchanged(tmp_path: Path) -> None:
+    src = _FlakySource(fail_times=1)
+    cfg = load_config(_CONFIG, SystemConfig)
+    run_ingest(
+        [SourceSpec("flaky", lambda c: src, "daily")],
+        cfg,
+        _RecordingSink(),
+        dt.date(2026, 9, 22),
+        data_dir=tmp_path,
+        tolerant=True,
+    )
+    assert src.calls == 1, "未指定 retries 時行為不得改變"
