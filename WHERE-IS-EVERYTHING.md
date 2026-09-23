@@ -1,4 +1,4 @@
-# 東西在哪（2026-09-19，資料補到 09-18）
+# 東西在哪（2026-09-23，資料補到 09-22；第九輪已結案）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > 深入的來龍去脈在 [docs/HANDOFF-2026-09-06-tracks-and-gates.md](docs/HANDOFF-2026-09-06-tracks-and-gates.md)，
@@ -13,6 +13,11 @@
 - 現況：**83 筆回測完成，沒有任何策略打敗 0050 含息（+40.08%／Sharpe 1.63）**
 - **研究平台已上線**：<http://localhost:8899>（前端）、<http://localhost:8000/api>（API）。
   操作看 [docs/OPERATIONS-platform-console.md](docs/OPERATIONS-platform-console.md)
+- **第九輪（右尾／飆股）已結案**：訊號通過（命中率倍率 **3.23×**）、**容器仍不行**（回撤 −39.7%~−54.1%，
+  過不了使用者的 35%）。判定見 DECISIONS **D-143 §十一**，交接見
+  [docs/HANDOFF-2026-09-23-tail-round.md](docs/HANDOFF-2026-09-23-tail-round.md)
+- **`factor_values` 的斷階已修**（2026-09-23，11 小時整批重物化 50 支 × 2,746 日）：
+  單日因子數 2023-06-15 從 21 → **54**。波動類新增 8 支（T-284）
 - **資料到 2026-09-18**（2026-09-19 補完，見第 9 節）：十一張來源表與 factor_values／
   composite_daily／screener_daily／broker_flow_daily 全部到最後一個交易日
 
@@ -188,6 +193,19 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 **訓練本身是安全的**——`ml.dataset.assemble` 是從特徵 left join 到標籤，而特徵只來自
 `factor_values`（只含四碼普通股），權證進不了訓練。但**任何直接對價表做的標籤健檢、
 基礎率計算、事件研究都必須自己加 `stock_id ~ '^[1-9][0-9]{3}$'`**，否則數字會被權證帶走。
+
+
+**⑫ 回測引擎原本完全不處理股票分割——已修（T-168，2026-09-23），但修正有四層。**
+1:20 分割當天價格掉 95%，跳價防護會把部位當成資料異常強制出清、記成 −94% 的**真實虧損**
+（D-143 實測 5314 與 6919 各賠掉一格）。**而且不對稱**：標籤那一側早就還原了，
+所以模型用乾淨資料訓練、回測吃假虧損。修正含引擎、結果包 `splits` 明細、
+`backtest/diagnostics.py` 與 `reporting/trade_journal.py` 的部位重建——
+**只修引擎會立刻炸**（`ledger 賣超持倉：持有 11000、賣出 205000`）。
+**已知未修**：宇宙衛生濾網（`max_jump_ratio`）也把分割當異常，會把該檔踢出候選 60 個交易日。
+
+**⑬ `pg_dump` 在 Git Bash 下會被 MSYS 路徑轉換弄壞。** `docker exec ... -f /tmp/x.dump`
+的 `/tmp/x.dump` 會被翻成 `C:/Users/.../Temp/x.dump`，pg_dump 在容器裡找不到那個目錄而失敗。
+要用 `MSYS_NO_PATHCONV=1` 或雙斜線 `//tmp/x.dump`。
 
 
 ## 7. 還在跑的東西（2026-09-19 部署後）

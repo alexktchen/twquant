@@ -215,3 +215,44 @@ def test_ac5_a_split_in_a_stock_we_do_not_hold_changes_nothing(tmp_path: Path) -
         _wh(tmp_path, days, split_day=split, ratio=0.25, sids=("9999",)), days
     )  # 不存在的代號
     assert _equity_on(res, split) == pytest.approx(_equity_on(res, days[41]), rel=1e-9)
+
+
+def test_ac6_split_is_recorded_so_ledger_consumers_can_rebuild(tmp_path: Path) -> None:
+    """分割要進結果包的 `splits`，否則從 ledger 重建部位的下游會判成「賣超持倉」。
+
+    D-143 實測：修好引擎之後，`summarize_backtest` 立刻炸在
+    `ledger 賣超持倉：5314 2025-04-10，持有 11000、賣出 205000`
+    ——引擎把股數調對了，但 ledger 沒有那筆變動，重建就對不上。
+    """
+    from twquant.backtest.diagnostics import summarize_backtest
+    from twquant.reporting.result_bundle import bundle_backtest
+    from twquant.reporting.trade_journal import build_journal
+
+    days = _sessions(60)
+    split = days[42]
+    wh = _wh(tmp_path, days, split_day=split, ratio=0.25)
+    res = _run(wh, days)
+
+    assert res.splits, "分割沒有被記錄"
+    sp = next(s for s in res.splits if s.stock_id == "2330")
+    assert sp.date == split
+    assert sp.adj_factor == pytest.approx(0.25)
+    assert sp.shares_after == round(sp.shares_before / 0.25)
+
+    # 兩個 ledger 消費者都要能走完（修正前這裡會 raise）
+    diag = summarize_backtest(res)
+    assert diag.trade_count > 0
+    bundle = bundle_backtest(
+        res,
+        strategy=_cfg(),
+        cost=load_config(_CONFIG_DIR / "costs.yaml", CostConfig),
+        start=days[0],
+        end=days[-1],
+        initial_capital=_CAPITAL,
+        max_participation=0.03,
+        source="test",
+        data_fingerprint="test",
+    )
+    assert bundle["splits"], "結果包沒有 splits"
+    journal = build_journal(bundle)
+    assert journal, "換股清單是空的"

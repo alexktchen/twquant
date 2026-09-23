@@ -48,6 +48,19 @@ class Trade:
 
 
 @dataclass(frozen=True)
+class SplitAdjustment:
+    """分割造成的股數變動（T-168）。**不是交易，故不進 ledger**——但也不能不記：
+    所有從 ledger 重建部位的下游（診斷、換股清單、判定）都會看到「買 11,000 卻賣 205,000」
+    而 raise。比照股利獨立成表，讓它可稽核也可重建。"""
+
+    date: dt.date
+    stock_id: str
+    adj_factor: float
+    shares_before: int
+    shares_after: int
+
+
+@dataclass(frozen=True)
 class Dividend:
     """除息／除權當日的現金入帳一筆（D-085 選項 A）。
 
@@ -113,6 +126,7 @@ class BacktestResult:
     final_equity: float
     final_holdings: list[Holding] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)  # D-085：可稽核的股利明細
+    splits: list[SplitAdjustment] = field(default_factory=list)  # T-168：可稽核的分割調整
     # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
     # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
     credit_dividends: bool = True
@@ -126,6 +140,7 @@ class _State:
     lots: dict[str, _Lot] = field(default_factory=dict)  # 本輪持有批次（成本/首買日/MAE）
     ledger: list[Trade] = field(default_factory=list)
     unfilled: list[Unfilled] = field(default_factory=list)
+    splits: list[SplitAdjustment] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)
     traded_notional: float = 0.0
 
@@ -231,7 +246,7 @@ def _splits_by_date(
     return out
 
 
-def _apply_splits(state: _State, events: list[tuple[str, float]]) -> None:
+def _apply_splits(state: _State, day: dt.date, events: list[tuple[str, float]]) -> None:
     """分割日調整股數與成本基礎（T-168）。**必須在當日收盤價更新之前呼叫**，
     否則 D-029 的跳價防護會先把部位當成資料異常清掉。
 
@@ -250,7 +265,17 @@ def _apply_splits(state: _State, events: list[tuple[str, float]]) -> None:
             state.last_close[sid] = prev_close * adj
         shares = state.holdings.get(sid)
         if shares:
-            state.holdings[sid] = round(shares / adj)
+            after = round(shares / adj)
+            state.holdings[sid] = after
+            state.splits.append(
+                SplitAdjustment(
+                    date=day,
+                    stock_id=sid,
+                    adj_factor=adj,
+                    shares_before=shares,
+                    shares_after=after,
+                )
+            )
         lot = state.lots.get(sid)
         if lot is not None:
             # 均價是 cost_amount / cost_shares 推出來的：同一筆錢換到更多股，
@@ -542,7 +567,7 @@ def run_backtest(
         # T-168：分割在收盤更新之前調整股數，否則跳價防護會先把部位清掉
         todays_split = split_by_date.get(day)
         if todays_split:
-            _apply_splits(state, todays_split)
+            _apply_splits(state, day, todays_split)
         for sid, row in day_px.items():  # 更新最後收盤（停牌沿用）
             if row.get("close") is None:
                 continue
@@ -661,6 +686,7 @@ def run_backtest(
         equity=equity_curve,
         ledger=state.ledger,
         unfilled=state.unfilled,
+        splits=state.splits,
         metrics=metrics,
         initial_capital=initial_capital,
         final_equity=final_equity,
