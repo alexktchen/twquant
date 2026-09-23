@@ -8,14 +8,19 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
 from twquant.backtest.exits import HeldPosition, entry_blocked, exit_reasons, ma_column
-from twquant.backtest.exposure import ExposureDay, conditional_exposure, inverse_vol_sizes
+from twquant.backtest.exposure import (
+    EntrySize,
+    ExposureDay,
+    conditional_exposure,
+    inverse_vol_sizes,
+)
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 from twquant.strategy.overlays import _realized_vol
@@ -130,6 +135,7 @@ class BacktestResult:
     dividends: list[Dividend] = field(default_factory=list)  # D-085：可稽核的股利明細
     splits: list[SplitAdjustment] = field(default_factory=list)  # T-168：可稽核的分割調整
     exposure: list[ExposureDay] = field(default_factory=list)  # D-149：條件式減碼的逐日判斷
+    entry_sizes: list[EntrySize] = field(default_factory=list)  # D-149 F3：每筆進場的格子倍數
     # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
     # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
     credit_dividends: bool = True
@@ -148,6 +154,7 @@ class _State:
     traded_notional: float = 0.0
     exposure_mult: float = 1.0  # T-286：每日曝險目標的倍數；無 exposure_target 時恆為 1.0
     exposure_log: list[ExposureDay] = field(default_factory=list)  # D-149：只有條件式減碼會寫
+    size_log: list[EntrySize] = field(default_factory=list)  # D-149 F3：只記真的成交的進場
 
 
 def _plan_trims(
@@ -581,7 +588,7 @@ def run_backtest(
     exits_pending: dict[str, str] = {}
     trims_pending: dict[str, int] = {}  # T-286：明早要減碼的股數
     entries_pending: list[str] = []
-    entry_sizes: dict[str, float] = {}  # D-149 F3：新進場的格子倍數；沒有的就是 1.0
+    entry_sizes: dict[str, EntrySize] = {}  # D-149 F3：新進場的格子倍數；沒有的就是 1.0
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
     div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
@@ -651,12 +658,16 @@ def run_backtest(
                     continue
                 o = float(px_row["open"])
                 # T-286／D-149：兩個倍數都是 1.0 時即既有行為
-                per_slot = pv * state.exposure_mult / slot_cfg.n * entry_sizes.get(sid, 1.0)
+                size = entry_sizes.get(sid)
+                per_slot = pv * state.exposure_mult / slot_cfg.n * (size.mult if size else 1.0)
                 want = int(per_slot // (o * _LOT)) * _LOT if o > 0 else 0
                 if want == 0:  # 一格的金額買不起一張：記下來，不靜默略過（T-135 同理）
                     _unfill(state, sid, "buy", int(per_slot / o) if o > 0 else 0, day, "lot")
                     continue
+                n_trades = len(state.ledger)
                 _fill(state, sid, want, day, px_row, cost_cfg, max_participation, "entry")
+                if size is not None and len(state.ledger) > n_trades:
+                    state.size_log.append(replace(size, date=day))  # 記成交日，與 ledger 對得上
             entries_pending = []
             entry_sizes = {}
 
@@ -759,6 +770,7 @@ def run_backtest(
         unfilled=state.unfilled,
         splits=state.splits,
         exposure=state.exposure_log,
+        entry_sizes=state.size_log,
         metrics=metrics,
         initial_capital=initial_capital,
         final_equity=final_equity,

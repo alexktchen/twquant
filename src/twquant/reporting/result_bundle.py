@@ -174,14 +174,17 @@ def _exposure(result: BacktestResult) -> dict[str, Any]:
     陣列而非物件（同 `equity`）：[日期, 倍數, 是否觸發, 觸發序列波動, 其百分位, 持股波動]；
     空手那幾晚沒有估計，後三格是 null。
     """
-    if not result.exposure:
-        return {}
-    return {
-        "exposure": [
+    out: dict[str, Any] = {}
+    if result.exposure:
+        out["exposure"] = [
             [e.date.isoformat(), e.mult, e.triggered, e.trigger_vol, e.trigger_pct, e.held_vol]
             for e in result.exposure
         ]
-    }
+    if result.entry_sizes:  # D-149 F3：[日期, 股票, 格子倍數, σ（null＝缺 σ 以下限計）]
+        out["entry_sizes"] = [
+            [e.date.isoformat(), e.stock_id, e.mult, e.sigma] for e in result.entry_sizes
+        ]
+    return out
 
 
 def metrics_from_bundle(bundle: dict[str, Any]) -> Metrics:

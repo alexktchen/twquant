@@ -142,6 +142,8 @@ def vol_context(
 
     需要 window_days + percentile_window_days − 1 個報酬，多給的只用最後那一段。
     不足即 raise：歷史不足時照給 1 倍，就是在回測最前段靜默地不管曝險。
+    百分位採「≤ 今日」的比例（含今日；同值一律算進去）。真實報酬是連續值，估計值不會
+    整片相同；只有人造的等幅序列才會讓同值把百分位推高。
     """
     need = cfg.estimator.window_days + cfg.conditional.percentile_window_days - 1
     r = np.asarray(returns, dtype=float)

@@ -37,6 +37,19 @@ class ExposureDay:
     held_vol: float | None  # 持股等權組合的年化波動（倍數的分母）
 
 
+@dataclass(frozen=True)
+class EntrySize:
+    """一筆新進場的格子倍數（D-149 F3）。`sigma is None`＝缺 σ、以下限計（§三 補充）。
+
+    `date` 在算出來時是訊號日；引擎成交後改記成交日，與 ledger 對得上。
+    """
+
+    date: dt.date
+    stock_id: str
+    mult: float
+    sigma: float | None
+
+
 def _window(sessions: list[dt.date], day: dt.date, n_returns: int) -> list[dt.date]:
     """`day`（含）往前 n_returns + 1 個交易日：第一天只當第一個報酬的前收。"""
     i = bisect.bisect_right(sessions, day) - 1
@@ -170,24 +183,39 @@ def inverse_vol_sizes(
     top_ids: list[str],
     entries: list[str],
     cfg: InverseVolSizingConfig,
-) -> dict[str, float]:
+) -> dict[str, EntrySize]:
     """D-149 F3：每筆新進場的格子倍數 clip(σ_ref ÷ σ_i, floor, 1.0)。
 
-    σ 取訊號日的 `cfg.factor`；σ_ref＝當晚候選前 n 名（`top_ids`）的 σ 中位數。
-    任何一檔缺 σ 或 σ ≤ 0 → raise：沒有波動可比就沒有部位大小可給，不猜。
+    σ 取訊號日的 `cfg.factor`；σ_ref＝當晚候選前 n 名（`top_ids`）中**有 σ 者**的中位數。
+    缺 σ（新上市恰好第 20 個交易日：有 ADV、還沒有 20 日波動）→ 以下限計（D-149 §三 補充）；
+    前 n 名全都缺 σ → raise：連參考水準都沒有，不猜。
     """
     import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
     from twquant.factors.compute import compute
 
     ids = sorted({*top_ids, *entries})
     vals = compute([cfg.factor], view, dates=[day]).filter(pl.col("stock_id").is_in(ids))
-    sigma = {str(r["stock_id"]): r["value"] for r in vals.to_dicts()}
-    bad = [s for s in ids if not isinstance(sigma.get(s), float) or not sigma[s] > 0.0]
-    if bad:
+    sigma: dict[str, float] = {}
+    for r in vals.to_dicts():
+        v = r["value"]
+        if isinstance(v, float) and np.isfinite(v) and v >= 0.0:
+            sigma[str(r["stock_id"])] = v
+    ref_pool = [sigma[s] for s in top_ids if s in sigma]
+    if not ref_pool:
         raise DataError(
             "prices_daily",
             day,
-            f"{cfg.factor} 在 {day} 缺值或非正：{bad[:5]}（共 {len(bad)} 檔）；反波動部位無從計算",
+            f"當晚候選前 {len(top_ids)} 名全都沒有 {cfg.factor}，反波動部位沒有參考水準",
         )
-    ref = float(np.median([sigma[s] for s in top_ids]))
-    return {s: min(1.0, max(cfg.floor, ref / sigma[s])) for s in entries}
+    ref = float(np.median(ref_pool))
+    out: dict[str, EntrySize] = {}
+    for s in entries:
+        sd = sigma.get(s)
+        if sd is None:
+            mult = cfg.floor
+        elif sd == 0.0:
+            mult = 1.0  # 零波動：ref ÷ 0 → 無限大，截在上限
+        else:
+            mult = min(1.0, max(cfg.floor, ref / sd))
+        out[s] = EntrySize(date=day, stock_id=s, mult=mult, sigma=sd)
+    return out
