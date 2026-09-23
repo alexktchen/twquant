@@ -61,6 +61,30 @@ def read_since(as_of: dt.date, names: Sequence[str]) -> dt.date:
     return as_of - dt.timedelta(days=longest * _TRIM_SAFETY + _TRIM_BUFFER_DAYS)
 
 
+# 只有這些表允許按表縮窗：它們的讀取者**全都**在因子註冊時宣告過 `tables`，而且有靜態測試
+# 守著「沒有別的程式讀它」（tests/test_serving_materialize_since.py）。其餘表沿用全體最長回看。
+# ml_scores 是唯一的一張：只有 `factors/ml.py` 的薄因子讀它、回看 0 天，卻被 `fundamental.sue`
+# 的 850 天拖著整批載入——2026-09-23 每日 pipeline 因此在 15.3 GB 被 OOM 砍掉。
+_NARROWABLE_TABLES: tuple[str, ...] = ("ml_scores",)
+
+
+def read_since_by_table(as_of: dt.date, names: Sequence[str]) -> dict[str, dt.date]:
+    """按表的讀取下界：只看**宣告讀這張表的因子**的回看，而不是全體最長回看。
+
+    跨度公式與 `read_since` 相同。只對 `_NARROWABLE_TABLES` 生效；沒有任何讀取者時不給值
+    （`PgTableSource` 就退回全域的 `since`）。
+    """
+    from twquant.factors.compute import _TRIM_BUFFER_DAYS, _TRIM_SAFETY
+    from twquant.factors.registry import get
+
+    out: dict[str, dt.date] = {}
+    for table in _NARROWABLE_TABLES:
+        spans = [get(n).lookback_days for n in names if table in get(n).tables]
+        if spans:
+            out[table] = as_of - dt.timedelta(days=max(spans) * _TRIM_SAFETY + _TRIM_BUFFER_DAYS)
+    return out
+
+
 def _compute_universe(
     source: TableSource,
     as_of: dt.date,

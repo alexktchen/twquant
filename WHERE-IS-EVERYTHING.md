@@ -232,6 +232,8 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 要用 `MSYS_NO_PATHCONV=1` 或雙斜線 `//tmp/x.dump`。
 
 
+**⑭ 研究回測的模型分數會讓每日 pipeline OOM（2026-09-23 實際發生，T-294 已修）。** `ml backfill-scores` 把研究模型的樣本外分數寫進生產同一張 `serving.ml_scores`；每日物化原本用全體最長回看（850 天）讀每張表，於是四年半的 ml_scores 整批進記憶體。表長到 4,162 萬列時程序在 15.3 GB 被砍。T-294 讓 ml_scores 只讀 30 天，但**研究分數仍在表內**（T-295）。**另一個教訓**：`docker exec … | tail` 的結束碼是 tail 的——要看 pipeline 真的成功，查 heartbeat 或 `dmesg`（`wsl -d docker-desktop dmesg | grep -i oom`）。
+
 ## 7. 還在跑的東西（2026-09-19 部署後）
 
 四個容器，全部在 compose 專案 `twquant`、映像來源＝`main`（`392d00e`，含 #69／#70）：

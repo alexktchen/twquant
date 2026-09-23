@@ -11,6 +11,7 @@ parquet，因子計算的資料源與落地都改在 PG，見 DECISIONS.md D-026
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping
 from typing import Any
 
 import polars as pl
@@ -28,13 +29,22 @@ class PgTableSource:
     """
 
     def __init__(
-        self, conn: Any, schema: str, cache: bool = False, since: dt.date | None = None
+        self,
+        conn: Any,
+        schema: str,
+        cache: bool = False,
+        since: dt.date | None = None,
+        table_since: Mapping[str, dt.date] | None = None,
     ) -> None:
         self._conn = conn
         self._schema = schema
         self._cache = cache
         self._cached: dict[str, pl.DataFrame] = {}
         self._since = since
+        # 個別表的讀取下界，覆寫 `since`。**只給讀取者全都宣告過的表**（見
+        # `materialize.read_since_by_table`）——因子讀沒宣告的表時不會被攔，
+        # 對那種表縮窗會讓它悄悄少讀歷史。
+        self._table_since: dict[str, dt.date] = dict(table_since or {})
         self._has_date: dict[str, bool] = {}
 
     def _assert_exists(self, table: str) -> None:
@@ -66,8 +76,9 @@ class PgTableSource:
             return self._cached[table].lazy()
         self._assert_exists(table)
         query = f'SELECT * FROM "{self._schema}"."{table}"'
-        if self._since is not None and self._date_col(table):
-            query += f" WHERE date >= '{self._since.isoformat()}'"
+        since = self._table_since.get(table, self._since)
+        if since is not None and self._date_col(table):
+            query += f" WHERE date >= '{since.isoformat()}'"
         # infer_schema_length=None：看完**全部**列才定型別。預設只看前 100 列——某欄若前面全是
         # null、後面才出現值（`stock_meta.delist_date` 2026-09-20 實際發生），會被定成 Null 型，
         # 再遇到日期就 ComputeError；而 stock_meta 是每次宇宙過濾都要讀的表。
