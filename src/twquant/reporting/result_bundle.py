@@ -165,6 +165,22 @@ def bundle_backtest(
             }
             for h in result.final_holdings
         ],
+    } | _exposure(result)
+
+
+def _exposure(result: BacktestResult) -> dict[str, Any]:
+    """D-149 條件式減碼的逐日判斷。**只有用到它的回測才帶這一欄**——既有結果包逐位元不變。
+
+    陣列而非物件（同 `equity`）：[日期, 倍數, 是否觸發, 觸發序列波動, 其百分位, 持股波動]；
+    空手那幾晚沒有估計，後三格是 null。
+    """
+    if not result.exposure:
+        return {}
+    return {
+        "exposure": [
+            [e.date.isoformat(), e.mult, e.triggered, e.trigger_vol, e.trigger_pct, e.held_vol]
+            for e in result.exposure
+        ]
     }
 
 

@@ -8,13 +8,22 @@ from __future__ import annotations
 
 import datetime as dt
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import polars as pl
 
+from twquant.errors import ConfigError
+
 if TYPE_CHECKING:
-    from twquant.portfolio.config import PortfolioConfig, RiskConfig
+    from twquant.portfolio.config import (
+        PortfolioConfig,
+        RiskConfig,
+        VolEstimator,
+        VolTargetConfig,
+    )
 
 Status = Literal["NORMAL", "NO_NEW_ENTRY", "REDUCED", "HALTED"]
 STATE_SCHEMA_VERSION = 1
@@ -91,17 +100,88 @@ def turnover_cap(
     return out
 
 
+# ── 條件式波動目標的估計器（D-004；D-149 補實作）──────────────────────
+#
+# `vol_scale` 在 2026-07 就寫好了，但產生 `VolContext` 的估計器從未實作——整個程式碼裡
+# 沒有任何呼叫端算出 (realized_vol, vol_percentile)。第十一輪（D-149）要把它接到每日補位
+# 才補上。**單一實作**：投組層與回測引擎都經過這幾個函數，不各自估一份。
+
+
+def ewma_vol_series(
+    returns: Sequence[float] | np.ndarray, est: VolEstimator, periods: float
+) -> np.ndarray:
+    """每個時點以最近 `window_days` 個日報酬的指數權重標準差 × √periods（D-004 估計器）。
+
+    權重 0.5^(k/halflife)，k=0 為最新；加權平均去心並做無偏修正 (Σw)²/((Σw)²−Σw²)，
+    與 polars `ewm_std(half_life=, adjust=True, bias=False)` 在同一段窗上相同（測試守著）。
+    回傳長度 len(returns) − window_days + 1，最後一點是最新的估計。
+    """
+    if est.method != "ewma":
+        raise ConfigError(f"波動估計器只實作 ewma（D-004），收到 {est.method!r}")
+    if est.window_days < 2 or est.halflife <= 0:
+        raise ConfigError(f"估計窗須 ≥ 2、半衰期須 > 0，收到 {est.window_days}／{est.halflife}")
+    r = np.asarray(returns, dtype=float)
+    win = est.window_days
+    if r.size < win:
+        raise ValueError(f"波動估計需要至少 {win} 個報酬，只有 {r.size} 個")
+    if not np.isfinite(r).all():
+        raise ValueError("報酬含 NaN／inf——上游價格有問題，不得帶進波動估計")
+    w = 0.5 ** (np.arange(win - 1, -1, -1, dtype=float) / est.halflife)  # 由舊到新
+    s1, s2 = float(w.sum()), float((w * w).sum())
+    windows = np.lib.stride_tricks.sliding_window_view(r, win)
+    mean = windows @ w / s1
+    var = ((windows - mean[:, None]) ** 2) @ w / s1 * (s1 * s1 / (s1 * s1 - s2))
+    return np.asarray(np.sqrt(var * periods), dtype=float)
+
+
+def vol_context(
+    returns: Sequence[float] | np.ndarray, cfg: VolTargetConfig, periods: float
+) -> VolContext:
+    """今日的（年化波動, 百分位）：估計值序列的最後一點，及它在最近 `percentile_window_days`
+    個估計值（含今日）中「≤ 今日」的比例 × 100。
+
+    需要 window_days + percentile_window_days − 1 個報酬，多給的只用最後那一段。
+    不足即 raise：歷史不足時照給 1 倍，就是在回測最前段靜默地不管曝險。
+    """
+    need = cfg.estimator.window_days + cfg.conditional.percentile_window_days - 1
+    r = np.asarray(returns, dtype=float)
+    if r.size < need:
+        raise ValueError(
+            f"條件式波動需要 {need} 個報酬（估計窗 {cfg.estimator.window_days} ＋ 百分位窗 "
+            f"{cfg.conditional.percentile_window_days} − 1），只有 {r.size} 個"
+        )
+    series = ewma_vol_series(r[-need:], cfg.estimator, periods)
+    today = float(series[-1])
+    return VolContext(realized_vol=today, vol_percentile=100.0 * float(np.mean(series <= today)))
+
+
+def vol_triggered(ctx: VolContext, cfg: VolTargetConfig) -> bool:
+    """D-004 觸發：落在自身百分位窗的 ≥ reduce_above_pct 百分位，**且**高於年化目標。"""
+    return (
+        ctx.vol_percentile >= cfg.conditional.reduce_above_pct and ctx.realized_vol > cfg.annual_vol
+    )
+
+
+def vol_multiplier(trigger: VolContext, scale_vol: float, cfg: VolTargetConfig) -> float:
+    """D-004 倍數：`trigger` 觸發時縮到 annual_vol ÷ scale_vol（上限 max_leverage），否則 1.0。
+
+    `scale_vol` 是被縮的那個組合自己的波動。D-004 原型裡兩者是同一條序列；
+    D-149 F2 觸發看大盤、倍數看持股，所以分開傳。
+    """
+    if not cfg.enabled or scale_vol <= 0.0 or not vol_triggered(trigger, cfg):
+        return 1.0
+    return min(cfg.annual_vol / scale_vol, cfg.max_leverage)
+
+
 def vol_scale(
     weights: dict[str, float], realized_vol: float, vol_percentile: float, cfg: PortfolioConfig
 ) -> dict[str, float]:
     """條件式波動目標（D-004）：只在波動落於 >reduce_above_pct 百分位才縮，且只降不升。"""
-    vt = cfg.vol_target
-    if not vt.enabled or realized_vol <= 0:
-        return dict(weights)
-    if vol_percentile < vt.conditional.reduce_above_pct or realized_vol <= vt.annual_vol:
+    ctx = VolContext(realized_vol=realized_vol, vol_percentile=vol_percentile)
+    mult = vol_multiplier(ctx, realized_vol, cfg.vol_target)
+    if mult == 1.0:
         return dict(weights)  # 非極端 → 維持 1x
-    scale = min(vt.annual_vol / realized_vol, vt.max_leverage)
-    return {s: w * scale for s, w in weights.items()}
+    return {s: w * mult for s, w in weights.items()}
 
 
 # ── kill-switch 狀態機 ─────────────────────────────────────────────

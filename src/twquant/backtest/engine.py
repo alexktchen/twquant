@@ -15,6 +15,7 @@ import polars as pl
 
 from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
 from twquant.backtest.exits import HeldPosition, entry_blocked, exit_reasons, ma_column
+from twquant.backtest.exposure import ExposureDay, conditional_exposure, inverse_vol_sizes
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
 from twquant.strategy.overlays import _realized_vol
@@ -128,6 +129,7 @@ class BacktestResult:
     final_holdings: list[Holding] = field(default_factory=list)
     dividends: list[Dividend] = field(default_factory=list)  # D-085：可稽核的股利明細
     splits: list[SplitAdjustment] = field(default_factory=list)  # T-168：可稽核的分割調整
+    exposure: list[ExposureDay] = field(default_factory=list)  # D-149：條件式減碼的逐日判斷
     # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
     # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
     credit_dividends: bool = True
@@ -145,6 +147,29 @@ class _State:
     dividends: list[Dividend] = field(default_factory=list)
     traded_notional: float = 0.0
     exposure_mult: float = 1.0  # T-286：每日曝險目標的倍數；無 exposure_target 時恆為 1.0
+    exposure_log: list[ExposureDay] = field(default_factory=list)  # D-149：只有條件式減碼會寫
+
+
+def _plan_trims(
+    state: _State, held_ids: list[str], mult: float, n: int, exits_pending: dict[str, str]
+) -> dict[str, int]:
+    """T-286：曝險超過目標 `mult` 一格（1/n）以上 → 等比減碼回目標；整檔要出場的不另減。
+
+    帶寬取一格是推導不是調參：小於一格的差距只是整張進位的噪音。D-149 的條件式減碼
+    走同一個函數——登記寫明「減碼的執行沿用 T-286」。
+    """
+    pos_now = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
+    pv_now = state.cash + pos_now
+    out: dict[str, int] = {}
+    if pv_now > 0.0 and pos_now > 0.0 and pos_now / pv_now > mult + 1.0 / n:
+        sell_frac = 1.0 - (mult * pv_now) / pos_now
+        for sid in held_ids:
+            if sid in exits_pending:  # 整檔要出場的，不再另外減碼
+                continue
+            q = int((state.holdings[sid] * sell_frac) // _LOT) * _LOT
+            if q > 0:
+                out[sid] = q
+    return out
 
 
 def _price_panel(
@@ -527,6 +552,7 @@ def run_backtest(
 
     calendar = cal.load(warehouse)
     sessions = calendar.between(start, end)
+    all_sessions = calendar.sessions  # D-149：條件式減碼往回數交易日（含回測起點之前）
     if not sessions:
         raise ValueError(f"[{start},{end}] 無交易日")
     slot_cfg = strategy_cfg.slots
@@ -555,6 +581,7 @@ def run_backtest(
     exits_pending: dict[str, str] = {}
     trims_pending: dict[str, int] = {}  # T-286：明早要減碼的股數
     entries_pending: list[str] = []
+    entry_sizes: dict[str, float] = {}  # D-149 F3：新進場的格子倍數；沒有的就是 1.0
 
     jump_ratio = cost_cfg.data_guard.jump_ratio
     div_by_date = _dividends_by_date(warehouse, start, end) if credit_dividends else {}
@@ -623,13 +650,15 @@ def run_backtest(
                 if sid in state.holdings or px_row is None or px_row.get("open") is None:
                     continue
                 o = float(px_row["open"])
-                per_slot = pv * state.exposure_mult / slot_cfg.n  # T-286：倍數 1.0 時即既有行為
+                # T-286／D-149：兩個倍數都是 1.0 時即既有行為
+                per_slot = pv * state.exposure_mult / slot_cfg.n * entry_sizes.get(sid, 1.0)
                 want = int(per_slot // (o * _LOT)) * _LOT if o > 0 else 0
                 if want == 0:  # 一格的金額買不起一張：記下來，不靜默略過（T-135 同理）
                     _unfill(state, sid, "buy", int(per_slot / o) if o > 0 else 0, day, "lot")
                     continue
                 _fill(state, sid, want, day, px_row, cost_cfg, max_participation, "entry")
             entries_pending = []
+            entry_sizes = {}
 
         pos_value = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
         equity_curve.append(
@@ -660,30 +689,35 @@ def run_backtest(
                 if realized > 0.0:
                     mult = max(et.min_mult, min(1.0, et.target_vol / realized))
             state.exposure_mult = mult
-            pos_now = sum(sh * state.last_close.get(sid, 0.0) for sid, sh in state.holdings.items())
-            pv_now = state.cash + pos_now
-            if pv_now > 0.0 and pos_now > 0.0 and pos_now / pv_now > mult + 1.0 / slot_cfg.n:
-                sell_frac = 1.0 - (mult * pv_now) / pos_now
-                for sid in held_ids:
-                    if sid in exits_pending:  # 整檔要出場的，不再另外減碼
-                        continue
-                    q = int((state.holdings[sid] * sell_frac) // _LOT) * _LOT
-                    if q > 0:
-                        trims_pending[sid] = q
+            trims_pending.update(_plan_trims(state, held_ids, mult, slot_cfg.n, exits_pending))
+
+        if slot_cfg is not None and slot_cfg.conditional_vol is not None:
+            # D-149 F1／F2：D-004 的條件式波動目標。平常 1 倍；觸發序列落在自身 252 日的
+            # 第 90 百分位以上且高於 15% 才縮到 15% ÷ 持股波動。執行與 T-286 同一條路徑。
+            held_ids = sorted(sid for sid, sh in state.holdings.items() if sh > 0)
+            rec = conditional_exposure(
+                warehouse.view(day), day, held_ids, all_sessions, slot_cfg.conditional_vol
+            )
+            state.exposure_log.append(rec)
+            state.exposure_mult = rec.mult
+            trims_pending.update(_plan_trims(state, held_ids, rec.mult, slot_cfg.n, exits_pending))
 
         if slot_cfg is not None:
             # 空位只算「現在真的空著的」：今晚才判定要賣的，明天賣不賣得掉還不知道（跌停）
             free = slot_cfg.n - len(state.holdings)
             if free > 0:
-                cands = [
-                    sid
-                    for sid, _ in slot_candidates(strategy_cfg, warehouse, day)
-                    if sid not in state.holdings
-                ]
+                ranked = slot_candidates(strategy_cfg, warehouse, day)
+                cands = [sid for sid, _ in ranked if sid not in state.holdings]
                 blocked = entry_blocked(
                     [*exit_rules, *strategy_cfg.entry_filters], cands, day_px, warehouse, day
                 )
                 entries_pending = [sid for sid in cands if sid not in blocked][:free]
+                if slot_cfg.inverse_vol is not None and entries_pending:
+                    # D-149 F3：σ_ref 取「當晚候選前 n 名」——含已持有的，與持股狀態無關
+                    top_ids = [sid for sid, _ in ranked[: slot_cfg.n]]
+                    entry_sizes = inverse_vol_sizes(
+                        warehouse.view(day), day, top_ids, entries_pending, slot_cfg.inverse_vol
+                    )
 
     equity_series = [e.equity for e in equity_curve]
     mean_equity = sum(equity_series) / len(equity_series)
@@ -724,6 +758,7 @@ def run_backtest(
         ledger=state.ledger,
         unfilled=state.unfilled,
         splits=state.splits,
+        exposure=state.exposure_log,
         metrics=metrics,
         initial_capital=initial_capital,
         final_equity=final_equity,
