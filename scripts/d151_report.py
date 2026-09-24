@@ -8,6 +8,9 @@
 `--vault`：用最終模型（只訓練到 2026-04-30）對保留段 **2026-05-01 ~ 08-03** 打分（D-151 §八），
 同一套算法報。行情只讀到 2026-08-31——20 日前向窗在此前結束，一天都不碰第二保留期（D-109）。
 
+D-152（門檻梯度）：標籤門檻從各臂配置 `label.barrier_up` 讀（A 0.30、A20 0.20、A25 0.25）；另報三臂在
+同一把尺（+20%／+25%／+30%）上的命中倍率，以及兩兩同日前 20 名的重疊比例。
+
 主報**配對基準**（D-143 §十二 的教訓）：
 - A（安靜股 → 20 日 +30%）：同日安靜股中「同 20 日波動十分位 × 同 60 日漲幅十分位」的命中率。
 - B（已飆股 → 20 日再跌 15%）：同月已飆股中「同波動十分位 × 同 20 日漲幅十分位」（已飆股一天只有幾十檔，
@@ -53,7 +56,8 @@ DATA_END = dt.date(2026, 8, 31)  # 20 日前向窗在此前結束；第二保留
 VAULT = (dt.date(2026, 5, 1), dt.date(2026, 8, 3))
 TOP_N = 20  # A：每日模型機率前 20 名（D-151 §四）
 H = 20
-UP, DROP, DROP2, REGAIN = 0.30, 0.15, 0.20, 0.20
+DROP, DROP2, REGAIN = 0.15, 0.20, 0.20
+THRESHOLDS = (0.20, 0.25, 0.30)  # D-152 §三.2：各臂的前 20 名都對這三個結果報，三臂同一把尺
 LIMIT_GAP = 0.095  # 隔日開盤相對前收 ≥ 9.5% 視為開盤漲停、買不到（台股漲幅 10%）
 PATTERNS = (
     "price.bb_squeeze_120",
@@ -143,8 +147,10 @@ def _print_importance(model_dir: pathlib.Path, features: list[str], watch: tuple
         )
 
 
-def report_up(name: str, oos: pl.DataFrame, mk: pl.DataFrame, conn: psycopg.Connection) -> None:
-    """模型 A 類：安靜股 → 20 日內碰到 +30%。"""
+def report_up(
+    name: str, oos: pl.DataFrame, mk: pl.DataFrame, conn: psycopg.Connection, *, up: float
+) -> pl.DataFrame:
+    """模型 A 類：安靜股 → 20 日內碰到 +up；回傳每日前 20 名（給名單重疊用）。"""
     df = oos.join(
         mk.select("date", _S, "vol20", "past60", "fwd20", "maxfwd", "gap"), on=["date", _S]
     ).filter(
@@ -160,7 +166,7 @@ def report_up(name: str, oos: pl.DataFrame, mk: pl.DataFrame, conn: psycopg.Conn
     market = (
         mk.filter(pl.col("maxfwd").is_not_null())
         .group_by("date")
-        .agg(m_hit=(pl.col("maxfwd") >= UP).cast(pl.Float64).mean())
+        .agg(m_hit=(pl.col("maxfwd") >= up).cast(pl.Float64).mean())
     )
     df = (
         df.join(cells, on=["date", "vdec", "mdec"])
@@ -174,7 +180,7 @@ def report_up(name: str, oos: pl.DataFrame, mk: pl.DataFrame, conn: psycopg.Conn
     lo, hi = df["date"].min(), df["date"].max()
     print(f"\n══ {name}（{lo} ~ {hi}；每日前 {TOP_N} 名，共 {picks.height:,} 筆）")
     print(
-        f"  安靜股樣本 {df.height:,} 列；基礎率（安靜股 20 日內碰到 +30%）{float(df['label'].mean()):.2%}"
+        f"  安靜股樣本 {df.height:,} 列；基礎率（安靜股 20 日內碰到 +{up:.0%}）{float(df['label'].mean()):.2%}"
     )
     for label, col in (
         ("同日全市場", "m_hit"),
@@ -185,10 +191,16 @@ def report_up(name: str, oos: pl.DataFrame, mk: pl.DataFrame, conn: psycopg.Conn
         print(f"  命中 {hit:.2%}　vs {label} {base:.2%}　→ 倍率 {hit / base:.2f}×")
     mean_d, t, nm = _block_t(picks, "d_hit")
     print(f"  配對超額命中 {mean_d:+.2%}（月區塊 t {t:+.2f}，{nm} 個月）")
-    f = picks.filter(pl.col("fwd20").is_not_null())
+    f = picks.filter(pl.col("fwd20").is_not_null()).with_columns(
+        d_fwd=pl.col("fwd20") - pl.col("c_fwd")
+    )
+    mean_f, tf, nf = _block_t(f, "d_fwd")
     print(
         f"  20 日報酬：平均 {float(f['fwd20'].mean()):+.2%}　中位 {float(f['fwd20'].median()):+.2%}　"
         f"配對組平均 {float(f['c_fwd'].mean()):+.2%}　安靜股平均 {float(f['q_fwd'].mean()):+.2%}（未扣成本）"
+    )
+    print(
+        f"  對配對組的超額報酬 {mean_f:+.2%}（月區塊 t {tf:+.2f}，{nf} 個月；D-152 §五 的挑選依據）"
     )
     yr = (
         picks.group_by(pl.col("date").dt.year().alias("y"))
@@ -222,6 +234,43 @@ def report_up(name: str, oos: pl.DataFrame, mk: pl.DataFrame, conn: psycopg.Conn
         )
     _regime_split(picks, mk)
     _patterns_alone(df, conn)
+    _cross_thresholds(df, picks)
+    return picks.select("date", _S)
+
+
+def _cross_thresholds(df: pl.DataFrame, picks: pl.DataFrame) -> None:
+    """D-152 §三.2：不管各臂自己的標籤，前 20 名碰到 +20%／+25%／+30% 的命中率 vs 配對組。"""
+    base = df.filter(pl.col("maxfwd").is_not_null())
+    parts = []
+    for x in THRESHOLDS:
+        hit = (pl.col("maxfwd") >= x).cast(pl.Float64)
+        cells = (
+            base.with_columns(hx=hit).group_by("date", "vdec", "mdec").agg(cx=pl.col("hx").mean())
+        )
+        p = (
+            picks.filter(pl.col("maxfwd").is_not_null())
+            .with_columns(hx=hit)
+            .join(cells, on=["date", "vdec", "mdec"])
+        )
+        g, c = float(p["hx"].mean()), float(p["cx"].mean())
+        parts.append(f"+{x:.0%} {g:.2%} vs 配對 {c:.2%} → {g / c:.2f}×")
+    print("  跨門檻（前 20 名 20 日內碰到）：" + "　".join(parts))
+
+
+def _overlap(picks: dict[str, pl.DataFrame]) -> None:
+    """D-152 §三.3：兩臂同日前 20 名的重疊比例，只在共同日期上算。"""
+    names = list(picks)
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            common = (
+                picks[a].select("date").unique().join(picks[b].select("date").unique(), on="date")
+            )
+            inter = picks[a].join(picks[b], on=["date", _S]).group_by("date").agg(k=pl.len())
+            k = common.join(inter, on="date", how="left").fill_null(0)["k"]
+            print(
+                f"  {a} ∩ {b}：同日前 {TOP_N} 名平均重疊 {float(k.mean()) / TOP_N:.0%}"
+                f"（{common.height} 天）"
+            )
 
 
 def _regime_split(picks: pl.DataFrame, mk: pl.DataFrame) -> None:
@@ -312,6 +361,12 @@ def report_down(name: str, oos: pl.DataFrame, mk: pl.DataFrame) -> None:
     )
 
 
+def _up(cfg: MlConfig) -> float:
+    """各臂自己的標籤門檻（D-152：0.30／0.20／0.25 都從配置來，不寫死）。"""
+    assert cfg.label.barrier_up is not None
+    return float(cfg.label.barrier_up)
+
+
 def vault_scores(
     conn: psycopg.Connection, cfg: MlConfig, model_dir: pathlib.Path, mk: pl.DataFrame
 ) -> pl.DataFrame:
@@ -324,7 +379,7 @@ def vault_scores(
     px = mk.select("date", _S, "open", "close", "amount", "adj")
     if cfg.label.transform == "tail_up":
         labels = tail_up_labels(
-            px, horizon=H, up=UP, adjusted=True, max_span_sessions=cfg.label.max_span_sessions
+            px, horizon=H, up=_up(cfg), adjusted=True, max_span_sessions=cfg.label.max_span_sessions
         )
     else:
         labels = down_probability_labels(
@@ -367,9 +422,10 @@ def main() -> None:
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     print(
-        "**D-151：不設門檻、只報數字。**"
+        "**D-151／D-152：不設門檻、只報數字。**"
         + ("　保留段 2026-05-01 ~ 08-03（開一次）" if args.vault else "　walk-forward 樣本外")
     )
+    up_picks: dict[str, pl.DataFrame] = {}
     with psycopg.connect(os.environ["TWQUANT_PG_DSN"]) as conn:
         mk = load_market(conn)
         for name, cfg_path, model_path in args.arm:
@@ -386,11 +442,16 @@ def main() -> None:
             if pl.Series(oos["date"]).max() > DATA_END:  # type: ignore[operator]
                 raise SystemExit(f"{name}：分數越過 {DATA_END}")
             if cfg.label.transform == "tail_up":
-                report_up(f"{name}（{model_dir.name}）", oos, mk, conn)
+                up_picks[name] = report_up(
+                    f"{name}（{model_dir.name}）", oos, mk, conn, up=_up(cfg)
+                )
             else:
                 report_down(f"{name}（{model_dir.name}）", oos, mk)
             broker = tuple(f for f in features if f.startswith("chip.broker"))
             _print_importance(model_dir, features, broker or PATTERNS)
+        if len(up_picks) >= 2:
+            print("\n══ 名單重疊（D-152 §三.3）")
+            _overlap(up_picks)
 
 
 if __name__ == "__main__":
