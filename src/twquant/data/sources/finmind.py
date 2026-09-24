@@ -518,10 +518,12 @@ SBL_DATASET = "TaiwanDailyShortSaleBalances"
 # → 均價 231.98，當日收盤 232.5。
 _DAYTRADE_SHARES = {"daytrade_shares": "Volume"}
 _DAYTRADE_AMOUNTS = {"daytrade_buy_amount": "BuyAmount", "daytrade_sell_amount": "SellAmount"}
-# BuyAfterSale＝TWSE TWTB4U 的「暫停現股賣出後現款買進當沖註記」。只認實測見過的三種值，
-# 其他值＝來源改了語意，raise 而不是猜成 False。
+# BuyAfterSale＝證交所 TWTB4U／櫃買 intraday/stat 的「暫停現股賣出後現款買進當沖註記」。
+# 證交所標 'Y'、櫃買標全形 '＊'（U+FF0A；官方表 2016-04-18 的 6488 即是，附註：「發行公司停止過戶前
+# 5 個營業日，暫停現股賣出後現款買進當日沖銷交易」）。實測是除權息／股東會停止過戶前的 5 日區塊，
+# 2017-04-28 開放先賣後買之前的年份也有標。只認實測見過的值，其他值＝來源改了語意，raise 不猜。
 _SELL_FIRST_FLAG = "BuyAfterSale"
-_SELL_FIRST_VALUES = {"": False, " ": False, "Y": True}
+_SELL_FIRST_VALUES = {"": False, " ": False, "Y": True, "＊": True}
 
 # ⚠ 單位：TaiwanDailyShortSaleBalances 全部是**股**，**不得 ×1000**——與上方融資券的
 # TaiwanStockMarginPurchaseShortSale（**張**，見 _LOT_SHARES）不同。證據：同一回應的
@@ -576,8 +578,8 @@ def _as_float(value: Any, src: str, table: str, day: dt.date, sid: str) -> float
 def daytrade_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """FinMind `TaiwanStockDayTrading` → `daytrade_daily`（股、元）。
 
-    缺欄或值為 null 一律 raise（不當 0）；`BuyAfterSale` 只認 ''／' '（→ False）與 'Y'（→ True）。
-    `available_at` 由 frame builder 加（`alerts.build_frame`，同日 21:00）。
+    缺欄或值為 null 一律 raise（不當 0）；`BuyAfterSale` 只認 ''／' '（→ False）與
+    'Y'（證交所）／'＊'（櫃買）（→ True）。`available_at` 由 frame builder 加（`alerts.build_frame`，同日 21:00）。
     """
     table = "daytrade_daily"
     out: list[dict[str, Any]] = []
@@ -594,8 +596,8 @@ def daytrade_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
             raise DataError(
                 table,
                 day,
-                f"{sid}：{_SELL_FIRST_FLAG} 出現未知值 {flag!r}（已知：''、' '、'Y'）——"
-                "來源改了語意，不猜。",
+                f"{sid}：{_SELL_FIRST_FLAG} 出現未知值 {flag!r}（已知：{sorted(_SELL_FIRST_VALUES)}）"
+                "——來源改了語意，不猜。",
             )
         vals["sell_first_suspended"] = _SELL_FIRST_VALUES[flag]
         out.append(vals)

@@ -177,8 +177,9 @@ class PitView:
 測試在 `tests/test_chip_batch1.py`，fixture 是實測回應的裁切（`tests/fixtures/http/chip_batch1/`），不連網。
 
 - AC-309-1（當沖映射）：FinMind `TaiwanStockDayTrading` → `daytrade_daily`：`Volume` 為股、兩個金額為元（2330 @ 2018-01-02
-  均價落在當日收盤附近）；`BuyAfterSale` 只認 ''／' '（False）與 'Y'（True），其他值 raise；缺欄或值為 null raise
-  （不當 0），非整數股數 raise；frame 的 available_at 為同日 21:00 Asia/Taipei
+  均價落在當日收盤附近；6488 @ 2016-04-18 與櫃買官方表逐位相同）；`BuyAfterSale` 只認 ''／' '（False）與
+  'Y'（證交所）／'＊'（櫃買）（True），其他值 raise；缺欄或值為 null raise（不當 0），非整數股數 raise；
+  frame 的 available_at 為同日 21:00 Asia/Taipei
 - AC-309-2（借券映射）：`TaiwanDailyShortSaleBalances` → `sbl_short_daily`，全部為股、**不 ×1000**；五個核心欄缺欄或 null
   raise，`sbl_next_quota`／`sbl_covering` 值為 null 時留 null、缺欄仍 raise；`sbl_identity_violations` 回傳違反
   「當日餘額＝前日＋賣出－還券＋調整」的列（真實兩列 0 筆、改一列即回那一列）；sbl_adjust 可負、其他欄負值被 schema 擋

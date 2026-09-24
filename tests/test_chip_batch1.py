@@ -90,11 +90,41 @@ def test_ac309_1_daytrade_maps_shares_and_twd() -> None:
     assert 225.0 < avg < 240.0, "若把股當張（或反之）均價會差 1,000 倍"
 
 
-@pytest.mark.parametrize(("flag", "expected"), [("", False), (" ", False), ("Y", True)])
+@pytest.mark.parametrize(
+    ("flag", "expected"), [("", False), (" ", False), ("Y", True), ("＊", True)]
+)
 def test_ac309_1_sell_first_flag_known_values(flag: str, expected: bool) -> None:
     raw = _daytrade_raw()[:1]
     raw[0]["BuyAfterSale"] = flag
     assert daytrade_rows(raw)[0]["sell_first_suspended"] is expected
+
+
+def test_ac309_1_tpex_star_flag_matches_official_report() -> None:
+    """櫃買用全形「＊」標暫停先賣後買（證交所用 'Y'）。
+
+    對照官方櫃買 intraday/stat 2016-04-18：6488 環球晶「＊」、23,000 股、買 1,698,000／賣 1,702,900 元
+    ——FinMind 逐欄相同，順帶證明櫃買的當沖也是股與元。附註：「發行公司停止過戶前 5 個營業日，
+    暫停現股賣出後現款買進當日沖銷交易」。
+    """
+    rows = daytrade_rows(_load("finmind_daytrade_tpex.json")["data"])
+    assert rows == [
+        {
+            "date": dt.date(2016, 4, 15),
+            "stock_id": "6488",
+            "daytrade_shares": 16_000,
+            "daytrade_buy_amount": 1_164_500.0,
+            "daytrade_sell_amount": 1_169_800.0,
+            "sell_first_suspended": False,
+        },
+        {
+            "date": dt.date(2016, 4, 18),
+            "stock_id": "6488",
+            "daytrade_shares": 23_000,
+            "daytrade_buy_amount": 1_698_000.0,
+            "daytrade_sell_amount": 1_702_900.0,
+            "sell_first_suspended": True,
+        },
+    ]
 
 
 @pytest.mark.parametrize("flag", ["N", "y", "YY", "*", None, 1])

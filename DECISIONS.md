@@ -55,12 +55,22 @@ S3 14.9%）。要搶天花板，得看得到「行情末段」的跡象：當沖
      處置的佔位列 1,432 列（名稱欄有時是一串空白）。
   5. 櫃買 subtitle「總累計次數」兩端點數法相反：處置的**不含**佔位列、注意的**含**（每一年都如此）。
   另：跨年重疊的處置（證交所 58、櫃買 66 則）兩個年度的內容逐欄相同；最長的處置期間是 2016 樂陞案的 376 天（真實）。
+- **FinMind 對官方逐欄核過**（smoke 三檔之後）：2330、2498 @ 2018-01-02 的借券五欄＋次一營業日限額與證交所 TWT93U、
+  當沖三欄與 TWTB4U **逐位相同**；6488 @ 2016-04-18 的當沖與櫃買 `intraday/stat` 逐位相同（23,000 股、1,698,000／
+  1,702,900 元）——兩市都是股與元。
+- **`BuyAfterSale` 櫃買標全形「＊」**（證交所標 'Y'）：櫃買官方表同一欄叫「暫停現股賣出後現款買進當沖註記」，附註「發行公司
+  停止過戶前 5 個營業日，暫停現股賣出後現款買進當日沖銷交易」。實測兩市都是除權息／股東會停止過戶前的 5 日區塊
+  （2330 每年 2~5 段），而且 2017-04-28 開放先賣後買**之前**的年份也有標——那幾年它只是「停止過戶前」的日曆標記，
+  不是真的限制了誰。
+- **`prices_daily` 最早只到 2015-06-01**：所以「2014 起的四碼宇宙」實際是 2015-06-01 起有價格的股票，2014-01~2015-05
+  之間下市的股票不在宇宙內（當沖／借券那一年半的倖存者缺口）；smoke 三檔 2014-01~2015-05 的 683 列當沖也沒有同日收盤可比。
+- 借券的 `SBLShortSalesShortCovering` 在 smoke 三檔全期都是 0（TWT93U 沒有這一欄）。
 
 #### 二、裁決
 
 | 表 | 欄位（型別、單位） | available_at |
 |---|---|---|
-| `daytrade_daily`（新） | daytrade_shares Int64 ≥0（股）；daytrade_buy_amount、daytrade_sell_amount Float64 ≥0（元）；sell_first_suspended Boolean（FinMind `BuyAfterSale`：''／' ' → False、'Y' → True、其他 raise） | 同日 21:00（比照 margin_daily，D-008） |
+| `daytrade_daily`（新） | daytrade_shares Int64 ≥0（股）；daytrade_buy_amount、daytrade_sell_amount Float64 ≥0（元）；sell_first_suspended Boolean（FinMind `BuyAfterSale`：''／' ' → False、'Y'（證交所）與 '＊'（櫃買）→ True、其他 raise） | 同日 21:00（比照 margin_daily，D-008） |
 | `sbl_short_daily`（新） | sbl_prev_balance、sbl_sell、sbl_return、sbl_balance Int64 ≥0；sbl_adjust Int64（可負）；sbl_next_quota、sbl_covering Int64 可 null——全部**股** | 同日 21:00 |
 | `disposition_stocks`（SPEC-001 既有定義，從未寫入） | 保留 date（公告日）、stock_id、effective_start、effective_end、available_at；**增** market（'twse'／'tpex'）、level Int64 可 null、match_minutes Int64 可 null、reason String 可 null、measure String 可 null（去 HTML 的處置內容） | 公告日 18:00（SPEC-001） |
 | `attention_stocks`（新） | date（公告日）、stock_id、market、clauses String 可 null（款次遞增逗號串，如 "1,9"）、info String（去 HTML）、close Float64 可 null | 公告日 18:00 |
@@ -77,7 +87,7 @@ S3 14.9%）。要搶天花板，得看得到「行情末段」的跡象：當沖
 4. **佔位列**：代號與名稱都空白、且內容欄（處置內容／注意交易資訊）寫「本日無…資料」或「本日無…資訊」→ 略過並計數，
    其餘欄是填充值、不看；其他代號空白的列一律 raise（丟掉它就是丟掉一筆公告）。證交所沒有佔位列。
 5. **範圍**：公告保留**全部有價證券**（權證、ETF、ETN 都留，哪些要用由因子層決定）；FinMind 兩個資料集只抓四碼歷史宇宙
-   （`prices_daily` 2014 起、`^[1-9][0-9]{3}$`、含已下市：2,093 檔）。
+   （`prices_daily` 2014 起、`^[1-9][0-9]{3}$`、含已下市：2,093 檔——`prices_daily` 實際從 2015-06-01 起，見 §一）。
 6. **查重**：同一批 (stock_id, date) 內容不同 → raise（`upsert` 的去重只會默默留下最後一列）；內容完全相同 → 合併並回報筆數。
    跨年重疊的公告與 PG 既有列內容不同 → 停（`--allow-changes` 才覆寫）。回應筆數與證交所 `total`、櫃買「總累計次數」
    （處置比公告列數、注意比含佔位列的總列數）對不上＝被截斷 → raise。
@@ -90,8 +100,9 @@ S3 14.9%）。要搶天花板，得看得到「行情末段」的跡象：當沖
 **AI 依授權補定的細節**（看到資料之後才定的）：
 - **不存「累計次數」**（原設計有 `cum_count`）：§一 的實測顯示它在證交所是前視值、在櫃買是「當天公告幾檔」，都不是這一列的
   事實（黃金規則 1）。某檔先前被注意過幾次，由因子層經 PitView 自己數。
-- 規則 3、4 裡的「督導會報 → null」「多個間隔取最長」「阿拉伯數字不設上限」「注意端點的佔位列」都是 §一 全史核對之後才加的：
-  原設計（只看過 2018）遇到它們會 raise，而它們是真實、合法的公告，不是來源改版。
+- 規則 3、4 裡的「督導會報 → null」「多個間隔取最長」「阿拉伯數字不設上限」「注意端點的佔位列」，以及當沖旗標的「＊」，
+  都是 §一 全史核對與 smoke 之後才加的：原設計（只看過 2018 與證交所）遇到它們會 raise，而它們是真實、合法的資料，
+  不是來源改版——每一項都有官方原文或實測列為證，並進了測試 fixture。
 - 文字欄做 SPEC-001 §3 的全形 → 半形（NFKC）；`<br>` → 換行，其餘 HTML 標籤與櫃買的連結尾巴去掉。
 - 回補腳本只建這四張表（`schema.ensure_tables`），**不跑**全體 `ensure_schema`：`CREATE INDEX IF NOT EXISTS` 在確認索引
   存在**之前**就要先拿該表的 ShareLock，另一個 session 正在寫的大表會卡住它、也讓後來的寫入排在它後面。
@@ -109,7 +120,24 @@ S3 14.9%）。要搶天花板，得看得到「行情末段」的跡象：當沖
 **建議 A，但任何當沖因子進入研究之前，要先有 T-310 的修訂量測。** 借券的 20:30／22:30 兩次更新都早於隔日 20:00 截點，
 對訊號沒有差別。
 
-#### 四、T-310（每日增量，未做）
+#### 四、載入現況（2026-09-25 03:00，T-309 smoke）
+
+| 表 | 列數 | 說明 |
+|---|---:|---|
+| `disposition_stocks` | 5,914 | 證交所 2,393＋櫃買 3,521（公告日 2013-12-16~2026-09-23；前者含 3 筆跨入 2014 的 2013-12 公告） |
+| `attention_stocks` | 69,650 | 證交所 35,924＋櫃買 33,726（2014-01-02~2026-09-24） |
+| `daytrade_daily` | 8,814 | 只有 smoke 三檔（2330、2498、6488） |
+| `sbl_short_daily` | 8,892 | 同上；恆等式違反 0 |
+
+**全量回補**（兩個資料集共用同一個 token 的 600 次/小時額度，**不可並行**，依序跑、各約 3.6 小時；已有列的三檔會自動跳過）：
+
+```bash
+export TWQUANT_PG_DSN=postgresql://twquant:twquant@localhost:5433/twquant
+uv run --all-groups --env-file D:/project/twquant/.env python scripts/backfill_chip_batch1.py finmind --dataset daytrade --start 2014-01-01
+uv run --all-groups --env-file D:/project/twquant/.env python scripts/backfill_chip_batch1.py finmind --dataset sbl --start 2014-01-01
+```
+
+#### 五、T-310（每日增量，未做）
 
 接進每日擷取與 `_run_daily_pipeline`（使用者規則：每個新的日資料來源都要接進「一鍵跑今日全部資料」）。八個官方端點：
 證交所當沖 `rwd/zh/dayTrading/TWTB4U?date=YYYYMMDD&selectType=All&response=json`（`tables[0]` 全市場統計、`tables[1]` 個股）、
