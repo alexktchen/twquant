@@ -209,9 +209,10 @@ def cmd_alerts(args: argparse.Namespace) -> int:
                 df, exact = alerts.build_frame(table, parsed.rows)
             except (DataError, QualityGateError) as exc:
                 log(f"{year}：停止——{exc}")
-                log(
-                    "回應是 HTML／428 就是被 WAF 擋了：不要重試，隔幾小時再從這一年續跑（--from-year）。"
-                )
+                if "anti_bot_suspected" in str(exc):
+                    log("被 WAF 擋了：不要重試，隔幾小時再從這一年續跑（--from-year）。")
+                else:
+                    log("回應與解析器的認知不符：先看上面那一列、補規則與測試，再從這一年續跑。")
                 status = 2
                 break
             existing = _existing_keys(conn, cfg.pg_schema, table, df)

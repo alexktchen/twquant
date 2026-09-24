@@ -8,7 +8,9 @@
 | twse | 處置 | `rwd/zh/announcement/punish` | 20180101 | 扁平 fields/data；期間用全形「～」；撮合分鐘是中文數字 |
 | twse | 注意 | `rwd/zh/announcement/notice` | 20180101 | 扁平；日期 `107.12.28`；款次包在 `<font>` 裡 |
 | tpex | 處置 | `www/zh-tw/bulletin/disposal` | 2018/01/01 | tables[]；有「本日無處置資料」佔位列；分鐘是阿拉伯數字 |
-| tpex | 注意 | `www/zh-tw/bulletin/attention` | 2018/01/01 | tables[]；款次用半形括號、`<br>` 分段 |
+| tpex | 注意 | `www/zh-tw/bulletin/attention` | 2018/01/01 | tables[]；有「本日無公布注意交易資訊」佔位列；款次用半形括號、`<br>` 分段 |
+
+以上格式對 2014~2026 全部 52 份回應逐年核過（D-154 §一）。
 
 處置的查詢是依「處置期間」與區間重疊，所以前一年底公告、跨年執行的處置兩個年度都會出現
 （內容相同，upsert 冪等）。
@@ -109,36 +111,42 @@ _NUMERAL = r"([0-9]+|[一二三四五六七八九十]+)"
 
 
 def chinese_number(text: str) -> int:
-    """1~99 的中文數字（五、十、二十五、四十五）或阿拉伯數字（含全形）→ int；其他 → ValueError。"""
+    """正整數：中文數字限 1~99（五、十、二十五、四十五）；阿拉伯數字（含全形）不設上限；其他 → ValueError。
+
+    阿拉伯數字不設上限是實測來的：櫃買 2014 有「約每270分鐘撮合一次」（270 分鐘＝整個交易時段，
+    即一天只撮合一次），是合法值。
+    """
     t = _nfkc(text).strip()
     if _ARABIC.fullmatch(t):
         n = int(t)
-    elif _CHINESE.fullmatch(t):
-        tens, ten, ones = t.partition("十")
-        if not ten:
-            if len(t) != 1:
-                raise ValueError(f"無法解讀的中文數字：{text!r}")
-            n = _CN_DIGITS[t]
-        else:
-            if "十" in ones or len(tens) > 1 or len(ones) > 1:
-                raise ValueError(f"無法解讀的中文數字：{text!r}")
-            n = (_CN_DIGITS[tens] if tens else 1) * 10 + (_CN_DIGITS[ones] if ones else 0)
-    else:
-        raise ValueError(f"不是 1~99 的數字：{text!r}")
-    if not 1 <= n <= 99:
-        raise ValueError(f"數字超出 1~99：{text!r}")
-    return n
+        if n < 1:
+            raise ValueError(f"須為正整數：{text!r}")
+        return n
+    if not _CHINESE.fullmatch(t):
+        raise ValueError(f"不是數字：{text!r}")
+    tens, ten, ones = t.partition("十")
+    if not ten:
+        if len(t) != 1:
+            raise ValueError(f"無法解讀的中文數字（只支援 1~99）：{text!r}")
+        return _CN_DIGITS[t]
+    if "十" in ones or len(tens) > 1 or len(ones) > 1:
+        raise ValueError(f"無法解讀的中文數字（只支援 1~99）：{text!r}")
+    return (_CN_DIGITS[tens] if tens else 1) * 10 + (_CN_DIGITS[ones] if ones else 0)
 
 
 _MINUTES = re.compile(r"每\s*" + _NUMERAL + r"\s*分鐘")
 
 
 def match_minutes(text: str) -> int | None:
-    """處置內容裡「約每 N 分鐘撮合一次」的 N；沒寫 → None；寫了兩個不同的值 → ValueError。"""
+    """處置內容裡「約每 N 分鐘撮合一次」的 N；沒寫 → None。
+
+    同一則寫了**多個**間隔時取最長的（最嚴格的撮合）。實測 2014~2026 有 26 則如此，兩種成因：
+    (a) 2026-08-10 處置新制過渡——期間跨過那天的，原本每 5／20 分鐘、當天起改每 2 分鐘；
+    (b) 櫃買可轉債併同標的股的處置——自身每 5 分鐘，與標的重疊的那段「仍應」每 20 分鐘。
+    完整文字留在 measure 欄，這一欄只是摘要。
+    """
     found = {chinese_number(m) for m in _MINUTES.findall(_nfkc(text))}
-    if len(found) > 1:
-        raise ValueError(f"處置內容出現多個撮合間隔 {sorted(found)}——不知道該取哪一個")
-    return found.pop() if found else None
+    return max(found) if found else None
 
 
 _CLAUSE = re.compile(r"第" + _NUMERAL + r"款")
@@ -256,13 +264,17 @@ def _tpex_data(
     return found["fields"], data, int(m.group(1)) if m else None
 
 
-def _check_declared(declared: int | None, parsed: int, table: str) -> None:
-    """櫃買的 subtitle「總累計次數: N」＝實際公告列數；對不上＝截斷或佔位列規則錯了。"""
-    if declared is not None and declared != parsed:
+def _check_declared(declared: int | None, counted: int, table: str) -> None:
+    """櫃買 subtitle 的「總累計次數: N」與實際列數核對；對不上＝截斷或佔位列規則錯了。
+
+    兩個端點數法不同（實測 2014~2026 每一年都如此）：處置的 N **不含**佔位列（＝公告列數），
+    注意的 N **含**佔位列（佔位列自帶「累計 1」）——呼叫端依端點給對應的列數。
+    """
+    if declared is not None and declared != counted:
         raise DataError(
             table,
             None,
-            f"櫃買回應標示總累計次數 {declared}，實際解析出 {parsed} 列——回應被截斷，或佔位列規則錯了。",
+            f"櫃買回應標示總累計次數 {declared}，實際 {counted} 列——回應被截斷，或佔位列規則錯了。",
         )
 
 
@@ -314,39 +326,40 @@ class _Row:
             raise DataError(
                 self.table,
                 day,
-                f"證券代號空白、又不是「本日無…資料」佔位列——丟掉它就是丟掉一筆公告：{self.values!r}",
+                f"證券代號空白、又不是「本日無…」佔位列——丟掉它就是丟掉一筆公告：{self.values!r}",
             )
         return sid
 
 
-_PLACEHOLDER = re.compile(r"本日無\S*資料")
+# 櫃買的「今天沒有公告」佔位列。實測 2014~2026 只有兩種樣子，代號與名稱都空白：
+#   處置：處置內容「本日無處置資料」，其餘欄空白（1,432 列）；
+#   注意：注意交易資訊「本日無公布注意交易資訊」，另帶 累計 1、收盤價 0.00、本益比 N/A、
+#         link「…company-detail.html?code=」這些填充值（10 列）。
+_PLACEHOLDER = re.compile(r"本日無\S*(?:資料|資訊)")
 
 
-def _is_placeholder(row: _Row, skip: set[int]) -> bool:
-    """櫃買佔位列：代號空白，且除了編號與日期欄之外，只有一格寫著「本日無…資料」。"""
-    filled: list[str] = []
-    for i, value in enumerate(row.values):
-        if i in skip:
-            continue
-        if not isinstance(value, str):
-            return False
-        text = clean_text(value)
-        if text:
-            filled.append(text)
-    return len(filled) == 1 and _PLACEHOLDER.fullmatch(filled[0]) is not None
-
-
-def _skip_indexes(fields: Sequence[Any], *names: str) -> set[int]:
-    return {i for i, f in enumerate(fields) if f in names}
+def _is_placeholder(row: _Row, content: str) -> bool:
+    """櫃買佔位列：代號、名稱都空白，且內容欄寫的是「本日無…資料／資訊」。其餘欄是填充值，不看。"""
+    if not (row.blank("證券代號") and row.blank("證券名稱")):
+        return False
+    text = row.raw(content)
+    cleaned = clean_text(text) if isinstance(text, str) else None
+    return cleaned is not None and _PLACEHOLDER.fullmatch(cleaned) is not None
 
 
 # ── 四個解析器 ────────────────────────────────────────────────────────────
 
 
 _TWSE_DISPOSITION = ("公布日期", "證券代號", "處置條件", "處置起迄時間", "處置措施", "處置內容")
-# 證交所「處置措施」只有這三種（實測 2018：87／76／26）。「人工管制撮合」（全額交割股等）
-# 沒有第幾次的分別，level 留 null；未知的值＝來源改了分類，raise 不猜。
-_TWSE_LEVEL: dict[str, int | None] = {"第一次處置": 1, "第二次處置": 2, "人工管制撮合": None}
+# 證交所「處置措施」實測 2014~2026 只有這四種（不重複公告 1,291／834／195／73 則）。「人工管制撮合」
+# （全額交割股等）與「督導會報決議」（監視業務督導會報另案決議）沒有第幾次的分別，level 留 null；
+# 未知的值＝來源改了分類，raise 不猜。
+_TWSE_LEVEL: dict[str, int | None] = {
+    "第一次處置": 1,
+    "第二次處置": 2,
+    "人工管制撮合": None,
+    "督導會報決議": None,
+}
 
 
 def twse_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
@@ -386,9 +399,18 @@ def twse_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
     return Parsed(out)
 
 
-_TPEX_DISPOSITION = ("公布日期", "證券代號", "處置起訖時間", "處置原因", "處置內容")
+_TPEX_DISPOSITION = ("公布日期", "證券代號", "證券名稱", "處置起訖時間", "處置原因", "處置內容")
 # 櫃買沒有「第幾次」欄位：內容寫「最近30個營業日內曾發布處置」＝第二次（實測 2018：193 筆中 64 筆）。
 _TPEX_REPEAT_MARK = "曾發布處置"
+# 處置原因寫「監視業務督導會報」＝督導會報另案決議（實測 47 則，多在 2014），同證交所「督導會報決議」
+# 沒有第幾次的分別 → level null。
+_TPEX_SUPERVISORY_MARK = "督導會報"
+
+
+def _tpex_level(reason: str | None, content: str) -> int | None:
+    if reason is not None and _TPEX_SUPERVISORY_MARK in reason:
+        return None
+    return 2 if _TPEX_REPEAT_MARK in _nfkc(content) else 1
 
 
 def tpex_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
@@ -396,12 +418,11 @@ def tpex_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
     table = TABLE_OF_KIND["disposition"]
     fields, data, declared = _tpex_data(payload, table, _TPEX_DISPOSITION)
     ix = _field_index(fields, _TPEX_DISPOSITION, table)
-    skip = _skip_indexes(fields, "編號", "公布日期")
     out: list[dict[str, Any]] = []
     placeholders = 0
     for values in data:
         row = _Row(values, fields, ix, table)
-        if row.blank("證券代號") and _is_placeholder(row, skip):
+        if _is_placeholder(row, "處置內容"):
             placeholders += 1
             continue
         day = row.date("公布日期")
@@ -410,6 +431,7 @@ def tpex_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
             roc_period, row.text("處置起訖時間", day, sid), table, day, sid, "處置期間"
         )
         content = row.text("處置內容", day, sid)
+        reason = clean_text(row.text("處置原因", day, sid))
         out.append(
             {
                 "date": day,
@@ -417,13 +439,13 @@ def tpex_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
                 "market": "tpex",
                 "effective_start": start,
                 "effective_end": end,
-                "level": 2 if _TPEX_REPEAT_MARK in _nfkc(content) else 1,
+                "level": _tpex_level(reason, content),
                 "match_minutes": _wrap(match_minutes, content, table, day, sid, "撮合分鐘"),
-                "reason": clean_text(row.text("處置原因", day, sid)),
+                "reason": reason,
                 "measure": clean_text(content),
             }
         )
-    _check_declared(declared, len(out), table)
+    _check_declared(declared, len(out), table)  # 處置：N 不含佔位列
     return Parsed(out, placeholders)
 
 
@@ -461,25 +483,24 @@ def twse_attention_rows(payload: Mapping[str, Any]) -> Parsed:
     return Parsed(out)
 
 
-_TPEX_ATTENTION = ("證券代號", "注意交易資訊", "公告日期", "收盤價")
+_TPEX_ATTENTION = ("證券代號", "證券名稱", "注意交易資訊", "公告日期", "收盤價")
 
 
 def tpex_attention_rows(payload: Mapping[str, Any]) -> Parsed:
-    """櫃買注意股公告 → `attention_stocks` 列（market='tpex'）；佔位列規則同處置。"""
+    """櫃買注意股公告 → `attention_stocks` 列（market='tpex'）；略過「本日無公布注意交易資訊」佔位列。"""
     table = TABLE_OF_KIND["attention"]
     fields, data, declared = _tpex_data(payload, table, _TPEX_ATTENTION)
     ix = _field_index(fields, _TPEX_ATTENTION, table)
-    skip = _skip_indexes(fields, "編號", "公告日期")
     out: list[dict[str, Any]] = []
     placeholders = 0
     for values in data:
         row = _Row(values, fields, ix, table)
-        if row.blank("證券代號") and _is_placeholder(row, skip):
+        if _is_placeholder(row, "注意交易資訊"):
             placeholders += 1
             continue
         day = row.date("公告日期")
         out.append(_attention_row(row, day, row.code("證券代號", day), "tpex"))
-    _check_declared(declared, len(out), table)
+    _check_declared(declared, len(out) + placeholders, table)  # 注意：N 含佔位列
     return Parsed(out, placeholders)
 
 

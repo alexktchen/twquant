@@ -247,6 +247,8 @@ def test_ac309_3_twse_disposition_rows() -> None:
         ("9958", dt.date(2018, 1, 11)),
         ("1475", dt.date(2018, 8, 23)),
         ("03775P", dt.date(2018, 11, 5)),  # 權證也留（全部有價證券）
+        ("3060", dt.date(2014, 5, 26)),
+        ("8046", dt.date(2026, 7, 31)),
     }
     first = got[("9958", dt.date(2018, 1, 8))]
     assert (first["effective_start"], first["effective_end"]) == (
@@ -267,6 +269,14 @@ def test_ac309_3_twse_disposition_rows() -> None:
         dt.date(2018, 11, 6),
         dt.date(2018, 11, 19),
     )
+
+    supervisory = got[("3060", dt.date(2014, 5, 26))]
+    assert supervisory["level"] is None, "督導會報決議沒有「第幾次」，同人工管制撮合"
+    assert (supervisory["match_minutes"], supervisory["reason"]) == (20, "監視業務督導會報決議")
+
+    transition = got[("8046", dt.date(2026, 7, 31))]
+    assert transition["level"] == 1
+    assert transition["match_minutes"] == 5, "2026-08-10 新制改每 2 分鐘；兩個間隔取最長（最嚴格）"
     for r in parsed.rows:
         assert r["market"] == "twse"
         assert "<" not in r["measure"]
@@ -319,13 +329,14 @@ def test_ac309_3_period_parsing() -> None:
         ("5", 5),
         ("45", 45),
         ("６０", 60),
+        ("270", 270),  # 櫃買 2014：整個交易時段只撮合一次
     ],
 )
 def test_ac309_3_chinese_numerals(text: str, n: int) -> None:
     assert alerts.chinese_number(text) == n
 
 
-@pytest.mark.parametrize("text", ["", "零", "一百", "二二", "十十", "0", "100", "五分", "兩"])
+@pytest.mark.parametrize("text", ["", "零", "一百", "二二", "十十", "0", "00", "五分", "兩"])
 def test_ac309_3_bad_numerals_raise(text: str) -> None:
     with pytest.raises(ValueError):
         alerts.chinese_number(text)
@@ -335,8 +346,9 @@ def test_ac309_3_match_minutes() -> None:
     assert alerts.match_minutes("撮合作業（約每五分鐘撮合一次）") == 5
     assert alerts.match_minutes("撮合作業(約每10分鐘撮合一次)") == 10
     assert alerts.match_minutes("以人工管制之撮合終端機執行撮合作業") is None
-    with pytest.raises(ValueError, match="撮合"):
-        alerts.match_minutes("約每五分鐘撮合一次；另約每二十分鐘撮合一次")
+    # 多個間隔（新制過渡、可轉債併同標的處置）→ 取最長的，也就是最嚴格的撮合
+    assert alerts.match_minutes("(約每五分鐘撮合一次)…自8月10日起(改以約每二分鐘撮合一次)") == 5
+    assert alerts.match_minutes("(約每5分鐘撮合一次)…其中…仍應(約每20分鐘撮合一次)") == 20
 
 
 def test_ac309_3_html_stripped() -> None:
@@ -354,7 +366,18 @@ def test_ac309_4_placeholder_skipped() -> None:
     assert [(r["stock_id"], r["date"]) for r in parsed.rows] == [
         ("3219", dt.date(2017, 12, 21)),
         ("6248", dt.date(2017, 12, 21)),
+        ("3520", dt.date(2014, 8, 15)),
+        ("6236", dt.date(2014, 3, 20)),
+        ("65931", dt.date(2023, 12, 14)),
     ]
+
+
+def test_ac309_4_placeholder_needs_blank_name_too() -> None:
+    """代號空白但名稱還在的列不是佔位列（即使內容寫「本日無…」）。"""
+    payload = copy.deepcopy(_load("tpex_disposal.json"))
+    payload["tables"][0]["data"][0][3] = "倚強"
+    with pytest.raises(DataError, match="證券代號"):
+        alerts.tpex_disposition_rows(payload)
 
 
 def test_ac309_4_other_empty_code_raises() -> None:
@@ -378,16 +401,31 @@ def test_ac309_4_ascii_period_arabic_minutes_and_level() -> None:
     assert {r["market"] for r in got.values()} == {"tpex"}
 
 
+def test_ac309_4_supervisory_long_interval_and_two_intervals() -> None:
+    got = _by_key(alerts.tpex_disposition_rows(_load("tpex_disposal.json")).rows)
+    sup = got[("3520", dt.date(2014, 8, 15))]
+    assert (sup["reason"], sup["level"], sup["match_minutes"]) == ("監視業務督導會報", None, 20)
+    whole_day = got[("6236", dt.date(2014, 3, 20))]
+    assert (whole_day["level"], whole_day["match_minutes"]) == (None, 270), "270 分鐘＝一天撮合一次"
+    cb = got[("65931", dt.date(2023, 12, 14))]
+    assert (cb["level"], cb["match_minutes"]) == (1, 20), (
+        "可轉債自身 5 分鐘、併同標的的那段 20 分鐘"
+    )
+
+
 def test_ac309_4_links_stripped() -> None:
     got = _by_key(alerts.tpex_disposition_rows(_load("tpex_disposal.json")).rows)
+    for key in [("3219", dt.date(2017, 12, 21)), ("6248", dt.date(2017, 12, 21))]:
+        assert got[key]["reason"] == "因連續3個營業日達本中心作業要點第四條第一項第一款"
+    assert got[("3520", dt.date(2014, 8, 15))]["reason"] == "監視業務督導會報"
     for r in got.values():
-        assert r["reason"] == "因連續3個營業日達本中心作業要點第四條第一項第一款"
         assert ".html" not in r["measure"]
 
 
 def test_ac309_4_truncated_response_raises() -> None:
+    """處置端點的「總累計次數」不含佔位列。"""
     payload = copy.deepcopy(_load("tpex_disposal.json"))
-    payload["tables"][0]["subtitle"] = "證券個數:2 總累計次數: 3"
+    payload["tables"][0]["subtitle"] = "證券個數:5 總累計次數: 6"
     with pytest.raises(DataError, match="總累計次數"):
         alerts.tpex_disposition_rows(payload)
 
@@ -411,7 +449,9 @@ def test_ac309_5_twse_attention() -> None:
 
 def test_ac309_5_tpex_attention() -> None:
     parsed = alerts.tpex_attention_rows(_load("tpex_attention.json"))
-    assert parsed.placeholders == 0
+    assert parsed.placeholders == 1, (
+        "「本日無公布注意交易資訊」佔位列（帶累計 1、收盤 0.00 等填充值）"
+    )
     got = _by_key(parsed.rows)
     assert got[("3317", dt.date(2018, 1, 31))]["clauses"] == "7"
     two = got[("6554", dt.date(2018, 1, 2))]
@@ -419,6 +459,14 @@ def test_ac309_5_tpex_attention() -> None:
     assert "<br>" not in two["info"] and "\n" in two["info"]
     assert got[("6265", dt.date(2018, 1, 31))]["close"] == 7.35
     assert {r["market"] for r in parsed.rows} == {"tpex"}
+
+
+def test_ac309_5_tpex_attention_declared_count_includes_placeholders() -> None:
+    """注意端點的「總累計次數」含佔位列（與處置端點相反，2014~2026 每年皆如此）。"""
+    payload = copy.deepcopy(_load("tpex_attention.json"))
+    payload["tables"][0]["subtitle"] = "證券個數:3 總累計次數: 3"
+    with pytest.raises(DataError, match="總累計次數"):
+        alerts.tpex_attention_rows(payload)
 
 
 def test_ac309_5_roc_date_both_formats() -> None:

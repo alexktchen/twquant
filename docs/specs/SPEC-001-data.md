@@ -182,13 +182,15 @@ class PitView:
 - AC-309-2（借券映射）：`TaiwanDailyShortSaleBalances` → `sbl_short_daily`，全部為股、**不 ×1000**；五個核心欄缺欄或 null
   raise，`sbl_next_quota`／`sbl_covering` 值為 null 時留 null、缺欄仍 raise；`sbl_identity_violations` 回傳違反
   「當日餘額＝前日＋賣出－還券＋調整」的列（真實兩列 0 筆、改一列即回那一列）；sbl_adjust 可負、其他欄負值被 schema 擋
-- AC-309-3（證交所處置）：民國日期 → 西元；全形「～」期間 → (起, 迄)；level 第一次 1／第二次 2／人工管制撮合 null，
-  未知處置措施 raise；中文數字撮合分鐘（五／二十／二十五…，1~99）；沒寫分鐘 → null、兩個不同值 raise；存的文字去 HTML；
-  權證保留；回應 `total` 與列數不符 raise
-- AC-309-4（櫃買處置）：「本日無處置資料」佔位列略過並計數，其他代號空白的列 raise；半形「~」期間；阿拉伯數字分鐘；
-  內容含「曾發布處置」→ level 2，否則 1；原因的連結尾巴 `(./attention.html)` 去掉；「總累計次數」與列數不符 raise
+- AC-309-3（證交所處置）：民國日期 → 西元；全形「～」期間 → (起, 迄)；level 第一次 1／第二次 2／人工管制撮合與督導會報決議
+  null，未知處置措施 raise；中文數字撮合分鐘（五／二十／二十五…，1~99；阿拉伯數字不設上限）；沒寫分鐘 → null、
+  寫了多個間隔取最長；存的文字去 HTML；權證保留；回應 `total` 與列數不符 raise
+- AC-309-4（櫃買處置）：代號與名稱皆空白、內容「本日無處置資料」的佔位列略過並計數，其他代號空白的列 raise；
+  半形「~」期間；阿拉伯數字分鐘（含 270）；處置原因含「督導會報」→ level null，否則內容含「曾發布處置」→ 2、其餘 1；
+  原因的連結尾巴 `(./attention.html)` 去掉；「總累計次數」與公告列數（不含佔位列）不符 raise
 - AC-309-5（注意股兩市）：`107.12.28` 與 `107/12/28` 兩種日期；款次（`﹝第九款﹞`、`(第七款)`、`<br>` 分段）→ 遞增逗號串
-  如 "1,9"；info 去 HTML（`<font>`、`<br>`）；收盤價 `-----`／`N/A` → null；info 空白 raise；不存「累計次數」
+  如 "1,9"；info 去 HTML（`<font>`、`<br>`）；收盤價 `-----`／`N/A` → null；info 空白 raise；不存「累計次數」；
+  櫃買「本日無公布注意交易資訊」佔位列略過，「總累計次數」與含佔位列的總列數不符 raise
 - AC-309-6（儲存）：四張表的 frame 通過 pandera 驗證、欄位與 schema 同名同序；四張表在 `DIRECT_PG_SPECS`、**不在**
   `MIRROR_TABLES`、在 `ALL_TABLES`，主鍵 `(stock_id, date)`、有 date 索引，PG 欄位與 pandera 同名同序，
   `rebuild_targets` 對它們 raise；同批同鍵內容不同 raise、完全相同合併並計數；列的欄位多或少都 raise；
