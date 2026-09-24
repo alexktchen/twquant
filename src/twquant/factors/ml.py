@@ -237,3 +237,63 @@ def lgbm_tail_up_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
             "前綴回退會讓兩臂的分數互相命中（D-143 §三）"
         )
     return _scores_for_model(view, params, "lgbm_tail", value_col="score")
+
+
+# ── 第十二輪安靜股模型（D-151／D-152）與第十三輪對照（D-153）─────────────────
+# A／A20／A25 的 model_id 只差 sample_tag（`lgbm_quietA_tu_h20_*`、`lgbm_quietA20_tu_h20_*`…），
+# 與上面同一個理由：強制 `model_id`。
+
+_VALUE_COLS = ("score", "rank_pct")
+
+
+@factor(
+    name="ml.lgbm_tail_up_20d",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"smooth_days": 0, "value_col": "score"},
+)
+def lgbm_tail_up_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """20 個交易日內最大漲幅 ≥ 門檻的機率（絕對值）；`value_col=rank_pct` 回同日池內百分位。
+
+    池＝該模型當日有分數的股票（安靜 ∩ 流動，D-151 §十三）；沒分數的股票沒有值，
+    當進場因子時不是候選、當 `score_below` 出場因子時不觸發（`backtest/exits.py`）。
+    """
+    if params.get("model_id") is None:
+        raise ValueError(
+            "ml.lgbm_tail_up_20d 須指定 model_id：A／A20／A25 前綴相近，"
+            "前綴回退會讓各臂的分數互相命中（D-152 §一）"
+        )
+    col = str(params.get("value_col", "score"))
+    if col not in _VALUE_COLS:
+        raise ValueError(f"ml.lgbm_tail_up_20d 的 value_col 只能是 {_VALUE_COLS}，收到 {col!r}")
+    return _scores_for_model(view, params, "lgbm_quiet", value_col=col)
+
+
+@factor(
+    name="ml.pool_random",
+    category="ml",
+    direction=1,
+    tables=["ml_scores"],
+    lookback_days=0,
+    params={"seed": 0},
+)
+def pool_random(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """對照用（D-153 §一）：`model_id` 當日有分數的股票各給一個固定 seed 的 [0, 1) 亂數，其餘沒有值。
+
+    同一個 (date, stock_id, seed) 永遠得到同一個數——回測可重現；換 seed 才換名單。
+    用途是「同池、同出場、不用模型排序」的對照，不是訊號。
+    """
+    if params.get("model_id") is None:
+        raise ValueError("ml.pool_random 須指定 model_id：池子＝該模型當日有分數的股票")
+    seed = int(str(params.get("seed", 0)))
+    pool = _scores_for_model(view, params, "", value_col="score")
+    span = float(2**53)
+    return pool.select(
+        "date",
+        "stock_id",
+        ((pl.struct(["date", "stock_id"]).hash(seed=seed) % 2**53).cast(pl.Float64) / span).alias(
+            "value"
+        ),
+    )

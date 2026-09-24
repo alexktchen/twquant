@@ -1,0 +1,29 @@
+# D-153 第十三輪 S2：A20 進場，出場＝訊號消失（A20 當日池內百分位 < 0.5，即不再是安靜池前半）
+# ＋ 抱滿 20 日上限。**RESEARCH ONLY。**
+# 沒分數不觸發（backtest/exits.py）：離開安靜池＝已經在動，交給時間上限。
+# rank_pct 0.5 是本輪唯一的新門檻，登記於 D-153 §一。與 S0 只差 exit_rules。
+name: quiet_s2
+description: 第十三輪 S2：A20 機率前 15、訊號消失出場＋20 日上限
+trial_scope: tail:quiet_a20_exits
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+slots:
+  n: 15
+  entry_threshold: 0.0
+exit_rules:
+  - kind: score_below
+    factor: ml.lgbm_tail_up_20d
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+      value_col: rank_pct
+    threshold: 0.5
+  - kind: time_stop
+    sessions: 20
