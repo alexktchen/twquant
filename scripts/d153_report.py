@@ -26,6 +26,7 @@ import polars as pl
 import psycopg
 
 from twquant.backtest.costs import CostConfig
+from twquant.backtest.engine import DEFAULT_LOT_SIZE
 from twquant.config import load_config
 from twquant.data.serving.ml_store import read_corporate_events, read_index_close
 from twquant.ml.dataset import attach_adjustment
@@ -196,13 +197,14 @@ def main() -> None:
     paths = sorted(pathlib.Path(args.bundles).glob("quiet_*.json"))
     if not paths:
         raise SystemExit(f"{args.bundles} 底下沒有結果包")
-    groups: dict[float, dict[str, Bundle]] = {}
+    groups: dict[tuple[float, int], dict[str, Bundle]] = {}  # (初始資金, 最小成交股數) → 臂
     for p in paths:
         b = json.loads(p.read_text(encoding="utf-8"))
         if dt.date.fromisoformat(str(b["end"])) > DEV_END:
             raise SystemExit(f"{p.name} 結束於 {b['end']}，越過第二保留期邊界")
         arm = str(b["strategy"]["name"]) if isinstance(b["strategy"], dict) else p.stem
-        groups.setdefault(float(b["initial_capital"]), {})[arm] = b
+        key = (float(b["initial_capital"]), int(b.get("lot_size", DEFAULT_LOT_SIZE)))
+        groups.setdefault(key, {})[arm] = b
     allb = [b for g in groups.values() for b in g.values()]
     lo = min(dt.date.fromisoformat(str(b["start"])) for b in allb)
     hi = max(dt.date.fromisoformat(str(b["end"])) for b in allb)
@@ -214,9 +216,10 @@ def main() -> None:
         taiex = read_index_close(conn, SCHEMA, "TAIEX", lo, hi)
         etf = _etf_0050(conn, lo, hi)
 
-    for capital in sorted(groups, reverse=True):
-        arms = groups[capital]
-        print(f"════════ 初始資金 {capital / 1e4:,.0f} 萬（{len(arms)} 個結果包）════════")
+    for capital, lot in sorted(groups, reverse=True):
+        arms = groups[(capital, lot)]
+        how = "整張" if lot == DEFAULT_LOT_SIZE else f"零股（最小 {lot} 股）"
+        print(f"════════ 初始資金 {capital / 1e4:,.0f} 萬・{how}（{len(arms)} 個結果包）════════")
         _report_group(arms, mk, rt)
 
     print("── 並列對照（不是門檻）──")

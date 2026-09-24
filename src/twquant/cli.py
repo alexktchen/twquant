@@ -2062,14 +2062,22 @@ def backtest(
         "--dividends/--no-dividends",
         help="除息日是否把股利現金入帳（D-085 預設開）；--no-dividends 回到價格報酬口徑，供 D-086 的對照",
     ),
+    lot_size: int | None = typer.Option(
+        None,
+        "--lot-size",
+        min=1,
+        help="每筆成交的最小股數；預設整張（1,000），1＝零股回測（D-153 §一 補充二）",
+    ),
 ) -> None:
     """跑回測，印績效指標並記入 research_log（純量化，不需 LLM）。"""
     from twquant.backtest.costs import CostConfig
     from twquant.backtest.diagnostics import summarize_backtest
-    from twquant.backtest.engine import run_backtest
+    from twquant.backtest.engine import DEFAULT_LOT_SIZE, run_backtest
     from twquant.config import load_config
     from twquant.data.warehouse import Warehouse
     from twquant.reporting.research_log import append_research_log, backtest_log_entries
+
+    lot = lot_size if lot_size is not None else DEFAULT_LOT_SIZE
     from twquant.strategy.config import load_strategy
 
     cfg = _load_system()
@@ -2103,6 +2111,7 @@ def backtest(
             initial_capital=capital,
             max_participation=participation,
             credit_dividends=dividends,
+            lot_size=lot,
         )
     finally:
         if pg_conn is not None:
@@ -2112,7 +2121,8 @@ def backtest(
     total_ret = res.final_equity / res.initial_capital - 1.0
     typer.secho(
         f"回測 {strat.name} · {s} ~ {e} · {m.n_days} 交易日"
-        f" · {'含息' if dividends else '**價格報酬（--no-dividends）**'}",
+        f" · {'含息' if dividends else '**價格報酬（--no-dividends）**'}"
+        + (f" · 零股（最小 {lot} 股）" if lot != DEFAULT_LOT_SIZE else ""),
         fg=typer.colors.CYAN,
         bold=True,
     )
@@ -2151,6 +2161,7 @@ def backtest(
             source=source,
             data_fingerprint=data_fingerprint(fp_tables),
             data_tables=fp_tables,
+            lot_size=lot,
         )
         write_bundle(out, bundle)
         typer.secho(

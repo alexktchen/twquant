@@ -273,6 +273,12 @@ Dockerfile 已加 `libgomp1`。教訓：先前「新步驟在部署映像裡驗�
 已補回（`repair_prices_2023.py --write --lake ""`）、2023-02~12 因子重物化、重放腳本補上該步。**任何還原之後都要重跑
 「每月上市／上櫃四碼股每日檔數」的檢查**——從沒修的輸入重算下游，看起來也是完整的。
 
+**⑳ 回測／訓練在跑的時候，`src/twquant/` 的任何 .py 都不能改（2026-09-25 損失一支 45 分鐘的回測）。**
+`twquant backtest` 在最後寫 `--out` 結果包時才 `import twquant.reporting.result_bundle`；我在它跑的期間給
+`engine.py` 加了常數、`result_bundle.py` 改成匯入它——那個程序裡的 `engine` 是舊版，新版 `result_bundle`
+找不到名字，`ImportError`、rc=1、research_log 也沒記。與「不要編輯正在跑的 bash 腳本」同一類但更隱蔽。
+要改就等它跑完，或先停掉再改再重跑；`scripts/*.py`、`configs/`、markdown 不受影響（跑到那步才起新程序）。
+
 ## 7. 還在跑的東西（2026-09-19 部署後）
 
 四個容器，全部在 compose 專案 `twquant`、映像來源＝`main`（`392d00e`，含 #69／#70）：

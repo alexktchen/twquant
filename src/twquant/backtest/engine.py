@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from twquant.strategy.config import StrategyConfig
 
 _LOT = 1000
+DEFAULT_LOT_SIZE = _LOT  # 對外（CLI／結果包）的名字：整張；零股回測傳 1（D-153 §一 補充二）
 _Row = dict[str, Any]  # 單日單股行情列（open/close/limit/_prev_close/_adv）
 
 
@@ -155,6 +156,7 @@ class _State:
     exposure_mult: float = 1.0  # T-286：每日曝險目標的倍數；無 exposure_target 時恆為 1.0
     exposure_log: list[ExposureDay] = field(default_factory=list)  # D-149：只有條件式減碼會寫
     size_log: list[EntrySize] = field(default_factory=list)  # D-149 F3：只記真的成交的進場
+    lot: int = _LOT  # 最小成交股數：1,000＝整張（預設）、1＝零股（D-153 §一 補充二）
 
 
 def _plan_trims(
@@ -173,7 +175,7 @@ def _plan_trims(
         for sid in held_ids:
             if sid in exits_pending:  # 整檔要出場的，不再另外減碼
                 continue
-            q = int((state.holdings[sid] * sell_frac) // _LOT) * _LOT
+            q = int((state.holdings[sid] * sell_frac) // state.lot) * state.lot
             if q > 0:
                 out[sid] = q
     return out
@@ -389,7 +391,7 @@ def _execute(
             continue
         w = targets.get(sid, 0.0)
         o = float(row["open"])
-        desired = int((w * pv) // (o * _LOT)) * _LOT if (w > 0 and o > 0) else 0
+        desired = int((w * pv) // (o * state.lot)) * state.lot if (w > 0 and o > 0) else 0
         if w > 0 and o > 0 and desired == 0:
             # T-135：目標金額不足一張 → 整張捨去歸零。先前**靜默**——不記未成交、不報錯，
             # 結果是「40 檔等權、10M 資金」實測曝險只有 61%，且檔數越多越嚴重，把跨檔數的
@@ -438,6 +440,7 @@ def _fill(
         max_participation=max_participation,
         available_cash=state.cash,
         cost_cfg=cost_cfg,
+        lot=state.lot,
     )
     # 迴圈變數不得叫 reason：那會**蓋掉本函數的 `reason` 參數**，
     # 於是部分成交（如撞到參與率上限）的再平衡單會被記成 `participation`，
@@ -545,8 +548,13 @@ def run_backtest(
     initial_capital: float = 10_000_000.0,
     max_participation: float = 0.05,
     credit_dividends: bool = True,
+    lot_size: int = _LOT,
 ) -> BacktestResult:
     """跑回測，回傳 BacktestResult（權益曲線、ledger、unfilled、指標）。
+
+    `lot_size` 是最小成交股數：預設整張（1,000 股）；傳 1 即零股回測（D-153 §一 補充二：
+    散戶會買零股，整張進位會讓一格買不起一張的高價股整檔跳過）。成交量參與率仍以整體
+    日成交量計，零股市場的流動性較差——這是偏樂觀的假設，登記裡寫明。
 
     `credit_dividends=False` 關掉 D-085 的股利入帳，回到**價格報酬**口徑。
     存在的理由是 D-086：含息與不含息兩次相減，才分離得出「股利本身」與
@@ -582,7 +590,9 @@ def run_backtest(
     )
     by_date = _price_panel(warehouse, start, end, ma_windows)
 
-    state = _State(cash=initial_capital)
+    if lot_size < 1:
+        raise ValueError(f"lot_size 須 ≥ 1 股，收到 {lot_size}")
+    state = _State(cash=initial_capital, lot=lot_size)
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
     exits_pending: dict[str, str] = {}
@@ -660,7 +670,7 @@ def run_backtest(
                 # T-286／D-149：兩個倍數都是 1.0 時即既有行為
                 size = entry_sizes.get(sid)
                 per_slot = pv * state.exposure_mult / slot_cfg.n * (size.mult if size else 1.0)
-                want = int(per_slot // (o * _LOT)) * _LOT if o > 0 else 0
+                want = int(per_slot // (o * state.lot)) * state.lot if o > 0 else 0
                 if want == 0:  # 一格的金額買不起一張：記下來，不靜默略過（T-135 同理）
                     _unfill(state, sid, "buy", int(per_slot / o) if o > 0 else 0, day, "lot")
                     continue

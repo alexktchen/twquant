@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from twquant.backtest.costs import CostConfig
-from twquant.backtest.engine import BacktestResult
+from twquant.backtest.engine import DEFAULT_LOT_SIZE, BacktestResult
 from twquant.backtest.metrics import Metrics, compute_metrics
 from twquant.errors import DataError
 from twquant.strategy.config import StrategyConfig
@@ -60,6 +60,7 @@ def bundle_backtest(
     source: str,
     data_fingerprint: str,
     data_tables: dict[str, tuple[int, str]] | None = None,
+    lot_size: int = DEFAULT_LOT_SIZE,
 ) -> dict[str, Any]:
     """把一次回測的完整輸出與身分序列化成可 JSON 化的 dict（純函數）。
 
@@ -75,6 +76,8 @@ def bundle_backtest(
         "end": end.isoformat(),
         "initial_capital": initial_capital,
         "max_participation": max_participation,
+        # D-153 §一 補充二：最小成交股數（整張 1,000／零股 1）。純追加欄位，舊結果包缺此鍵＝整張。
+        "lot_size": lot_size,
         "source": source,
         "data_fingerprint": data_fingerprint,
         # 逐表明細：跨策略比雜湊無意義（不同策略讀不同的表，雜湊必然不同），
