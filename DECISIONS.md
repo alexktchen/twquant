@@ -5,6 +5,105 @@
 
 ## 待裁決
 
+### D-154（2026-09-25，使用者裁決「先抓1吧」＋AI 依授權定細節）第 1 批免費籌碼資料：當沖、借券賣出、處置股、注意股
+
+使用者要的第 1 批免費資料：**當沖、借券賣出、處置股、注意股**，上市＋上櫃，2014 起。這一步**只存資料**（T-309）；
+因子、策略、宇宙濾網、每日 pipeline 都不接（每日增量是 T-310）。
+
+#### 〇、為什麼
+
+第十四輪要做模型出場（D-153 §四），而規則出場只吃到天花板的一成多（D-153 §六：8,000 萬組最好的兩臂 S1 11.6%、
+S3 14.9%）。要搶天花板，得看得到「行情末段」的跡象：當沖比重暴增（短線客接手）、借券賣出餘額攀升（有人在放空）、
+注意股 → 處置股（交易所開始降溫）。這四樣現有的表都沒有：`margin_daily` 只有融資券餘額；`disposition_stocks`
+在 SPEC-001 有定義，但**從來沒有寫進過一列**。
+
+#### 一、實測（2026-09-25 凌晨，live）
+
+- **FinMind 免費註冊層**：`TaiwanStockDayTrading`（2014-01-06 起）與 `TaiwanDailyShortSaleBalances`（2005-07-01 起）
+  都拿得到，上市、上櫃都有，一檔一個請求回全期。免費層**拿不到**的：集保持股分級、處置、八大行庫、分點、分 K、
+  減資參考價。額度 600 次/小時 → 每請求間隔 ≥ 6.2 秒；HTTP 402＝額度用盡（沿用 `scripts/backfill_finmind.py` 的等待重試）。
+- **單位**（對既有資料核過）：
+  - 當沖 `Volume`＝**股**、金額＝**元**：2330 @ 2018-01-02 為 758,000 股、買進 175,838,000 元 → 均價 231.98，當日收盤 232.5。
+  - 借券 `TaiwanDailyShortSaleBalances`＝**股**：同一回應的融券餘額 2,161,000 等於 `margin_daily.short_balance`（股）
+    2330 @ 2018-01-02 的 2,161,000；6488 同日 2,905,000 亦相符。**隔壁的 `TaiwanStockMarginPurchaseShortSale` 是張**
+    （`finmind.py` 的 `_LOT_SHARES`）——照抄它的 ×1000 會讓借券大一千倍。
+- **官方公告端點**：大量歷史走 TWSE rwd 會在約 120~390 個請求後被 WAF 封 IP（D-015／D-044），所以兩個日資料走 FinMind；
+  處置／注意的四個端點接受整年區間，一年一個請求、2014~2026 四種共約 52 個，安全。
+
+  | 端點 | 回應的樣子（2018 全年；櫃買注意為 2018-01） |
+  |---|---|
+  | 證交所處置 `rwd/zh/announcement/punish` | 扁平 fields/data；公布日期 `107/11/05`；處置起迄時間 `107/11/06～107/11/19`（**全形**波浪號）；處置措施只有第一次處置／第二次處置／人工管制撮合（87／76／26）；處置內容「約每五分鐘撮合一次」是**中文數字**（五 87、二十 76、二十五 23、十 2、四十五 1） |
+  | 證交所注意 `rwd/zh/announcement/notice` | 扁平；日期 `107.12.28`；款次包在 `<font color='#FF0000'>﹝第九款﹞</font>`；收盤價 `12.60`；本益比可為 `-----` |
+  | 櫃買處置 `www/zh-tw/bulletin/disposal` | `tables[0]`；**佔位列**（代號空白、處置內容「本日無處置資料」，328 列中 135 列）；期間 `107/12/18~107/12/28`（半形）；「(約每10分鐘撮合一次)」是**阿拉伯數字**（5 分 109、20 分 54、45 分 11、10 分 9、25 分 8、60 分 2）；沒有「第幾次」欄；名稱與原因後面接連結尾巴 `(../../mainboard/…)`、`(./attention.html)` |
+  | 櫃買注意 `www/zh-tw/bulletin/attention` | `tables[0]`；公告日期 `107/01/31`；款次 `(第七款)`、`<br>` 分段；本益比可為 `N/A` |
+
+  櫃買端點要帶瀏覽器 headers（`tpex.browser_client`）。四份回應裡同一 (代號, 公告日) 都沒有重複。
+- **處置的查詢是依「處置期間」重疊，不是依公告日**：兩市 2018 的回應各含 5 筆 2017 年底公告、跨年執行的處置
+  ——相鄰兩年會各出現一次，內容相同。
+- **來源的「累計／累計次數」不是這一列的事實**：證交所注意 2018 全年 2,335 列**全部**等於該檔在查詢區間內的列數
+  （含之後才公告的＝前視值）；櫃買的「累計」同一天各檔數字都一樣＝當天公告了幾檔。
+- **兩個修訂時點**（官方附註）：證交所當沖表「T 日、T+1 日、T+2 日各更新一次，最終正確數額以 T+2 日為準」；借券賣出
+  （TWT93U）每晚約 20:30、22:30 各更新一次（第二次補進隔日轉上市的個股）。FinMind 回補拿到的是**最終值**。
+
+#### 二、裁決
+
+| 表 | 欄位（型別、單位） | available_at |
+|---|---|---|
+| `daytrade_daily`（新） | daytrade_shares Int64 ≥0（股）；daytrade_buy_amount、daytrade_sell_amount Float64 ≥0（元）；sell_first_suspended Boolean（FinMind `BuyAfterSale`：''／' ' → False、'Y' → True、其他 raise） | 同日 21:00（比照 margin_daily，D-008） |
+| `sbl_short_daily`（新） | sbl_prev_balance、sbl_sell、sbl_return、sbl_balance Int64 ≥0；sbl_adjust Int64（可負）；sbl_next_quota、sbl_covering Int64 可 null——全部**股** | 同日 21:00 |
+| `disposition_stocks`（SPEC-001 既有定義，從未寫入） | 保留 date（公告日）、stock_id、effective_start、effective_end、available_at；**增** market（'twse'／'tpex'）、level Int64 可 null、match_minutes Int64 可 null、reason String 可 null、measure String 可 null（去 HTML 的處置內容） | 公告日 18:00（SPEC-001） |
+| `attention_stocks`（新） | date（公告日）、stock_id、market、clauses String 可 null（款次遞增逗號串，如 "1,9"）、info String（去 HTML）、close Float64 可 null | 公告日 18:00 |
+
+四張表主鍵都是 `(stock_id, date)`，另建 `date` 索引。規則：
+
+1. **`disposition_stocks` 就地改 v1**：v1 從沒有任何資料寫入，增欄不影響任何讀者，不另開新表名。
+2. **直寫 PG、不寫資料湖**（使用者裁決：資料只在 PG）。四張表放在 `serving/schema.py` 新的 `DIRECT_PG_SPECS`，併入
+   `_ALL_SPECS`（`ensure_schema` 會建），**不放進 `MIRROR_SPECS`**——`serving rebuild` 會 TRUNCATE 鏡射表再從資料湖重灌，
+   而資料湖沒有它們，一次 rebuild 就清空；`rebuild_targets` 對這四張表 raise 並指向回補腳本。寫入走 `serving.sync.upsert`。
+3. **level／minutes**：證交所 第一次處置 → 1、第二次處置 → 2、人工管制撮合 → null（沒有次數，不猜），其他值 raise；
+   櫃買內容含「曾發布處置」→ 2，否則 1。match_minutes 取「每 N 分鐘」的 N，中文（1~99）或阿拉伯數字皆可；沒寫 → null；
+   同一則寫了兩個不同的值 → raise。
+4. **佔位列**：代號空白、且除了編號與日期欄只有一格寫「本日無…資料」→ 略過並計數；其他代號空白的列一律 raise
+   （丟掉它就是丟掉一筆公告）。證交所沒有佔位列。
+5. **範圍**：公告保留**全部有價證券**（權證、ETF、ETN 都留，哪些要用由因子層決定）；FinMind 兩個資料集只抓四碼歷史宇宙
+   （`prices_daily` 2014 起、`^[1-9][0-9]{3}$`、含已下市：2,093 檔）。
+6. **查重**：同一批 (stock_id, date) 內容不同 → raise（`upsert` 的去重只會默默留下最後一列）；內容完全相同 → 合併並回報筆數。
+   跨年重疊的公告與 PG 既有列內容不同 → 停（`--allow-changes` 才覆寫）。回應筆數與證交所 `total`、櫃買「總累計次數」
+   對不上＝被截斷 → raise。
+7. **品質只報不修**：借券恆等式「當日餘額＝前日＋賣出－還券＋調整」（TWT93U 附註）的違反筆數與樣本；當沖買進／賣出
+   均價 ÷ 同日 `prices_daily.close` 的中位數，與落在 [0.8, 1.25] 外的比例（單位錯會差 1,000 倍）。
+8. **失敗的檔寫在哪裡都沒有**：一檔（HTTP、映射、驗證）失敗 → 該檔一列都不寫、記下、繼續，結束時列出並以非零碼結束；
+   連續 10 檔失敗或 402 等超過 2 小時 → 整批停（多半是 token 或額度層級的問題）。已有列的檔預設跳過（可續傳）。
+9. **什麼都不接**：因子、策略、宇宙濾網（`exclude_disposition` 維持未接）、每日 pipeline 都不動。
+
+**AI 依授權補定的細節**（看到資料之後才定的）：
+- **不存「累計次數」**（原設計有 `cum_count`）：§一 的實測顯示它在證交所是前視值、在櫃買是「當天公告幾檔」，都不是這一列的
+  事實（黃金規則 1）。某檔先前被注意過幾次，由因子層經 PitView 自己數。
+- 文字欄做 SPEC-001 §3 的全形 → 半形（NFKC）；`<br>` → 換行，其餘 HTML 標籤與櫃買的連結尾巴去掉。
+- 回補腳本只建這四張表（`schema.ensure_tables`），**不跑**全體 `ensure_schema`：`CREATE INDEX IF NOT EXISTS` 在確認索引
+  存在**之前**就要先拿該表的 ShareLock，另一個 session 正在寫的大表會卡住它、也讓後來的寫入排在它後面。
+- 副作用：`serving seed-cloud` 取 `ALL_TABLES`，會把這四張表全史搬上雲（雲端滾動窗沒有設它們）。雲端自 2026-09-03 改地端後
+  不用；要恢復時再設窗口。
+- 回補日誌寫 `D:/project/twquant/data/logs/chip_batch1_<時間>_<部分>.log`（絕對路徑）。
+
+#### 三、待裁決：當沖修訂值的前視
+
+§一 的官方附註：當沖的 T 日數字到 T+2 日才定案，而 FinMind 回補存的是**最終值**、available_at 設在 T 日 21:00。對因子而言是
+**輕微前視**（T+1 的訊號看到 T+2 才定案的數），修訂幅度未知。
+- A.（目前實作）維持 T 日 21:00；T-310 每天另存首次公布值，累積一段後量修訂幅度，小到可忽略就定案。
+- B. 改成 T+2 日晚間（嚴格，但當沖因子整整晚兩天）。
+
+**建議 A，但任何當沖因子進入研究之前，要先有 T-310 的修訂量測。** 借券的 20:30／22:30 兩次更新都早於隔日 20:00 截點，
+對訊號沒有差別。
+
+#### 四、T-310（每日增量，未做）
+
+接進每日擷取與 `_run_daily_pipeline`（使用者規則：每個新的日資料來源都要接進「一鍵跑今日全部資料」）。八個官方端點：
+證交所當沖 `rwd/zh/dayTrading/TWTB4U?date=YYYYMMDD&selectType=All&response=json`（`tables[0]` 全市場統計、`tables[1]` 個股）、
+證交所借券 `rwd/zh/marginTrading/TWT93U?date=YYYYMMDD&response=json`（扁平；融券與借券兩段同名欄）、櫃買當沖 `intraday/stat`
+（POST 表單 `date=YYYY/MM/DD&type=Daily&response=json`，`tables[1]` 個股）、櫃買借券 `margin/sbl?date=YYYY/MM/DD&response=json`，
+加上本條四個公告端點（單日區間）。一天 8 個請求，遠低於 WAF 門檻。每日路徑讀 PG 一律經 `cli._daily_pg_source`（WHERE ⑭）。
+
 ### D-150（2026-09-23，使用者授權 AI 裁決）ML 選股頁看研究模型：**每日匯出不可變快照**，不從 `ml_scores` 即時讀
 
 使用者：「我要可以根據模型來看不同天的推薦股票」，並交代「兩種做法擇一、規格沒寫就在這裡寫理由」。

@@ -14,13 +14,19 @@
 | shareholding_dispersion | date, stock_id, level | 週 | TDCC opendata | 公布日（週六）12:00 |
 | monthly_revenue | year_month, stock_id | 月 | MOPS | 實際公布日 22:00；未知時取「次月 10 日後第一個營業日 22:00」 |
 | corporate_events | date, stock_id, event_type | 不定 | TWSE/TPEX 公告 | 公告日 18:00 |
-| disposition_stocks | date, stock_id | 日 | TWSE/TPEX 處置公告 | 公告日 18:00，**生效區間另有欄位** |
+| disposition_stocks | date, stock_id | 公告 | TWSE `announcement/punish`／TPEX `bulletin/disposal`（T-309，直寫 PG） | 公告日 18:00，**生效區間另有欄位**；另有 market、level（第幾次；證交所「人工管制撮合」為 null）、match_minutes、reason、measure（D-154） |
+| attention_stocks | date, stock_id | 公告 | TWSE `announcement/notice`／TPEX `bulletin/attention`（T-309，直寫 PG） | 公告日 18:00；款次 clauses、去 HTML 的 info、收盤價；來源的「累計次數」不存（前視，D-154） |
+| daytrade_daily | date, stock_id | 日 | FinMind `TaiwanStockDayTrading`（回補，T-309）；每日增量 T-310 | 同日 21:00（D-008）；股、元；T+2 修訂見 D-154 §三 |
+| sbl_short_daily | date, stock_id | 日 | FinMind `TaiwanDailyShortSaleBalances`（回補，**股**、不 ×1000，T-309）；每日增量 T-310 | 同日 21:00 |
 | taifex_institutional | date, product, side | 日 | TAIFEX | 當日 15:30 |
 | stock_meta | stock_id | 緩變 | TWSE/TPEX isin 清單 | 快照制，含上市日、下市日、產業、market |
 | trading_calendar | date | 年 | 由 prices_daily 推導+人工核對 | — |
 | ingest_log | source, table, date, attempt_ts | 每次抓取 | 系統自產 | — |
 
 - 欄位定義的唯一真相來源是 `src/twquant/data/schemas.py`（T-004 建立）。
+- **直寫 PG 的表**（D-154）：`disposition_stocks`、`attention_stocks`、`daytrade_daily`、`sbl_short_daily` 只存在 PG
+  （`serving/schema.py` 的 `DIRECT_PG_SPECS`），不在資料湖、也不在鏡射清單——`serving rebuild` 不處理它們，
+  重抓用 `scripts/backfill_chip_batch1.py`。
 - `prices_daily` **必含** `limit_up_price`、`limit_down_price`（來源提供則直接用，
   否則清洗層依 §3 檔位表精算填入），供回測漲跌停判定（SPEC-004 §3，REVIEW M21/H1）。
 - `inst_holding`（REVIEW H2）：投信/外資累計持股張數與佔流通股本比。台股無官方
@@ -165,6 +171,28 @@ class PitView:
 - AC-11（log 並行，H21）：兩行程各 append N 筆 research_log 後，總筆數 = 2N
 - AC-12（原子寫，H22/M31）：模擬 write 中途 kill 行程後，倉儲讀取不含殘檔且
   可自動復原；同一 (table, date) write 兩次後讀取內容 == 最後一次
+
+### 第 1 批免費籌碼（T-309／D-154）
+
+測試在 `tests/test_chip_batch1.py`，fixture 是實測回應的裁切（`tests/fixtures/http/chip_batch1/`），不連網。
+
+- AC-309-1（當沖映射）：FinMind `TaiwanStockDayTrading` → `daytrade_daily`：`Volume` 為股、兩個金額為元（2330 @ 2018-01-02
+  均價落在當日收盤附近）；`BuyAfterSale` 只認 ''／' '（False）與 'Y'（True），其他值 raise；缺欄或值為 null raise
+  （不當 0），非整數股數 raise；frame 的 available_at 為同日 21:00 Asia/Taipei
+- AC-309-2（借券映射）：`TaiwanDailyShortSaleBalances` → `sbl_short_daily`，全部為股、**不 ×1000**；五個核心欄缺欄或 null
+  raise，`sbl_next_quota`／`sbl_covering` 值為 null 時留 null、缺欄仍 raise；`sbl_identity_violations` 回傳違反
+  「當日餘額＝前日＋賣出－還券＋調整」的列（真實兩列 0 筆、改一列即回那一列）；sbl_adjust 可負、其他欄負值被 schema 擋
+- AC-309-3（證交所處置）：民國日期 → 西元；全形「～」期間 → (起, 迄)；level 第一次 1／第二次 2／人工管制撮合 null，
+  未知處置措施 raise；中文數字撮合分鐘（五／二十／二十五…，1~99）；沒寫分鐘 → null、兩個不同值 raise；存的文字去 HTML；
+  權證保留；回應 `total` 與列數不符 raise
+- AC-309-4（櫃買處置）：「本日無處置資料」佔位列略過並計數，其他代號空白的列 raise；半形「~」期間；阿拉伯數字分鐘；
+  內容含「曾發布處置」→ level 2，否則 1；原因的連結尾巴 `(./attention.html)` 去掉；「總累計次數」與列數不符 raise
+- AC-309-5（注意股兩市）：`107.12.28` 與 `107/12/28` 兩種日期；款次（`﹝第九款﹞`、`(第七款)`、`<br>` 分段）→ 遞增逗號串
+  如 "1,9"；info 去 HTML（`<font>`、`<br>`）；收盤價 `-----`／`N/A` → null；info 空白 raise；不存「累計次數」
+- AC-309-6（儲存）：四張表的 frame 通過 pandera 驗證、欄位與 schema 同名同序；四張表在 `DIRECT_PG_SPECS`、**不在**
+  `MIRROR_TABLES`、在 `ALL_TABLES`，主鍵 `(stock_id, date)`、有 date 索引，PG 欄位與 pandera 同名同序，
+  `rebuild_targets` 對它們 raise；同批同鍵內容不同 raise、完全相同合併並計數；列的欄位多或少都 raise；
+  PG 往返（`ensure_tables` 只建四張、upsert 兩次列數不變、布林／timestamptz／null 原樣回來）
 
 ## 範圍外
 

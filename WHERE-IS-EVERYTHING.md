@@ -61,6 +61,11 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
 
+- **第 1 批免費籌碼（T-309／D-154，2026-09-25）**：PG `serving.daytrade_daily`（當沖）、`sbl_short_daily`（借券賣出，股）
+  來自 FinMind 免費層；`disposition_stocks`（處置）、`attention_stocks`（注意）來自證交所＋櫃買公告，2014 起、含權證。
+  **直寫 PG、不在鏡射清單**——`serving rebuild` 不會碰它們，重抓用 `scripts/backfill_chip_batch1.py`（`report` 子指令只讀）。
+  **每日增量還沒接（T-310）**，也還沒有任何因子讀它們；當沖數字 T+2 才定案，見 D-154 §三。
+
 **歸檔但刻意保留的**（是證據，不要刪）：
 - `data/ladder/_pre-T142-T149/`、`data/tracks/_pre-T142-T149/` — 舊的 10M 批次，D-070 的證據
 - `data/models/_archive/…__pre-D064-data-defects/` — 汙染資料訓練的舊模型
