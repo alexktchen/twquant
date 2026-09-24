@@ -45,6 +45,10 @@ features:
   - price.vp_poc_dist_60
   - price.vp_support_hold_20
   - price.vp_near_share_60
+# D-151 §十三：與策略宇宙同一把尺（成交額當日前 30%、股價 ≥ 10，沿用 D-143 §五）。
+# 不加的話安靜股 63% 日均成交不到 1,000 萬——模型會學到買不進的冷門股（T-248 的原意）。
+sample_min_adv_pctl: 0.70
+sample_min_price: 10.0
 context_features: [ctx.taiex_ma20_dev, ctx.taiex_vol20, ctx.breadth_ma20]
 sample_state: # 已飆股：過去 20 日還原報酬 ≥ +30%（與 A 的標籤同一把尺）
   kind: hot

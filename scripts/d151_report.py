@@ -41,6 +41,7 @@ from twquant.ml.dataset import (
     assemble,
     attach_adjustment,
     down_probability_labels,
+    liquid_pool,
     state_pool,
     tail_up_labels,
 )
@@ -336,6 +337,15 @@ def vault_scores(
         idx = read_index_close(conn, SCHEMA, "TAIEX", DATA_START, DATA_END)
         ctx = market_state_features(idx, mk.select("date", _S, "close"), window=cfg.context_window)
         frame = frame.join(ctx.select("date", *ctx_cols), on="date", how="left")
+    if cfg.sample_min_adv_pctl is not None or cfg.sample_min_price is not None:
+        # 與訓練同一把尺（cli ml train 的流動性樣本池，D-151 §十三）
+        pool = liquid_pool(
+            px,
+            adv_window=cfg.label.adv_window_sessions,
+            min_adv_pctl=cfg.sample_min_adv_pctl,
+            min_price=cfg.sample_min_price,
+        )
+        frame = frame.join(pool, on=["date", _S], how="inner")
     assert cfg.sample_state is not None
     frame = frame.join(
         state_pool(px, cfg.sample_state, adjusted=True), on=["date", _S], how="inner"
