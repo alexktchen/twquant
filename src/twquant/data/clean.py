@@ -14,7 +14,7 @@ import polars as pl
 
 from twquant.conventions import SHARES_PER_LOT, TZ
 from twquant.data import schemas
-from twquant.errors import DataError
+from twquant.errors import DataError, QualityGateError
 
 
 def _at(date: dt.date, hour: int) -> dt.datetime:
@@ -186,6 +186,81 @@ def clean_tpex_prices(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     out = out.filter(pl.col("stock_id").str.contains(r"^[0-9]{4,6}[A-Z]?$"))
     out = out.drop_nulls(["open", "high", "low", "close", "volume", "amount"])
     return schemas.validate("prices_daily", out)
+
+
+# ── T-313：個股本益比／殖利率／淨值比（證交所 BWIBBU_d、櫃買 peQryDate）────────────────
+# 「不計算」標記：證交所 "-"、櫃買 "N/A"。櫃買附註：「當每股稅後純益為 0 或負數時，則不計算本益比」；
+# 新上市、還沒有財報的股票淨值比也不計算（實測 7835 @ 2026-07-24、6287 @ 2025-06-20）。
+# 存 **0.0**——這是 stock_valuation 既有的慣例，不是新發明：FinMind 全史 477 萬列同樣以 0 表示「不適用」
+# （2026-09-18 兩市 423 個標記與 FinMind 的 0 逐檔對上，D-157），下游 `fundamental._valuation`
+# 以 positive_only 把 ≤0 轉 null、洞悉層把 0 當缺值。只認各市場自己的那一個標記；其他非數字一律 raise。
+_VALUATION_NOT_COMPUTED = 0.0
+_VALUATION_HOUR = 18  # 同 FinMind 歷史（scripts/load_finmind_history_tables.py 的 valuation 規格）
+
+
+def _strict_float(
+    raw: pl.DataFrame, col: str, id_col: str, marker: str | None, date: dt.date
+) -> pl.Series:
+    """字串欄 → Float64：千分位逗號去掉；`marker` → 0.0；其他解析不了或非有限值 → raise（不轉 null）。"""
+    text = raw[col].str.strip_chars().str.replace_all(",", "")
+    parsed = text.cast(pl.Float64, strict=False)
+    if marker is None:
+        marked = pl.repeat(False, raw.height, dtype=pl.Boolean, eager=True)
+    else:
+        marked = (text == marker).fill_null(False)
+    bad = raw.filter((parsed.is_null() | ~parsed.is_finite()).fill_null(True) & ~marked)
+    if bad.height:
+        sample = bad.select(id_col, col).head(5).rows()
+        raise DataError(
+            "stock_valuation",
+            date,
+            f"{col} 有 {bad.height} 列不是數字（只認 {marker!r} 為「不計算」）：{sample}",
+        )
+    return pl.select(
+        pl.when(marked).then(pl.lit(_VALUATION_NOT_COMPUTED)).otherwise(parsed)
+    ).to_series()
+
+
+def _clean_valuation(raw: pl.DataFrame, date: dt.date, id_col: str, marker: str) -> pl.DataFrame:
+    table = "stock_valuation"
+    missing = [c for c in (id_col, "本益比", "股價淨值比", "殖利率(%)") if c not in raw.columns]
+    if missing:
+        raise DataError(table, date, f"回應缺欄位 {missing}（來源改版？）；欄位：{raw.columns}")
+    ids = raw[id_col].str.strip_chars()
+    if ids.is_null().any() or (ids == "").any() or ids.is_duplicated().any():
+        raise DataError(table, date, f"{id_col} 有空白或重複：{ids.filter(ids.is_duplicated())}")
+    # 殖利率是率 → 小數（黃金規則 3）；實測從來沒有「不計算」標記，沒股利是 "0.00"。
+    # 用 Python 真除法：polars 除以純量實作成「乘倒數」（0.94×0.01＝0.0094，0.94÷100＝0.009399999999999999），
+    # 最後一位會與 FinMind 歷史（`finmind.valuation_rows` 的 v / 100.0）不同——同一個數字存成兩個值。
+    pct = _strict_float(raw, "殖利率(%)", id_col, None, date).to_list()
+    out = pl.DataFrame(
+        {
+            "date": pl.repeat(date, raw.height, dtype=pl.Date, eager=True),
+            "stock_id": ids,
+            "per": _strict_float(raw, "本益比", id_col, marker, date),
+            "pbr": _strict_float(raw, "股價淨值比", id_col, marker, date),
+            "dividend_yield": pl.Series([v / 100.0 for v in pct], dtype=pl.Float64),
+            "available_at": pl.repeat(
+                _at(date, _VALUATION_HOUR), raw.height, dtype=schemas.TW_DT, eager=True
+            ),
+        }
+    )
+    # 新表的驗證失敗只算這一張表失敗：run_ingest 只接 DataError，QualityGateError 會讓同一輪
+    # 排在後面的來源（例如櫃買行情）一起沒抓。
+    try:
+        return schemas.validate(table, out)
+    except QualityGateError as exc:
+        raise DataError(table, date, str(exc)) from exc
+
+
+def clean_valuation(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
+    """證交所 BWIBBU_d 原始 → stock_valuation（上市）。本益比／淨值比 "-"＝不計算 → 0.0。"""
+    return _clean_valuation(raw, date, "證券代號", "-")
+
+
+def clean_tpex_valuation(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
+    """櫃買 peQryDate 原始 → stock_valuation（上櫃）。本益比／淨值比 "N/A"＝不計算 → 0.0。"""
+    return _clean_valuation(raw, date, "股票代號", "N/A")
 
 
 def _month_end(year: int, month: int) -> dt.date:
@@ -391,11 +466,13 @@ CLEANERS = {
     "prices_daily": clean_prices,
     "institutional_daily": clean_institutional,
     "margin_daily": clean_margin,
+    "stock_valuation": clean_valuation,
 }
 
 # TPEX 專用清洗（上櫃）
 TPEX_CLEANERS = {
     "prices_daily": clean_tpex_prices,
+    "stock_valuation": clean_tpex_valuation,
 }
 
 # TDCC 專用清洗（集保戶股權分散）

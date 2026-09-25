@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +29,18 @@ class IngestOutcome:
     status: str  # "success" | "failed"
     rows: int
     detail: str
+
+
+def trading_evidence(
+    outcomes: Sequence[IngestOutcome], proves_trading: Mapping[str, bool]
+) -> list[IngestOutcome]:
+    """「這天有交易」的證據：`proves_trading` 為真的來源抓成功的表（T-276／T-310）。
+
+    TWSE 對休市與暫時性失敗回的是同一種 stat != 'OK'；分辨靠「同日有沒有別的表成功」。
+    公告類（處置／注意）休市日也查得到東西，它們的成功不算證據——否則休市日的每一張失敗表
+    都會被當成「這天有交易卻沒抓到」。未知的來源標籤 → KeyError（不猜）。
+    """
+    return [o for o in outcomes if o.status == "success" and proves_trading[o.source_tag]]
 
 
 def run_ingest(

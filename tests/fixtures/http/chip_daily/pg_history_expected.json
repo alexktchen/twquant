@@ -1,0 +1,212 @@
+{
+ "_source": "serving.* @ 2026-09-25（FinMind 回補／載入）；錄一次，測試離線",
+ "daytrade_daily": [
+  {
+   "date": "2026-09-18",
+   "stock_id": "1233",
+   "daytrade_shares": 0,
+   "daytrade_buy_amount": 0.0,
+   "daytrade_sell_amount": 0.0,
+   "sell_first_suspended": false
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1240",
+   "daytrade_shares": 0,
+   "daytrade_buy_amount": 0.0,
+   "daytrade_sell_amount": 0.0,
+   "sell_first_suspended": false
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1439",
+   "daytrade_shares": 0,
+   "daytrade_buy_amount": 0.0,
+   "daytrade_sell_amount": 0.0,
+   "sell_first_suspended": true
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1595",
+   "daytrade_shares": 40000,
+   "daytrade_buy_amount": 2626600.0,
+   "daytrade_sell_amount": 2638500.0,
+   "sell_first_suspended": true
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "2330",
+   "daytrade_shares": 4805000,
+   "daytrade_buy_amount": 11764940000.0,
+   "daytrade_sell_amount": 11794345000.0,
+   "sell_first_suspended": false
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "6488",
+   "daytrade_shares": 8337000,
+   "daytrade_buy_amount": 7710101000.0,
+   "daytrade_sell_amount": 7749321000.0,
+   "sell_first_suspended": false
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "9103",
+   "daytrade_shares": 57000,
+   "daytrade_buy_amount": 283310.0,
+   "daytrade_sell_amount": 283990.0,
+   "sell_first_suspended": false
+  }
+ ],
+ "sbl_short_daily": [
+  {
+   "date": "2026-09-18",
+   "stock_id": "1213",
+   "sbl_prev_balance": 0,
+   "sbl_sell": 0,
+   "sbl_return": 0,
+   "sbl_adjust": 0,
+   "sbl_balance": 0,
+   "sbl_next_quota": 0,
+   "sbl_covering": 0
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1799",
+   "sbl_prev_balance": 0,
+   "sbl_sell": 0,
+   "sbl_return": 0,
+   "sbl_adjust": 0,
+   "sbl_balance": 0,
+   "sbl_next_quota": 0,
+   "sbl_covering": 0
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "2330",
+   "sbl_prev_balance": 15738514,
+   "sbl_sell": 131000,
+   "sbl_return": 197000,
+   "sbl_adjust": 0,
+   "sbl_balance": 15672514,
+   "sbl_next_quota": 6293132,
+   "sbl_covering": 0
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "2887",
+   "sbl_prev_balance": 461300902,
+   "sbl_sell": 17696000,
+   "sbl_return": 5659050,
+   "sbl_adjust": 0,
+   "sbl_balance": 473337852,
+   "sbl_next_quota": 18862140,
+   "sbl_covering": 0
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "5904",
+   "sbl_prev_balance": 28895000,
+   "sbl_sell": 2381000,
+   "sbl_return": 249000,
+   "sbl_adjust": 0,
+   "sbl_balance": 31027000,
+   "sbl_next_quota": 3532923,
+   "sbl_covering": 0
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "6488",
+   "sbl_prev_balance": 29069000,
+   "sbl_sell": 2544000,
+   "sbl_return": 16000,
+   "sbl_adjust": 0,
+   "sbl_balance": 31597000,
+   "sbl_next_quota": 2875598,
+   "sbl_covering": 0
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "9103",
+   "sbl_prev_balance": 3633000,
+   "sbl_sell": 0,
+   "sbl_return": 1000,
+   "sbl_adjust": 0,
+   "sbl_balance": 3632000,
+   "sbl_next_quota": 176439,
+   "sbl_covering": 0
+  }
+ ],
+ "stock_valuation": [
+  {
+   "date": "2026-09-18",
+   "stock_id": "1101",
+   "per": 0.0,
+   "pbr": 0.79,
+   "dividend_yield": 0.0329
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1102",
+   "per": 9.71,
+   "pbr": 0.68,
+   "dividend_yield": 0.0654
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1240",
+   "per": 10.33,
+   "pbr": 1.64,
+   "dividend_yield": 0.009000000000000001
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "1595",
+   "per": 0.0,
+   "pbr": 1.35,
+   "dividend_yield": 0.0070999999999999995
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "2330",
+   "per": 28.52,
+   "pbr": 9.92,
+   "dividend_yield": 0.0089
+  },
+  {
+   "date": "2026-09-18",
+   "stock_id": "6488",
+   "per": 45.83,
+   "pbr": 4.67,
+   "dividend_yield": 0.008199999999999999
+  },
+  {
+   "date": "2026-07-24",
+   "stock_id": "2330",
+   "per": 31.59,
+   "pbr": 10.34,
+   "dividend_yield": 0.009399999999999999
+  },
+  {
+   "date": "2026-07-24",
+   "stock_id": "7835",
+   "per": 0.0,
+   "pbr": 0.0,
+   "dividend_yield": 0.0
+  },
+  {
+   "date": "2025-06-20",
+   "stock_id": "6287",
+   "per": 0.0,
+   "pbr": 0.0,
+   "dividend_yield": 0.0
+  },
+  {
+   "date": "2025-06-20",
+   "stock_id": "6488",
+   "per": 17.66,
+   "pbr": 1.5,
+   "dividend_yield": 0.0383
+  }
+ ]
+}

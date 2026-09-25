@@ -40,11 +40,12 @@ import polars as pl
 from twquant.conventions import TZ
 from twquant.data import schemas
 from twquant.data.http import HttpClient
-from twquant.errors import DataError
+from twquant.errors import DataError, QualityGateError
 
 MARKETS = ("twse", "tpex")
 KINDS = ("disposition", "attention")
 TABLE_OF_KIND = {"disposition": "disposition_stocks", "attention": "attention_stocks"}
+KIND_OF_TABLE = {table: kind for kind, table in TABLE_OF_KIND.items()}
 
 _ENDPOINTS = {
     ("twse", "disposition"): "https://www.twse.com.tw/rwd/zh/announcement/punish",
@@ -564,6 +565,65 @@ def fetch_alerts(
     if not isinstance(payload, dict):
         raise DataError(table, end, f"{market} {kind} 回應 JSON 不是物件：{type(payload).__name__}")
     return payload
+
+
+# ── 每日增量（T-310）：一天一市場一種一個請求，查一個窗 ─────────────────────────────
+
+
+def alert_window(
+    kind: str, day: dt.date, lookback_days: int, lookahead_days: int
+) -> tuple[dt.date, dt.date]:
+    """每日查詢窗 (起, 迄)，兩端都含。
+
+    - 注意：依**公告日**查 → [day − lookback, day]。
+    - 處置：依**處置期間**與區間重疊查（D-154 §一），而當天公告的處置從下一個交易日才開始——
+      查 [day, day] 抓不到當天的公告（實測 2026-09-24：證交所 3443、櫃買 6 則都要迄日往後才出現）。
+      故 [day − lookback, day + lookahead]；窗內早就存過的列 upsert 冪等。
+
+    lookback 讓漏跑的日子下次補到（排程停擺幾天也不必有人記得回補）。
+    """
+    if kind not in KINDS:
+        raise ValueError(f"未知的 kind：{kind!r}")
+    start = day - dt.timedelta(days=lookback_days)
+    end = day + dt.timedelta(days=lookahead_days) if kind == "disposition" else day
+    return start, end
+
+
+@dataclass(frozen=True)
+class AlertSource:
+    """處置／注意公告的 SourcePort（直寫 PG）：load(table, day)＝抓 `alert_window` 那個窗、解析、驗證。
+
+    回傳的列公告日可以不是 day（窗內每一天、以及處置期間跨過窗的舊公告）；公告日 18:00 為 available_at。
+    """
+
+    market: str
+    client: HttpClient
+    lookback_days: int
+    lookahead_days: int
+
+    @property
+    def name(self) -> str:
+        """來源標籤。"""
+        return f"{self.market}_alerts"
+
+    @property
+    def tables(self) -> list[str]:
+        """供應的表。"""
+        return list(KIND_OF_TABLE)
+
+    def load(self, table: str, period: dt.date) -> pl.DataFrame:
+        """抓 period 的查詢窗 → 驗證過的 frame；任何資料問題都是 DataError（只算這張表失敗）。"""
+        kind = KIND_OF_TABLE.get(table)
+        if kind is None:
+            raise DataError(table, period, f"{self.name} 不供應 {table}")
+        start, end = alert_window(kind, period, self.lookback_days, self.lookahead_days)
+        payload = fetch_alerts(self.client, self.market, kind, start, end)
+        parsed = parse_alerts(self.market, kind, payload)
+        try:
+            df, _dups = build_frame(table, parsed.rows)
+        except QualityGateError as exc:
+            raise DataError(table, period, f"{self.market}：{exc}") from exc
+        return df
 
 
 # ── 第 1 批四張表的 frame builder ─────────────────────────────────────────────

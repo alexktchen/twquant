@@ -16,8 +16,9 @@
 | corporate_events | date, stock_id, event_type | 不定 | TWSE/TPEX 公告 | 公告日 18:00 |
 | disposition_stocks | date, stock_id | 公告 | TWSE `announcement/punish`／TPEX `bulletin/disposal`（T-309，直寫 PG） | 公告日 18:00，**生效區間另有欄位**；另有 market、level（第幾次；證交所「人工管制撮合」為 null）、match_minutes、reason、measure（D-154） |
 | attention_stocks | date, stock_id | 公告 | TWSE `announcement/notice`／TPEX `bulletin/attention`（T-309，直寫 PG） | 公告日 18:00；款次 clauses、去 HTML 的 info、收盤價；來源的「累計次數」不存（前視，D-154） |
-| daytrade_daily | date, stock_id | 日 | FinMind `TaiwanStockDayTrading`（回補，T-309）；每日增量 T-310 | 同日 21:00（D-008）；股、元；T+2 修訂見 D-154 §三 |
-| sbl_short_daily | date, stock_id | 日 | FinMind `TaiwanDailyShortSaleBalances`（回補，**股**、不 ×1000，T-309）；每日增量 T-310 | 同日 21:00 |
+| daytrade_daily | date, stock_id | 日 | FinMind `TaiwanStockDayTrading`（回補，T-309）；每日：證交所 `TWTB4U`、櫃買 `intraday/stat`（T-310，直寫 PG） | 同日 21:00（D-008）；股、元；每日 pipeline 抓前 1~3 個交易日並覆寫（T+2 定案），首次值另存 `daytrade_first_pub`（D-154 §三、D-157） |
+| sbl_short_daily | date, stock_id | 日 | FinMind `TaiwanDailyShortSaleBalances`（回補，**股**、不 ×1000，T-309）；每日：證交所 `TWT93U`、櫃買 `margin/sbl`（T-310） | 同日 21:00；每日 pipeline 抓前 1 個交易日（22:30 更新後才完整）；官方無 `sbl_covering` → null（FinMind 全史補 0，D-157） |
+| stock_valuation | date, stock_id | 日 | FinMind `TaiwanStockPER`（歷史，至 2026-09-18）；每日：證交所 `BWIBBU_d`、櫃買 `peQryDate`（T-313，資料湖 → 供應層鏡射） | 同日 18:00；殖利率存小數；本益比／淨值比「不計算」（`-`／`N/A`）存 0.0（既有慣例，D-157） |
 | taifex_institutional | date, product, side | 日 | TAIFEX | 當日 15:30 |
 | stock_meta | stock_id | 緩變 | TWSE/TPEX isin 清單 | 快照制，含上市日、下市日、產業、market |
 | trading_calendar | date | 年 | 由 prices_daily 推導+人工核對 | — |
@@ -26,7 +27,10 @@
 - 欄位定義的唯一真相來源是 `src/twquant/data/schemas.py`（T-004 建立）。
 - **直寫 PG 的表**（D-154）：`disposition_stocks`、`attention_stocks`、`daytrade_daily`、`sbl_short_daily` 只存在 PG
   （`serving/schema.py` 的 `DIRECT_PG_SPECS`），不在資料湖、也不在鏡射清單——`serving rebuild` 不處理它們，
-  重抓用 `scripts/backfill_chip_batch1.py`。
+  歷史重抓用 `scripts/backfill_chip_batch1.py`。**每日增量（T-310）**：每日 pipeline 的「籌碼」步驟（`cli._run_chip_day`，
+  也可單獨 `twquant chip-daily`）經來源註冊表（`twse_chip`／`tpex_chip`／`twse_alerts`／`tpex_alerts`，`store="pg"`）與
+  `run_ingest`，sink 換成 `serving.direct_ingest.PgDirectSink`；另有簿記表 `daytrade_first_pub`（當沖首次值，量 T+2 修訂）。
+  `ingest --tables <這幾張>` 可手動抓單日；`backfill` 預設不碰它們。
 - `prices_daily` **必含** `limit_up_price`、`limit_down_price`（來源提供則直接用，
   否則清洗層依 §3 檔位表精算填入），供回測漲跌停判定（SPEC-004 §3，REVIEW M21/H1）。
 - `inst_holding`（REVIEW H2）：投信/外資累計持股張數與佔流通股本比。台股無官方
@@ -196,6 +200,36 @@ class PitView:
   `MIRROR_TABLES`、在 `ALL_TABLES`，主鍵 `(stock_id, date)`、有 date 索引，PG 欄位與 pandera 同名同序，
   `rebuild_targets` 對它們 raise；同批同鍵內容不同 raise、完全相同合併並計數；列的欄位多或少都 raise；
   PG 往返（`ensure_tables` 只建四張、upsert 兩次列數不變、布林／timestamptz／null 原樣回來）
+
+### 官方每日增量（T-310）與估值每日來源（T-313）
+
+測試在 `tests/test_chip_daily.py`；fixture `tests/fixtures/http/chip_daily/` 是 2026-09-25 實測回應的裁切，
+`pg_history_expected.json` 是同一 (日, 檔) 在 PG 的 FinMind 歷史值（錄一次，不連網）。細節與實測見 D-157。
+
+- AC-310-1（當沖官方映射）：證交所 `TWTB4U`（tables 中含「證券代號」那張）與櫃買 `intraday/stat`（GET、`type=Daily`）→
+  `daytrade_daily`，與 FinMind 歷史同 (日, 檔) **逐欄相等**；宇宙外（ETF、0050、六碼 TDR）不收；旗標只認證交所 `Y`／櫃買 `＊`／空白；
+  股數非整數 raise（不當 0）；休市（stat OK＋空表）raise；回應日期 ≠ 要求 raise；筆數（total／totalCount）不符 raise；
+  欄位改了 raise；WAF 頁 raise；available_at 同日 21:00
+- AC-310-2（借券官方映射）：證交所 `TWT93U`（扁平）與櫃買 `margin/sbl` → 借券賣出六欄（第 8~13 欄，股）與 FinMind 逐位相等；
+  `sbl_covering` null（官方沒有這一欄）；調整可負；與融券同名的欄靠位置 → 整列欄名逐字核對、證交所欄組核對；
+  證交所最後的「合計」列略過，其他代號空白的列 raise
+- AC-310-3（公告每日查詢窗）：注意 [d−lookback, d]、處置 [d−lookback, d+lookahead]；只查 [d, d] 抓不到 d 當天公告的處置
+  （2026-09-24 的 3443），往後推的窗抓得到
+- AC-310-4（註冊與休市）：四個直寫來源 `store="pg"`、合起來涵蓋 `DIRECT_PG_TABLES`；公告 `proves_trading=False`——
+  「行情全失敗、公告成功」不算有交易（`orchestrator.trading_evidence`）；非直寫表進 `PgDirectSink` raise
+- AC-310-5（每日補抓計畫，`direct_ingest.plan_from`）：當天不抓；當沖前第 1／2／3 個交易日（第 1 次存首次值，只在 live＝這一輪就是今天；
+  重跑過去的日子不存）、借券前第 1 個；
+  最近 `catchup_trading_days` 個交易日裡某市場 0 列 → 缺日補抓（不存首次值）；`system.yaml` 與 pydantic 預設相同、壞設定 raise
+- AC-310-6（PG 往返，scratch schema）：首次值先到先存、重抓只改 `daytrade_daily`，`daytrade_revision` 報對幾檔改過與股數差；
+  重抓少一檔不刪、記 note；公告內容變了 raise 且一列不寫（連線 rollback 後仍可用）；計畫從 PG 讀交易日與各市場列數。
+  修訂量測查詢：`SELECT f.date, count(*), count(*) FILTER (WHERE f.daytrade_shares <> d.daytrade_shares) FROM serving.daytrade_first_pub f
+  JOIN serving.daytrade_daily d USING (stock_id, date) GROUP BY 1 ORDER BY 1`
+- AC-310-7（限流）：同一交易所的多個 client 共用一個滑動窗（`http.shared_limiter`）
+- AC-313-1（估值官方映射）：證交所 `BWIBBU_d`、櫃買 `peQryDate` → `stock_valuation` 的 per／pbr／殖利率（÷100，Python 真除法）
+  與 FinMind **逐位相等、無容忍度**；本益比、淨值比的「不計算」標記（證交所 `-`、櫃買 `N/A`）→ 0.0；其他非數字（含對方市場的標記、
+  殖利率的 `-`）raise；代號重複 raise；available_at 同日 18:00
+- AC-313-2（接進每日擷取）：`twse`／`tpex` 兩個既有每日來源多供應 `stock_valuation`（資料湖 → 供應層步驟鏡射同步進 PG）；
+  休市日兩個端點都 raise（T-276 才判得出休市）
 
 ## 範圍外
 
