@@ -29,7 +29,7 @@ from twquant.ml.context import market_state_features
 from twquant.ml.dataset import liquid_pool, state_pool
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from d151_report import DATA_START, SCHEMA, load_market
+from d151_report import DATA_START, SCHEMA
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CFG = ROOT / "configs" / "ml_quiet_a20.yaml"
@@ -39,6 +39,30 @@ LOOKBACK_NEW = 20  # 「新」＝過去 20 個交易日沒進過前 15（第十�
 H = 20  # 漲跌窗：隔日開盤進場 → 第 20 個交易日收盤（同 d151_report 的 fwd20）
 HOLDOUT_START = dt.date(2026, 9, 9)  # 第二保留期起日：任何報酬計算都不得用到這天以後的價格
 _S = "stock_id"
+
+
+def _load_px(conn: psycopg.Connection, end: dt.date) -> pl.DataFrame:
+    """四碼股還原行情到 `end`（打分用；`load_market` 為了第十二輪報告寫死只到 08-31，這裡要到最新）。
+
+    列名單不算任何報酬，讀到第二保留期的價格是被允許的（D-148 禁的是績效統計）；報酬另由 `_outcomes` 把關。
+    """
+    from twquant.data.serving.ml_store import read_corporate_events
+    from twquant.ml.dataset import attach_adjustment
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""select date, stock_id, open, close, amount from "{SCHEMA}".prices_daily
+                where date between %s and %s and stock_id ~ '^[1-9][0-9]{{3}}$' and close > 0""",
+            (end - dt.timedelta(days=500), end),
+        )
+        rows = cur.fetchall()
+    px = pl.DataFrame(
+        rows, schema=["date", _S, "open", "close", "amount"], orient="row"
+    ).with_columns(
+        pl.col("date").cast(pl.Date),
+        *(pl.col(c).cast(pl.Float64) for c in ("open", "close", "amount")),
+    )
+    return attach_adjustment(px, read_corporate_events(conn, SCHEMA, end)).sort(_S, "date")
 
 
 def _outcomes(conn: psycopg.Connection, days: list[dt.date]) -> pl.DataFrame:
@@ -97,7 +121,7 @@ def main() -> None:
     ctx_cols = [f for f in features if f.startswith("ctx.")]
     booster = lgb.Booster(model_file=str(MODEL / "model.txt"))
     with psycopg.connect(os.environ["TWQUANT_PG_DSN"]) as conn:
-        mk = load_market(conn).filter(pl.col("date") <= end)
+        mk = _load_px(conn, end)
         days = sorted(mk["date"].unique().to_list())
         lo = days[-(args.show + LOOKBACK_NEW + 5)]
         feats = read_factor_frames(conn, SCHEMA, factor_feats, lo, end)
