@@ -52,6 +52,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from twquant.config import ServingConfig, SourceRate
 from twquant.conventions import now_tw
 from twquant.data.http import HttpClient
+from twquant.data.serving import direct_ingest
 from twquant.data.serving import schema as sch
 from twquant.data.serving import store
 from twquant.data.serving.sync import upsert
@@ -124,28 +125,6 @@ def _parse_stocks(text: str) -> list[str]:
 # ── 公告（處置／注意）────────────────────────────────────────────────────────
 
 
-def _changed_vs_pg(conn: Any, schema: str, spec: sch.TableSpec, df: pl.DataFrame) -> pl.DataFrame:
-    """回傳 df 中「PG 已有同鍵、但內容不同」的列（新舊值並列）。available_at 由日期推得，不比。"""
-    keys = list(spec.pk)
-    values = [c for c in spec.column_names if c not in spec.pk and c != "available_at"]
-    if df.is_empty():
-        return pl.DataFrame()
-    cols = [*keys, *values]
-    select = ", ".join(f't."{c}"' for c in cols)
-    with conn.cursor() as cur:
-        cur.execute(
-            f'SELECT {select} FROM "{schema}"."{spec.name}" t '
-            "JOIN unnest(%s::text[], %s::date[]) AS k(stock_id, date) "
-            "ON t.stock_id = k.stock_id AND t.date = k.date",
-            (df["stock_id"].to_list(), df["date"].to_list()),
-        )
-        rows = cur.fetchall()
-    old = pl.DataFrame(rows, schema={c: df.schema[c] for c in cols}, orient="row")
-    joined = df.select(cols).join(old, on=keys, how="inner", suffix="_pg")
-    differs = pl.any_horizontal([~pl.col(c).eq_missing(pl.col(f"{c}_pg")) for c in values])
-    return joined.filter(differs)
-
-
 def _existing_keys(conn: Any, schema: str, table: str, df: pl.DataFrame) -> int:
     if df.is_empty():
         return 0
@@ -216,7 +195,8 @@ def cmd_alerts(args: argparse.Namespace) -> int:
                 status = 2
                 break
             existing = _existing_keys(conn, cfg.pg_schema, table, df)
-            changed = _changed_vs_pg(conn, cfg.pg_schema, spec, df)
+            with conn.cursor() as cur:
+                changed = direct_ingest.changed_rows(cur, cfg.pg_schema, spec, df)
             if changed.height:
                 log(f"{year}：{changed.height} 列與 PG 既有同鍵列內容不同，例：")
                 for row in changed.head(5).iter_rows(named=True):

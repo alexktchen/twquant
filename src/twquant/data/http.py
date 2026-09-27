@@ -90,11 +90,32 @@ class SlidingWindowLimiter:
                 self._clock.sleep(max(wait, 0.0))
 
 
+_SHARED_LIMITERS: dict[tuple[str, int, float], SlidingWindowLimiter] = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def shared_limiter(source: str, rate: SourceRate) -> SlidingWindowLimiter:
+    """同一行程內、同一來源共用的限流器（真實時鐘）。
+
+    SPEC-001 §7.7：限流器狀態要跨呼叫共享。每日擷取對同一個交易所會建好幾個 HttpClient
+    （行情、估值、當沖／借券、公告各一個來源，T-310 的補抓還會逐日再建），各自一個限流器
+    就等於沒有限流——證交所 5 秒 3 次的窗會被好幾個 client 一起灌爆。
+    """
+    key = (source, rate.max_requests, rate.per_seconds)
+    with _SHARED_LOCK:
+        limiter = _SHARED_LIMITERS.get(key)
+        if limiter is None:
+            limiter = SlidingWindowLimiter(rate.max_requests, rate.per_seconds, SystemClock())
+            _SHARED_LIMITERS[key] = limiter
+        return limiter
+
+
 @dataclass
 class HttpClient:
     """單一來源的 HTTP 客戶端：限流 + 指數退避重試。
 
     transport 可注入以離線測試；預設在首次使用時建立 requests.Session。
+    limiter 給定時共用該限流器（`shared_limiter`），否則自建一個。
     """
 
     source: str
@@ -106,10 +127,13 @@ class HttpClient:
     max_retries: int = 3
     base_delay: float = 1.0
     timeout: float = 20.0
+    limiter: SlidingWindowLimiter | None = None
 
     def __post_init__(self) -> None:
-        self._limiter = SlidingWindowLimiter(
-            self.rate.max_requests, self.rate.per_seconds, self.clock
+        self._limiter = (
+            self.limiter
+            if self.limiter is not None
+            else SlidingWindowLimiter(self.rate.max_requests, self.rate.per_seconds, self.clock)
         )
         self._transport_lock = threading.Lock()  # 多執行緒下只建一次共用 Session
 

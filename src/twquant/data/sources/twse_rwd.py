@@ -1,4 +1,5 @@
-"""TWSE rwd 轉接器（SPEC-001）：日 K（MI_INDEX）、三大法人（T86）、融資融券（MI_MARGN）。
+"""TWSE rwd 轉接器（SPEC-001）：日 K（MI_INDEX）、三大法人（T86）、融資融券（MI_MARGN）、
+個股本益比／殖利率／淨值比（BWIBBU_d，T-313）。
 
 回傳原始中文欄名的 polars DataFrame（全 Utf8，未轉型/未換單位）。TWSE 部分端點把
 資料包在 tables[] 內（一個 response 多張表），本轉接器以「欄位含股票代號欄」挑出
@@ -37,6 +38,10 @@ _ENDPOINTS: dict[str, _Endpoint] = {
     ),
     "margin_daily": _Endpoint(
         "marginTrading/MI_MARGN", {"selectType": "ALL", "response": "json"}, "代號"
+    ),
+    # T-313：扁平 fields/data，全上市普通股一個請求（2026-09-18：1,078 列）
+    "stock_valuation": _Endpoint(
+        "afterTrading/BWIBBU_d", {"selectType": "ALL", "response": "json"}, "證券代號"
     ),
 }
 
