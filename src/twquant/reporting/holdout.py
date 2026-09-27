@@ -26,17 +26,27 @@ from twquant.config import BaseConfig
 _INERT_EXTENSIONS: tuple[tuple[tuple[str, ...], object], ...] = (
     (("slots", "conditional_vol"), None),  # D-149 F1／F2
     (("slots", "inverse_vol"), None),  # D-149 F3
+    (("exit_rules", "*", "mult"), None),  # D-159：bb_lower_stop／atr_trailing 的倍數
 )
 
 
 def _strip_inert(payload: dict[str, Any]) -> dict[str, Any]:
     for path, default in _INERT_EXTENSIONS:
-        node: Any = payload
-        for key in path[:-1]:
-            node = node.get(key) if isinstance(node, dict) else None
-        if isinstance(node, dict) and path[-1] in node and node[path[-1]] == default:
-            del node[path[-1]]
+        _strip_path(payload, path, default)
     return payload
+
+
+def _strip_path(node: Any, path: tuple[str, ...], default: object) -> None:
+    """沿路徑刪掉等於預設的鍵；`*` 表示清單的每一個元素（例如每一條出場規則）。"""
+    key, rest = path[0], path[1:]
+    if key == "*":
+        for item in node if isinstance(node, list) else ():
+            _strip_path(item, rest, default)
+    elif not rest:
+        if isinstance(node, dict) and key in node and node[key] == default:
+            del node[key]
+    elif isinstance(node, dict):
+        _strip_path(node.get(key), rest, default)
 
 
 def config_fingerprint(model: BaseModel) -> str:

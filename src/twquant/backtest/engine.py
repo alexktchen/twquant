@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, limit_down_proxy, limit_up_proxy, trade_cost
-from twquant.backtest.exits import HeldPosition, entry_blocked, exit_reasons, ma_column
+from twquant.backtest.exits import (
+    HeldPosition,
+    atr_column,
+    entry_blocked,
+    exit_reasons,
+    ma_column,
+    sd_column,
+)
 from twquant.backtest.exposure import (
     EntrySize,
     ExposureDay,
@@ -182,12 +189,31 @@ def _plan_trims(
 
 
 def _price_panel(
-    wh: TableSource, start: dt.date, end: dt.date, ma_windows: tuple[int, ...] = ()
+    wh: TableSource,
+    start: dt.date,
+    end: dt.date,
+    ma_windows: tuple[int, ...] = (),
+    sd_windows: tuple[int, ...] = (),
+    atr_windows: tuple[int, ...] = (),
 ) -> dict[dt.date, dict[str, _Row]]:
     """載入 [start,end] 的日行情，附前收與 20 日 ADV，組成 {date: {stock_id: row}}。"""
+    prev = pl.col("close").shift(1).over("stock_id")
+    tr = pl.max_horizontal(
+        pl.col("high") - pl.col("low"), (pl.col("high") - prev).abs(), (pl.col("low") - prev).abs()
+    )
     lf = (
         wh.scan("prices_daily")
-        .select("date", "stock_id", "open", "close", "amount", "limit_up_price", "limit_down_price")
+        .select(
+            "date",
+            "stock_id",
+            "open",
+            "high",
+            "low",
+            "close",
+            "amount",
+            "limit_up_price",
+            "limit_down_price",
+        )
         .sort(["stock_id", "date"])
         .with_columns(
             _prev_close=pl.col("close").shift(1).over("stock_id", order_by="date"),
@@ -195,6 +221,18 @@ def _price_panel(
             # T-231：均線用**未還原**收盤（含當日）——與看盤軟體上的均線同一條；
             # 除息日的跳空因此可能觸發跌破，這是規則本身的性質，不在此修飾。
             **{ma_column(w): pl.col("close").rolling_mean(w).over("stock_id") for w in ma_windows},
+            # D-159 布林下軌：母體標準差（ddof=0），與看盤軟體同一條；同樣用未還原收盤
+            **{
+                sd_column(w): pl.col("close").rolling_std(w, ddof=0).over("stock_id")
+                for w in sd_windows
+            },
+            # D-159 ATR：與 `price.atr_14` 同一公式（Wilder 平滑、未滿 window 筆回 null），但不除以收盤
+            **{
+                atr_column(w): pl.when(pl.int_range(pl.len()).over("stock_id") >= w).then(
+                    tr.ewm_mean(alpha=1.0 / w, ignore_nulls=True).over("stock_id")
+                )
+                for w in atr_windows
+            },
         )
         .filter((pl.col("date") >= start) & (pl.col("date") <= end))
     )
@@ -588,7 +626,13 @@ def run_backtest(
             }
         )
     )
-    by_date = _price_panel(warehouse, start, end, ma_windows)
+    sd_windows = tuple(
+        sorted({int(r.window) for r in exit_rules if r.kind == "bb_lower_stop" and r.window})
+    )
+    atr_windows = tuple(
+        sorted({int(r.window) for r in exit_rules if r.kind == "atr_trailing" and r.window})
+    )
+    by_date = _price_panel(warehouse, start, end, ma_windows, sd_windows, atr_windows)
 
     if lot_size < 1:
         raise ValueError(f"lot_size 須 ≥ 1 股，收到 {lot_size}")

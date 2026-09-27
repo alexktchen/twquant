@@ -36,10 +36,22 @@ def ma_column(window: int) -> str:
     return f"_ma{window}"
 
 
+def sd_column(window: int) -> str:
+    """價格面板裡 N 日收盤母體標準差欄位的名字（布林通道用，D-159）。"""
+    return f"_sd{window}"
+
+
+def atr_column(window: int) -> str:
+    """價格面板裡 Wilder ATR 欄位的名字（atr_trailing 用，D-159）。"""
+    return f"_atr{window}"
+
+
 def rule_label(rule: ExitRuleConfig) -> str:
     """寫進成交紀錄的出場原因。"""
-    if rule.kind in ("below_ma", "trailing_ma"):
+    if rule.kind in ("below_ma", "trailing_ma", "ma_lock"):
         return f"{rule.kind}_{rule.window}"
+    if rule.kind in ("bb_lower_stop", "atr_trailing"):
+        return f"{rule.kind}_{rule.window}x{rule.mult}"
     if rule.kind == "trailing_pct":
         return f"trailing_pct_{rule.pct}"
     if rule.kind == "score_below":
@@ -111,12 +123,41 @@ def exit_reasons(
                 )
                 armed = peak >= _req(rule.min_peak_gain)  # 曾經漲到過門檻才上膛
                 hit = armed and ma is not None and float(close) < float(ma)
+            elif rule.kind == "bb_lower_stop":
+                ma = day_px[sid].get(ma_column(int(_req(rule.window))))
+                sd = day_px[sid].get(sd_column(int(_req(rule.window))))
+                hit = (
+                    ma is not None
+                    and sd is not None
+                    and float(close) < float(ma) - _req(rule.mult) * float(sd)
+                )
+            elif rule.kind in ("atr_trailing", "ma_lock"):
+                # D-159：停利線只在高於本輪均價時生效——那時它鎖的是利潤；
+                # 低於均價的那一段交給停損規則，兩條各管一邊。股利攤回同 trailing_pct。
+                pos = held[sid]
+                line = _lock_line(rule, pos, day_px[sid])
+                if line is None or pos.avg_cost <= 0.0:
+                    continue
+                armed = line + pos.dividends_per_share > pos.avg_cost
+                hit = armed and float(close) < line
             else:
                 score = scores.get(sid)
                 hit = score is not None and score < _req(rule.threshold)
             if hit:
                 out[sid] = rule_label(rule)
     return out
+
+
+def _lock_line(rule: ExitRuleConfig, pos: HeldPosition, row: Mapping[str, Any]) -> float | None:
+    """atr_trailing：持有期最高收盤 − mult × ATR；ma_lock：均線。缺值（窗未滿、還沒高點）→ None。"""
+    window = int(_req(rule.window))
+    if rule.kind == "ma_lock":
+        ma = row.get(ma_column(window))
+        return None if ma is None else float(ma)
+    atr = row.get(atr_column(window))
+    if atr is None or pos.peak_close <= 0.0:
+        return None
+    return pos.peak_close - _req(rule.mult) * float(atr)
 
 
 def _req(value: float | int | None) -> float:

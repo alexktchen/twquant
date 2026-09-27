@@ -1,0 +1,27 @@
+# D-159 第十五輪 T-MA：下軌停損＋20 日均線鎖利（最長 120 個交易日）。**RESEARCH ONLY，未經部署裁決，勿用於實盤。**
+# 與 quiet_s0 只差 exit_rules（tests/test_exit_d159_configs.py 守著）：進場逐字相同。
+# 引擎用未還原價，除息跳空可能誤觸下軌；逐筆判定以 scripts/d159_trailing_exits.py 的還原價為準。
+name: quiet_t_ma
+description: 第十五輪 T-MA：下軌停損＋20 日均線鎖利
+trial_scope: tail:quiet_a20_trailing
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+slots:
+  n: 15
+  entry_threshold: 0.0
+exit_rules:
+  - kind: bb_lower_stop
+    window: 20
+    mult: 2.0
+  - kind: ma_lock
+    window: 20
+  - kind: time_stop
+    sessions: 120
