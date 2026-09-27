@@ -1,0 +1,22 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "stock_id": "6488",
+   "date": "2016-04-15",
+   "BuyAfterSale": "",
+   "Volume": 16000,
+   "BuyAmount": 1164500,
+   "SellAmount": 1169800
+  },
+  {
+   "stock_id": "6488",
+   "date": "2016-04-18",
+   "BuyAfterSale": "＊",
+   "Volume": 23000,
+   "BuyAmount": 1698000,
+   "SellAmount": 1702900
+  }
+ ]
+}

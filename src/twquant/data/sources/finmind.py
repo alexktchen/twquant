@@ -13,8 +13,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
+
+import polars as pl
 
 from twquant.conventions import TZ
 from twquant.errors import DataError
@@ -504,3 +507,135 @@ def split_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda r: (r["date"], r["stock_id"]))
     return out
+
+
+# ── 第 1 批免費籌碼：當沖、借券賣出（T-309／D-154）─────────────────────────────
+# 兩個資料集免費註冊層都拿得到（上市＋上櫃、一檔一請求回全期）；當沖自 2014-01-06 起。
+DAYTRADE_DATASET = "TaiwanStockDayTrading"
+SBL_DATASET = "TaiwanDailyShortSaleBalances"
+
+# 當沖：Volume 是**股**、兩個金額是**元**。實測 2330 @ 2018-01-02：758,000 股、買進 175,838,000 元
+# → 均價 231.98，當日收盤 232.5。
+_DAYTRADE_SHARES = {"daytrade_shares": "Volume"}
+_DAYTRADE_AMOUNTS = {"daytrade_buy_amount": "BuyAmount", "daytrade_sell_amount": "SellAmount"}
+# BuyAfterSale＝證交所 TWTB4U／櫃買 intraday/stat 的「暫停現股賣出後現款買進當沖註記」。
+# 證交所標 'Y'、櫃買標全形 '＊'（U+FF0A；官方表 2016-04-18 的 6488 即是，附註：「發行公司停止過戶前
+# 5 個營業日，暫停現股賣出後現款買進當日沖銷交易」）。實測是除權息／股東會停止過戶前的 5 日區塊，
+# 2017-04-28 開放先賣後買之前的年份也有標。只認實測見過的值，其他值＝來源改了語意，raise 不猜。
+_SELL_FIRST_FLAG = "BuyAfterSale"
+_SELL_FIRST_VALUES = {"": False, " ": False, "Y": True, "＊": True}
+
+# ⚠ 單位：TaiwanDailyShortSaleBalances 全部是**股**，**不得 ×1000**——與上方融資券的
+# TaiwanStockMarginPurchaseShortSale（**張**，見 _LOT_SHARES）不同。證據：同一回應的
+# MarginShortSalesCurrentDayBalance 2,161,000 等於本專案 margin_daily.short_balance（股）
+# 2330 @ 2018-01-02 的 2,161,000；6488 同日 2,905,000 亦相符。照抄融資券的換算會讓借券大一千倍。
+_SBL_REQUIRED = {
+    "sbl_prev_balance": "SBLShortSalesPreviousDayBalance",
+    "sbl_sell": "SBLShortSalesShortSales",
+    "sbl_return": "SBLShortSalesReturns",
+    "sbl_adjust": "SBLShortSalesAdjustments",
+    "sbl_balance": "SBLShortSalesCurrentDayBalance",
+}
+# 值為 null 時留 null（不當 0）；但**缺欄**仍 raise——缺欄是來源改版，與「這天沒有值」是兩回事。
+_SBL_NULLABLE = {
+    "sbl_next_quota": "SBLShortSalesQuota",
+    "sbl_covering": "SBLShortSalesShortCovering",
+}
+
+
+def _stock_id(row: Mapping[str, Any], table: str, day: dt.date) -> str:
+    sid = row.get("stock_id")
+    if not isinstance(sid, str) or not sid.strip():
+        raise DataError(table, day, f"FinMind 回應缺 stock_id 或型別非字串：{sid!r}")
+    return sid.strip()
+
+
+def _field(row: Mapping[str, Any], src: str, table: str, day: dt.date, sid: str) -> Any:
+    if src not in row:
+        raise DataError(
+            table, day, f"{sid}：FinMind 回應缺欄位 {src}（來源改版？）——缺欄不得當 0。"
+        )
+    return row[src]
+
+
+def _as_int(value: Any, src: str, table: str, day: dt.date, sid: str) -> int:
+    # bool 是 int 的子類：True 當成 1 股是靜默改值；非整數的 float 截尾也是。
+    ok = isinstance(value, int | float) and not isinstance(value, bool)
+    if not ok or (isinstance(value, float) and not value.is_integer()):
+        raise DataError(table, day, f"{sid}：{src} 須為整數（股），得到 {value!r}——缺值不得當 0。")
+    return int(value)
+
+
+def _as_float(value: Any, src: str, table: str, day: dt.date, sid: str) -> float:
+    ok = isinstance(value, int | float) and not isinstance(value, bool)
+    if not ok or not math.isfinite(float(value)):
+        raise DataError(
+            table, day, f"{sid}：{src} 須為有限數值（元），得到 {value!r}——缺值不得當 0。"
+        )
+    return float(value)
+
+
+def daytrade_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanStockDayTrading` → `daytrade_daily`（股、元）。
+
+    缺欄或值為 null 一律 raise（不當 0）；`BuyAfterSale` 只認 ''／' '（→ False）與
+    'Y'（證交所）／'＊'（櫃買）（→ True）。`available_at` 由 frame builder 加（`alerts.build_frame`，同日 21:00）。
+    """
+    table = "daytrade_daily"
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        day = _date(row, table)
+        sid = _stock_id(row, table, day)
+        vals: dict[str, Any] = {"date": day, "stock_id": sid}
+        for col, src in _DAYTRADE_SHARES.items():
+            vals[col] = _as_int(_field(row, src, table, day, sid), src, table, day, sid)
+        for col, src in _DAYTRADE_AMOUNTS.items():
+            vals[col] = _as_float(_field(row, src, table, day, sid), src, table, day, sid)
+        flag = _field(row, _SELL_FIRST_FLAG, table, day, sid)
+        if not isinstance(flag, str) or flag not in _SELL_FIRST_VALUES:
+            raise DataError(
+                table,
+                day,
+                f"{sid}：{_SELL_FIRST_FLAG} 出現未知值 {flag!r}（已知：{sorted(_SELL_FIRST_VALUES)}）"
+                "——來源改了語意，不猜。",
+            )
+        vals["sell_first_suspended"] = _SELL_FIRST_VALUES[flag]
+        out.append(vals)
+    out.sort(key=lambda r: (r["date"], r["stock_id"]))
+    return out
+
+
+def sbl_short_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FinMind `TaiwanDailyShortSaleBalances` → `sbl_short_daily`（借券賣出，**股**，不 ×1000）。
+
+    五個核心欄缺欄或 null 即 raise；`sbl_next_quota`／`sbl_covering` 值為 null 時留 null，缺欄仍 raise。
+    融券（MarginShortSales*）欄位不取——`margin_daily` 已有融券餘額。
+    """
+    table = "sbl_short_daily"
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        day = _date(row, table)
+        sid = _stock_id(row, table, day)
+        vals: dict[str, Any] = {"date": day, "stock_id": sid}
+        for col, src in _SBL_REQUIRED.items():
+            vals[col] = _as_int(_field(row, src, table, day, sid), src, table, day, sid)
+        for col, src in _SBL_NULLABLE.items():
+            raw = _field(row, src, table, day, sid)
+            vals[col] = None if raw is None else _as_int(raw, src, table, day, sid)
+        out.append(vals)
+    out.sort(key=lambda r: (r["date"], r["stock_id"]))
+    return out
+
+
+def sbl_identity_violations(df: pl.DataFrame) -> pl.DataFrame:
+    """回傳違反「當日餘額＝前日餘額＋當日賣出－當日還券＋當日調整」的列（TWSE TWT93U 附註）。
+
+    只報不修：違反的列照原樣留在表裡，回補結束時列出筆數與樣本（D-154 §二）。
+    """
+    expected = (
+        pl.col("sbl_prev_balance")
+        + pl.col("sbl_sell")
+        - pl.col("sbl_return")
+        + pl.col("sbl_adjust")
+    )
+    return df.filter(pl.col("sbl_balance") != expected)

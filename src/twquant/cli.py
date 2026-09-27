@@ -28,6 +28,8 @@ if TYPE_CHECKING:
         SystemConfig,
     )
     from twquant.data.http import HttpClient
+    from twquant.data.ingest.orchestrator import IngestOutcome
+    from twquant.data.ingest.registry import SourceSpec
     from twquant.data.serving.pg_view import PgTableSource
     from twquant.data.sources.indices import TpexIndexSource, TwseIndexSource
     from twquant.data.warehouse import TableSource
@@ -147,21 +149,30 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
     """抓→清洗→存單日每日來源（TWSE+TPEX）。tolerant=True 時單表失敗只警告不中斷。
 
     來源由註冊表驅動（D-017）：新增每日來源 = data/ingest/builtins.py 一筆 register，
-    不改本函數；Warehouse 於寫入站以 IngestSink 埠使用（儲存亦可換）。回傳成功表數。
+    不改本函數；Warehouse 於寫入站以 IngestSink 埠使用（儲存亦可換）。
+
+    直寫 PG 的表（T-310：當沖、借券、處置、注意）只在 `tables` 明確指定時才抓——每日 pipeline
+    由「籌碼」步驟抓它們（前幾個交易日＋缺日，見 `_run_chip_day`）；`backfill` 預設也不碰
+    （公告一天一個查詢窗，逐日回補只會重複查同一段、白白逼近證交所 WAF 門檻）。
+
+    回傳「證明當天有交易」的成功表數（公告類不算，見 SourceSpec.proves_trading）。
     """
     import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
-    from twquant.data.ingest.orchestrator import run_ingest
+    from twquant.data.ingest.orchestrator import run_ingest, trading_evidence
     from twquant.data.ingest.registry import list_specs
+    from twquant.data.serving.schema import DIRECT_PG_TABLES
     from twquant.data.warehouse import Warehouse
 
     cfg = _load_system()
     wh = Warehouse(cfg.data_dir)
+    specs = list_specs(cadence="daily")
 
     def _announce(tag: str, table: str) -> None:
         typer.secho(f">> [{tag}] 抓取 {table} @ {day}", fg=typer.colors.CYAN)
 
+    retries = 2 if tolerant else 0  # T-276：容錯模式（每日排程）才重試
     outcomes = run_ingest(
-        list_specs(cadence="daily"),
+        [s for s in specs if s.store == "lake"],
         cfg,
         wh,
         day,
@@ -169,26 +180,81 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
         tables=tables,
         tolerant=tolerant,
         on_start=_announce,
-        retries=2 if tolerant else 0,  # T-276：容錯模式（每日排程）才重試
+        retries=retries,
     )
+    direct = [t for t in (tables or []) if t in DIRECT_PG_TABLES]
+    if direct:
+        pg_specs = [s for s in specs if s.store == "pg"]
+        outcomes += _ingest_direct(day, pg_specs, direct, tolerant, _announce, retries)
     ok = [o for o in outcomes if o.status == "success"]
+    evidence = trading_evidence(outcomes, {s.source_tag: s.proves_trading for s in specs})
     bad = [o for o in outcomes if o.status != "success"]
     for o in ok:
         typer.secho(f"[OK] {o.source_tag}/{o.table}：{o.rows} 列已存入", fg=typer.colors.GREEN)
     # T-276：**有表成功就代表當天有交易**，那麼失敗的表就不是休市，是真的沒抓到。
     # 兩者原本都印成黃色 [SKIP]，於是 `margin_daily` 連兩天沒進來也沒人發現
     # （2026-09-21／22，停在 09-18）。休市時全部的表都會失敗，用這個差異分開它們。
+    # T-310：公告（處置／注意）休市日也查得到東西，它的成功不算證據。
     for o in bad:
-        if ok:
+        if evidence:
             typer.secho(
                 f"[FAILED] {o.source_tag}/{o.table}：{o.detail}"
-                f"　← 同日其他 {len(ok)} 張表有資料，**這天有交易**，不是休市",
+                f"　← 同日其他 {len(evidence)} 張表有資料，**這天有交易**，不是休市",
                 fg=typer.colors.RED,
                 bold=True,
             )
         else:
             typer.secho(f"[SKIP] {o.source_tag}/{o.table}：{o.detail}", fg=typer.colors.YELLOW)
-    return len(ok)
+    return len(evidence)
+
+
+def _ingest_direct(
+    day: dt.date,
+    specs: Sequence[SourceSpec],
+    tables: list[str],
+    tolerant: bool,
+    on_start: Callable[[str, str], None],
+    retries: int,
+) -> list[IngestOutcome]:
+    """直寫 PG 的表（T-310）：同一個註冊表與 run_ingest，sink 換成 PgDirectSink。
+
+    PG 未啟用或連不上：這些表無處可寫 → 容錯模式記失敗（ingest_log 也記），非容錯模式 raise。
+    """
+    from twquant.data.ingest.orchestrator import IngestOutcome, run_ingest
+    from twquant.data.serving import direct_ingest, store
+    from twquant.data.serving import schema as sch
+    from twquant.errors import DataError
+    from twquant.reporting.ingest_log import record
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    if not scfg.enabled or not store.ping(scfg):
+        detail = "PG 未啟用或連不上——直寫表（T-310）無處可寫"
+        if not tolerant:
+            raise DataError(",".join(tables), day, detail)
+        out: list[IngestOutcome] = []
+        for spec in specs:
+            for table in (t for t in spec.build(cfg).tables if t in tables):
+                record(cfg.data_dir, spec.source_tag, table, day, "failed", detail=detail)
+                out.append(IngestOutcome(spec.source_tag, table, "failed", 0, detail))
+        return out
+    with store.connect(scfg) as conn:
+        sch.ensure_tables(conn, sch.DIRECT_INGEST_SPECS, scfg.pg_schema)
+        sink = direct_ingest.PgDirectSink(conn, scfg.pg_schema)
+        outcomes = run_ingest(
+            specs,
+            cfg,
+            sink,
+            day,
+            data_dir=cfg.data_dir,
+            tables=tables,
+            tolerant=tolerant,
+            on_start=on_start,
+            retries=retries,
+        )
+    for note in sink.notes:
+        typer.secho(f"[NOTE] {note}", fg=typer.colors.YELLOW)
+    return outcomes
 
 
 @app.command()
@@ -669,6 +735,27 @@ def fubon_chip_status(
     )
 
 
+@app.command(name="chip-daily")
+def chip_daily(
+    date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「籌碼」步驟（T-310）：官方當沖／借券、處置／注意公告 → 直寫 PG。
+
+    當沖／借券抓這天之前的第 k 個交易日（system.yaml `chip_daily.refetch_offsets`）＋缺日；
+    公告抓以這天為準的查詢窗。與 pipeline 同一個函數，平常不用手跑。
+    """
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _run_chip_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 籌碼 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
 def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
     """距離下一個 hh:mm（同時區）的秒數；已過今日該時刻則算明日。"""
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
@@ -1014,6 +1101,135 @@ def _run_fubon_day(day: dt.date) -> str:
         return f"{full.height} 列（{full['stock_id'].n_unique()} 檔）入 PG＋資料湖"
 
 
+def _run_chip_day(day: dt.date) -> str:
+    """每日 pipeline「籌碼」步驟（T-310）：官方當沖／借券、處置／注意公告 → 直寫 PG。
+
+    - 當沖／借券：抓「前第 k 個交易日」（system.yaml `chip_daily.refetch_offsets`，覆寫）＋最近
+      `catchup_trading_days` 個交易日裡某市場一列都沒有的日子。**當天不抓**：借券 20:30／22:30
+      才更新、當沖晚間才公布，19:00 的排程抓不到；兩表 available_at 都是同日 21:00，隔天 19:00
+      抓進來仍早於 20:00 訊號截點。
+    - 當沖在 T+1 那一次另存首次值（daytrade_first_pub；只有 day＝今天那一輪），T+2／T+3 重抓後回報與首次值的差
+      （D-154 §三）。
+    - 公告：查一個窗（`alerts.alert_window`），窗內舊列 upsert 冪等、內容變了就 raise（D-154 §二.6）。
+
+    任一抓取失敗 → 全部跑完後 raise（步驟標 failed，訊息列出哪幾個）；PG 未啟用／不可達 → 回略過訊息。
+    """
+    import twquant.data.ingest.builtins as src_builtins
+    from twquant.conventions import now_tw
+    from twquant.data.ingest.orchestrator import run_ingest
+    from twquant.data.ingest.registry import get
+    from twquant.data.serving import direct_ingest as di
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    scfg = _load_serving()
+    if not scfg.enabled:
+        return "未啟用（serving.yaml enabled=false）"
+    if not store.ping(scfg):
+        return "PG 不可達，略過"
+    cfg = _load_system()
+    pg = scfg.pg_schema
+
+    def _announce_for(d: dt.date) -> Callable[[str, str], None]:
+        def _announce(tag: str, table: str) -> None:
+            typer.secho(f">> [{tag}] 抓取 {table} @ {d}", fg=typer.colors.CYAN)
+
+        return _announce
+
+    done: list[tuple[di.ChipFetch, int]] = []
+    failures: list[str] = []
+    notes: list[str] = []
+    alert_rows: dict[str, int] = {}
+    with store.connect(scfg) as conn:
+        sch.ensure_tables(conn, sch.DIRECT_INGEST_SPECS, pg)
+        with conn.cursor() as cur:
+            # 只有「今天」那一輪的 T+1 抓取算首次值；手動重跑過去的日子抓到的可能已是定案值
+            plan = di.plan_chip_fetches(cur, pg, day, cfg.chip_daily, live=day >= now_tw().date())
+        conn.commit()
+        batches: dict[tuple[dt.date, str], list[di.ChipFetch]] = {}
+        for f in plan:
+            batches.setdefault((f.day, f.market), []).append(f)
+        for (d, market), fetches in sorted(batches.items()):
+            by_table = {f.table: f for f in fetches}
+            sink = di.PgDirectSink(
+                conn,
+                pg,
+                keep_first=any(f.first for f in fetches),
+                market=di.STOCK_META_MARKET[market],
+            )
+            outs = run_ingest(
+                [get(src_builtins.CHIP_SOURCES[market])],
+                cfg,
+                sink,
+                d,
+                data_dir=cfg.data_dir,
+                tables=list(by_table),
+                tolerant=True,
+                on_start=_announce_for(d),
+                retries=2,
+            )
+            notes += sink.notes
+            for o in outs:
+                f = by_table[o.table]
+                if o.status == "success":
+                    done.append((f, o.rows))
+                else:
+                    failures.append(f"{o.table} {d} {market}（{f.reason}）：{o.detail}")
+        sink = di.PgDirectSink(conn, pg)
+        outs = run_ingest(
+            [get(tag) for tag in src_builtins.ALERT_SOURCES.values()],
+            cfg,
+            sink,
+            day,
+            data_dir=cfg.data_dir,
+            tolerant=True,
+            on_start=_announce_for(day),
+            retries=2,
+        )
+        for o in outs:
+            if o.status == "success":
+                alert_rows[o.table] = alert_rows.get(o.table, 0) + o.rows
+            else:
+                failures.append(f"{o.table} {o.source_tag}（查詢窗）：{o.detail}")
+        refetched = sorted({f.day for f, _ in done if f.table == "daytrade_daily" and not f.first})
+        with conn.cursor() as cur:
+            revisions = [di.daytrade_revision(cur, pg, d) for d in refetched]
+        conn.commit()
+
+    parts: list[str] = []
+    for table, label in (("daytrade_daily", "當沖"), ("sbl_short_daily", "借券")):
+        got = [(f, n) for f, n in done if f.table == table]
+        if got:
+            days = sorted({f.day for f, _ in got})
+            span = f"{days[0]}" if len(days) == 1 else f"{days[0]}~{days[-1]}"
+            parts.append(f"{label} {len(got)} 批 {sum(n for _, n in got):,} 列（{span}）")
+        else:
+            parts.append(f"{label} 0 批")
+    gaps = [f for f, _ in done if f.reason == "缺日"]
+    if gaps:
+        parts.append(f"缺日補 {len(gaps)} 批（{sorted({str(f.day) for f in gaps})}）")
+    parts.append(
+        f"處置 {alert_rows.get('disposition_stocks', 0):,}／注意 {alert_rows.get('attention_stocks', 0):,} 列"
+        "（查詢窗，冪等）"
+    )
+    for r in revisions:
+        if r.compared:
+            ex = f"，例 {'、'.join(r.examples)}" if r.examples else ""
+            parts.append(
+                f"當沖 {r.day} 首次值 {r.compared:,} 列中 {r.changed} 列改過"
+                f"（股數差 {r.shares_abs_diff:,}／{r.shares_total:,}{ex}）"
+            )
+    for note in notes:
+        typer.secho(f"[NOTE] {note}", fg=typer.colors.YELLOW)
+    summary = "；".join(parts) + (f"；注意：{'；'.join(notes)}" if notes else "")
+    if failures:
+        raise DataError(
+            "chip_daily", day, f"{summary}｜失敗 {len(failures)}：{'；'.join(failures)}"
+        )
+    return summary
+
+
 def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResult:
     """每日營運 pipeline：擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照，寫 heartbeat（LOOP §3）。
 
@@ -1117,6 +1333,12 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         # 買賣超（T-040 五池依賴 broker_trades）。best-effort：非交易日由探測快速跳過、
         # 續傳冪等；PG 未啟用/不可達或來源失敗不擋主線（見 _run_fubon_day）。
         return _run_fubon_day(day)
+
+    def _chip_step() -> str:
+        # T-310：官方當沖／借券（前幾個交易日＋缺日）、處置／注意公告 → 直寫 PG。
+        # 不依賴當天行情（交易日取自 PG prices_daily 在今天之前的日子），休市日照跑（冪等）。
+        # 抓失敗會 raise（步驟標 failed、列出哪幾個），但不是關鍵步驟，不擋訊號主線。
+        return _run_chip_day(day)
 
     def _screener_step() -> str:
         # 選股池每日快照（SPEC-007 §6 / T-041）：需供應層已同步當日資料，故排在其後；
@@ -1257,6 +1479,7 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
+        PipelineStep("籌碼（當沖／借券／處置／注意）", _chip_step),
         PipelineStep("券商買賣超", _broker_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),

@@ -92,4 +92,10 @@ def test_unsupported_table_raises() -> None:
 def test_source_metadata() -> None:
     src = _source_returning("{}")
     assert src.name == "twse_rwd"
-    assert set(src.tables) == {"prices_daily", "institutional_daily", "margin_daily"}
+    # T-313：BWIBBU_d（個股本益比／殖利率／淨值比）→ stock_valuation
+    assert set(src.tables) == {
+        "prices_daily",
+        "institutional_daily",
+        "margin_daily",
+        "stock_valuation",
+    }

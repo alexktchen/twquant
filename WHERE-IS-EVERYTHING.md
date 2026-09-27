@@ -44,9 +44,10 @@
 - **停利文獻回顧**：`docs/reports/2026-09-25-exit-literature.md`（15 篇、逐篇核對出處）——固定停利對右偏報酬必傷期望值、停損買的是保險、
   出場應看狀態機率；第十四輪的標籤、對照臂（隨機賣出、Han 等 −10% 停損、μ̂−σ̂²/2 理論臂）照這份設計。
 - **第 1 批免費籌碼（D-154／T-309，PR #98，分支 `claude/free-chip-data-t309`）**：`daytrade_daily`、`sbl_short_daily`、`attention_stocks`、
-  `disposition_stocks` 四張**直寫 PG** 表（`serving rebuild` 不碰）。處置／注意股 2014~2026 已全部入庫；FinMind 當沖／借券 2,093 檔全量回補
-  2026-09-25 02:57 起跑（`data/logs/chip_batch1_full_*.log`，約 7 小時，跑完自動 pg_dump）。**注意**：證交所注意股的「累計次數」是查詢期間總數＝前視，
-  不存；當沖數字 T+2 才定案，做因子前先量修正幅度（D-154 §三 待裁決）。每日增量是 T-310（未接）。
+  `disposition_stocks` 四張**直寫 PG** 表（`serving rebuild` 不碰）。**全史都已入庫**（2014 起到 2026-09-24，筆數見 §2 那段）；
+  FinMind 全量回補 2026-09-25 完成（`data/logs/chip_batch1_full_*.log`，0 失敗），之後已 pg_dump（`twquant_serving_20260925-1010_post-chip-batch1.dump`）。
+  **注意**：證交所注意股的「累計次數」是查詢期間總數＝前視，不存；當沖數字 T+2 才定案，做因子前先量修正幅度（D-154 §三 待裁決）。
+  每日增量 T-310 與估值每日來源 T-313 已併入本 PR（#99）；**合併部署後才每天跑**，在那之前這四張表與 `stock_valuation` 停在 09-24。
 - **TAIL-B（第九輪 B 臂）已上架**平台「策略持股」頁（D-147）：列的是**今日候選前 15**，不是實際持股；
   模型每日推論（`configs/ml.yaml` 的 `research_live_models`，失敗不擋正式名單）
 - **策略持股頁標新進／移出／連續天數、可切日期（T-300）；ML 選股頁有模型選單、可切日期（T-301／D-150）**：
@@ -92,6 +93,17 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
 
+- **第 1 批免費籌碼（T-309／D-154，2026-09-25）**：PG `serving.daytrade_daily`（當沖）、`sbl_short_daily`（借券賣出，股）
+  來自 FinMind 免費層；`disposition_stocks`（處置）、`attention_stocks`（注意）來自證交所＋櫃買公告，2014 起、含權證。
+  **直寫 PG、不在鏡射清單**——`serving rebuild` 不會碰它們，重抓用 `scripts/backfill_chip_batch1.py`（`report` 子指令只讀）。
+  **全史已載入**（PG 實數，2026-09-27 查）：當沖 3,943,191 列／1,961 檔（2014-01-06 起）、借券 4,960,985 列／1,998 檔（2014-01-02 起）、
+  處置 5,921 列、注意 69,650 列，四張都到 2026-09-24；FinMind 全量回補 0 失敗（借券恆等式違反 52 列，D-154 §四 的品質報告）。
+  **每日增量已接（T-310／D-157，部署後生效）**：每日 pipeline 新步驟「籌碼」（也可 `twquant chip-daily --date <日>`）——**當天不抓**，
+  當沖抓前 1／2／3 個交易日覆寫（T+2 才定案）、借券抓前 1 個交易日、最近 10 個交易日有缺自己補；處置／注意查一個窗（處置迄日往後推 14 天）。
+  當沖第一次抓到的值另存 `serving.daytrade_first_pub`（量修訂幅度用，D-154 §三 仍待裁決——**當沖因子進研究前先看它**）。
+  官方數字與 FinMind 歷史逐位相同；**`sbl_covering` 不要用**：官方沒有這一欄 → null，FinMind 全史是它自己補的 0。
+  每日因子還沒有讀這四張表（只有第十四輪研究腳本 D-156 M1 用過）。
+
 **歸檔但刻意保留的**（是證據，不要刪）：
 - `data/ladder/_pre-T142-T149/`、`data/tracks/_pre-T142-T149/` — 舊的 10M 批次，D-070 的證據
 - `data/models/_archive/…__pre-D064-data-defects/` — 汙染資料訓練的舊模型
@@ -132,6 +144,7 @@ cd D:/project/twquant/.claude/worktrees/strange-kalam-3ec702
 | **平台部署** | `docker compose build frontend api && TWQUANT_DATA_HOST=D:/project/twquant/data docker compose up -d api frontend` |
 | **把推論輸出成推薦** | `uv run --all-groups python -m twquant ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data` |
 | **補某一天的推薦快照** | `TWQUANT_DATA_DIR=D:/project/twquant/data ... python -m twquant ml score --date <日> --model <模型目錄> [--pg]` 再 `... ml export-recommendations --date <日> --model <模型目錄> --out D:/project/twquant/data`（同 run_id 已存在不同內容會 raise；要重出先把舊檔改名為 `.superseded-...`）|
+| **籌碼每日補抓（手動）** | `TWQUANT_DATA_DIR=D:/project/twquant/data TWQUANT_PG_DSN=... uv run --all-groups python -m twquant chip-daily --date <日>`（與 pipeline「籌碼」步驟同一個函數；單日單表用 `ingest --date <日> --tables daytrade_daily`）|
 | **紙上交易：記今天** | `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant paper-trade --date <日> --out D:/project/twquant/data`（已接進每日 pipeline，平常不用手跑；append-only，重跑同一天安全，**不得回填**）|
 | **紙上交易：驗鏈** | `uv run --all-groups python -m twquant paper-verify --out D:/project/twquant/data`——雜湊鏈被動過就以非零碼結束。規則與判讀門檻見 `DECISIONS.md` 的 **D-142**，配置在 `configs/paper_trading.yaml` |
 | **持股出場檢查** | 平台「我的追蹤」頁；API `GET /api/platform/exit-check?ids=2330,2317`（規則清單在 `configs/exit_check.yaml`，門檻在 E 系列策略配置）|
@@ -312,7 +325,7 @@ TAIL-B 已匯出的快照不回頭改（D-150 不可變）。另外 `stock_valua
 | `twquant-frontend-1` | 平台（含「ML 選股」「策略持股」）| `http://localhost:8899` |
 | `twquant-scheduler-1` | **每日 19:00 跑完整 pipeline** | — |
 
-每日 pipeline 的步驟（依序）：擷取 → 品質閘門 → 券商買賣超 → 訊號生成 → **指數** → 供應層 →
+每日 pipeline 的步驟（依序）：擷取（T-313 起含估值）→ 品質閘門 → **籌碼**（T-310：當沖／借券／處置／注意，直寫 PG）→ 券商買賣超 → 訊號生成 → **指數** → 供應層 →
 選股池快照 → **ML 推薦名單**（三個模型推論並寫進 PG，匯出前 20／觀察／風控剔除／**流動性剔除** D-113，尚未重建映像）→ **策略持股**（8 支）→ 洞悉分析。
 粗體是 D-111／D-112／T-227 新增或改動的。**第一次由排程觸發的完整執行是 2026-09-21（週一）19:00**，
 在那之前新步驟只被逐一驗過、沒有整條一起跑過——那天晚上值得看一眼
@@ -374,14 +387,12 @@ T-150 未修）。前者排除 broker 與 ml 共 12 個因子、剩 37 個，13 
   跑 `ingest-meta` 修好。**順帶治好** `price.industry_mom_6m` 與 `price.industry_rs_20d`
   ——它們本來每天丟 `ComputeError` 被 `_compute_universe` 吞掉，meta 一更新就正常。
 
-**`stock_valuation` 不在任何每日擷取路徑裡。** `ingest/builtins.py` 只註冊 twse／tpex（出
-prices／institutional／margin）與 tdcc（週）。估值只能靠 `scripts/backfill_finmind.py
-TaiwanStockPER` **逐檔**回補：2,067 檔 × 6.42 秒 ＝ **3.6 小時**只為了 13 個交易日。
-FinMind 免費層**不支援**全市場單日查詢（實測回 `Your level is register`）。官方 TWSE BWIBBU
-端點一天一個請求就有全市場，做成正式來源並接進 `_run_daily_pipeline` 是待辦。
-近期估值 staging **沒有現成載入器**（`load_finmind_chip.py` 只支援 institutional／margin，
-`load_finmind_history_tables.py` 刻意只寫 2020 之前），這輪是照 `load_finmind_chip.py`
-的規則臨時寫一支（重疊不覆寫＋零值分布比對）。
+**`stock_valuation` 現在每天自動抓（T-313／D-157，2026-09-25，部署後生效）。** 證交所 `BWIBBU_d`、櫃買 `peQryDate`
+接進既有的 twse／tpex 每日來源（資料湖 → 供應層鏡射同步進 PG，與行情同一條路）。09-18 兩市 1,965 檔與 FinMind 歷史逐位相同；
+虧損公司「不計算」的本益比沿用歷史慣例存 0。**09-21~09-24 已補進 PG**（每天約 1,970 檔），但 **`factor_values` 的三支估值因子
+（`fundamental.earnings_yield`／`book_yield`／`dividend_yield`）那四天仍是空的**——要補得重物化那 4 天
+（`scripts/materialize_long_history.py --from 2026-09-21 --to 2026-09-24`，會連 composite 一起重算，未做）。
+以前的做法（FinMind 逐檔回補，2,067 檔 × 6.42 秒 ＝ 3.6 小時只為了 13 個交易日；免費層不支援全市場單日查詢）不必再用。
 
 **⑩ 「回報成功」不等於資料進去了——請直接查 PG 的逐年天數。** 2026-09-20 實際發生：`load_finmind_chip.py` 回報
 「已寫入湖與 PG：266 萬列」，但 2020~2024 的籌碼資料一列都沒進 PG——它只用「資料湖有沒有這一天」判斷，

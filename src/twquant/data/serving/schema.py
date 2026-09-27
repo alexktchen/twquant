@@ -321,6 +321,97 @@ BROKER_FLOW_DAILY_SPEC = TableSpec(
     indexes=(("date",),),
 )
 
+# 第 1 批免費籌碼（T-309／D-154）：**直寫 PG** 的四張表（使用者裁決：資料只在 PG，不寫資料湖）。
+# 刻意**不**放進 MIRROR_SPECS：`serving rebuild` 會 TRUNCATE 鏡射表再從資料湖重灌，
+# 而資料湖裡沒有這四張——放進去，一次 rebuild 就清空。欄位與 data/schemas.py 同名同序（測試守著）。
+DIRECT_PG_SPECS: tuple[TableSpec, ...] = (
+    TableSpec(
+        "daytrade_daily",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("daytrade_shares", "bigint"),
+            ("daytrade_buy_amount", "double precision"),
+            ("daytrade_sell_amount", "double precision"),
+            ("sell_first_suspended", "boolean"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("stock_id", "date"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
+        "sbl_short_daily",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("sbl_prev_balance", "bigint"),
+            ("sbl_sell", "bigint"),
+            ("sbl_return", "bigint"),
+            ("sbl_adjust", "bigint"),
+            ("sbl_balance", "bigint"),
+            ("sbl_next_quota", "bigint"),
+            ("sbl_covering", "bigint"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("stock_id", "date"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
+        "disposition_stocks",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("market", "text"),
+            ("effective_start", "date"),
+            ("effective_end", "date"),
+            ("level", "bigint"),
+            ("match_minutes", "bigint"),
+            ("reason", "text"),
+            ("measure", "text"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("stock_id", "date"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
+        "attention_stocks",
+        (
+            ("date", "date"),
+            ("stock_id", "text"),
+            ("market", "text"),
+            ("clauses", "text"),
+            ("info", "text"),
+            ("close", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("stock_id", "date"),
+        indexes=(("date",),),
+    ),
+)
+
+# 當沖「首次抓到的值」（T-310，D-154 §三 A）：每日 pipeline 在 T+1 抓 T 日當沖時另存一份（先到先存，
+# ON CONFLICT DO NOTHING），之後 T+2／T+3 重抓只覆寫 daytrade_daily。兩者一比就是「訊號當下用到的數字」
+# 與定案值的差——任何當沖因子進研究之前要先看這個（D-154 §三）。量測用的簿記表：只由每日「籌碼」步驟寫、
+# 不在鏡射清單、也不在 DIRECT_PG_SPECS（那是 T-309 的四張資料表）。fetched_at＝抓取時點。
+DAYTRADE_FIRST_PUB_SPEC = TableSpec(
+    "daytrade_first_pub",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("daytrade_shares", "bigint"),
+        ("daytrade_buy_amount", "double precision"),
+        ("daytrade_sell_amount", "double precision"),
+        ("sell_first_suspended", "boolean"),
+        ("available_at", "timestamptz"),
+        ("fetched_at", "timestamptz"),
+    ),
+    pk=("stock_id", "date"),
+    indexes=(("date",),),
+)
+
+# 每日直寫擷取（T-310）要建的表：四張資料表＋首次公布值簿記表。
+DIRECT_INGEST_SPECS: tuple[TableSpec, ...] = (*DIRECT_PG_SPECS, DAYTRADE_FIRST_PUB_SPEC)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -328,10 +419,13 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     FUBON_FETCH_LOG_SPEC,
     SCREENER_DAILY_SPEC,
     BROKER_FLOW_DAILY_SPEC,
+    *DIRECT_PG_SPECS,
+    DAYTRADE_FIRST_PUB_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
 FACTOR_TABLES: tuple[str, ...] = tuple(s.name for s in FACTOR_SPECS)
+DIRECT_PG_TABLES: tuple[str, ...] = tuple(s.name for s in DIRECT_PG_SPECS)
 ALL_TABLES: tuple[str, ...] = tuple(s.name for s in _ALL_SPECS)
 
 
@@ -356,12 +450,18 @@ def rebuild_targets(tables: list[str] | None) -> tuple[TableSpec, ...]:
     invalid = [t for t in tables if t not in MIRROR_TABLES]
     if invalid:
         factor = [t for t in invalid if t in FACTOR_TABLES]
+        direct = [t for t in invalid if t in DIRECT_PG_TABLES]
         hint = (
             f" 其中 {factor} 為因子表，由 PitView 逐日物化（非鏡射自資料湖）——"
             "請改用 `python -m twquant serving materialize --from <起> --to <迄>` 重物化。"
             if factor
             else ""
         )
+        if direct:
+            hint += (
+                f" 其中 {direct} 為直寫 PG 表（T-309，資料湖沒有它們）——"
+                "重抓請用 `scripts/backfill_chip_batch1.py`。"
+            )
         raise ValueError(
             f"serving rebuild 只支援鏡射表 {list(MIRROR_TABLES)}；"
             f"收到不支援的表名 {invalid}。{hint}"
@@ -375,26 +475,40 @@ def table_ddls(schema: str) -> dict[str, str]:
     return {s.name: s.ddl(schema) for s in _ALL_SPECS}
 
 
+def _spec_index_ddls(spec: TableSpec, schema: str) -> list[str]:
+    out: list[str] = []
+    for cols in spec.indexes:
+        iname = f"{spec.name}_{'_'.join(cols)}_idx"
+        out.append(
+            f'CREATE INDEX IF NOT EXISTS "{iname}" ON "{schema}"."{spec.name}" ({", ".join(cols)})'
+        )
+    return out
+
+
 def index_ddls(schema: str) -> list[str]:
     """回傳所有輔助索引 DDL（每 spec 的 indexes，冪等）。"""
     _check_ident(schema)
-    out: list[str] = []
-    for s in _ALL_SPECS:
-        for cols in s.indexes:
-            iname = f"{s.name}_{'_'.join(cols)}_idx"
-            out.append(
-                f'CREATE INDEX IF NOT EXISTS "{iname}" ON "{schema}"."{s.name}" ({", ".join(cols)})'
-            )
-    return out
+    return [ddl for s in _ALL_SPECS for ddl in _spec_index_ddls(s, schema)]
+
+
+def ensure_tables(conn: Any, specs: tuple[TableSpec, ...], schema: str = "serving") -> None:
+    """只建指定的表＋其索引（冪等）。conn 為呼叫端 PG 連線。
+
+    與 `ensure_schema` 的差別：`CREATE INDEX IF NOT EXISTS` 在確認索引已存在**之前**就要先拿
+    該表的 ShareLock，另一個 session 正在寫的大表（如 ml_scores）會讓它排隊、也讓後來的寫入
+    排在它後面。只碰自己要用的表的腳本（T-309 回補）用這個，不去鎖別人的表。
+    """
+    _check_ident(schema)
+    with conn.cursor() as cur:
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+        for spec in specs:
+            cur.execute(spec.ddl(schema))
+        for spec in specs:
+            for ddl in _spec_index_ddls(spec, schema):
+                cur.execute(ddl)
+    conn.commit()
 
 
 def ensure_schema(conn: Any, schema: str = "serving") -> None:
     """建立 serving schema 與所有 T-031 資料表＋索引（冪等）。conn 為呼叫端 PG 連線。"""
-    _check_ident(schema)
-    with conn.cursor() as cur:
-        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-        for ddl in table_ddls(schema).values():
-            cur.execute(ddl)
-        for ddl in index_ddls(schema):
-            cur.execute(ddl)
-    conn.commit()
+    ensure_tables(conn, _ALL_SPECS, schema)

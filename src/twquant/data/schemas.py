@@ -182,15 +182,75 @@ CORPORATE_EVENTS = _schema(
     },
 )
 
+# ── 第 1 批免費籌碼（T-309／D-154）：只寫 PG（直寫表，見 serving/schema.py 的 DIRECT_PG_SPECS）──
+_MARKETS = ("twse", "tpex")
+
+# v1 在 T-309 之前從未有任何資料寫入，故就地增欄、不另開新表名（D-154 §二）。
 DISPOSITION_STOCKS = _schema(
     "disposition_stocks",
     1,
     {
         "date": _col(pl.Date),  # 公告日
-        "stock_id": _col(pl.String),
+        "stock_id": _col(pl.String),  # 全部有價證券（含權證／ETF）
+        "market": pa.Column(pl.String, checks=pa.Check.isin(_MARKETS)),
         "effective_start": _col(pl.Date),
         "effective_end": _col(pl.Date),
-        "available_at": _col(TW_DT),
+        # 第幾次處置：1／2；證交所「人工管制撮合」沒有次數 → null（不猜）
+        "level": pa.Column(pl.Int64, checks=pa.Check.isin([1, 2]), nullable=True),
+        # 「約每 N 分鐘撮合一次」的 N；內容沒寫 → null
+        "match_minutes": pa.Column(pl.Int64, checks=pa.Check.gt(0), nullable=True),
+        "reason": _col(pl.String, nullable=True),  # 證交所「處置條件」／櫃買「處置原因」
+        "measure": _col(pl.String, nullable=True),  # 處置內容（去 HTML、全形轉半形）
+        "available_at": _col(TW_DT),  # 公告日 18:00（SPEC-001）
+    },
+)
+
+ATTENTION_STOCKS = _schema(
+    "attention_stocks",
+    1,
+    {
+        # 來源的「累計次數」刻意不存：證交所是查詢區間內的總次數（含之後的公告＝前視），
+        # 櫃買是「當天公告幾檔」，兩者都不是這一列的事實（D-154 §二）。
+        "date": _col(pl.Date),  # 公告日
+        "stock_id": _col(pl.String),  # 全部有價證券
+        "market": pa.Column(pl.String, checks=pa.Check.isin(_MARKETS)),
+        "clauses": _col(pl.String, nullable=True),  # 觸及的款次，遞增逗號串如 "1,9"
+        "info": _col(pl.String),  # 注意交易資訊（去 HTML、全形轉半形）
+        "close": _nonneg(pl.Float64, nullable=True),  # 公告日收盤價（TWD）
+        "available_at": _col(TW_DT),  # 公告日 18:00
+    },
+)
+
+DAYTRADE_DAILY = _schema(
+    "daytrade_daily",
+    1,
+    {
+        "date": _col(pl.Date),
+        "stock_id": _col(pl.String),
+        "daytrade_shares": _nonneg(pl.Int64),  # 當日沖銷成交股數（股）
+        "daytrade_buy_amount": _nonneg(pl.Float64),  # 當沖買進成交金額（TWD）
+        "daytrade_sell_amount": _nonneg(pl.Float64),  # 當沖賣出成交金額（TWD）
+        # 暫停「先賣後買」當沖（FinMind BuyAfterSale='Y'）
+        "sell_first_suspended": _col(pl.Boolean),
+        "available_at": _col(TW_DT),  # 同日 21:00（比照 margin_daily，D-008）
+    },
+)
+
+SBL_SHORT_DAILY = _schema(
+    "sbl_short_daily",
+    1,
+    {
+        # 借券賣出，全部是**股**（FinMind TaiwanDailyShortSaleBalances；不是張，不 ×1000）
+        "date": _col(pl.Date),
+        "stock_id": _col(pl.String),
+        "sbl_prev_balance": _nonneg(pl.Int64),  # 前日餘額
+        "sbl_sell": _nonneg(pl.Int64),  # 當日賣出
+        "sbl_return": _nonneg(pl.Int64),  # 當日還券
+        "sbl_adjust": _col(pl.Int64),  # 當日調整（可負）
+        "sbl_balance": _nonneg(pl.Int64),  # 當日餘額＝前日＋賣出－還券＋調整
+        "sbl_next_quota": _col(pl.Int64, nullable=True),  # 次一營業日可限額
+        "sbl_covering": _col(pl.Int64, nullable=True),  # FinMind SBLShortSalesShortCovering
+        "available_at": _col(TW_DT),  # 同日 21:00
     },
 )
 
@@ -306,6 +366,9 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "financial_statements": FINANCIAL_STATEMENTS,
     "corporate_events": CORPORATE_EVENTS,
     "disposition_stocks": DISPOSITION_STOCKS,
+    "attention_stocks": ATTENTION_STOCKS,
+    "daytrade_daily": DAYTRADE_DAILY,
+    "sbl_short_daily": SBL_SHORT_DAILY,
     "taifex_institutional": TAIFEX_INSTITUTIONAL,
     "stock_meta": STOCK_META,
     "trading_calendar": TRADING_CALENDAR,

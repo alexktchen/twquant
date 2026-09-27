@@ -17,15 +17,24 @@ if TYPE_CHECKING:
     from twquant.data.ingest.ports import SourcePort
 
 Cadence = Literal["daily", "weekly", "monthly"]
+Store = Literal["lake", "pg"]
 
 
 @dataclass(frozen=True)
 class SourceSpec:
-    """一個來源的註冊項：儲存標籤、建構器（注入 config → SourcePort）、擷取頻率。"""
+    """一個來源的註冊項：儲存標籤、建構器（注入 config → SourcePort）、擷取頻率。
+
+    store（T-310）：`lake`＝寫資料湖，供應層步驟再鏡射同步進 PG；`pg`＝直寫 PG
+    （`serving.schema.DIRECT_PG_SPECS`，資料湖沒有這些表）。
+    proves_trading（T-310）：這個來源抓成功＝當天有交易。`cli._ingest_date` 靠它分辨
+    「休市」與「真的沒抓到」（T-276）；公告類（處置／注意）休市日也查得到東西，故為 False。
+    """
 
     source_tag: str
     build: Callable[[SystemConfig], SourcePort]
     cadence: Cadence = "daily"
+    store: Store = "lake"
+    proves_trading: bool = True
 
 
 _REGISTRY: dict[str, SourceSpec] = {}
