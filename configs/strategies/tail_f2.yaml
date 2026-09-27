@@ -1,0 +1,41 @@
+# D-149 第十一輪 F2 臂。**RESEARCH ONLY，不設門檻、只報數字（D-146 規矩）。**
+#
+# 與 F1 唯一的差別是觸發源：看加權指數（TAIEX）自身 252 日的第 90 百分位且高於 15%；
+# 倍數仍以持股波動計算（15% ÷ 持股波動，只降不升）。
+#
+# 以下除 name／description／slots 新增段外，逐字同 tail_b.yaml（測試守著）。
+name: tail_f2
+description: 第十一輪 F2：tail_b ＋ D-004 條件式減碼（觸發看加權指數）
+trial_scope: lw:slots_tail
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70 # D-143 §五：宇宙 ADV 前 30%，與 E0 相同（D-140 已證更嚴格更差）
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_60d
+    weight: 1.0
+    params:
+      model_id: lgbm_tailb_tu_h60_20260430_7ab9b0f9
+slots:
+  n: 15
+  entry_threshold: 0.0
+  conditional_vol:
+    trigger: index
+    index_id: TAIEX
+    vol_target: # 逐字抄自 configs/portfolio.yaml 的 vol_target（D-004）；測試守著兩邊相同
+      enabled: true
+      annual_vol: 0.15
+      estimator: {window_days: 60, method: ewma, halflife: 20}
+      conditional:
+        percentile_window_days: 252
+        reduce_above_pct: 90.0
+      max_leverage: 1.0
+exit_rules:
+  - kind: stop_loss
+    pct: 0.15
+  - kind: trailing_pct
+    pct: 0.10
+    min_peak_gain: 0.20
+  - kind: time_stop
+    sessions: 60

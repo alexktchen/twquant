@@ -27,6 +27,13 @@ exclude_factors:
   # D-147：右尾模型的薄因子強制要求 model_id（A／B 兩臂前綴相近），用預設參數每天物化只會 raise；
   # 它的分數本來就在 ml_scores，策略直接讀那裡。
   - ml.lgbm_tail_up_60d
+  # D-151 §十.3：第十二輪的五支盤整型態因子目前只有研究用途，不進每日物化（長歷史另用
+  # scripts/materialize_long_history.py --factors 物化）。模型要上線時再移除這五行。
+  - price.bb_squeeze_120
+  - price.ma_tangle
+  - price.vp_poc_dist_60
+  - price.vp_support_hold_20
+  - price.vp_near_share_60
 composite_factors:
   - price.reversal_5d
   - price.residual_reversal_5d

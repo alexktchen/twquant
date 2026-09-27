@@ -1,0 +1,23 @@
+# D-153 第十三輪 R0：**對照**——同池（同日有 A20 分數的股票）、固定 seed 亂數排序、同 S0 出場。
+# 不用模型排序，量的是「池子＋出場」本身；S0 − R0 才是模型排序的貢獻。**RESEARCH ONLY。**
+# 與 S0 只差 signals（因子換成 ml.pool_random）。單一 seed 的雜訊見 D-153 §一。
+name: quiet_r0
+description: 第十三輪 R0：同池亂數前 15、抱滿 20 日（S0 的對照）
+trial_scope: tail:quiet_a20_exits
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.pool_random
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+      seed: 20260924
+slots:
+  n: 15
+  entry_threshold: 0.0
+exit_rules:
+  - kind: time_stop
+    sessions: 20

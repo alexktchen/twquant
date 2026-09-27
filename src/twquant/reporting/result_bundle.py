@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from twquant.backtest.costs import CostConfig
-from twquant.backtest.engine import BacktestResult
+from twquant.backtest.engine import DEFAULT_LOT_SIZE, BacktestResult
 from twquant.backtest.metrics import Metrics, compute_metrics
 from twquant.errors import DataError
 from twquant.strategy.config import StrategyConfig
@@ -60,6 +60,7 @@ def bundle_backtest(
     source: str,
     data_fingerprint: str,
     data_tables: dict[str, tuple[int, str]] | None = None,
+    lot_size: int = DEFAULT_LOT_SIZE,
 ) -> dict[str, Any]:
     """把一次回測的完整輸出與身分序列化成可 JSON 化的 dict（純函數）。
 
@@ -75,6 +76,8 @@ def bundle_backtest(
         "end": end.isoformat(),
         "initial_capital": initial_capital,
         "max_participation": max_participation,
+        # D-153 §一 補充二：最小成交股數（整張 1,000／零股 1）。純追加欄位，舊結果包缺此鍵＝整張。
+        "lot_size": lot_size,
         "source": source,
         "data_fingerprint": data_fingerprint,
         # 逐表明細：跨策略比雜湊無意義（不同策略讀不同的表，雜湊必然不同），
@@ -165,7 +168,26 @@ def bundle_backtest(
             }
             for h in result.final_holdings
         ],
-    }
+    } | _exposure(result)
+
+
+def _exposure(result: BacktestResult) -> dict[str, Any]:
+    """D-149 條件式減碼的逐日判斷。**只有用到它的回測才帶這一欄**——既有結果包逐位元不變。
+
+    陣列而非物件（同 `equity`）：[日期, 倍數, 是否觸發, 觸發序列波動, 其百分位, 持股波動]；
+    空手那幾晚沒有估計，後三格是 null。
+    """
+    out: dict[str, Any] = {}
+    if result.exposure:
+        out["exposure"] = [
+            [e.date.isoformat(), e.mult, e.triggered, e.trigger_vol, e.trigger_pct, e.held_vol]
+            for e in result.exposure
+        ]
+    if result.entry_sizes:  # D-149 F3：[日期, 股票, 格子倍數, σ（null＝缺 σ 以下限計）]
+        out["entry_sizes"] = [
+            [e.date.isoformat(), e.stock_id, e.mult, e.sigma] for e in result.entry_sizes
+        ]
+    return out
 
 
 def metrics_from_bundle(bundle: dict[str, Any]) -> Metrics:

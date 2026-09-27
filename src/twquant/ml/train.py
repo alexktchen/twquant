@@ -174,6 +174,7 @@ _BACKCOMPAT_DEFAULTS: tuple[tuple[tuple[str, ...], object], ...] = (
     (("model_score_features",), {}),
     (("sample_min_adv_pctl",), None),
     (("sample_min_price",), None),
+    (("sample_state",), None),  # D-151：None＝全部股票（既有行為）
 )
 
 # **永遠**不進訓練指紋的欄位——不論它們的值是什麼。

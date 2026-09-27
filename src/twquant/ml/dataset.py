@@ -9,14 +9,17 @@ from __future__ import annotations
 import datetime as dt
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import polars as pl
 
 from twquant.backtest.costs import CostConfig, trade_cost
 from twquant.errors import DataError
-from twquant.panel import session_index
+from twquant.panel import safe_ratio, session_index
+
+if TYPE_CHECKING:
+    from twquant.config import MlSampleStateConfig
 
 # 事件表開頭可容忍的空窗（交易日）。約一季——真實的事件表在區間開頭本來就可能
 # 有幾週沒有除權息（台股除權息集中在 6~8 月），但不可能空一整季以上。
@@ -727,6 +730,43 @@ def liquid_pool(
         keep = keep & (pl.col("_adv") >= pl.col("_cut"))
     if min_price is not None:
         keep = keep & (pl.col("close") >= min_price)
+    return frame.filter(keep).select("date", "stock_id").sort("date", "stock_id")
+
+
+def state_pool(prices: pl.DataFrame, cfg: MlSampleStateConfig, *, adjusted: bool) -> pl.DataFrame:
+    """每日符合狀態的 (date, stock_id)（D-151）。只用 t 日（含）以前的收盤。
+
+    過去報酬用還原收盤（`adjusted` 與標籤同口徑，分割不會變成暴跌）；波動百分位的算法與
+    `price.vol_20d` 相同（未還原收盤的日報酬滾動標準差），在同日全體（呼叫端已限四碼普通股）
+    排百分位。分母 ≤ 0 → null → 不入池（沒有答案就不是那個狀態，不是補值）。
+    輸入需含 (date, stock_id, close)，`adjusted` 時另需 adj。
+    """
+    need = {"date", "stock_id", "close"} | ({"adj"} if adjusted else set())
+    missing = sorted(need - set(prices.columns))
+    if missing:
+        raise ValueError(f"state_pool 缺欄位：{missing}")
+    price = pl.col("close") / pl.col("adj") if adjusted else pl.col("close")
+    frame = prices.sort("stock_id", "date").with_columns(_p=price)
+    frame = frame.with_columns(
+        _past=safe_ratio(pl.col("_p"), pl.col("_p").shift(cfg.past_window).over("stock_id")) - 1.0
+    )
+    if cfg.kind == "hot":
+        keep = pl.col("_past") >= cast("float", cfg.min_past_ret)
+    else:
+        daily = safe_ratio(pl.col("close"), pl.col("close").shift(1).over("stock_id")) - 1.0
+        frame = (
+            frame.with_columns(_r=daily)
+            .with_columns(
+                _vol=pl.col("_r").rolling_std(cast("int", cfg.vol_window)).over("stock_id")
+            )
+            .with_columns(
+                _vpct=pl.col("_vol").rank("average").over("date")
+                / pl.col("_vol").count().over("date")
+            )
+        )
+        keep = (pl.col("_past") < cast("float", cfg.max_past_ret)) & (
+            pl.col("_vpct") < cast("float", cfg.max_vol_pctl)
+        )
     return frame.filter(keep).select("date", "stock_id").sort("date", "stock_id")
 
 
