@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -40,12 +41,49 @@ class QualityGateConfig(BaseConfig):
     disk_min_gb: float = 50.0
 
 
+#: T-310：每日 pipeline 會重抓的兩張直寫表（其餘直寫表是公告，依查詢窗抓）。
+CHIP_DAILY_TABLES = ("daytrade_daily", "sbl_short_daily")
+
+
+class ChipDailyConfig(BaseConfig):
+    """官方每日當沖／借券／處置／注意（T-310，D-154 §五／D-157）。權威說明在 system.yaml 的註解。"""
+
+    # 當沖／借券只收這個宇宙（＝FinMind 回補的歷史宇宙，D-154 §二.5；表不在中途換宇宙）
+    universe_pattern: str = "^[1-9][0-9]{3}$"
+    # 每日 pipeline 抓「前第 k 個交易日」並覆寫；最小的 k 是當沖的首次公布值（存 daytrade_first_pub）
+    refetch_offsets: dict[str, tuple[int, ...]] = {
+        "daytrade_daily": (1, 2, 3),
+        "sbl_short_daily": (1,),
+    }
+    catchup_trading_days: int = Field(default=10, ge=1)  # 往回找「某市場一列都沒有」的交易日
+    alerts_lookback_days: int = Field(default=14, ge=0)  # 公告查詢窗往回的日曆日
+    disposition_lookahead_days: int = Field(default=14, ge=1)  # 處置依處置期間查，迄日往後推
+
+    @model_validator(mode="after")
+    def _offsets_valid(self) -> ChipDailyConfig:
+        try:
+            re.compile(self.universe_pattern)
+        except re.error as exc:
+            raise ValueError(f"universe_pattern 不是合法的正規式：{exc}") from exc
+        if set(self.refetch_offsets) != set(CHIP_DAILY_TABLES):
+            raise ValueError(
+                f"refetch_offsets 必須剛好列出 {list(CHIP_DAILY_TABLES)}，得到 {sorted(self.refetch_offsets)}"
+            )
+        for table, offsets in self.refetch_offsets.items():
+            if not offsets or any(k < 1 for k in offsets):
+                raise ValueError(
+                    f"refetch_offsets.{table} 須為 ≥1 的交易日數（當天不抓），得到 {offsets}"
+                )
+        return self
+
+
 class SystemConfig(BaseConfig):
     """system.yaml 的最小模型（SPEC-001 為權威來源，後續任務擴充）。"""
 
     data_dir: str
     source_rates: dict[str, SourceRate]
     quality_gate: QualityGateConfig = QualityGateConfig()
+    chip_daily: ChipDailyConfig = ChipDailyConfig()
 
 
 # D-020 綜合分有效子集的預設值（serving.yaml.composite_factors 缺省時後備）。

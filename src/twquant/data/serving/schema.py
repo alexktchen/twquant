@@ -389,6 +389,29 @@ DIRECT_PG_SPECS: tuple[TableSpec, ...] = (
     ),
 )
 
+# 當沖「首次抓到的值」（T-310，D-154 §三 A）：每日 pipeline 在 T+1 抓 T 日當沖時另存一份（先到先存，
+# ON CONFLICT DO NOTHING），之後 T+2／T+3 重抓只覆寫 daytrade_daily。兩者一比就是「訊號當下用到的數字」
+# 與定案值的差——任何當沖因子進研究之前要先看這個（D-154 §三）。量測用的簿記表：只由每日「籌碼」步驟寫、
+# 不在鏡射清單、也不在 DIRECT_PG_SPECS（那是 T-309 的四張資料表）。fetched_at＝抓取時點。
+DAYTRADE_FIRST_PUB_SPEC = TableSpec(
+    "daytrade_first_pub",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("daytrade_shares", "bigint"),
+        ("daytrade_buy_amount", "double precision"),
+        ("daytrade_sell_amount", "double precision"),
+        ("sell_first_suspended", "boolean"),
+        ("available_at", "timestamptz"),
+        ("fetched_at", "timestamptz"),
+    ),
+    pk=("stock_id", "date"),
+    indexes=(("date",),),
+)
+
+# 每日直寫擷取（T-310）要建的表：四張資料表＋首次公布值簿記表。
+DIRECT_INGEST_SPECS: tuple[TableSpec, ...] = (*DIRECT_PG_SPECS, DAYTRADE_FIRST_PUB_SPEC)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -397,6 +420,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     SCREENER_DAILY_SPEC,
     BROKER_FLOW_DAILY_SPEC,
     *DIRECT_PG_SPECS,
+    DAYTRADE_FIRST_PUB_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
