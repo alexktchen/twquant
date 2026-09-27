@@ -169,6 +169,7 @@ class RebalanceConfig(BaseConfig):
 
 # 不需要部位就能判斷的規則：可以用來擋進場。停損／trailing_ma 相對於買進價與持有期高點，
 # 對還沒買的股票沒有定義，故不在此列。`backtest.exits.entry_blocked` 用同一份名單。
+# bb_lower_stop 雖不需要部位，**刻意不列入**：D-159 要求各臂進場逐字相同，只換出場。
 POSITION_FREE_KINDS: frozenset[str] = frozenset({"below_ma", "score_below"})
 
 
@@ -187,11 +188,18 @@ class ExitRuleConfig(BaseConfig):
         "trailing_pct",
         "take_profit",
         "time_stop",
+        "bb_lower_stop",
+        "atr_trailing",
+        "ma_lock",
     ]
     # stop_loss：收盤（含已收股利）較本輪均價的**跌**幅；take_profit：**漲**幅。皆為正的小數
     pct: float | None = None
     sessions: int | None = None  # time_stop：買進後持有滿幾個交易日即賣（買進日算第 0 天）
-    window: int | None = None  # below_ma／trailing_ma：均線天數（含當日）
+    window: int | None = (
+        None  # below_ma／trailing_ma／ma_lock：均線天數；bb_lower_stop／atr_trailing：統計窗
+    )
+    # bb_lower_stop：幾倍標準差（布林下軌）；atr_trailing：持有期最高收盤往下幾倍 ATR（D-159）
+    mult: float | None = None
     # trailing_ma／trailing_pct：本輪未實現報酬**曾經**達到此值之後才上膛（D-120 S0：讓獲利奔跑）
     min_peak_gain: float | None = None
     factor: str | None = None  # score_below：因子名（如 ml.lgbm_lw_net_20d）
@@ -203,6 +211,7 @@ class ExitRuleConfig(BaseConfig):
         given = {
             "pct": self.pct is not None,
             "window": self.window is not None,
+            "mult": self.mult is not None,
             "min_peak_gain": self.min_peak_gain is not None,
             "sessions": self.sessions is not None,
             "factor": self.factor is not None,
@@ -218,6 +227,10 @@ class ExitRuleConfig(BaseConfig):
             "take_profit": {"pct"},
             "time_stop": {"sessions"},
             "score_below": {"factor", "threshold", "params"},
+            # D-159：布林下軌停損、ATR 移動停利、均線鎖利（後兩者線高於均價才生效）
+            "bb_lower_stop": {"window", "mult"},
+            "atr_trailing": {"window", "mult"},
+            "ma_lock": {"window"},
         }[self.kind]
         required = allowed - {"params"}
         missing = sorted(k for k in required if not given[k])
@@ -230,6 +243,8 @@ class ExitRuleConfig(BaseConfig):
             raise ValueError(f"time_stop.sessions 須 >= 1，得到 {self.sessions}")
         if self.window is not None and self.window < 2:
             raise ValueError(f"{self.kind}.window 須 >= 2，得到 {self.window}")
+        if self.mult is not None and self.mult <= 0.0:
+            raise ValueError(f"{self.kind}.mult 須 > 0，得到 {self.mult}")
         if self.min_peak_gain is not None and self.min_peak_gain <= 0.0:
             raise ValueError(f"{self.kind}.min_peak_gain 須 > 0，得到 {self.min_peak_gain}")
         return self
