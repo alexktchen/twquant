@@ -37,6 +37,19 @@ def test_ac1_registered_strategies_are_unchanged() -> None:
         )
 
 
+def test_ac1b_post_registration_optional_fields_only_count_when_set() -> None:
+    """D-149 在 schema 加了 slots.conditional_vol／inverse_vol：沒設（預設 None）不得改變指紋，
+    設了就必須改變——前者是 schema 演進，後者才是行為改變。"""
+    cfg = load_strategy(str(_CONFIG_DIR / "strategies" / "tail_b.yaml"))
+    assert cfg.slots is not None and cfg.slots.conditional_vol is None
+    f3 = load_strategy(str(_CONFIG_DIR / "strategies" / "tail_f3.yaml"))
+    assert f3.slots is not None and f3.slots.inverse_vol is not None
+    touched = cfg.model_copy(
+        update={"slots": cfg.slots.model_copy(update={"inverse_vol": f3.slots.inverse_vol})}
+    )
+    assert config_fingerprint(touched) != config_fingerprint(cfg)
+
+
 def test_ac2_registered_costs_are_unchanged() -> None:
     costs = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
     for entry in _reg().entries:

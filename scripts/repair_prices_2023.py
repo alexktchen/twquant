@@ -117,7 +117,11 @@ def _pg_frame(cfg: ServingConfig) -> pl.DataFrame:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lake", default="D:/project/twquant/data/lake_rebuild")
+    ap.add_argument(
+        "--lake",
+        default="D:/project/twquant/data/lake_rebuild",
+        help="給空字串＝只寫 PG（使用者規定資料只存 PG；湖已不是資料源）",
+    )
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
@@ -228,31 +232,35 @@ def main() -> None:
         print("\n--check 完成，未寫入。", flush=True)
         return
 
-    wh = Warehouse(args.lake)
     days = sorted(out["date"].unique().to_list())
-    for d in days:
-        # 寫成獨立 source：`_write_partition` 只替換同名檔，故與既有 part-pg.parquet 並存，
-        # scan 時 union。因為只補「兩邊都沒有」的列，union 不會產生重複。
-        wh.write("clean", "prices_daily", out.filter(pl.col("date") == d), source="finmind_repair")
+    if args.lake:
+        wh = Warehouse(args.lake)
+        for d in days:
+            # 寫成獨立 source：`_write_partition` 只替換同名檔，故與既有 part-pg.parquet 並存，
+            # scan 時 union。因為只補「兩邊都沒有」的列，union 不會產生重複。
+            wh.write(
+                "clean", "prices_daily", out.filter(pl.col("date") == d), source="finmind_repair"
+            )
     with store.connect(cfg) as conn, conn.cursor() as cur:
         upsert(cur, cfg.pg_schema, sch.spec_of("prices_daily"), out)
         conn.commit()
-    print(f"\n已寫入湖與 PG：{out.height:,} 列", flush=True)
+    print(f"\n已寫入{'湖與 ' if args.lake else ''}PG：{out.height:,} 列", flush=True)
 
     # ── 寫後驗證：湖不得出現重複 (date, stock_id)，PG 的缺腿須消失 ──────
-    lake = (
-        wh.scan("prices_daily")
-        .filter(pl.col("date").is_in(days))
-        .select("date", "stock_id")
-        .collect()
-    )
-    if lake.height != lake.unique().height:
-        raise SystemExit(
-            f"湖在修補日出現重複 (date, stock_id)：{lake.height:,} 列但只有 "
-            f"{lake.unique().height:,} 個相異鍵——分區檔可能重疊，請檢查 "
-            "clean/prices_daily/date=*/ 下的 part-*.parquet"
+    if args.lake:
+        lake = (
+            wh.scan("prices_daily")
+            .filter(pl.col("date").is_in(days))
+            .select("date", "stock_id")
+            .collect()
         )
-    print(f"  ✓ 湖回讀 {lake.height:,} 列、無重複鍵", flush=True)
+        if lake.height != lake.unique().height:
+            raise SystemExit(
+                f"湖在修補日出現重複 (date, stock_id)：{lake.height:,} 列但只有 "
+                f"{lake.unique().height:,} 個相異鍵——分區檔可能重疊，請檢查 "
+                "clean/prices_daily/date=*/ 下的 part-*.parquet"
+            )
+        print(f"  ✓ 湖回讀 {lake.height:,} 列、無重複鍵", flush=True)
 
     with store.connect(cfg) as conn, conn.cursor() as cur:
         cur.execute(

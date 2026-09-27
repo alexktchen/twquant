@@ -292,6 +292,40 @@ class RecommendationBucketConfig(BaseConfig):
         return self
 
 
+class MlSampleStateConfig(BaseConfig):
+    """只在某種「狀態」的股票上訓練、也只在那裡預測（D-151）。只用 t 日（含）以前的收盤。
+
+    - `quiet`（模型 A）：過去 `past_window` 日還原報酬 < `max_past_ret`，**且** `vol_window` 日
+      報酬標準差（與 `price.vol_20d` 同算法）在同日全體的百分位 < `max_vol_pctl`。
+      排除「已經在飆」的股票——D-143 §十二 量到，讓模型看全部股票它就走捷徑挑最熱的。
+    - `hot`（模型 B）：過去 `past_window` 日還原報酬 ≥ `min_past_ret`——已經飆上去的股票。
+
+    寫了卻不生效的欄位一律拒絕（no-op 缺陷）：quiet 不得給 `min_past_ret`，hot 不得給波動條件。
+    """
+
+    kind: Literal["quiet", "hot"]
+    past_window: int = Field(ge=1)
+    max_past_ret: float | None = None
+    min_past_ret: float | None = None
+    vol_window: int | None = Field(default=None, ge=2)
+    max_vol_pctl: float | None = Field(default=None, gt=0.0, lt=1.0)
+
+    @model_validator(mode="after")
+    def _shape(self) -> MlSampleStateConfig:
+        vol_given = self.vol_window is not None or self.max_vol_pctl is not None
+        if self.kind == "quiet":
+            if self.max_past_ret is None or self.vol_window is None or self.max_vol_pctl is None:
+                raise ValueError("quiet 須同時給 max_past_ret、vol_window、max_vol_pctl")
+            if self.min_past_ret is not None:
+                raise ValueError("quiet 不得給 min_past_ret（它不會生效）")
+        else:
+            if self.min_past_ret is None:
+                raise ValueError("hot 須給 min_past_ret")
+            if self.max_past_ret is not None or vol_given:
+                raise ValueError("hot 只看過去報酬下限，不得給 max_past_ret 或波動條件")
+        return self
+
+
 class MlConfig(BaseConfig):
     """ml.yaml 的模型（SPEC-010 §1 為權威）。"""
 
@@ -312,6 +346,8 @@ class MlConfig(BaseConfig):
     # 訓練樣本限縮到流動性合格池（與回測 universe 同兩個門檻）；None＝全部四碼普通股（既有行為）
     sample_min_adv_pctl: float | None = Field(default=None, gt=0.0, lt=1.0)
     sample_min_price: float | None = Field(default=None, gt=0.0)
+    # D-151：只在安靜股／已飆股上訓練與預測；None＝全部四碼普通股（既有行為）
+    sample_state: MlSampleStateConfig | None = None
     label: MlLabelConfig = MlLabelConfig()
     split: MlSplitConfig = MlSplitConfig()
     lgbm: MlLgbmConfig = MlLgbmConfig()

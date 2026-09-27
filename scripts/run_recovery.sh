@@ -158,6 +158,11 @@ if want 10; then
 fi
 
 if want 11; then
+  # 2026-09-24 發現：第一次重放漏了這一步——T-149 的因子重物化被重放了，它依賴的 T-136 價格修補卻沒有，
+  # 於是 2023-02-20~06-30 的上市腿又缺席了兩週多才被發現。價格必須在重物化之前補齊。
+  say "11a 2023 價格缺腿（T-136，09-05）——必須在重物化之前"
+  py scripts/repair_prices_2023.py --check
+  py scripts/repair_prices_2023.py --write --lake ""
   say "11 factor_values 全期重物化 2015-06-01 ~ 2026-09-09（37 個因子，約 3 小時）"
   # 一次涵蓋 T-142（inf 修正）、T-149（2023 缺口）、T-167（長歷史）、T-180（2020 Q1 缺洞），
   # 比逐一重放那四次更一致。broker 三因子與 ml.* 不在內（見 materialize_long_history.py）。

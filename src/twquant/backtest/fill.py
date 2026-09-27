@@ -7,11 +7,12 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from twquant.backtest.costs import CostConfig, TradeCost, trade_cost
 
-_LOT = 1000
+_LOT = 1000  # 整張；零股回測由呼叫端傳 lot=1（D-153 §一 補充二）
 
 
 @dataclass(frozen=True)
@@ -32,8 +33,9 @@ def decide_fill(
     max_participation: float,
     available_cash: float,
     cost_cfg: CostConfig,
+    lot: int = _LOT,
 ) -> FillDecision:
-    """決定一張單成交多少。side='buy'|'sell'，shares 為正整數股（1000 倍數）。"""
+    """決定一張單成交多少。side='buy'|'sell'，shares 為正整數股（`lot` 的倍數；預設整張）。"""
     qty = shares
     if side == "buy" and limit_up is not None and price >= limit_up:
         return FillDecision(0, None, [(qty, "limit_up")])
@@ -42,7 +44,7 @@ def decide_fill(
 
     unfilled: list[tuple[int, str]] = []
     if adv is not None and adv > 0:
-        cap = int((max_participation * adv) // (price * _LOT)) * _LOT
+        cap = int((max_participation * adv) // (price * lot)) * lot
         if qty > cap:
             unfilled.append((qty - cap, "participation"))
             qty = cap
@@ -56,7 +58,11 @@ def decide_fill(
             c = trade_cost(side="buy", price=price, shares=q, participation=part, cfg=cost_cfg)
             if price * q + c.total <= available_cash + 1e-6:
                 break
-            q -= _LOT
+            if lot == _LOT:  # 整張：逐張退，行為逐位元不變
+                q -= lot
+            else:  # 零股：一股一股退會迴圈上萬次，直接跳過短缺的股數（進位到 lot）
+                short = price * q + c.total - available_cash
+                q -= max(lot, math.ceil(short / (price * lot)) * lot)
         if q <= 0:
             return FillDecision(0, None, [*unfilled, (shares, "cash")])
         c = trade_cost(side="buy", price=price, shares=q, participation=part, cfg=cost_cfg)

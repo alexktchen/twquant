@@ -15,6 +15,7 @@ from pydantic import Field, model_validator
 
 from twquant.config import BaseConfig, load_config
 from twquant.errors import ConfigError
+from twquant.portfolio.config import VolTargetConfig
 
 
 class PrefilterConfig(BaseConfig):
@@ -249,6 +250,48 @@ class ExposureTargetConfig(BaseConfig):
     min_mult: float = Field(gt=0.0, le=1.0)  # 倍數下限；避免極端行情下曝險歸零而完全踏空
 
 
+class ConditionalVolConfig(BaseConfig):
+    """條件式減碼（D-149）：把 D-004／SPEC-005 的條件式波動目標接到每日補位。
+
+    `vol_target` 逐字沿用 `configs/portfolio.yaml`（測試守著兩邊相同）：觸發序列的波動落在
+    自身 `percentile_window_days` 日的第 `reduce_above_pct` 百分位以上、**且**高於 `annual_vol`，
+    才把曝險縮到 `annual_vol ÷ 持股波動`；其餘 1 倍。`trigger` 決定看哪條序列：
+    `holdings`＝目前持股的等權報酬（F1），`index`＝`index_id` 的指數報酬（F2）。
+    倍數一律以持股波動計算——兩臂唯一的差別是觸發源。減碼的執行沿用 T-286。
+    """
+
+    trigger: Literal["holdings", "index"]
+    index_id: str | None = None  # trigger=index 時必填（例如 TAIEX）
+    vol_target: VolTargetConfig
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ConditionalVolConfig:
+        if (self.trigger == "index") != (self.index_id is not None):
+            raise ValueError("trigger=index 必須給 index_id；trigger=holdings 不得給 index_id")
+        if not self.vol_target.enabled:
+            raise ValueError(
+                "vol_target.enabled=false 會讓整段設定變成 no-op；要關掉請拿掉 conditional_vol"
+            )
+        if self.vol_target.estimator.method != "ewma":
+            raise ValueError(
+                f"估計器只實作 ewma（D-004），收到 {self.vol_target.estimator.method!r}"
+            )
+        if self.vol_target.max_leverage > 1.0:
+            raise ValueError("每日補位只減碼不加槓桿（D-149 §二）：max_leverage 不得大於 1")
+        return self
+
+
+class InverseVolSizingConfig(BaseConfig):
+    """反波動部位（D-149 F3）：每格 × clip(σ_ref ÷ σ_i, floor, 1.0)，只降不升。
+
+    σ_i＝該檔訊號日的 `factor` 值，σ_ref＝當晚候選前 n 名的 σ 中位數。上限 1.0 沿用
+    D-004「只降不升」，`floor` 沿用 D-009 的 REDUCED 檔位——兩個邊界都借自既有登記。
+    """
+
+    factor: str  # σ 的來源因子（D-149：price.vol_20d）
+    floor: float = Field(gt=0.0, le=1.0)
+
+
 class SlotsConfig(BaseConfig):
     """每日補位模式（T-247／D-120 §五）。給了它，`rebalance`／`selection`／`weighting` 一律不用。
 
@@ -259,6 +302,16 @@ class SlotsConfig(BaseConfig):
     n: int = Field(ge=1)  # 滿手檔數；每格＝成交當時權益 ÷ n
     entry_threshold: float  # 因子原始值 >= 此值才是候選
     exposure_target: ExposureTargetConfig | None = None  # T-286：None ＝ 永遠滿倉（既有行為）
+    conditional_vol: ConditionalVolConfig | None = None  # D-149 F1／F2
+    inverse_vol: InverseVolSizingConfig | None = None  # D-149 F3
+
+    @model_validator(mode="after")
+    def _one_exposure_rule(self) -> SlotsConfig:
+        if self.exposure_target is not None and self.conditional_vol is not None:
+            raise ValueError(
+                "exposure_target 與 conditional_vol 只能擇一：兩者寫的是同一個曝險倍數，會互相覆蓋"
+            )
+        return self
 
 
 class StrategyConfig(BaseConfig):

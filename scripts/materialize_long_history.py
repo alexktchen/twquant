@@ -57,7 +57,7 @@ def main() -> None:
         "--factors",
         default="",
         help="逗號分隔；只物化這些因子（單支補算用）。留空＝全部（扣除 broker 與 ml）。"
-        "所選子集仍須完整包含 composite 集合，理由見 D-057",
+        "所選子集須完整包含 composite 集合、或與它完全不相交，理由見 D-057",
     )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -72,11 +72,15 @@ def main() -> None:
         if unknown := sorted(set(wanted) - set(factors)):
             raise SystemExit(f"--factors 含未註冊或被排除的因子：{unknown}（可用：{factors}）")
         factors = sorted(wanted)
-    missing = set(cfg.composite_factors) - set(factors)
-    if missing:
-        # 部分重疊時 `_materialize_on` 會 raise；在這裡先擋，訊息比它清楚（D-057）
+    comp = set(cfg.composite_factors)
+    overlap = comp & set(factors)
+    if overlap and overlap != comp:
+        # 部分重疊時 `_materialize_on` 會 raise；在這裡先擋，訊息比它清楚（D-057）。
+        # 完全不相交（例如 D-151 的五支新因子）是允許的：只寫因子表，composite_daily 不動——
+        # `_materialize_on` 本來就這樣處理，先前這裡把「不相交」也一併擋掉，逼每次補新因子都
+        # 連帶重算三支綜合分因子與整張綜合分表。
         raise SystemExit(
-            f"因子子集未完整包含 composite 集合，缺 {sorted(missing)}"
+            f"因子子集與 composite 集合部分重疊（{sorted(overlap)}），缺 {sorted(comp - overlap)}"
             "——那會讓 composite_daily 與因子表對同一個因子有兩個版本"
         )
     print(f"物化 {len(factors)} 個因子（已排除 broker 與 ml）")

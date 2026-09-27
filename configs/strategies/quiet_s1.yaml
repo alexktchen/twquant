@@ -1,0 +1,27 @@
+# D-153 第十三輪 S1：A20 進場，出場＝tail_b 的 ratchet **逐字**（D-143 §四：初始停損 −15%；
+# 浮盈曾達 +20% 後改為自持有期高點回落 10%；60 個交易日時間上限）。**RESEARCH ONLY。**
+# 與 S0 只差 exit_rules（tests/test_round13_configs.py 守著）。
+name: quiet_s1
+description: 第十三輪 S1：A20 機率前 15、tail_b ratchet 出場
+trial_scope: tail:quiet_a20_exits
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+slots:
+  n: 15
+  entry_threshold: 0.0
+exit_rules:
+  - kind: stop_loss
+    pct: 0.15
+  - kind: trailing_pct
+    pct: 0.10
+    min_peak_gain: 0.20
+  - kind: time_stop
+    sessions: 60

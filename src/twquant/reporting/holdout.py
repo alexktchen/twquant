@@ -13,16 +13,37 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from twquant.config import BaseConfig
 
+# 登記（D-148，2026-09-23）**之後**才加進配置 schema、而且預設值不改變行為的選配欄位。
+# 雜湊前若它們等於預設就拿掉——否則每加一個選配欄位，所有凍結指紋都會失效，而那不是
+# 行為改變（D-149 新增 slots.conditional_vol／inverse_vol 時正是如此）。**設了非預設值就保留**：
+# 那才是行為改變，閘門照樣會紅。只能往這裡加「登記後新增的欄位」；拿舊欄位來加等於改寫登記。
+_INERT_EXTENSIONS: tuple[tuple[tuple[str, ...], object], ...] = (
+    (("slots", "conditional_vol"), None),  # D-149 F1／F2
+    (("slots", "inverse_vol"), None),  # D-149 F3
+)
+
+
+def _strip_inert(payload: dict[str, Any]) -> dict[str, Any]:
+    for path, default in _INERT_EXTENSIONS:
+        node: Any = payload
+        for key in path[:-1]:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, dict) and path[-1] in node and node[path[-1]] == default:
+            del node[path[-1]]
+    return payload
+
 
 def config_fingerprint(model: BaseModel) -> str:
     """驗證後配置的內容指紋（sha256，排序鍵的 JSON）。只反映行為，不反映格式。"""
-    payload = json.dumps(model.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    payload = _strip_inert(model.model_dump(mode="json"))
+    text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def file_sha256(data: bytes) -> str:
