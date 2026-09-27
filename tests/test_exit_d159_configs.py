@@ -17,7 +17,7 @@ def _load(name: str) -> StrategyConfig:
     return StrategyConfig.model_validate(yaml.safe_load((ROOT / f"{name}.yaml").read_text("utf-8")))
 
 
-@pytest.mark.parametrize("arm", ["quiet_t_ma", "quiet_t_atr"])
+@pytest.mark.parametrize("arm", ["quiet_t_ma", "quiet_t_atr", "quiet_t_atr_f15"])
 def test_ac6_arms_differ_from_s0_only_in_exits(arm: str) -> None:
     s0 = _load("quiet_s0").model_dump(mode="json")
     t = _load(arm).model_dump(mode="json")
@@ -42,5 +42,18 @@ def test_ac6_arms_carry_the_registered_parameters(arm: str, lock: dict[str, obje
     assert rules == [
         {"kind": "bb_lower_stop", "window": 20, "mult": 2.0},
         lock,
+        {"kind": "time_stop", "sessions": 120},
+    ]
+
+
+def test_ac6_f15_arm_swaps_only_the_band_for_a_fixed_stop() -> None:
+    """D-161 §一：T-ATR-F15＝T-ATR 把布林下軌換成固定 −15% 停損，其餘出場逐字相同。"""
+    rules = [
+        {k: v for k, v in r.model_dump().items() if v not in (None, {})}
+        for r in _load("quiet_t_atr_f15").exit_rules
+    ]
+    assert rules == [
+        {"kind": "stop_loss", "pct": 0.15},
+        {"kind": "atr_trailing", "window": 14, "mult": 3.0},
         {"kind": "time_stop", "sessions": 120},
     ]
