@@ -358,3 +358,57 @@ export function confluenceZones(
     }, null)
   return { above: pick(done.filter((z) => z.price > close)), below: pick(done.filter((z) => z.price <= close)) }
 }
+
+/**
+ * 結構分數（T-321）：把判讀摘要的五項各打 0–20 分，加總成 0–100（偏多程度）。
+ * 權重與對照表是看盤慣例＋軌道線做法的轉述，**沒有回測、不可當訊號**；事後不得依報酬調整。
+ */
+export const SCORE = {
+  perItem: 20,
+  /** 趨勢標籤 → 分數（長、短波段共用）。 */
+  trend: { 偏多: 20, 轉強: 16, 收斂: 10, 不明: 10, 擴散: 8, 轉弱: 4, 偏空: 0 } as Record<string, number>,
+  /** 軌道位置 → 分數（軌道線做法：靠下軌才是多方位置，中間沒有戰略位置）。 */
+  position: { 靠下軌: 20, 軌道中間: 10, 跑出軌道上方: 10, 靠上軌: 5, 跌出軌道下方: 0 } as Record<string, number>,
+  /** 支撐：幾條線合流算滿分；距收盤在 near 內全額、far 內打 midFactor 折，更遠打 farFactor 折。 */
+  support: { fullLines: 5, near: 0.05, far: 0.1, midFactor: 0.7, farFactor: 0.4 },
+  /** 空間：到壓力／到支撐的比例達 fullRatio 算滿分；上方沒有合流壓力給 openAbove 分。 */
+  space: { fullRatio: 2, openAbove: 16 },
+  /** 總分分級：≥ bull 結構偏多、< bear 結構偏空，中間為中性。 */
+  grade: { bull: 70, bear: 40 },
+} as const
+
+export type ScoreInput = {
+  longTag: string
+  shortTag: string
+  /** 軌道位置標籤；沒有有效軌道為 null（該項給中性分）。 */
+  where: string | null
+  /** 下方最強合流區的線數與距收盤比例（負數）；沒有為 null。 */
+  support: { lines: number; dist: number } | null
+  /** 到上方合流區的距離（正數）；上方沒有合流區為 null。 */
+  up: number | null
+}
+export type ScoreItem = { key: 'long' | 'short' | 'position' | 'support' | 'space'; score: number }
+
+export function structureScore(x: ScoreInput, s: typeof SCORE = SCORE): { items: ScoreItem[]; total: number; pct: number; grade: '結構偏多' | '中性' | '結構偏空' } {
+  const neutral = s.perItem / 2
+  const trend = (tag: string) => s.trend[tag] ?? neutral
+  let sup = 0
+  if (x.support) {
+    const d = Math.abs(x.support.dist)
+    const f = d <= s.support.near ? 1 : d <= s.support.far ? s.support.midFactor : s.support.farFactor
+    sup = s.perItem * Math.min(1, x.support.lines / s.support.fullLines) * f
+  }
+  let space = 0
+  if (x.support && x.support.dist < 0) space = x.up === null ? s.space.openAbove : s.perItem * Math.min(1, x.up / -x.support.dist / s.space.fullRatio)
+  const items: ScoreItem[] = [
+    { key: 'long', score: trend(x.longTag) },
+    { key: 'short', score: trend(x.shortTag) },
+    { key: 'position', score: x.where === null ? neutral : (s.position[x.where] ?? neutral) },
+    { key: 'support', score: Math.round(sup) },
+    { key: 'space', score: Math.round(space) },
+  ]
+  const total = items.reduce((a, b) => a + b.score, 0)
+  const pct = total / (s.perItem * items.length)
+  const grade = pct * 100 >= s.grade.bull ? '結構偏多' : pct * 100 < s.grade.bear ? '結構偏空' : '中性'
+  return { items, total, pct, grade }
+}
