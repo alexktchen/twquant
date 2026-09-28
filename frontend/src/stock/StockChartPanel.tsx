@@ -2,13 +2,18 @@
 // 副圖全部併進 K 線（v5 原生 pane、共用時間軸），每個 pane 左上以 watermark 標示指標名稱。
 // factors＝要加開的因子副圖（一因子一 pane，方向化 z）；available＋onToggle 提供 chips 多選。
 // 綜合分位與主力序列由頁面讀一次後傳入（與儀表板面板共用），本元件不重複打 API。
-import { useMemo, useState } from 'react'
+import { useContext, useMemo, useState } from 'react'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorOption, StockFactorHistory } from '../api'
 import { fetchStockFactorHistory } from '../api'
 import { RangeCandle, type ChartMarker } from '../charts'
 import { useMediaQuery, useResource } from '../hooks'
 import { MAX_FACTOR_PANES } from './store'
 import { ChipRow, TPanel, chip } from './ui'
+import { CardHeightContext } from './DashGrid'
+
+// 卡片裡圖以外的高度（標題列＋副圖因子列＋自動畫線／均線開關列＋內距），與圖的下限
+const CHART_CHROME_H = 230
+const MIN_CHART_H = 200
 
 export function StockChartPanel({
   no,
@@ -68,6 +73,10 @@ export function StockChartPanel({
   const desktop = useMediaQuery('(min-width: 768px)')
   const baseH = tall ? (desktop ? 600 : 430) : desktop ? 320 : 250
   const paneH = desktop ? 90 : 72
+  // 使用者把 K 線卡拉高（T-322）：圖跟著撐高，扣掉標題列與各開關列的高度
+  const cardH = useContext(CardHeightContext)
+  const naturalH = baseH + factorPanes.length * paneH
+  const chartH = cardH === null ? naturalH : Math.max(MIN_CHART_H, cardH - CHART_CHROME_H)
   const subs = [
     '量(股)',
     hasComp && '綜合因子分位',
@@ -100,7 +109,7 @@ export function StockChartPanel({
       <RangeCandle
         key={sid}
         data={series}
-        height={baseH + factorPanes.length * paneH}
+        height={chartH}
         volume
         composite={hasComp ? composite : undefined}
         brokerFlow={hasFlow ? brokerFlow : undefined}

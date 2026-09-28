@@ -20,6 +20,7 @@ import { StockChartPanel } from './StockChartPanel'
 import { StrategyPools } from './StrategyPools'
 import { DEFAULT_SCREEN, MAX_FACTOR_PANES, loadSubFactors, loadWatch, saveSubFactors, saveWatch } from './store'
 import { TPanel } from './ui'
+import { DashGrid } from './DashGrid'
 import { useStockData } from './useStockData'
 import { DEFAULT_STOCK_TAB, parseStockTab, quoteIdentity, stockTabs, type StockTabId } from '../platform/stockTabs'
 import { mapEventsToSessions } from '../platform/eventMarkers'
@@ -29,6 +30,8 @@ import type { StockEvent } from '../platform/stockRecommendations'
 import { markerFor } from '../platform/markerStyle'
 
 // 穩定的空陣列：圖表以陣列 identity 為 effect 依賴，每次 render 產生新 [] 會讓整座圖重建。
+/** 個股儀表板的卡片順序與大小（T-322），跨股票共用同一份版面。 */
+const DASH_LAYOUT_KEY = 'twquant.stockDashLayout'
 const NO_COMPOSITE: CompositePoint[] = []
 const NO_FLOW: BrokerFlowPoint[] = []
 
@@ -163,66 +166,77 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
         onCsv={() => bars && downloadBlob(`${sid}_日K_${stamp}.csv`, new Blob([ohlcCsv(bars)], { type: 'text/csv;charset=utf-8' }))}
       />
       <QuickRow sid={sid} watch={watch} hot={hot} hotIsRanked={topRows.length > 0} mm={mm} onPick={setSid} />
-      <div className="dash-grid">
-        {bars ? (
-          <StockChartPanel
-            no="01"
-            className="dash-c6 dash-r2"
-            sid={sid}
-            title={`${labelOf(mm, sid)} · K 線`}
-            series={bars}
-            composite={data.comp.data?.rows ?? NO_COMPOSITE}
-            brokerFlow={data.flow.data?.rows ?? NO_FLOW}
-            subLoading={data.comp.loading || data.flow.loading}
-            factors={subFactors}
-            available={ftop.data?.available ?? []}
-            onToggle={toggleSub}
-            markers={chartMarkers.length ? chartMarkers : undefined}
-            focusTime={focusSession}
-            onResetView={() => setFocusDay(null)}
-            onReady={(fn) => { shot.current = fn }}
-          />
-        ) : (
-          <TPanel no="01" title={`${labelOf(mm, sid)} · K 線`} className="dash-c6 dash-r2">
-            <div className="dash-state" style={{ minHeight: 220 }}>
-              {ohlcError
-                ? `無法讀取 ${labelOf(mm, sid)} K 線：${ohlcError}（讀取失敗，未以離線快照替代）`
-                : !series || loading
-                  ? `載入 ${labelOf(mm, sid)} K 線…`
-                  : live
-                    ? `無 ${labelOf(mm, sid)} K 線資料`
-                    : `離線快照僅含熱門 ${meta.top_stocks.length} 檔，無 ${labelOf(mm, sid)} K 線`}
-            </div>
-          </TPanel>
-        )}
-        <ReadingsPanel no="02" className="dash-c3" bars={bars} data={data} />
-        <FactorRadarPanel no="03" className="dash-c3" data={data} />
-        <HeatPanel no="04" className="dash-c3" bars={bars} />
-        <RiskRadarPanel no="05" className="dash-c3" data={data} />
-        <div className="dash-c6">
-          <StockEventsPanel
-            no="06"
-            groups={mapping.groups}
-            pending={mapping.pending}
-            loading={eventsLoading}
-            error={eventsError}
-            selectedDay={focusDay ?? dateContext}
-            onSelectDay={setFocusDay}
-          />
-        </div>
-        <InstPanel no="07" className="dash-c6" data={data} />
-        <CompositeTrendPanel no="08" className="dash-c3" data={data} />
-        <BrokerFlowPanel no="09" className="dash-c3" data={data} />
-        <MarginStructurePanel no="10" className="dash-c3" data={data} />
-        <EnergyPanel no="11" className="dash-c3" bars={bars} />
-        <HealthPanel no="12" className="dash-c3" data={data} />
-        <PoolPanel no="13" className="dash-c3" sid={sid} />
-        <RangeGaugePanel no="14" className="dash-c3" bars={bars} />
-        <CoveragePanel no="15" className="dash-c3" bars={bars} data={data} events={{ count: events.length, failed: eventsError !== null, loading: eventsLoading }} />
-        <RevenueTrendPanel no="16" className="dash-c3" data={data} />
-        <InsightSummaryPanel no="17" className="dash-c3" data={data} onOpen={() => selectTab('insights')} />
-        <BrokerCountPanel no="18" className="dash-c6" data={data} />
-      </div>
+      <DashGrid
+        storageKey={DASH_LAYOUT_KEY}
+        items={[
+          {
+            id: '01',
+            w: 6,
+            tall: true,
+            node: bars ? (
+              <StockChartPanel
+                no="01"
+                sid={sid}
+                title={`${labelOf(mm, sid)} · K 線`}
+                series={bars}
+                composite={data.comp.data?.rows ?? NO_COMPOSITE}
+                brokerFlow={data.flow.data?.rows ?? NO_FLOW}
+                subLoading={data.comp.loading || data.flow.loading}
+                factors={subFactors}
+                available={ftop.data?.available ?? []}
+                onToggle={toggleSub}
+                markers={chartMarkers.length ? chartMarkers : undefined}
+                focusTime={focusSession}
+                onResetView={() => setFocusDay(null)}
+                onReady={(fn) => { shot.current = fn }}
+              />
+            ) : (
+              <TPanel no="01" title={`${labelOf(mm, sid)} · K 線`}>
+                <div className="dash-state" style={{ minHeight: 220 }}>
+                  {ohlcError
+                    ? `無法讀取 ${labelOf(mm, sid)} K 線：${ohlcError}（讀取失敗，未以離線快照替代）`
+                    : !series || loading
+                      ? `載入 ${labelOf(mm, sid)} K 線…`
+                      : live
+                        ? `無 ${labelOf(mm, sid)} K 線資料`
+                        : `離線快照僅含熱門 ${meta.top_stocks.length} 檔，無 ${labelOf(mm, sid)} K 線`}
+                </div>
+              </TPanel>
+            ),
+          },
+          { id: '02', w: 3, node: <ReadingsPanel no="02" bars={bars} data={data} /> },
+          { id: '03', w: 3, node: <FactorRadarPanel no="03" data={data} /> },
+          { id: '04', w: 3, node: <HeatPanel no="04" bars={bars} /> },
+          { id: '05', w: 3, node: <RiskRadarPanel no="05" data={data} /> },
+          {
+            id: '06',
+            w: 6,
+            node: (
+              <StockEventsPanel
+                no="06"
+                groups={mapping.groups}
+                pending={mapping.pending}
+                loading={eventsLoading}
+                error={eventsError}
+                selectedDay={focusDay ?? dateContext}
+                onSelectDay={setFocusDay}
+              />
+            ),
+          },
+          { id: '07', w: 6, node: <InstPanel no="07" data={data} /> },
+          { id: '08', w: 3, node: <CompositeTrendPanel no="08" data={data} /> },
+          { id: '09', w: 3, node: <BrokerFlowPanel no="09" data={data} /> },
+          { id: '10', w: 3, node: <MarginStructurePanel no="10" data={data} /> },
+          { id: '11', w: 3, node: <EnergyPanel no="11" bars={bars} /> },
+          { id: '12', w: 3, node: <HealthPanel no="12" data={data} /> },
+          { id: '13', w: 3, node: <PoolPanel no="13" sid={sid} /> },
+          { id: '14', w: 3, node: <RangeGaugePanel no="14" bars={bars} /> },
+          { id: '15', w: 3, node: <CoveragePanel no="15" bars={bars} data={data} events={{ count: events.length, failed: eventsError !== null, loading: eventsLoading }} /> },
+          { id: '16', w: 3, node: <RevenueTrendPanel no="16" data={data} /> },
+          { id: '17', w: 3, node: <InsightSummaryPanel no="17" data={data} onOpen={() => selectTab('insights')} /> },
+          { id: '18', w: 6, node: <BrokerCountPanel no="18" data={data} /> },
+        ]}
+      />
       <div className="dash-tabs" role="tablist" aria-label="個股資料頁籤">
         {stockTabs.map((t) => (
           <button
