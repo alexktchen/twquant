@@ -10,7 +10,7 @@ export type Holding = { stock_id: string; entry_date: string; held_sessions: num
 /** 當天模型前 n 名（推薦），位子滿不滿都列；`held`＝收盤後持有、`new`＝過去 20 個交易日沒進過前 n。 */
 export type Pick = { stock_id: string; rank: number; held: boolean; new: boolean }
 /** `watch_new`／`picks`：補位型才有。 */
-export type BoardDay = { date: string; entered: Entered[]; exited: Exited[]; holdings: Holding[]; watch_new?: string[]; picks?: Pick[] }
+export type BoardDay = { date: string; entered: Entered[]; exited: Exited[]; holdings: Holding[]; watch_new?: string[]; picks?: Pick[] | null; picks_missing?: string }
 export type NextPlan = { rebalance: boolean; buy: string[]; sell: { stock_id: string; reason: string }[] }
 export type BoardStrategy = {
   code: string
@@ -119,4 +119,30 @@ export function equitySummary(equity: readonly EquityPoint[], initial: number, d
 export function resolveTab(codes: readonly string[], wanted: string | null): string | null {
   if (!codes.length) return null
   return wanted && codes.includes(wanted) ? wanted : codes[0]
+}
+
+/**
+ * 逐筆結果（到 `day` 為止、看板顯示窗內）：已賣出的筆數、平均每筆、勝率；持股的平均未實現漲跌。
+ * 漲跌是成交價算的股價漲跌（不含股利與費用）。勝率只是輔助——隨機進場也有高勝率（D-136），看平均每筆。
+ */
+export function tradeStats(strategy: BoardStrategy, day: string): {
+  closed: number; avgClosed: number | null; winRate: number | null; open: number; avgOpen: number | null; openUp: number
+} {
+  const closed = strategy.days
+    .filter(d => d.date <= day)
+    .flatMap(d => d.exited.map(e => e.change))
+    .filter((x): x is number => typeof x === 'number' && Number.isFinite(x))
+  const today = strategy.days.find(d => d.date === day)
+  const open = (today?.holdings ?? [])
+    .map(h => h.change)
+    .filter((x): x is number => typeof x === 'number' && Number.isFinite(x))
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
+  return {
+    closed: closed.length,
+    avgClosed: mean(closed),
+    winRate: closed.length ? closed.filter(x => x > 0).length / closed.length : null,
+    open: open.length,
+    avgOpen: mean(open),
+    openUp: open.filter(x => x > 0).length,
+  }
 }
