@@ -7,6 +7,12 @@
 
 ## 0. 三十秒版本
 
+- **只留兩條線（D-163，2026-09-28）**：**大盤精選**（`CORE`＝E0，`lw_e0_ctrl`、排序模型 `lgbm_lw_net_h20_20260225_83890036`，紙上交易中）
+  與 **潛伏飆股**（`QUIET`＝A20，`lgbm_quietA20_tu_h20_20260430_655df6d7`，每日名單 `scripts/a20_picks.py`，出場待第二保留期）。
+  名字只是別名，檔名與指紋不改；不再開新的選股或出場輪次。
+- **D-162 事後檢驗（A20 重訓到 2026-02、考 03-02 ~ 09-08）**：選股力 1.95×（前 15 名 26.1% vs 池內 13.4%）；
+  抱滿 S0 **+43.7%**／−25.6%、T-ATR +19.1%／−29.3%、T-ATR-F15 +33.5%／−25.3%（0050 +38.8%／−15.4%）→ **兩個 T 臂被推翻**。
+  腳本 `scripts/d162_score_window.py`、配置 `configs/strategies/*_2602.yaml`、結果包 `data/tracks_d162/`。不取代第二保留期。
 - 最新 worktree：`D:/project/twquant/.claude/worktrees/quant-trading-strategies-268d12`，branch `claude/round11-conditional-vol`（第十一輪結果＋第十二輪進行中）
 - **資料一律在主 checkout**：`D:/project/twquant/data/`（不進 git，但都在本機）
 - **八輪加工已封檔（D-141）**：八輪沒有一輪改善 **E0**（年化 +27.8%／回撤 −41.4%／Calmar 0.67）。
