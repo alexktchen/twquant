@@ -1,10 +1,16 @@
 /** 每日選股看板（D-164）的資料型別與純函數；頁面只負責畫。 */
 
-export type Entered = { stock_id: string; reason: string }
-export type Exited = { stock_id: string; reason: string; entry_date: string; held_sessions: number }
-export type Holding = { stock_id: string; entry_date: string; held_sessions: number }
-/** `watch_new`：補位型才有——這天模型前 n 名裡、過去 20 個交易日沒進過前 n 的新名字（觀察用，不一定會買）。 */
-export type BoardDay = { date: string; entered: Entered[]; exited: Exited[]; holdings: Holding[]; watch_new?: string[] }
+/**
+ * `change`（D-165）：成交價算的股價漲跌（小數，0.05 = +5%），不含股利與費用；舊看板沒有這欄。
+ * 新增那筆的 `change_to`：`exit`＝算到賣出、`now`＝仍持有，算到看板最後一天收盤。
+ */
+export type Entered = { stock_id: string; reason: string; change?: number | null; change_to?: 'exit' | 'now' }
+export type Exited = { stock_id: string; reason: string; entry_date: string; held_sessions: number; change?: number | null }
+export type Holding = { stock_id: string; entry_date: string; held_sessions: number; change?: number | null }
+/** 當天模型前 n 名（推薦），位子滿不滿都列；`held`＝收盤後持有、`new`＝過去 20 個交易日沒進過前 n。 */
+export type Pick = { stock_id: string; rank: number; held: boolean; new: boolean }
+/** `watch_new`／`picks`：補位型才有。 */
+export type BoardDay = { date: string; entered: Entered[]; exited: Exited[]; holdings: Holding[]; watch_new?: string[]; picks?: Pick[] }
 export type NextPlan = { rebalance: boolean; buy: string[]; sell: { stock_id: string; reason: string }[] }
 export type BoardStrategy = {
   code: string
@@ -14,6 +20,10 @@ export type BoardStrategy = {
   hold_sessions: number | null
   /** 補位型＝位子數；月換股型＝每次挑幾檔。 */
   slots: number | null
+  /** 推薦名單順序是否就是模型名次（月換股型是等權重目標名單，沒有名次）。 */
+  picks_ordered?: boolean
+  /** 整段重播的每日淨值（D-165）；舊看板沒有。 */
+  equity?: EquityPoint[]
   days: BoardDay[]
   next: NextPlan
 }
@@ -22,6 +32,7 @@ export type Board = {
   as_of: string
   generated_at: string
   replay_start: string
+  initial_capital?: number
   strategies: BoardStrategy[]
   stocks: Record<string, StockInfo>
 }
@@ -67,4 +78,45 @@ export function changeLog(strategy: BoardStrategy): BoardDay[] {
 export function stockLabel(stocks: Record<string, StockInfo>, sid: string): string {
   const name = stocks[sid]?.name
   return name ? `${sid} ${name}` : sid
+}
+
+/** 漲跌的文字與顏色（台股慣例：紅漲綠跌）；沒有數字回 null，畫面就不顯示。 */
+export function changeText(change: number | null | undefined): { text: string; tone: 'up' | 'down' | 'flat' } | null {
+  if (change === null || change === undefined || !Number.isFinite(change)) return null
+  const pctv = change * 100
+  const text = `${pctv > 0 ? '+' : ''}${pctv.toFixed(1)}%`
+  if (text === '+0.0%' || text === '-0.0%' || text === '0.0%') return { text: '0.0%', tone: 'flat' }
+  return { text, tone: pctv > 0 ? 'up' : 'down' }
+}
+
+export type EquityPoint = { date: string; value: number }
+
+/** 整體損益（D-165）：到 `day` 為止的累計、當天變化與最大回撤；淨值含費用與股利。 */
+export function equitySummary(equity: readonly EquityPoint[], initial: number, day: string): {
+  value: number; pnl: number; pnlPct: number; dayPnl: number | null; dayPct: number | null; maxDrawdown: number
+} | null {
+  const upto = equity.filter(p => p.date <= day)
+  if (!upto.length || !(initial > 0)) return null
+  const last = upto[upto.length - 1]
+  const prev = upto.length > 1 ? upto[upto.length - 2] : null
+  let peak = -Infinity
+  let mdd = 0
+  for (const p of upto) {
+    peak = Math.max(peak, p.value)
+    mdd = Math.min(mdd, p.value / peak - 1)
+  }
+  return {
+    value: last.value,
+    pnl: last.value - initial,
+    pnlPct: last.value / initial - 1,
+    dayPnl: prev ? last.value - prev.value : null,
+    dayPct: prev && prev.value > 0 ? last.value / prev.value - 1 : null,
+    maxDrawdown: mdd,
+  }
+}
+
+/** 網址帶的分頁代號不存在 → 第一條線。 */
+export function resolveTab(codes: readonly string[], wanted: string | null): string | null {
+  if (!codes.length) return null
+  return wanted && codes.includes(wanted) ? wanted : codes[0]
 }

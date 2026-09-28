@@ -3,6 +3,9 @@ import { test } from 'node:test'
 import {
   boardDates,
   changeLog,
+  changeText,
+  equitySummary,
+  resolveTab,
   exitReasonText,
   remainingSessions,
   resolveDay,
@@ -55,4 +58,35 @@ test('AC-318-4: the change log lists only days with moves, newest first; ids kee
   assert.deepEqual(changeLog(quiet).map(d => d.date), ['2026-09-24', '2026-09-22'])
   assert.equal(stockLabel(board.stocks, '2330'), '2330 台積電')
   assert.equal(stockLabel(board.stocks, '0050'), '0050')
+})
+
+test('AC-319-1: change text is signed and toned red-up / green-down; missing stays hidden', () => {
+  assert.deepEqual(changeText(0.1234), { text: '+12.3%', tone: 'up' })
+  assert.deepEqual(changeText(-0.05), { text: '-5.0%', tone: 'down' })
+  assert.deepEqual(changeText(0.00001), { text: '0.0%', tone: 'flat' })
+  assert.equal(changeText(null), null)
+  assert.equal(changeText(undefined), null)
+})
+
+test('AC-319-2: equity summary stops at the shown day and tracks the worst drawdown', () => {
+  const eq = [
+    { date: '2026-09-01', value: 100 },
+    { date: '2026-09-02', value: 120 },
+    { date: '2026-09-03', value: 90 },
+    { date: '2026-09-04', value: 110 },
+  ]
+  const s = equitySummary(eq, 100, '2026-09-03')
+  assert.ok(s)
+  assert.equal(s.pnl, -10)
+  assert.equal(s.dayPnl, -30)
+  assert.ok(Math.abs(s.maxDrawdown - (90 / 120 - 1)) < 1e-12)
+  assert.equal(equitySummary(eq, 100, '2026-08-31'), null)
+  assert.equal(equitySummary([], 100, '2026-09-03'), null)
+})
+
+test('AC-319-3: unknown tab falls back to the first model', () => {
+  assert.equal(resolveTab(['CORE', 'QUIET'], 'QUIET'), 'QUIET')
+  assert.equal(resolveTab(['CORE', 'QUIET'], 'NOPE'), 'CORE')
+  assert.equal(resolveTab(['CORE', 'QUIET'], null), 'CORE')
+  assert.equal(resolveTab([], 'CORE'), null)
 })

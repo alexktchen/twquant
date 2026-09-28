@@ -16,6 +16,7 @@ strategies:
     name: 大盤精選
     config: lw_e0_ctrl
     summary: 全市場排序模型每月挑 15 檔、平均分配，抱到下個月換股；不設停損停利。
+    watch: true # D-165：每天列出「若今天換股會挑的 15 檔」
   - code: QUIET
     name: 潛伏飆股
     config: quiet_s0

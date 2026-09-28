@@ -140,9 +140,15 @@ def test_ac3_payload_shows_only_the_display_window_and_its_names() -> None:
     days = replay_days(D, [_t(0, "2330", "buy", 100), _t(5, "0050", "buy", 10)], [])
     strat = BoardStrategy(code="QUIET", name="潛伏飆股", config="quiet_s0", summary="測試")
     plan = NextPlan(rebalance=None, exits=(), entries=("1101",))
-    one = strategy_payload(strat, "slots", 20, 15, days, plan, display_sessions=2)
+    one = strategy_payload(
+        strat, "slots", 20, 15, days, plan, display_sessions=2, equity=[(D[0], 1.0), (D[5], 1.1)]
+    )
     shown = cast("list[dict[str, object]]", one["days"])
     assert [d["date"] for d in shown] == ["2026-09-05", "2026-09-06"]
+    assert one["equity"] == [
+        {"date": "2026-09-01", "value": 1.0},
+        {"date": "2026-09-06", "value": 1.1},
+    ], "淨值曲線是整段重播，不只顯示窗"
     cfg = PickBoardConfig(
         replay_start=D[0],
         display_sessions=2,
@@ -162,7 +168,9 @@ def test_ac3_payload_shows_only_the_display_window_and_its_names() -> None:
     stocks = cast("dict[str, dict[str, str]]", board["stocks"])
     assert set(stocks) == {"2330", "0050", "1101"}
     assert stocks["0050"] == {}
-    assert "return" not in str(board) and "equity" not in str(board)  # 第二保留期：不帶任何報酬
+    # D-165 起帶淨值曲線（使用者裁決）；仍不帶任何事後算好的績效統計（報酬率、夏普等由前端就淨值畫）
+    assert "return" not in str(board) and "sharpe" not in str(board)
+    assert board["initial_capital"] == 1.0
 
 
 def test_ac4_api_serves_the_saved_board_and_is_empty_before_the_first_run(tmp_path: Path) -> None:
@@ -206,3 +214,72 @@ def test_ac6_watch_list_must_cover_every_shown_day() -> None:
     assert shown[-1]["watch_new"] == ["1101"]
     with pytest.raises(ValueError, match="觀察名單缺"):
         strategy_payload(strat, "slots", 20, 15, days, None, 2, {D[4]: []})
+
+
+def test_ac7_picks_list_the_full_top_n_even_when_every_slot_is_full() -> None:
+    days = replay_days(D, [_t(0, "2330", "buy", 100)], [])
+    strat = BoardStrategy(
+        code="QUIET", name="潛伏飆股", config="quiet_s0", summary="測試", watch=True
+    )
+    top = {d: ["2330", "1101", "0050"] for d in D}
+    new = {d: ["0050"] for d in D}
+    one = strategy_payload(strat, "slots", 20, 1, days, None, 2, new, top)
+    last = cast("list[dict[str, object]]", one["days"])[-1]
+    assert last["picks"] == [
+        {"stock_id": "2330", "rank": 1, "held": True, "new": False},
+        {"stock_id": "1101", "rank": 2, "held": False, "new": False},
+        {"stock_id": "0050", "rank": 3, "held": False, "new": True},
+    ], "唯一的位子已被 2330 佔住，其餘兩檔照樣列為推薦"
+    with pytest.raises(ValueError, match="推薦名單缺"):
+        strategy_payload(strat, "slots", 20, 1, days, None, 2, new, {D[5]: []})
+
+
+def _tp(day: int, sid: str, side: str, shares: int, price: float, reason: str = "entry") -> Trade:
+    return Trade(D[day], sid, side, shares, price, 0.0, 0.0, 0.0, reason)
+
+
+def test_ac8_changes_run_from_fill_price_to_close_or_sale() -> None:
+    closes = {
+        D[0]: {"2330": 11.0, "1101": 20.0},
+        D[1]: {"2330": 12.0, "1101": 22.0},
+        # D[2]：2330 停牌，沿用上一個收盤
+        D[2]: {"1101": 24.0},
+        D[3]: {"2330": 9.0},
+        D[4]: {"2330": 9.0},
+        D[5]: {"2330": 13.0},
+    }
+    days = replay_days(
+        D,
+        [
+            _tp(0, "2330", "buy", 100, 10.0),
+            _tp(0, "1101", "buy", 10, 20.0),
+            _tp(1, "1101", "sell", 5, 22.0, "trim"),  # 減碼：已賣金額留著算
+            _tp(3, "1101", "sell", 5, 18.0, "time_stop"),
+        ],
+        [],
+        closes,
+    )
+    held = {str(h["stock_id"]): h["change"] for h in days[2].holdings}
+    assert held["2330"] == pytest.approx(0.2), "停牌沿用 D[1] 收盤 12"
+    assert held["1101"] == pytest.approx((5 * 22 + 5 * 24) / 200 - 1)
+    assert days[3].exited[0]["change"] == pytest.approx((5 * 22 + 5 * 18) / 200 - 1)
+    by_sid = {str(e["stock_id"]): e for e in days[0].entered}
+    assert by_sid["1101"]["change_to"] == "exit"
+    assert by_sid["1101"]["change"] == days[3].exited[0]["change"]
+    assert by_sid["2330"]["change_to"] == "now"
+    assert by_sid["2330"]["change"] == pytest.approx(0.3), "仍持有：算到最後一天收盤 13"
+
+
+def test_ac8_split_keeps_the_change_on_the_same_money() -> None:
+    days = replay_days(
+        D[:3],
+        [_tp(0, "2330", "buy", 100, 10.0)],
+        [SplitAdjustment(D[1], "2330", 0.5, 100, 200)],
+        {D[0]: {"2330": 10.0}, D[1]: {"2330": 5.5}, D[2]: {"2330": 5.5}},
+    )
+    assert days[1].holdings[0]["change"] == pytest.approx(0.1)
+
+
+def test_ac8_missing_close_on_the_buy_day_raises() -> None:
+    with pytest.raises(ValueError, match="沒有收盤價"):
+        replay_days(D[:2], [_tp(0, "2330", "buy", 100, 10.0)], [], {D[1]: {"2330": 10.0}})

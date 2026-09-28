@@ -12,7 +12,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 
@@ -2061,7 +2061,6 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
         strategy_payload,
     )
     from twquant.strategy.config import load_strategy
-    from twquant.strategy.slots import slot_candidates
 
     board_cfg = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
     if day < board_cfg.replay_start:
@@ -2092,10 +2091,11 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
                 raise DataError("pick_board", day, f"{strat.code} 重播只到 {sessions[-1]}")
             time_stops = [r.sessions for r in cfg.exit_rules if r.kind == "time_stop"]
             watch = None
+            top_by_day = None
             if strat.watch:
-                if cfg.slots is None:
-                    raise typer.BadParameter(f"{strat.code}：觀察名單只適用補位型策略")
-                n = cfg.slots.n
+                n = cfg.slots.n if cfg.slots is not None else cfg.selection.top_n
+                if n is None:
+                    raise typer.BadParameter(f"{strat.code}：推薦名單要固定檔數（selection.top_n）")
                 need = board_cfg.display_sessions + board_cfg.watch_lookback_sessions
                 if len(sessions) < need:
                     raise DataError(
@@ -2105,10 +2105,9 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
                         "把 configs/pick_board.yaml 的 replay_start 往前移",
                     )
                 span = sessions[-need:]
-                ranked = [
-                    (d, [sid for sid, _ in slot_candidates(cfg, source, d)[:n]]) for d in span
-                ]
+                ranked = [(d, _top_names(cfg, source, d, n)) for d in span]
                 watch = new_names(ranked, board_cfg.watch_lookback_sessions)
+                top_by_day = dict(ranked)  # 推薦名單：位子滿不滿都照列
             payloads.append(
                 strategy_payload(
                     strat,
@@ -2116,10 +2115,18 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
                     time_stops[0] if time_stops else None,
                     # 補位型＝位子數；月換股型＝每次挑幾檔（持股少於它時頁面說明原因）
                     cfg.slots.n if cfg.slots is not None else cfg.selection.top_n,
-                    replay_days(sessions, res.ledger, res.splits),
+                    replay_days(
+                        sessions,
+                        res.ledger,
+                        res.splits,
+                        _closes_for(conn, scfg.pg_schema, res.ledger, board_cfg.replay_start, day),
+                    ),
                     res.next_plan,
                     board_cfg.display_sessions,
                     watch,
+                    top_by_day,
+                    [(p.date, p.equity) for p in res.equity],
+                    cfg.slots is not None,
                 )
             )
         with conn.cursor() as cur:
@@ -2149,6 +2156,40 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
             f"−{len(last['exited'])}、下一交易日 +{len(nxt['buy'])}／−{len(nxt['sell'])}"
         )
     return f"{path.name}：" + "；".join(parts)
+
+
+def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str]:
+    """`day` 收盤後模型的前 n 名：補位型＝策略實際候選序；月換股型＝若當天換股的目標名單。"""
+    from twquant.strategy.build import build_targets
+    from twquant.strategy.slots import slot_candidates
+
+    if cfg.slots is not None:
+        return [sid for sid, _ in slot_candidates(cfg, source, day)[:n]]
+    tg = build_targets(cfg, source, day)
+    rows = sorted(
+        ((str(r["stock_id"]), float(r["target_weight"])) for r in tg.to_dicts()),
+        key=lambda x: (-x[1], x[0]),
+    )
+    return [sid for sid, w in rows if w > 0.0][:n]
+
+
+def _closes_for(
+    conn: Any, schema: str, ledger: Sequence[Any], start: dt.date, end: dt.date
+) -> dict[dt.date, dict[str, float]]:
+    """看板漲跌用的每日收盤價（未還原，與引擎成交價同一把尺；D-165），只取帳本出現過的股票。"""
+    ids = sorted({str(t.stock_id) for t in ledger})
+    out: dict[dt.date, dict[str, float]] = {}
+    if not ids:
+        return out
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT date, stock_id, close FROM "{schema}"."prices_daily" '
+            "WHERE date BETWEEN %s AND %s AND stock_id = ANY(%s) AND close IS NOT NULL",
+            (start, end, ids),
+        )
+        for d, sid, close in cur.fetchall():
+            out.setdefault(d, {})[str(sid)] = float(close)
+    return out
 
 
 def _pg_has_prices(day: dt.date) -> bool:
