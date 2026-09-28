@@ -2110,7 +2110,8 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
                     strat,
                     "slots" if cfg.slots is not None else "rebalance",
                     time_stops[0] if time_stops else None,
-                    cfg.slots.n if cfg.slots is not None else None,
+                    # 補位型＝位子數；月換股型＝每次挑幾檔（持股少於它時頁面說明原因）
+                    cfg.slots.n if cfg.slots is not None else cfg.selection.top_n,
                     replay_days(sessions, res.ledger, res.splits),
                     res.next_plan,
                     board_cfg.display_sessions,

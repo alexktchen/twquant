@@ -165,7 +165,7 @@ def strategy_payload(
     strat: BoardStrategy,
     kind: BoardKind,
     hold_sessions: int | None,
-    slots_n: int | None,
+    slots_n: int | None,  # 補位型＝位子數；月換股型＝每次挑幾檔
     days: Sequence[DayChanges],
     plan: NextPlan | None,
     display_sessions: int,

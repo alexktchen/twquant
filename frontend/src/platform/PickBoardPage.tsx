@@ -74,14 +74,15 @@ function Holdings({ strategy, day, stocks }: { strategy: BoardStrategy; day: Boa
   const slots = strategy.kind === 'slots'
   return <section aria-label={`${strategy.name}持股`}>
     <h3>持股 {day.holdings.length} 檔{slots && strategy.slots ? <span className="pb-muted">（共 {strategy.slots} 個位子）</span> : null}</h3>
+    {!slots && strategy.slots !== null && day.holdings.length > 0 && day.holdings.length < strategy.slots && <p className="pb-footnote">每次挑 {strategy.slots} 檔；少的是換股那天沒買到的（漲停或成交量不足），下次換股再補。</p>}
     {!day.holdings.length ? <p className="pb-quiet">空手。</p> : <div className="pb-table-wrap"><table className="pb-table">
-      <thead><tr><th>股票</th><th>產業</th><th>買進日</th><th className="pb-num">已持有</th>{slots && <th className="pb-num">還剩</th>}</tr></thead>
+      <thead><tr><th>股票</th><th className="pb-col-ind">產業</th><th>買進日</th><th className="pb-num">已持有</th>{slots && <th className="pb-num">還剩</th>}</tr></thead>
       <tbody>{day.holdings.map(h => {
         const left = remainingSessions(strategy, h.held_sessions)
         const info = stocks[h.stock_id]
         return <tr key={h.stock_id}>
           <td><a href={routeHref('stocks', h.stock_id)}><strong>{h.stock_id}</strong> {info?.name ?? ''}</a></td>
-          <td className="pb-muted">{info?.industry ?? ''}</td>
+          <td className="pb-muted pb-col-ind">{info?.industry ?? ''}</td>
           <td>{h.entry_date}</td>
           <td className="pb-num">{h.held_sessions} 天</td>
           {slots && <td className={`pb-num${left !== null && left <= 1 ? ' pb-soon' : ''}`}>{left === null ? '' : left === 0 ? '今天到期' : `${left} 天`}</td>}
@@ -147,7 +148,8 @@ export function PickBoardPage({ route }: { route: PlatformRoute }): JSX.Element 
     <div className="pb-head">
       <div>
         <h1>每日選股</h1>
-        <p>資料到 <strong>{withWeekday(board.as_of)}</strong>。兩條線每天的新增、剔除和目前持股；點股票可看個股。<span className="pb-muted">頁面不顯示報酬（2026-09-09 起是保留期，績效等 2027-03 一次判讀）。</span></p>
+        <p>資料到 <strong>{withWeekday(board.as_of)}</strong>。兩條線每天的新增、剔除和目前持股；點股票可看個股。</p>
+        <p className="pb-muted">頁面不顯示報酬：2026-09-09 起是保留期，績效等 2027-03 一次判讀。</p>
       </div>
       <DayNav dates={dates} day={shown} label="看哪一天" hrefFor={dayHref} latestHref={shown && shown !== latest ? dayHref(null) : null} />
     </div>

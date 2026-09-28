@@ -12,6 +12,7 @@ export type BoardStrategy = {
   summary: string
   kind: 'rebalance' | 'slots'
   hold_sessions: number | null
+  /** 補位型＝位子數；月換股型＝每次挑幾檔。 */
   slots: number | null
   days: BoardDay[]
   next: NextPlan
