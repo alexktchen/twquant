@@ -40,7 +40,8 @@ function StockOptions({ options }: { options: string[] }) {
   return <datalist id={LIST_ID}>{options.map((o) => <option key={o} value={o} />)}</datalist>
 }
 
-export type Pill = { icon: string; label: string; value: string; color: string }
+/** big＝放大顯示（個股總分，T-326）。 */
+export type Pill = { icon: string; label: string; value: string; color: string; big?: boolean }
 
 export function CommandBar({ sid, name, industry, market, pills, mm, onPick }: {
   sid: string; name: string; industry: string | null; market: string | null
@@ -57,7 +58,7 @@ export function CommandBar({ sid, name, industry, market, pills, mm, onPick }: {
       </div>
       <div className="dash-pills">
         {pills.map((p) => (
-          <span key={p.label} className="dash-pill" style={{ color: p.color }}>
+          <span key={p.icon + p.label} className={`dash-pill${p.big ? ' is-big' : ''}`} style={{ color: p.color }}>
             <i aria-hidden>{p.icon}</i>
             <span>{p.label}<small>{p.value}</small></span>
           </span>

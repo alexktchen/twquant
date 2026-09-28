@@ -21,6 +21,8 @@ import { StrategyPools } from './StrategyPools'
 import { DEFAULT_SCREEN, MAX_FACTOR_PANES, loadSubFactors, loadWatch, saveSubFactors, saveWatch } from './store'
 import { TPanel } from './ui'
 import { DashGrid } from './DashGrid'
+import { STOCK_SCORE } from './stockScore'
+import { useStockScore } from './useStockScore'
 import { DrawAnalysisPanel } from './DrawAnalysisPanel'
 import type { DrawAnalysis } from '../charts'
 import { useStockData } from './useStockData'
@@ -178,7 +180,22 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
 
   const o = data.overview.data
   const stamp = bars?.[bars.length - 1]?.d ?? 'na'
+  // 個股總分（T-326）：與每日選股徽章同一套算法與快取（最新資料、畫線用 120 日），不跟 K 線卡的視窗走
+  const score = useStockScore(sid)
+  const scorePill: Pill =
+    score === null
+      ? { icon: '★', label: '總分', value: '計算中…', color: 'var(--muted)', big: true }
+      : score === 'error'
+        ? { icon: '★', label: '總分', value: '讀取失敗', color: 'var(--crit)', big: true }
+        : {
+            icon: '★',
+            big: true,
+            label: `總分 ${score.total ?? '—'}・${score.grade}`,
+            value: score.parts.map((p) => `${p.label} ${p.value ?? '–'}`).join('／'),
+            color: score.total === null ? 'var(--muted)' : score.total >= STOCK_SCORE.bull ? 'var(--up)' : score.total < STOCK_SCORE.bear ? 'var(--down)' : 'var(--warn)',
+          }
   const pills: Pill[] = [
+    scorePill,
     { icon: '◉', label: 'API STATUS', value: live ? '已連線' : '未連線 · 快照', color: live ? 'var(--good)' : 'var(--warn)' },
     { icon: '▦', label: 'DATA AS OF', value: meta.as_of ?? '未知', color: 'var(--accent)' },
     { icon: '⚙', label: 'FACTOR AS OF', value: data.scorecard.data?.as_of ?? (data.scorecard.loading ? '…' : '無'), color: 'var(--accent-2)' },
