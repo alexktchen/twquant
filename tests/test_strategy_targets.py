@@ -206,9 +206,27 @@ def test_ac12_registry_rejects_a_strategy_without_any_evidence() -> None:
 
 def test_ac13_research_evidence_is_carried_into_the_run() -> None:
     """研究期成績跟金庫成績一樣，一律跟著名單走（頁面靠它標明「不是金庫期」）。"""
-    root = Path(__file__).resolve().parents[1] / "configs"
-    registry = load_config(root / "strategies_live.yaml", LiveStrategies)
-    tail = next(s for s in registry.strategies if s.code == "TAIL-B")
+    # D-163 下架 TAIL-B 之後正式登記表沒有研究策略；用 TAIL-B 當時的登記內容驗同一條規則
+    registry = LiveStrategies.model_validate(
+        {
+            "strategies": [
+                {
+                    "code": "TAIL-B",
+                    "config": "tail_b",
+                    "label": "右尾 B",
+                    "research": {
+                        "decision": "D-143 §十一",
+                        "window_start": "2017-01-03",
+                        "window_end": "2026-02-28",
+                        "cagr": 0.128,
+                        "max_drawdown": -0.397,
+                        "calmar": 0.32,
+                    },
+                }
+            ]
+        }
+    )
+    tail = registry.strategies[0]
     assert tail.vault is None, "TAIL-B 沒有金庫期成績，不得假造"
     assert tail.research is not None and tail.research.decision.startswith("D-143")
     assert tail.research.max_drawdown < 0

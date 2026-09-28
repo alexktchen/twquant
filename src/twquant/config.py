@@ -403,6 +403,12 @@ class MlConfig(BaseConfig):
     # 這些在正式名單匯出**之後**才打分，失敗只寫進步驟摘要、不擋名單——
     # 生產名單（與風控閘門）不得依賴一個研究模型能不能跑。
     research_live_models: tuple[str, ...] = ()
+    # D-163 潛伏飆股（QUIET）：安靜股模型每日推論。它要先篩安靜∩流動池、再加大盤狀態特徵
+    # （`ml/quiet_live.py`），不能混進上面兩個鍵走通用 `ml score`。空＝不打分。
+    quiet_live_model: str = ""
+    quiet_live_config: str = ""  # 該模型的訓練配置（configs/ 下檔名），池子與大盤窗口以它為準
+    # 安靜狀態看 60 日、流動性看 20 日，往前讀的日曆天數要涵蓋兩者與假期
+    quiet_price_lookback_days: int = Field(default=200, ge=120)
     # 名單分組政策（D-111）。預設停用＝既有快照的 bucket 逐字不變。
     recommendation_buckets: RecommendationBucketConfig = RecommendationBucketConfig()
 

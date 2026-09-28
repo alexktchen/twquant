@@ -1,5 +1,5 @@
 import { useSyncExternalStore, type ReactNode, type JSX } from 'react'
-import { parseRoute, platformPages, routeHref, type PlatformRoute } from './routes'
+import { navPages, parseRoute, platformPages, routeHref, type PlatformRoute } from './routes'
 import './platform.css'
 
 function subscribe(listener: () => void): () => void {
@@ -7,8 +7,8 @@ function subscribe(listener: () => void): () => void {
   return () => window.removeEventListener('hashchange', listener)
 }
 
-/** Navigation grouped the way routes.ts declares it, in declaration order. */
-const navGroups = platformPages.reduce<{ group: string; pages: (typeof platformPages)[number][] }[]>((groups, page) => {
+/** Navigation grouped the way routes.ts declares it, in declaration order (only `nav: true` pages, D-164). */
+const navGroups = navPages.reduce<{ group: string; pages: (typeof platformPages)[number][] }[]>((groups, page) => {
   const last = groups[groups.length - 1]
   if (last?.group === page.group) last.pages.push(page)
   else groups.push({ group: page.group, pages: [page] })
@@ -16,8 +16,8 @@ const navGroups = platformPages.reduce<{ group: string; pages: (typeof platformP
 }, [])
 
 /** Render the research workspace while keeping page identity in the URL. */
-export function PlatformShell({ live, asOf, stock, research, daily, operations }: {
-  live: boolean; asOf: string | null; stock: (route: PlatformRoute) => ReactNode; research: (route: PlatformRoute) => ReactNode; daily: (route: PlatformRoute) => ReactNode; operations: (route: PlatformRoute) => ReactNode
+export function PlatformShell({ live, asOf, picks, stock, research, daily, operations }: {
+  live: boolean; asOf: string | null; picks: (route: PlatformRoute) => ReactNode; stock: (route: PlatformRoute) => ReactNode; research: (route: PlatformRoute) => ReactNode; daily: (route: PlatformRoute) => ReactNode; operations: (route: PlatformRoute) => ReactNode
 }): JSX.Element {
   const hash = useSyncExternalStore(subscribe, () => window.location.hash, () => '')
   const route = parseRoute(hash)
@@ -26,7 +26,7 @@ export function PlatformShell({ live, asOf, stock, research, daily, operations }
     <a className="platform-skip" href="#platform-content" onClick={event => { event.preventDefault(); document.getElementById('platform-content')?.focus() }}>跳至內容</a>
     {/* 全寬儀表板：導覽在頂列而非側欄，面板格才用得到整個視窗寬度。 */}
     <header className="platform-topbar">
-      <a className="platform-brand" href={routeHref('overview')} title="台股研究工作台">twquant<span> /</span></a>
+      <a className="platform-brand" href={routeHref('picks')} title="台股研究工作台">twquant<span> /</span></a>
       <nav aria-label="平台導覽">{navGroups.map(({ group, pages }) => <div key={group} className="platform-nav-cluster">
         <span className="platform-nav-group">{group}</span>
         {pages.map(p => <a key={p.id} href={routeHref(p.id)} aria-current={route.page === p.id ? 'page' : undefined}>{p.label}</a>)}
@@ -34,9 +34,9 @@ export function PlatformShell({ live, asOf, stock, research, daily, operations }
       <div className="platform-connection"><span className={live ? 'platform-live' : 'platform-offline'}>{live ? 'API 已連線' : 'API 未連線 · 快照可用'}</span><span>資料至 {asOf ?? '未知'}</span></div>
     </header>
     <main id="platform-content" className="platform-content" tabIndex={-1}>
-      <div className="platform-page-heading"><div><div className="platform-eyebrow">RESEARCH WORKSPACE · {current?.group ?? '平台'}</div><h1>{current?.label ?? '找不到這個頁面'}</h1><p>{current?.description ?? '請確認連結，或回到總覽繼續。'}</p></div><span className="platform-mode">研究模式</span></div>
-      <div className="platform-context"><span>查詢日期：{route.query.get('date') ?? '最新可得'}</span>{route.query.get('model') && <span>模型：{route.query.get('model')}</span>}{route.query.get('run') && <span>推薦版本：{route.query.get('run')}</span>}</div>
-      {route.page === 'stocks' ? stock(route) : route.page === 'operations' ? operations(route) : route.page === 'models' || route.page === 'backtests' || route.page === 'industries' || route.page === 'insights' || route.page === 'watchlists' || route.page === 'strategies' ? research(route) : route.page === 'overview' || route.page === 'recommendations' ? daily(route) : route.page === 'not-found' ? <a href={routeHref('overview')}>回今日總覽 →</a> : <PlatformPending route={route} />}
+      {route.page === 'picks' ? null : <><div className="platform-page-heading"><div><div className="platform-eyebrow">RESEARCH WORKSPACE · {current?.group ?? '平台'}</div><h1>{current?.label ?? '找不到這個頁面'}</h1><p>{current?.description ?? '請確認連結，或回到每日選股繼續。'}</p></div><span className="platform-mode">研究模式</span></div>
+      <div className="platform-context"><span>查詢日期：{route.query.get('date') ?? '最新可得'}</span>{route.query.get('model') && <span>模型：{route.query.get('model')}</span>}{route.query.get('run') && <span>推薦版本：{route.query.get('run')}</span>}</div></>}
+      {route.page === 'picks' ? picks(route) : route.page === 'stocks' ? stock(route) : route.page === 'operations' ? operations(route) : route.page === 'models' || route.page === 'backtests' || route.page === 'industries' || route.page === 'insights' || route.page === 'watchlists' || route.page === 'strategies' ? research(route) : route.page === 'overview' || route.page === 'recommendations' ? daily(route) : route.page === 'not-found' ? <a href={routeHref('picks')}>回每日選股 →</a> : <PlatformPending route={route} />}
     </main>
     <footer className="platform-footer"><span>本平台為個人研究整理，僅供參考，不構成投資建議；數字以各面板標示的資料日與來源為準。</span><strong>twquant 台股研究工作台</strong></footer>
   </div>

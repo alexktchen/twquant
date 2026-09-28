@@ -35,6 +35,7 @@ from twquant.data.warehouse import TableSource, Warehouse
 from twquant.errors import DataError, TwquantError
 from twquant.monitoring import jobs, screener, stock_api
 from twquant.monitoring import snapshot as snap
+from twquant.reporting import pick_board as pick_board_mod
 from twquant.reporting import strategy_targets as strategy_targets_mod
 from twquant.reporting.insight_evidence import select_packs
 from twquant.reporting.insight_run import insights_for_run
@@ -362,6 +363,20 @@ def get_platform_strategy_targets(
         "available_dates": [item.as_of.date().isoformat() for item in series],
         "tracking_lookback": shown.lookback,
     }
+
+
+@app.get("/api/platform/pick-board")
+def get_platform_pick_board(data_dir: RecommendationDataRootDep) -> dict[str, object]:
+    """每日選股看板（D-164）：大盤精選／潛伏飆股每天的新增、剔除、持股與下一個交易日的計畫。
+
+    只讀每日排程存下的 `pick_board.json`，不觸發重播。還沒產生過回 `board: null`（空狀態，不是錯誤）。
+    內容不含任何報酬（第二保留期，D-109）。
+    """
+    try:
+        board = pick_board_mod.load_board(data_dir)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="選股看板暫時無法讀取") from exc
+    return {"board": board}
 
 
 @app.get("/api/platform/exit-check")

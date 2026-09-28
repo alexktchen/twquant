@@ -132,6 +132,20 @@ class Holding:
 
 
 @dataclass(frozen=True)
+class NextPlan:
+    """最後一個交易日收盤後、**下一個交易日開盤**要執行的單（D-163 每日選股看板）。
+
+    回測迴圈本來就在收盤時決定隔日動作；區間的最後一天那些決定沒有下一個開盤可執行，
+    以前直接丟掉。這裡只把它們原樣帶出來——不改任何成交邏輯，也不進結果包。
+    `rebalance` 非 None＝明早是再平衡（目標權重全權決定，出場旗標作廢，與迴圈同語意）。
+    """
+
+    rebalance: tuple[tuple[str, float], ...] | None
+    exits: tuple[tuple[str, str], ...]  # (代號, 出場規則)
+    entries: tuple[str, ...]  # 補位型：明早依序嘗試買進的代號（空位不足或買不到會略過）
+
+
+@dataclass(frozen=True)
 class BacktestResult:
     equity: list[EquityPoint]
     ledger: list[Trade]
@@ -147,6 +161,7 @@ class BacktestResult:
     # 這次是不是含息口徑。**必須帶在結果裡**——不然含息與不含息的結果包長得一模一樣，
     # 誰也分不出手上這份是哪一種，而那正是最容易造成靜默不一致的地方。
     credit_dividends: bool = True
+    next_plan: NextPlan | None = None  # D-163：只供每日看板，不進結果包
 
 
 @dataclass
@@ -831,6 +846,11 @@ def run_backtest(
         final_holdings=final_holdings,
         dividends=state.dividends,
         credit_dividends=credit_dividends,
+        next_plan=NextPlan(
+            rebalance=tuple(sorted(pending.items())) if pending is not None else None,
+            exits=() if pending is not None else tuple(sorted(exits_pending.items())),
+            entries=tuple(entries_pending),
+        ),
     )
 
 
