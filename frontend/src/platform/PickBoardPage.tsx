@@ -13,6 +13,7 @@ import {
   resolveDay,
   resolveTab,
   stockLabel,
+  tradeStats,
   type Board,
   type BoardDay,
   type BoardStrategy,
@@ -68,6 +69,7 @@ function toneOf(x: number | null): string {
 /** 最上面一眼看完：累計損益、當天、最大回撤、持股數。 */
 function Summary({ strategy, day, initial }: { strategy: BoardStrategy; day: BoardDay; initial: number }) {
   const s = equitySummary(strategy.equity ?? [], initial, day.date)
+  const t = tradeStats(strategy, day.date)
   const slots = strategy.slots
   return <div className="pb-kpis">
     <div className="pb-kpi pb-kpi-main">
@@ -77,6 +79,18 @@ function Summary({ strategy, day, initial }: { strategy: BoardStrategy; day: Boa
     <div className="pb-kpi">
       <span>當天</span>
       {s && s.dayPct !== null && s.dayPnl !== null ? <><strong className={toneOf(s.dayPnl)}>{changeText(s.dayPct)?.text}</strong><small className={toneOf(s.dayPnl)}>{money(s.dayPnl)} 元</small></> : <strong>—</strong>}
+    </div>
+    <div className="pb-kpi">
+      <span>持股平均漲跌</span>
+      {t.avgOpen !== null ? <><strong className={toneOf(t.avgOpen)}>{changeText(t.avgOpen)?.text}</strong><small className="pb-muted">{t.open} 檔裡 {t.openUp} 檔上漲</small></> : <strong>—</strong>}
+    </div>
+    <div className="pb-kpi">
+      <span>已賣出平均每筆</span>
+      {t.avgClosed !== null ? <><strong className={toneOf(t.avgClosed)}>{changeText(t.avgClosed)?.text}</strong><small className="pb-muted">近三個月 {t.closed} 筆</small></> : <><strong>—</strong><small className="pb-muted">近三個月沒有賣出</small></>}
+    </div>
+    <div className="pb-kpi">
+      <span>勝率（賺錢筆數）</span>
+      {t.winRate !== null ? <><strong>{(t.winRate * 100).toFixed(0)}%</strong><small className="pb-muted">輔助看，平均每筆才是重點</small></> : <strong>—</strong>}
     </div>
     <div className="pb-kpi">
       <span>最大回撤</span>
@@ -149,7 +163,8 @@ function Picks({ strategy, day, stocks }: { strategy: BoardStrategy; day: BoardD
   const title = strategy.kind === 'slots' ? '當天推薦' : '若今天換股會挑'
   return <section className="pb-panel" aria-label={title}>
     <div className="pb-section-head"><h3>{title}{picks ? ` ${picks.length} 檔` : ''}</h3>{picks && <span className="pb-muted">持有中 {heldN}・未持有 {picks.length - heldN}</span>}</div>
-    {picks === undefined ? <p className="pb-quiet">這份看板還沒有推薦名單，等下一次排程重算。</p>
+    {picks === null ? <p className="pb-quiet pb-error">這天模型沒有打分（排序模型分數缺漏），列不出名單。</p>
+      : picks === undefined ? <p className="pb-quiet">這份看板還沒有推薦名單，等下一次排程重算。</p>
       : !picks.length ? <p className="pb-quiet">這天沒有股票過門檻。</p>
         : <ol className="pb-pick-list">{picks.map(p => <li key={p.stock_id} className={p.held ? 'is-held' : undefined}>
           {ordered && <span className="pb-rank">{p.rank}</span>}

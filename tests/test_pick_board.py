@@ -230,6 +230,11 @@ def test_ac7_picks_list_the_full_top_n_even_when_every_slot_is_full() -> None:
         {"stock_id": "1101", "rank": 2, "held": False, "new": False},
         {"stock_id": "0050", "rank": 3, "held": False, "new": True},
     ], "唯一的位子已被 2330 佔住，其餘兩檔照樣列為推薦"
+    unscored = strategy_payload(strat, "slots", 20, 1, days, None, 2, new, {**top, D[5]: None})
+    last = cast("list[dict[str, object]]", unscored["days"])[-1]
+    assert last["picks"] is None and last["picks_missing"] == "no_scores", (
+        "沒打分要明示，不是空名單"
+    )
     with pytest.raises(ValueError, match="推薦名單缺"):
         strategy_payload(strat, "slots", 20, 1, days, None, 2, new, {D[5]: []})
 

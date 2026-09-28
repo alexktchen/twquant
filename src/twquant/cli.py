@@ -2105,9 +2105,12 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
                         "把 configs/pick_board.yaml 的 replay_start 往前移",
                     )
                 span = sessions[-need:]
-                ranked = [(d, _top_names(cfg, source, d, n)) for d in span]
-                watch = new_names(ranked, board_cfg.watch_lookback_sessions)
-                top_by_day = dict(ranked)  # 推薦名單：位子滿不滿都照列
+                tops = [(d, _top_names(cfg, source, d, n)) for d in span]
+                # 沒打分的日子在「新名字」回看裡當作沒有名單（頁面另標缺漏）
+                watch = new_names(
+                    [(d, t or []) for d, t in tops], board_cfg.watch_lookback_sessions
+                )
+                top_by_day = dict(tops)  # 推薦名單：位子滿不滿都照列
             payloads.append(
                 strategy_payload(
                     strat,
@@ -2158,13 +2161,25 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
     return f"{path.name}：" + "；".join(parts)
 
 
-def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str]:
-    """`day` 收盤後模型的前 n 名：補位型＝策略實際候選序；月換股型＝若當天換股的目標名單。"""
+def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str] | None:
+    """`day` 收盤後模型的前 n 名：補位型＝策略實際候選序；月換股型＝若當天換股的目標名單。
+
+    月換股型的串接閘門（排序模型分數）當天全市場沒有值 → 回 None（D-165：頁面明示「這天模型沒有打分」）。
+    引擎只在換股日取分數，平常日缺分數不影響持股；但缺漏本身仍是資料問題，看板會逐日標出來。
+    """
+    import polars as pl
+
+    from twquant.factors.compute import compute
     from twquant.strategy.build import build_targets
     from twquant.strategy.slots import slot_candidates
 
     if cfg.slots is not None:
         return [sid for sid, _ in slot_candidates(cfg, source, day)[:n]]
+    view = source.view(day)
+    for pf in cfg.prefilter:
+        gate = compute([pf.factor], view, dates=[day], params={pf.factor: dict(pf.params)})
+        if gate.filter(pl.col("value").is_not_null() & pl.col("value").is_finite()).is_empty():
+            return None
     tg = build_targets(cfg, source, day)
     rows = sorted(
         ((str(r["stock_id"]), float(r["target_weight"])) for r in tg.to_dicts()),

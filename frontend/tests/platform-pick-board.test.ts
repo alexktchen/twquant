@@ -6,6 +6,7 @@ import {
   changeText,
   equitySummary,
   resolveTab,
+  tradeStats,
   exitReasonText,
   remainingSessions,
   resolveDay,
@@ -89,4 +90,22 @@ test('AC-319-3: unknown tab falls back to the first model', () => {
   assert.equal(resolveTab(['CORE', 'QUIET'], 'NOPE'), 'CORE')
   assert.equal(resolveTab(['CORE', 'QUIET'], null), 'CORE')
   assert.equal(resolveTab([], 'CORE'), null)
+})
+
+test('AC-319-4: trade stats count closed trades up to the shown day and average the open ones', () => {
+  const s: BoardStrategy = {
+    ...quiet,
+    days: [
+      { date: '2026-09-22', entered: [], exited: [{ stock_id: 'A', reason: 'time_stop', entry_date: '2026-08-01', held_sessions: 20, change: 0.1 }], holdings: [] },
+      { date: '2026-09-23', entered: [], exited: [{ stock_id: 'B', reason: 'time_stop', entry_date: '2026-08-02', held_sessions: 20, change: -0.3 }], holdings: [{ stock_id: 'C', entry_date: '2026-09-01', held_sessions: 5, change: 0.02 }, { stock_id: 'D', entry_date: '2026-09-01', held_sessions: 5, change: -0.04 }] },
+      { date: '2026-09-24', entered: [], exited: [{ stock_id: 'E', reason: 'time_stop', entry_date: '2026-08-03', held_sessions: 20, change: 0.5 }], holdings: [] },
+    ],
+  }
+  const t = tradeStats(s, '2026-09-23')
+  assert.equal(t.closed, 2)
+  assert.ok(Math.abs((t.avgClosed ?? 0) - -0.1) < 1e-12)
+  assert.equal(t.winRate, 0.5)
+  assert.equal(t.open, 2)
+  assert.equal(t.openUp, 1)
+  assert.ok(Math.abs((t.avgOpen ?? 0) - -0.01) < 1e-12)
 })

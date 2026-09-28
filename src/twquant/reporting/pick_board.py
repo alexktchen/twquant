@@ -184,6 +184,16 @@ def picks_payload(top: Sequence[str], held: set[str], new: set[str]) -> list[dic
     ]
 
 
+def _day_picks(
+    top: list[str] | None, day: DayChanges, watch: dict[dt.date, list[str]] | None
+) -> dict[str, object]:
+    if top is None:
+        return {"picks": None, "picks_missing": "no_scores"}
+    new = set(watch[day.date]) if watch is not None else set()
+    held = {str(h["stock_id"]) for h in day.holdings}
+    return {"picks": picks_payload(top, held, new)}
+
+
 def plan_payload(plan: NextPlan | None, holdings: set[str]) -> dict[str, object]:
     """下一個交易日開盤的計畫：買誰、賣誰。再平衡日由目標名單與目前持股的差算出。"""
     if plan is None:
@@ -211,14 +221,15 @@ def strategy_payload(
     plan: NextPlan | None,
     display_sessions: int,
     watch: dict[dt.date, list[str]] | None = None,
-    ranked: dict[dt.date, list[str]] | None = None,
+    ranked: dict[dt.date, list[str] | None] | None = None,
     equity: Sequence[tuple[dt.date, float]] = (),
     picks_ordered: bool = True,
 ) -> dict[str, object]:
     """一條線的看板內容：最近 `display_sessions` 個交易日的進出與持股、下一個交易日的計畫。
 
     `watch`：每天模型前 n 名裡的新名字；`ranked`：每天模型前 n 名（推薦名單）。
-    兩者顯示窗內缺哪一天就 raise（不給半套名單）。`picks_ordered`＝名單順序就是模型排名
+    兩者顯示窗內缺哪一天就 raise（不給半套名單）；`ranked` 某天為 None＝模型當天沒有打分，
+    輸出 `picks: null` 與 `picks_missing: "no_scores"`，由頁面明示。`picks_ordered`＝名單順序就是模型排名
     （月換股型的目標名單是等權重，順序只是代號序，頁面不顯示名次）。
     `equity`：整段重播的每日淨值（含費用與股利），畫整體損益曲線用（D-165）。
     """
@@ -251,17 +262,7 @@ def strategy_payload(
                 "exited": d.exited,
                 "holdings": d.holdings,
                 **({"watch_new": watch[d.date]} if watch is not None else {}),
-                **(
-                    {
-                        "picks": picks_payload(
-                            ranked[d.date],
-                            {str(h["stock_id"]) for h in d.holdings},
-                            set(watch[d.date]) if watch is not None else set(),
-                        )
-                    }
-                    if ranked is not None
-                    else {}
-                ),
+                **(_day_picks(ranked[d.date], d, watch) if ranked is not None else {}),
             }
             for d in shown
         ],
@@ -284,7 +285,7 @@ def board_payload(
             for key in ("entered", "exited", "holdings"):
                 seen.update(str(r["stock_id"]) for r in d[key])
             seen.update(str(x) for x in d.get("watch_new", []))
-            seen.update(str(r["stock_id"]) for r in d.get("picks", []))
+            seen.update(str(r["stock_id"]) for r in d.get("picks") or [])
         nxt = s["next"]
         seen.update(str(x) for x in nxt["buy"])  # type: ignore[index]
         seen.update(str(r["stock_id"]) for r in nxt["sell"])  # type: ignore[index]
