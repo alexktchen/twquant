@@ -96,3 +96,11 @@
   .pb-tab { padding: 8px 12px; font-size: 15px; }
   .pb-kpi strong, .pb-kpi-main strong { font-size: 20px; }
 }
+
+/* 個股總分徽章（T-325）：總分大字＋三項小字（畫線/籌碼/基本面） */
+.pb-score{display:inline-flex;align-items:baseline;gap:4px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);font:700 12px ui-monospace,"Cascadia Code",Consolas,monospace;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:help}
+.pb-score small{font-size:10px;font-weight:500;color:var(--muted)}
+.pb-score.is-bull{color:var(--up);border-color:color-mix(in srgb,var(--up) 55%,transparent);background:color-mix(in srgb,var(--up) 10%,transparent)}
+.pb-score.is-mid{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.pb-score.is-bear{color:var(--down);border-color:color-mix(in srgb,var(--down) 55%,transparent);background:color-mix(in srgb,var(--down) 10%,transparent)}
+.pb-score.is-na,.pb-score.is-loading{color:var(--muted)}

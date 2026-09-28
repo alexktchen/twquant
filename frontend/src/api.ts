@@ -160,6 +160,11 @@ export const fetchStockOhlc = (sid: string) =>
   getJSON<StockSeries<{ date: string; open: number; high: number; low: number; close: number; volume: number }>>(
     `/api/stocks/${encodeURIComponent(sid)}/ohlc?days=5000`,
   ).then((r) => r.rows.map((x) => ({ d: x.date, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume })))
+/** 只要最近幾天的 K 棒（每日選股的個股總分用，T-325），不必像個股頁一樣抓十年。 */
+export const fetchStockOhlcRecent = (sid: string, days: number) =>
+  getJSON<StockSeries<{ date: string; open: number; high: number; low: number; close: number; volume: number }>>(
+    `/api/stocks/${encodeURIComponent(sid)}/ohlc?days=${days}`,
+  ).then((r) => r.rows.map((x) => ({ d: x.date, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume })))
 export const fetchStockMeta = () => getJSON<{ meta: StockMetaMap }>('/api/stock-meta').then((r) => r.meta)
 export const fetchStockFactors = (sid: string) =>
   getJSON<Scorecard>(`/api/stocks/${encodeURIComponent(sid)}/factors`)
