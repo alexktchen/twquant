@@ -36,7 +36,8 @@ async function computeScore(sid: string): Promise<StockScore> {
 }
 
 export function useStockScore(sid: string): StockScore | null | 'error' {
-  const [s, setS] = useState<StockScore | null | 'error'>(null)
+  // 結果連同股號一起存：換股後、新分數回來前，舊股票的分數不能冒充新股票的（顯示「計算中」）
+  const [s, setS] = useState<{ sid: string; v: StockScore | 'error' } | null>(null)
   useEffect(() => {
     let alive = true
     let p = cache.get(sid)
@@ -45,10 +46,10 @@ export function useStockScore(sid: string): StockScore | null | 'error' {
       cache.set(sid, p)
       p.catch(() => cache.delete(sid))
     }
-    p.then((v) => alive && setS(v)).catch(() => alive && setS('error'))
+    p.then((v) => alive && setS({ sid, v })).catch(() => alive && setS({ sid, v: 'error' }))
     return () => {
       alive = false
     }
   }, [sid])
-  return s
+  return s !== null && s.sid === sid ? s.v : null
 }
