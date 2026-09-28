@@ -193,6 +193,10 @@ _NOT_TRAINING_INPUTS: tuple[tuple[str, ...], ...] = (
     ("recommendation_buckets",),
     ("production_aux_models",),
     ("research_live_models",),  # D-147：上架研究策略用的模型清單，屬部署不屬模型身分
+    # D-164：潛伏飆股每日推論的綁定（哪個模型、它的訓練配置、讀價格往前幾天）——同樣是部署
+    ("quiet_live_model",),
+    ("quiet_live_config",),
+    ("quiet_price_lookback_days",),
 )
 
 
