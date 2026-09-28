@@ -2,12 +2,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers, createTextWatermark } from 'lightweight-charts'
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, SeriesAttachedParameter, Time } from 'lightweight-charts'
-import { DEFAULT_DRAW_ON, DRAW_KINDS, buildDrawings, type DrawKind, type DrawNote, type DrawRect, type Drawings } from './stock/drawLayer.ts'
+import { DEFAULT_DRAW_ON, DRAW_KINDS, buildDrawings, drawSummary, type DrawSummary, type DrawKind, type DrawNote, type DrawRect, type Drawings } from './stock/drawLayer.ts'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorHistPoint } from './api'
 import { kd, macd, volumeProfile } from './stock/indicators.ts'
 import { ACC, DOWN, LINE, MUT, UP, WARN, num, priceFmt } from './theme'
 import { chipCls } from './ui'
 
+const RIGHT_PAD_BARS = 12
 const baseChart = (el: HTMLDivElement, height: number) =>
   createChart(el, {
     width: el.clientWidth,
@@ -20,7 +21,8 @@ const baseChart = (el: HTMLDivElement, height: number) =>
     },
     grid: { vertLines: { color: 'rgba(31,42,60,0.5)' }, horzLines: { color: LINE } },
     rightPriceScale: { borderColor: LINE },
-    timeScale: { borderColor: LINE, rightOffset: 2, fixLeftEdge: true, fixRightEdge: true },
+    // 最後一根右邊留空白：價格軸標籤（支撐壓力、黃金切割）與最新 K 棒才不會擠在一起
+    timeScale: { borderColor: LINE, rightOffset: RIGHT_PAD_BARS, fixLeftEdge: true },
     crosshair: {
       mode: CrosshairMode.Normal,
       vertLine: { color: MUT, width: 1, style: 3, labelBackgroundColor: '#172031' },
@@ -283,7 +285,8 @@ export function CandleChart({
           lines: [{ text: t, color: 'rgba(139,152,165,0.85)', fontSize: 11 }],
         })
     })
-    chart.timeScale().fitContent()
+    // fitContent 會把最後一根貼到右緣；明確設可視區才留得出 RIGHT_PAD_BARS 的空白
+    chart.timeScale().setVisibleLogicalRange({ from: 0, to: data.length - 1 + RIGHT_PAD_BARS })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     chart.subscribeCrosshairMove((param: any) => {
       const lg = legend.current
@@ -478,6 +481,7 @@ export function RangeCandle({
   }, [data, macdOn, cutoff])
   // 自動畫線以「目前視窗」偵測：換 60／120 日視窗，線跟著畫面上看得到的波段走（同量價分布）。
   const auto = useMemo(() => buildDrawings(shown, drawOn), [shown, drawOn])
+  const summary = useMemo(() => drawSummary(shown), [shown])
   const extraH = ((kdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0) + ((macdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0)
   // 標記同樣裁到目前視窗；超出視窗的事件仍留在事件清單，不會被靜默丟掉。
   const shownMarkers = useMemo(
@@ -561,7 +565,23 @@ export function RangeCandle({
         drawings={drawOn.length ? auto.drawings : undefined}
         onReady={onReady}
       />
+      {summary && <SummaryCard s={summary} />}
       {auto.notes.length > 0 && <DrawReadout notes={auto.notes} close={shown[shown.length - 1].c} />}
+    </div>
+  )
+}
+
+/** 判讀摘要卡：所有畫線整理成幾句話（不受圖層開關影響）。 */
+function SummaryCard({ s }: { s: DrawSummary }) {
+  return (
+    <div className="mt-2 rounded border border-[var(--line)] p-2 text-[12px]">
+      <div className="font-semibold mb-1">判讀摘要：{s.headline}</div>
+      <ul className="list-disc pl-4 space-y-0.5">
+        {s.lines.map((l, i) => <li key={i}>{l}</li>)}
+      </ul>
+      <div className="mt-1 text-[11px] text-[var(--muted)]">
+        依目前視窗的轉折點自動整理，只描述圖形結構；支撐壓力與軌道線沒有回測證據，不是買賣訊號。
+      </div>
     </div>
   )
 }

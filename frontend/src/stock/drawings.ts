@@ -47,6 +47,8 @@ export const DRAW = {
   gapMax: 3,
   /** 大量K棒：量 ≥ volMult × 前 volAvg 日均量，且實體 ≥ bodyMinPct；最多列最近幾根。 */
   keyBar: { volAvg: 20, volMult: 2, bodyMinPct: 0.03, max: 3 },
+  /** 合流區：不同的線落在彼此此比例內就併成一區；只看收盤上下此範圍內（對應使用者 15–20% 單檔停損）；至少幾條線才算。 */
+  confluence: { tol: 0.015, range: 0.2, minLines: 2 },
 } as const
 
 export type Pivot = { i: number; kind: 'high' | 'low'; price: number }
@@ -323,4 +325,36 @@ export function priorHighLow(bars: Bar[], span: number): { high: Pivot | null; l
     if (!low && q.kind === 'low' && q.price < close) low = q
   }
   return { high, low }
+}
+
+export type Zone = { price: number; lo: number; hi: number; labels: string[] }
+
+/**
+ * 合流區：把各種線今天的價位依價格排序，與目前區平均相距 confluence.tol 內就併入。
+ * 只留收盤 ± confluence.range 內、至少 minLines 條線的區；回傳收盤上方最強（條數多，同條數取近）與下方最強各一。
+ */
+export function confluenceZones(
+  items: { price: number; label: string }[],
+  close: number,
+  p: typeof DRAW = DRAW,
+): { above: Zone | null; below: Zone | null } {
+  const c = p.confluence
+  const pts = items.filter((x) => Math.abs(x.price / close - 1) <= c.range).sort((a, b) => a.price - b.price)
+  const zones: { sum: number; lo: number; hi: number; labels: string[] }[] = []
+  for (const x of pts) {
+    const z = zones[zones.length - 1]
+    if (z && Math.abs(x.price - z.sum / z.labels.length) <= (z.sum / z.labels.length) * c.tol) {
+      z.sum += x.price
+      z.hi = x.price
+      z.labels.push(x.label)
+    } else zones.push({ sum: x.price, lo: x.price, hi: x.price, labels: [x.label] })
+  }
+  const done = zones.filter((z) => z.labels.length >= c.minLines).map((z) => ({ price: z.sum / z.labels.length, lo: z.lo, hi: z.hi, labels: z.labels }))
+  const pick = (side: Zone[]) =>
+    side.reduce<Zone | null>((best, z) => {
+      if (!best || z.labels.length > best.labels.length) return z
+      if (z.labels.length === best.labels.length && Math.abs(z.price - close) < Math.abs(best.price - close)) return z
+      return best
+    }, null)
+  return { above: pick(done.filter((z) => z.price > close)), below: pick(done.filter((z) => z.price <= close)) }
 }
