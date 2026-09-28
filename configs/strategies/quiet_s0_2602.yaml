@@ -1,0 +1,26 @@
+# D-162 事後檢驗：quiet_s0.yaml 逐字複製，只換 model_id（重訓到 2026-02-26 的 A20）與 name。**RESEARCH ONLY。**
+# D-153 第十三輪 S0：A20 進場（安靜 ∩ 流動股、20 日 +20% 機率前 15）、抱滿 20 日出場。
+# **RESEARCH ONLY，未經部署裁決，勿用於實盤。**
+#
+# 進場六臂逐字相同（D-153 §一）：A20 只對安靜 ∩ 流動股有分數，沒分數的不是候選；
+# 每日補位 15 檔、沒有絕對門檻（同 tail_b／D-143 §三）。**出場是各臂唯一的差別。**
+# S0 抱滿 20 日＝標籤視窗，是出場天花板（scripts/d153_ceiling.py）的基準。
+name: quiet_s0_2602
+description: 第十三輪 S0：A20 機率前 15、抱滿 20 日
+trial_scope: tail:quiet_a20_exits
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70 # D-143 §五：宇宙 ADV 前 30%，與 A20 的樣本門檻同一把尺（D-151 §十三）
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260226_0ac86788
+slots:
+  n: 15
+  entry_threshold: 0.0
+exit_rules:
+  - kind: time_stop
+    sessions: 20

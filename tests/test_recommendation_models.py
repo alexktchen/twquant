@@ -108,7 +108,12 @@ def test_ac301_1_export_policy_follows_the_model(monkeypatch: pytest.MonkeyPatch
         return BucketPolicy(top_n=20, watch_n=50, risk_scores={} if risk_gate else None)
 
     monkeypatch.setattr(cli, "_bucket_policy", fake)
-    research = cli._load_ml().research_live_models[0]
+    # D-163 之後正式配置沒有研究模型；這裡驗的是「有登記時」的分流，用配置副本注入一個
+    real = cli._load_ml()
+    research = "lgbm_research_probe_h60_20260430_00000000"
+    monkeypatch.setattr(
+        cli, "_load_ml", lambda: real.model_copy(update={"research_live_models": (research,)})
+    )
     day = dt.date(2026, 9, 23)
     assert cli._export_policy(research, day) is not None
     assert cli._export_policy(cli._load_ml().production_ranking_model, day) is not None

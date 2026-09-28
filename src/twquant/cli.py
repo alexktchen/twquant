@@ -1429,6 +1429,29 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
             return "PG 不可達，略過"
         return _paper_trading_for_day(day, Path(cfg.data_dir))
 
+    def _quiet_score_step() -> str:
+        # D-163 潛伏飆股：安靜股模型的當日分數（池子與大盤狀態同訓練）。排在 ML 推薦名單之後、
+        # 看板之前——看板重播要讀當日分數。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
+        return _quiet_score_range(day, day)
+
+    def _pick_board_step() -> str:
+        # D-164 每日選股看板：兩條線重播到今天，存新增／剔除／持股／明日計畫。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），看板維持上一個交易日"
+        return _pick_board_for_day(day, Path(cfg.data_dir))
+
     def _insight_step() -> str:
         # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
         # 前提是當日已有推薦快照；沒有就是正常的「沒有 L0 名單可分析」，不是錯誤。
@@ -1486,8 +1509,10 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
+        PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("紙上交易", _paper_trading_step),
+        PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
     ]
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
@@ -1970,6 +1995,205 @@ def strategy_targets(
         day = row[0]
     data_dir = Path(out) if out else Path(_load_system().data_dir)
     typer.secho(f"[OK] {day} {_strategy_targets_for_day(day, data_dir)}", fg=typer.colors.GREEN)
+
+
+def _quiet_score_range(start: dt.date, end: dt.date) -> str:
+    """潛伏飆股（D-163）：安靜股模型對 [start, end] 每個交易日打分並寫進 `ml_scores`。回傳一行摘要。
+
+    通用的 `ml score` 對全宇宙打分、不算大盤狀態——拿來打安靜股模型會落在錯的池子上
+    （策略把「當日有分數的股票」當池子），所以走 `ml/quiet_live.py`。upsert 冪等，重跑安全。
+    """
+    from twquant.config import MlConfig, load_config
+    from twquant.data.serving import store
+    from twquant.data.serving.ml_store import upsert_ml_scores
+    from twquant.errors import DataError
+    from twquant.ml.quiet_live import quiet_scores
+
+    ml_cfg = _load_ml()
+    if not ml_cfg.quiet_live_model:
+        return "未綁定 quiet_live_model，略過"
+    if not ml_cfg.quiet_live_config:
+        raise typer.BadParameter("quiet_live_model 有綁定但 quiet_live_config 是空的")
+    model_cfg = load_config(_CONFIG_DIR / ml_cfg.quiet_live_config, MlConfig)
+    model_dir = Path(_load_system().data_dir) / "models" / ml_cfg.quiet_live_model
+    if not (model_dir / "model.txt").exists():
+        raise DataError("ml_scores", end, f"找不到模型檔 {model_dir / 'model.txt'}")
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        rows = quiet_scores(
+            conn,
+            scfg.pg_schema,
+            cfg=model_cfg,
+            model_dir=model_dir,
+            stock_pattern=scfg.cloud.stock_pattern,
+            start=start,
+            end=end,
+            lookback_days=ml_cfg.quiet_price_lookback_days,
+        )
+        n = upsert_ml_scores(conn, scfg.pg_schema, rows)
+    finally:
+        conn.close()
+    days = rows["date"].n_unique()
+    return f"{ml_cfg.quiet_live_model}：{days} 個交易日、{rows.height} 列（新增 {n}）"
+
+
+def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
+    """每日選股看板（D-164）：各條線從 replay_start 重播到 `day`，存進出／持股／明日計畫。
+
+    持股不是帳戶資料，是回測引擎的重播——同一套成交語意，所以跟研究回測對得上。
+    **不存任何報酬**（第二保留期，D-109）：只把帳本轉成名單與持有天數。
+    """
+    import twquant.factors.builtins  # noqa: F401  # 觸發註冊，才問得到 lookback
+    from twquant.backtest.costs import CostConfig
+    from twquant.backtest.engine import run_backtest
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+    from twquant.factors.registry import list_factors
+    from twquant.reporting.pick_board import (
+        PickBoardConfig,
+        board_payload,
+        new_names,
+        replay_days,
+        save_board,
+        strategy_payload,
+    )
+    from twquant.strategy.config import load_strategy
+    from twquant.strategy.slots import slot_candidates
+
+    board_cfg = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
+    if day < board_cfg.replay_start:
+        raise typer.BadParameter(f"{day} 早於看板重播起點 {board_cfg.replay_start}")
+    cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        # 下界取重播起點往前的最長回看：沒有下界 PgTableSource 會整張 ml_scores 全掃（T-278）
+        source = _daily_pg_source(
+            conn, scfg.pg_schema, board_cfg.replay_start, list(list_factors())
+        )
+        payloads = []
+        for strat in board_cfg.strategies:
+            cfg = load_strategy(str(_CONFIG_DIR / "strategies" / f"{strat.config}.yaml"))
+            res = run_backtest(
+                cfg,
+                cost,
+                board_cfg.replay_start,
+                day,
+                source,
+                initial_capital=board_cfg.initial_capital,
+                max_participation=board_cfg.max_participation,
+                lot_size=board_cfg.lot_size,
+            )
+            sessions = [p.date for p in res.equity]
+            if sessions[-1] != day:
+                raise DataError("pick_board", day, f"{strat.code} 重播只到 {sessions[-1]}")
+            time_stops = [r.sessions for r in cfg.exit_rules if r.kind == "time_stop"]
+            watch = None
+            if strat.watch:
+                if cfg.slots is None:
+                    raise typer.BadParameter(f"{strat.code}：觀察名單只適用補位型策略")
+                n = cfg.slots.n
+                need = board_cfg.display_sessions + board_cfg.watch_lookback_sessions
+                if len(sessions) < need:
+                    raise DataError(
+                        "pick_board",
+                        day,
+                        f"{strat.code}：重播只有 {len(sessions)} 個交易日，觀察名單要 {need} 個——"
+                        "把 configs/pick_board.yaml 的 replay_start 往前移",
+                    )
+                span = sessions[-need:]
+                ranked = [
+                    (d, [sid for sid, _ in slot_candidates(cfg, source, d)[:n]]) for d in span
+                ]
+                watch = new_names(ranked, board_cfg.watch_lookback_sessions)
+            payloads.append(
+                strategy_payload(
+                    strat,
+                    "slots" if cfg.slots is not None else "rebalance",
+                    time_stops[0] if time_stops else None,
+                    # 補位型＝位子數；月換股型＝每次挑幾檔（持股少於它時頁面說明原因）
+                    cfg.slots.n if cfg.slots is not None else cfg.selection.top_n,
+                    replay_days(sessions, res.ledger, res.splits),
+                    res.next_plan,
+                    board_cfg.display_sessions,
+                    watch,
+                )
+            )
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT stock_id, name, market, industry FROM "{scfg.pg_schema}"."stock_meta"'
+            )
+            stocks = {
+                str(sid): {
+                    "name": str(nm or ""),
+                    "market": str(mk or ""),
+                    "industry": str(ind or ""),
+                }
+                for sid, nm, mk, ind in cur.fetchall()
+            }
+    finally:
+        conn.close()
+    payload = board_payload(
+        as_of=day, generated_at=now_tw(), cfg=board_cfg, strategies=payloads, stocks=stocks
+    )
+    path = save_board(data_dir, payload)
+    parts = []
+    for p in payloads:
+        last = cast("list[dict[str, list[object]]]", p["days"])[-1]
+        nxt = cast("dict[str, list[object]]", p["next"])
+        parts.append(
+            f"{p['name']} 持股 {len(last['holdings'])}、當日 +{len(last['entered'])}／"
+            f"−{len(last['exited'])}、下一交易日 +{len(nxt['buy'])}／−{len(nxt['sell'])}"
+        )
+    return f"{path.name}：" + "；".join(parts)
+
+
+def _pg_has_prices(day: dt.date) -> bool:
+    """PG 在 `day` 有沒有行情。休市日（如中秋）新步驟要說「略過」，而不是報失敗。"""
+    from twquant.data.serving import store
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT 1 FROM "{scfg.pg_schema}"."prices_daily" WHERE date = %s LIMIT 1', (day,)
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _pg_latest_price_day() -> dt.date:
+    """PG 最新行情日；沒有行情即 raise（不猜日期）。"""
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT MAX(date) FROM "{scfg.pg_schema}"."prices_daily"')
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row or row[0] is None:
+        raise DataError("prices_daily", None, "PG 無行情，無法決定日期")
+    return cast("dt.date", row[0])
+
+
+@app.command(name="pick-board")
+def pick_board(
+    date: str = typer.Option("", help="看板日期 YYYY-MM-DD；空＝PG 最新行情日"),
+    out: str = typer.Option("", help="資料根目錄（絕對路徑）；空＝configs/system.yaml data_dir"),
+) -> None:
+    """重建每日選股看板（D-164）：兩條線的新增、剔除、持股與下一個交易日的計畫。"""
+    day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    typer.secho(f"[OK] {day} {_pick_board_for_day(day, data_dir)}", fg=typer.colors.GREEN)
 
 
 def _file_fingerprint(path: Path) -> str:
@@ -3526,6 +3750,23 @@ def _carry_forward_scores(
             pl.DataFrame({"date": span}, schema={"date": pl.Date}).join(block, how="cross")
         )
     return pl.concat(frames).select(scored.columns).sort("date", "stock_id")
+
+
+@ml_app.command("score-quiet")
+def ml_score_quiet(
+    from_: str = typer.Option(..., "--from", help="起日（含）YYYY-MM-DD"),
+    to: str = typer.Option(..., "--to", help="迄日（含）YYYY-MM-DD"),
+    chunk_days: int = typer.Option(31, min=1, help="每批幾個日曆天（控制記憶體）"),
+) -> None:
+    """潛伏飆股（D-163）：安靜股模型對一段日期補打分並寫進 ml_scores（每日排程只打當天）。"""
+    start, end = dt.date.fromisoformat(from_), dt.date.fromisoformat(to)
+    if end < start:
+        raise typer.BadParameter(f"--to {end} 早於 --from {start}")
+    lo = start
+    while lo <= end:
+        hi = min(end, lo + dt.timedelta(days=chunk_days - 1))
+        typer.echo(f"{lo} ~ {hi}：{_quiet_score_range(lo, hi)}")
+        lo = hi + dt.timedelta(days=1)
 
 
 @ml_app.command("backfill-scores")

@@ -85,3 +85,6 @@ p.platform-changes{border-left-color:var(--line)}
 .platform-note-details{margin:8px 0 0;font-size:12px;color:var(--muted)}
 .platform-note-details summary{cursor:pointer;color:var(--accent);width:max-content}
 .platform-note-details p{margin:6px 0 0;line-height:1.75;max-width:78ch}
+
+/* D-164：導覽只剩三頁，手機上一行排得下；資料日在頁面裡已經寫了，頂列不再重複。 */
+@media(max-width:600px){.platform-topbar{flex-wrap:nowrap;gap:8px}.platform-topbar nav{flex-wrap:nowrap}.platform-nav-cluster{flex-wrap:nowrap}.platform-connection{display:none}.platform-brand{font-size:17px}}
