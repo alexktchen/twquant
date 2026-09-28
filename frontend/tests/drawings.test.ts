@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Bar } from '../src/stock/indicators.ts'
-import { DRAW, boxes, channelOffset, fibLevels, keyBars, lineAt, openGaps, pivots, priorHighLow, regressionChannel, srLevels, trendLines } from '../src/stock/drawings.ts'
+import { DRAW, boxes, channelOffset, confluenceZones, fibLevels, keyBars, lineAt, openGaps, pivots, priorHighLow, regressionChannel, srLevels, trendLines } from '../src/stock/drawings.ts'
 
 /** Deterministic bars: a drifting sine so swing highs and lows recur at known places. */
 function bars(n: number, drift = 0.4): Bar[] {
@@ -142,4 +142,17 @@ test('AC-321-2: a line is not extended more than trendMaxExtend times its anchor
       for (const tl of trendLines(bars(n), span)) assert.ok(n - 1 - tl.b.i <= DRAW.trendMaxExtend * (tl.b.i - tl.a.i))
     }
   }
+})
+
+test('AC-321-11: confluence picks the zone where the most lines agree on each side, nearest on a tie', () => {
+  const items = [
+    { price: 110, label: 'a' }, { price: 110.5, label: 'b' }, { price: 111, label: 'c' }, // 3 lines above
+    { price: 104, label: 'd' }, { price: 104.2, label: 'e' }, // 2 lines above, nearer
+    { price: 95, label: 'f' }, { price: 95.5, label: 'g' }, { price: 90, label: 'h' }, { price: 90.3, label: 'i' },
+    { price: 150, label: 'far' }, { price: 150.1, label: 'far2' }, // beyond the range: ignored
+  ]
+  const z = confluenceZones(items, 100)
+  assert.deepEqual(z.above!.labels, ['a', 'b', 'c'])
+  assert.deepEqual(z.below!.labels, ['f', 'g']) // Tie on count: the nearer zone wins.
+  assert.deepEqual(confluenceZones([{ price: 101, label: 'lonely' }], 100), { above: null, below: null })
 })
