@@ -95,7 +95,7 @@ T-215 用固定 HTTP fixtures 驗證每日選股→個股 K 線／推薦日→�
 
 | # | 面板 | 來源 | 內容 |
 |---|---|---|---|
-| 01 | K 線 | `/ohlc` ＋ `/composite-history` ＋ `/broker-flow` ＋ `/factors/history` | 均線、關鍵價位、推薦標記；KD／MACD 為可開關副圖 |
+| 01 | K 線 | `/ohlc` ＋ `/composite-history` ＋ `/broker-flow` ＋ `/factors/history` | 均線、關鍵價位、推薦標記；KD／MACD 為可開關副圖；自動畫線（T-321：趨勢線／支撐壓力／箱型／缺口／黃金切割／回歸通道）＋判讀清單 |
 | 02 | 技術摘要 | 同上 ＋ `/institutional` ＋ `/margin` ＋ `/overview` | 規則式判讀（均線排列、KD、MACD、主力／法人／融資窗內淨額、價值區） |
 | 03／05／12 | 因子雷達／風險雷達／因子健康度 | `/factors/history?days=1`（逐因子最新一筆）＋ `/overview` | 方向化百分位、原始百分位；相對定位（D-020） |
 | 04 | 籌碼熱區圖 | `/ohlc` | 近 120 日量價分布（volume-at-price）、POC、70% 價值區 |
