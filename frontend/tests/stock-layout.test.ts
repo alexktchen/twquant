@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { GRID, colsFromWidth, moveCard, parseLayout, resolveLayout, type CardDefault } from '../src/stock/layout.ts'
+import { GRID, colsFromWidth, moveCard, parseLayout, resolveLayout, rowSpan, type CardDefault } from '../src/stock/layout.ts'
 
-const defs: CardDefault[] = [{ id: '01', w: 6, tall: true }, { id: '02', w: 3 }, { id: '03', w: 3 }, { id: '04', w: 3 }]
+const defs: CardDefault[] = [{ id: '01', w: 6 }, { id: '02', w: 3 }, { id: '03', w: 3 }, { id: '04', w: 3 }]
 
 test('AC-322-1: no saved layout falls back to the default order and widths', () => {
   const l = resolveLayout(defs, null)
@@ -41,4 +41,11 @@ test('AC-322-4: malformed saved layouts are rejected as a whole', () => {
   assert.equal(parseLayout(JSON.stringify({ order: [1, 2], sizes: {} })), null)
   assert.equal(parseLayout(JSON.stringify({ order: ['a'], sizes: { a: { w: '6', h: null } } })), null)
   assert.deepEqual(parseLayout(JSON.stringify({ order: ['a'], sizes: { a: { w: 6, h: null } } })), { order: ['a'], sizes: { a: { w: 6, h: null } } })
+})
+
+test('AC-324-1: masonry row span covers the card height plus the gap, never less than one row', () => {
+  assert.equal(rowSpan(0), Math.ceil(GRID.rowGap / GRID.rowUnit))
+  assert.equal(rowSpan(300, 8, 10), 39) // 310 / 8 = 38.75 -> 39 rows = 312px >= 300 + 10.
+  assert.equal(rowSpan(-50, 8, 10), 1)
+  for (const h of [1, 99, 120, 457, 1200]) assert.ok(rowSpan(h) * GRID.rowUnit >= h + GRID.rowGap)
 })

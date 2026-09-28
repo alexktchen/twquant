@@ -1,11 +1,42 @@
 // 個股儀表板的可拖拉格（T-322）：右上 ⠿ 拖曳換位置、右下角拖曳調寬（對齊 12 欄）與高度，版面存 localStorage。
-import { createContext, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { GRID, colsFromWidth, moveCard, parseLayout, resolveLayout, type Layout } from './layout.ts'
+// 瀑布流（T-324）：每張卡量自己的實際高度換算占幾個細列，矮卡會疊進高卡旁的空位，同一欄可直疊多張。
+import { createContext, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { GRID, colsFromWidth, moveCard, parseLayout, resolveLayout, rowSpan, type Layout } from './layout.ts'
 
 /** 使用者設定的卡片高度（px，放開把手後才更新；null＝跟內容走）。K 線卡用它把圖撐高。 */
 export const CardHeightContext = createContext<number | null>(null)
 
-export type DashItem = { id: string; w: number; tall?: boolean; node: ReactNode }
+export type DashItem = { id: string; w: number; node: ReactNode }
+
+/** 瀑布流的一格：量內層實際高度 → grid-row: span N；拖曳把手與縮放角都放在內層，貼著卡片本體。 */
+function Cell({ id, half, cls, style, h, children, handlers }: {
+  id: string
+  half: boolean
+  cls: string
+  style: CSSProperties
+  h: number | null
+  children: ReactNode
+  handlers: React.HTMLAttributes<HTMLDivElement>
+}) {
+  const inner = useRef<HTMLDivElement>(null)
+  const [span, setSpan] = useState(() => rowSpan(h ?? GRID.minHeight))
+  useLayoutEffect(() => {
+    const el = inner.current
+    if (!el) return
+    const measure = () => setSpan(rowSpan(el.offsetHeight))
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return (
+    <div data-card={id} data-half={half ? '1' : '0'} className={cls} style={{ ...style, gridRowEnd: `span ${span}` }} {...handlers}>
+      <div ref={inner} className="dash-card-in" style={{ height: h ?? undefined }}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 function loadLayout(key: string): Layout | null {
   try {
@@ -15,11 +46,11 @@ function loadLayout(key: string): Layout | null {
   }
 }
 
-export function DashGrid({ storageKey, items }: { storageKey: string; items: DashItem[] }) {
+export function DashGrid({ storageKey, items, toolbar }: { storageKey: string; items: DashItem[]; toolbar?: ReactNode }) {
   const [saved, setSaved] = useState<Layout | null>(() => loadLayout(storageKey))
-  const defaultsKey = items.map((i) => `${i.id}:${i.w}:${i.tall ? 1 : 0}`).join(',')
+  const defaultsKey = items.map((i) => `${i.id}:${i.w}`).join(',')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const layout = useMemo(() => resolveLayout(items.map(({ id, w, tall }) => ({ id, w, tall })), saved), [defaultsKey, saved])
+  const layout = useMemo(() => resolveLayout(items.map(({ id, w }) => ({ id, w })), saved), [defaultsKey, saved])
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const [live, setLive] = useState<{ id: string; w: number; h: number } | null>(null)
@@ -71,38 +102,42 @@ export function DashGrid({ storageKey, items }: { storageKey: string; items: Das
   return (
     <>
       <div className="dash-layout-bar">
-        <span>拖曳卡片右上角 ⠿ 可移動位置，拖曳右下角可調整大小（雙擊右下角恢復該卡預設大小）</span>
+        {toolbar}
+        <span className="dash-layout-hint">拖曳卡片右上角 ⠿ 可移動位置，拖曳右下角可調整大小（雙擊右下角恢復該卡預設大小）</span>
         {customized && (
           <button type="button" className="dash-btn" onClick={() => save(null)}>
             重設版面
           </button>
         )}
       </div>
-      <div className="dash-grid" ref={grid}>
+      <div className="dash-grid dash-masonry" ref={grid}>
         {layout.order.map((id) => {
           const it = byId.get(id)
           if (!it) return null
           const sz = live?.id === id ? live : layout.sizes[id]
-          const style = { '--w': sz.w, height: sz.h ?? undefined, gridRow: it.tall && sz.h === null ? 'span 2' : undefined } as CSSProperties
+          const style = { '--w': sz.w } as CSSProperties
           return (
-            <div
+            <Cell
               key={id}
-              data-card={id}
-              data-half={sz.w > 3 ? '1' : '0'}
-              className={`dash-card${sz.h !== null ? ' has-h' : ''}${dragId === id ? ' is-dragging' : ''}${overId === id && dragId !== id ? ' is-over' : ''}`}
+              id={id}
+              half={sz.w > 3}
+              h={sz.h}
+              cls={`dash-card${sz.h !== null ? ' has-h' : ''}${dragId === id ? ' is-dragging' : ''}${overId === id && dragId !== id ? ' is-over' : ''}`}
               style={style}
-              onDragOver={(e) => {
-                if (!dragId) return
-                e.preventDefault()
-                e.dataTransfer.dropEffect = 'move'
-                if (overId !== id) setOverId(id)
-              }}
-              onDragLeave={() => overId === id && setOverId(null)}
-              onDrop={(e) => {
-                e.preventDefault()
-                if (dragId && dragId !== id) save({ ...layout, order: moveCard(layout.order, dragId, id) })
-                setDragId(null)
-                setOverId(null)
+              handlers={{
+                onDragOver: (e) => {
+                  if (!dragId) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (overId !== id) setOverId(id)
+                },
+                onDragLeave: () => overId === id && setOverId(null),
+                onDrop: (e) => {
+                  e.preventDefault()
+                  if (dragId && dragId !== id) save({ ...layout, order: moveCard(layout.order, dragId, id) })
+                  setDragId(null)
+                  setOverId(null)
+                },
               }}
             >
               <button
@@ -132,7 +167,7 @@ export function DashGrid({ storageKey, items }: { storageKey: string; items: Das
                 onPointerDown={startResize(id)}
                 onDoubleClick={() => save({ ...layout, sizes: { ...layout.sizes, [id]: { w: it.w, h: null } } })}
               />
-            </div>
+            </Cell>
           )
         })}
       </div>

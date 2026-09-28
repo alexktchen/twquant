@@ -29,10 +29,18 @@
 .dash-grid>*{min-width:0}
 .dash-grid>div{display:flex}.dash-grid>div>.dash-panel{flex:1}
 /* 可拖拉卡片（T-322）：寬度由 --w 欄數決定，窄螢幕由下方 media query 改排 */
-.dash-layout-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;font-size:11px;color:var(--muted)}
-.dash-card{grid-column:span var(--w);position:relative;display:flex;min-width:0;min-height:0}
-.dash-card>:not(.dash-grip):not(.dash-resize){flex:1;min-width:0;min-height:0}
-.dash-card.has-h>:not(.dash-grip):not(.dash-resize){overflow:auto}
+.dash-layout-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+.dash-layout-hint{margin-left:auto}
+.dash-cardtabs{display:flex;flex-wrap:wrap;gap:4px}
+.dash-cardtab{padding:5px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted);font-size:13px;white-space:nowrap;transition:color .15s,border-color .15s}
+.dash-cardtab:hover{color:var(--fg)}
+.dash-cardtab[aria-selected=true]{color:var(--accent);border-color:var(--accent);background:var(--panel-2);font-weight:700}
+.dash-grid.dash-masonry{grid-auto-rows:8px;row-gap:0;grid-auto-flow:row dense;align-items:start}
+/* 卡片外層不可是 flex：內層被撐到整格高，量到的高度會一直長（細列高度 8px＝layout.ts GRID.rowUnit） */
+.dash-grid>.dash-card{display:block;grid-column:span var(--w);min-width:0}
+.dash-card-in{position:relative;display:flex;flex-direction:column;min-width:0}
+.dash-card-in>:not(.dash-grip):not(.dash-resize){flex:1;min-width:0;min-height:0}
+.dash-card.has-h .dash-card-in>:not(.dash-grip):not(.dash-resize){overflow:auto}
 .dash-grip{position:absolute;top:5px;right:6px;z-index:5;padding:0 5px;border-radius:5px;font-size:14px;line-height:20px;color:var(--muted);background:var(--panel-2);cursor:grab;opacity:0;transition:opacity .15s}
 .dash-grip:active{cursor:grabbing}
 .dash-resize{position:absolute;right:1px;bottom:1px;z-index:5;width:16px;height:16px;cursor:nwse-resize;opacity:0;transition:opacity .15s;background:linear-gradient(135deg,transparent 55%,var(--muted) 55%,var(--muted) 62%,transparent 62%,transparent 72%,var(--muted) 72%,var(--muted) 79%,transparent 79%);touch-action:none}
@@ -94,6 +102,6 @@
 .dash-quick button:hover{border-color:var(--accent);color:var(--accent)}
 .dash-quick button span{margin-left:6px;font-family:ui-sans-serif,system-ui,"Noto Sans TC",sans-serif;font-weight:500;opacity:.8}
 
-@media(max-width:1100px){.dash-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.dash-card{grid-column:span 3}.dash-card[data-half="1"]{grid-column:span 6}.dash-c4,.dash-c6,.dash-c8,.dash-c12{grid-column:span 6}.dash-r2{grid-row:auto}.dash-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}}
-@media(max-width:640px){.dash-grid{grid-template-columns:minmax(0,1fr)}.dash-card,.dash-card[data-half="1"]{grid-column:auto}.dash-c3,.dash-c4,.dash-c6,.dash-c8,.dash-c12{grid-column:auto}.dash-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-kpi strong{font-size:17px}.dash-search{flex:1 1 100%}.dash-search input{width:100%}.dash-hero{padding:34px 14px}.dash-hero h2{font-size:23px}.dash-hero input{font-size:19px;letter-spacing:2px}.dash-split{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:1100px){.dash-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.dash-grid>.dash-card{grid-column:span 3}.dash-grid>.dash-card[data-half="1"]{grid-column:span 6}.dash-c4,.dash-c6,.dash-c8,.dash-c12{grid-column:span 6}.dash-r2{grid-row:auto}.dash-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(max-width:640px){.dash-grid{grid-template-columns:minmax(0,1fr)}.dash-grid>.dash-card,.dash-grid>.dash-card[data-half="1"]{grid-column:auto}.dash-c3,.dash-c4,.dash-c6,.dash-c8,.dash-c12{grid-column:auto}.dash-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-kpi strong{font-size:17px}.dash-search{flex:1 1 100%}.dash-search input{width:100%}.dash-hero{padding:34px 14px}.dash-hero h2{font-size:23px}.dash-hero input{font-size:19px;letter-spacing:2px}.dash-split{grid-template-columns:minmax(0,1fr)}}
 @media print{.dash-grip,.dash-resize,.dash-layout-bar,.dash-tools,.dash-search,.dash-tabs-note{display:none}.dash-panel{break-inside:avoid}}

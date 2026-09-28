@@ -32,8 +32,25 @@ import type { StockEvent } from '../platform/stockRecommendations'
 import { markerFor } from '../platform/markerStyle'
 
 // 穩定的空陣列：圖表以陣列 identity 為 effect 依賴，每次 render 產生新 [] 會讓整座圖重建。
-/** 個股儀表板的卡片順序與大小（T-322），跨股票共用同一份版面。 */
+/** 個股儀表板的卡片順序與大小（T-322），跨股票共用；每個分頁（T-324）各存一份：`<key>.<分頁>`。 */
 const DASH_LAYOUT_KEY = 'twquant.stockDashLayout'
+const DASH_TAB_KEY = 'twquant.stockDashTab'
+/** 卡片分頁（T-324）：一頁只放一類，資訊不會一次全攤開；'all' 保留完整儀表板。 */
+const DASH_TABS: { id: string; label: string; cards: string[] | null }[] = [
+  { id: 'tech', label: '技術面', cards: ['01', '19', '02', '04', '11', '14'] },
+  { id: 'chip', label: '籌碼', cards: ['09', '18', '07', '10', '04'] },
+  { id: 'factor', label: '因子／模型', cards: ['03', '05', '08', '12', '13', '06'] },
+  { id: 'fund', label: '基本面／其他', cards: ['16', '17', '15'] },
+  { id: 'all', label: '全部', cards: null },
+]
+function loadDashTab(): string {
+  try {
+    const v = localStorage.getItem(DASH_TAB_KEY)
+    return DASH_TABS.some((t) => t.id === v) ? (v as string) : DASH_TABS[0].id
+  } catch {
+    return DASH_TABS[0].id
+  }
+}
 const NO_COMPOSITE: CompositePoint[] = []
 const NO_FLOW: BrokerFlowPoint[] = []
 
@@ -144,6 +161,16 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
   const data = useStockData(sid, ftop.loading ? null : (ftop.data?.available ?? []))
   const shot = useRef<(() => HTMLCanvasElement) | null>(null)
   const [analysis, setAnalysis] = useState<DrawAnalysis | null>(null)
+  const [dashTab, setDashTabState] = useState(loadDashTab)
+  const setDashTab = (t: string) => {
+    setDashTabState(t)
+    try {
+      localStorage.setItem(DASH_TAB_KEY, t)
+    } catch {
+      /* 寫不進去：分頁只在本次會話有效 */
+    }
+  }
+  const tabCards = DASH_TABS.find((t) => t.id === dashTab)?.cards ?? null
 
   if (!sid) {
     return <StockHero mm={mm} watch={watch} hot={hot} hotIsRanked={topRows.length > 0} live={live} onPick={setSid} />
@@ -170,12 +197,22 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
       />
       <QuickRow sid={sid} watch={watch} hot={hot} hotIsRanked={topRows.length > 0} mm={mm} onPick={setSid} />
       <DashGrid
-        storageKey={DASH_LAYOUT_KEY}
+        key={dashTab}
+        // 「全部」沿用分頁前的舊鍵：使用者先前存的版面不會不見
+        storageKey={dashTab === 'all' ? DASH_LAYOUT_KEY : `${DASH_LAYOUT_KEY}.${dashTab}`}
+        toolbar={
+          <div className="dash-cardtabs" role="tablist" aria-label="儀表板分類">
+            {DASH_TABS.map((t) => (
+              <button key={t.id} type="button" role="tab" aria-selected={dashTab === t.id} className="dash-cardtab" onClick={() => setDashTab(t.id)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        }
         items={[
           {
             id: '01',
             w: 6,
-            tall: true,
             node: bars ? (
               <StockChartPanel
                 no="01"
@@ -224,7 +261,11 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
                 loading={eventsLoading}
                 error={eventsError}
                 selectedDay={focusDay ?? dateContext}
-                onSelectDay={setFocusDay}
+                onSelectDay={(d) => {
+                  setFocusDay(d)
+                  // 點推薦日要看 K 線定位：K 線不在目前分頁就切回技術面
+                  if (d && tabCards !== null && !tabCards.includes('01')) setDashTab('tech')
+                }}
               />
             ),
           },
@@ -240,7 +281,8 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
           { id: '16', w: 3, node: <RevenueTrendPanel no="16" data={data} /> },
           { id: '17', w: 3, node: <InsightSummaryPanel no="17" data={data} onOpen={() => selectTab('insights')} /> },
           { id: '18', w: 6, node: <BrokerCountPanel no="18" data={data} /> },
-        ]}
+        ].filter((it) => tabCards === null || tabCards.includes(it.id))
+          .sort((a, b) => (tabCards === null ? 0 : tabCards.indexOf(a.id) - tabCards.indexOf(b.id)))}
       />
       <div className="dash-tabs" role="tablist" aria-label="個股資料頁籤">
         {stockTabs.map((t) => (
