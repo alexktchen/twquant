@@ -8,12 +8,14 @@ import { STOCK_SCORE, combineStockScore, pctTo100, type StockScore } from '../st
 
 // 同一檔在推薦名單與持股表都會出現：整頁共用一份請求，不重複打 API。
 const cache = new Map<string, Promise<StockScore>>()
+const SCORE_CATEGORIES = ['chip', 'fundamental']
 // 因子清單（名稱、方向）整頁只抓一次；/api/stocks/{sid}/factors 每檔要重算全市場百分位太慢，
 // 改走個股頁因子雷達同一條路：清單＋ factors/history?days=1。
 let optionsP: Promise<FactorOption[]> | null = null
 const factorOptions = () => {
   if (!optionsP) {
-    optionsP = fetchFactorTop(DEFAULT_SCREEN.factor, 1).then((r) => r.available)
+    // 總分只用籌碼、基本面兩類；價格／量能／ML 因子不抓（72 個因子一檔 0.6 秒，只抓兩類快很多）
+    optionsP = fetchFactorTop(DEFAULT_SCREEN.factor, 1).then((r) => r.available.filter((o) => SCORE_CATEGORIES.includes(o.factor.split('.')[0])))
     optionsP.catch(() => { optionsP = null })
   }
   return optionsP
