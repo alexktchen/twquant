@@ -1437,6 +1437,8 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         scfg = _load_serving()
         if not scfg.enabled or not store.ping(scfg):
             return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
         return _quiet_score_range(day, day)
 
     def _pick_board_step() -> str:
@@ -1446,6 +1448,8 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         scfg = _load_serving()
         if not scfg.enabled or not store.ping(scfg):
             return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），看板維持上一個交易日"
         return _pick_board_for_day(day, Path(cfg.data_dir))
 
     def _insight_step() -> str:
@@ -2145,6 +2149,22 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
             f"−{len(last['exited'])}、下一交易日 +{len(nxt['buy'])}／−{len(nxt['sell'])}"
         )
     return f"{path.name}：" + "；".join(parts)
+
+
+def _pg_has_prices(day: dt.date) -> bool:
+    """PG 在 `day` 有沒有行情。休市日（如中秋）新步驟要說「略過」，而不是報失敗。"""
+    from twquant.data.serving import store
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT 1 FROM "{scfg.pg_schema}"."prices_daily" WHERE date = %s LIMIT 1', (day,)
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
 
 
 def _pg_latest_price_day() -> dt.date:
