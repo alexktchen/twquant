@@ -5,7 +5,7 @@
 import { useContext, useMemo, useState } from 'react'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorOption, StockFactorHistory } from '../api'
 import { fetchStockFactorHistory } from '../api'
-import { RangeCandle, type ChartMarker } from '../charts'
+import { RangeCandle, type ChartMarker, type DrawAnalysis } from '../charts'
 import { useMediaQuery, useResource } from '../hooks'
 import { MAX_FACTOR_PANES } from './store'
 import { ChipRow, TPanel, chip } from './ui'
@@ -30,6 +30,7 @@ export function StockChartPanel({
   focusTime,
   onResetView,
   onReady,
+  onAnalysis,
   className,
 }: {
   no?: string
@@ -46,6 +47,8 @@ export function StockChartPanel({
   focusTime?: string | null
   onResetView?: () => void
   onReady?: (shot: (() => HTMLCanvasElement) | null) => void
+  /** 判讀摘要／清單改由頁面放到獨立卡片（T-323）。 */
+  onAnalysis?: (a: DrawAnalysis | null) => void
   className?: string
 }) {
   const codes = factors.map((f) => f.factor)
@@ -118,6 +121,7 @@ export function StockChartPanel({
         focusTime={focusTime}
         onResetView={onResetView}
         onReady={onReady}
+        onAnalysis={onAnalysis}
       />
     </TPanel>
   )

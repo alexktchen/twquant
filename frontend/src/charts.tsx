@@ -396,6 +396,7 @@ export function RangeCandle({
   focusTime,
   onResetView,
   onReady,
+  onAnalysis,
 }: {
   data: Candle[]
   height?: number
@@ -407,6 +408,8 @@ export function RangeCandle({
   focusTime?: string | null
   onResetView?: () => void
   onReady?: (shot: (() => HTMLCanvasElement) | null) => void
+  /** 給了就把判讀摘要／清單交給呼叫端另外放（個股頁的獨立卡片），圖下方不再畫；元件卸載時交出 null。 */
+  onAnalysis?: (a: DrawAnalysis | null) => void
 }) {
   const [markersOn, setMarkersOn] = useState(true)
   const [range, setRange] = useState(() => loadChartSettings().range)
@@ -482,6 +485,13 @@ export function RangeCandle({
   // 自動畫線以「目前視窗」偵測：換 60／120 日視窗，線跟著畫面上看得到的波段走（同量價分布）。
   const auto = useMemo(() => buildDrawings(shown, drawOn), [shown, drawOn])
   const summary = useMemo(() => drawSummary(shown), [shown])
+  const analysisCb = useRef(onAnalysis)
+  analysisCb.current = onAnalysis
+  const lastClose = shown.length ? shown[shown.length - 1].c : null
+  useEffect(() => {
+    analysisCb.current?.(lastClose === null ? null : { summary, notes: auto.notes, close: lastClose })
+  }, [summary, auto.notes, lastClose])
+  useEffect(() => () => analysisCb.current?.(null), [])
   const extraH = ((kdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0) + ((macdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0)
   // 標記同樣裁到目前視窗；超出視窗的事件仍留在事件清單，不會被靜默丟掉。
   const shownMarkers = useMemo(
@@ -565,19 +575,22 @@ export function RangeCandle({
         drawings={drawOn.length ? auto.drawings : undefined}
         onReady={onReady}
       />
-      {summary && <SummaryCard s={summary} />}
-      {auto.notes.length > 0 && <DrawReadout notes={auto.notes} close={shown[shown.length - 1].c} />}
+      {!onAnalysis && summary && <SummaryCard s={summary} />}
+      {!onAnalysis && auto.notes.length > 0 && <DrawReadout notes={auto.notes} close={shown[shown.length - 1].c} />}
     </div>
   )
 }
 
-/** 判讀摘要卡：五項各 0–20 分、總分百分比（不受圖層開關影響）。 */
-function SummaryCard({ s }: { s: DrawSummary }) {
+/** 判讀摘要與清單：由 RangeCandle 依目前視窗與圖層開關算好，交給個股頁的獨立卡片。 */
+export type DrawAnalysis = { summary: DrawSummary | null; notes: DrawNote[]; close: number }
+
+/** 判讀摘要卡：五項各 0–20 分、總分百分比（不受圖層開關影響）。bare＝放在別的面板裡，不另加外框。 */
+export function SummaryCard({ s, bare = false }: { s: DrawSummary; bare?: boolean }) {
   const tone = (r: number) => (r >= 0.7 ? UP : r < 0.4 ? DOWN : WARN)
   const pct = Math.round(s.pct * 100)
   const per = s.max / s.items.length
   return (
-    <div className="mt-2 rounded border border-[var(--line)] p-2 text-[12px]">
+    <div className={bare ? 'text-[12px]' : 'mt-2 rounded border border-[var(--line)] p-2 text-[12px]'}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
         <span className="font-semibold">判讀摘要：{s.headline}</span>
         <span className="mono tnum text-[15px] font-bold" style={{ color: tone(s.pct) }}>
@@ -606,7 +619,7 @@ function SummaryCard({ s }: { s: DrawSummary }) {
 }
 
 /** 判讀清單：所有自動畫線在最後一根 K 棒的價位，由高到低，並把最後收盤插在中間。 */
-function DrawReadout({ notes, close }: { notes: DrawNote[]; close: number }) {
+export function DrawReadout({ notes, close }: { notes: DrawNote[]; close: number }) {
   const above = notes.filter((x) => x.price > close)
   const below = notes.filter((x) => x.price <= close)
   const row = (x: DrawNote, i: number) => (

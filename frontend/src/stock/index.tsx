@@ -21,6 +21,8 @@ import { StrategyPools } from './StrategyPools'
 import { DEFAULT_SCREEN, MAX_FACTOR_PANES, loadSubFactors, loadWatch, saveSubFactors, saveWatch } from './store'
 import { TPanel } from './ui'
 import { DashGrid } from './DashGrid'
+import { DrawAnalysisPanel } from './DrawAnalysisPanel'
+import type { DrawAnalysis } from '../charts'
 import { useStockData } from './useStockData'
 import { DEFAULT_STOCK_TAB, parseStockTab, quoteIdentity, stockTabs, type StockTabId } from '../platform/stockTabs'
 import { mapEventsToSessions } from '../platform/eventMarkers'
@@ -141,6 +143,7 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
   // 因子清單（名稱／方向）來自 factor-top；還沒回來傳 null，讀不到傳空陣列，因子卡據此分辨載入中與失敗。
   const data = useStockData(sid, ftop.loading ? null : (ftop.data?.available ?? []))
   const shot = useRef<(() => HTMLCanvasElement) | null>(null)
+  const [analysis, setAnalysis] = useState<DrawAnalysis | null>(null)
 
   if (!sid) {
     return <StockHero mm={mm} watch={watch} hot={hot} hotIsRanked={topRows.length > 0} live={live} onPick={setSid} />
@@ -189,6 +192,7 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
                 focusTime={focusSession}
                 onResetView={() => setFocusDay(null)}
                 onReady={(fn) => { shot.current = fn }}
+                onAnalysis={setAnalysis}
               />
             ) : (
               <TPanel no="01" title={`${labelOf(mm, sid)} · K 線`}>
@@ -204,6 +208,7 @@ export function StockFactorsPage({ selectedSid, onSelectSid, tab, onSelectTab, d
               </TPanel>
             ),
           },
+          { id: '19', w: 6, node: <DrawAnalysisPanel no="19" analysis={analysis} /> },
           { id: '02', w: 3, node: <ReadingsPanel no="02" bars={bars} data={data} /> },
           { id: '03', w: 3, node: <FactorRadarPanel no="03" data={data} /> },
           { id: '04', w: 3, node: <HeatPanel no="04" bars={bars} /> },
