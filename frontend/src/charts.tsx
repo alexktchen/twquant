@@ -1,6 +1,8 @@
 // 共用圖表：lightweight-charts 包裝（K 線＋副圖 pane、範圍/均線/關鍵價位開關）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers, createTextWatermark } from 'lightweight-charts'
+import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, SeriesAttachedParameter, Time } from 'lightweight-charts'
+import { DEFAULT_DRAW_ON, DRAW_KINDS, buildDrawings, type DrawKind, type DrawNote, type DrawRect, type Drawings } from './stock/drawLayer.ts'
 import type { BrokerFlowPoint, Candle, CompositePoint, FactorHistPoint } from './api'
 import { kd, macd, volumeProfile } from './stock/indicators.ts'
 import { ACC, DOWN, LINE, MUT, UP, WARN, num, priceFmt } from './theme'
@@ -47,6 +49,42 @@ export type ChartMarker = {
   text: string
 }
 
+// 自動畫線（T-321）的方框：箱型、缺口。lightweight-charts 沒有矩形，用 series primitive 自己畫在 K 棒後面。
+const LINE_STYLE = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted } as const
+function rectPrimitive(rects: DrawRect[]): ISeriesPrimitive<Time> {
+  let host: SeriesAttachedParameter<Time> | null = null
+  const renderer: IPrimitivePaneRenderer = {
+    draw: () => {},
+    drawBackground: (target) => {
+      if (!host) return
+      const { chart, series } = host
+      target.useMediaCoordinateSpace(({ context: ctx }) => {
+        for (const r of rects) {
+          const x0 = chart.timeScale().timeToCoordinate(r.t0)
+          const x1 = chart.timeScale().timeToCoordinate(r.t1)
+          const y0 = series.priceToCoordinate(r.top)
+          const y1 = series.priceToCoordinate(r.bottom)
+          if (x0 === null || x1 === null || y0 === null || y1 === null) continue
+          ctx.fillStyle = r.fill
+          ctx.fillRect(x0, y0, x1 - x0, y1 - y0)
+          ctx.strokeStyle = r.border
+          ctx.lineWidth = 1
+          ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0)
+          ctx.fillStyle = r.border
+          ctx.font = '10px ui-monospace, Consolas, monospace'
+          ctx.fillText(r.label, x0 + 3, y0 - 3)
+        }
+      })
+    },
+  }
+  const view: IPrimitivePaneView = { zOrder: () => 'bottom', renderer: () => renderer }
+  return {
+    attached: (p) => { host = p },
+    detached: () => { host = null },
+    paneViews: () => [view],
+  }
+}
+
 export function CandleChart({
   data,
   height = 320,
@@ -60,6 +98,7 @@ export function CandleChart({
   focusTime,
   kdPane,
   macdPane,
+  drawings,
   onReady,
 }: {
   data: Candle[]
@@ -74,6 +113,7 @@ export function CandleChart({
   focusTime?: string | null
   kdPane?: KdPanePoint[]
   macdPane?: MacdPanePoint[]
+  drawings?: Drawings
   /** 圖建立後交出截圖函數（下載 PNG 用），圖銷毀時交出 null；不列入 effect deps，換 callback 不重建圖。 */
   onReady?: (shot: (() => HTMLCanvasElement) | null) => void
 }) {
@@ -115,6 +155,31 @@ export function CandleChart({
         candle.createPriceLine({ price: lv.val, color: MUT, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `VA底 ${priceFmt(lv.val)}` })
       }
     }
+
+    // 自動畫線：斜線用只有端點的 LineSeries（lightweight-charts 以 K 棒序數等距，兩點即直線），水平價位用 price line。
+    for (const sg of drawings?.segs ?? []) {
+      if (sg.points.length < 2) continue
+      const s = chart.addSeries(
+        LineSeries,
+        {
+          color: sg.color,
+          lineWidth: sg.width,
+          lineStyle: LINE_STYLE[sg.style],
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          pointMarkersVisible: false,
+          // 畫線不參與自動縮放：陡的趨勢線延伸到今天可能遠離 K 棒，會把主圖壓扁
+          autoscaleInfoProvider: () => null,
+        },
+        0,
+      )
+      s.setData(sg.points)
+    }
+    for (const lv of drawings?.levels ?? []) {
+      candle.createPriceLine({ price: lv.price, color: lv.color, lineWidth: 1, lineStyle: LINE_STYLE[lv.style], axisLabelVisible: true, title: lv.label })
+    }
+    if (drawings?.rects.length) candle.attachPrimitive(rectPrimitive(drawings.rects))
 
     // 每個副圖各佔一個 pane；stretch factor 讓主圖佔大部分高度。
     // titles 與 pane 序號對齊——每個副圖左上角以 watermark 標示指標名稱。
@@ -273,7 +338,7 @@ export function CandleChart({
       ro.disconnect()
       chart.remove()
     }
-  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels, markers, focusTime, kdPane, macdPane])
+  }, [data, height, volume, composite, brokerFlow, factorPanes, mas, keyLevels, markers, focusTime, kdPane, macdPane, drawings])
   return (
     <div style={{ position: 'relative' }}>
       <div
@@ -293,7 +358,8 @@ const CHART_SETTINGS_KEY = 'twquant.chartSettings'
 // 舊版會在首次掛載就把預設值寫進 localStorage，無法分辨是不是使用者自己選的，故升版時只重設 range 一次。
 const CHART_SETTINGS_VERSION = 2
 const DEFAULT_RANGE = 120
-type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean; kdOn: boolean; macdOn: boolean }
+type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean; kdOn: boolean; macdOn: boolean; drawOn: DrawKind[] }
+const isDrawKind = (x: unknown): x is DrawKind => DRAW_KINDS.some((k) => k.kind === x)
 function loadChartSettings(): ChartSettings {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(CHART_SETTINGS_KEY) ?? 'null')
@@ -305,12 +371,13 @@ function loadChartSettings(): ChartSettings {
         levelsOn: typeof o.levelsOn === 'boolean' ? o.levelsOn : true,
         kdOn: o.kdOn === true,
         macdOn: o.macdOn === true,
+        drawOn: Array.isArray(o.drawOn) ? o.drawOn.filter(isDrawKind) : DEFAULT_DRAW_ON,
       }
     }
   } catch {
     /* 壞資料：退回預設 */
   }
-  return { range: DEFAULT_RANGE, maOn: [5, 20], levelsOn: true, kdOn: false, macdOn: false }
+  return { range: DEFAULT_RANGE, maOn: [5, 20], levelsOn: true, kdOn: false, macdOn: false, drawOn: DEFAULT_DRAW_ON }
 }
 const MA_DEFS: [number, string][] = [[5, '#f2c94c'], [10, '#5aa2f7'], [20, '#e578d1'], [60, '#2dd4bf']]
 const KD_GUIDES = [80, 20] // KD 高／低檔參考線（與 readings.ts 的 kdHigh／kdLow 同值）
@@ -344,13 +411,15 @@ export function RangeCandle({
   const [levelsOn, setLevelsOn] = useState(() => loadChartSettings().levelsOn)
   const [kdOn, setKdOn] = useState(() => loadChartSettings().kdOn)
   const [macdOn, setMacdOn] = useState(() => loadChartSettings().macdOn)
+  const [drawOn, setDrawOn] = useState<DrawKind[]>(() => loadChartSettings().drawOn)
   useEffect(() => {
     try {
-      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ v: CHART_SETTINGS_VERSION, range, maOn, levelsOn, kdOn, macdOn }))
+      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ v: CHART_SETTINGS_VERSION, range, maOn, levelsOn, kdOn, macdOn, drawOn }))
     } catch {
       /* 隱私模式等寫入失敗：設定僅本次會話有效 */
     }
-  }, [range, maOn, levelsOn, kdOn, macdOn])
+  }, [range, maOn, levelsOn, kdOn, macdOn, drawOn])
+  const toggleDraw = (k: DrawKind) => setDrawOn((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]))
   const toggleMa = (w: number) => setMaOn((cur) => (cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w]))
   // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，
   // 每次 render 產生新陣列會導致父層任何 state 變動（如搜尋框打字）都整座圖砍掉重建。
@@ -407,6 +476,8 @@ export function RangeCandle({
     const pts = macd(data.map((k) => k.c))
     return data.flatMap((k, i) => (pts[i] && k.d >= cutoff ? [{ time: k.d, ...pts[i]! }] : []))
   }, [data, macdOn, cutoff])
+  // 自動畫線以「目前視窗」偵測：換 60／120 日視窗，線跟著畫面上看得到的波段走（同量價分布）。
+  const auto = useMemo(() => buildDrawings(shown, drawOn), [shown, drawOn])
   const extraH = ((kdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0) + ((macdShown?.length ?? 0) > 1 ? INDICATOR_PANE_H : 0)
   // 標記同樣裁到目前視窗；超出視窗的事件仍留在事件清單，不會被靜默丟掉。
   const shownMarkers = useMemo(
@@ -415,6 +486,16 @@ export function RangeCandle({
   )
   return (
     <div>
+      <div className="flex flex-wrap items-center gap-1 mb-1">
+        <span className="text-[11px] text-[var(--muted)] mr-1" title="依轉折點自動畫出，只描述圖形結構供判讀，不是買賣訊號（文獻：自動支撐壓力扣成本後無超額報酬）">
+          自動畫線
+        </span>
+        {DRAW_KINDS.map((k) => (
+          <button key={k.kind} onClick={() => toggleDraw(k.kind)} className={chipCls(drawOn.includes(k.kind))} title={k.title}>
+            {k.label}
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center gap-1 justify-between mb-1">
         <div className="flex flex-wrap items-center gap-1">
           {MA_DEFS.map(([w, color]) => (
@@ -477,8 +558,41 @@ export function RangeCandle({
         focusTime={focusTime}
         kdPane={kdShown}
         macdPane={macdShown}
+        drawings={drawOn.length ? auto.drawings : undefined}
         onReady={onReady}
       />
+      {auto.notes.length > 0 && <DrawReadout notes={auto.notes} close={shown[shown.length - 1].c} />}
     </div>
+  )
+}
+
+/** 判讀清單：所有自動畫線在最後一根 K 棒的價位，由高到低，並把最後收盤插在中間。 */
+function DrawReadout({ notes, close }: { notes: DrawNote[]; close: number }) {
+  const above = notes.filter((x) => x.price > close)
+  const below = notes.filter((x) => x.price <= close)
+  const row = (x: DrawNote, i: number) => (
+    <div key={i} className="flex items-baseline gap-2 py-0.5">
+      <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ background: x.color }} />
+      <span className="w-40 shrink-0">{x.label}</span>
+      <span className="mono tnum w-16 text-right shrink-0">{priceFmt(x.price)}</span>
+      <span className="mono tnum w-16 text-right shrink-0" style={{ color: x.dist >= 0 ? UP : DOWN }}>
+        {x.dist >= 0 ? '+' : ''}{(x.dist * 100).toFixed(1)}%
+      </span>
+      <span className="text-[var(--muted)] truncate">{x.detail}</span>
+    </div>
+  )
+  return (
+    <details className="mt-2 text-[11px]" open>
+      <summary className="cursor-pointer text-[var(--muted)]">判讀清單（各線今日價位，距收盤 %）</summary>
+      <div className="mt-1">
+        {above.map(row)}
+        <div className="flex items-baseline gap-2 py-0.5 border-y border-[var(--line)] font-semibold">
+          <span className="inline-block w-2 h-2 shrink-0" />
+          <span className="w-40 shrink-0">最後收盤</span>
+          <span className="mono tnum w-16 text-right shrink-0">{priceFmt(close)}</span>
+        </div>
+        {below.map(row)}
+      </div>
+    </details>
   )
 }
