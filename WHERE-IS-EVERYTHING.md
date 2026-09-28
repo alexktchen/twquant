@@ -44,10 +44,12 @@
 - **D-158（使用者提問，事後描述、非登記試驗）布林規則**：`scripts/bb_rule_profile.py`——等碰下軌才買明顯更差（會飆的 76% 不回下軌）；
   隔天買＋收盤破下軌停損＋離開上軌停利讓虧 >10% 的 16.8% → 9.3%，每持有日 +0.081% vs 抱滿 +0.074%（雜訊量級、未檢定）。
   要採用須另立登記進第二保留期，且回測引擎要先加布林出場。`scripts/blend_e0_a20.py`：E0／A20 日相關 0.68，混合 Calmar 下降，A20 不是 E0 的分散工具。
-- **第十五輪（D-159）已登記、還沒跑**：讓賺的抱久、賠的早走——下軌停損＋三種停利線（20 日均線、最高收盤 − 3×ATR14、主力成本階梯），
-  最長 121 天，對抱滿 21 天。**下一步（要 PG）**：`TWQUANT_PG_DSN=... uv run --all-groups python scripts/d159_trailing_exits.py`（逐筆），
-  再用 `configs/strategies/quiet_t_ma.yaml`／`quiet_t_atr.yaml` 對 `quiet_s0` 跑組合回測看最大回撤（1,000 萬、`--lot-size 1`、`--out` 給絕對路徑）。
-  T-MA、T-ATR 不論開發期結果都進第二保留期；參數寫死，不得依結果改。
+- **第十五輪（D-159）跑完（2026-09-28）**：下軌停損＋停利線、最長 121 天，對抱滿 21 天。逐筆 `data/logs/d159_trades_20260928.log`；
+  組合 `scripts/run_round15.sh` → `data/tracks_round15/*.json`（1,000 萬零股），報表 `scripts/d153_report.py --bundles D:/project/twquant/data/tracks_round15`。
+  逐筆：T 臂虧 >10% 變少、T-ATR 淨 ≥ +50% 是 S0 的 4 倍，但**每持有日月區塊兩臂對 S0 都是 t ≈ −3.5**（合併值較高是組成效果）。
+  組合：T-ATR +18.7%／−36.0%／Calmar 0.52（S0 +8.3%／−44.4%）、T-MA +7.5%／**−57.3%**；T-ATR 仍輸 E0（0.67）且回撤超過 35% 門檻。
+  **T-BRK（分點主力成本）依 §六 收線**；T-MA、T-ATR 照原樣留待第二保留期（2027-03），§六「開發期每持有日」用哪個值待使用者在開啟前裁決。
+  S0 重跑與第十三輪結果包逐位元相同——引擎加三種出場沒有副作用。
 - **停利文獻回顧**：`docs/reports/2026-09-25-exit-literature.md`（15 篇、逐篇核對出處）——固定停利對右偏報酬必傷期望值、停損買的是保險、
   出場應看狀態機率；第十四輪的標籤、對照臂（隨機賣出、Han 等 −10% 停損、μ̂−σ̂²/2 理論臂）照這份設計。
 - **第 1 批免費籌碼（D-154／T-309，PR #98，分支 `claude/free-chip-data-t309`）**：`daytrade_daily`、`sbl_short_daily`、`attention_stocks`、
