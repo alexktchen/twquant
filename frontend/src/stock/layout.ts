@@ -1,9 +1,12 @@
 // 個股儀表板可拖拉版面（T-322）的純邏輯：順序、寬高、存讀。不 import 執行期模組，Node 測試可直接載入。
 
-/** 版面參數：12 欄格、寬度最少幾欄、高度最少幾 px。 */
-export const GRID = { cols: 12, minCols: 3, minHeight: 120 } as const
+/**
+ * 版面參數：12 欄格、寬度最少幾欄、高度最少幾 px；瀑布流（T-324）的列高單位與卡片上下間距（px）。
+ * 列切成 rowUnit 高的細格，每張卡依實際高度占 rowSpan 格，矮卡才能疊進高卡旁邊的空位。
+ */
+export const GRID = { cols: 12, minCols: 3, minHeight: 120, rowUnit: 8, rowGap: 10 } as const
 
-export type CardDefault = { id: string; w: number; tall?: boolean }
+export type CardDefault = { id: string; w: number }
 /** 使用者調過的單卡尺寸：w＝欄數；h＝px，null＝跟內容走。 */
 export type CardSize = { w: number; h: number | null }
 export type Layout = { order: string[]; sizes: Record<string, CardSize> }
@@ -66,4 +69,9 @@ export function parseLayout(raw: string | null): Layout | null {
   } catch {
     return null
   }
+}
+
+/** 卡片實際高度（px）→ 占幾個 rowUnit 列（含下方間距，至少 1）。 */
+export function rowSpan(heightPx: number, unit: number = GRID.rowUnit, gap: number = GRID.rowGap): number {
+  return Math.max(1, Math.ceil((heightPx + gap) / unit))
 }
