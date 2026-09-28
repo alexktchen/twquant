@@ -57,3 +57,15 @@ def test_ac6_f15_arm_swaps_only_the_band_for_a_fixed_stop() -> None:
         {"kind": "atr_trailing", "window": 14, "mult": 3.0},
         {"kind": "time_stop", "sessions": 120},
     ]
+
+
+@pytest.mark.parametrize("arm", ["quiet_s0", "quiet_t_atr", "quiet_t_atr_f15"])
+def test_ac1_d162_posthoc_arms_only_swap_the_model(arm: str) -> None:
+    """D-162 §二：事後檢驗的三個配置只換 model_id（重訓到 2026-02-26）與 name。"""
+    base = _load(arm).model_dump(mode="json")
+    new = _load(f"{arm}_2602").model_dump(mode="json")
+    assert new["name"] == f"{arm}_2602"
+    assert new["signals"][0]["params"]["model_id"] == "lgbm_quietA20_tu_h20_20260226_0ac86788"
+    new["signals"][0]["params"]["model_id"] = base["signals"][0]["params"]["model_id"]
+    new["name"] = base["name"]
+    assert new == base
