@@ -571,16 +571,35 @@ export function RangeCandle({
   )
 }
 
-/** 判讀摘要卡：所有畫線整理成幾句話（不受圖層開關影響）。 */
+/** 判讀摘要卡：五項各 0–20 分、總分百分比（不受圖層開關影響）。 */
 function SummaryCard({ s }: { s: DrawSummary }) {
+  const tone = (r: number) => (r >= 0.7 ? UP : r < 0.4 ? DOWN : WARN)
+  const pct = Math.round(s.pct * 100)
+  const per = s.max / s.items.length
   return (
     <div className="mt-2 rounded border border-[var(--line)] p-2 text-[12px]">
-      <div className="font-semibold mb-1">判讀摘要：{s.headline}</div>
-      <ul className="list-disc pl-4 space-y-0.5">
-        {s.lines.map((l, i) => <li key={i}>{l}</li>)}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+        <span className="font-semibold">判讀摘要：{s.headline}</span>
+        <span className="mono tnum text-[15px] font-bold" style={{ color: tone(s.pct) }}>
+          {s.total}／{s.max}（{pct}%）{s.grade}
+        </span>
+      </div>
+      <div className="h-1.5 rounded bg-[var(--panel-2)] overflow-hidden mb-2">
+        <div className="h-full" style={{ width: `${pct}%`, background: tone(s.pct) }} />
+      </div>
+      <ul className="space-y-1">
+        {s.items.map((it, i) => (
+          <li key={i} className="flex items-baseline gap-2">
+            <span className="mono tnum shrink-0 w-12 text-right font-semibold" style={{ color: tone(it.score / per) }}>
+              {it.score}/{per}
+            </span>
+            <span className="shrink-0 w-20 text-[var(--muted)]">{it.name}</span>
+            <span className="min-w-0">{it.text}</span>
+          </li>
+        ))}
       </ul>
-      <div className="mt-1 text-[11px] text-[var(--muted)]">
-        依目前視窗的轉折點自動整理，只描述圖形結構；支撐壓力與軌道線沒有回測證據，不是買賣訊號。
+      <div className="mt-2 text-[11px] text-[var(--muted)]">
+        分數＝圖形結構偏多的程度（≥70% 偏多、&lt;40% 偏空）。權重是看盤慣例與軌道線做法的轉述，沒有回測，不是買賣訊號。
       </div>
     </div>
   )

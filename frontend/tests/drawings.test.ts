@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Bar } from '../src/stock/indicators.ts'
-import { DRAW, boxes, channelOffset, confluenceZones, fibLevels, keyBars, lineAt, openGaps, pivots, priorHighLow, regressionChannel, srLevels, trendLines } from '../src/stock/drawings.ts'
+import { DRAW, SCORE, boxes, channelOffset, confluenceZones, fibLevels, keyBars, lineAt, openGaps, pivots, priorHighLow, regressionChannel, srLevels, structureScore, trendLines } from '../src/stock/drawings.ts'
 
 /** Deterministic bars: a drifting sine so swing highs and lows recur at known places. */
 function bars(n: number, drift = 0.4): Bar[] {
@@ -155,4 +155,18 @@ test('AC-321-11: confluence picks the zone where the most lines agree on each si
   assert.deepEqual(z.above!.labels, ['a', 'b', 'c'])
   assert.deepEqual(z.below!.labels, ['f', 'g']) // Tie on count: the nearer zone wins.
   assert.deepEqual(confluenceZones([{ price: 101, label: 'lonely' }], 100), { above: null, below: null })
+})
+
+test('AC-321-12: structure score maps each item to 0-20 and totals to a percentage with a grade', () => {
+  const best = structureScore({ longTag: '偏多', shortTag: '偏多', where: '靠下軌', support: { lines: 6, dist: -0.03 }, up: 0.08 })
+  assert.equal(best.total, 100)
+  assert.equal(best.pct, 1)
+  assert.equal(best.grade, '結構偏多')
+  const worst = structureScore({ longTag: '偏空', shortTag: '轉弱', where: '跌出軌道下方', support: null, up: null })
+  assert.deepEqual(worst.items.map((i) => i.score), [0, 4, 0, 0, 0])
+  assert.equal(worst.grade, '結構偏空')
+  // Support far away is discounted; a 1:1 reward/risk earns half the space score.
+  const mid = structureScore({ longTag: '收斂', shortTag: '不明', where: null, support: { lines: 5, dist: -0.12 }, up: 0.12 })
+  assert.deepEqual(mid.items.map((i) => i.score), [10, 10, 10, 8, 10])
+  for (const it of [...best.items, ...worst.items, ...mid.items]) assert.ok(it.score >= 0 && it.score <= SCORE.perItem)
 })

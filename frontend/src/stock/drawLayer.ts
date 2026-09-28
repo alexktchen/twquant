@@ -1,7 +1,7 @@
 // 自動畫線 → 圖層（T-321）：把 drawings.ts 的偵測結果（K 棒序數）轉成圖表座標、配色與判讀清單。
 import type { Candle } from '../api'
 import {
-  DRAW, boxes, channelOffset, confluenceZones, fibLevels, keyBars, lineAt, openGaps, priorHighLow, regressionChannel, srLevels, trendLines, type TrendLine,
+  DRAW, SCORE, boxes, channelOffset, confluenceZones, fibLevels, structureScore, keyBars, lineAt, openGaps, priorHighLow, regressionChannel, srLevels, trendLines, type TrendLine,
 } from './drawings.ts'
 import { priceFmt } from '../theme'
 
@@ -141,7 +141,8 @@ export function buildDrawings(bars: Candle[], on: DrawKind[]): { drawings: Drawi
 
 const segKey = (tl: TrendLine) => `tl-${tl.kind}-${tl.a.i}-${tl.b.i}`
 
-export type DrawSummary = { headline: string; lines: string[] }
+export type SummaryItem = { name: string; text: string; score: number }
+export type DrawSummary = { headline: string; items: SummaryItem[]; total: number; max: number; pct: number; grade: string }
 const pctTxt = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`
 
 /** 一個波段層級（短／長）的趨勢線合起來在說什麼。 */
@@ -170,13 +171,12 @@ export function drawSummary(bars: Candle[]): DrawSummary | null {
   if (bars.length < DRAW.channelMinBars) return null
   const last = bars.length - 1
   const close = bars[last].c
-  const lines: string[] = []
   const short = tierView(trendLines(bars, DRAW.pivotSpan.short))
   const long = tierView(trendLines(bars, DRAW.pivotSpan.long))
-  lines.push(`趨勢：長波段${long.tag}（${long.why}），短波段${short.tag}（${short.why}）。`)
 
   // 短線軌道位置：取未破的短線趨勢線（有兩條時取支撐線）與它的平行軌道
-  let where = ''
+  let where: string | null = null
+  let whereTxt = '沒有未破的短線趨勢線，無法定軌道（給中性分）。'
   const rail = trendLines(bars, DRAW.pivotSpan.short).filter((l) => l.brokenAt === null).sort((a, b) => (a.kind === 'support' ? -1 : 1) - (b.kind === 'support' ? -1 : 1))[0]
   if (rail) {
     const base = lineAt(rail, last)
@@ -186,7 +186,7 @@ export function drawSummary(bars: Candle[]): DrawSummary | null {
       const pos = (close - lo) / (hi - lo)
       where = pos > 1 ? '跑出軌道上方' : pos < 0 ? '跌出軌道下方' : pos < 1 / 3 ? '靠下軌' : pos > 2 / 3 ? '靠上軌' : '軌道中間'
       const hint = where === '靠下軌' ? '軌道線做法的多方位置' : where === '靠上軌' ? '軌道線做法的減碼／空方位置' : where === '軌道中間' ? '軌道線做法視為沒有戰略位置' : '軌道失效或加速，等新軌道成形'
-      lines.push(`位置：在短線軌道 ${priceFmt(lo)}–${priceFmt(hi)} 的 ${Math.round(Math.max(0, Math.min(1, pos)) * 100)}%，${where}（${hint}）。`)
+      whereTxt = `在短線軌道 ${priceFmt(lo)}–${priceFmt(hi)} 的 ${Math.round(Math.max(0, Math.min(1, pos)) * 100)}%，${where}（${hint}）。`
     }
   }
 
@@ -196,13 +196,29 @@ export function drawSummary(bars: Candle[]): DrawSummary | null {
     `${priceFmt(zz.lo)}${zz.hi > zz.lo ? '–' + priceFmt(zz.hi) : ''}（${zz.labels.length} 條線合流：${[...new Set(zz.labels)].join('、')}）`
   const up = z.above ? z.above.lo / close - 1 : null
   const down = z.below ? z.below.hi / close - 1 : null
-  lines.push(z.above ? `上方主要壓力：${zoneTxt(z.above)}，距收盤 ${pctTxt(up!)}。` : `上方 ${DRAW.confluence.range * 100}% 內沒有兩條以上的線合流。`)
-  lines.push(z.below ? `下方主要支撐：${zoneTxt(z.below)}，距收盤 ${pctTxt(down!)}；收盤跌破這區代表目前結構失效。` : `下方 ${DRAW.confluence.range * 100}% 內沒有兩條以上的線合流。`)
-  let space = ''
-  if (up !== null && down !== null && down < 0) {
-    space = `上 ${pctTxt(up)}／下 ${pctTxt(down)}`
-    lines.push(`空間：到壓力 ${pctTxt(up)}、到支撐 ${pctTxt(down)}，約 ${(up / -down).toFixed(1)} : 1。`)
-  }
-  const headline = [`長${long.tag}短${short.tag}`, where, space].filter(Boolean).join('・')
-  return { headline, lines }
+  const range = DRAW.confluence.range * 100
+  const resTxt = z.above ? `上方主要壓力 ${zoneTxt(z.above)}，距收盤 ${pctTxt(up!)}。` : `上方 ${range}% 內沒有兩條以上的線合流（上檔較空）。`
+  const supTxt = z.below ? `${zoneTxt(z.below)}，距收盤 ${pctTxt(down!)}；收盤跌破這區代表目前結構失效。` : `下方 ${range}% 內沒有兩條以上的線合流，沒有明確的結構支撐。`
+  const spaceTxt = up !== null && down !== null && down < 0
+    ? `到壓力 ${pctTxt(up)}、到支撐 ${pctTxt(down)}，約 ${(up / -down).toFixed(1)} : 1。${resTxt}`
+    : down !== null && down < 0 ? `到支撐 ${pctTxt(down)}；${resTxt}` : resTxt
+
+  const sc = structureScore({
+    longTag: long.tag,
+    shortTag: short.tag,
+    where,
+    support: z.below && down !== null ? { lines: z.below.labels.length, dist: down } : null,
+    up,
+  })
+  const score = (k: string) => sc.items.find((i) => i.key === k)!.score
+  const items: SummaryItem[] = [
+    { name: '長波段趨勢', text: `${long.tag}（${long.why}）。`, score: score('long') },
+    { name: '短波段趨勢', text: `${short.tag}（${short.why}）。`, score: score('short') },
+    { name: '軌道位置', text: whereTxt, score: score('position') },
+    { name: '下方支撐', text: supTxt, score: score('support') },
+    { name: '上下空間', text: spaceTxt, score: score('space') },
+  ]
+  const max = SCORE.perItem * items.length
+  const headline = [`長${long.tag}短${short.tag}`, where].filter(Boolean).join('・')
+  return { headline, items, total: sc.total, max, pct: sc.pct, grade: sc.grade }
 }
