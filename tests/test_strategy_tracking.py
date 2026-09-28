@@ -316,7 +316,6 @@ def test_ac300_4_live_registry_declares_the_tracking_lookback() -> None:
     registry = load_config(root / "strategies_live.yaml", LiveStrategies)
     display = get_strategy_display()
     assert display.lookback == registry.tracking_lookback >= 2
-    assert display.kinds["tail_b"] == "slots", "TAIL-B 是每日補位型（D-147）"
     assert display.kinds["lw_e0_ctrl"] == "rebalance"
     assert set(display.kinds) == {s.config for s in registry.strategies}
 

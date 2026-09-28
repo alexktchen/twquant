@@ -1,0 +1,23 @@
+# 每日選股看板（D-163／D-164）：只留兩條線，每天呈現新增、剔除、目前持股與下一個交易日的計畫。
+#
+# 持股不是帳戶資料，是回測引擎從 replay_start 一路重播到今天的結果（同一套成交語意）。
+# replay_start 比顯示窗早約兩個月當暖機：起跑那天空手，大盤精選要等第一次月換股、潛伏飆股要等位子補滿；
+# 觀察名單另要顯示窗之前 watch_lookback_sessions 個交易日的前 15 名（不夠會 raise）。
+# **頁面不顯示任何報酬**：2026-09-09 起是第二保留期（D-109），只列名單與持有天數。
+replay_start: 2026-05-01
+display_sessions: 63 # 約三個月的交易日
+initial_capital: 10000000 # 1,000 萬、零股——與第十三～十五輪的散戶組相同（D-153 §一 補充二）
+lot_size: 1
+max_participation: 0.05
+watch_lookback_sessions: 20 # 觀察名單的「新名字」＝過去 20 個交易日沒進過前 15 名（同 scripts/a20_picks.py）
+
+strategies:
+  - code: CORE
+    name: 大盤精選
+    config: lw_e0_ctrl
+    summary: 全市場排序模型每月挑 15 檔、平均分配，抱到下個月換股；不設停損停利。
+  - code: QUIET
+    name: 潛伏飆股
+    config: quiet_s0
+    summary: 在「安靜又買得到」的股票裡，挑 20 天內最可能漲 20% 的股票；15 個位子，每檔抱滿 20 個交易日就賣。
+    watch: true

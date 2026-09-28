@@ -1,16 +1,23 @@
-/** Canonical platform destinations shared by routing and navigation. */
+/**
+ * Canonical platform destinations shared by routing and navigation.
+ * D-164：只留兩條線之後，導覽只露出 `nav: true` 的三頁；其餘頁面的路由保留，舊連結照樣打得開。
+ */
 export const platformPages = [
-  { id: 'overview', label: '今日總覽', group: '每日投資', description: '每日候選與研究工作，從這裡開始。' },
-  { id: 'recommendations', label: 'ML 選股', group: '每日投資', description: '查看模型選出的候選、推薦版本與歷史紀錄。' },
-  { id: 'strategies', label: '策略持股', group: '每日投資', description: '已登記策略的每日目標持股，連同它們在未見資料上的成績。' },
-  { id: 'watchlists', label: '我的追蹤', group: '每日投資', description: '保存觀察理由，持續追蹤研究結果。' },
-  { id: 'stocks', label: '個股研究', group: '市場研究', description: '價量、籌碼與基本面，一起檢視。' },
-  { id: 'industries', label: '產業研究', group: '市場研究', description: '觀察產業資金流向、涵蓋範圍與相關股票。' },
-  { id: 'insights', label: '洞悉與證據', group: '市場研究', description: '核對消息、產業與基本面支持或反對的理由。' },
-  { id: 'models', label: '模型中心', group: '模型研究', description: '追溯模型版本、訓練資料與驗證紀錄。' },
-  { id: 'backtests', label: '回測中心', group: '模型研究', description: '查看回測結果、成本假設與歷史持倉。' },
-  { id: 'operations', label: '資料與工作', group: '營運', description: '檢查資料涵蓋、缺口與背景工作的執行狀態。' },
+  { id: 'picks', label: '每日選股', group: '每日', nav: true, description: '大盤精選與潛伏飆股：每天新增、剔除、目前持股。' },
+  { id: 'overview', label: '今日總覽', group: '每日投資', nav: false, description: '每日候選與研究工作，從這裡開始。' },
+  { id: 'recommendations', label: 'ML 選股', group: '每日投資', nav: false, description: '查看模型選出的候選、推薦版本與歷史紀錄。' },
+  { id: 'strategies', label: '策略持股', group: '每日投資', nav: false, description: '已登記策略的每日目標持股，連同它們在未見資料上的成績。' },
+  { id: 'watchlists', label: '我的追蹤', group: '每日投資', nav: false, description: '保存觀察理由，持續追蹤研究結果。' },
+  { id: 'stocks', label: '個股', group: '查詢', nav: true, description: '價量、籌碼與基本面，一起檢視。' },
+  { id: 'industries', label: '產業研究', group: '市場研究', nav: false, description: '觀察產業資金流向、涵蓋範圍與相關股票。' },
+  { id: 'insights', label: '洞悉與證據', group: '市場研究', nav: false, description: '核對消息、產業與基本面支持或反對的理由。' },
+  { id: 'models', label: '模型中心', group: '模型研究', nav: false, description: '追溯模型版本、訓練資料與驗證紀錄。' },
+  { id: 'backtests', label: '回測中心', group: '模型研究', nav: false, description: '查看回測結果、成本假設與歷史持倉。' },
+  { id: 'operations', label: '資料與排程', group: '營運', nav: true, description: '檢查資料涵蓋、缺口與背景工作的執行狀態。' },
 ] as const
+
+/** 導覽列上實際露出的頁面（D-164）。 */
+export const navPages = platformPages.filter(p => p.nav)
 export type PageId = typeof platformPages[number]['id']
 export type PlatformRoute = { page: PageId | 'not-found'; entityId?: string; query: URLSearchParams }
 
@@ -18,7 +25,7 @@ export type PlatformRoute = { page: PageId | 'not-found'; entityId?: string; que
 export function parseRoute(hash: string): PlatformRoute {
   const aliases: Record<string, string> = { '#stock': '#/stocks', '#ingest': '#/operations' }
   const normalized = aliases[hash] ?? hash
-  const [path, search = ''] = (normalized.replace(/^#/, '') || '/overview').split('?')
+  const [path, search = ''] = (normalized.replace(/^#/, '') || '/picks').split('?')
   const parts = path.replace(/^\//, '').split('/')
   const page = parts[0] as PageId
   const query = new URLSearchParams(search)
