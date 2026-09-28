@@ -116,8 +116,8 @@ def test_ac3_research_model_failures_are_returned_not_raised() -> None:
 def test_ac4_research_models_are_separate_from_production_keys() -> None:
     """上架的研究模型不得混進生產或風控的鍵——那兩個鍵失敗會擋名單，這個不會。"""
     cfg = load_config(_CONFIG_DIR / "ml.yaml", MlConfig)
+    # D-163 只留兩條線之後研究模型清單可以是空的；有登記時仍不得混進生產或風控的鍵
     research = set(cfg.research_live_models)
-    assert research, "D-147 應至少登記一個研究模型"
     assert cfg.production_ranking_model not in research
     assert research.isdisjoint(cfg.production_aux_models)
     assert cfg.recommendation_buckets.risk_gate_model not in research

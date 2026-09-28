@@ -129,8 +129,11 @@ def ewma_vol_series(
     w = 0.5 ** (np.arange(win - 1, -1, -1, dtype=float) / est.halflife)  # 由舊到新
     s1, s2 = float(w.sum()), float((w * w).sum())
     windows = np.lib.stride_tricks.sliding_window_view(r, win)
-    mean = windows @ w / s1
-    var = ((windows - mean[:, None]) ** 2) @ w / s1 * (s1 * s1 / (s1 * s1 - s2))
+    # 逐窗「相乘再沿最後一軸加總」，不用矩陣乘法：BLAS 依列數切塊、加總順序跟著變，
+    # 同一個窗在 r[:k] 與 r 上會差 1 ulp，反前視性質就不再逐位元成立（D-160）。
+    # 沿最後一軸的 sum 對每一列用同一套成對加總，與一次算幾列無關。
+    mean = (windows * w).sum(axis=1) / s1
+    var = ((windows - mean[:, None]) ** 2 * w).sum(axis=1) / s1 * (s1 * s1 / (s1 * s1 - s2))
     return np.asarray(np.sqrt(var * periods), dtype=float)
 
 

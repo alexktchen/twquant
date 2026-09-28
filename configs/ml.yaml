@@ -35,15 +35,15 @@ production_ranking_model: lgbm_lw_net_h20_20260225_83890036 # D-110：換成長�
 # **部署的是排序不是策略**——D-107 判定沒有任何一支策略可部署，本綁定不改變那件事。
 # 原綁定 lgbm_net_h20_20260225_6a798962（短窗口）保留在 data/models/，可隨時換回。
 
-# 每天額外要推論並寫進 PG 的模型（D-112）：已登記策略 LW-F1 以營收驚奇模型的分數當池子。
-production_aux_models:
-  - lgbm_lw_rev_h15_20260225_9d4a149c
+# 每天額外要推論並寫進 PG 的模型（D-112）。D-163 只留兩條線之後，LW-F1 已下架，不再需要營收驚奇模型。
+production_aux_models: []
 
-# D-147：平台上架的研究策略所用的模型（第九輪 B 臂，右尾 60 日漲 ≥50% 的機率）。
-# 與上面兩個鍵的差別：在正式名單匯出**之後**才打分，失敗只寫進步驟摘要、不擋名單
-# ——生產名單與風控閘門不得依賴一個研究模型能不能跑。
-research_live_models:
-  - lgbm_tailb_tu_h60_20260430_7ab9b0f9
+# D-147 的研究模型（TAIL-B）已隨 D-163 下架；需要時再列回來。
+research_live_models: []
+
+# D-163 潛伏飆股（QUIET）：安靜股 A20 模型每日推論（`ml/quiet_live.py`，池子與訓練同一組函數）。
+quiet_live_model: lgbm_quietA20_tu_h20_20260430_655df6d7
+quiet_live_config: ml_quiet_a20.yaml
 
 # ML 選股名單的晉級門檻（D-111）。在此之前所有候選一律 ml_candidate，
 # 於是畫面上「每天推薦 200 檔」——那其實是 API 的 page_size，不是模型選的。

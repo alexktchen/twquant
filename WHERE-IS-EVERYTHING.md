@@ -7,6 +7,16 @@
 
 ## 0. 三十秒版本
 
+- **只留兩條線（D-163，2026-09-28）**：**大盤精選**（`CORE`＝E0，`lw_e0_ctrl`、排序模型 `lgbm_lw_net_h20_20260225_83890036`，紙上交易中）
+  與 **潛伏飆股**（`QUIET`＝A20，`lgbm_quietA20_tu_h20_20260430_655df6d7`，每日名單 `scripts/a20_picks.py`，出場待第二保留期）。
+  名字只是別名，檔名與指紋不改；不再開新的選股或出場輪次。
+- **每日選股看板（D-164，前端首頁 `#/picks`）**：`data/pick_board/pick_board.json`，每天排程「潛伏飆股打分」→「每日選股看板」產生；
+  手動重建 `TWQUANT_DATA_DIR=D:/project/twquant/data uv run --all-groups python -m twquant pick-board --date <日> --out D:/project/twquant/data`，
+  補潛伏飆股分數 `... python -m twquant ml score-quiet --from <日> --to <日>`。持股是從 2026-05-01 起的引擎重播（`configs/pick_board.yaml`），**不顯示報酬**。
+  其餘 9 支策略與 TAIL-B 研究模型已從排程下架（`strategies_live.yaml` 只剩 LW-E0、`ml.yaml` 研究模型清空）。
+- **D-162 事後檢驗（A20 重訓到 2026-02、考 03-02 ~ 09-08）**：選股力 1.95×（前 15 名 26.1% vs 池內 13.4%）；
+  抱滿 S0 **+43.7%**／−25.6%、T-ATR +19.1%／−29.3%、T-ATR-F15 +33.5%／−25.3%（0050 +38.8%／−15.4%）→ **兩個 T 臂被推翻**。
+  腳本 `scripts/d162_score_window.py`、配置 `configs/strategies/*_2602.yaml`、結果包 `data/tracks_d162/`。不取代第二保留期。
 - 最新 worktree：`D:/project/twquant/.claude/worktrees/quant-trading-strategies-268d12`，branch `claude/round11-conditional-vol`（第十一輪結果＋第十二輪進行中）
 - **資料一律在主 checkout**：`D:/project/twquant/data/`（不進 git，但都在本機）
 - **八輪加工已封檔（D-141）**：八輪沒有一輪改善 **E0**（年化 +27.8%／回撤 −41.4%／Calmar 0.67）。
@@ -50,6 +60,8 @@
   組合：T-ATR +18.7%／−36.0%／Calmar 0.52（S0 +8.3%／−44.4%）、T-MA +7.5%／**−57.3%**；T-ATR 仍輸 E0（0.67）且回撤超過 35% 門檻。
   **T-BRK（分點主力成本）依 §六 收線**；T-MA、T-ATR 照原樣留待第二保留期（2027-03），§六「開發期每持有日」用哪個值待使用者在開啟前裁決。
   S0 重跑與第十三輪結果包逐位元相同——引擎加三種出場沒有副作用。
+- **D-161（使用者要求，看過 D-159 後事前登記）T-ATR-F15＝拿掉下軌、改固定 −15% 停損**：`scripts/d161_atr_fixed_stop.py`、`configs/strategies/quiet_t_atr_f15.yaml`。
+  每筆 +2.41%、淨 ≥ +50% 4.36%（三臂最高）但平均抱 47 天、虧 >10% 37.4%，**每持有日三臂最低**；組合 +11.7%／−36.1%／Calmar 0.32。照原樣留待第二保留期。
 - **停利文獻回顧**：`docs/reports/2026-09-25-exit-literature.md`（15 篇、逐篇核對出處）——固定停利對右偏報酬必傷期望值、停損買的是保險、
   出場應看狀態機率；第十四輪的標籤、對照臂（隨機賣出、Han 等 −10% 停損、μ̂−σ̂²/2 理論臂）照這份設計。
 - **第 1 批免費籌碼（D-154／T-309，PR #98，分支 `claude/free-chip-data-t309`）**：`daytrade_daily`、`sbl_short_daily`、`attention_stocks`、

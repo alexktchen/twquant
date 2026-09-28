@@ -27,6 +27,7 @@ import { MetaCtx, useMeta, type MetaCtxT } from './hooks'
 import { PlatformShell } from './platform/PlatformShell'
 import { ResearchPages } from './platform/ResearchPages'
 import { routeHref } from './platform/routes'
+import { PickBoardPage } from './platform/PickBoardPage'
 import { RecommendationsPage } from './platform/RecommendationsPage'
 import { StockResearch } from './platform/StockResearch'
 import { operationsTabs, parseOperationsTab, type OperationsTabId } from './platform/operationsTabs'
@@ -728,6 +729,7 @@ function Shell() {
       query.set('tab', tab)
       window.location.hash = routeHref('operations', undefined, query)
     }} />}
+    picks={(route) => <PickBoardPage route={route} />}
     daily={(route) => <RecommendationsPage route={route} dataAsOf={meta.as_of} />}
     research={(route) => <ResearchPages route={route} />}
     stock={(route) => <StockResearch route={route} />}
