@@ -327,6 +327,23 @@ def test_ac309_3_empty_code_raises() -> None:
         alerts.twse_disposition_rows(payload)
 
 
+def test_ac327_3_same_day_star_on_twse_disposition_date_is_accepted() -> None:
+    """T-327：證交所處置「公告當天」的列，公布日期前面帶一個 `*`（2026-09-29／30 實測）；隔天同一列沒有。"""
+    plain = alerts.twse_disposition_rows(_load("twse_punish.json"))
+    payload = copy.deepcopy(_load("twse_punish.json"))
+    assert payload["fields"][1] == "公布日期"
+    payload["data"][0][1] = "*" + payload["data"][0][1]
+    assert alerts.twse_disposition_rows(payload).rows == plain.rows
+
+
+@pytest.mark.parametrize("bad", ["**{}", "#{}", "{}*"])
+def test_ac327_3_only_one_leading_star_is_accepted(bad: str) -> None:
+    payload = copy.deepcopy(_load("twse_punish.json"))
+    payload["data"][0][1] = bad.format(payload["data"][0][1])
+    with pytest.raises(DataError, match="公布日期"):
+        alerts.twse_disposition_rows(payload)
+
+
 def test_ac309_3_truncated_response_raises() -> None:
     """回應的 total 與實際列數不同＝被截斷，不得當成完整的一年。"""
     payload = copy.deepcopy(_load("twse_punish.json"))
