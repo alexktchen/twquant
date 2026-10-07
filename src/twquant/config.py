@@ -56,6 +56,8 @@ class ChipDailyConfig(BaseConfig):
         "sbl_short_daily": (1,),
     }
     catchup_trading_days: int = Field(default=10, ge=1)  # 往回找「某市場一列都沒有」的交易日
+    # T-327：資料湖表也在同一個窗裡補缺日（PG 一列都沒有的交易日重抓，再由供應層鏡射進 PG）
+    lake_catchup_tables: tuple[str, ...] = ("margin_daily",)
     alerts_lookback_days: int = Field(default=14, ge=0)  # 公告查詢窗往回的日曆日
     disposition_lookahead_days: int = Field(default=14, ge=1)  # 處置依處置期間查，迄日往後推
 

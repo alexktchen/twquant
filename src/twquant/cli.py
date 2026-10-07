@@ -1101,6 +1101,59 @@ def _run_fubon_day(day: dt.date) -> str:
         return f"{full.height} 列（{full['stock_id'].n_unique()} 檔）入 PG＋資料湖"
 
 
+def _catchup_lake_days(
+    gaps: dict[str, list[dt.date]],
+    announce_for: Callable[[dt.date], Callable[[str, str], None]],
+) -> tuple[list[str], list[str]]:
+    """T-327：資料湖表的缺日逐日重抓（舊到新）→ (摘要片段, 失敗)。
+
+    落地照舊走資料湖，同一輪的「供應層」步驟再鏡射進 PG（籌碼步驟排在它前面）。
+    缺日由 `direct_ingest.lake_gap_days` 從 PG 算出；這裡只負責抓。
+    """
+    import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
+    from twquant.data.ingest.orchestrator import run_ingest
+    from twquant.data.ingest.registry import list_specs
+    from twquant.data.serving.schema import DIRECT_PG_TABLES
+    from twquant.data.warehouse import Warehouse
+    from twquant.errors import ConfigError
+
+    direct = sorted(set(gaps) & set(DIRECT_PG_TABLES))
+    if direct:
+        raise ConfigError(
+            f"chip_daily.lake_catchup_tables 只收資料湖表；{direct} 是直寫 PG 的表（由籌碼步驟的計畫補）"
+        )
+    cfg = _load_system()
+    wh = Warehouse(cfg.data_dir)
+    specs = [s for s in list_specs(cadence="daily") if s.store == "lake"]
+    parts: list[str] = []
+    failures: list[str] = []
+    for table, days in gaps.items():
+        got: list[tuple[dt.date, int]] = []
+        for d in days:
+            outs = run_ingest(
+                specs,
+                cfg,
+                wh,
+                d,
+                data_dir=cfg.data_dir,
+                tables=[table],
+                tolerant=True,
+                on_start=announce_for(d),
+                retries=2,
+            )
+            if not outs:
+                failures.append(f"{table} {d}（缺日）：沒有任何資料湖來源提供這張表")
+            for o in outs:
+                if o.status == "success":
+                    got.append((d, o.rows))
+                else:
+                    failures.append(f"{o.table} {d}（缺日）：{o.detail}")
+        if got:
+            listed = "、".join(str(d) for d, _ in got)
+            parts.append(f"{table} 缺日補 {len(got)} 天 {sum(n for _, n in got):,} 列（{listed}）")
+    return parts, failures
+
+
 def _run_chip_day(day: dt.date) -> str:
     """每日 pipeline「籌碼」步驟（T-310）：官方當沖／借券、處置／注意公告 → 直寫 PG。
 
@@ -1111,6 +1164,8 @@ def _run_chip_day(day: dt.date) -> str:
     - 當沖在 T+1 那一次另存首次值（daytrade_first_pub；只有 day＝今天那一輪），T+2／T+3 重抓後回報與首次值的差
       （D-154 §三）。
     - 公告：查一個窗（`alerts.alert_window`），窗內舊列 upsert 冪等、內容變了就 raise（D-154 §二.6）。
+    - 資料湖表（`chip_daily.lake_catchup_tables`，T-327）：同一個補抓窗裡 PG 一列都沒有的交易日重抓
+      進資料湖（融資融券常晚於 19:00 才公布，當天那一次抓不到）。
 
     任一抓取失敗 → 全部跑完後 raise（步驟標 failed，訊息列出哪幾個）；PG 未啟用／不可達 → 回略過訊息。
     """
@@ -1195,7 +1250,13 @@ def _run_chip_day(day: dt.date) -> str:
         refetched = sorted({f.day for f, _ in done if f.table == "daytrade_daily" and not f.first})
         with conn.cursor() as cur:
             revisions = [di.daytrade_revision(cur, pg, d) for d in refetched]
+            lake_gaps = {
+                t: di.lake_gap_days(cur, pg, t, day, cfg.chip_daily.catchup_trading_days)
+                for t in cfg.chip_daily.lake_catchup_tables
+            }
         conn.commit()
+    lake_parts, lake_failures = _catchup_lake_days(lake_gaps, _announce_for)
+    failures += lake_failures
 
     parts: list[str] = []
     for table, label in (("daytrade_daily", "當沖"), ("sbl_short_daily", "借券")):
@@ -1213,6 +1274,7 @@ def _run_chip_day(day: dt.date) -> str:
         f"處置 {alert_rows.get('disposition_stocks', 0):,}／注意 {alert_rows.get('attention_stocks', 0):,} 列"
         "（查詢窗，冪等）"
     )
+    parts += lake_parts
     for r in revisions:
         if r.compared:
             ex = f"，例 {'、'.join(r.examples)}" if r.examples else ""
