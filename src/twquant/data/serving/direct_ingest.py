@@ -187,6 +187,26 @@ def recent_sessions(cur: Any, schema: str, day: dt.date, n: int) -> list[dt.date
     return [r[0] for r in cur.fetchall()]
 
 
+def missing_days(sessions: Sequence[dt.date], present: set[dt.date]) -> list[dt.date]:
+    """純函數：sessions 裡沒有出現在 present 的交易日，舊到新（補抓依時間順序跑）。"""
+    return sorted(d for d in sessions if d not in present)
+
+
+def lake_gap_days(cur: Any, schema: str, table: str, day: dt.date, n: int) -> list[dt.date]:
+    """day 之前（不含）最近 n 個交易日裡，PG `table` 一列都沒有的日子（T-327）。
+
+    給資料湖表（例如融資融券）用：它們先落資料湖、再由供應層鏡射進 PG，所以缺日看 PG 就夠了——
+    資料湖有、PG 還沒有的那天重抓一次也是冪等的。
+    """
+    sessions = recent_sessions(cur, schema, day, n)
+    if not sessions:
+        return []
+    cur.execute(
+        f"SELECT DISTINCT date FROM {_q(schema, table)} WHERE date = ANY(%s)", (list(sessions),)
+    )
+    return missing_days(sessions, {r[0] for r in cur.fetchall()})
+
+
 def market_counts(
     cur: Any, schema: str, table: str, days: Sequence[dt.date]
 ) -> dict[tuple[dt.date, str], int]:
