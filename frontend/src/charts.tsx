@@ -361,7 +361,7 @@ const CHART_SETTINGS_KEY = 'twquant.chartSettings'
 // 舊版會在首次掛載就把預設值寫進 localStorage，無法分辨是不是使用者自己選的，故升版時只重設 range 一次。
 const CHART_SETTINGS_VERSION = 2
 const DEFAULT_RANGE = 120
-type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean; kdOn: boolean; macdOn: boolean; drawOn: DrawKind[] }
+type ChartSettings = { range: number; maOn: number[]; levelsOn: boolean; kdOn: boolean; macdOn: boolean; drawOn: DrawKind[]; markersOn: boolean }
 const isDrawKind = (x: unknown): x is DrawKind => DRAW_KINDS.some((k) => k.kind === x)
 function loadChartSettings(): ChartSettings {
   try {
@@ -375,12 +375,13 @@ function loadChartSettings(): ChartSettings {
         kdOn: o.kdOn === true,
         macdOn: o.macdOn === true,
         drawOn: Array.isArray(o.drawOn) ? o.drawOn.filter(isDrawKind) : DEFAULT_DRAW_ON,
+        markersOn: typeof o.markersOn === 'boolean' ? o.markersOn : true,
       }
     }
   } catch {
     /* 壞資料：退回預設 */
   }
-  return { range: DEFAULT_RANGE, maOn: [5, 20], levelsOn: true, kdOn: false, macdOn: false, drawOn: DEFAULT_DRAW_ON }
+  return { range: DEFAULT_RANGE, maOn: [5, 20], levelsOn: true, kdOn: false, macdOn: false, drawOn: DEFAULT_DRAW_ON, markersOn: true }
 }
 const MA_DEFS: [number, string][] = [[5, '#f2c94c'], [10, '#5aa2f7'], [20, '#e578d1'], [60, '#2dd4bf']]
 const KD_GUIDES = [80, 20] // KD 高／低檔參考線（與 readings.ts 的 kdHigh／kdLow 同值）
@@ -411,7 +412,7 @@ export function RangeCandle({
   /** 給了就把判讀摘要／清單交給呼叫端另外放（個股頁的獨立卡片），圖下方不再畫；元件卸載時交出 null。 */
   onAnalysis?: (a: DrawAnalysis | null) => void
 }) {
-  const [markersOn, setMarkersOn] = useState(true)
+  const [markersOn, setMarkersOn] = useState(() => loadChartSettings().markersOn)
   const [range, setRange] = useState(() => loadChartSettings().range)
   const [maOn, setMaOn] = useState<number[]>(() => loadChartSettings().maOn)
   const [levelsOn, setLevelsOn] = useState(() => loadChartSettings().levelsOn)
@@ -420,11 +421,11 @@ export function RangeCandle({
   const [drawOn, setDrawOn] = useState<DrawKind[]>(() => loadChartSettings().drawOn)
   useEffect(() => {
     try {
-      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ v: CHART_SETTINGS_VERSION, range, maOn, levelsOn, kdOn, macdOn, drawOn }))
+      localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({ v: CHART_SETTINGS_VERSION, range, maOn, levelsOn, kdOn, macdOn, drawOn, markersOn }))
     } catch {
       /* 隱私模式等寫入失敗：設定僅本次會話有效 */
     }
-  }, [range, maOn, levelsOn, kdOn, macdOn, drawOn])
+  }, [range, maOn, levelsOn, kdOn, macdOn, drawOn, markersOn])
   const toggleDraw = (k: DrawKind) => setDrawOn((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]))
   const toggleMa = (w: number) => setMaOn((cur) => (cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w]))
   // useMemo 維持陣列 identity 穩定——CandleChart 的 effect 以這些為 deps，

@@ -314,8 +314,11 @@ class _Row:
         value = self.raw(name)
         return isinstance(value, str) and not value.strip()
 
-    def date(self, name: str) -> dt.date:
+    def date(self, name: str, *, mark: str = "") -> dt.date:
+        """民國日期欄；`mark` 是來源允許出現在日期前面的一個標記（只去掉一個，其餘照舊 raise）。"""
         raw = self.text(name, None)
+        if mark and raw.startswith(mark):
+            raw = raw[len(mark) :]
         try:
             return roc_date(raw)
         except ValueError as exc:
@@ -361,6 +364,10 @@ _TWSE_LEVEL: dict[str, int | None] = {
     "人工管制撮合": None,
     "督導會報決議": None,
 }
+# 證交所處置公告「公告當天」查到的那一列，公布日期前面多一個 `*`（T-327：2026-09-29／30 的每日
+# 排程實測 '*115/09/29'、'*115/09/30'，整個籌碼步驟因此失敗；10-07 再查，同一則公告已是 '115/09/29'）。
+# 只認這一個前綴；其他非日期字元照舊 raise。
+_TWSE_SAME_DAY_MARK = "*"
 
 
 def twse_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
@@ -371,7 +378,7 @@ def twse_disposition_rows(payload: Mapping[str, Any]) -> Parsed:
     out: list[dict[str, Any]] = []
     for values in data:
         row = _Row(values, fields, ix, table)
-        day = row.date("公布日期")
+        day = row.date("公布日期", mark=_TWSE_SAME_DAY_MARK)
         sid = row.code("證券代號", day)
         kind = _nfkc(row.text("處置措施", day, sid)).strip()
         if kind not in _TWSE_LEVEL:

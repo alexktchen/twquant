@@ -844,3 +844,82 @@ def test_ac313_2_holiday_raises(
     """休市日（2026-09-25）兩個端點都 raise——同日其他表一起失敗，T-276 才會判成休市。"""
     with pytest.raises(DataError, match=match):
         loader(name, dt.date(2026, 9, 25))
+
+
+# ── AC-327-2 資料湖表缺日補抓（融資融券常晚於 19:00 公布）───────────────────────
+
+
+def test_ac327_2_missing_days_are_oldest_first_and_only_absent_ones() -> None:
+    present = {_S[0], _S[3], _S[4]}
+    assert di.missing_days(_S[:5], present) == [_S[2], _S[1]], "舊到新、只列 PG 沒有的交易日"
+    assert di.missing_days([], set()) == []
+
+
+def test_ac327_2_margin_is_a_default_lake_catchup_table() -> None:
+    assert ChipDailyConfig().lake_catchup_tables == ("margin_daily",)
+    assert load_config(_CONFIG, SystemConfig).chip_daily.lake_catchup_tables == ("margin_daily",)
+
+
+def test_ac327_2_direct_pg_tables_are_refused() -> None:
+    from twquant import cli
+    from twquant.errors import ConfigError
+
+    with pytest.raises(ConfigError, match="daytrade_daily"):
+        cli._catchup_lake_days({"daytrade_daily": [_S[0]]}, lambda d: lambda tag, table: None)
+
+
+def test_ac327_2_catchup_fetches_each_gap_into_the_lake_and_reports_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from twquant import cli
+    from twquant.data.ingest import orchestrator
+
+    calls: list[tuple[dt.date, list[str] | None, str]] = []
+
+    def fake_run_ingest(specs: Any, cfg: Any, sink: Any, period: dt.date, **kw: Any) -> Any:
+        calls.append((period, kw["tables"], type(sink).__name__))
+        if period == _S[1]:
+            return [IngestOutcome("twse", "margin_daily", "failed", 0, "沒有符合條件的資料")]
+        return [IngestOutcome("twse", "margin_daily", "success", 1297, "")]
+
+    monkeypatch.setattr(orchestrator, "run_ingest", fake_run_ingest)
+    parts, failures = cli._catchup_lake_days(
+        {"margin_daily": [_S[2], _S[1]]}, lambda d: lambda tag, table: None
+    )
+    assert calls == [
+        (_S[2], ["margin_daily"], "Warehouse"),
+        (_S[1], ["margin_daily"], "Warehouse"),
+    ], "逐日、只抓那張表、落資料湖（供應層再鏡射）"
+    assert parts == [f"margin_daily 缺日補 1 天 1,297 列（{_S[2]}）"]
+    assert failures == [f"margin_daily {_S[1]}（缺日）：沒有符合條件的資料"]
+
+
+def test_ac327_2_lake_gap_days_reads_sessions_and_rows_from_pg() -> None:
+    conn = _pg_or_skip()
+    test_schema = "serving_test_t327"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f'DROP SCHEMA IF EXISTS "{test_schema}" CASCADE')
+            cur.execute(f'CREATE SCHEMA "{test_schema}"')
+            cur.execute(f'CREATE TABLE "{test_schema}".prices_daily (date date, stock_id text)')
+            cur.execute(f'CREATE TABLE "{test_schema}".margin_daily (date date, stock_id text)')
+            days = sorted(_S[:5])  # 09-18~09-24
+            today = dt.date(2026, 9, 25)
+            cur.executemany(
+                f'INSERT INTO "{test_schema}".prices_daily VALUES (%s, %s)',
+                [(d, "2330") for d in [*days, today]],
+            )
+            # 融資：09-21、09-23 缺；今天（09-25）本來就不在補抓範圍
+            cur.executemany(
+                f'INSERT INTO "{test_schema}".margin_daily VALUES (%s, %s)',
+                [(d, "2330") for d in days if d not in (_S[1], _S[3])],
+            )
+            got = di.lake_gap_days(cur, test_schema, "margin_daily", today, 4)
+            assert got == [_S[3], _S[1]], "窗內缺的兩天，舊到新"
+            assert di.lake_gap_days(cur, test_schema, "margin_daily", today, 1) == [], "窗外不補"
+        conn.commit()
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(f'DROP SCHEMA IF EXISTS "{test_schema}" CASCADE')
+        conn.commit()
+        conn.close()
