@@ -3,6 +3,7 @@ import { AreaSeries, ColorType, LineStyle, createChart } from 'lightweight-chart
 import { apiUrl } from '../api'
 import { DOWN, LINE, MUT, UP, num } from '../theme'
 import { DayNav } from './DayNav'
+import { ScoreBadge } from './ScoreBadge'
 import {
   boardDates,
   changeLog,
@@ -169,12 +170,14 @@ function Picks({ strategy, day, stocks }: { strategy: BoardStrategy; day: BoardD
         : <ol className="pb-pick-list">{picks.map(p => <li key={p.stock_id} className={p.held ? 'is-held' : undefined}>
           {ordered && <span className="pb-rank">{p.rank}</span>}
           <a href={routeHref('stocks', p.stock_id)}>{stockLabel(stocks, p.stock_id)}</a>
+          <ScoreBadge sid={p.stock_id} />
           <span className="pb-pick-tags">
             {p.new && <span className="pb-badge pb-badge-new">新</span>}
             {p.held ? <span className="pb-badge pb-badge-held">持有中</span> : <span className="pb-badge pb-badge-rec">推薦</span>}
             {p.held && <Change value={change.get(p.stock_id)} />}
           </span>
         </li>)}</ol>}
+    {picks && picks.length > 0 && <p className="pb-footnote">股票後面的數字＝總分（畫線結構／籌碼／基本面三項平均，小字依序是三項），用最新資料算、不隨上方日期切換；≥70 偏多、&lt;40 偏空。只是要不要點進去看的篩選，未回測、不是買賣訊號。</p>}
     {picks && heldN < picks.length && <p className="pb-footnote">{strategy.kind === 'slots' ? '「推薦」＝模型看好但模擬帳本沒持有（位子滿了不會買），照樣列出。「新」＝過去 20 個交易日沒進過前 15 名。' : '月換股型只在換股日照這份名單調整；平常日列出供參考。「新」＝過去 20 個交易日沒進過名單。'}</p>}
   </section>
 }
@@ -185,12 +188,13 @@ function Holdings({ strategy, day, stocks }: { strategy: BoardStrategy; day: Boa
     <div className="pb-section-head"><h3>目前持股 {day.holdings.length} 檔</h3>{slots && strategy.slots ? <span className="pb-muted">共 {strategy.slots} 個位子</span> : null}</div>
     {!slots && strategy.slots !== null && day.holdings.length > 0 && day.holdings.length < strategy.slots && <p className="pb-footnote">每次挑 {strategy.slots} 檔；少的是換股那天沒買到的（漲停或成交量不足），下次換股再補。</p>}
     {!day.holdings.length ? <p className="pb-quiet">空手。</p> : <div className="pb-table-wrap"><table className="pb-table">
-      <thead><tr><th>股票</th><th className="pb-col-ind">產業</th><th>買進日</th><th className="pb-num">漲跌</th><th className="pb-num">持有</th>{slots && <th className="pb-num">還剩</th>}</tr></thead>
+      <thead><tr><th>股票</th><th className="pb-num" title="畫線結構／籌碼／基本面三項平均，最新資料">總分</th><th className="pb-col-ind">產業</th><th>買進日</th><th className="pb-num">漲跌</th><th className="pb-num">持有</th>{slots && <th className="pb-num">還剩</th>}</tr></thead>
       <tbody>{day.holdings.map(h => {
         const left = remainingSessions(strategy, h.held_sessions)
         const info = stocks[h.stock_id]
         return <tr key={h.stock_id}>
           <td><a href={routeHref('stocks', h.stock_id)}><strong>{h.stock_id}</strong> {info?.name ?? ''}</a></td>
+          <td className="pb-num"><ScoreBadge sid={h.stock_id} /></td>
           <td className="pb-muted pb-col-ind">{info?.industry ?? ''}</td>
           <td>{h.entry_date.slice(5)}</td>
           <td className="pb-num"><Change value={h.change} /></td>
