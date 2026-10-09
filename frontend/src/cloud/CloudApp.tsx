@@ -194,7 +194,7 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
             MA{m.n}
           </span>
         ))}
-        <span className="cq-legend-note">▲ 被推薦的日子</span>
+        <span className="cq-legend-note">▼ 被推薦的日子</span>
       </div>
       {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} />}
     </>

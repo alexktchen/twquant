@@ -75,8 +75,9 @@ export function KChart({
       candle,
       pickMarkers(pickDays, lineNames, bars).map((m) => ({
         time: m.time,
-        position: 'belowBar' as const,
-        shape: 'arrowUp' as const,
+        position: 'aboveBar' as const,
+        shape: 'arrowDown' as const,
+        size: 0.5,
         color: LINE_COLOR[m.line] ?? '#FF7A00',
         text: m.text,
       })),
