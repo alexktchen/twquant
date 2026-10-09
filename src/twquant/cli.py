@@ -2212,6 +2212,10 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
         as_of=day, generated_at=now_tw(), cfg=board_cfg, strategies=payloads, stocks=stocks
     )
     path = save_board(data_dir, payload)
+    # T-329：同一份看板順便畫成 HTML（含收盤與漲幅），放 data/reports/，瀏覽器直接開。
+    html_path = _save_board_html(
+        payload, data_dir, board_cfg.html_window_sessions, with_prices=True
+    )
     parts = []
     for p in payloads:
         last = cast("list[dict[str, list[object]]]", p["days"])[-1]
@@ -2220,7 +2224,63 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
             f"{p['name']} 持股 {len(last['holdings'])}、當日 +{len(last['entered'])}／"
             f"−{len(last['exited'])}、下一交易日 +{len(nxt['buy'])}／−{len(nxt['sell'])}"
         )
-    return f"{path.name}：" + "；".join(parts)
+    return f"{path.name}＋{html_path.name}：" + "；".join(parts)
+
+
+def _board_prices(
+    board: dict[str, object], window_sessions: int
+) -> dict[str, dict[str, float | None]]:
+    """HTML 版（T-329）要的收盤與漲幅：讀 PG `prices_daily` 裡看板每一檔在 as_of、前一交易日、視窗第一天的收盤。
+
+    只查這三個日期、只查看板出現過的代號（不是整張表，T-278）。前一交易日＝PG 裡 as_of 之前最後一個有行情的日子。
+    """
+    from twquant.data.serving import store
+    from twquant.reporting.pick_board_html import price_changes
+
+    as_of = dt.date.fromisoformat(str(board["as_of"]))
+    strategies = cast("list[dict[str, Any]]", board["strategies"])
+    # 視窗第一天＝各條線最後 N 個交易日裡最早的那天（兩條線日曆相同；取 min 以防不同）
+    firsts = [
+        dt.date.fromisoformat(str(s["days"][-window_sessions:][0]["date"]))
+        for s in strategies
+        if s["days"]
+    ]
+    window_start = min(firsts) if firsts else None
+    ids = sorted(cast("dict[str, object]", board["stocks"]))
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT MAX(date) FROM "{scfg.pg_schema}"."prices_daily" WHERE date < %s',
+                (as_of,),
+            )
+            row = cur.fetchone()
+            prev = cast("dt.date | None", row[0] if row else None)
+            wanted = [d for d in (as_of, prev, window_start) if d is not None]
+            cur.execute(
+                f'SELECT stock_id, date, close FROM "{scfg.pg_schema}"."prices_daily" '
+                "WHERE stock_id = ANY(%s) AND date = ANY(%s)",
+                (ids, wanted),
+            )
+            closes: dict[str, dict[dt.date, float]] = {}
+            for sid, d, c in cur.fetchall():
+                if c is not None:
+                    closes.setdefault(str(sid), {})[cast("dt.date", d)] = float(c)
+    finally:
+        conn.close()
+    return price_changes(closes, as_of=as_of, prev_session=prev, window_start=window_start)
+
+
+def _save_board_html(
+    board: dict[str, object], data_dir: Path, window_sessions: int, *, with_prices: bool
+) -> Path:
+    """把看板畫成 HTML 並寫到 `<data_dir>/reports/pick_board.html`；`with_prices` 決定要不要讀 PG 補收盤與漲幅。"""
+    from twquant.reporting.pick_board_html import render_board_html, save_board_html
+
+    prices = _board_prices(board, window_sessions) if with_prices else None
+    page = render_board_html(board, window_sessions=window_sessions, prices=prices)
+    return save_board_html(data_dir, page)
 
 
 def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str] | None:
@@ -2312,6 +2372,30 @@ def pick_board(
     day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
     data_dir = Path(out) if out else Path(_load_system().data_dir)
     typer.secho(f"[OK] {day} {_pick_board_for_day(day, data_dir)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="pick-board-html")
+def pick_board_html(
+    out: str = typer.Option("", help="資料根目錄（絕對路徑）；空＝configs/system.yaml data_dir"),
+    no_prices: bool = typer.Option(
+        False, "--no-prices", help="不讀 PG：收盤與漲幅顯示「—」（測試或 PG 不可達時用）"
+    ),
+) -> None:
+    """把已存好的看板（pick_board.json）畫成 HTML（T-329）：不重播、不改 JSON，寫到 data/reports/pick_board.html。"""
+    from twquant.config import load_config
+    from twquant.reporting.pick_board import PickBoardConfig, load_board
+
+    data_dir = Path(out) if out else Path(_load_system().data_dir)
+    board = load_board(data_dir)
+    if board is None:
+        typer.secho(
+            f"找不到 {data_dir / 'pick_board' / 'pick_board.json'}：先跑 pick-board 產生看板。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    cfg = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
+    path = _save_board_html(board, data_dir, cfg.html_window_sessions, with_prices=not no_prices)
+    typer.secho(f"[OK] {board['as_of']} {path}", fg=typer.colors.GREEN)
 
 
 def _file_fingerprint(path: Path) -> str:

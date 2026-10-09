@@ -10,6 +10,7 @@ initial_capital: 10000000 # 1,000 萬、零股——與第十三～十五輪的�
 lot_size: 1
 max_participation: 0.05
 watch_lookback_sessions: 20 # 觀察名單的「新名字」＝過去 20 個交易日沒進過前 15 名（同 scripts/a20_picks.py）
+html_window_sessions: 6 # HTML 版（T-329）推薦名單的「近 N 日上榜」：看最後幾個交易日的前 15 名
 
 strategies:
   - code: CORE
