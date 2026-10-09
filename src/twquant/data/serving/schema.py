@@ -412,6 +412,23 @@ DAYTRADE_FIRST_PUB_SPEC = TableSpec(
 # 每日直寫擷取（T-310）要建的表：四張資料表＋首次公布值簿記表。
 DIRECT_INGEST_SPECS: tuple[TableSpec, ...] = (*DIRECT_PG_SPECS, DAYTRADE_FIRST_PUB_SPEC)
 
+# 每日名單（T-332／D-170）：每條線當天收盤後的前 n 名，永久保留（約 30 列／日）。
+# 大盤精選＝若當天換股的目標名單（score 為空：名單由規則排名而非單一分數）；
+# 潛伏飆股＝補位候選序，score＝模型機率。衍生表：sync/rebuild/prune 都不碰。
+DAILY_PICKS_SPEC = TableSpec(
+    "daily_picks",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("rank", "integer"),
+        ("stock_id", "text"),
+        ("score", "double precision"),
+        ("model_id", "text"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -421,6 +438,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     BROKER_FLOW_DAILY_SPEC,
     *DIRECT_PG_SPECS,
     DAYTRADE_FIRST_PUB_SPEC,
+    DAILY_PICKS_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

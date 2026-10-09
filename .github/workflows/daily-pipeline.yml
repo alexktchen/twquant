@@ -9,7 +9,7 @@ name: daily-pipeline
 
 on:
   schedule:
-    - cron: "23 11 * * 1-5" # 19:23 台北
+    - cron: "23 12 * * 1-5" # 20:23 台北（D-008 截點 20:00 之後，推薦快照才不會被拒；D-169）
     - cron: "43 14 * * 1-5" # 22:43 台北（補融資券/券商）
   workflow_dispatch:
     inputs:
@@ -59,18 +59,32 @@ jobs:
             # 不能用 runner 當下日期：schedule 可能延遲跨日/週末。回推最近一個預定班次，
             # 取得原排程所屬日期；平日國定假日仍由品質閘門大聲失敗。
             uv run python scripts/resolve_pipeline_day.py \
-              --slot "19:23" --slot "22:43" >> "$GITHUB_ENV"
+              --slot "20:23" --slot "22:43" >> "$GITHUB_ENV"
           else
             # 手動補跑日期由操作者明確指定，優先於自動解析。
             echo "DAY=$DAY" >> "$GITHUB_ENV"
             echo "FROM7=$(date -d "$DAY -7 days" +%F)" >> "$GITHUB_ENV"
           fi
 
+      - name: 模型檔（GitHub Release models-prod-2026-10 → data/models；T-332）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data/models
+          gh release download models-prod-2026-10 --pattern "models-prod-2026-10.tar.gz" --dir /tmp
+          tar -xzf /tmp/models-prod-2026-10.tar.gz -C data/models
+          ls data/models
+
+      - name: 月營收（上個月與當月，MOPS；冪等，供應層同步帶進 PG）
+        run: |
+          uv run python -m twquant ingest-revenue --month "$(date -d "$DAY -1 month" +%Y-%m)"
+          uv run python -m twquant ingest-revenue --month "$(date -d "$DAY" +%Y-%m)"
+
       - name: 融資券 T-1 補抓（21:30 才公布，前幾日缺口冪等回補）
         run: uv run python -m twquant backfill --from "$FROM7" --to "$DAY" --tables margin_daily --no-skip-existing
 
       - name: 每日 pipeline（擷取→閘門→券商→訊號(PG)→供應層→選股池）
-        run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --fail-on-degraded
+        run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --cloud --fail-on-degraded
 
       - name: 券商買賣超日聚合（broker_flow_daily，明細修剪前）
         run: uv run python -m twquant serving broker-flow --from "$DAY" --to "$DAY"

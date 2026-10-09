@@ -112,6 +112,9 @@ class CloudConfig(BaseConfig):
     # 「本機研究用、雲端沒有」，而非讓雲端在殘缺窗口上算出看似正常的數字。test_cloud 把關：
     # 每個被排除的因子都必須真的超窗，清單不能拿來藏錯。
     exclude_factors: tuple[str, ...] = ()
+    # 雲端跑每日 pipeline（`pipeline --cloud`）時明確略過的步驟名（D-170：網站只要每日推薦，
+    # 不要回測重播、紙上交易、選股池）。名稱對不上任何步驟即 raise。
+    skip_pipeline_steps: tuple[str, ...] = ()
 
 
 class ServingConfig(BaseConfig):
