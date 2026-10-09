@@ -75,7 +75,8 @@
 .cq-quote dt { color: var(--mute); }
 .cq-quote dd { margin: 0; font-variant-numeric: tabular-nums; }
 .cq-legend { display: flex; gap: 14px; font-size: 12px; }
-.cq-legend-note { color: var(--mute); margin-left: auto; }
+.cq-legend-note { color: var(--mute); margin-left: auto; display: flex; gap: 10px; }
+.cq-legend-note b { font-weight: 500; }
 .cq-chart { flex: 1; min-height: 360px; }
 
 @media (max-width: 820px) {
