@@ -16,8 +16,9 @@
 - **每日選股看板（D-164，前端首頁 `#/picks`）**：`data/pick_board/pick_board.json`，每天排程「潛伏飆股打分」→「每日選股看板」產生；
   手動重建 `TWQUANT_DATA_DIR=D:/project/twquant/data uv run --all-groups python -m twquant pick-board --date <日> --out D:/project/twquant/data`，
   補潛伏飆股分數 `... python -m twquant ml score-quiet --from <日> --to <日>`。持股是從 2026-05-01 起的引擎重播（`configs/pick_board.yaml`），**不顯示報酬**。
-  **HTML 版（T-329）**：同一步驟另存 `data/reports/pick_board.html`（含收盤、當日／近 6 日漲幅）；只重畫不重播：
-  `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant pick-board-html --out D:/project/twquant/data`（視窗天數在 `pick_board.yaml` 的 `html_window_sessions`）。
+  **HTML 版（T-329／T-330）**：同一步驟另存 `data/reports/pick_board.html`（含收盤、當日／近 6 日漲幅，與每條線的「整體表現」：重播以來的年化／回撤／逐筆＋研究回測參考）；只重畫不重播：
+  `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant pick-board-html --out D:/project/twquant/data`（視窗天數在 `pick_board.yaml` 的 `html_window_sessions`；
+  研究回測參考引用的結果包在同檔各線的 `references`，包不在會 raise）。
   其餘 9 支策略與 TAIL-B 研究模型已從排程下架（`strategies_live.yaml` 只剩 LW-E0、`ml.yaml` 研究模型清空）。
 - **D-162 事後檢驗（A20 重訓到 2026-02、考 03-02 ~ 09-08）**：選股力 1.95×（前 15 名 26.1% vs 池內 13.4%）；
   抱滿 S0 **+43.7%**／−25.6%、T-ATR +19.1%／−29.3%、T-ATR-F15 +33.5%／−25.3%（0050 +38.8%／−15.4%）→ **兩個 T 臂被推翻**。

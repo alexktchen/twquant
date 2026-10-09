@@ -13,7 +13,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from twquant.backtest import metrics as _metrics
+
 HTML_FILE = "pick_board.html"
+# 不足這麼多個交易日的年化只是換算，頁面要標明（與引擎年化用的同一個常數）
+_ONE_YEAR_SESSIONS = int(_metrics._TRADING_DAYS)
 
 # 各股價格資訊的鍵：收盤、當日漲幅、近 N 日漲幅（N＝頁面「近 N 日上榜」的視窗）。缺的放 None。
 PRICE_KEYS = ("close", "change_1d", "change_window")
@@ -304,8 +308,188 @@ def _activity(shown: Sequence[Mapping[str, Any]], names: _Names) -> str:
     return "".join(acts)
 
 
+def _mean(xs: Sequence[float]) -> float | None:
+    return sum(xs) / len(xs) if xs else None
+
+
+def replay_summary(strategy: Mapping[str, Any], *, initial_capital: float) -> dict[str, Any] | None:
+    """重播以來（看板 `equity`）的整體數字＋看板顯示窗內的逐筆（T-330）。
+
+    年化／Sharpe／最大回撤／Calmar 用引擎同一支 `compute_metrics`（淨值含費用與股利）；期間報酬以配置的
+    起始資金為分母（重播第一天就已經有進出時，第一個淨值點不等於起始資金）。逐筆照前端 D-165 的定義：
+    已賣出的每筆漲跌（成交價算、不含股利與費用）、勝率只是輔助；持股的平均未實現。沒有淨值回 None。
+    """
+    equity = list(strategy.get("equity") or [])
+    if not equity or initial_capital <= 0:
+        return None
+    values = [float(p["value"]) for p in equity]
+    m = _metrics.compute_metrics(values, 0.0)
+    closed = [
+        float(e["change"])
+        for d in strategy["days"]
+        for e in d["exited"]
+        if isinstance(e.get("change"), (int, float))
+    ]
+    open_ = [
+        float(h["change"])
+        for h in strategy["days"][-1]["holdings"]
+        if isinstance(h.get("change"), (int, float))
+    ]
+    return {
+        "start": str(equity[0]["date"]),
+        "end": str(equity[-1]["date"]),
+        "n_days": len(values),
+        "period_return": values[-1] / initial_capital - 1.0,
+        "cagr": m.cagr,
+        "sharpe": m.sharpe,
+        "mdd": m.mdd,
+        "calmar": m.calmar,
+        "short": len(values) < _ONE_YEAR_SESSIONS,
+        "closed": len(closed),
+        "avg_closed": _mean(closed),
+        "win_rate": (sum(1 for x in closed if x > 0) / len(closed)) if closed else None,
+        "open": len(open_),
+        "avg_open": _mean(open_),
+        "open_up": sum(1 for x in open_ if x > 0),
+    }
+
+
+def reference_summary(pack: Mapping[str, Any]) -> dict[str, Any]:
+    """研究回測結果包（`run_tracks.py` 等產出的 JSON）裡頁面要的數字：只讀它的 `metrics` 與期初／期末資金。"""
+    metrics = pack.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("結果包沒有 metrics：不是回測結果包，或還沒跑完")
+    initial = float(pack["initial_capital"])
+    final = float(pack["final_equity"])
+    n_days = int(metrics["n_days"])
+    return {
+        "start": str(pack["start"]),
+        "end": str(pack["end"]),
+        "initial_capital": initial,
+        "final_equity": final,
+        "n_days": n_days,
+        "period_return": final / initial - 1.0,
+        "cagr": float(metrics["cagr"]),
+        "mdd": float(metrics["mdd"]),
+        "calmar": float(metrics["calmar"]),
+        "sharpe": float(metrics["sharpe"]),
+        "win_rate": float(metrics["win_rate"]) if metrics.get("win_rate") is not None else None,
+        "short": n_days < _ONE_YEAR_SESSIONS,
+    }
+
+
+def _ratio(v: float | None) -> str:
+    return "—" if v is None else f"{v:.2f}"
+
+
+def _stat(code: str, key: str, label: str, value: str, cls: str = "", note: str = "") -> str:
+    small = f"<small>{_e(note)}</small>" if note else ""
+    return (
+        f'<div class="stat"><div class="k">{_e(label)}</div>'
+        f'<div class="v {cls}"><b data-metric="{_e(code)}:{key}">{value}</b>{small}</div></div>'
+    )
+
+
+def _performance(
+    code: str, replay: Mapping[str, Any] | None, refs: Sequence[Mapping[str, Any]]
+) -> str:
+    cagr_note = "不足一年，年化是換算"
+    if replay is None:
+        top = "<p class='lede'>尚無淨值：重播還沒有產生淨值序列。</p>"
+    else:
+        r = replay
+        tiles = [
+            _stat(
+                code,
+                "replay:period_return",
+                "期間報酬",
+                _pct(r["period_return"]),
+                _pct_class(r["period_return"]),
+            ),
+            _stat(
+                code,
+                "replay:cagr",
+                "年化",
+                _pct(r["cagr"]),
+                _pct_class(r["cagr"]),
+                cagr_note if r["short"] else "",
+            ),
+            _stat(code, "replay:mdd", "最大回撤", _pct(r["mdd"]), _pct_class(r["mdd"])),
+            _stat(code, "replay:calmar", "Calmar", _ratio(r["calmar"])),
+            _stat(code, "replay:sharpe", "Sharpe", _ratio(r["sharpe"])),
+            _stat(
+                code,
+                "replay:avg_closed",
+                f"已賣出 {r['closed']} 筆平均",
+                _pct(r["avg_closed"]),
+                _pct_class(r["avg_closed"]),
+            ),
+            _stat(
+                code,
+                "replay:win_rate",
+                "勝率（賺錢筆數）",
+                _pct(r["win_rate"]).lstrip("+") if r["win_rate"] is not None else "—",
+                "",
+                "輔助看，平均每筆才是重點",
+            ),
+            _stat(
+                code,
+                "replay:avg_open",
+                f"持股 {r['open']} 檔平均未實現",
+                _pct(r["avg_open"]),
+                _pct_class(r["avg_open"]),
+                f"{r['open_up']} 檔在成本之上" if r["open"] else "",
+            ),
+        ]
+        top = (
+            f"<p class='lede'>重播 {_e(r['start'])}～{_e(r['end'])}（{r['n_days']} 個交易日）的淨值，含費用與股利；"
+            "逐筆只算看板顯示窗內。</p>"
+            f"<div class='stats'>{''.join(tiles)}</div>"
+        )
+    if not refs:
+        rows_html = "<p class='lede'>沒有登記研究回測參考。</p>"
+    else:
+        rows = []
+        for i, ref in enumerate(refs):
+            s = ref["summary"]
+            key = f"ref{i}"
+            cagr_cell = (
+                f'<td class="num {_pct_class(s["cagr"])}"><b data-metric="{_e(code)}:{key}:cagr">{_pct(s["cagr"])}</b>'
+                + (f"<br><small>{cagr_note}</small>" if s["short"] else "")
+                + "</td>"
+            )
+            rows.append(
+                "<tr>"
+                f"<td class='label'>{_e(ref['label'])}<br><code>{_e(ref['source'])}</code></td>"
+                f"<td class='num'>{_e(s['start'])}～{_e(s['end'])}<br><small>{s['n_days']} 個交易日</small></td>"
+                f'<td class="num {_pct_class(s["period_return"])}"><b data-metric="{_e(code)}:{key}:period_return">{_pct(s["period_return"])}</b></td>'
+                + cagr_cell
+                + f'<td class="num {_pct_class(s["mdd"])}"><b data-metric="{_e(code)}:{key}:mdd">{_pct(s["mdd"])}</b></td>'
+                f"<td class='num'>{_ratio(s['calmar'])}</td><td class='num'>{_ratio(s['sharpe'])}</td>"
+                "</tr>"
+            )
+        rows_html = (
+            "<div class='scroll'><table class='refs'><thead><tr><th>研究回測參考</th><th class='num'>期間</th>"
+            "<th class='num'>期間報酬</th><th class='num'>年化</th><th class='num'>最大回撤</th><th class='num'>Calmar</th><th class='num'>Sharpe</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div>"
+        )
+    return (
+        "<h3>整體表現</h3>"
+        + top
+        + rows_html
+        + "<p class='lede'>研究回測的數字來自各結果包的 metrics（含費用，不含股利再投入），資金規模與整張／零股見標籤。"
+        "第二保留期（D-109）：這些數字只能看，不得依它們改任何參數。</p>"
+    )
+
+
 def _section(
-    s: Mapping[str, Any], names: _Names, prices: Mapping[str, PriceInfo], window_sessions: int
+    s: Mapping[str, Any],
+    names: _Names,
+    prices: Mapping[str, PriceInfo],
+    window_sessions: int,
+    *,
+    initial_capital: float,
+    refs: Sequence[Mapping[str, Any]],
 ) -> str:
     days: list[Mapping[str, Any]] = list(s["days"])
     if not days:
@@ -317,6 +501,7 @@ def _section(
         f'<section id="{_e(code.lower())}">'
         f'<div class="sec-head"><h2>{_e(s["name"])}</h2><p class="summary">{_e(s["summary"])}</p></div>'
         f'<div class="facts">{_facts(s, len(last["holdings"]))}</div>'
+        f"{_performance(code, replay_summary(s, initial_capital=initial_capital), refs)}"
         f'<div class="plan"><h3>下一個交易日</h3>{_plan(s, names, last["holdings"])}</div>'
         f"<h3>目前持股</h3>{_holdings_table(code, last, names, prices)}"
         f"<h3>{_md(str(last['date']))} 推薦名單</h3>{_picks_table(s, shown, names, prices)}"
@@ -360,7 +545,13 @@ th.num,td.num{text-align:right}td.rank{color:var(--muted);width:2.5em}td.stock{f
 .act .d{font-variant-numeric:tabular-nums;font-weight:500}.act .body{display:grid;gap:6px;font-size:14px}.lbl{display:inline-block;font-weight:500;margin-right:8px}
 .foot{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
 .foot code{font-size:13px;background:var(--panel2);padding:1px 5px;border-radius:4px}
-@media (max-width:520px){h1{font-size:26px}h2{font-size:21px}.act{grid-template-columns:1fr;gap:4px}}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0 14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.stat .k{font-size:12px;color:var(--muted);letter-spacing:.04em}.stat .v{font-size:20px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.stat .v small{display:block;font-size:12px;font-weight:400;color:var(--muted)}
+table.refs td.label{white-space:normal;min-width:16em}table.refs code{font-size:12px;color:var(--muted);background:var(--panel2);padding:0 4px;border-radius:3px}
+table.refs small{color:var(--muted);font-size:12px;font-weight:400}
+@media (max-width:520px){h1{font-size:26px}h2{font-size:21px}.act{grid-template-columns:1fr;gap:4px}.stat .v{font-size:18px}}
 """
 
 
@@ -369,18 +560,32 @@ def render_board_html(
     *,
     window_sessions: int,
     prices: Mapping[str, PriceInfo] | None = None,
+    references: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
 ) -> str:
     """把看板 payload 畫成完整的 HTML 頁（含 <!doctype>，可直接用瀏覽器打開）。
 
     `window_sessions`：推薦名單「近 N 日上榜／漲幅」看最後幾個交易日（少於 N 天就看有的）。
     `prices`：各股的收盤、當日漲幅、近 N 日漲幅（見 `price_changes`）；沒給或缺的顯示「—」。
+    `references[code]`：該條線的研究回測參考，每筆 `{label, source, summary}`（summary 見 `reference_summary`）。
     同一輸入永遠產生同一字串。
     """
     if window_sessions < 1:
         raise ValueError(f"window_sessions 須 ≥ 1，得到 {window_sessions}")
     names = _Names(board["stocks"])
     px: Mapping[str, PriceInfo] = prices or {}
-    sections = "".join(_section(s, names, px, window_sessions) for s in board["strategies"])
+    refs: Mapping[str, Sequence[Mapping[str, Any]]] = references or {}
+    initial_capital = float(board["initial_capital"])
+    sections = "".join(
+        _section(
+            s,
+            names,
+            px,
+            window_sessions,
+            initial_capital=initial_capital,
+            refs=refs.get(str(s["code"]), ()),
+        )
+        for s in board["strategies"]
+    )
     gen = dt.datetime.fromisoformat(str(board["generated_at"]))
     return (
         '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
@@ -391,7 +596,7 @@ def render_board_html(
         "<header><div><div class='eyebrow'>大盤精選 · 潛伏飆股</div><h1>每日選股看板</h1></div>"
         f"<div class='meta'>資料到 <b>{_e(board['as_of'])}</b> 收盤<br>看板產生於 {gen:%Y-%m-%d %H:%M}</div></header>"
         f"<p class='note'>持股是系統從 {_e(board['replay_start'])} 起用回測引擎重播出來的名單，不是任何帳戶的實際部位；"
-        "這頁不顯示整體報酬。</p>"
+        "「整體表現」是重播與研究回測的數字，不是帳戶損益。</p>"
         f"{sections}"
         "<div class='foot'>來源 <code>data/pick_board/pick_board.json</code>（每日排程產生）；收盤與漲幅來自供應層 <code>prices_daily</code>。"
         "這頁的每個數字都由程式從資料讀出。</div>"

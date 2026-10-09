@@ -319,12 +319,16 @@ def test_ac7_cli_renders_from_the_saved_board_or_refuses(tmp_path: Path) -> None
     from twquant.cli import app
 
     runner = CliRunner()
-    missing = runner.invoke(app, ["pick-board-html", "--out", str(tmp_path), "--no-prices"])
+    missing = runner.invoke(
+        app, ["pick-board-html", "--out", str(tmp_path), "--no-prices", "--no-references"]
+    )
     assert missing.exit_code != 0
     assert "pick_board.json" in missing.output
 
     save_board(tmp_path, _board())
-    ok = runner.invoke(app, ["pick-board-html", "--out", str(tmp_path), "--no-prices"])
+    ok = runner.invoke(
+        app, ["pick-board-html", "--out", str(tmp_path), "--no-prices", "--no-references"]
+    )
     assert ok.exit_code == 0, ok.output
     out = tmp_path / "reports" / HTML_FILE
     assert out.exists() and "大盤精選" in out.read_text(encoding="utf-8")
