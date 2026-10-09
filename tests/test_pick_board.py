@@ -156,6 +156,7 @@ def test_ac3_payload_shows_only_the_display_window_and_its_names() -> None:
         lot_size=1,
         max_participation=0.05,
         watch_lookback_sessions=2,
+        html_window_sessions=6,
         strategies=(strat,),
     )
     board = board_payload(
@@ -221,7 +222,8 @@ def test_ac7_picks_list_the_full_top_n_even_when_every_slot_is_full() -> None:
     strat = BoardStrategy(
         code="QUIET", name="潛伏飆股", config="quiet_s0", summary="測試", watch=True
     )
-    top = {d: ["2330", "1101", "0050"] for d in D}
+    # ranked 的值型別是 list[str] | None（模型沒打分那天是 None），dict 不變性要求這裡明寫
+    top: dict[dt.date, list[str] | None] = {d: ["2330", "1101", "0050"] for d in D}
     new = {d: ["0050"] for d in D}
     one = strategy_payload(strat, "slots", 20, 1, days, None, 2, new, top)
     last = cast("list[dict[str, object]]", one["days"])[-1]

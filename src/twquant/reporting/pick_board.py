@@ -43,6 +43,9 @@ class PickBoardConfig(BaseConfig):
     lot_size: int = Field(ge=1)
     max_participation: float = Field(gt=0.0, le=1.0)
     watch_lookback_sessions: int = Field(ge=1)  # 「新名字」＝過去幾個交易日沒進過前 n 名
+    html_window_sessions: int = Field(
+        ge=1
+    )  # HTML 版（T-329）推薦名單「近 N 日上榜／漲幅」看最後幾個交易日
     strategies: tuple[BoardStrategy, ...] = Field(min_length=1)
 
 
