@@ -104,6 +104,8 @@ class CloudConfig(BaseConfig):
     # 大表只留符合此 pattern 的股票（四碼普通股，同 screener 宇宙）；只套用在 pattern_tables
     stock_pattern: str = "^[1-9][0-9]{3}$"
     pattern_tables: tuple[str, ...] = ("prices_daily", "broker_trades")
+    # pattern_tables 中仍保留「stock_meta 有產業別」股票的表（特別股會進產業平均，刪了產業因子就和地端不同）
+    industry_member_tables: tuple[str, ...] = ()
     # 滾動窗口（交易日數）；未列出的表全史保留（小表）。硬下限＝因子最大回看（有測試把關）
     windows: dict[str, int] = {}
     # 雲端不算的因子：需要的歷史超過該表的滾動窗（含 expanding 統計）。列在這裡＝明確承認

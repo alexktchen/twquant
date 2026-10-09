@@ -1,0 +1,61 @@
+# 雲端（Supabase Free 500 MB，不升級）只放「每天算因子 → 模型推薦 → 記錄每日名單」需要的切片，
+# 空間允許時再加 K 線（使用者 2026-10-09）。網站不再需要回測系統：看板重播、紙上交易、
+# 回測引擎、選股池、分點面板都不上雲。研究全史只留地端 PG。
+#
+# 由 scripts/cloud_seed_needed.py 讀取：DROP 雲端 serving 全部表 → 以現行程式的 schema 重建 →
+# 從地端 PG 只 COPY 下列切片。未列出的表在雲端建成空表，由每日 GHA 自己寫入。
+#
+# 切片語法（同表可並列多段）：
+#   all: true                 整表
+#   since: "YYYY-MM-DD"       date >= 該日
+#   last_sessions: N          該表在地端最新 N 個 distinct date
+#   stock_pattern: true       stock_id 套 serving.yaml cloud.stock_pattern（四碼普通股）
+#   industry_members: true    不符 stock_pattern、但 stock_meta 有產業別的股票（特別股等）
+#   in: {欄名: [值, ...]}     欄位值白名單
+#
+# 窗口要和 serving.yaml 的 cloud.windows 一致，否則每日 GHA 的 `serving prune` 會修掉多搬的部分。
+tables:
+  # 因子最長價格回看是 price.high_52w（260 個交易日），500 日同時當 K 線（約兩年）。
+  # 特別股（2887G 等 25 檔）會進產業平均：少了它們，residual_reversal_5d／industry_rs_20d／
+  # industry_mom_6m 各約 241 檔和地端不同（2026-10-09 實測；補上後全部一致）
+  prices_daily:
+    - {last_sessions: 500, stock_pattern: true}
+    - {last_sessions: 500, industry_members: true}
+  # ctx.* 三個特徵與 price.rs_market_20d；整表約 6 千列
+  index_daily:
+    - {all: true}
+  stock_meta:
+    - {all: true}
+  # revenue_yoy 用 MOPS 自報 yoy、revenue_accel 再減前一個月；多留幾個月當緩衝
+  monthly_revenue:
+    - {last_sessions: 6}
+  # 生產模型只有潛伏飆股的 fundamental.log_market_cap 用到財報，且只讀股本（OrdinaryShare）。
+  # 其餘品質因子在季數或科目不足時給「無值」而非錯值（factors/quality.py 的 _ttm／_lag／SUE 皆要求連續季）
+  financial_statements:
+    - since: "2025-09-30"
+      in: {type: [OrdinaryShare]}
+  # fundamental.earnings_yield 等估值因子，讀取下界約 1 個月
+  stock_valuation:
+    - {last_sessions: 30}
+  # chip.foreign_streak 等讀取下界約 63 個交易日；margin_velocity_5d 約 35 日
+  institutional_daily:
+    - {last_sessions: 80}
+  margin_daily:
+    - {last_sessions: 80}
+  # 每日籌碼步驟自己回補最近幾日
+  daytrade_daily:
+    - {last_sessions: 5}
+  sbl_short_daily:
+    - {last_sessions: 5}
+  attention_stocks:
+    - {last_sessions: 5}
+  disposition_stocks:
+    - {last_sessions: 5}
+  # 三個生產模型最近幾日的分數（當日由 GHA 打分寫入）
+  ml_scores:
+    - last_sessions: 5
+      in:
+        model_id:
+          - lgbm_lw_net_h20_20260225_83890036
+          - lgbm_quietA20_tu_h20_20260430_655df6d7
+          - lgbm_lw_dd_h60_20260225_1bd7c6a0
