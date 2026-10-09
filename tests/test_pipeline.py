@@ -5,11 +5,14 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+import pytest
+
 from twquant.pipeline import (
     PipelineStep,
     read_heartbeat,
     run_pipeline,
     watchdog_check,
+    with_skips,
     write_heartbeat,
 )
 
@@ -51,6 +54,48 @@ def test_pipeline_critical_fail_degrades_and_skips_signal(tmp_path: Path) -> Non
     assert status["signal"] == "skipped"  # 降級 → 不產生新訊號
     assert res.degraded is True and res.signals_produced is False
     assert read_heartbeat(tmp_path) is not None  # heartbeat 仍寫（pipeline 有跑）
+
+
+def test_t332_ac1_skipped_steps_are_recorded_and_not_run(tmp_path: Path) -> None:
+    """雲端略過的步驟記為 skipped、附原因，而且函式完全不會被呼叫。"""
+    called: list[str] = []
+
+    def boom() -> str:
+        called.append("board")
+        raise AssertionError("略過的步驟不該被執行")
+
+    steps = with_skips(
+        [_step("ingest", "ok"), PipelineStep(name="board", fn=boom), _step("picks", "30 檔")],
+        ["board"],
+        "雲端不跑",
+    )
+    res = run_pipeline(_DAY, steps, data_dir=tmp_path, git_hash="x", now=_NOW)
+    assert [(s.name, s.status) for s in res.steps] == [
+        ("ingest", "ok"),
+        ("board", "skipped"),
+        ("picks", "ok"),
+    ]
+    assert res.steps[1].detail == "雲端不跑"
+    assert called == []
+
+
+def test_t332_ac2_unknown_skip_name_raises() -> None:
+    """設定打錯字不得靜默變成「全部照跑」。"""
+    with pytest.raises(ValueError, match="看板"):
+        with_skips([_step("ingest", "ok")], ["看板"], "x")
+
+
+def test_t332_ac3_cloud_skip_names_exist_in_daily_pipeline() -> None:
+    """serving.yaml 的 cloud.skip_pipeline_steps 每個名字都是每日 pipeline 真的有的步驟（靜態）。"""
+    from twquant.config import ServingConfig, load_config
+
+    names = load_config(Path("configs/serving.yaml"), ServingConfig).cloud.skip_pipeline_steps
+    assert names, "雲端應該至少略過回測重播等步驟"
+    source = Path("src/twquant/cli.py").read_text(encoding="utf-8")
+    for name in names:
+        assert f'PipelineStep("{name}"' in source, f"每日 pipeline 沒有「{name}」這個步驟"
+    assert 'PipelineStep("每日名單"' in source
+    assert "每日名單" not in names  # 每日名單正是雲端要做的事
 
 
 def test_watchdog_missing_and_stale(tmp_path: Path) -> None:

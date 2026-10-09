@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 _HEARTBEAT = ("state", "heartbeat.json")
@@ -22,6 +22,17 @@ class PipelineStep:
     fn: Callable[[], str]  # 回傳細節字串；raise 視為失敗
     critical: bool = False  # 失敗即進 degraded
     skip_if_degraded: bool = False  # degraded 時略過（如訊號生成）
+    skip_reason: str | None = None  # 非 None＝這次明確不跑（如雲端用不到的步驟），結果記 skipped
+
+
+def with_skips(steps: list[PipelineStep], names: Sequence[str], reason: str) -> list[PipelineStep]:
+    """把 `names` 列到的步驟標成略過。名稱對不上任何步驟即 raise——設定打錯字不得靜默變成「全跑」。"""
+    known = {s.name for s in steps}
+    unknown = sorted(set(names) - known)
+    if unknown:
+        raise ValueError(f"要略過的步驟不存在：{unknown}；現有步驟：{[s.name for s in steps]}")
+    skip = set(names)
+    return [replace(s, skip_reason=reason) if s.name in skip else s for s in steps]
 
 
 @dataclass(frozen=True)
@@ -52,6 +63,9 @@ def run_pipeline(
     degraded = False
     produced = False
     for step in steps:
+        if step.skip_reason is not None:
+            results.append(StepResult(step.name, "skipped", step.skip_reason))
+            continue
         if degraded and step.skip_if_degraded:
             results.append(StepResult(step.name, "skipped", "前置降級，沿用前日"))
             continue
