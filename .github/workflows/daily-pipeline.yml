@@ -42,16 +42,6 @@ jobs:
       - name: Sync deps
         run: uv sync --dev --all-groups
 
-      - name: Install rclone
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
-
-      - name: rclone config（Drive 歸檔憑證，Secret 注入）
-        run: |
-          mkdir -p ~/.config/rclone
-          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
-        env:
-          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
-
       - name: Resolve trading day
         run: |
           DAY="${{ inputs.date }}"
@@ -76,21 +66,40 @@ jobs:
           ls data/models
 
       - name: 月營收（上個月與當月，MOPS；冪等，供應層同步帶進 PG）
+        continue-on-error: true # 失敗只亮警告：照樣用已有的月營收算當天推薦
         run: |
           uv run python -m twquant ingest-revenue --month "$(date -d "$DAY -1 month" +%Y-%m)"
           uv run python -m twquant ingest-revenue --month "$(date -d "$DAY" +%Y-%m)"
 
       - name: 融資券 T-1 補抓（21:30 才公布，前幾日缺口冪等回補）
+        continue-on-error: true # 失敗只亮警告：照樣算當天推薦
         run: uv run python -m twquant backfill --from "$FROM7" --to "$DAY" --tables margin_daily --no-skip-existing
 
-      - name: 每日 pipeline（擷取→閘門→券商→訊號(PG)→供應層→選股池）
+      - name: 每日 pipeline（擷取→閘門→因子→打分→每日名單；雲端略過的步驟見 serving.yaml）
         run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --cloud --fail-on-degraded
 
+      - name: Install rclone（Drive 歸檔用；排在推薦之後，失敗不影響當天名單）
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+
+      - name: rclone config（Drive 歸檔憑證，Secret 注入）
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+
       - name: 每日增量歸檔 → Drive（保命線，D-030）
+        if: ${{ !cancelled() }}
+        continue-on-error: true # 歸檔失敗不影響當天名單（推薦優先，使用者 2026-10-10）
         run: |
           uv run python -m twquant archive-daily --date "$DAY" --out archive_out
           rclone copy archive_out gdrive:twquant-archive/daily --transfers 4
           rclone check archive_out gdrive:twquant-archive/daily --one-way
 
       - name: 滾動窗口修剪（Supabase 500 MB 防線）
+        if: ${{ !cancelled() }} # 前面任何一步失敗都要修剪，免得超過免費額度
         run: uv run python -m twquant serving prune
