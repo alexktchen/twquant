@@ -1,0 +1,44 @@
+// Cloudflare Pages Functions 版的每日名單 API（T-332）：與 Python 的 monitoring/picks_api.py 同一套規則。
+// 純函數放這裡供 node 單元測試；資料庫存取在 db.ts。
+
+/** 線別順序與顯示名稱——以 configs/pick_board.yaml 為準，改那邊時要同步改這裡。 */
+export const LINES: { code: string; name: string }[] = [
+  { code: 'CORE', name: '大盤精選' },
+  { code: 'QUIET', name: '潛伏飆股' },
+]
+/** 連續上榜最多回看幾個有名單的日子（同 picks_api.STREAK_LOOKBACK）。 */
+export const STREAK_LOOKBACK = 60
+
+export const SID_RE = /^[0-9A-Z]{4,6}$/
+export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** 每檔的 [連續上榜天數, 是否新進]。previous 由近到遠，每項是那天同一條線的名單。 */
+export function annotate(today: string[], previous: string[][]): Record<string, [number, boolean]> {
+  const out: Record<string, [number, boolean]> = {}
+  for (const sid of today) {
+    let streak = 1
+    for (const day of previous) {
+      if (!day.includes(sid)) break
+      streak += 1
+    }
+    out[sid] = [streak, previous.length === 0 || !previous[0].includes(sid)]
+  }
+  return out
+}
+
+/** 當日漲跌；缺任一價或前收 ≤ 0 → null（不補 0）。 */
+export function change(close: number | null, prev: number | null): number | null {
+  if (close === null || prev === null || prev <= 0) return null
+  return close / prev - 1
+}
+
+export type PickRow = { date: string; line: string; rank: number; stock_id: string; score: number | null }
+
+/** 依 LINES 順序排列今天出現的線別；未登記的線排最後。 */
+export function lineOrder(codes: string[]): string[] {
+  const idx = (c: string) => {
+    const i = LINES.findIndex((l) => l.code === c)
+    return i < 0 ? LINES.length : i
+  }
+  return [...new Set(codes)].sort((a, b) => idx(a) - idx(b) || a.localeCompare(b))
+}

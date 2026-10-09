@@ -2,3 +2,7 @@ node_modules
 bundle.html
 .parcelrc
 pnpm-lock.yaml
+
+# Cloudflare 本機祕密（wrangler pages dev）
+.dev.vars
+.wrangler/

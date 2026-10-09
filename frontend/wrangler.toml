@@ -1,0 +1,7 @@
+# Cloudflare Pages（T-332）：前端靜態檔＋functions/ 底下的 API（直接連 Supabase）。
+# 部署：VITE_APP_MODE=cloud npm run build && npx wrangler pages deploy
+# 祕密：npx wrangler pages secret put TWQUANT_PG_DSN --project-name twquant
+name = "twquant"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
