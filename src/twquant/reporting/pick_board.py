@@ -23,6 +23,13 @@ BOARD_FILE = "pick_board.json"
 BoardKind = Literal["rebalance", "slots"]
 
 
+class ReferenceResult(BaseConfig):
+    """HTML 版「研究回測參考」引用的一個結果包（T-330）：只登記標籤與路徑，數字從包裡的 metrics 讀。"""
+
+    label: str = Field(min_length=1)
+    path: str = Field(min_length=1)  # 相對 data_dir，例如 tracks_e_long_nodiv/E0_lw_e0_ctrl_1x.json
+
+
 class BoardStrategy(BaseConfig):
     """看板上的一條線。"""
 
@@ -32,6 +39,7 @@ class BoardStrategy(BaseConfig):
     summary: str = Field(min_length=1)
     # 每天的推薦名單（模型前 n 名，位子滿不滿都列）與其中的新名字（過去 watch_lookback_sessions 天沒進過前 n）
     watch: bool = False
+    references: tuple[ReferenceResult, ...] = ()  # HTML 版的研究回測參考（T-330）
 
 
 class PickBoardConfig(BaseConfig):

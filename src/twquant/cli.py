@@ -2212,9 +2212,9 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
         as_of=day, generated_at=now_tw(), cfg=board_cfg, strategies=payloads, stocks=stocks
     )
     path = save_board(data_dir, payload)
-    # T-329：同一份看板順便畫成 HTML（含收盤與漲幅），放 data/reports/，瀏覽器直接開。
+    # T-329／T-330：同一份看板順便畫成 HTML（含收盤、漲幅與整體表現），放 data/reports/，瀏覽器直接開。
     html_path = _save_board_html(
-        payload, data_dir, board_cfg.html_window_sessions, with_prices=True
+        payload, data_dir, board_cfg, with_prices=True, with_references=True
     )
     parts = []
     for p in payloads:
@@ -2272,14 +2272,52 @@ def _board_prices(
     return price_changes(closes, as_of=as_of, prev_session=prev, window_start=window_start)
 
 
+def _board_references(cfg: Any, data_dir: Path) -> dict[str, list[dict[str, object]]]:
+    """HTML 版「研究回測參考」（T-330）：讀 `pick_board.yaml` 每條線登記的結果包，取它們的 metrics。
+
+    包不在或沒有 metrics 就 raise——頁面不給半套參考列，登記了就要拿得到。
+    """
+    import json
+
+    from twquant.errors import DataError
+    from twquant.reporting.pick_board_html import reference_summary
+
+    out: dict[str, list[dict[str, object]]] = {}
+    for strat in cfg.strategies:
+        rows: list[dict[str, object]] = []
+        for ref in strat.references:
+            path = data_dir / ref.path
+            if not path.exists():
+                raise DataError(
+                    "pick_board",
+                    None,
+                    f"{strat.code} 登記的結果包不存在：{path}（pick_board.yaml references）",
+                )
+            try:
+                summary = reference_summary(json.loads(path.read_text(encoding="utf-8")))
+            except (ValueError, KeyError, TypeError) as exc:
+                raise DataError(
+                    "pick_board", None, f"{strat.code} 的結果包 {path} 讀不出 metrics：{exc}"
+                ) from exc
+            rows.append({"label": ref.label, "source": ref.path, "summary": summary})
+        out[str(strat.code)] = rows
+    return out
+
+
 def _save_board_html(
-    board: dict[str, object], data_dir: Path, window_sessions: int, *, with_prices: bool
+    board: dict[str, object], data_dir: Path, cfg: Any, *, with_prices: bool, with_references: bool
 ) -> Path:
-    """把看板畫成 HTML 並寫到 `<data_dir>/reports/pick_board.html`；`with_prices` 決定要不要讀 PG 補收盤與漲幅。"""
+    """把看板畫成 HTML 並寫到 `<data_dir>/reports/pick_board.html`。
+
+    `cfg`＝`PickBoardConfig`；`with_prices` 決定要不要讀 PG 補收盤與漲幅，`with_references` 決定要不要讀研究回測結果包。
+    """
     from twquant.reporting.pick_board_html import render_board_html, save_board_html
 
-    prices = _board_prices(board, window_sessions) if with_prices else None
-    page = render_board_html(board, window_sessions=window_sessions, prices=prices)
+    prices = _board_prices(board, cfg.html_window_sessions) if with_prices else None
+    references = _board_references(cfg, data_dir) if with_references else None
+    page = render_board_html(
+        board, window_sessions=cfg.html_window_sessions, prices=prices, references=references
+    )
     return save_board_html(data_dir, page)
 
 
@@ -2380,8 +2418,11 @@ def pick_board_html(
     no_prices: bool = typer.Option(
         False, "--no-prices", help="不讀 PG：收盤與漲幅顯示「—」（測試或 PG 不可達時用）"
     ),
+    no_references: bool = typer.Option(
+        False, "--no-references", help="不讀研究回測結果包：整體表現只留重播以來的數字（測試用）"
+    ),
 ) -> None:
-    """把已存好的看板（pick_board.json）畫成 HTML（T-329）：不重播、不改 JSON，寫到 data/reports/pick_board.html。"""
+    """把已存好的看板（pick_board.json）畫成 HTML（T-329／T-330）：不重播、不改 JSON，寫到 data/reports/pick_board.html。"""
     from twquant.config import load_config
     from twquant.reporting.pick_board import PickBoardConfig, load_board
 
@@ -2394,7 +2435,9 @@ def pick_board_html(
         )
         raise typer.Exit(1)
     cfg = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
-    path = _save_board_html(board, data_dir, cfg.html_window_sessions, with_prices=not no_prices)
+    path = _save_board_html(
+        board, data_dir, cfg, with_prices=not no_prices, with_references=not no_references
+    )
     typer.secho(f"[OK] {board['as_of']} {path}", fg=typer.colors.GREEN)
 
 
