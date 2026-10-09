@@ -9,7 +9,7 @@ name: daily-pipeline
 
 on:
   schedule:
-    - cron: "23 11 * * 1-5" # 19:23 台北
+    - cron: "23 12 * * 1-5" # 20:23 台北（D-008 截點 20:00 之後，推薦快照才不會被拒；D-169）
     - cron: "43 14 * * 1-5" # 22:43 台北（補融資券/券商）
   workflow_dispatch:
     inputs:
@@ -42,16 +42,6 @@ jobs:
       - name: Sync deps
         run: uv sync --dev --all-groups
 
-      - name: Install rclone
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
-
-      - name: rclone config（Drive 歸檔憑證，Secret 注入）
-        run: |
-          mkdir -p ~/.config/rclone
-          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
-        env:
-          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
-
       - name: Resolve trading day
         run: |
           DAY="${{ inputs.date }}"
@@ -59,27 +49,57 @@ jobs:
             # 不能用 runner 當下日期：schedule 可能延遲跨日/週末。回推最近一個預定班次，
             # 取得原排程所屬日期；平日國定假日仍由品質閘門大聲失敗。
             uv run python scripts/resolve_pipeline_day.py \
-              --slot "19:23" --slot "22:43" >> "$GITHUB_ENV"
+              --slot "20:23" --slot "22:43" >> "$GITHUB_ENV"
           else
             # 手動補跑日期由操作者明確指定，優先於自動解析。
             echo "DAY=$DAY" >> "$GITHUB_ENV"
             echo "FROM7=$(date -d "$DAY -7 days" +%F)" >> "$GITHUB_ENV"
           fi
 
+      - name: 模型檔（GitHub Release models-prod-2026-10 → data/models；T-332）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data/models
+          gh release download models-prod-2026-10 --pattern "models-prod-2026-10.tar.gz" --dir /tmp
+          tar -xzf /tmp/models-prod-2026-10.tar.gz -C data/models
+          ls data/models
+
+      - name: 月營收（上個月與當月，MOPS；冪等，供應層同步帶進 PG）
+        continue-on-error: true # 失敗只亮警告：照樣用已有的月營收算當天推薦
+        run: |
+          uv run python -m twquant ingest-revenue --month "$(date -d "$DAY -1 month" +%Y-%m)"
+          uv run python -m twquant ingest-revenue --month "$(date -d "$DAY" +%Y-%m)"
+
       - name: 融資券 T-1 補抓（21:30 才公布，前幾日缺口冪等回補）
+        continue-on-error: true # 失敗只亮警告：照樣算當天推薦
         run: uv run python -m twquant backfill --from "$FROM7" --to "$DAY" --tables margin_daily --no-skip-existing
 
-      - name: 每日 pipeline（擷取→閘門→券商→訊號(PG)→供應層→選股池）
-        run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --fail-on-degraded
+      - name: 每日 pipeline（擷取→閘門→因子→打分→每日名單；雲端略過的步驟見 serving.yaml）
+        run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --cloud --fail-on-degraded
 
-      - name: 券商買賣超日聚合（broker_flow_daily，明細修剪前）
-        run: uv run python -m twquant serving broker-flow --from "$DAY" --to "$DAY"
+      - name: Install rclone（Drive 歸檔用；排在推薦之後，失敗不影響當天名單）
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+
+      - name: rclone config（Drive 歸檔憑證，Secret 注入）
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
 
       - name: 每日增量歸檔 → Drive（保命線，D-030）
+        if: ${{ !cancelled() }}
+        continue-on-error: true # 歸檔失敗不影響當天名單（推薦優先，使用者 2026-10-10）
         run: |
           uv run python -m twquant archive-daily --date "$DAY" --out archive_out
           rclone copy archive_out gdrive:twquant-archive/daily --transfers 4
           rclone check archive_out gdrive:twquant-archive/daily --one-way
 
       - name: 滾動窗口修剪（Supabase 500 MB 防線）
+        if: ${{ !cancelled() }} # 前面任何一步失敗都要修剪，免得超過免費額度
         run: uv run python -m twquant serving prune

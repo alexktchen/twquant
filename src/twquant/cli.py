@@ -1292,7 +1292,9 @@ def _run_chip_day(day: dt.date) -> str:
     return summary
 
 
-def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResult:
+def _run_daily_pipeline(
+    day: dt.date, pg_signals: bool = False, cloud: bool = False
+) -> PipelineResult:
     """每日營運 pipeline：擷取→品質閘門→券商買賣超→訊號→供應層→選股池快照，寫 heartbeat（LOOP §3）。
 
     供 `pipeline` CLI 一次性指令與 `scheduler` 常駐迴圈共用（T-023：排程改跑完整
@@ -1301,11 +1303,13 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
 
     pg_signals=True（T-057，GHA 雲端模式）：訊號生成改以 PgTableSource 讀 PG 供應層——
     雲端 runner 的資料湖是 ephemeral（只有當日擷取），歷史回看必須來自 PG 滾動窗口。
+
+    cloud=True（T-332／D-170）：`serving.yaml` 的 `cloud.skip_pipeline_steps` 列到的步驟記為略過。
     """
     from twquant.conventions import now_tw
     from twquant.data.warehouse import Warehouse
     from twquant.errors import DataError
-    from twquant.pipeline import PipelineStep, run_pipeline
+    from twquant.pipeline import PipelineStep, run_pipeline, with_skips
     from twquant.strategy.build import build_targets
     from twquant.strategy.config import load_strategy
 
@@ -1481,6 +1485,17 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
             return "PG 不可達，略過"
         return _strategy_targets_for_day(day, Path(cfg.data_dir))
 
+    def _daily_picks_step() -> str:
+        # T-332／D-170：兩條線當天的名單寫進 PG daily_picks（永久保留）。排在打分與策略持股之後。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），不寫名單"
+        return _daily_picks_for_day(day)
+
     def _paper_trading_step() -> str:
         # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
         # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
@@ -1573,10 +1588,13 @@ def _run_daily_pipeline(day: dt.date, pg_signals: bool = False) -> PipelineResul
         PipelineStep("ML 推薦名單", _recommendation_step),
         PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
+        PipelineStep("每日名單", _daily_picks_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
     ]
+    if cloud:
+        steps = with_skips(steps, _load_serving().cloud.skip_pipeline_steps, "雲端不跑（D-170）")
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
 
 
@@ -1603,15 +1621,31 @@ def pipeline(
         help="降級（關鍵步驟失敗）時以非零碼結束——GHA 無人值守需要紅燈；注意國定假日"
         "（平日休市）也會因無行情而降級",
     ),
+    cloud: bool = typer.Option(
+        False,
+        "--cloud",
+        help="雲端模式：略過 serving.yaml cloud.skip_pipeline_steps 列的步驟（D-170）",
+    ),
 ) -> None:
     """每日營運 pipeline：擷取→品質閘門→訊號生成→供應層→選股池快照，寫 heartbeat（LOOP §3）。"""
     from twquant.conventions import now_tw
 
     day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
-    res = _run_daily_pipeline(day, pg_signals=pg_signals)
+    res = _run_daily_pipeline(day, pg_signals=pg_signals, cloud=cloud)
     _echo_pipeline_result(res)
     if fail_on_degraded and res.degraded:
         raise typer.Exit(1)
+
+
+@app.command(name="daily-picks")
+def daily_picks(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """把兩條線當天的名單寫進 PG daily_picks（T-332；與每日 pipeline 的「每日名單」步驟相同）。"""
+    from twquant.conventions import now_tw
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    typer.secho(f"[OK] {day}：{_daily_picks_for_day(day)}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -2327,6 +2361,14 @@ def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str] | None:
     月換股型的串接閘門（排序模型分數）當天全市場沒有值 → 回 None（D-165：頁面明示「這天模型沒有打分」）。
     引擎只在換股日取分數，平常日缺分數不影響持股；但缺漏本身仍是資料問題，看板會逐日標出來。
     """
+    picks = _line_picks(cfg, source, day, n)
+    return None if picks is None else [sid for sid, _ in picks]
+
+
+def _line_picks(
+    cfg: Any, source: Any, day: dt.date, n: int
+) -> list[tuple[str, float | None]] | None:
+    """`_top_names` 的帶分數版：補位型附模型分數；月換股型的名單由規則排名產生，分數為 None。"""
     import polars as pl
 
     from twquant.factors.compute import compute
@@ -2334,7 +2376,7 @@ def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str] | None:
     from twquant.strategy.slots import slot_candidates
 
     if cfg.slots is not None:
-        return [sid for sid, _ in slot_candidates(cfg, source, day)[:n]]
+        return [(sid, float(score)) for sid, score in slot_candidates(cfg, source, day)[:n]]
     view = source.view(day)
     for pf in cfg.prefilter:
         gate = compute([pf.factor], view, dates=[day], params={pf.factor: dict(pf.params)})
@@ -2345,7 +2387,56 @@ def _top_names(cfg: Any, source: Any, day: dt.date, n: int) -> list[str] | None:
         ((str(r["stock_id"]), float(r["target_weight"])) for r in tg.to_dicts()),
         key=lambda x: (-x[1], x[0]),
     )
-    return [sid for sid, w in rows if w > 0.0][:n]
+    ranked: list[tuple[str, float | None]] = [(sid, None) for sid, w in rows if w > 0.0]
+    return ranked[:n]
+
+
+def _strategy_model_id(cfg: Any) -> str | None:
+    """策略用的模型代號：先看串接閘門（prefilter），再看訊號；都沒有回 None。"""
+    for item in (*cfg.prefilter, *cfg.signals):
+        model_id = dict(item.params).get("model_id")
+        if model_id:
+            return str(model_id)
+    return None
+
+
+def _daily_picks_for_day(day: dt.date) -> str:
+    """每日名單（T-332／D-170）：`pick_board.yaml` 的每條線算出當天前 n 名，寫進 PG `daily_picks`。
+
+    與看板的「推薦名單」同一個函式（`_line_picks`），所以兩邊的名單逐檔相同；
+    但這裡不重播持股，只要當天的資料，雲端的滾動窗口就夠。
+    """
+    import twquant.factors.builtins  # noqa: F401  # 觸發註冊，才問得到 lookback
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.picks_store import replace_line
+    from twquant.errors import DataError
+    from twquant.factors.registry import list_factors
+    from twquant.reporting.pick_board import PickBoardConfig
+    from twquant.strategy.config import load_strategy
+
+    board_cfg = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        source = _daily_pg_source(conn, scfg.pg_schema, day, list(list_factors()))
+        done = []
+        for strat in board_cfg.strategies:
+            cfg = load_strategy(str(_CONFIG_DIR / "strategies" / f"{strat.config}.yaml"))
+            n = cfg.slots.n if cfg.slots is not None else cfg.selection.top_n
+            if n is None:
+                raise typer.BadParameter(f"{strat.code}：名單要固定檔數（selection.top_n）")
+            picks = _line_picks(cfg, source, day, n)
+            if picks is None:
+                raise DataError("daily_picks", day, f"{strat.code}：排序模型當天沒有分數")
+            written = replace_line(
+                conn, scfg.pg_schema, day, strat.code, picks, _strategy_model_id(cfg), now_tw()
+            )
+            done.append(f"{strat.name} {written} 檔")
+    finally:
+        conn.close()
+    return "、".join(done)
 
 
 def _closes_for(
