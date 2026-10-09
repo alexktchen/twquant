@@ -79,7 +79,6 @@ export function KChart({
         shape: 'arrowDown' as const,
         size: 0.5,
         color: LINE_COLOR[m.line] ?? '#FF7A00',
-        text: m.text,
       })),
     )
     // 先看最近約半年（120 根）；要等版面算好才設，否則會被自動縮放蓋掉
@@ -98,3 +97,4 @@ export function KChart({
 }
 
 export const MA_LEGEND = MA
+export const LINE_LEGEND = LINE_COLOR

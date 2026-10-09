@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
 import { fetchBars, fetchPickDates, fetchPicks, fetchStockPicks } from './api'
-import { KChart, MA_LEGEND } from './KChart'
+import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
 
 type Tab = 'today' | 'history'
@@ -194,7 +194,14 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
             MA{m.n}
           </span>
         ))}
-        <span className="cq-legend-note">▼ 被推薦的日子</span>
+        <span className="cq-legend-note">
+          被推薦的日子：
+          {Object.entries(lineNames).map(([code, name]) => (
+            <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }}>
+              ▼{name}
+            </b>
+          ))}
+        </span>
       </div>
       {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} />}
     </>
