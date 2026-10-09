@@ -70,6 +70,7 @@ cloud:
     - chip.broker_persistence_10d
   # `pipeline --cloud` 略過的步驟（D-170：網站只要每日推薦＋每日名單＋K 線）。名稱對不上就 raise。
   skip_pipeline_steps:
+    - 券商買賣超      # 2026-10-10 使用者：先停。正式模型都沒用到分點，雲端只是存檔
     - 訊號生成        # 範例策略 sample_revenue_trust，與兩條線無關
     - 選股池快照      # 要 166 天分點明細，雲端只留 1 天，算出來是錯的
     - 紙上交易        # 帳本是檔案，runner 每次都是新機器，留不住

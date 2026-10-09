@@ -86,9 +86,6 @@ jobs:
       - name: 每日 pipeline（擷取→閘門→券商→訊號(PG)→供應層→選股池）
         run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --cloud --fail-on-degraded
 
-      - name: 券商買賣超日聚合（broker_flow_daily，明細修剪前）
-        run: uv run python -m twquant serving broker-flow --from "$DAY" --to "$DAY"
-
       - name: 每日增量歸檔 → Drive（保命線，D-030）
         run: |
           uv run python -m twquant archive-daily --date "$DAY" --out archive_out
