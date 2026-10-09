@@ -48,8 +48,14 @@ def prune(
     windows: dict[str, int],
     stock_pattern: str | None = None,
     pattern_tables: tuple[str, ...] = (),
+    industry_member_tables: tuple[str, ...] = (),
 ) -> list[PruneResult]:
-    """把 windows 各表修剪到最新 N 個交易日（＋pattern_tables 剔除非白名單股票）。冪等。"""
+    """把 windows 各表修剪到最新 N 個交易日（＋pattern_tables 剔除非白名單股票）。冪等。
+
+    industry_member_tables：這些表剔除非白名單股票時，**保留 stock_meta 有產業別的**。
+    特別股（2887G 等）不是四碼，卻會進產業平均；刪掉它們，產業相對因子
+    （residual_reversal_5d、industry_rs_20d、industry_mom_6m）就和地端不同（2026-10-09 實測各約 241 檔）。
+    """
     results: list[PruneResult] = []
     with conn.cursor() as cur:
         for table, n in windows.items():
@@ -62,8 +68,14 @@ def prune(
                 cur.execute(f'DELETE FROM "{schema}"."{table}" WHERE date < %s', (cutoff,))
                 deleted = cur.rowcount
             if stock_pattern and table in pattern_tables:
+                keep = (
+                    f' AND stock_id NOT IN (SELECT stock_id FROM "{schema}".stock_meta '
+                    "WHERE coalesce(industry, '') <> '')"
+                    if table in industry_member_tables
+                    else ""
+                )
                 cur.execute(
-                    f'DELETE FROM "{schema}"."{table}" WHERE stock_id !~ %s', (stock_pattern,)
+                    f'DELETE FROM "{schema}"."{table}" WHERE stock_id !~ %s{keep}', (stock_pattern,)
                 )
                 deleted += cur.rowcount
             results.append(PruneResult(table, deleted, cutoff))

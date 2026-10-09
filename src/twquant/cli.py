@@ -3226,6 +3226,7 @@ def serving_prune(
             dict(cfg.cloud.windows),
             cfg.cloud.stock_pattern,
             tuple(cfg.cloud.pattern_tables),
+            tuple(cfg.cloud.industry_member_tables),
         )
     finally:
         conn.close()

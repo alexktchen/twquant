@@ -43,15 +43,27 @@ cloud:
   dsn_env: TWQUANT_SUPABASE_DSN   # Supabase transaction pooler（6543）DSN 的環境變數
   stock_pattern: "^[1-9][0-9]{3}$" # 大表只留四碼普通股（同 screener 宇宙）
   pattern_tables: [prices_daily, broker_trades]
+  # 特別股不是四碼卻有產業別、會進產業平均；修剪時留下，否則產業相對因子和地端不同（2026-10-09 實測）
+  industry_member_tables: [prices_daily]
+  # 2026-10-09 使用者裁決：Free 不升級；雲端只放「每天算因子 → 模型推薦 → 記錄每日名單」需要的，
+  # 空間允許再放 K 線。網站不再有回測、選股池、分點面板。初始切片見 configs/cloud_seed.yaml。
   windows:                         # 滾動窗（交易日數）；未列出的表全史保留（小表）
-    prices_daily: 260              # 硬下限＝price.high_52w 回看 260（test_cloud 把關）
-    broker_trades: 10              # 明細只留近 10 日（歷史在 Drive 歸檔）
+    prices_daily: 500              # 因子硬下限 260（price.high_52w，test_cloud 把關）；500 日兼作約兩年 K 線
+    broker_trades: 1               # 只供當日聚合與 Drive 歸檔（歸檔在修剪之前）；三支分點因子雲端不算
     fubon_fetch_log: 10
-    factor_values: 20               # D-034 過渡：60 日實測 361 MB 撐爆 Free 500 MB，暫縮 20
-    composite_daily: 120            # D-034 過渡：250 → 120（P8 趨勢縮短，待裁決長期方案）
-    screener_daily: 250
-    broker_flow_daily: 250         # 券商母公司日聚合（P6 折線的雲端資料源）
-    ml_scores: 250                 # ML 排序分數（SPEC-010 §5；~2k 列/日，量小）
+    factor_values: 2               # 模型只讀當日因子；網站不再顯示因子走勢
+    composite_daily: 2
+    screener_daily: 5              # 選股池不上雲（它要 166 天分點明細，雲端本來就算不對）
+    broker_flow_daily: 5
+    ml_scores: 5                   # 只供當日推薦；每日名單另存（待辦）
+    factor_cross_stats: 5
+    institutional_daily: 80        # chip.foreign_streak 等讀取下界約 63 個交易日
+    margin_daily: 80
+    stock_valuation: 30            # 估值因子讀取下界約 1 個月
+    daytrade_daily: 5              # 籌碼步驟只回補最近幾日；目前沒有因子讀它
+    sbl_short_daily: 5
+    attention_stocks: 5
+    disposition_stocks: 5
   exclude_factors:                 # 雲端不算（見 CloudConfig 註解）
     - chip.broker_concentration_20d  # T-016：需 broker_trades 全歷史（隔日沖分點 expanding 比率）＋20 日窗 > 雲端 10 日
     - chip.broker_count_diff_5d

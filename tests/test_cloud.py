@@ -157,6 +157,77 @@ def test_ac_prune_window_and_idempotent() -> None:
         conn.close()
 
 
+def test_t331_ac1_prune_keeps_industry_members_outside_pattern() -> None:
+    """特別股（非四碼、有產業別）在 industry_member_tables 裡要留下；ETF（無產業別）照刪。"""
+    conn = _connect_or_skip()
+    from twquant.data.serving.cloud import prune
+
+    days = [dt.date(2026, 6, 25), dt.date(2026, 6, 26)]
+    pattern = "^[1-9][0-9]{3}$"
+    try:
+        _drop(conn)
+        _seed_prices(conn, _SRC, days, ["2330", "2887G", "0050"])
+        with conn.cursor() as cur:
+            cur.execute(
+                f'INSERT INTO "{_SRC}".stock_meta (stock_id, name, market, industry) VALUES '
+                "('2330', '台積電', 'TWSE', '半導體業'), ('2887G', '台新戊特二', 'TWSE', '金融保險業'), "
+                "('0050', '元大台灣50', 'TWSE', NULL)"
+            )
+        conn.commit()
+
+        def remaining() -> set[str]:
+            with conn.cursor() as cur:
+                cur.execute(f'SELECT DISTINCT stock_id FROM "{_SRC}".prices_daily')
+                return {r[0] for r in cur.fetchall()}
+
+        kept = prune(
+            conn,
+            _SRC,
+            {"prices_daily": 10},
+            pattern,
+            ("prices_daily",),
+            industry_member_tables=("prices_daily",),
+        )
+        assert kept[0].deleted == 2  # 只刪 0050 的兩天
+        assert remaining() == {"2330", "2887G"}
+        again = prune(
+            conn,
+            _SRC,
+            {"prices_daily": 10},
+            pattern,
+            ("prices_daily",),
+            industry_member_tables=("prices_daily",),
+        )
+        assert again[0].deleted == 0  # 冪等
+        strict = prune(conn, _SRC, {"prices_daily": 10}, pattern, ("prices_daily",))
+        assert strict[0].deleted == 2  # 沒列進 industry_member_tables → 特別股照刪（舊行為）
+        assert remaining() == {"2330"}
+    finally:
+        _drop(conn)
+        conn.close()
+
+
+def test_t331_ac2_seed_slices_fit_prune_windows() -> None:
+    """configs/cloud_seed.yaml 灌進去的天數不能超過 cloud.windows，否則當晚 prune 就修掉（靜態）。"""
+    from pathlib import Path
+
+    import yaml
+
+    from twquant.config import ServingConfig, load_config
+    from twquant.data.serving.schema import spec_of
+
+    cfg = load_config(Path("configs/serving.yaml"), ServingConfig)
+    win = cfg.cloud.windows
+    assert set(cfg.cloud.industry_member_tables) <= set(cfg.cloud.pattern_tables)
+    seed = yaml.safe_load(Path("configs/cloud_seed.yaml").read_text(encoding="utf-8"))["tables"]
+    for table, pieces in seed.items():
+        spec_of(table)  # 未知表名 raise
+        for piece in pieces:
+            n = piece.get("last_sessions")
+            if n is not None and table in win:
+                assert n <= win[table], f"{table} 灌 {n} 日，但雲端窗口只留 {win[table]} 日"
+
+
 def test_broker_flow_aggregation_idempotent() -> None:
     conn = _connect_or_skip()
     from twquant.data.serving import schema as sch
