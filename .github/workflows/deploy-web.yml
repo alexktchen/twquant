@@ -1,0 +1,109 @@
+# T-332：雲端網站部署到 Cloudflare Pages（前端靜態檔＋frontend/functions 的 API，直連 Supabase）。
+# 需要的 repo secrets：
+#   CLOUDFLARE_API_TOKEN   Cloudflare 自訂 token，權限 Account › Cloudflare Pages › Edit
+#   CLOUDFLARE_ACCOUNT_ID  Cloudflare 帳號 ID（後台 Workers & Pages 右側欄）
+#   TWQUANT_SUPABASE_DSN   既有（每日 pipeline 也用它）；部署時寫進 Pages 的祕密 TWQUANT_PG_DSN
+# main 上前端有改動就自動部署；也可在 Actions 頁手動觸發。
+name: deploy-web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROJECT: twquant
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 檢查祕密
+        id: secrets
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -n "${{ secrets.TWQUANT_SUPABASE_DSN }}" ] || missing="$missing TWQUANT_SUPABASE_DSN"
+          if [ -n "$missing" ]; then
+            # 還沒設 token 時改由本機 `npx wrangler pages deploy` 部署（2026-10-10 起）；這裡只留警告不報錯
+            echo "::warning::缺少 repo secrets:$missing——本次不自動部署"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.secrets.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        if: steps.secrets.outputs.ok == 'true'
+
+      - name: 前端單元測試
+        if: steps.secrets.outputs.ok == 'true'
+        run: npm test
+
+      - name: 建置雲端版
+        if: steps.secrets.outputs.ok == 'true'
+        run: npm run build
+        env:
+          VITE_APP_MODE: cloud
+
+      - name: Pages 專案（不存在才建）
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          if npx --yes wrangler@4 pages project list | grep -qw "$PROJECT"; then
+            echo "專案 $PROJECT 已存在"
+          else
+            npx --yes wrangler@4 pages project create "$PROJECT" --production-branch main
+          fi
+
+      - name: 資料庫連線祕密（Pages Functions 用）
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+        run: printf '%s' "$DSN" | npx --yes wrangler@4 pages secret put TWQUANT_PG_DSN --project-name "$PROJECT"
+
+      - name: 部署
+        if: steps.secrets.outputs.ok == 'true'
+        id: deploy
+        run: |
+          set -o pipefail
+          npx --yes wrangler@4 pages deploy dist --project-name "$PROJECT" --branch main | tee deploy.log
+          url=$(grep -oE "https://[a-z0-9.-]+\.pages\.dev" deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error::部署輸出裡找不到網址"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### 網站：$url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 部署後檢查（網站與 API 都要回 200）
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          url="${{ steps.deploy.outputs.url }}"
+          for path in / /api/picks/dates /api/picks; do
+            code=""
+            for i in 1 2 3 4 5 6; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$url$path" || true)
+              [ "$code" = "200" ] && break
+              sleep 10
+            done
+            echo "$url$path -> $code"
+            [ "$code" = "200" ] || { echo "::error::$path 回 $code"; exit 1; }
+          done

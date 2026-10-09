@@ -1,0 +1,15 @@
+// GET /api/stocks/:sid/picks：某檔被推薦過的日子（K 線標記）。
+import { fail, guarded, json, type Env } from '../../../_lib/db'
+import { SID_RE } from '../../../_lib/picks'
+
+export const onRequestGet: PagesFunction<Env, 'sid'> = async ({ params, env }) => {
+  const sid = String(params.sid)
+  if (!SID_RE.test(sid)) return fail(400, `非法股票代號：${sid}`)
+  return guarded(env, async (db) => {
+    const rows = await db<{ line: string; d: string }[]>`
+      SELECT line, date::text AS d FROM serving.daily_picks WHERE stock_id = ${sid} ORDER BY d`
+    const days: Record<string, string[]> = {}
+    for (const r of rows) (days[r.line] ??= []).push(r.d)
+    return json({ sid, days })
+  })
+}
