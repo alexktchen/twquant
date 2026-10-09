@@ -21,6 +21,10 @@ tables:
   prices_daily:
     - {last_sessions: 500, stock_pattern: true}
     - {last_sessions: 500, industry_members: true}
+  # 潛伏飆股的「安靜股」篩選用還原價算過去 60 日漲幅（ml/quiet_live.py attach_adjustment），
+  # 少了除權息就拒絕打分（2026-10-10 雲端實測）。價格回看 200 日曆日，多留一年當緩衝。
+  corporate_events:
+    - {since: "2025-01-01"}
   # ctx.* 三個特徵與 price.rs_market_20d；整表約 6 千列
   index_daily:
     - {all: true}
