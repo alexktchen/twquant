@@ -1,9 +1,10 @@
-# 東西在哪（2026-10-08，資料到 10-07，**停機缺口已補齊**）
+# 東西在哪（2026-10-09，資料到 10-08）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > **2026-10-07 交接：[docs/HANDOFF-2026-10-07-data-catchup.md](docs/HANDOFF-2026-10-07-data-catchup.md)**——
 > 機器在 10-01 ~ 10-07 停擺；10-08 凌晨已照它的 §4 補齊九月尾巴與十月五天、重建看板、備份（完成紀錄見該文件 §7）。
-> 排程的三個洞由 T-327（PR #116）修正，**已合併、尚未部署**（映像仍是 09-28）。
+> 排程的三個洞由 T-327（PR #116）修正，已於 10-08 04:04 部署。**T-329／T-330（看板 HTML，#118／#120）10-09 已合併、尚未部署**
+> ——照 memory／§4 的部署步驟重建 `twquant:latest`、`up -d --no-deps api scheduler`，之後排程才會每天產出 `data/reports/pick_board.html`。
 > **第四個洞待裁決（D-169）**：排程 19:00 開跑、打分 ~19:17 完成，早於 D-008 的 20:00 截點，推薦快照每天被拒匯出。
 > **上一輪的來龍去脈在 [docs/HANDOFF-2026-09-23-eight-rounds-and-pipeline.md](docs/HANDOFF-2026-09-23-eight-rounds-and-pipeline.md)**——
 > 動手前先讀它的「一、使用者是誰、要什麼」與「四、我犯的錯」。
@@ -17,6 +18,9 @@
 - **每日選股看板（D-164，前端首頁 `#/picks`）**：`data/pick_board/pick_board.json`，每天排程「潛伏飆股打分」→「每日選股看板」產生；
   手動重建 `TWQUANT_DATA_DIR=D:/project/twquant/data uv run --all-groups python -m twquant pick-board --date <日> --out D:/project/twquant/data`，
   補潛伏飆股分數 `... python -m twquant ml score-quiet --from <日> --to <日>`。持股是從 2026-05-01 起的引擎重播（`configs/pick_board.yaml`），**不顯示報酬**。
+  **HTML 版（T-329／T-330）**：同一步驟另存 `data/reports/pick_board.html`（含收盤、當日／近 6 日漲幅，與每條線的「整體表現」：重播以來的年化／回撤／逐筆＋研究回測參考）；只重畫不重播：
+  `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant pick-board-html --out D:/project/twquant/data`（視窗天數在 `pick_board.yaml` 的 `html_window_sessions`；
+  研究回測參考引用的結果包在同檔各線的 `references`，包不在會 raise）。
   其餘 9 支策略與 TAIL-B 研究模型已從排程下架（`strategies_live.yaml` 只剩 LW-E0、`ml.yaml` 研究模型清空）。
 - **D-162 事後檢驗（A20 重訓到 2026-02、考 03-02 ~ 09-08）**：選股力 1.95×（前 15 名 26.1% vs 池內 13.4%）；
   抱滿 S0 **+43.7%**／−25.6%、T-ATR +19.1%／−29.3%、T-ATR-F15 +33.5%／−25.3%（0050 +38.8%／−15.4%）→ **兩個 T 臂被推翻**。

@@ -187,3 +187,19 @@ uv run --all-groups python scripts/materialize_long_history.py --from 2026-10-08
 docker exec twquant-api-1 python -m twquant ml score-quiet --from 2026-10-08 --to 2026-10-08
 docker exec twquant-api-1 python -m twquant pick-board --date 2026-10-08
 ```
+
+## 8. 2026-10-09 下午（同一 session 續做）——換 session 前的狀態
+
+- **Docker 事故**：13:32 在 api 容器內手動 `ml export-recommendations --date 2026-10-08` 吃到 13.7 GB，Docker VM OOM、dockerd 斷線；
+  使用者授權後以 `scratchpad/restart_docker.ps1` 重啟（停程序→`wsl --shutdown`→移走 `Dockerun`→啟動），PG 資料完好。登記 **T-328**（原因未查明，別再重試）。
+  重啟後我自己的 `/api/meta` 探測迴圈把 API 執行緒池塞滿，`docker restart twquant-api-1` 後恢復；教訓在記憶 `twquant-deploy-layout`。
+- **部署**：後端映像（10-08 04:04 建）就是 main 當時的版本、含 T-327；前端 9/28 映像已含 #113／#114，重建全部命中快取，所以當天沒有東西要部署。
+- **T-329／T-330 已合併（#118、#120），尚未部署**：看板 HTML `data/reports/pick_board.html`（收盤、當日／近 6 日漲幅、整體表現、研究回測參考）。
+  手動重畫：`TWQUANT_PG_DSN=postgresql://twquant:twquant@localhost:5433/twquant uv run --all-groups python -m twquant pick-board-html --out D:/project/twquant/data`。
+  給使用者看的 artifact：https://claude.ai/artifact/9gGiVk1imPA5gBXGD4Kjka（第 3 版，資料到 10-08）。
+- **下一個任務 T-331（未開）**：使用者指出重播 5 個月年化 +105% 沒意義——不足一年的區間不顯示年化／Sharpe／Calmar，只留期間報酬與最大回撤，
+  改放逐年報酬表（已算過：大盤精選 2021~2025 年報酬 +33.6／−25.5／+54.4／+40.3／+22.0%，近 5 年年化 +25.3%；
+  潛伏飆股 +32.0／−18.4／+37.3／−17.9／+12.3%，近 5 年年化 +8.6%；來源＝`pick_board.yaml` references 登記的長窗口包）。
+- **其他待辦**：D-169 待裁決（建議排程改 20:05）；10-08 推薦快照仍缺（D-169＋T-328）；紙上交易帳本 10 月空手（D-142 設計）；
+  潛伏飆股 10-12 開盤賣 14 檔、10-13 補新股。10-09 休市，排程 19:00 會跑但略過。
+- worktree 已清：`C:/t/pbhtml`、`C:/t/docs-1008`（本分支合併後移除）。主 checkout `D:/project/twquant` 仍停在 PR #64，不要從它建映像。

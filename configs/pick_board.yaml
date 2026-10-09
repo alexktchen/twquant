@@ -10,6 +10,7 @@ initial_capital: 10000000 # 1,000 萬、零股——與第十三～十五輪的�
 lot_size: 1
 max_participation: 0.05
 watch_lookback_sessions: 20 # 觀察名單的「新名字」＝過去 20 個交易日沒進過前 15 名（同 scripts/a20_picks.py）
+html_window_sessions: 6 # HTML 版（T-329）推薦名單的「近 N 日上榜」：看最後幾個交易日的前 15 名
 
 strategies:
   - code: CORE
@@ -17,8 +18,19 @@ strategies:
     config: lw_e0_ctrl
     summary: 全市場排序模型每月挑 15 檔、平均分配，抱到下個月換股；不設停損停利。
     watch: true # D-165：每天列出「若今天換股會挑的 15 檔」
+    # T-330：HTML 版「研究回測參考」引用的結果包（相對 data_dir）。數字從包裡的 metrics 讀，不寫在這裡。
+    references:
+      - label: 開發期回測（8,000 萬、整張）
+        path: tracks_e_long_nodiv/E0_lw_e0_ctrl_1x.json
+      - label: 金庫期（模型沒看過的半年；8,000 萬、整張）
+        path: tracks_e_vault_nodiv/E0_lw_e0_ctrl_1x.json
   - code: QUIET
     name: 潛伏飆股
     config: quiet_s0
     summary: 在「安靜又買得到」的股票裡，挑 20 天內最可能漲 20% 的股票；15 個位子，每檔抱滿 20 個交易日就賣。
     watch: true
+    references:
+      - label: 第十三輪長窗口回測（1,000 萬、零股）
+        path: tracks_round13/quiet_s0_10m_lot1.json
+      - label: D-162 事後檢驗（模型重訓到 2026-02、考 2026-03～09；1,000 萬、零股）
+        path: tracks_d162/quiet_s0_2602.json
