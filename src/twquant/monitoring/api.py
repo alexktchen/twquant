@@ -526,6 +526,44 @@ def get_stock_meta(wh: WarehouseDep) -> dict[str, object]:
     return _stock_ep(lambda: stock_api.stock_meta_all(wh, stock_api.serving_cfg()))
 
 
+@app.get("/api/picks")
+def get_picks(
+    date: str | None = Query(None, description="YYYY-MM-DD；空＝最新"),
+) -> dict[str, object]:
+    """兩條線某日的名單（T-332，雲端網站首頁）：收盤、當日漲跌、連續上榜、新進。"""
+    from twquant.monitoring import picks_api
+
+    if date is not None:
+        try:
+            day: dt.date | None = dt.date.fromisoformat(date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"日期格式錯誤：{date!r}") from exc
+    else:
+        day = None
+    try:
+        return picks_api.picks_payload(stock_api.serving_cfg(), day, picks_api.line_names())
+    except DataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # PG 突發不可用 → 503，不外洩堆疊
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/picks/dates")
+def get_pick_dates(limit: int = Query(250, ge=1, le=2000)) -> dict[str, object]:
+    """有名單的日期，新到舊（歷史名單頁的日期選單）。"""
+    from twquant.monitoring import picks_api
+
+    return _stock_ep(lambda: {"dates": picks_api.pick_dates(stock_api.serving_cfg(), limit)})
+
+
+@app.get("/api/stocks/{sid}/picks")
+def get_stock_picks(sid: str) -> dict[str, object]:
+    """某檔被推薦過的日子（K 線標記）。"""
+    from twquant.monitoring import picks_api
+
+    return _stock_ep(lambda: picks_api.stock_pick_days(stock_api.serving_cfg(), sid))
+
+
 @app.get("/api/stocks/{sid}")
 def get_stock(sid: str, wh: WarehouseDep) -> dict[str, object]:
     """單一個股即時 K 線（任一資料湖內個股，非只快照的前 8 檔）。"""

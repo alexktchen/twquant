@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "cd frontend && npm ci && npm run build",
+  "buildCommand": "cd frontend && npm ci && VITE_APP_MODE=cloud npm run build",
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.py": {
