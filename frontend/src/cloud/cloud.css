@@ -54,7 +54,7 @@
 .cq-list li:hover { background: #1b1d24; }
 .cq-list li.on { background: #1f2129; box-shadow: inset 3px 0 0 var(--accent); }
 .cq-name b { display: block; font-size: 14px; font-weight: 600; }
-.cq-name b em { font-style: normal; font-weight: 400; color: var(--mute); font-size: 11.5px; margin-left: 6px; }
+.cq-name b em { font-style: normal; font-weight: 400; color: var(--mute); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .cq-dots { display: inline-flex; gap: 3px; }
 .cq-dots i { width: 9px; height: 9px; border-radius: 2px; background: #262830; }
 .cq-dots i.in { background: #3d9bff; }
@@ -76,7 +76,7 @@
 .cq-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px 20px; gap: 10px; }
 .cq-quote { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .cq-quote h1 { margin: 0; font-size: 20px; font-weight: 700; }
-.cq-quote h1 small { color: var(--mute); font-size: 13px; font-weight: 400; margin-left: 4px; }
+.cq-quote h1 small { color: var(--mute); font-size: 15px; font-weight: 400; margin-right: 2px; }
 .cq-big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cq-big span { font-size: 16px; margin-left: 8px; }
 .cq-quote dl { display: grid; grid-template-columns: repeat(4, auto auto); gap: 4px 10px; margin: 0; font-size: 13px; }
