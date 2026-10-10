@@ -112,7 +112,7 @@ export default function CloudApp() {
             ))}
           </div>
           <div className="cq-head">
-            <span>名稱／近 6 日上榜</span>
+            <span>代號／名稱／近 6 日上榜</span>
             <span>收盤／6日</span>
             <span>漲跌幅</span>
           </div>
@@ -139,8 +139,8 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
     <li className={on ? 'on' : ''} onClick={onClick}>
       <div className="cq-name">
         <b>
-          {p.name ?? p.sid}
           <em>{p.sid}</em>
+          {p.name ?? ''}
         </b>
         <small>
           <span className="cq-dots" title={`近 6 日上榜 ${h.on}/${h.of}`}>
@@ -185,7 +185,7 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
       <div className="cq-quote">
         <div>
           <h1>
-            {p.name ?? p.sid} <small>{p.sid}</small>
+            <small>{p.sid}</small> {p.name ?? ''}
           </h1>
           <div className={`cq-big ${t}`}>
             {price(p.close)} <span>{pct(p.chg)}</span>
