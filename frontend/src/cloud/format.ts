@@ -88,8 +88,17 @@ export function signedPrice(v: number | null): string {
   return `${v > 0 ? '+' : v < 0 ? '-' : ''}${price(Math.abs(v))}`
 }
 
-/** 預設看最近 120 根 K 棒（約半年；台股一個月約 21 個交易日）。 */
-export const DEFAULT_VISIBLE_BARS = 120
+/** 預設看最近 60 根 K 棒（約 3 個月；台股一個月約 21 個交易日）。 */
+export const DEFAULT_VISIBLE_BARS = 60
+
+/** 瀏覽器裡記住「K 線看幾根」的鍵（隱私權政策有寫：只有這個數字，不含個人資料）。 */
+export const KEPT_BARS_KEY = 'twquant.kline.bars'
+
+/** 讀回記住的根數；沒有或壞掉（非整數、太小、太大）就用預設。 */
+export function parseKeptBars(raw: string | null): number {
+  const n = Number(raw)
+  return raw !== null && Number.isInteger(n) && n >= 5 && n <= 2000 ? n : DEFAULT_VISIBLE_BARS
+}
 
 /** 顯示最新的 visible 根：右緣留 1 根空間給最新一根的推薦箭頭。 */
 export function latestRange(total: number, visible: number): { from: number; to: number } {

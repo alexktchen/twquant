@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEFAULT_VISIBLE_BARS, latestRange, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
+import { DEFAULT_VISIBLE_BARS, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
 
 const bar = (date: string, close: number): Bar => ({ date, open: close, high: close, low: close, close, volume: 1 })
 
@@ -58,9 +58,19 @@ test('T-332 長按浮框：漲跌點數帶正負號、位數跟股價一樣', ()
   assert.equal(quoteBar(bars, undefined, 0)?.diff, null)
 })
 
-test('T-332 K 線：預設看最近 120 根，指定根數時從最新一根往回算', () => {
-  assert.equal(DEFAULT_VISIBLE_BARS, 120)
+test('T-332 K 線：預設看最近 60 根，指定根數時從最新一根往回算', () => {
+  assert.equal(DEFAULT_VISIBLE_BARS, 60)
   assert.deepEqual(latestRange(500, 120), { from: 381, to: 501 })
   assert.deepEqual(latestRange(500, 30), { from: 471, to: 501 })
   assert.deepEqual(latestRange(50, 120), { from: 0, to: 51 }, '資料比要看的少就從第一根開始')
+})
+
+test('T-332 K 線：記住的根數讀回來，沒有或壞掉就用預設 60', () => {
+  assert.equal(parseKeptBars('45'), 45)
+  assert.equal(parseKeptBars(null), 60)
+  assert.equal(parseKeptBars(''), 60)
+  assert.equal(parseKeptBars('abc'), 60)
+  assert.equal(parseKeptBars('12.5'), 60)
+  assert.equal(parseKeptBars('2'), 60, '太小')
+  assert.equal(parseKeptBars('99999'), 60, '太大')
 })
