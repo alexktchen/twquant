@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>twquant AI 選股</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<meta name="theme-color" content="#0e0f14" />
+<style>
+  body { margin: 0; background: #0e0f14; color: #e6e7eb; font: 16px/1.7 -apple-system, 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 22px 64px; }
+  header { display: flex; align-items: center; gap: 14px; }
+  header img { width: 56px; height: 56px; border-radius: 13px; }
+  h1 { font-size: 26px; margin: 0; }
+  h2 { font-size: 18px; margin: 32px 0 6px; }
+  p, li { color: #c9ccd3; }
+  a { color: #ff9a3c; }
+  .go { display: inline-block; margin-top: 28px; padding: 10px 20px; border-radius: 8px; background: #ff7a00; color: #fff; text-decoration: none; font-weight: 600; }
+  footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid #23252d; font-size: 13px; color: #8a8f98; }
+</style>
+</head>
+<body>
+<main>
+  <header><img src="/icon-192.png" alt="" /><h1>twquant AI 選股</h1></header>
+
+  <p>每個台股交易日收盤後，twquant 用機器學習模型替上市櫃股票打分，產生兩份每日名單，並把每天的名單保存下來。</p>
+
+  <h2>網站上看得到什麼</h2>
+  <ul>
+    <li><b>大盤精選</b>與<b>潛伏飆股</b>兩份當日名單，以及每檔股票近 6 個交易日有沒有上榜。</li>
+    <li>依日期查詢的歷史名單。</li>
+    <li>個股 K 線圖，並標出過去被選進名單的日子。</li>
+  </ul>
+
+  <h2>登入</h2>
+  <p>網站需要用 Google 帳號登入，登入由 Cloudflare Access 處理。網站只用你的電子郵件地址確認身分，並顯示在畫面右上角。詳見<a href="/privacy">隱私權政策</a>。</p>
+
+  <a class="go" href="/">進入網站</a>
+
+  <footer>名單由模型自動產生，僅供研究參考，不是投資建議。　<a href="/privacy">隱私權政策</a></footer>
+</main>
+</body>
+</html>
