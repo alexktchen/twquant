@@ -5,7 +5,7 @@ import './cloud.css'
 import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchPublicDates, fetchStockPicks, logoutTarget } from './api'
 import { LOGIN_URL, LoginRequired, guestCandles, guestDay } from './auth'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { hits, pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
+import { hits, pct, price, quoteBar, trend, type Bar, type Pick, type PicksDay } from './format'
 
 type Tab = 'today' | 'history'
 
@@ -190,7 +190,7 @@ export default function CloudApp() {
               <GuestChart />
             </div>
           ) : selected ? (
-            <Detail p={selected} lineNames={lineNames} />
+            <Detail p={selected} asOf={view?.date} lineNames={lineNames} />
           ) : null}
         </section>
       </main>
@@ -251,8 +251,9 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
   )
 }
 
-function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }) {
+function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lineNames: Record<string, string> }) {
   const [bars, setBars] = useState<Bar[]>([])
+  const [hover, setHover] = useState<number | null>(null)
   const [days, setDays] = useState<Record<string, string[]>>({})
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -265,7 +266,8 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
       .catch((e: Error) => setErr(e.message))
   }, [p.sid])
   const t = trend(p.chg)
-  const last = bars.at(-1)
+  // 報價列：長按中的那根，否則是名單日期那根（歷史名單選 9/24 就顯示 9/24，不是最新一天）
+  const q = quoteBar(bars, asOf, hover)
   return (
     <>
       <div className="cq-quote">
@@ -277,16 +279,21 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
             {price(p.close)} <span>{pct(p.chg)}</span>
           </div>
         </div>
-        {last && (
-          <dl>
+        {q && (
+          <dl className={hover !== null ? 'cq-ohlc on' : 'cq-ohlc'}>
             <dt>開</dt>
-            <dd>{price(last.open)}</dd>
+            <dd>{price(q.bar.open)}</dd>
             <dt>高</dt>
-            <dd className="up">{price(last.high)}</dd>
+            <dd className="up">{price(q.bar.high)}</dd>
             <dt>低</dt>
-            <dd className="down">{price(last.low)}</dd>
-            <dt>量（張）</dt>
-            <dd>{Math.round(last.volume / 1000).toLocaleString()}</dd>
+            <dd className="down">{price(q.bar.low)}</dd>
+            <dt>收</dt>
+            <dd className={trend(q.chg)}>{price(q.bar.close)}</dd>
+            <dt>量</dt>
+            <dd>{Math.round(q.bar.volume / 1000).toLocaleString()} 張</dd>
+            <dt>漲跌</dt>
+            <dd className={trend(q.chg)}>{pct(q.chg)}</dd>
+            <dd className="cq-ohlc-date">{q.bar.date}</dd>
           </dl>
         )}
       </div>
@@ -305,7 +312,7 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
           ))}
         </span>
       </div>
-      {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} />}
+      {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} onHover={setHover} />}
     </>
   )
 }

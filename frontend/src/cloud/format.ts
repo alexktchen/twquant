@@ -67,3 +67,13 @@ export function pickMarkers(
   }
   return out.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.line.localeCompare(b.line)))
 }
+
+/** 報價列要顯示的那根 K 棒：長按中的那根，否則是名單日期那根（歷史名單），找不到就用最後一根。漲跌對前一根收盤。 */
+export function quoteBar(bars: Bar[], asOf: string | undefined, hoverIndex: number | null): { bar: Bar; chg: number | null } | null {
+  if (bars.length === 0) return null
+  let i = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < bars.length ? hoverIndex : -1
+  if (i < 0 && asOf) i = bars.findIndex((b) => b.date === asOf)
+  if (i < 0) i = bars.length - 1
+  const prev = i > 0 ? bars[i - 1].close : null
+  return { bar: bars[i], chg: prev ? bars[i].close / prev - 1 : null }
+}
