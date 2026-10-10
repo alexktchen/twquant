@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { pct, pickMarkers, price, quoteBar, sma, trend, type Bar } from '../src/cloud/format.ts'
+import { pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
 
 const bar = (date: string, close: number): Bar => ({ date, open: close, high: close, low: close, close, volume: 1 })
 
@@ -46,4 +46,14 @@ test('T-332 報價列：歷史名單顯示名單那天的 K 棒，長按時換�
   assert.equal(quoteBar(bars, '2026-09-24', 0)?.chg, null, '第一根沒有前一根')
   assert.equal(quoteBar(bars, '2026-09-24', 9)?.bar.date, '2026-09-24', '超出範圍的長按不算')
   assert.equal(quoteBar([], '2026-09-24', null), null)
+})
+
+test('T-332 長按浮框：漲跌點數帶正負號、位數跟股價一樣', () => {
+  const bars = [bar('2026-09-23', 100), bar('2026-09-24', 102.5), bar('2026-09-25', 99)]
+  assert.equal(quoteBar(bars, undefined, 1)?.diff, 2.5)
+  assert.equal(signedPrice(quoteBar(bars, undefined, 1)?.diff ?? null), '+2.50')
+  assert.equal(signedPrice(quoteBar(bars, undefined, 2)?.diff ?? null), '-3.50')
+  assert.equal(signedPrice(0), '0.00')
+  assert.equal(signedPrice(null), '—')
+  assert.equal(quoteBar(bars, undefined, 0)?.diff, null)
 })

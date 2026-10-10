@@ -253,7 +253,6 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
 
 function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lineNames: Record<string, string> }) {
   const [bars, setBars] = useState<Bar[]>([])
-  const [hover, setHover] = useState<number | null>(null)
   const [days, setDays] = useState<Record<string, string[]>>({})
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -266,8 +265,8 @@ function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lin
       .catch((e: Error) => setErr(e.message))
   }, [p.sid])
   const t = trend(p.chg)
-  // 報價列：長按中的那根，否則是名單日期那根（歷史名單選 9/24 就顯示 9/24，不是最新一天）
-  const q = quoteBar(bars, asOf, hover)
+  // 報價列：名單日期那根（歷史名單選 9/24 就顯示 9/24，不是最新一天）；長按看別天在 K 線上的浮框
+  const q = quoteBar(bars, asOf, null)
   return (
     <>
       <div className="cq-quote">
@@ -280,7 +279,7 @@ function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lin
           </div>
         </div>
         {q && (
-          <dl className={hover !== null ? 'cq-ohlc on' : 'cq-ohlc'}>
+          <dl className="cq-ohlc">
             <dt>開</dt>
             <dd>{price(q.bar.open)}</dd>
             <dt>高</dt>
@@ -312,7 +311,7 @@ function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lin
           ))}
         </span>
       </div>
-      {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} onHover={setHover} />}
+      {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} />}
     </>
   )
 }
