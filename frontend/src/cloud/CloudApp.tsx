@@ -2,7 +2,8 @@
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
 import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
-import { fetchBars, fetchIdentity, fetchPickDates, fetchPicks, fetchStockPicks, logoutTarget } from './api'
+import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchStockPicks, logoutTarget } from './api'
+import { LOGIN_URL, LoginRequired, guestCandles, guestPicks } from './auth'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { hits, pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
 
@@ -16,12 +17,22 @@ export default function CloudApp() {
   const [line, setLine] = useState<string>('')
   const [sid, setSid] = useState<string>('')
   const [err, setErr] = useState<string>('')
+  const [guest, setGuest] = useState(false)
+  const [email, setEmail] = useState<string | null>(null)
+  // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 切成模糊預覽＋登入按鈕；其他錯誤照常顯示
+  const onFail = (e: Error) => (e instanceof LoginRequired ? setGuest(true) : setErr(e.message))
 
   useEffect(() => {
-    fetchPickDates().then(setDates).catch((e: Error) => setErr(e.message))
+    // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可
+    fetchMe()
+      .then((m) => setEmail(m.email))
+      .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
+    fetchPickDates().then(setDates).catch(onFail)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
+    if (guest) return
     const want = tab === 'today' ? undefined : date
     setErr('')
     fetchPicks(want)
@@ -33,10 +44,10 @@ export default function CloudApp() {
           if (!first.picks.some((p) => p.sid === sid)) setSid(first.picks[0]?.sid ?? '')
         }
       })
-      .catch((e: Error) => setErr(e.message))
+      .catch(onFail)
     // line/sid 只用來保留使用者目前的選擇，不該觸發重抓
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, date])
+  }, [tab, date, guest])
 
   const lineNames = useMemo(
     () => Object.fromEntries((day?.lines ?? []).map((l) => [l.code, l.name])),
@@ -45,6 +56,8 @@ export default function CloudApp() {
   const current = day?.lines.find((l) => l.code === line)
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   const idx = date ? dates.indexOf(date) : -1
+
+  if (guest) return <GuestView />
 
   return (
     <div className="cq">
@@ -91,7 +104,7 @@ export default function CloudApp() {
             </span>
           )}
         </div>
-        <User />
+        <User email={email} />
       </header>
 
       {err && <div className="cq-err">{err}</div>}
@@ -135,11 +148,7 @@ export default function CloudApp() {
 }
 
 /** 登入身分與登出（Cloudflare Access）。沒開 Access 時整塊不顯示。 */
-function User() {
-  const [email, setEmail] = useState<string | null>(null)
-  useEffect(() => {
-    fetchIdentity().then((id) => setEmail(id?.email ?? null))
-  }, [])
+function User({ email }: { email: string | null }) {
   if (!email) return null
   return (
     <div className="cq-user" title={email}>
@@ -247,5 +256,101 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
       </div>
       {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} />}
     </>
+  )
+}
+
+/** 沒登入：版面照常，名單與 K 線換成模糊的假資料，中間一張登入卡片。真資料只從 /api 給已登入的人。 */
+function GuestView() {
+  const picks = useMemo(() => guestPicks(), [])
+  return (
+    <div className="cq">
+      <header className="cq-top cq-top-guest">
+        <div className="cq-brand">
+          <img className="cq-logo" src="/icon.svg" alt="" width="26" height="26" />
+          twquant
+        </div>
+        <div className="cq-user">
+          <a className="cq-login" href={LOGIN_URL}>
+            登入
+          </a>
+        </div>
+      </header>
+      <div className="cq-guest">
+        <div className="cq-guest-blur" aria-hidden="true">
+          <main className="cq-body">
+            <aside className="cq-list">
+              <div className="cq-seg">
+                <button className="on" tabIndex={-1}>
+                  大盤精選<em>{picks.length}</em>
+                </button>
+                <button tabIndex={-1}>
+                  潛伏飆股<em>{picks.length}</em>
+                </button>
+              </div>
+              <div className="cq-head">
+                <span>代號／名稱／近 6 日上榜</span>
+                <span>收盤／6日</span>
+                <span>漲跌幅</span>
+              </div>
+              <ul>
+                {picks.map((p, i) => (
+                  <Row key={i} p={p} on={i === 0} onClick={() => undefined} />
+                ))}
+              </ul>
+            </aside>
+            <section className="cq-detail">
+              <GuestChart />
+            </section>
+          </main>
+        </div>
+        <div className="cq-gate">
+          <div className="cq-gate-card">
+            <img src="/icon-192.png" alt="" width="60" height="60" />
+            <h2>登入後查看今日名單</h2>
+            <p>每個交易日收盤後，AI 模型挑出的大盤精選與潛伏飆股。</p>
+            <a className="cq-google" href={LOGIN_URL}>
+              <GoogleMark />
+              使用 Google 帳號登入
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 模糊背景裡的假 K 線。 */
+function GuestChart() {
+  const bars = useMemo(() => guestCandles(), [])
+  const hi = Math.max(...bars.map((b) => b.h))
+  const lo = Math.min(...bars.map((b) => b.l))
+  const W = 600
+  const H = 300
+  const step = W / bars.length
+  const y = (v: number) => ((hi - v) / (hi - lo)) * (H - 20) + 10
+  return (
+    <svg className="cq-guest-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      {bars.map((b, i) => {
+        const x = i * step + step / 2
+        const color = b.c >= b.o ? '#F6465D' : '#0ECB81'
+        return (
+          <g key={i} stroke={color} fill={color}>
+            <line x1={x} x2={x} y1={y(b.h)} y2={y(b.l)} strokeWidth={1.5} />
+            <rect x={x - step * 0.3} width={step * 0.6} y={y(Math.max(b.o, b.c))} height={Math.max(2, Math.abs(y(b.o) - y(b.c)))} />
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.8 6.1C12.3 13.6 17.7 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.5 5.8c4.4-4 6.8-10 6.8-17.2z" />
+      <path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.8-6.1C1 16.5 0 20.1 0 24s1 7.5 2.6 10.8l7.8-6.1z" />
+      <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.7-4.1-13.6-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z" />
+    </svg>
   )
 }

@@ -1,18 +1,20 @@
 // 雲端版（T-332）的 API：每日名單、日期清單、個股 K 線與被推薦的日子。
 import { apiUrl } from '../api'
+import { LoginRequired, needsLogin } from './auth'
 import type { Bar, PicksDay } from './format'
 
-// 登入（Cloudflare Access）過期時，API 會被導去登入頁：瀏覽器只回 TypeError 或拿到 HTML。
-const RELOGIN = '登入已過期或連線中斷，請重新整理頁面'
+const OFFLINE = '連線中斷，請重新整理頁面'
 
+// redirect: 'manual'：沒登入時 Access 會把 /api 導去登入頁，攔下來改丟 LoginRequired，畫面切成預覽模式。
 async function get<T>(path: string): Promise<T> {
   let res: Response
   try {
-    res = await fetch(apiUrl(path), { headers: { accept: 'application/json' } })
+    res = await fetch(apiUrl(path), { headers: { accept: 'application/json' }, redirect: 'manual' })
   } catch {
-    throw new Error(RELOGIN)
+    throw new Error(OFFLINE)
   }
-  if (!(res.headers.get('content-type') ?? '').includes('json')) throw new Error(RELOGIN)
+  if (needsLogin(res)) throw new LoginRequired()
+  if (!(res.headers.get('content-type') ?? '').includes('json')) throw new Error(`${res.status} ${res.statusText}`)
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail ?? `${res.status} ${res.statusText}`)
@@ -20,23 +22,14 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
-/** Cloudflare Access 登入身分；網站沒開 Access（或本機開發）時回 null，不丟錯。 */
-/** 登出後要去的網址：伺服器撤銷登入成功就到本站的登出頁，否則退回 Cloudflare 的登出頁，確保一定登得出去。 */
+/** 登出後要去的網址：伺服器撤銷登入成功就回首頁（沒登入的預覽畫面），否則退回 Cloudflare 的登出頁，確保一定登得出去。 */
 export async function logoutTarget(): Promise<string> {
   const res = await fetch('/api/logout', { method: 'POST' }).catch(() => null)
-  return res?.ok ? '/signed-out' : '/cdn-cgi/access/logout'
+  return res?.ok ? '/' : '/cdn-cgi/access/logout'
 }
 
-export async function fetchIdentity(): Promise<{ email: string } | null> {
-  try {
-    const res = await fetch('/cdn-cgi/access/get-identity', { headers: { accept: 'application/json' } })
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null
-    const body = (await res.json()) as { email?: unknown }
-    return typeof body.email === 'string' ? { email: body.email } : null
-  } catch {
-    return null
-  }
-}
+/** 目前登入的 email；沒登入時丟 LoginRequired。 */
+export const fetchMe = () => get<{ email: string }>('/api/me')
 
 export const fetchPicks = (date?: string) =>
   get<PicksDay>(date ? `/api/picks?date=${encodeURIComponent(date)}` : '/api/picks')

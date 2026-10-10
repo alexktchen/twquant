@@ -96,8 +96,9 @@ jobs:
       - name: 部署後檢查（網站與 API）
         if: steps.secrets.outputs.ok == 'true'
         env:
-          # 網站開了 Cloudflare Access（SSO）之後，部署網址會被導去登入頁。
-          # 有 Access 服務權杖（repo secrets）就帶上它照常驗證 API 內容；沒有就把「導去登入」視為受保護、部署成功。
+          # Cloudflare Access 只保護 /api（網站外殼公開，沒登入看到模糊預覽）。
+          # 有 Access 服務權杖（repo secrets）就帶上它驗證 API 內容；沒有時 API 必須被擋（302/401/403），
+          # 沒登入就回 200 等於名單外洩 → 部署檢查失敗。
           ACCESS_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           ACCESS_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
@@ -115,6 +116,9 @@ jobs:
               sleep 10
             done
             echo "$url$path -> $code"
+            if [ ${#auth[@]} -eq 0 ] && [ "$path" != "/" ] && [ "$code" = "200" ]; then
+              echo "::error::$path 沒登入就回 200：名單外洩，檢查 Cloudflare Access 是否還保護 /api"; exit 1
+            fi
             if [ "$code" = "200" ]; then continue; fi
             if [ ${#auth[@]} -eq 0 ] && { [ "$code" = "302" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; }; then
               echo "::notice::$path 受 Cloudflare Access 保護（$code），未驗證內容；要驗證請加 CF_ACCESS_CLIENT_ID／SECRET"
