@@ -69,11 +69,21 @@ export function pickMarkers(
 }
 
 /** 報價列要顯示的那根 K 棒：長按中的那根，否則是名單日期那根（歷史名單），找不到就用最後一根。漲跌對前一根收盤。 */
-export function quoteBar(bars: Bar[], asOf: string | undefined, hoverIndex: number | null): { bar: Bar; chg: number | null } | null {
+export function quoteBar(
+  bars: Bar[],
+  asOf: string | undefined,
+  hoverIndex: number | null,
+): { bar: Bar; chg: number | null; diff: number | null } | null {
   if (bars.length === 0) return null
   let i = hoverIndex !== null && hoverIndex >= 0 && hoverIndex < bars.length ? hoverIndex : -1
   if (i < 0 && asOf) i = bars.findIndex((b) => b.date === asOf)
   if (i < 0) i = bars.length - 1
   const prev = i > 0 ? bars[i - 1].close : null
-  return { bar: bars[i], chg: prev ? bars[i].close / prev - 1 : null }
+  return { bar: bars[i], chg: prev ? bars[i].close / prev - 1 : null, diff: prev ? bars[i].close - prev : null }
+}
+
+/** 漲跌點數：帶正負號，位數跟股價一樣。 */
+export function signedPrice(v: number | null): string {
+  if (v === null) return '—'
+  return `${v > 0 ? '+' : v < 0 ? '-' : ''}${price(Math.abs(v))}`
 }
