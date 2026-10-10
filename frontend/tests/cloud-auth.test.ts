@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { afterLogin, me } from '../functions/_lib/auth.ts'
 import { EMAIL_HEADER } from '../functions/_lib/logout.ts'
-import { LOGIN_URL, LoginRequired, guestCandles, guestPicks, needsLogin } from '../src/cloud/auth.ts'
+import { LOGIN_URL, LoginRequired, guestCandles, guestDay, needsLogin } from '../src/cloud/auth.ts'
 
 const res = (type: string, status: number, ct: string) => ({
   type,
@@ -23,14 +23,22 @@ test('T-332 沒登入：Access 的導向、401／403、拿到 HTML 登入頁都�
   assert.ok(LOGIN_URL.startsWith('/api/'), '登入入口必須在受 Access 保護的 /api 底下')
 })
 
-test('T-332 沒登入：預覽用的假名單與假 K 線固定、和真實股票無關', () => {
-  const picks = guestPicks()
-  assert.deepEqual(picks, guestPicks())
-  assert.equal(picks.length, 10)
-  for (const p of picks) {
-    assert.equal(p.sid, '0000')
-    assert.equal(p.recent.length, 6)
-    assert.equal(p.score, null)
+test('T-332 沒登入：假名單每天每條線固定、切日期會變、代號不是真股票', () => {
+  const day = guestDay('2026-10-08')
+  assert.deepEqual(day, guestDay('2026-10-08'))
+  assert.notDeepEqual(day.lines[0].picks, guestDay('2026-10-07').lines[0].picks)
+  assert.notDeepEqual(day.lines[0].picks, day.lines[1].picks)
+  assert.deepEqual(
+    day.lines.map((l) => [l.code, l.name, l.picks.length]),
+    [['CORE', '大盤精選', 15], ['QUIET', '潛伏飆股', 15]],
+  )
+  for (const l of day.lines) {
+    assert.equal(new Set(l.picks.map((p) => p.sid)).size, l.picks.length, '代號不重複（React key）')
+    for (const p of l.picks) {
+      assert.ok(/^00\d\d$/.test(p.sid) && p.sid < '0050', `${p.sid} 必須是台股不存在的代號`)
+      assert.equal(p.recent.length, 6)
+      assert.equal(p.score, null)
+    }
   }
   const bars = guestCandles()
   assert.deepEqual(bars, guestCandles())

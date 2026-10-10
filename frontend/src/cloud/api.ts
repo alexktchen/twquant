@@ -36,6 +36,9 @@ export const fetchPicks = (date?: string) =>
 
 export const fetchPickDates = () => get<{ dates: string[] }>('/api/picks/dates').then((r) => r.dates)
 
+/** 有名單的交易日（公開，不含任何股票），讓沒登入的人也能切到歷史名單選日期。 */
+export const fetchPublicDates = () => get<{ dates: string[] }>('/pub/dates').then((r) => r.dates)
+
 export const fetchBars = (sid: string, days = 500) =>
   get<{ rows: Bar[] }>(`/api/stocks/${encodeURIComponent(sid)}/ohlc?days=${days}`).then((r) => r.rows)
 

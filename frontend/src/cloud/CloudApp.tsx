@@ -2,8 +2,8 @@
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
 import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
-import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchStockPicks, logoutTarget } from './api'
-import { LOGIN_URL, LoginRequired, guestCandles, guestPicks } from './auth'
+import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchPublicDates, fetchStockPicks, logoutTarget } from './api'
+import { LOGIN_URL, LoginRequired, guestCandles, guestDay } from './auth'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { hits, pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
 
@@ -19,7 +19,7 @@ export default function CloudApp() {
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
-  // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 切成模糊預覽＋登入按鈕；其他錯誤照常顯示
+  // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 版面照常可操作，只有股票列與 K 線換成模糊的假資料；其他錯誤照常顯示
   const onFail = (e: Error) => (e instanceof LoginRequired ? setGuest(true) : setErr(e.message))
 
   useEffect(() => {
@@ -27,27 +27,39 @@ export default function CloudApp() {
     fetchMe()
       .then((m) => setEmail(m.email))
       .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
-    fetchPickDates().then(setDates).catch(onFail)
+    fetchPickDates()
+      .then(setDates)
+      .catch((e: Error) => {
+        if (!(e instanceof LoginRequired)) return setErr(e.message)
+        setGuest(true)
+        // 日期是公開資訊：沒登入也能切到歷史名單選日期
+        fetchPublicDates().then(setDates).catch(onFail)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 沒登入時「今日」用公開日期清單的最新一天；登入時這個值固定 undefined，不會多抓一次
+  const guestToday = guest ? dates[0] : undefined
+
   useEffect(() => {
-    if (guest) return
     const want = tab === 'today' ? undefined : date
+    const apply = (d: PicksDay) => {
+      setDay(d)
+      const first = d.lines.find((l) => l.code === line) ?? d.lines[0]
+      if (first) {
+        setLine(first.code)
+        if (!first.picks.some((p) => p.sid === sid)) setSid(first.picks[0]?.sid ?? '')
+      }
+    }
+    if (guest) {
+      apply(guestDay(want ?? guestToday ?? ''))
+      return
+    }
     setErr('')
-    fetchPicks(want)
-      .then((d) => {
-        setDay(d)
-        const first = d.lines.find((l) => l.code === line) ?? d.lines[0]
-        if (first) {
-          setLine(first.code)
-          if (!first.picks.some((p) => p.sid === sid)) setSid(first.picks[0]?.sid ?? '')
-        }
-      })
-      .catch(onFail)
+    fetchPicks(want).then(apply).catch(onFail)
     // line/sid 只用來保留使用者目前的選擇，不該觸發重抓
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, date, guest])
+  }, [tab, date, guest, guestToday])
 
   const lineNames = useMemo(
     () => Object.fromEntries((day?.lines ?? []).map((l) => [l.code, l.name])),
@@ -56,8 +68,6 @@ export default function CloudApp() {
   const current = day?.lines.find((l) => l.code === line)
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   const idx = date ? dates.indexOf(date) : -1
-
-  if (guest) return <GuestView />
 
   return (
     <div className="cq">
@@ -104,7 +114,15 @@ export default function CloudApp() {
             </span>
           )}
         </div>
-        <User email={email} />
+        {guest ? (
+          <div className="cq-user">
+            <a className="cq-login" href={LOGIN_URL}>
+              登入
+            </a>
+          </div>
+        ) : (
+          <User email={email} />
+        )}
       </header>
 
       {err && <div className="cq-err">{err}</div>}
@@ -131,17 +149,28 @@ export default function CloudApp() {
             <span>收盤／6日</span>
             <span>漲跌幅</span>
           </div>
-          <ul>
-            {current?.picks.map((p) => (
-              <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
-            ))}
-          </ul>
+          <div className="cq-rows">
+            <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
+              {current?.picks.map((p) => (
+                <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
+              ))}
+            </ul>
+            {guest && <Gate />}
+          </div>
           <p className="cq-note">
             方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
           </p>
         </aside>
 
-        <section className="cq-detail">{selected ? <Detail p={selected} lineNames={lineNames} /> : null}</section>
+        <section className="cq-detail">
+          {guest ? (
+            <div className="cq-locked cq-guest-detail" aria-hidden="true">
+              <GuestChart />
+            </div>
+          ) : selected ? (
+            <Detail p={selected} lineNames={lineNames} />
+          ) : null}
+        </section>
       </main>
     </div>
   )
@@ -259,61 +288,18 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
   )
 }
 
-/** 沒登入：版面照常，名單與 K 線換成模糊的假資料，中間一張登入卡片。真資料只從 /api 給已登入的人。 */
-function GuestView() {
-  const picks = useMemo(() => guestPicks(), [])
+/** 沒登入：蓋在模糊名單上的登入卡片。股票列與 K 線是假資料，真資料只從 /api 給已登入的人。 */
+function Gate() {
   return (
-    <div className="cq">
-      <header className="cq-top cq-top-guest">
-        <div className="cq-brand">
-          <img className="cq-logo" src="/icon.svg" alt="" width="26" height="26" />
-          twquant
-        </div>
-        <div className="cq-user">
-          <a className="cq-login" href={LOGIN_URL}>
-            登入
-          </a>
-        </div>
-      </header>
-      <div className="cq-guest">
-        <div className="cq-guest-blur" aria-hidden="true">
-          <main className="cq-body">
-            <aside className="cq-list">
-              <div className="cq-seg">
-                <button className="on" tabIndex={-1}>
-                  大盤精選<em>{picks.length}</em>
-                </button>
-                <button tabIndex={-1}>
-                  潛伏飆股<em>{picks.length}</em>
-                </button>
-              </div>
-              <div className="cq-head">
-                <span>代號／名稱／近 6 日上榜</span>
-                <span>收盤／6日</span>
-                <span>漲跌幅</span>
-              </div>
-              <ul>
-                {picks.map((p, i) => (
-                  <Row key={i} p={p} on={i === 0} onClick={() => undefined} />
-                ))}
-              </ul>
-            </aside>
-            <section className="cq-detail">
-              <GuestChart />
-            </section>
-          </main>
-        </div>
-        <div className="cq-gate">
-          <div className="cq-gate-card">
-            <img src="/icon-192.png" alt="" width="60" height="60" />
-            <h2>登入後查看今日名單</h2>
-            <p>每個交易日收盤後，AI 模型挑出的大盤精選與潛伏飆股。</p>
-            <a className="cq-google" href={LOGIN_URL}>
-              <GoogleMark />
-              使用 Google 帳號登入
-            </a>
-          </div>
-        </div>
+    <div className="cq-gate">
+      <div className="cq-gate-card">
+        <img src="/icon-192.png" alt="" width="52" height="52" />
+        <h2>登入後查看名單</h2>
+        <p>每個交易日收盤後，AI 模型挑出的大盤精選與潛伏飆股。</p>
+        <a className="cq-google" href={LOGIN_URL}>
+          <GoogleMark />
+          使用 Google 帳號登入
+        </a>
       </div>
     </div>
   )

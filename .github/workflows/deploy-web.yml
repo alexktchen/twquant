@@ -107,7 +107,7 @@ jobs:
           if [ -n "$ACCESS_ID" ] && [ -n "$ACCESS_SECRET" ]; then
             auth=(-H "CF-Access-Client-Id: $ACCESS_ID" -H "CF-Access-Client-Secret: $ACCESS_SECRET")
           fi
-          for path in / /api/picks/dates /api/picks; do
+          for path in / /pub/dates /api/picks/dates /api/picks; do
             code=""
             for i in 1 2 3 4 5 6; do
               code=$(curl -s -o /dev/null -w "%{http_code}" "${auth[@]}" "$url$path" || true)
@@ -116,7 +116,7 @@ jobs:
               sleep 10
             done
             echo "$url$path -> $code"
-            if [ ${#auth[@]} -eq 0 ] && [ "$path" != "/" ] && [ "$code" = "200" ]; then
+            if [ ${#auth[@]} -eq 0 ] && [ "${path#/api/}" != "$path" ] && [ "$code" = "200" ]; then
               echo "::error::$path 沒登入就回 200：名單外洩，檢查 Cloudflare Access 是否還保護 /api"; exit 1
             fi
             if [ "$code" = "200" ]; then continue; fi
