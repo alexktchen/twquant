@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
 import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchPublicDates, fetchStockPicks, logoutTarget } from './api'
 import { LOGIN_URL, LoginRequired, guestCandles, guestDay } from './auth'
+import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { hits, pct, price, quoteBar, trend, type Bar, type Pick, type PicksDay } from './format'
 
@@ -14,7 +15,8 @@ export default function CloudApp() {
   const [dates, setDates] = useState<string[]>([])
   const [date, setDate] = useState<string | undefined>(undefined)
   const [day, setDay] = useState<PicksDay | null>(null)
-  const [line, setLine] = useState<string>('')
+  // 上次看的策略（大盤精選／潛伏飆股）：重新整理、重開都停在那一條
+  const [line, setLine] = useState<string>(() => loadPref(LINE_KEY) ?? '')
   const [sid, setSid] = useState<string>('')
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
@@ -158,6 +160,7 @@ export default function CloudApp() {
                 className={l.code === current?.code ? 'on' : ''}
                 onClick={() => {
                   setLine(l.code)
+                  savePref(LINE_KEY, l.code)
                   setSid(l.picks[0]?.sid ?? '')
                 }}
               >

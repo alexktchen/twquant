@@ -9,6 +9,7 @@ import {
   createChart,
   createSeriesMarkers,
 } from 'lightweight-charts'
+import { loadPref, savePref } from './prefs'
 import { KEPT_BARS_KEY, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from './format'
 
 const UP = '#F6465D'
@@ -21,22 +22,11 @@ const MA = [
 const LINE_COLOR: Record<string, string> = { CORE: '#FF7A00', QUIET: '#3D9BFF' }
 
 // 使用者縮放後看幾根 K 棒：換股票、重新整理都沿用（存在這台裝置的瀏覽器，隱私權政策有寫）
-function readKeptBars(): number {
-  try {
-    return parseKeptBars(window.localStorage.getItem(KEPT_BARS_KEY))
-  } catch {
-    return parseKeptBars(null) // 瀏覽器禁用儲存（部分無痕模式）：用預設，不影響看圖
-  }
-}
-let keptBars = readKeptBars()
+let keptBars = parseKeptBars(loadPref(KEPT_BARS_KEY))
 function keepBars(n: number) {
   if (n === keptBars) return
   keptBars = n
-  try {
-    window.localStorage.setItem(KEPT_BARS_KEY, String(n))
-  } catch {
-    // 存不了（無痕或空間滿）：這次開著時仍沿用，只是重新整理後回預設
-  }
+  savePref(KEPT_BARS_KEY, String(n))
 }
 
 export function KChart({
