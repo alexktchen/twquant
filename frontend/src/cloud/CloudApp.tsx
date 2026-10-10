@@ -2,7 +2,7 @@
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
 import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
-import { fetchBars, fetchIdentity, fetchPickDates, fetchPicks, fetchStockPicks } from './api'
+import { fetchBars, fetchIdentity, fetchPickDates, fetchPicks, fetchStockPicks, logoutTarget } from './api'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { hits, pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
 
@@ -145,7 +145,15 @@ function User() {
     <div className="cq-user" title={email}>
       <span className="cq-avatar">{email.slice(0, 1).toUpperCase()}</span>
       <span className="cq-email">{email}</span>
-      <a href="/cdn-cgi/access/logout">登出</a>
+      <a
+        href="/cdn-cgi/access/logout"
+        onClick={(e) => {
+          e.preventDefault()
+          logoutTarget().then((to) => window.location.assign(to))
+        }}
+      >
+        登出
+      </a>
     </div>
   )
 }

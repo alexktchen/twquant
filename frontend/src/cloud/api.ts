@@ -21,6 +21,12 @@ async function get<T>(path: string): Promise<T> {
 }
 
 /** Cloudflare Access 登入身分；網站沒開 Access（或本機開發）時回 null，不丟錯。 */
+/** 登出後要去的網址：伺服器撤銷登入成功就到本站的登出頁，否則退回 Cloudflare 的登出頁，確保一定登得出去。 */
+export async function logoutTarget(): Promise<string> {
+  const res = await fetch('/api/logout', { method: 'POST' }).catch(() => null)
+  return res?.ok ? '/signed-out' : '/cdn-cgi/access/logout'
+}
+
 export async function fetchIdentity(): Promise<{ email: string } | null> {
   try {
     const res = await fetch('/cdn-cgi/access/get-identity', { headers: { accept: 'application/json' } })
