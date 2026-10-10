@@ -39,7 +39,7 @@ export function KChart({
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#8A8F98',
-        fontSize: 11,
+        fontSize: 13,
         panes: { separatorColor: '#23252D' },
       },
       grid: { vertLines: { color: '#1C1E25' }, horzLines: { color: '#1C1E25' } },
