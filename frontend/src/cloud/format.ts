@@ -87,3 +87,11 @@ export function signedPrice(v: number | null): string {
   if (v === null) return '—'
   return `${v > 0 ? '+' : v < 0 ? '-' : ''}${price(Math.abs(v))}`
 }
+
+/** 預設看最近 120 根 K 棒（約半年；台股一個月約 21 個交易日）。 */
+export const DEFAULT_VISIBLE_BARS = 120
+
+/** 顯示最新的 visible 根：右緣留 1 根空間給最新一根的推薦箭頭。 */
+export function latestRange(total: number, visible: number): { from: number; to: number } {
+  return { from: Math.max(0, total + 1 - visible), to: total + 1 }
+}

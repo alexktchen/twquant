@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
+import { DEFAULT_VISIBLE_BARS, latestRange, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
 
 const bar = (date: string, close: number): Bar => ({ date, open: close, high: close, low: close, close, volume: 1 })
 
@@ -56,4 +56,11 @@ test('T-332 長按浮框：漲跌點數帶正負號、位數跟股價一樣', ()
   assert.equal(signedPrice(0), '0.00')
   assert.equal(signedPrice(null), '—')
   assert.equal(quoteBar(bars, undefined, 0)?.diff, null)
+})
+
+test('T-332 K 線：預設看最近 120 根，指定根數時從最新一根往回算', () => {
+  assert.equal(DEFAULT_VISIBLE_BARS, 120)
+  assert.deepEqual(latestRange(500, 120), { from: 381, to: 501 })
+  assert.deepEqual(latestRange(500, 30), { from: 471, to: 501 })
+  assert.deepEqual(latestRange(50, 120), { from: 0, to: 51 }, '資料比要看的少就從第一根開始')
 })
