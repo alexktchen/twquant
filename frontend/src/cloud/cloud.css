@@ -22,10 +22,9 @@
 
 .cq-top {
   /* 加到 iPhone 主畫面後是全螢幕（black-translucent），內容會畫到狀態列底下：用安全區把頂欄往下推。
-     iOS 26 另在狀態列下方約 32px 疊一層 Liquid Glass 淡出，網頁關不掉，所以有安全區時再多讓 32px；
-     min(32px, inset × 1000) 在沒有安全區（桌機、一般 Safari 分頁）時是 0。 */
+     不再多留 iOS 26 淡出的緩衝：使用者嫌狀態列下方空太多（頂欄最上緣可能被系統淡出稍微調暗）。 */
   box-sizing: content-box; height: 52px; display: flex; align-items: center; gap: 24px;
-  padding: calc(env(safe-area-inset-top, 0px) + min(32px, env(safe-area-inset-top, 0px) * 1000)) 20px 0;
+  padding: env(safe-area-inset-top, 0px) 20px 0;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .cq {
