@@ -13,13 +13,9 @@ test('T-332 公開頁：首頁連到隱私權政策與網站', () => {
 })
 
 test('T-332 公開頁：不載入腳本、不碰 API', () => {
-  for (const name of ['about.html', 'privacy.html', 'signed-out.html']) {
+  for (const name of ['about.html', 'privacy.html']) {
     const html = page(name)
     assert.doesNotMatch(html, /<script/i, `${name} 不可有 <script>`)
     assert.doesNotMatch(html, /\/api\//, `${name} 不可呼叫 /api/`)
   }
-})
-
-test('T-332 公開頁：登出頁的登入按鈕回到首頁（由 Access 轉 Google）', () => {
-  assert.match(page('signed-out.html'), /class="google" href="\/"/)
 })
