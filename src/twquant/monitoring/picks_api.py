@@ -16,6 +16,7 @@ from twquant.monitoring import snapshot as snap
 
 _SID_RE = re.compile(r"^[0-9A-Z]{4,6}$")
 STREAK_LOOKBACK = 60  # 連續上榜最多回看幾個有名單的日子（API 參數上限，非模型參數）
+RECENT_WINDOW = 6  # 「近 6 日上榜」方格與近 6 日漲幅的天數（同舊看板 HTML 的 html_window_sessions）
 
 
 def line_names() -> dict[str, str]:
@@ -43,6 +44,11 @@ def annotate(
         is_new = not previous or sid not in previous[0]
         out[sid] = (streak, is_new)
     return out
+
+
+def recent_flags(sid: str, window: Sequence[Sequence[str] | None]) -> list[bool | None]:
+    """近 N 日每天是否在名單，舊到新。`window` 由近到遠；None＝那天這條線沒有名單（模型沒打分）。"""
+    return [None if day is None else sid in day for day in reversed(window)]
 
 
 def _query(cfg: ServingConfig, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
@@ -74,7 +80,8 @@ def _change(close: float | None, prev: float | None) -> float | None:
 def picks_payload(
     cfg: ServingConfig, day: dt.date | None, names: Mapping[str, str]
 ) -> dict[str, Any]:
-    """某日（None＝最新）兩條線的名單，每檔附名稱、收盤、當日漲跌、連續上榜、新進。"""
+    """某日（None＝最新）兩條線的名單，每檔附名稱、收盤、當日漲跌、連續上榜、新進，
+    以及近 6 日上榜方格（recent）與近 6 日漲幅（chg6＝窗口第一天收盤到當天收盤）。"""
     sch = cfg.pg_schema
     dates = [
         r["date"]
@@ -107,6 +114,18 @@ def picks_payload(
         (target, sids),
     )
     close = {r["stock_id"]: (r["close"], r["prev"]) for r in px}
+    window = dates[:RECENT_WINDOW]
+    start_close: dict[str, float] = {}
+    if len(window) > 1:
+        start_close = {
+            r["stock_id"]: r["close"]
+            for r in _query(
+                cfg,
+                f'SELECT stock_id, close FROM "{sch}".prices_daily '
+                "WHERE date = %s AND stock_id = ANY(%s)",
+                (window[-1], sids),
+            )
+        }
     meta = {
         r["stock_id"]: r["name"]
         for r in _query(
@@ -120,6 +139,10 @@ def picks_payload(
         today = [r["stock_id"] for r in by_day[(target, code)]]
         previous = [[r["stock_id"] for r in by_day.get((d, code), [])] for d in dates[1:]]
         marks = annotate(today, previous)
+        recent_lists = [
+            [r["stock_id"] for r in by_day[(d, code)]] if (d, code) in by_day else None
+            for d in window
+        ]
         picks = []
         for r in by_day[(target, code)]:
             c, p = close.get(r["stock_id"], (None, None))
@@ -134,10 +157,16 @@ def picks_payload(
                     "chg": _change(c, p),
                     "streak": streak,
                     "new": is_new,
+                    "recent": recent_flags(r["stock_id"], recent_lists),
+                    "chg6": _change(c, start_close.get(r["stock_id"])),
                 }
             )
         lines.append({"code": code, "name": names.get(code, code), "picks": picks})
-    return {"date": target.isoformat(), "lines": lines}
+    return {
+        "date": target.isoformat(),
+        "window": [d.isoformat() for d in reversed(window)],
+        "lines": lines,
+    }
 
 
 def stock_pick_days(cfg: ServingConfig, sid: str) -> dict[str, Any]:

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
 import { fetchBars, fetchPickDates, fetchPicks, fetchStockPicks } from './api'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
+import { hits, pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
 
 type Tab = 'today' | 'history'
 
@@ -112,8 +112,8 @@ export default function CloudApp() {
             ))}
           </div>
           <div className="cq-head">
-            <span>名稱／代號</span>
-            <span>收盤</span>
+            <span>名稱／近 6 日上榜</span>
+            <span>收盤／6日</span>
             <span>漲跌幅</span>
           </div>
           <ul>
@@ -121,7 +121,9 @@ export default function CloudApp() {
               <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
             ))}
           </ul>
-          <p className="cq-note">每日收盤後由模型產生，非投資建議。</p>
+          <p className="cq-note">
+            方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
+          </p>
         </aside>
 
         <section className="cq-detail">{selected ? <Detail p={selected} lineNames={lineNames} /> : null}</section>
@@ -132,18 +134,32 @@ export default function CloudApp() {
 
 function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) {
   const t = trend(p.chg)
+  const h = hits(p.recent ?? [])
   return (
     <li className={on ? 'on' : ''} onClick={onClick}>
       <div className="cq-name">
-        <b>{p.name ?? p.sid}</b>
+        <b>
+          {p.name ?? p.sid}
+          <em>{p.sid}</em>
+        </b>
         <small>
-          {p.sid}
-          {p.new && <i className="cq-tag new">新</i>}
-          {p.streak > 1 && <i className="cq-tag">連{p.streak}天</i>}
+          <span className="cq-dots" title={`近 6 日上榜 ${h.on}/${h.of}`}>
+            {(p.recent ?? []).map((x, i) => (
+              <i key={i} className={x === null ? 'na' : x ? 'in' : ''} />
+            ))}
+          </span>
+          <span className="cq-hits">
+            {h.on}/{h.of}
+          </span>
+          {p.new && <i className="cq-tag new">新上榜</i>}
+          {p.streak > (p.recent?.length ?? 0) && <i className="cq-tag">連{p.streak}天</i>}
           {p.score !== null && <i className="cq-tag prob">{Math.round(p.score * 100)}%</i>}
         </small>
       </div>
-      <span className={`cq-px ${t}`}>{price(p.close)}</span>
+      <span className="cq-pxcol">
+        <span className={`cq-px ${t}`}>{price(p.close)}</span>
+        <small className={trend(p.chg6)}>{pct(p.chg6, 1)}</small>
+      </span>
       <span className={`cq-chg ${t}`}>{pct(p.chg)}</span>
     </li>
   )
@@ -195,7 +211,7 @@ function Detail({ p, lineNames }: { p: Pick; lineNames: Record<string, string> }
           </span>
         ))}
         <span className="cq-legend-note">
-          被推薦的日子：
+          推薦日
           {Object.entries(lineNames).map(([code, name]) => (
             <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }}>
               ▼{name}

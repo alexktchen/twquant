@@ -12,6 +12,7 @@ test('T-332 AC8: 漲紅跌綠與格式', () => {
   assert.equal(pct(0.0123), '+1.23%')
   assert.equal(pct(-0.05), '-5.00%')
   assert.equal(pct(null), '—')
+  assert.equal(pct(0.2205, 1), '+22.1%')
   assert.equal(price(1085), '1085')
   assert.equal(price(123.45), '123.5')
   assert.equal(price(45.678), '45.68')

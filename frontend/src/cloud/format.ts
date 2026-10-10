@@ -9,9 +9,13 @@ export type Pick = {
   chg: number | null
   streak: number
   new: boolean
+  /** 近 6 個有名單的交易日是否在這條線的名單，舊到新；null＝那天沒打分 */
+  recent: (boolean | null)[]
+  /** 近 6 日漲幅：窗口第一天收盤到當天收盤 */
+  chg6: number | null
 }
 export type Line = { code: string; name: string; picks: Pick[] }
-export type PicksDay = { date: string; lines: Line[] }
+export type PicksDay = { date: string; window?: string[]; lines: Line[] }
 export type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }
 
 /** 台股習慣：漲紅、跌綠、平盤灰。 */
@@ -20,11 +24,16 @@ export function trend(chg: number | null): 'up' | 'down' | 'flat' {
   return chg > 0 ? 'up' : 'down'
 }
 
-/** 0.0123 → "+1.23%"；null → "—"。 */
-export function pct(chg: number | null): string {
+/** 近 6 日方格的「上榜天數/有打分天數」，例如 4/6。 */
+export function hits(recent: (boolean | null)[]): { on: number; of: number } {
+  return { on: recent.filter((x) => x === true).length, of: recent.filter((x) => x !== null).length }
+}
+
+/** 0.0123 → "+1.23%"（digits 預設 2 位）；null → "—"。 */
+export function pct(chg: number | null, digits = 2): string {
   if (chg === null || !Number.isFinite(chg)) return '—'
   const v = chg * 100
-  return `${v > 0 ? '+' : ''}${v.toFixed(2)}%`
+  return `${v > 0 ? '+' : ''}${v.toFixed(digits)}%`
 }
 
 /** 價格依台股檔位習慣：≥ 1000 取 0 位、≥ 100 取 1 位、其餘 2 位。 */

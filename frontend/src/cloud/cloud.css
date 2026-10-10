@@ -54,6 +54,14 @@
 .cq-list li:hover { background: #1b1d24; }
 .cq-list li.on { background: #1f2129; box-shadow: inset 3px 0 0 var(--accent); }
 .cq-name b { display: block; font-size: 14px; font-weight: 600; }
+.cq-name b em { font-style: normal; font-weight: 400; color: var(--mute); font-size: 11.5px; margin-left: 6px; }
+.cq-dots { display: inline-flex; gap: 3px; }
+.cq-dots i { width: 9px; height: 9px; border-radius: 2px; background: #262830; }
+.cq-dots i.in { background: #3d9bff; }
+.cq-dots i.na { background: transparent; box-shadow: inset 0 0 0 1px #3a3d46; }
+.cq-hits { font-variant-numeric: tabular-nums; }
+.cq-pxcol { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+.cq-pxcol small { font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .cq-name small { color: var(--mute); font-size: 11.5px; display: flex; gap: 5px; align-items: center; margin-top: 2px; }
 .cq-tag { font-style: normal; font-size: 10.5px; padding: 0 4px; border-radius: 3px; background: #262830; color: var(--mute); }
 .cq-tag.new { background: rgba(255, 122, 0, .18); color: var(--accent); }
@@ -74,7 +82,7 @@
 .cq-quote dl { display: grid; grid-template-columns: repeat(4, auto auto); gap: 4px 10px; margin: 0; font-size: 13px; }
 .cq-quote dt { color: var(--mute); }
 .cq-quote dd { margin: 0; font-variant-numeric: tabular-nums; }
-.cq-legend { display: flex; gap: 14px; font-size: 12px; }
+.cq-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
 .cq-legend-note { color: var(--mute); margin-left: auto; display: flex; gap: 10px; }
 .cq-legend-note b { font-weight: 500; }
 .cq-chart { flex: 1; min-height: 360px; }
@@ -87,6 +95,7 @@
   .cq-date { font-size: 11.5px; }
   .cq-date-suffix { display: none; }
   .cq-body { grid-template-columns: 1fr; overflow: visible; }
-  .cq-list { border-right: 0; max-height: 46vh; }
+  .cq-list { border-right: 0; max-height: 60vh; }
+  .cq-head span { white-space: nowrap; }
   .cq-chart { min-height: 320px; }
 }
