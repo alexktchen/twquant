@@ -93,17 +93,32 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "### 網站：$url" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 部署後檢查（網站與 API 都要回 200）
+      - name: 部署後檢查（網站與 API）
         if: steps.secrets.outputs.ok == 'true'
+        env:
+          # 網站開了 Cloudflare Access（SSO）之後，部署網址會被導去登入頁。
+          # 有 Access 服務權杖（repo secrets）就帶上它照常驗證 API 內容；沒有就把「導去登入」視為受保護、部署成功。
+          ACCESS_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          ACCESS_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           url="${{ steps.deploy.outputs.url }}"
+          auth=()
+          if [ -n "$ACCESS_ID" ] && [ -n "$ACCESS_SECRET" ]; then
+            auth=(-H "CF-Access-Client-Id: $ACCESS_ID" -H "CF-Access-Client-Secret: $ACCESS_SECRET")
+          fi
           for path in / /api/picks/dates /api/picks; do
             code=""
             for i in 1 2 3 4 5 6; do
-              code=$(curl -s -o /dev/null -w "%{http_code}" "$url$path" || true)
+              code=$(curl -s -o /dev/null -w "%{http_code}" "${auth[@]}" "$url$path" || true)
               [ "$code" = "200" ] && break
+              if [ ${#auth[@]} -eq 0 ] && { [ "$code" = "302" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; }; then break; fi
               sleep 10
             done
             echo "$url$path -> $code"
-            [ "$code" = "200" ] || { echo "::error::$path 回 $code"; exit 1; }
+            if [ "$code" = "200" ]; then continue; fi
+            if [ ${#auth[@]} -eq 0 ] && { [ "$code" = "302" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; }; then
+              echo "::notice::$path 受 Cloudflare Access 保護（$code），未驗證內容；要驗證請加 CF_ACCESS_CLIENT_ID／SECRET"
+              continue
+            fi
+            echo "::error::$path 回 $code"; exit 1
           done

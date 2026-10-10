@@ -2,7 +2,7 @@
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
 import { useEffect, useMemo, useState } from 'react'
 import './cloud.css'
-import { fetchBars, fetchPickDates, fetchPicks, fetchStockPicks } from './api'
+import { fetchBars, fetchIdentity, fetchPickDates, fetchPicks, fetchStockPicks } from './api'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { hits, pct, price, trend, type Bar, type Pick, type PicksDay } from './format'
 
@@ -90,6 +90,7 @@ export default function CloudApp() {
             </span>
           )}
         </div>
+        <User />
       </header>
 
       {err && <div className="cq-err">{err}</div>}
@@ -128,6 +129,22 @@ export default function CloudApp() {
 
         <section className="cq-detail">{selected ? <Detail p={selected} lineNames={lineNames} /> : null}</section>
       </main>
+    </div>
+  )
+}
+
+/** 登入身分與登出（Cloudflare Access）。沒開 Access 時整塊不顯示。 */
+function User() {
+  const [email, setEmail] = useState<string | null>(null)
+  useEffect(() => {
+    fetchIdentity().then((id) => setEmail(id?.email ?? null))
+  }, [])
+  if (!email) return null
+  return (
+    <div className="cq-user" title={email}>
+      <span className="cq-avatar">{email.slice(0, 1).toUpperCase()}</span>
+      <span className="cq-email">{email}</span>
+      <a href="/cdn-cgi/access/logout">登出</a>
     </div>
   )
 }

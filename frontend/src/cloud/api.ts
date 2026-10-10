@@ -2,13 +2,34 @@
 import { apiUrl } from '../api'
 import type { Bar, PicksDay } from './format'
 
+// 登入（Cloudflare Access）過期時，API 會被導去登入頁：瀏覽器只回 TypeError 或拿到 HTML。
+const RELOGIN = '登入已過期或連線中斷，請重新整理頁面'
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(apiUrl(path), { headers: { accept: 'application/json' } })
+  let res: Response
+  try {
+    res = await fetch(apiUrl(path), { headers: { accept: 'application/json' } })
+  } catch {
+    throw new Error(RELOGIN)
+  }
+  if (!(res.headers.get('content-type') ?? '').includes('json')) throw new Error(RELOGIN)
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail ?? `${res.status} ${res.statusText}`)
   }
   return (await res.json()) as T
+}
+
+/** Cloudflare Access 登入身分；網站沒開 Access（或本機開發）時回 null，不丟錯。 */
+export async function fetchIdentity(): Promise<{ email: string } | null> {
+  try {
+    const res = await fetch('/cdn-cgi/access/get-identity', { headers: { accept: 'application/json' } })
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null
+    const body = (await res.json()) as { email?: unknown }
+    return typeof body.email === 'string' ? { email: body.email } : null
+  } catch {
+    return null
+  }
 }
 
 export const fetchPicks = (date?: string) =>

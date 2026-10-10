@@ -12,7 +12,7 @@ export function sql(env: Env) {
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=60' },
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, max-age=60' },
   })
 
 export const fail = (status: number, detail: string) => json({ detail }, status)

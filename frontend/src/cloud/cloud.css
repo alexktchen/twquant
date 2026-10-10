@@ -36,6 +36,9 @@
 .cq-date button { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); }
 .cq-date button:disabled { opacity: .35; cursor: default; }
 
+.cq-user { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--mute); margin-left: 14px; }
+.cq-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+.cq-user a { color: var(--text); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
 .cq-err { margin: 12px 20px 0; padding: 8px 12px; border-radius: 6px; background: #3a1c22; color: #ffb4bd; font-size: 13px; }
 
 .cq-body { flex: 1; display: grid; grid-template-columns: 360px 1fr; min-height: 0; overflow: hidden; }
@@ -94,6 +97,8 @@
   .cq-tabs button { padding: 0 8px; }
   .cq-date { font-size: 11.5px; }
   .cq-date-suffix { display: none; }
+  .cq-email { display: none; }
+  .cq-user { margin-left: 6px; gap: 6px; }
   .cq-body { grid-template-columns: 1fr; overflow: visible; }
   .cq-list { border-right: 0; max-height: 60vh; }
   .cq-head span { white-space: nowrap; }
