@@ -9,7 +9,7 @@ import {
   createChart,
   createSeriesMarkers,
 } from 'lightweight-charts'
-import { pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from './format'
+import { DEFAULT_VISIBLE_BARS, latestRange, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from './format'
 
 const UP = '#F6465D'
 const DOWN = '#0ECB81'
@@ -19,6 +19,9 @@ const MA = [
   { n: 60, color: '#3D9BFF' },
 ]
 const LINE_COLOR: Record<string, string> = { CORE: '#FF7A00', QUIET: '#3D9BFF' }
+
+// 使用者縮放後看幾根 K 棒：換股票時沿用。只放記憶體（隱私權政策承諾不在瀏覽器存資料），重新整理就回預設
+let keptBars = DEFAULT_VISIBLE_BARS
 
 export function KChart({
   bars,
@@ -96,14 +99,26 @@ export function KChart({
       setTip((t) => (t && t.i === i && t.left === left ? t : { i, left }))
     })
     // 先看最近約半年（120 根）；要等版面算好才設，否則會被自動縮放蓋掉
-    const frame = requestAnimationFrame(() =>
-      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - 120), to: bars.length + 1 }),
-    )
+    const frame = requestAnimationFrame(() => chart.timeScale().setVisibleLogicalRange(latestRange(bars.length, keptBars)))
+    // 只有使用者自己縮放（觸控、滑鼠、滾輪）後才記住根數；開圖時程式設的範圍不算
+    let touched = false
+    const mark = () => {
+      touched = true
+    }
+    box.addEventListener('pointerdown', mark)
+    box.addEventListener('touchstart', mark, { passive: true })
+    box.addEventListener('wheel', mark, { passive: true })
+    chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+      if (touched && r) keptBars = Math.max(5, Math.round(r.to - r.from))
+    })
     const ro = new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight }))
     ro.observe(box)
     return () => {
       cancelAnimationFrame(frame)
       ro.disconnect()
+      box.removeEventListener('pointerdown', mark)
+      box.removeEventListener('touchstart', mark)
+      box.removeEventListener('wheel', mark)
       setTip(null)
       chart.remove()
     }
