@@ -24,12 +24,18 @@ export function KChart({
   bars,
   pickDays,
   lineNames,
+  onHover,
 }: {
   bars: Bar[]
   pickDays: Record<string, string[]>
   lineNames: Record<string, string>
+  /** 長按（觸控）或滑鼠移到 K 棒上時回報第幾根；離開時回報 null */
+  onHover?: (index: number | null) => void
 }) {
   const el = useRef<HTMLDivElement>(null)
+  // 回呼放 ref：換函式不必重畫整張圖
+  const hoverRef = useRef(onHover)
+  hoverRef.current = onHover
   useEffect(() => {
     const box = el.current
     if (!box || bars.length === 0) return
@@ -43,8 +49,13 @@ export function KChart({
         panes: { separatorColor: '#23252D' },
       },
       grid: { vertLines: { color: '#1C1E25' }, horzLines: { color: '#1C1E25' } },
-      rightPriceScale: { borderColor: '#23252D' },
-      timeScale: { borderColor: '#23252D', rightOffset: 6 },
+      // 價格軸一律自動貼合；手機上上下拖動交給頁面捲動，否則一拖（或雙指縮放時手指上下動）
+      // 價格軸就被平移、K 棒跑出畫面且不會回來
+      rightPriceScale: { borderColor: '#23252D', autoScale: true },
+      handleScroll: { vertTouchDrag: false },
+      handleScale: { axisPressedMouseMove: { time: true, price: false } },
+      // 不能拖出資料範圍外的空白
+      timeScale: { borderColor: '#23252D', rightOffset: 2, fixLeftEdge: true, fixRightEdge: true },
       crosshair: { mode: CrosshairMode.Normal },
     })
     const candle = chart.addSeries(CandlestickSeries, {
@@ -81,15 +92,21 @@ export function KChart({
         color: LINE_COLOR[m.line] ?? '#FF7A00',
       })),
     )
+    // 長按（觸控會進入十字線追蹤模式）或滑鼠移動：回報第幾根 K 棒，報價列跟著換成那一根
+    chart.subscribeCrosshairMove((param) => {
+      const i = param.point && param.logical !== undefined ? Math.round(param.logical) : null
+      hoverRef.current?.(i !== null && i >= 0 && i < bars.length ? i : null)
+    })
     // 先看最近約半年（120 根）；要等版面算好才設，否則會被自動縮放蓋掉
     const frame = requestAnimationFrame(() =>
-      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - 120), to: bars.length + 5 }),
+      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - 120), to: bars.length + 1 }),
     )
     const ro = new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight }))
     ro.observe(box)
     return () => {
       cancelAnimationFrame(frame)
       ro.disconnect()
+      hoverRef.current?.(null)
       chart.remove()
     }
   }, [bars, pickDays, lineNames])

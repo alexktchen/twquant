@@ -92,9 +92,14 @@
 .cq-quote h1 small { color: var(--mute); font-size: 17px; font-weight: 400; margin-right: 2px; }
 .cq-big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cq-big span { font-size: 18px; margin-left: 8px; }
-.cq-quote dl { display: grid; grid-template-columns: repeat(4, auto auto); gap: 4px 10px; margin: 0; font-size: 15px; }
-.cq-quote dt { color: var(--mute); }
+.cq-quote dl { display: grid; grid-template-columns: repeat(4, auto auto); gap: 4px 8px; margin: 0; font-size: 15px; }
+.cq-quote dt { color: var(--mute); white-space: nowrap; }
+.cq-quote dd { white-space: nowrap; }
 .cq-quote dd { margin: 0; font-variant-numeric: tabular-nums; }
+/* 長按 K 線時報價列換成那一根，底色提示「正在看別天」 */
+.cq-ohlc { padding: 4px 8px; margin: 0 -8px; border-radius: 6px; }
+.cq-ohlc.on { background: #1f2129; }
+.cq-ohlc-date { grid-column: span 4; color: var(--mute); text-align: right; }
 .cq-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; }
 .cq-legend-note { color: var(--mute); margin-left: auto; display: flex; gap: 10px; }
 .cq-legend-note b { font-weight: 500; }

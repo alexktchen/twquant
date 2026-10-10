@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { pct, pickMarkers, price, sma, trend, type Bar } from '../src/cloud/format.ts'
+import { pct, pickMarkers, price, quoteBar, sma, trend, type Bar } from '../src/cloud/format.ts'
 
 const bar = (date: string, close: number): Bar => ({ date, open: close, high: close, low: close, close, volume: 1 })
 
@@ -34,4 +34,16 @@ test('T-332 AC8: 推薦標記只標在 K 線範圍內、依日期排序', () => 
     { time: '2026-10-07', text: '大盤精選', line: 'CORE' },
     { time: '2026-10-08', text: '潛伏飆股', line: 'QUIET' },
   ])
+})
+
+test('T-332 報價列：歷史名單顯示名單那天的 K 棒，長按時換成那一根，漲跌對前一根收盤', () => {
+  const bars = [bar('2026-09-23', 100), bar('2026-09-24', 110), bar('2026-10-08', 121)]
+  assert.equal(quoteBar(bars, '2026-09-24', null)?.bar.date, '2026-09-24')
+  assert.equal(quoteBar(bars, '2026-09-24', null)?.chg, 110 / 100 - 1)
+  assert.equal(quoteBar(bars, undefined, null)?.bar.date, '2026-10-08')
+  assert.equal(quoteBar(bars, '2026-01-01', null)?.bar.date, '2026-10-08', '找不到日期就用最後一根')
+  assert.equal(quoteBar(bars, '2026-09-24', 0)?.bar.date, '2026-09-23', '長按優先')
+  assert.equal(quoteBar(bars, '2026-09-24', 0)?.chg, null, '第一根沒有前一根')
+  assert.equal(quoteBar(bars, '2026-09-24', 9)?.bar.date, '2026-09-24', '超出範圍的長按不算')
+  assert.equal(quoteBar([], '2026-09-24', null), null)
 })
