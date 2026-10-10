@@ -1,7 +1,7 @@
 // 登入狀態判斷與沒登入時的預覽資料（純函式，方便測試）。
 // 資料 API 受 Cloudflare Access 保護：沒登入或登入過期時會被導去登入頁。
 // 前端用 redirect: 'manual' 攔下這個導向，畫面改成模糊的假名單＋登入按鈕。
-import type { Pick } from './format'
+import type { Pick, PicksDay } from './format'
 
 export const LOGIN_URL = '/api/login'
 
@@ -28,14 +28,21 @@ function rng(seed: number): () => number {
   }
 }
 
-/** 沒登入時模糊背景裡的假名單：代號一律 0000、名稱是說明文字，和真實股票無關。 */
-export function guestPicks(n = 10): Pick[] {
-  const r = rng(20261010)
+/** 把字串變成固定種子：同一天同一條線永遠是同一組假資料，切換時畫面會跟著變。 */
+function seedOf(text: string): number {
+  let h = 2166136261
+  for (const ch of text) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
+  return h % 2147483648
+}
+
+/** 沒登入時模糊的假名單：代號 0001 起（台股沒有這些代號）、名稱是說明文字，和真實股票無關。 */
+export function guestPicks(n = 15, seed = 20261010): Pick[] {
+  const r = rng(seed)
   return Array.from({ length: n }, (_, i) => {
     const recent = Array.from({ length: 6 }, () => r() > 0.4)
     return {
       rank: i + 1,
-      sid: '0000',
+      sid: String(i + 1).padStart(4, '0'),
       name: GUEST_NAMES[i % GUEST_NAMES.length],
       score: null,
       close: Math.round((20 + r() * 480) * 10) / 10,
@@ -46,6 +53,16 @@ export function guestPicks(n = 10): Pick[] {
       chg6: Math.round((r() * 0.3 - 0.08) * 1000) / 1000,
     }
   })
+}
+
+export const GUEST_LINES = [
+  { code: 'CORE', name: '大盤精選' },
+  { code: 'QUIET', name: '潛伏飆股' },
+]
+
+/** 沒登入時某一天的假名單（兩條線各 15 檔）；日期是公開的真實交易日，股票全是假的。 */
+export function guestDay(date: string): PicksDay {
+  return { date, lines: GUEST_LINES.map((l) => ({ ...l, picks: guestPicks(15, seedOf(`${date}:${l.code}`)) })) }
 }
 
 export type GuestCandle = { o: number; h: number; l: number; c: number }
