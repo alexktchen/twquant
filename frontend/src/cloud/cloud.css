@@ -25,7 +25,8 @@
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .cq-brand { font-weight: 700; font-size: 17px; letter-spacing: .3px; }
-.cq-logo { background: var(--accent); color: #fff; border-radius: 6px; padding: 1px 5px; margin-right: 3px; }
+.cq-brand { display: flex; align-items: center; gap: 8px; }
+.cq-logo { display: block; width: 26px; height: 26px; border-radius: 7px; }
 .cq-tabs { display: flex; gap: 4px; height: 100%; }
 .cq-tabs button { white-space: nowrap; padding: 0 14px; color: var(--mute); border-bottom: 2px solid transparent; }
 .cq-tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }

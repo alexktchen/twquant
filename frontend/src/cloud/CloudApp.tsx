@@ -50,7 +50,8 @@ export default function CloudApp() {
     <div className="cq">
       <header className="cq-top">
         <div className="cq-brand">
-          <span className="cq-logo">tw</span>quant
+          <img className="cq-logo" src="/icon.svg" alt="" width="26" height="26" />
+          twquant
         </div>
         <nav className="cq-tabs">
           <button className={tab === 'today' ? 'on' : ''} onClick={() => setTab('today')}>
