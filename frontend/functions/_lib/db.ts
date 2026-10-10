@@ -12,18 +12,23 @@ export function sql(env: Env) {
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, max-age=60' },
+    // no-store：登出後瀏覽器不能再從快取拿到上一個人的名單
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store' },
   })
 
 export const fail = (status: number, detail: string) => json({ detail }, status)
 
-/** 包住每個端點：資料庫錯誤一律 503，不外洩堆疊。 */
-export async function guarded(env: Env, fn: (db: ReturnType<typeof sql>) => Promise<Response>) {
+/** 包住每個端點：資料庫錯誤一律 503，不外洩堆疊。公開端點傳 publicDetail，連錯誤訊息都不回（可能含主機名）。 */
+export async function guarded(
+  env: Env,
+  fn: (db: ReturnType<typeof sql>) => Promise<Response>,
+  publicDetail?: string,
+) {
   const db = sql(env)
   try {
     return await fn(db)
   } catch (e) {
-    return fail(503, e instanceof Error ? e.message : String(e))
+    return fail(503, publicDetail ?? (e instanceof Error ? e.message : String(e)))
   } finally {
     await db.end({ timeout: 2 })
   }

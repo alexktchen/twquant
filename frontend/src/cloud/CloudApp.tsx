@@ -20,7 +20,11 @@ export default function CloudApp() {
   const [guest, setGuest] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
   // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 版面照常可操作，只有股票列與 K 線換成模糊的假資料；其他錯誤照常顯示
-  const onFail = (e: Error) => (e instanceof LoginRequired ? setGuest(true) : setErr(e.message))
+  const onFail = (e: Error) => {
+    if (!(e instanceof LoginRequired)) return setErr(e.message)
+    setGuest(true)
+    setDay(null) // 登入過期：先前的真名單不留在狀態裡
+  }
 
   useEffect(() => {
     // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可
@@ -41,31 +45,49 @@ export default function CloudApp() {
   // 沒登入時「今日」用公開日期清單的最新一天；登入時這個值固定 undefined，不會多抓一次
   const guestToday = guest ? dates[0] : undefined
 
+  // 歷史名單：日期清單晚到時（沒登入要多一趟），一到就選最新一天，否則選單會停在空值
   useEffect(() => {
+    if (tab === 'history' && !date && dates[0]) setDate(dates[0])
+  }, [tab, date, dates])
+
+  useEffect(() => {
+    if (guest) return
+    // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
+    let stale = false
     const want = tab === 'today' ? undefined : date
-    const apply = (d: PicksDay) => {
-      setDay(d)
-      const first = d.lines.find((l) => l.code === line) ?? d.lines[0]
-      if (first) {
-        setLine(first.code)
-        if (!first.picks.some((p) => p.sid === sid)) setSid(first.picks[0]?.sid ?? '')
-      }
-    }
-    if (guest) {
-      apply(guestDay(want ?? guestToday ?? ''))
-      return
-    }
     setErr('')
-    fetchPicks(want).then(apply).catch(onFail)
+    fetchPicks(want)
+      .then((d) => {
+        if (stale) return
+        setDay(d)
+        const first = d.lines.find((l) => l.code === line) ?? d.lines[0]
+        if (first) {
+          setLine(first.code)
+          if (!first.picks.some((p) => p.sid === sid)) setSid(first.picks[0]?.sid ?? '')
+        }
+      })
+      .catch((e: Error) => {
+        if (!stale) onFail(e)
+      })
+    return () => {
+      stale = true
+    }
     // line/sid 只用來保留使用者目前的選擇，不該觸發重抓
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, date, guest, guestToday])
+  }, [tab, date, guest])
+
+  // 沒登入時畫面只讀假資料：就算有真名單寫進 day，也不會出現在沒登入的畫面
+  const guestView = useMemo(
+    () => (guest ? guestDay((tab === 'today' ? undefined : date) ?? guestToday ?? '') : null),
+    [guest, tab, date, guestToday],
+  )
+  const view = guest ? guestView : day
 
   const lineNames = useMemo(
-    () => Object.fromEntries((day?.lines ?? []).map((l) => [l.code, l.name])),
-    [day],
+    () => Object.fromEntries((view?.lines ?? []).map((l) => [l.code, l.name])),
+    [view],
   )
-  const current = day?.lines.find((l) => l.code === line)
+  const current = view?.lines.find((l) => l.code === line) ?? view?.lines[0]
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   const idx = date ? dates.indexOf(date) : -1
 
@@ -109,7 +131,7 @@ export default function CloudApp() {
             </>
           ) : (
             <span>
-              {day?.date}
+              {view?.date}
               <span className="cq-date-suffix"> 收盤後</span>
             </span>
           )}
@@ -128,12 +150,12 @@ export default function CloudApp() {
       {err && <div className="cq-err">{err}</div>}
 
       <main className="cq-body">
-        <aside className="cq-list">
+        <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
           <div className="cq-seg">
-            {day?.lines.map((l) => (
+            {view?.lines.map((l) => (
               <button
                 key={l.code}
-                className={l.code === line ? 'on' : ''}
+                className={l.code === current?.code ? 'on' : ''}
                 onClick={() => {
                   setLine(l.code)
                   setSid(l.picks[0]?.sid ?? '')

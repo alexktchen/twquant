@@ -107,7 +107,7 @@ jobs:
           if [ -n "$ACCESS_ID" ] && [ -n "$ACCESS_SECRET" ]; then
             auth=(-H "CF-Access-Client-Id: $ACCESS_ID" -H "CF-Access-Client-Secret: $ACCESS_SECRET")
           fi
-          for path in / /pub/dates /api/picks/dates /api/picks; do
+          for path in / /api/picks/dates /api/picks; do
             code=""
             for i in 1 2 3 4 5 6; do
               code=$(curl -s -o /dev/null -w "%{http_code}" "${auth[@]}" "$url$path" || true)
@@ -126,3 +126,11 @@ jobs:
             fi
             echo "::error::$path 回 $code"; exit 1
           done
+          # 公開的交易日清單：要真的回日期 JSON（Pages 對不存在的路徑會回首頁 HTML，一樣是 200）
+          ok=""
+          for i in 1 2 3 4 5 6; do
+            if curl -s "$url/pub/dates" | grep -q '"dates"'; then ok=1; break; fi
+            sleep 10
+          done
+          if [ -z "$ok" ]; then echo "::error::/pub/dates 沒回日期 JSON（沒登入的人會看不到歷史日期）"; exit 1; fi
+          echo "$url/pub/dates -> dates JSON"

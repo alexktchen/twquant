@@ -9,7 +9,7 @@ const OFFLINE = '連線中斷，請重新整理頁面'
 async function get<T>(path: string): Promise<T> {
   let res: Response
   try {
-    res = await fetch(apiUrl(path), { headers: { accept: 'application/json' }, redirect: 'manual' })
+    res = await fetch(apiUrl(path), { headers: { accept: 'application/json' }, redirect: 'manual', cache: 'no-store' })
   } catch {
     throw new Error(OFFLINE)
   }
