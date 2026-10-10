@@ -48,7 +48,7 @@
 
 .cq-user { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--mute); margin-left: 14px; }
 .cq-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
-.cq-user a { color: var(--text); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+.cq-user a { white-space: nowrap; color: var(--text); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
 .cq-err { margin: 12px 20px 0; padding: 8px 12px; border-radius: 6px; background: #3a1c22; color: #ffb4bd; font-size: 13px; }
 
 .cq-body { flex: 1; display: grid; grid-template-columns: 360px 1fr; min-height: 0; overflow: hidden; }
@@ -105,12 +105,22 @@
   /* 只改左右：padding 簡寫會把上面安全區的 padding-top 歸零（PR #135 就是這樣失效） */
   /* 手機整頁捲動：頂欄釘在上面，捲動時清單才不會跑到時鐘底下 */
   .cq-top { gap: 10px; padding-left: 12px; padding-right: 12px; position: sticky; top: 0; z-index: 10; }
+  /* 品牌、分頁、日期、帳號排一列要約 470px，手機放不下：改兩列，上列品牌＋帳號，下列分頁＋日期 */
+  .cq-top {
+    display: grid; grid-template-columns: 1fr auto; grid-template-rows: 44px 40px;
+    grid-template-areas: "brand user" "tabs date"; height: auto; row-gap: 0;
+  }
+  .cq-brand { grid-area: brand; }
+  .cq-user { grid-area: user; }
+  .cq-tabs { grid-area: tabs; align-self: stretch; height: auto; }
+  .cq-tabs button:first-child { padding-left: 0; }
+  .cq-date { grid-area: date; margin-left: 0; }
   .cq-brand { font-size: 15px; }
   .cq-tabs button { padding: 0 8px; }
   .cq-date { font-size: 11.5px; }
   .cq-date-suffix { display: none; }
   .cq-email { display: none; }
-  .cq-user { margin-left: 6px; gap: 6px; }
+  .cq-user { margin-left: 0; gap: 8px; }
   .cq-body { grid-template-columns: 1fr; overflow: visible; }
   .cq-list { border-right: 0; max-height: 60vh; }
   .cq-head span { white-space: nowrap; }
