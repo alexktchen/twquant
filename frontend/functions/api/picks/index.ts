@@ -1,6 +1,6 @@
 // GET /api/picks?date=YYYY-MM-DD（空＝最新）：兩條線的名單，附收盤、當日漲跌、連續上榜、新進。
 import { fail, guarded, json, type Env } from '../../_lib/db'
-import { DATE_RE, LINES, STREAK_LOOKBACK, annotate, change, lineOrder, type PickRow } from '../../_lib/picks'
+import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, lineOrder, recentFlags, type PickRow } from '../../_lib/picks'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const want = new URL(request.url).searchParams.get('date')
@@ -25,10 +25,22 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const meta = await db<{ stock_id: string; name: string | null }[]>`
       SELECT stock_id, name FROM serving.stock_meta WHERE stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
     const close = new Map(px.map((r) => [r.stock_id, r]))
+    const window = dates.slice(0, RECENT_WINDOW)
+    const startClose = new Map<string, number | null>()
+    if (window.length > 1) {
+      const start = await db<{ stock_id: string; close: number | null }[]>`
+        SELECT stock_id, close FROM serving.prices_daily
+        WHERE date = ${window[window.length - 1]}::date AND stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
+      for (const r of start) startClose.set(r.stock_id, r.close)
+    }
     const names = new Map(meta.map((r) => [r.stock_id, r.name]))
     const byDay = (d: string, line: string) => rows.filter((r) => r.date === d && r.line === line)
     const lines = lineOrder(todayRows.map((r) => r.line)).map((code) => {
       const today = byDay(target, code)
+      const recentLists = window.map((d) => {
+        const day = byDay(d, code)
+        return day.length ? day.map((r) => r.stock_id) : null
+      })
       const marks = annotate(
         today.map((r) => r.stock_id),
         dates.slice(1).map((d) => byDay(d, code).map((r) => r.stock_id)),
@@ -49,10 +61,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
             chg: change(c, p?.prev ?? null),
             streak,
             new: isNew,
+            recent: recentFlags(r.stock_id, recentLists),
+            chg6: change(c, startClose.get(r.stock_id) ?? null),
           }
         }),
       }
     })
-    return json({ date: target, lines })
+    return json({ date: target, window: [...window].reverse(), lines })
   })
 }

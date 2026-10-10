@@ -11,7 +11,7 @@ import pytest
 from twquant.config import ServingConfig
 from twquant.conventions import TZ
 from twquant.errors import DataError
-from twquant.monitoring.picks_api import annotate
+from twquant.monitoring.picks_api import annotate, recent_flags
 
 _SCHEMA = "serving_test_picks_api"
 _D1, _D2, _D3 = dt.date(2026, 10, 6), dt.date(2026, 10, 7), dt.date(2026, 10, 8)
@@ -22,6 +22,13 @@ def test_t332_ac5_streak_and_new() -> None:
     marks = annotate(["A", "B", "C"], [["A", "B"], ["A", "X"], ["A"]])
     assert marks == {"A": (4, False), "B": (2, False), "C": (1, True)}
     assert annotate(["A"], []) == {"A": (1, True)}  # 第一天：全部是新進
+
+
+def test_t332_ac10_recent_flags_oldest_first_and_unscored_days() -> None:
+    """近 N 日方格：舊到新；那天這條線沒名單（模型沒打分）是 None，不當成「不在榜」。"""
+    window = [["A"], None, ["A", "B"]]  # 由近到遠
+    assert recent_flags("A", window) == [True, None, True]
+    assert recent_flags("B", window) == [True, None, False]
 
 
 def _cfg_or_skip() -> tuple[ServingConfig, Any]:
@@ -92,12 +99,18 @@ def test_t332_ac6_picks_payload_reads_pg() -> None:
             False,
         )
         assert top["chg"] == pytest.approx(99.0 / 110.0 - 1.0)
+        assert out["window"] == ["2026-10-06", "2026-10-07", "2026-10-08"]
+        assert top["recent"] == [True, True, True]
+        assert top["chg6"] == pytest.approx(99.0 / 100.0 - 1.0)  # 窗口第一天 10-06 收盤 100
+        core_top = out["lines"][0]["picks"][0]
+        assert core_top["recent"] == [None, None, True]  # CORE 只有 10-08 有名單
         assert (quiet[1]["sid"], quiet[1]["streak"], quiet[1]["new"], quiet[1]["close"]) == (
             "2317",
             1,
             True,
             None,  # 沒有行情就是 None，不補 0
         )
+        assert quiet[1]["recent"] == [False, False, True] and quiet[1]["chg6"] is None
         older = picks_payload(cfg, _D2, names)
         assert older["date"] == "2026-10-07" and older["lines"][0]["picks"][0]["streak"] == 2
         with pytest.raises(DataError, match="沒有名單"):

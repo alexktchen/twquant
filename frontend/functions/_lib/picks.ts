@@ -8,6 +8,8 @@ export const LINES: { code: string; name: string }[] = [
 ]
 /** 連續上榜最多回看幾個有名單的日子（同 picks_api.STREAK_LOOKBACK）。 */
 export const STREAK_LOOKBACK = 60
+/** 「近 6 日上榜」方格與近 6 日漲幅的天數（同 picks_api.RECENT_WINDOW）。 */
+export const RECENT_WINDOW = 6
 
 export const SID_RE = /^[0-9A-Z]{4,6}$/
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -24,6 +26,11 @@ export function annotate(today: string[], previous: string[][]): Record<string, 
     out[sid] = [streak, previous.length === 0 || !previous[0].includes(sid)]
   }
   return out
+}
+
+/** 近 N 日每天是否在名單，舊到新。window 由近到遠；null＝那天這條線沒有名單（模型沒打分）。 */
+export function recentFlags(sid: string, window: (string[] | null)[]): (boolean | null)[] {
+  return [...window].reverse().map((day) => (day === null ? null : day.includes(sid)))
 }
 
 /** 當日漲跌；缺任一價或前收 ≤ 0 → null（不補 0）。 */
