@@ -24,6 +24,9 @@
   height: 52px; display: flex; align-items: center; gap: 24px; padding: 0 20px;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
+/* 加到 iPhone 主畫面後是全螢幕（black-translucent），內容會畫到狀態列底下：用安全區把頂欄往下推 */
+.cq-top { box-sizing: content-box; padding-top: env(safe-area-inset-top, 0px); }
+.cq { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .cq-brand { font-weight: 700; font-size: 17px; letter-spacing: .3px; }
 .cq-brand { display: flex; align-items: center; gap: 8px; }
 .cq-logo { display: block; width: 26px; height: 26px; border-radius: 7px; }
