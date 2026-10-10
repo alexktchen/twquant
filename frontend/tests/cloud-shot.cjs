@@ -5,6 +5,13 @@ const { chromium } = require('playwright')
   const [url, out, w = '1440', h = '900'] = process.argv.slice(2)
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: Number(w), height: Number(h) } })
+  // 網站在 Cloudflare Access 後面時，用服務權杖通過登入（環境變數 CF_ACCESS_CLIENT_ID / SECRET）
+  if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
+    await page.setExtraHTTPHeaders({
+      'CF-Access-Client-Id': process.env.CF_ACCESS_CLIENT_ID,
+      'CF-Access-Client-Secret': process.env.CF_ACCESS_CLIENT_SECRET,
+    })
+  }
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
