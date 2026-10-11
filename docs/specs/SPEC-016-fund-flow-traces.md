@@ -10,7 +10,8 @@
 - D-141 八輪結論：不在開發期資料上再對 E0 加工。本線加的是**新資料**（ETF 申贖、持股、換股公告），不是舊特徵再組合。
 - D-109 第二保留期（2026-09-09 起）**一律不碰**；所有軌跡只算到 2026-08-31。
 - D-134 改制：部署／採用門檻由使用者訂；統計量照報、不當通過條件。
-- 資料盤點前置：[docs/reports/event-signal-data-inventory-2026-09-28.md](../reports/event-signal-data-inventory-2026-09-28.md)。
+- 資料盤點前置：[docs/reports/event-signal-data-inventory-2026-09-28.md](../reports/event-signal-data-inventory-2026-09-28.md)；
+  本線來源盤點（T-334）：[docs/reports/fund-flow-data-inventory-2026-10-11.md](../reports/fund-flow-data-inventory-2026-10-11.md)，§2 的修正以它為準。
 
 ## 0. 給實作者的一頁（先讀這裡）
 
@@ -73,9 +74,9 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 |---|---|---|
 | date | date | 基準交易日 |
 | etf_id | str | |
-| units_outstanding | int64 | 已發行受益權單位數 |
-| units_delta | int64 | 與前一交易日差（可負；**由來源欄位直接取，不自算**；來源沒有就 null） |
-| nav | float64 | 每單位淨值 TWD |
+| units | int64 | 已發行單位數（FinMind `NumberOfSharesIssued`，2005 起；T-334） |
+| units_delta | int64, nullable | 同一 ETF 相鄰兩個交易日相減（**自算**，T-334 修正）；前一日缺值或分割／反分割日 → null |
+| nav | float64, nullable | 每單位淨值 TWD；歷史沒有來源 → null，MIS 從上線日起每日存 |
 | available_at | TW_DT | §2.4 |
 
 `etf_holdings_daily`（每日持股，來源 PCF）
@@ -93,13 +94,13 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 
 | 欄 | 型別 | 說明 |
 |---|---|---|
-| announce_date | date | 公告日 |
-| effective_date | date | 生效日（收盤後換股的那一天） |
+| announce_date | date, nullable | 公告日；由持股推導時拿不到 → null（T-334） |
+| effective_date | date | 生效日＝新持股清單第一個基準日 |
 | index_id | str | |
 | stock_id | str | |
 | action | str | `add` / `remove` |
-| source_url | str | 公告來源 |
-| available_at | TW_DT | announce_date 18:00 |
+| source | str | `holdings_diff`（由 `etf_holdings_daily` 推導）或公告來源 |
+| available_at | TW_DT | 推導來源的持股 `available_at` |
 
 ### 2.3 來源（T-334 唯讀盤點先確認，報告寫進 `docs/reports/fund-flow-data-inventory-<日期>.md`）
 
@@ -114,10 +115,10 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 
 ### 2.4 可用時點（`available_at`）與防前視
 
-- `etf_units_daily`：揭露專區當日盤後公布 → `date` 18:00。盤點若發現是盤中即時值，一律取**收盤後最後一筆**並記 18:00；不得用盤中值。
+- `etf_units_daily`：與外資持股統計同表，`date` 21:00（晚於 20:00 截點 → 以 T-1 進訊號，同借券、融資）。
 - `etf_holdings_daily`：PCF 通常在基準日**前一晚或當天開盤前**公布「當日適用」的清單，內容是**前一交易日**持股。
   故 `date`＝持股所屬交易日，`available_at`＝公布時點；盤點未確認前一律保守記 `date` 的**下一個交易日 18:00**。
-- `index_rebalance_events`：`announce_date` 18:00。公告在盤中發布的也記 18:00（保守）。
+- `index_rebalance_events`：由持股推導，`available_at` 沿用推導來源那份持股的 `available_at`。
 - 三張表與日頻表 join 一律 backward asof on `available_at`（SPEC-000）。
 - 每個事件的「事件日 T」＝訊號截點 20:00 當天能看到該事件的第一個交易日；進場一律 T+1 開盤。
 
@@ -128,7 +129,7 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 
 | 量 | 定義 | 單位 |
 |---|---|---|
-| `etf_flow_twd_i(t)` | Σ_e u_e(t) × nav_e(t) × w_{e,i}(t−1) | TWD；機械性需求 |
+| `etf_flow_twd_i(t)` | Σ_e u_e(t) × px_e(t) × w_{e,i}(t−1)；px＝nav，nav 為 null 時用 ETF 收盤價（T-334） | TWD；機械性需求 |
 | `etf_flow_shares_i(t)` | `etf_flow_twd_i(t)` / `close_i(t)` | 股 |
 | `trust_disc_i(t)` | `trust_net_i(t)` − `etf_flow_shares_i(t)` | 股；裁量近似 |
 
@@ -152,8 +153,8 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 
 | 代號 | 名稱 | 定義 | 需要的表 |
 |---|---|---|---|
-| E1 | 納入公告 | `index_rebalance_events.action = add`，T＝announce_date；另記 `effective_date` 供分段 | rebalance |
-| E2 | 剔除公告 | 同上，`action = remove` | rebalance |
+| E1 | 指數納入 | 指數型 ETF（`is_active=false`）`index_rebalance_events.action = add`，T＝生效日的資料可用日；T−20…T 只描述（公告日不明，不可交易） | rebalance |
+| E2 | 指數剔除 | 同上，`action = remove` | rebalance |
 | E3 | 申購潮 | `chip.etf_flow_pressure_5d` 在 T 的橫斷面 ≥ 第 95 百分位，且 > 0 | units + holdings |
 | E4 | 贖回潮 | 同上 ≤ 第 5 百分位，且 < 0 | units + holdings |
 | E5 | 裁量連買起點 | `chip.trust_disc_streak` 在 T 恰好 = 3，且 T−3 前連續 ≥ 5 日非買超 | institutional（＋PCF 若有） |
@@ -176,7 +177,8 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 - 報告（每個事件型態 × 每個分層）：
   - 事件數、股票數、逐年事件數、兩市場占比、丟棄數與原因。
   - +1／+5／+10／+20／+40／+60 的平均與中位數超額累積報酬（對配對組）、命中率（超額 > 0 的比例）。
-  - E1／E2 另分「公告→生效」與「生效→+60」兩段。
+  - E1／E2 另分「生效前 T−20…T（只描述）」與「生效後 T+1…T+60」兩段。
+  - E3／E4 的單位數變動與實際買賣可能差 1～2 日（T-334 §五）：0、1、2 日三種對齊並列，不得事後挑。
   - **每持有日**超額報酬（D-153 §六：不得用持有天數灌水）。
   - 扣成本版本：進場 T+1 開盤、出場 T+k 開盤，成本沿 `configs/costs.yaml`（不另寫費率）。
   - 月區塊 bootstrap 的 t 值與 95% 信賴區間（seed 42、次數在 config），**照報、不當通過條件**。
@@ -211,8 +213,8 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 |---|---|---|---|
 | T-334 | C | 唯讀盤點：§2.3 四種來源；輸出報告；**不寫 PG** | AC-1：報告對每個來源回答「有歷史／只有當日」、欄位、更新時點、URL；AC-2：腳本不含任何寫入呼叫（IO 邊界測試涵蓋 `scripts/probe/`） |
 | T-335 | B | `configs/fund_flow.yaml` ＋ `FundFlowConfig`；`etf_meta`、`etf_units_daily` schema、擷取與直寫 PG；接進每日 pipeline | AC-3：未知欄位／負百分位／窗口 ≤ 0 載入即失敗並指出欄位；AC-4：fixture 解析逐欄比對（股、TWD、available_at 18:00、tz-aware）；AC-5：重跑同日冪等，列數不變；AC-6：來源缺當日 → raise，不寫部分列 |
-| T-336 | B | `etf_holdings_daily` 擷取與直寫 PG（每家投信一個 parser，fixture 錄自真實頁面） | AC-7：`date` 為持股基準日而非公布日，`available_at` 依 §2.4；AC-8：權重和在 [0.98, 1.02] 之外 → raise；AC-9：同 AC-5／AC-6 |
-| T-337 | B | `index_rebalance_events` 歷史回抓＋每日擷取 | AC-10：公告日 ≤ 生效日、action 只有 add/remove、同鍵不重複；AC-11：fixture 含至少一次 0050 與一次高股息 ETF 換股 |
+| T-336 | B | `etf_holdings_daily` 擷取與直寫 PG（每家投信一個 parser，fixture 錄自真實頁面） | AC-7：`date` 為持股基準日而非公布日，`available_at` 依 §2.4；AC-8：股票權重和不在 (0, 1.02] → raise（主動式 ETF 持現金與期貨，下限不設 0.98；T-334）；AC-9：同 AC-5／AC-6 |
+| T-337 | B | `index_rebalance_events` 由指數型 ETF 持股增刪推導（T-334 改範圍） | AC-10：action 只有 add/remove、同鍵不重複、主動式 ETF 不產生事件、分割日不產生事件；AC-11：0050 推導結果的日期與增刪檔數和元大換股紀錄一致（fixture 至少兩次） |
 | T-338 | B | §3 四個因子 | AC-12：每個因子的 `assert_no_lookahead`；AC-13：手算三檔兩日的 `etf_flow_twd` 與 `trust_disc`；AC-14：缺 PCF 的日期回傳 null 且 `is_decomposed=false`，不得為 0；AC-15：同輸入重跑 bit-identical |
 | T-339 | A | §4 事件與 §5 軌跡腳本 `scripts/d171_fund_flow_traces.py` | AC-16：事件去重與前置空窗手算案例；AC-17：配對數 < 5 的事件被丟棄且計數；AC-18：最晚日期 > 2026-08-31 即 raise；AC-19：報告含 §5 全部欄位，JSON 可重算 markdown；AC-20：research_log 多一筆 `flow:traces` |
 | T-340 | B | `flow_exclude` overlay ＋ 兩支 `_xflow.yaml` | AC-21：命中股權重為 0 且其他股權重不變；AC-22：原檔指紋測試仍綠；AC-23：事件型態清單從配置來，空清單 → raise |
