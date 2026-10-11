@@ -134,6 +134,8 @@ def check(
 #: `research_log`（＝DSR 的試驗計數）與各式落地仍會分岔——實測本輪的兩筆 `ml_train`
 #: 就寫進了 worktree，差點讓試驗帳本一分為二。此環境變數讓所有寫入路徑一次對齊。
 _DATA_DIR_ENV = "TWQUANT_DATA_DIR"
+_FLOW_FLAG_LOOKBACK_DAYS = 120  # T-341：看板資金流旗標往前讀幾個日曆日（約 80 個交易日）
+_SIGNAL_CUTOFF_HOUR = 20  # D-008 訊號截點
 _CONTEXT_INDEX_ID = "TAIEX"  # 大盤狀態特徵用的指數（T-248；與 index_trend_gate 同一個）
 
 
@@ -2222,6 +2224,83 @@ def _quiet_score_range(start: dt.date, end: dt.date) -> str:
     return f"{ml_cfg.quiet_live_model}：{days} 個交易日、{rows.height} 列（新增 {n}）"
 
 
+def _flow_flags_for(day: dt.date, sids: list[str]) -> tuple[dict[str, object] | None, str | None]:
+    """看板日的資金流旗標（T-341）：(旗標, 缺漏原因)。資金流三張表任一不存在 → (None, "no_tables")。
+
+    只讀看板日往前 `_FLOW_FLAG_LOOKBACK_DAYS` 個日曆日：因子窗口（ADV 20、事件前置空窗 8、去重 20）都夠。
+    """
+    import polars as pl
+
+    import twquant.factors.chip  # noqa: F401  # 註冊 chip.margin_velocity_5d
+    import twquant.factors.fund_flow as ffac
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.factors.registry import get
+    from twquant.reporting import flow_flags as ffl
+    from twquant.reporting import fund_flow_traces as ft
+
+    scfg = _load_serving()
+    cfg, meta = _load_fund_flow()
+    f = cfg.factors
+    with store.connect(scfg) as conn:
+        with conn.cursor() as cur:
+            for t in ("etf_units_daily", "etf_holdings_daily", "index_rebalance_events"):
+                cur.execute("SELECT to_regclass(%s)", (f"{scfg.pg_schema}.{t}",))
+                if cur.fetchone()[0] is None:
+                    return None, "no_tables"
+        since = day - dt.timedelta(days=_FLOW_FLAG_LOOKBACK_DAYS)
+        view = PgTableSource(conn, scfg.pg_schema, cache=True, since=since).view(day)
+
+        def run(name: str, **params: object) -> pl.DataFrame:
+            fdef = get(name)
+            assert fdef.fn is not None
+            out = fdef.fn(view, {**fdef.params, **params})
+            return out.collect() if isinstance(out, pl.LazyFrame) else out
+
+        pressure = run(
+            "chip.etf_flow_pressure_5d", window=f.pressure_window, adv_window=f.adv_window
+        )
+        streak = run("chip.trust_disc_streak")
+        px = (
+            view.table("prices_daily")
+            .select("date", "stock_id")
+            .filter(pl.col("stock_id").str.contains(r"^[1-9][0-9]{3}$"))
+            .collect()
+        )
+        sessions = sorted(set(px["date"].to_list()))
+        events = ft.detect_events(
+            sessions=sessions,
+            rebal=view.table("index_rebalance_events")
+            .select("stock_id", "action", "available_at")
+            .collect(),
+            pressure=pressure,
+            disc=ffac.daily_disc(view, 10),
+            disc_net=run("chip.trust_disc_net_10d", window=f.disc_window),
+            sbl=ffac.sbl_sell_ratio(view, f.pressure_window),
+            margin=run("chip.margin_velocity_5d", window=f.pressure_window),
+            universe=px,
+            cfg=cfg.events,
+            cutoff_hour=_SIGNAL_CUTOFF_HOUR,
+        )
+        recent = set(sessions[-cfg.events.dedup_sessions :])
+        active = [e.etf_id for e in meta.etfs if e.is_active]
+        hold = (
+            view.table("etf_holdings_daily")
+            .select("date", "etf_id", "stock_id", "shares")
+            .filter(pl.col("etf_id").is_in(active))
+            .collect()
+        )
+    flags = ffl.build_flow_flags(
+        sids,
+        day,
+        pressure=pressure,
+        streak=streak,
+        events=events.filter(pl.col("date").is_in(sorted(recent))),
+        changes=ffl.active_changes(hold, active),
+    )
+    return {"note": ffl.NOTE, "as_of": day.isoformat(), "stocks": flags}, None
+
+
 def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
     """每日選股看板（D-164）：各條線從 replay_start 重播到 `day`，存進出／持股／明日計畫。
 
@@ -2333,6 +2412,11 @@ def _pick_board_for_day(day: dt.date, data_dir: Path) -> str:
     payload = board_payload(
         as_of=day, generated_at=now_tw(), cfg=board_cfg, strategies=payloads, stocks=stocks
     )
+    # T-341／SPEC-016 §7：資金流旗標（監控、未回測）。PG 沒有資金流表 → null 並註明原因，不是 0。
+    flags, missing = _flow_flags_for(day, sorted(cast("dict[str, object]", payload["stocks"])))
+    payload["flow_flags"] = flags
+    if missing:
+        payload["flow_flags_missing"] = missing
     path = save_board(data_dir, payload)
     # T-329／T-330：同一份看板順便畫成 HTML（含收盤、漲幅與整體表現），放 data/reports/，瀏覽器直接開。
     html_path = _save_board_html(

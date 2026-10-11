@@ -362,3 +362,45 @@ def etf_holdings_coverage(view: PitView, params: dict[str, object]) -> pl.DataFr
         value=pl.when(pl.col("aum_all") > 0).then(pl.col("aum_known") / pl.col("aum_all"))
     )
     return _broadcast(daily, view)
+
+
+def daily_disc(view: PitView, max_stale: int) -> pl.DataFrame:
+    """(date, stock_id, disc)：每日投信裁量買賣超（股；日期已前移到下一交易日）。T-339 的 E5／E6 用。"""
+    return (
+        _disc(view, max_stale).select("date", "stock_id", "disc").sort("date", "stock_id").collect()
+    )
+
+
+def sbl_sell_ratio(view: PitView, window: int) -> pl.DataFrame:
+    """N 日借券賣出（股）÷ N 日成交量（股），借券 21:00 公布 → 前移到下一交易日（D-008）。E8 用。
+
+    **刻意不註冊成因子**：它吃的 `sbl_short_daily` 在雲端只留 5 天（`cloud.windows`），註冊了就會被
+    雲端窗口測試當成雲端要算的因子。只給 T-339 研究腳本與看板旗標用（同 `daily_disc`）。
+    """
+    sess = _sessions(view)
+    sbl = view.table("sbl_short_daily").select("date", "stock_id", "sbl_sell")
+    px = view.table("prices_daily").select("date", "stock_id", "volume")
+    g = (
+        px.join(sbl, on=["date", "stock_id"], how="inner")
+        .join(sess, on="date", how="inner")
+        .sort("stock_id", "_pos")
+        .with_columns(
+            _s=pl.col("sbl_sell")
+            .cast(pl.Float64)
+            .rolling_sum_by("_pos", window_size=f"{window}i")
+            .over("stock_id"),
+            _v=pl.col("volume")
+            .cast(pl.Float64)
+            .rolling_sum_by("_pos", window_size=f"{window}i")
+            .over("stock_id"),
+        )
+        .with_columns(value=pl.when(pl.col("_v") > 0).then(pl.col("_s") / pl.col("_v")))
+        .select("date", "stock_id", "_pos", "value")
+    )
+    return (
+        _to_next_session(g, view)
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .sort("date", "stock_id")
+        .collect()
+    )

@@ -255,3 +255,41 @@ def test_ac15_not_in_builtins() -> None:
         a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names
     }
     assert not any("fund_flow" in m for m in mods)
+
+
+def test_ac12_sbl_sell_ratio_shift_and_lookahead(tmp_path: Path) -> None:
+    wh = _build(tmp_path)
+    rows = [
+        (d, s, 0, 1000 * (k + 1), 0, 0, 0, None, None, _at(d, 21))
+        for k, d in enumerate(D)
+        for s in STOCKS
+    ]
+    for d in D:
+        wh.write(
+            "clean",
+            "sbl_short_daily",
+            pl.DataFrame(
+                [r for r in rows if r[0] == d],
+                schema={
+                    "date": pl.Date,
+                    "stock_id": pl.String,
+                    "sbl_prev_balance": pl.Int64,
+                    "sbl_sell": pl.Int64,
+                    "sbl_return": pl.Int64,
+                    "sbl_adjust": pl.Int64,
+                    "sbl_balance": pl.Int64,
+                    "sbl_next_quota": pl.Int64,
+                    "sbl_covering": pl.Int64,
+                    "available_at": schemas.TW_DT,
+                },
+                orient="row",
+            ),
+        )
+    from twquant.factors.fund_flow import sbl_sell_ratio
+
+    out = sbl_sell_ratio(wh.view(D[7]), 2)
+    # D[0]、D[1] 的借券賣出 1000＋2000 → 標在 D[2]（21:00 公布）
+    assert _val(out, D[2], "2330") == pytest.approx(3000 / (2 * VOL))
+    assert _val(out, D[0], "2330") is None
+    for cut in (D[3], D[6]):  # 反前視：截在 cut 的結果＝完整結果過濾到 cut
+        assert sbl_sell_ratio(wh.view(cut), 2).equals(out.filter(pl.col("date") <= cut))

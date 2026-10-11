@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from twquant.backtest import metrics as _metrics
+from twquant.reporting.flow_flags import flags_text
 
 HTML_FILE = "pick_board.html"
 # 不足這麼多個交易日的年化只是換算，頁面要標明（與引擎年化用的同一個常數）
@@ -104,6 +105,28 @@ class _Names:
         return f"{_e(self.name(sid))}<span class='sid'>{_e(sid)}</span>"
 
 
+class _Flow:
+    """資金流旗標欄（T-341，SPEC-016 §7）：看板沒有 flow_flags 鍵 → 不畫這欄（舊看板）；
+    鍵在但值是 null（PG 沒有資金流表）→ 每格「無資料」。監控、未回測。"""
+
+    def __init__(self, board: Mapping[str, Any]) -> None:
+        self.on = "flow_flags" in board
+        raw = board.get("flow_flags")
+        self.flags: Mapping[str, Any] | None = None if raw is None else raw.get("stocks")
+
+    def th(self) -> str:
+        return "<th>資金流<br><span class='muted'>監控、未回測</span></th>" if self.on else ""
+
+    def td(self, sid: str) -> str:
+        if not self.on:
+            return ""
+        flag = None if self.flags is None else self.flags.get(sid)
+        return f"<td class='muted flow'>{_e(flags_text(flag))}</td>"
+
+
+_NO_FLOW = _Flow({})
+
+
 def _facts(s: Mapping[str, Any], n_holdings: int) -> str:
     if s["kind"] == "rebalance":
         rhythm = "每月第一個交易日換股，期間不動"
@@ -185,7 +208,11 @@ def _plan(s: Mapping[str, Any], names: _Names, last_holdings: Sequence[Mapping[s
 
 
 def _holdings_table(
-    code: str, last: Mapping[str, Any], names: _Names, prices: Mapping[str, PriceInfo]
+    code: str,
+    last: Mapping[str, Any],
+    names: _Names,
+    prices: Mapping[str, PriceInfo],
+    flow: _Flow = _NO_FLOW,
 ) -> str:
     holdings = sorted(
         last["holdings"], key=lambda h: (-(h.get("change") or 0.0), str(h["stock_id"]))
@@ -203,6 +230,7 @@ def _holdings_table(
             + f'<td class="num">{_md(str(h["entry_date"]))}</td>'
             + f'<td class="num">{int(h["held_sessions"])}</td>'
             + _pct_cell(h.get("change"))
+            + flow.td(sid)
             + "</tr>"
         )
     n_up = sum(1 for h in holdings if (h.get("change") or 0.0) > 0)
@@ -212,7 +240,9 @@ def _holdings_table(
         f"{len(holdings) - n_up - n_down} 檔持平。「進場至今」是買進成交價到 {_md(str(last['date']))} 收盤，不含股利與費用；紅漲綠跌。</p>"
         "<div class='scroll'><table>"
         "<thead><tr><th>股票</th><th>產業</th><th class='num'>收盤</th><th class='num'>當日</th>"
-        "<th class='num'>進場日</th><th class='num'>持有<br>交易日</th><th class='num'>進場至今</th></tr></thead>"
+        "<th class='num'>進場日</th><th class='num'>持有<br>交易日</th><th class='num'>進場至今</th>"
+        + flow.th()
+        + "</tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></div>"
     )
 
@@ -222,6 +252,7 @@ def _picks_table(
     shown: Sequence[Mapping[str, Any]],
     names: _Names,
     prices: Mapping[str, PriceInfo],
+    flow: _Flow = _NO_FLOW,
 ) -> str:
     last = shown[-1]
     picks = last.get("picks")
@@ -255,7 +286,9 @@ def _picks_table(
             f"<span class='dots'>{marks}</span><span class='cnt'>{n}/{len(member)}</span></td>"
             + f'<td class="tags" data-chips="{_e(code)}:{_e(sid)}" data-held="{int(bool(p["held"]))}" data-new="{int(bool(p["new"]))}">'
             + " ".join(chips)
-            + "</td></tr>"
+            + "</td>"
+            + flow.td(sid)
+            + "</tr>"
         )
     order = "名次是模型分數的順序。" if s["picks_ordered"] else "名單不分先後（名次只是代號排序）。"
     first, lastday = _md(member[0][0]), _md(member[-1][0])
@@ -266,7 +299,9 @@ def _picks_table(
         f"漲幅是 {first} 收盤到 {lastday} 收盤。上榜天數只是參考，不代表模型更有把握。</p>"
         "<div class='scroll'><table class='picks'>"
         f"<thead><tr><th class='num'>#</th><th>股票</th><th>產業</th><th class='num'>收盤</th><th class='num'>當日</th>"
-        f"<th class='num'>近 {n_days} 日<br>漲幅</th><th>近 {n_days} 日<br>上榜</th><th></th></tr></thead>"
+        f"<th class='num'>近 {n_days} 日<br>漲幅</th><th>近 {n_days} 日<br>上榜</th><th></th>"
+        + flow.th()
+        + "</tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></div>"
     )
 
@@ -490,6 +525,7 @@ def _section(
     *,
     initial_capital: float,
     refs: Sequence[Mapping[str, Any]],
+    flow: _Flow = _NO_FLOW,
 ) -> str:
     days: list[Mapping[str, Any]] = list(s["days"])
     if not days:
@@ -503,8 +539,8 @@ def _section(
         f'<div class="facts">{_facts(s, len(last["holdings"]))}</div>'
         f"{_performance(code, replay_summary(s, initial_capital=initial_capital), refs)}"
         f'<div class="plan"><h3>下一個交易日</h3>{_plan(s, names, last["holdings"])}</div>'
-        f"<h3>目前持股</h3>{_holdings_table(code, last, names, prices)}"
-        f"<h3>{_md(str(last['date']))} 推薦名單</h3>{_picks_table(s, shown, names, prices)}"
+        f"<h3>目前持股</h3>{_holdings_table(code, last, names, prices, flow)}"
+        f"<h3>{_md(str(last['date']))} 推薦名單</h3>{_picks_table(s, shown, names, prices, flow)}"
         f"<h3>近期進出</h3><div class='acts'>{_activity(shown, names)}</div>"
         "</section>"
     )
@@ -575,6 +611,7 @@ def render_board_html(
     px: Mapping[str, PriceInfo] = prices or {}
     refs: Mapping[str, Sequence[Mapping[str, Any]]] = references or {}
     initial_capital = float(board["initial_capital"])
+    flow = _Flow(board)
     sections = "".join(
         _section(
             s,
@@ -583,6 +620,7 @@ def render_board_html(
             window_sessions,
             initial_capital=initial_capital,
             refs=refs.get(str(s["code"]), ()),
+            flow=flow,
         )
         for s in board["strategies"]
     )
