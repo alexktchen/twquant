@@ -69,7 +69,7 @@ def _cells(body: str) -> str:
     )
 
 
-def render(md_text: str, title: str, src: str, index_name: str) -> str:
+def render(md_text: str, title: str, src: str, index_name: str | None) -> str:
     md = MarkdownIt("commonmark", {"html": False}).enable("table")
     body = _cells(md.render(md_text))
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -77,8 +77,8 @@ def render(md_text: str, title: str, src: str, index_name: str) -> str:
         '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>{html.escape(title)}</title><style>{STYLE}</style></head><body><div class='wrap'>"
-        f"<nav class='top'><a href='{index_name}'>← 報告目錄</a></nav>"
-        f"<article>{body}</article>"
+        + (f"<nav class='top'><a href='{index_name}'>← 報告目錄</a></nav>" if index_name else "")
+        + f"<article>{body}</article>"
         f"<div class='foot'>來源 <code>{html.escape(src)}</code>（版控的 markdown 原文）；轉檔於 {now}。</div>"
         "</div></body></html>"
     )
@@ -104,13 +104,16 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--out", required=True, help="輸出資料夾（絕對路徑）")
+    ap.add_argument(
+        "--no-index", action="store_true", help="只轉單一份、不做目錄頁也不放回目錄的連結"
+    )
     ap.add_argument("files", nargs="+")
     args = ap.parse_args()
     out = pathlib.Path(args.out)
     if not out.is_absolute():
         raise SystemExit(f"--out 要給絕對路徑：{out}")
     out.mkdir(parents=True, exist_ok=True)
-    index_name = "index.html"
+    index_name: str | None = None if args.no_index else "index.html"
     items = []
     for f in args.files:
         p = pathlib.Path(f)
@@ -122,6 +125,8 @@ def main() -> int:
         )
         items.append((name, title, _lede(text)))
         print(f"[OK] {out / name}")
+    if index_name is None:
+        return 0
     lis = "".join(
         f"<li><a href='{n}'>{html.escape(t)}</a><p>{html.escape(d)}</p></li>" for n, t, d in items
     )
@@ -132,8 +137,8 @@ def main() -> int:
         f"<article><h1>研究報告目錄</h1><p>2026-10-11 的研究整理。標「開發期」的數字只當參考，正式判讀在第二保留期（最早 2027-03-01）。</p>"
         f"<ul class='index'>{lis}</ul></article></div></body></html>"
     )
-    (out / index_name).write_text(page, encoding="utf-8")
-    print(f"[OK] {out / index_name}")
+    (out / "index.html").write_text(page, encoding="utf-8")
+    print(f"[OK] {out / 'index.html'}")
     return 0
 
 
