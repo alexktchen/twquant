@@ -153,6 +153,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | `docs/HANDOFF-2026-09-06-tracks-and-gates.md` | **本輪完整交接**：進度、五個未解問題、產物清單 |
 | `docs/reports/backtest-results.md` | 結果的版控版（與 HTML 同源） |
 | `docs/specs/SPEC-013-two-track-strategies.md` | 雙軌策略的規格 |
+| `docs/specs/SPEC-016-fund-flow-traces.md` | **投信／ETF 資金流軌跡 PRD（2026-10-11，D-171 待裁決）**：給低階模型的實作規格，任務 T-334～T-341 |
 | `docs/reports/volume-lead-price-ic.md` | **量先價行鏈 9 因子 11 年 IC**（2026-09-07）：連買天數正、買超÷量反向、放量 U 型 |
 | `docs/research/PAPERS-KEYLEVELS.md` + DECISIONS **D-093** | 關鍵價位文獻 ＋ K 系列事前登記草稿（待裁決） |
 
