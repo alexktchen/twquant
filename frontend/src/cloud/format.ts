@@ -17,6 +17,21 @@ export type Pick = {
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[] }
 export type PicksDay = { date: string; window?: string[]; lines: Line[] }
+/** 歷史名單日期選單的檔數（/api/picks/dates）：counts[日期][線別]＝檔數；since[線別]＝這條線第一天有名單的日子。 */
+export type DateCounts = { counts: Record<string, Record<string, number>>; since: Record<string, string> }
+
+/** 某天某條線有幾檔；這條線那天還沒開始記錄（早於第一天）或後端沒給檔數 → null（不寫 0，免得把「沒記錄」說成「沒股票」）。 */
+export function dayCount(c: DateCounts | null, date: string, line: string): number | null {
+  const first = c?.since[line]
+  if (!c || !first || date < first) return null
+  return c.counts[date]?.[line] ?? 0
+}
+
+/** 日期選單的一個選項文字：「2026-10-08　2 檔」；沒有檔數就只寫日期。 */
+export function dateOption(date: string, n: number | null): string {
+  return n === null ? date : `${date}　${n} 檔`
+}
+
 export type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }
 
 /** 台股習慣：漲紅、跌綠、平盤灰。 */

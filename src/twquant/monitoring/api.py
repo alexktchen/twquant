@@ -550,10 +550,15 @@ def get_picks(
 
 @app.get("/api/picks/dates")
 def get_pick_dates(limit: int = Query(250, ge=1, le=2000)) -> dict[str, object]:
-    """有名單的日期，新到舊（歷史名單頁的日期選單）。"""
+    """有名單的日期，新到舊（歷史名單頁的日期選單），附每天每條線的檔數與每條線的第一天。"""
     from twquant.monitoring import picks_api
 
-    return _stock_ep(lambda: {"dates": picks_api.pick_dates(stock_api.serving_cfg(), limit)})
+    def build() -> dict[str, object]:
+        cfg = stock_api.serving_cfg()
+        dates = picks_api.pick_dates(cfg, limit)
+        return {"dates": dates, **picks_api.pick_counts(cfg, dates)}
+
+    return _stock_ep(build)
 
 
 @app.get("/api/stocks/{sid}/picks")

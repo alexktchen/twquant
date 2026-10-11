@@ -60,3 +60,13 @@ export function lineOrder(codes: string[]): string[] {
 export function linesForDay(todayCodes: string[]): string[] {
   return lineOrder([...LINES.map((l) => l.code), ...todayCodes])
 }
+
+/** 日期選單的檔數：把 (日期, 線別, 檔數) 列整理成 counts[日期][線別]，把每條線的第一天整理成 since[線別]。 */
+export function groupCounts(
+  rows: { d: string; line: string; n: number }[],
+  first: { line: string; d: string }[],
+): { counts: Record<string, Record<string, number>>; since: Record<string, string> } {
+  const counts: Record<string, Record<string, number>> = {}
+  for (const r of rows) (counts[r.d] ??= {})[r.line] = r.n
+  return { counts, since: Object.fromEntries(first.map((f) => [f.line, f.d])) }
+}

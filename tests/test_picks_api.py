@@ -82,7 +82,12 @@ def _drop(conn: Any) -> None:
 
 def test_t332_ac6_picks_payload_reads_pg() -> None:
     cfg, conn = _cfg_or_skip()
-    from twquant.monitoring.picks_api import pick_dates, picks_payload, stock_pick_days
+    from twquant.monitoring.picks_api import (
+        pick_counts,
+        pick_dates,
+        picks_payload,
+        stock_pick_days,
+    )
 
     try:
         names = {"CORE": "大盤精選", "QUIET": "潛伏飆股"}
@@ -123,6 +128,11 @@ def test_t332_ac6_picks_payload_reads_pg() -> None:
         with pytest.raises(DataError, match="沒有名單"):
             picks_payload(cfg, dt.date(2026, 10, 9), names)
         assert pick_dates(cfg, 2) == ["2026-10-08", "2026-10-07"]
+        # 日期選單的檔數：counts 只涵蓋給定日期以後，since 是每條線的第一天
+        pc = pick_counts(cfg, ["2026-10-08", "2026-10-07"])
+        assert pc["counts"] == {"2026-10-08": {"QUIET": 2, "CORE": 1}, "2026-10-07": {"QUIET": 2}}
+        assert pc["since"] == {"QUIET": "2026-10-06", "CORE": "2026-10-08"}
+        assert pick_counts(cfg, [])["counts"] == {}
         assert stock_pick_days(cfg, "2330")["days"] == {
             "QUIET": ["2026-10-06", "2026-10-07", "2026-10-08"]
         }
@@ -149,6 +159,11 @@ def test_t332_ac7_picks_routes(monkeypatch: pytest.MonkeyPatch) -> None:
             assert exc.value.status_code == code
         dates = api.get_pick_dates(250)["dates"]
         assert isinstance(dates, list) and dates[0] == "2026-10-08"
+        assert api.get_pick_dates(250)["counts"] == {
+            "2026-10-08": {"QUIET": 2, "CORE": 1},
+            "2026-10-07": {"QUIET": 2},
+            "2026-10-06": {"QUIET": 1},
+        }
         days = api.get_stock_picks("2330")["days"]
         assert isinstance(days, dict) and days["QUIET"][-1] == "2026-10-08"
     finally:

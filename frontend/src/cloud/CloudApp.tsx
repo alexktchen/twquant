@@ -6,13 +6,15 @@ import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchPublicDates, fetch
 import { LOGIN_URL, LoginRequired, guestCandles, guestDay } from './auth'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { hits, pct, price, quoteBar, trend, type Bar, type Pick, type PicksDay } from './format'
+import { dateOption, dayCount, hits, pct, price, quoteBar, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 
 type Tab = 'today' | 'history'
 
 export default function CloudApp() {
   const [tab, setTab] = useState<Tab>('today')
   const [dates, setDates] = useState<string[]>([])
+  // 日期選單旁的檔數（只有登入後的 /api 才給；公開日期清單沒有）
+  const [dateCounts, setDateCounts] = useState<DateCounts | null>(null)
   const [date, setDate] = useState<string | undefined>(undefined)
   const [day, setDay] = useState<PicksDay | null>(null)
   // 上次看的策略（大盤精選／潛伏飆股）：重新整理、重開都停在那一條
@@ -34,7 +36,10 @@ export default function CloudApp() {
       .then((m) => setEmail(m.email))
       .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
     fetchPickDates()
-      .then(setDates)
+      .then((r) => {
+        setDates(r.dates)
+        setDateCounts(r.counts)
+      })
       .catch((e: Error) => {
         if (!(e instanceof LoginRequired)) return setErr(e.message)
         setGuest(true)
@@ -123,7 +128,7 @@ export default function CloudApp() {
               <select value={date ?? ''} onChange={(e) => setDate(e.target.value)}>
                 {dates.map((d) => (
                   <option key={d} value={d}>
-                    {d}
+                    {dateOption(d, dayCount(dateCounts, d, current?.code ?? line))}
                   </option>
                 ))}
               </select>

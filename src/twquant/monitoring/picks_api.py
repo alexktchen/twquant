@@ -71,6 +71,27 @@ def pick_dates(cfg: ServingConfig, limit: int) -> list[str]:
     return [r["date"].isoformat() for r in rows]
 
 
+def pick_counts(cfg: ServingConfig, dates: Sequence[str]) -> dict[str, Any]:
+    """日期選單的檔數（同 Cloudflare 版 groupCounts）：counts[日期][線別]＝檔數、since[線別]＝這條線第一天有名單的日子。"""
+    sch = cfg.pg_schema
+    counts: dict[str, dict[str, int]] = {}
+    if dates:
+        for r in _query(
+            cfg,
+            f'SELECT date, line, count(*) AS n FROM "{sch}".daily_picks WHERE date >= %s '
+            "GROUP BY date, line",
+            (dt.date.fromisoformat(dates[-1]),),
+        ):
+            counts.setdefault(r["date"].isoformat(), {})[r["line"]] = int(r["n"])
+    since = {
+        r["line"]: r["d"].isoformat()
+        for r in _query(
+            cfg, f'SELECT line, min(date) AS d FROM "{sch}".daily_picks GROUP BY line', ()
+        )
+    }
+    return {"counts": counts, "since": since}
+
+
 def _change(close: float | None, prev: float | None) -> float | None:
     if close is None or prev is None or prev <= 0:
         return None

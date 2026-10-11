@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEFAULT_VISIBLE_BARS, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
+import { DEFAULT_VISIBLE_BARS, dateOption, dayCount, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
 
 const bar = (date: string, close: number): Bar => ({ date, open: close, high: close, low: close, close, volume: 1 })
 
@@ -73,4 +73,16 @@ test('T-332 K 線：記住的根數讀回來，沒有或壞掉就用預設 60', 
   assert.equal(parseKeptBars('12.5'), 60)
   assert.equal(parseKeptBars('2'), 60, '太小')
   assert.equal(parseKeptBars('99999'), 60, '太大')
+})
+
+test('日期選單檔數：有記錄的日子寫幾檔（沒股票寫 0 檔），還沒開始記錄或沒給檔數就只寫日期', () => {
+  const c = { counts: { '2026-10-08': { CORE: 15, QUIETV: 2 }, '2026-10-07': { CORE: 15 } }, since: { CORE: '2026-05-04', QUIETV: '2026-10-07' } }
+  assert.equal(dayCount(c, '2026-10-08', 'QUIETV'), 2)
+  assert.equal(dayCount(c, '2026-10-07', 'QUIETV'), 0) // 已開始記錄、那天沒股票
+  assert.equal(dayCount(c, '2026-10-06', 'QUIETV'), null) // 那天還沒有這條線
+  assert.equal(dayCount(c, '2026-10-08', 'ZZZ'), null)
+  assert.equal(dayCount(null, '2026-10-08', 'CORE'), null) // 舊後端或沒登入
+  assert.equal(dateOption('2026-10-08', 2), '2026-10-08　2 檔')
+  assert.equal(dateOption('2026-10-08', 0), '2026-10-08　0 檔')
+  assert.equal(dateOption('2026-10-06', null), '2026-10-06')
 })
