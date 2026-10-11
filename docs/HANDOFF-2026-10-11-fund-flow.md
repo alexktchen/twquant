@@ -73,3 +73,10 @@
 - 開發期參考（T-342，`docs/reports/d172-threshold-arms-dev.md`）：0.35 年化 +11.7%／回撤 −19.3%／Calmar 0.60，S0 +8.3%／−44.4%／0.19；曝險 23%。ETF 排除差距在雜訊量級。
 - **bug**：資金流滾動和的浮點殘差把全 0 窗口判成贖回潮；修正（`_wsum` 逐格相加）後排除規則改 `trim_lookback`（每天 ~10s → ~1.2s），
   真實資料 trim／整段逐位元相同。重跑軌跡與右尾，結論不變。全專案其他滾動和：加總整數或只用於排名，兩條正式線不受影響。
+
+## 八、其他（同日）
+
+- 《技術分析精論》總結與可回測的進出依據：`docs/reports/pring-technical-analysis-summary.md`。
+- 核心＋伺機（大盤精選 70%＋高分潛伏飆股 30%）開發期描述：`docs/reports/core-opportunistic-blend-dev.md`（Calmar 0.67 → 0.78）；尚未登記。
+- D-173 排列組合 512 組：無組合過運氣門檻，不送保留期（`docs/reports/d173-ta-grid-dev.md`）。
+- HTML 版（含目錄）：`data/reports/html/index.html`，用 `scripts/md_reports_to_html.py` 從 markdown 重轉。
