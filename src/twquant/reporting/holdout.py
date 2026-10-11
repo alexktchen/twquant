@@ -27,6 +27,7 @@ _INERT_EXTENSIONS: tuple[tuple[tuple[str, ...], object], ...] = (
     (("slots", "conditional_vol"), None),  # D-149 F1／F2
     (("slots", "inverse_vol"), None),  # D-149 F3
     (("exit_rules", "*", "mult"), None),  # D-159：bb_lower_stop／atr_trailing 的倍數
+    (("slots", "exclude"), []),  # D-172：進場排除規則（空清單＝沒有規則）
 )
 
 

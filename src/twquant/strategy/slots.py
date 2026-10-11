@@ -22,7 +22,7 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
     這與 `build_targets` 不同：那邊宇宙為空是資料問題所以 raise；這邊宇宙照樣由
     `universe_ids` 把關（空宇宙它會回空，缺表它會 raise），只有「沒人過門檻」才安靜回空。
     """
-    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
+    import twquant.factors.builtins  # 匯入觸發全因子註冊
     from twquant.factors.compute import compute
 
     if cfg.slots is None:
@@ -38,6 +38,17 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
         return []
     uni = universe_ids(view, day, cfg.universe)
     df = df.filter(pl.col("stock_id").is_in(uni))
+    for rule in cfg.slots.exclude:
+        # D-172：排除規則的因子可能不在 builtins（資金流因子只在地端有資料），用到時才註冊
+        import twquant.factors.fund_flow  # noqa: F401
+
+        ex = compute([rule.factor], view, dates=[day], params={rule.factor: dict(rule.params)})
+        blocked = ex.filter(pl.col("value").is_not_null() & (pl.col("value") >= rule.min_value))[
+            "stock_id"
+        ].to_list()
+        df = df.filter(~pl.col("stock_id").is_in(blocked))
+        if df.is_empty():
+            return []
     rows = sorted(
         ((str(r["stock_id"]), float(r["value"])) for r in df.to_dicts()),
         key=lambda item: (-item[1], item[0]),

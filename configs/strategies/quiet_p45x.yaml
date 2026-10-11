@@ -1,0 +1,24 @@
+# D-172（2026-10-11，事前登記）：潛伏飆股 A20 分數門檻臂 p45x——與 quiet_s0 逐字相同，只改 entry_threshold 0.0 → 0.45，並排除當天處於 ETF 申購潮／贖回潮狀態的股票（chip.etf_flow_wave，SPEC-016 E3／E4）。
+# **RESEARCH ONLY**，在第二保留期（2027-03 開）與 quiet_s0 一起判讀；開啟前不得修改（configs/holdout2_quiet_threshold.yaml 守著）。
+name: quiet_p45x
+description: D-172 quiet_p45x：A20 機率 ≥ 0.45＋排除 ETF 資金流狀態、抱滿 20 日
+trial_scope: tail:quiet_threshold
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70 # D-143 §五：宇宙 ADV 前 30%，與 A20 的樣本門檻同一把尺（D-151 §十三）
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+slots:
+  n: 15
+  entry_threshold: 0.45 # D-172：模型機率 ≥ 0.45 才是候選；沒人過門檻就空手
+  exclude: # D-172：ETF 資金流狀態（E3／E4）當天不進場；因子值 null＝未知，不排除
+    - factor: chip.etf_flow_wave
+      min_value: 1.0
+exit_rules:
+  - kind: time_stop
+    sessions: 20

@@ -307,6 +307,18 @@ class InverseVolSizingConfig(BaseConfig):
     floor: float = Field(gt=0.0, le=1.0)
 
 
+class SlotExcludeConfig(BaseConfig):
+    """補位模式的進場排除規則（D-172）：因子原始值 ≥ `min_value` 的股票當天不得進場。
+
+    只擋進場、不賣持股（與 entry filter 同語意）。因子值為 null＝狀態未知 → 不排除
+    （排除是「已知處於某狀態」，不是「不確定就不買」；未知的比例由研究報告另列）。
+    """
+
+    factor: str
+    min_value: float
+    params: dict[str, object] = Field(default_factory=dict)
+
+
 class SlotsConfig(BaseConfig):
     """每日補位模式（T-247／D-120 §五）。給了它，`rebalance`／`selection`／`weighting` 一律不用。
 
@@ -319,6 +331,7 @@ class SlotsConfig(BaseConfig):
     exposure_target: ExposureTargetConfig | None = None  # T-286：None ＝ 永遠滿倉（既有行為）
     conditional_vol: ConditionalVolConfig | None = None  # D-149 F1／F2
     inverse_vol: InverseVolSizingConfig | None = None  # D-149 F3
+    exclude: list[SlotExcludeConfig] = Field(default_factory=list)  # D-172：進場排除規則
 
     @model_validator(mode="after")
     def _one_exposure_rule(self) -> SlotsConfig:

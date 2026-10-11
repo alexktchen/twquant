@@ -250,3 +250,32 @@ def test_ac12_entry_filters_actually_reach_the_engine(tmp_path: Path) -> None:
     assert [t for t in _run(tmp_path, _cfg_entry_filter()).ledger if t.side == "buy"]
     blocked = _run(tmp_path, _cfg_entry_filter(entry_filters=[block_all]))
     assert not [t for t in blocked.ledger if t.side == "buy"]
+
+
+def test_ac13_exclude_rule_blocks_entry_but_never_sells(tmp_path: Path) -> None:
+    """D-172：`slots.exclude` 的因子值 ≥ min_value 當天不得進場；只擋進場，不影響持股。"""
+    from twquant.strategy.slots import slot_candidates
+
+    wh = _wh(tmp_path)
+    day = _day(START)
+    plain = [sid for sid, _ in slot_candidates(_cfg(threshold=0.05), wh, day)]
+    assert "1101" in plain  # 1101 的 20 日動能恆約 +22%，過門檻
+    cfg = StrategyConfig.model_validate(
+        {
+            **_cfg(threshold=0.05).model_dump(),
+            "slots": {
+                "n": 2,
+                "entry_threshold": 0.05,
+                "exclude": [{"factor": "price.mom_20d", "min_value": 0.20}],
+            },
+        }
+    )
+    picked = [sid for sid, _ in slot_candidates(cfg, wh, day)]
+    assert "1101" not in picked and set(picked) <= set(plain)
+    with pytest.raises(Exception, match="min_value"):
+        StrategyConfig.model_validate(
+            {
+                **cfg.model_dump(),
+                "slots": {"n": 2, "entry_threshold": 0.05, "exclude": [{"factor": "x"}]},
+            }
+        )

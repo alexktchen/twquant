@@ -404,3 +404,38 @@ def sbl_sell_ratio(view: PitView, window: int) -> pl.DataFrame:
         .sort("date", "stock_id")
         .collect()
     )
+
+
+@factor(
+    name="chip.etf_flow_wave",
+    category="chip",
+    direction=-1,
+    tables=["etf_units_daily", "etf_holdings_daily", "prices_daily"],
+    lookback_days=40,
+    params={"window": 5, "adv_window": 20, "max_stale": 10, "hi_pctl": 0.95, "lo_pctl": 0.05},
+)
+def etf_flow_wave(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """ETF 申購潮／贖回潮狀態（SPEC-016 E3／E4 的定義）：1＝當天處於狀態，0＝不處於。
+
+    `chip.etf_flow_pressure_5d` 在**四碼普通股**當日橫斷面 ≥ hi_pctl 分位數且 > 0，或 ≤ lo_pctl 且 < 0 → 1。
+    壓力 null（差分未知）的股票沒有列。D-172 的進場排除規則用它（`slots.exclude`）。
+    """
+    hi = float(params.get("hi_pctl", 0.95))  # type: ignore[arg-type]
+    lo = float(params.get("lo_pctl", 0.05))  # type: ignore[arg-type]
+    p = etf_flow_pressure_5d(view, params).filter(
+        pl.col("stock_id").str.contains(r"^[1-9][0-9]{3}$")
+    )
+    return (
+        p.with_columns(
+            _hi=pl.col("value").quantile(hi, "linear").over("date"),
+            _lo=pl.col("value").quantile(lo, "linear").over("date"),
+        )
+        .with_columns(
+            value=(
+                ((pl.col("value") >= pl.col("_hi")) & (pl.col("value") > 0))
+                | ((pl.col("value") <= pl.col("_lo")) & (pl.col("value") < 0))
+            ).cast(pl.Float64)
+        )
+        .select("date", "stock_id", "value")
+        .sort("date", "stock_id")
+    )

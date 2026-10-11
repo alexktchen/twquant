@@ -155,6 +155,7 @@ def _val(df: pl.DataFrame, d: dt.date, sid: str) -> float | None:
 
 _NAMES = [
     "chip.etf_flow_pressure_5d",
+    "chip.etf_flow_wave",
     "chip.trust_disc_net_10d",
     "chip.trust_disc_streak",
     "market.etf_flow_total_5d",
@@ -293,3 +294,15 @@ def test_ac12_sbl_sell_ratio_shift_and_lookahead(tmp_path: Path) -> None:
     assert _val(out, D[0], "2330") is None
     for cut in (D[3], D[6]):  # 反前視：截在 cut 的結果＝完整結果過濾到 cut
         assert sbl_sell_ratio(wh.view(cut), 2).equals(out.filter(pl.col("date") <= cut))
+
+
+def test_ac13_etf_flow_wave_marks_only_cross_sectional_tails(tmp_path: Path) -> None:
+    wh = _build(tmp_path)
+    w = _run(wh, "chip.etf_flow_wave", D[7], window=1, adv_window=1)
+    # D[2]（D[1] 的流量）：2317 壓力最高且 > 0 → 1；2330、1101 → 0
+    assert _val(w, D[2], "2317") == 1.0 and _val(w, D[2], "2330") == 0.0
+    assert _val(w, D[2], "1101") == 0.0
+    # D[3]（D[2] 的流量）：2317 最負 → 1；1101 壓力 0 不算申購潮 → 0
+    assert _val(w, D[3], "2317") == 1.0 and _val(w, D[3], "1101") == 0.0
+    # 差分未知的那天沒有列（不是 0）
+    assert _val(w, D[5], "2330") is None
