@@ -1,0 +1,41 @@
+# 投信／ETF 資金流（SPEC-016；D-171 §一 事前登記）。欄位定義與說明在 src/twquant/config.py 的 FundFlowConfig。
+# events 與 traces 是**事件定義與量測方法**，寫於任何軌跡結果之前；換值＝新 trial，原結果保留。
+# 採用門檻（結果算不算好）不在這裡，由使用者填 D-171 §二。
+etf_meta_path: configs/etf_meta.yaml
+
+units:
+  finmind_dataset: TaiwanStockShareholding # 外資持股統計；ETF 也列在內，NumberOfSharesIssued＝已發行單位數
+  finmind_field: NumberOfSharesIssued
+  available_hour: 21
+  history_start: 2015-06-01 # PG 行情（交易日曆）從這天起；FinMind 有到 2005，但更早的沒有日曆可對
+  catchup_trading_days: 5
+  split_event_types: [split, reverse_split]
+  split_null_sessions_before: 1 # 0050／0052 的單位數跳動在分割事件日的前一個交易日
+  jump_report_ratio: 1.5
+
+events:
+  flow_hi_pctl: 0.95 # E3 申購潮
+  flow_lo_pctl: 0.05 # E4 贖回潮
+  quarter_end_pctl: 0.90 # E7 季底拉抬
+  absorb_pctl: 0.80 # E8 ETF 接貨（借券、融資）
+  streak_start: 3 # E5／E6 連買／連賣起點
+  quiet_before: 5
+  quarter_end_sessions: 5
+  dedup_sessions: 20
+
+factors:
+  pressure_window: 5
+  disc_window: 10
+  market_window: 5
+  adv_window: 20
+
+traces:
+  pre_sessions: 20
+  post_sessions: 60
+  horizons: [1, 5, 10, 20, 40, 60]
+  matched_min: 5
+  match_deciles: 10
+  flow_lags: [0, 1, 2]
+  bootstrap_n: 2000
+  seed: 42
+  last_date: 2026-08-31 # D-109 第二保留期不碰

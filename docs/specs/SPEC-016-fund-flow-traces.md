@@ -67,8 +67,10 @@ ETF 申贖與指數換股產生的**機械性**買賣，以及基金經理人的
 | index_id | str, nullable | 追蹤指數代號；主動式為 null |
 | is_active | bool | 主動式 ETF |
 | listed_date | date | |
+| delisted_date | date, nullable | |
+| units_tracked | bool | False＝來源沒有它的單位數（T-335：0054、0058、0059、0060、00742 不在 MI_QFIIS），原因寫在 yaml 的 `note`；完整性閘門與機械流量都不算它 |
 
-`etf_units_daily`（每日申贖）
+`etf_units_daily`（每日申贖；每日來源 TWSE `fund/MI_QFIIS?selectType=0099P`，歷史來源 FinMind，兩者同日同值，T-335 逐列核對 2026-10-08 的 83 檔）
 
 | 欄 | 型別 | 說明 |
 |---|---|---|

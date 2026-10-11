@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     import polars as pl
 
     from twquant.config import (
+        EtfMetaConfig,
+        FundFlowConfig,
         MlConfig,
         RecommendationBucketConfig,
         ServingConfig,
@@ -1292,6 +1294,47 @@ def _run_chip_day(day: dt.date) -> str:
     return summary
 
 
+def _load_fund_flow() -> tuple[FundFlowConfig, EtfMetaConfig]:
+    """configs/fund_flow.yaml 與它指到的 etf_meta.yaml（SPEC-016）。"""
+    from twquant.config import EtfMetaConfig, FundFlowConfig, load_config
+
+    cfg = load_config(_CONFIG_DIR / "fund_flow.yaml", FundFlowConfig)
+    meta = load_config(_CONFIG_DIR.parent / cfg.etf_meta_path, EtfMetaConfig)
+    return cfg, meta
+
+
+def _run_etf_units_day(day: dt.date) -> str:
+    """每日 pipeline「ETF 單位數」步驟（T-335／SPEC-016）：TWSE MI_QFIIS（ETF 類）→ `etf_units_daily`。
+
+    補 day 之前最近 `units.catchup_trading_days` 個交易日裡 PG 還沒有的日子；當天不抓（21:00 才公布）。
+    任一天缺任一檔 configs/etf_meta.yaml 的 ETF → raise、整批不寫（步驟標 failed，不擋訊號主線）。
+    """
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import fund_flow_ingest as ffi
+    from twquant.data.serving import store
+    from twquant.data.sources.etf_units import fetch_qfiis_units
+
+    scfg = _load_serving()
+    if not scfg.enabled:
+        return "未啟用（serving.yaml enabled=false）"
+    if not store.ping(scfg):
+        return "PG 不可達，略過"
+    cfg, meta = _load_fund_flow()
+    sys_cfg = _load_system()
+    client = HttpClient(source="twse_rwd", rate=sys_cfg.source_rates["twse_rwd"])
+
+    def _fetch(d: dt.date) -> list[dict[str, object]]:
+        typer.secho(f">> [ETF 單位數] 抓取 MI_QFIIS @ {d}", fg=typer.colors.CYAN)
+        return fetch_qfiis_units(client, d)
+
+    with store.connect(scfg) as conn:
+        res = ffi.ingest_recent_units(conn, scfg.pg_schema, cfg, meta, day, _fetch)
+    if not res.fetched:
+        return f"最近 {len(res.targets)} 個交易日都已有（{res.targets[-1] if res.targets else '—'} 止）"
+    tail = f"；單日比值異常 {len(res.jumps)} 列（只報不修）：{res.jumps[:3]}" if res.jumps else ""
+    return f"補 {len(res.fetched)} 天（{res.fetched[0]}～{res.fetched[-1]}）、{res.rows} 列{tail}"
+
+
 def _run_daily_pipeline(
     day: dt.date, pg_signals: bool = False, cloud: bool = False
 ) -> PipelineResult:
@@ -1399,6 +1442,10 @@ def _run_daily_pipeline(
         # 買賣超（T-040 五池依賴 broker_trades）。best-effort：非交易日由探測快速跳過、
         # 續傳冪等；PG 未啟用/不可達或來源失敗不擋主線（見 _run_fubon_day）。
         return _run_fubon_day(day)
+
+    def _etf_units_step() -> str:
+        # T-335／SPEC-016：ETF 已發行單位數（資金流研究）。不依賴當天行情，非關鍵步驟。
+        return _run_etf_units_day(day)
 
     def _chip_step() -> str:
         # T-310：官方當沖／借券（前幾個交易日＋缺日）、處置／注意公告 → 直寫 PG。
@@ -1580,6 +1627,7 @@ def _run_daily_pipeline(
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
         PipelineStep("籌碼（當沖／借券／處置／注意）", _chip_step),
+        PipelineStep("ETF 單位數", _etf_units_step),
         PipelineStep("券商買賣超", _broker_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),
@@ -3499,6 +3547,36 @@ def insights_import(
 
 
 # ── ML 排序層（SPEC-010，T-067）──────────────────────────────────────
+
+fund_flow_app = typer.Typer(help="投信／ETF 資金流（SPEC-016）：ETF 基本資料與已發行單位數。")
+app.add_typer(fund_flow_app, name="fund-flow")
+
+
+@fund_flow_app.command("meta")
+def fund_flow_meta() -> None:
+    """configs/etf_meta.yaml → PG `etf_meta`（整份重灌）。"""
+    from twquant.data.serving import fund_flow_ingest as ffi
+    from twquant.data.serving import store
+
+    scfg = _load_serving()
+    _, meta = _load_fund_flow()
+    with store.connect(scfg) as conn:
+        n = ffi.write_meta(conn, scfg.pg_schema, meta)
+    typer.secho(f"[OK] etf_meta {n} 檔", fg=typer.colors.GREEN)
+
+
+@fund_flow_app.command("units")
+def fund_flow_units(
+    date: str | None = typer.Option(
+        None, "--date", help="以這天為「今天」（預設今天）；補它之前的缺日"
+    ),
+) -> None:
+    """補 ETF 已發行單位數（TWSE MI_QFIIS）：與每日 pipeline 的「ETF 單位數」步驟相同。"""
+    from twquant.conventions import now_tw
+
+    day = dt.date.fromisoformat(date) if date else now_tw().date()
+    typer.secho(f"[OK] {_run_etf_units_day(day)}", fg=typer.colors.GREEN)
+
 
 ml_app = typer.Typer(help="ML 排序層（SPEC-010）：研究軌訓練與每日推論")
 app.add_typer(ml_app, name="ml")

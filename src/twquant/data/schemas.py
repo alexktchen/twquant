@@ -352,6 +352,41 @@ ML_SCORES = _schema(
     },
 )
 
+# ── 投信／ETF 資金流（SPEC-016／T-335）：只寫 PG（見 serving/schema.py 的 FUND_FLOW_SPECS）──
+
+ETF_META = _schema(
+    "etf_meta",
+    1,
+    {
+        "etf_id": _col(pl.String),  # 保留前導零，如 "0050"、"00981A"
+        "name": _col(pl.String),
+        "issuer": _col(pl.String),  # 經理公司簡稱
+        "fund_type": _col(pl.String),  # TWSE t187ap47_L 的「基金類型」
+        "is_active": _col(pl.Boolean),  # 主動式 ETF
+        "index_name": _col(pl.String, nullable=True),  # 追蹤指數；主動式為 null
+        "listed_date": _col(pl.Date),
+        "delisted_date": _col(pl.Date, nullable=True),
+        "units_tracked": _col(
+            pl.Boolean
+        ),  # False＝來源沒有它的單位數（原因在 etf_meta.yaml 的 note）
+        "available_at": _col(TW_DT),  # 上市日 18:00
+    },
+)
+
+ETF_UNITS_DAILY = _schema(
+    "etf_units_daily",
+    1,
+    {
+        "date": _col(pl.Date),
+        "etf_id": _col(pl.String),
+        "units": _nonneg(pl.Int64),  # 已發行受益權單位數（FinMind NumberOfSharesIssued）
+        # 與前一交易日相減（自算，T-334）；前一交易日缺值、分割／反分割窗內 → null（不是 0）
+        "units_delta": _col(pl.Int64, nullable=True),
+        "nav": _nonneg(pl.Float64, nullable=True),  # 每單位淨值 TWD；歷史沒有來源 → null
+        "available_at": _col(TW_DT),  # 同日 21:00（外資持股統計同表）
+    },
+)
+
 # 表名 → schema 的註冊表（唯一入口）
 SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "prices_daily": PRICES_DAILY,
@@ -376,6 +411,8 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "ingest_log": INGEST_LOG,
     "structural_breaks": STRUCTURAL_BREAKS,
     "ml_scores": ML_SCORES,
+    "etf_meta": ETF_META,
+    "etf_units_daily": ETF_UNITS_DAILY,
 }
 
 
