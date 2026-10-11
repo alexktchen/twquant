@@ -22,8 +22,12 @@ from twquant.config import EtfMetaConfig, FundFlowConfig
 from twquant.data import fund_flow_units as ffu
 from twquant.data.serving import schema as sch
 from twquant.data.serving.sync import upsert
+from twquant.data.sources.etf_pcf import PcfEmpty, PcfMissingBase, PcfSnapshot
+from twquant.errors import DataError
 
 UnitsFetch = Callable[[dt.date], list[dict[str, Any]]]
+#: (etf_id, 查詢日) → 清單；查詢日 None＝最新（元大）。拿不到清單時 raise PcfEmpty。
+QueryFetch = Callable[[str, dt.date | None], PcfSnapshot]
 _RAW: dict[str, pl.DataType | type[pl.DataType]] = {
     "date": pl.Date,
     "etf_id": pl.String,
@@ -178,3 +182,169 @@ def ingest_recent_units(
     result.rows = df.height
     result.jumps = ffu.units_jumps(df, cfg.units.jump_report_ratio).head(10).rows()
     return result
+
+
+# ── 每日持股（T-336）──────────────────────────────────────────────────────────
+
+
+def holdings_scope(cfg: FundFlowConfig, meta: EtfMetaConfig) -> list[tuple[str, str, dt.date]]:
+    """(etf_id, 投信, 上市日)：投信在 holdings.issuers、且追蹤單位數的 ETF。"""
+    return [
+        (e.etf_id, e.issuer, e.listed_date)
+        for e in meta.etfs
+        if e.issuer in cfg.holdings.issuers and e.units_tracked
+    ]
+
+
+def present_holdings(cur: Any, schema: str, days: Sequence[dt.date]) -> set[tuple[str, dt.date]]:
+    """PG 已有清單的 (etf_id, 基準日)。表還沒建 → 空集合。"""
+    cur.execute("SELECT to_regclass(%s)", (f"{schema}.etf_holdings_daily",))
+    if cur.fetchone()[0] is None:
+        return set()
+    cur.execute(
+        f"SELECT DISTINCT etf_id, date FROM {_q(schema, 'etf_holdings_daily')} "
+        "WHERE date = ANY(%s::date[])",
+        (list(days),),
+    )
+    return {(r[0], r[1]) for r in cur.fetchall()}
+
+
+def snapshot_for_base(
+    fetch: QueryFetch,
+    etf_id: str,
+    base: dt.date,
+    next_session: dt.date | None,
+    probe_days: int,
+) -> PcfSnapshot:
+    """拿「持股基準日＝base」的那份清單。
+
+    查詢日＝base 的下一個交易日（已知時）；未知（base 是最後一個交易日）就從 base+1 起逐日試
+    probe_days 天，只有 PcfEmpty（非交易日）才換下一天。回來的基準日不是 base → raise（來源缺那天）。
+    """
+    candidates = (
+        [next_session]
+        if next_session is not None
+        else [base + dt.timedelta(days=k) for k in range(1, probe_days + 1)]
+    )
+    last: PcfEmpty | None = None
+    for q in candidates:
+        try:
+            snap = fetch(etf_id, q)
+        except PcfEmpty as exc:
+            last = exc
+            continue
+        if snap.base_date != base:
+            raise PcfMissingBase(
+                "etf_holdings_daily",
+                base,
+                f"{etf_id}：查詢日 {q} 回的基準日是 {snap.base_date}，不是 {base}（來源缺這天？）",
+            )
+        return snap
+    raise PcfMissingBase(
+        "etf_holdings_daily", base, f"{etf_id}：試了 {candidates} 都沒有清單（最後：{last}）"
+    )
+
+
+@dataclass
+class HoldingsResult:
+    """一次持股擷取的結果（呼叫端印出）。"""
+
+    window: list[dt.date]
+    fetched: list[tuple[str, dt.date]]
+    rows: int = 0
+
+
+def ingest_recent_holdings(
+    conn: Any,
+    schema: str,
+    cfg: FundFlowConfig,
+    meta: EtfMetaConfig,
+    day: dt.date,
+    fetchers: dict[str, QueryFetch],
+) -> HoldingsResult:
+    """每日模式：day 之前最近 `holdings.catchup_trading_days` 個交易日裡 PG 還沒有的 (ETF, 基準日) → 抓、寫。
+
+    全有或全無：任一份抓不到或驗證失敗 → raise、一列都不寫（步驟標 failed）。
+    fetchers：投信 → QueryFetch；scope 內的投信缺 fetcher → raise。
+    """
+    sch.ensure_tables(conn, sch.FUND_FLOW_SPECS, schema)
+    scope = holdings_scope(cfg, meta)
+    lack = sorted({iss for _, iss, _ in scope} - set(fetchers))
+    if lack:
+        raise DataError("etf_holdings_daily", day, f"沒有這些投信的抓取函數：{lack}")
+    with conn.cursor() as cur:
+        window = recent_sessions(cur, schema, day, cfg.holdings.catchup_trading_days)
+        have = present_holdings(cur, schema, window)
+    nxt = {b: (window[i + 1] if i + 1 < len(window) else None) for i, b in enumerate(window)}
+    todo = [
+        (etf_id, iss, b)
+        for etf_id, iss, listed in scope
+        for b in window
+        if listed < b and (etf_id, b) not in have
+    ]
+    snaps = [
+        snapshot_for_base(fetchers[iss], etf_id, b, nxt[b], cfg.holdings.probe_calendar_days)
+        for etf_id, iss, b in todo
+    ]
+    result = HoldingsResult(window=window, fetched=[(e, b) for e, _, b in todo])
+    if not snaps:
+        return result
+    df = ffu.holdings_frame(snaps, cfg.holdings.available_hour, cfg.holdings.weight_sum_max)
+    write_holdings(conn, schema, df)
+    result.rows = df.height
+    return result
+
+
+def write_holdings(conn: Any, schema: str, df: pl.DataFrame) -> None:
+    """upsert `etf_holdings_daily`；同一 (ETF, 基準日) 先刪舊列再寫（清單是整份，不能殘留已賣出的股票）。"""
+    sch.ensure_tables(conn, sch.FUND_FLOW_SPECS, schema)
+    keys = df.select("etf_id", "date").unique()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {_q(schema, 'etf_holdings_daily')} t "
+                "USING unnest(%s::text[], %s::date[]) AS k(etf_id, date) "
+                "WHERE t.etf_id = k.etf_id AND t.date = k.date",
+                (keys["etf_id"].to_list(), keys["date"].to_list()),
+            )
+            upsert(cur, schema, sch.spec_of("etf_holdings_daily"), df)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+# ── 指數換股事件（T-337）──────────────────────────────────────────────────────
+
+
+def rebuild_rebalance(conn: Any, schema: str, meta: EtfMetaConfig) -> int:
+    """由 PG `etf_holdings_daily` 整份重算 `index_rebalance_events`（同一交易：刪光再寫）。回傳事件數。"""
+    sch.ensure_tables(conn, sch.FUND_FLOW_SPECS, schema)
+    index_ids = {e.etf_id for e in meta.etfs if not e.is_active}
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT date, etf_id, stock_id, available_at FROM {_q(schema, 'etf_holdings_daily')} "
+            "WHERE etf_id = ANY(%s)",
+            (sorted(index_ids),),
+        )
+        h = pl.DataFrame(
+            cur.fetchall(),
+            schema={
+                "date": pl.Date,
+                "etf_id": pl.String,
+                "stock_id": pl.String,
+                "available_at": pl.Datetime("us", "UTC"),
+            },
+            orient="row",
+        ).with_columns(pl.col("available_at").dt.convert_time_zone("Asia/Taipei"))
+    ev = ffu.rebalance_events(h, index_ids)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"DELETE FROM {_q(schema, 'index_rebalance_events')}")
+            if ev.height:
+                upsert(cur, schema, sch.spec_of("index_rebalance_events"), ev)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return ev.height

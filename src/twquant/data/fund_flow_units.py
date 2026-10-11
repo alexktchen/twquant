@@ -1,4 +1,4 @@
-"""`etf_meta`／`etf_units_daily` 的清洗（SPEC-016 §2，T-335）：純函數，不碰網路與 PG。
+"""`etf_meta`／`etf_units_daily`／`etf_holdings_daily` 的清洗（SPEC-016 §2，T-335／T-336）：純函數，不碰網路與 PG。
 
 - `units_delta`＝同一 ETF 在**相鄰兩個交易日**的單位數相減（T-334：自算）。
   前一交易日沒有列 → null；分割／反分割窗內 → null。**不得**跨缺日相減、不得補 0。
@@ -17,6 +17,7 @@ import polars as pl
 from twquant.config import EtfMetaConfig
 from twquant.conventions import TZ
 from twquant.data import schemas
+from twquant.data.sources.etf_pcf import PcfSnapshot
 from twquant.errors import DataError
 
 TABLE = "etf_units_daily"
@@ -169,3 +170,123 @@ def units_jumps(df: pl.DataFrame, ratio: float) -> pl.DataFrame:
         & (prev > 0)
         & ((pl.col("units") / prev > ratio) | (pl.col("units") / prev < 1.0 / ratio))
     )
+
+
+# ── 每日持股（T-336）──────────────────────────────────────────────────────────
+
+HOLDINGS = "etf_holdings_daily"
+
+
+def holdings_frame(
+    snaps: Sequence[PcfSnapshot], available_hour: int, weight_sum_max: float
+) -> pl.DataFrame:
+    """PcfSnapshot → `etf_holdings_daily`。股票權重和不在 (0, weight_sum_max] → raise（AC-8）。
+
+    available_at＝max(基準日 available_hour, 來源公布時點)：來源晚於該時點才公布（或事後修訂）就照實記晚。
+    同一 (ETF, 基準日) 出現兩份 → raise。
+    """
+    seen: set[tuple[str, dt.date]] = set()
+    rows: list[tuple[object, ...]] = []
+    for s in snaps:
+        key = (s.etf_id, s.base_date)
+        if key in seen:
+            raise DataError(HOLDINGS, s.base_date, f"{s.etf_id} 同一基準日兩份清單")
+        seen.add(key)
+        total = sum(w for _, _, w in s.rows)
+        if not 0.0 < total <= weight_sum_max:
+            raise DataError(
+                HOLDINGS,
+                s.base_date,
+                f"{s.etf_id}：股票權重和 {total:.4f} 不在 (0, {weight_sum_max}]",
+            )
+        at = max(_at(s.base_date, available_hour), s.published_at)
+        rows += [(s.base_date, s.etf_id, sid, sh, w, at) for sid, sh, w in s.rows]
+    df = pl.DataFrame(
+        rows,
+        schema={
+            "date": pl.Date,
+            "etf_id": pl.String,
+            "stock_id": pl.String,
+            "shares": pl.Int64,
+            "weight": pl.Float64,
+            "available_at": schemas.TW_DT,
+        },
+        orient="row",
+    ).sort(["date", "etf_id", "stock_id"])
+    return schemas.validate(HOLDINGS, df)
+
+
+# ── 指數換股事件（T-337）：由指數型 ETF 的持股增刪推導 ───────────────────────────
+
+REBALANCE = "index_rebalance_events"
+REBALANCE_SOURCE = "holdings_diff"
+
+
+def rebalance_events(holdings: pl.DataFrame, index_etfs: set[str]) -> pl.DataFrame:
+    """[date, etf_id, stock_id, available_at] → `index_rebalance_events`。
+
+    每檔指數型 ETF 依基準日排序，相鄰兩份清單比成分：後一份多出的 → add、少掉的 → remove，
+    effective_date＝後一份的基準日、prev_base_date＝前一份。主動式 ETF 天天換股，不在 index_etfs 就不產生事件。
+    只看成分、不看股數與權重：分割、配股、申贖造成的股數變化不是換股。
+    """
+    rows: list[tuple[object, ...]] = []
+    h = holdings.filter(pl.col("etf_id").is_in(sorted(index_etfs)))
+    for (etf_id,), g in h.group_by(["etf_id"], maintain_order=True):
+        snaps = (
+            g.group_by("date")
+            .agg(pl.col("stock_id").sort(), pl.col("available_at").max())
+            .sort("date")
+        )
+        prev: tuple[dt.date, set[str]] | None = None
+        for day, ids, at in snaps.iter_rows():
+            cur = set(ids)
+            if prev is not None:
+                pday, pids = prev
+                rows += [
+                    (etf_id, s, "add", day, pday, None, REBALANCE_SOURCE, at)
+                    for s in sorted(cur - pids)
+                ]
+                rows += [
+                    (etf_id, s, "remove", day, pday, None, REBALANCE_SOURCE, at)
+                    for s in sorted(pids - cur)
+                ]
+            prev = (day, cur)
+    df = pl.DataFrame(
+        rows,
+        schema={
+            "etf_id": pl.String,
+            "stock_id": pl.String,
+            "action": pl.String,
+            "effective_date": pl.Date,
+            "prev_base_date": pl.Date,
+            "announce_date": pl.Date,
+            "source": pl.String,
+            "available_at": schemas.TW_DT,
+        },
+        orient="row",
+    ).sort(["etf_id", "effective_date", "action", "stock_id"])
+    return schemas.validate(REBALANCE, df)
+
+
+def net_changes(
+    events: pl.DataFrame, etf_id: str, after: dt.date | None, upto: dt.date
+) -> tuple[set[str], set[str]]:
+    """某 ETF 在 (after, upto] 期間的淨增、淨刪成分（先加後刪的暫時持股互相抵銷）。"""
+    e = events.filter(
+        (pl.col("etf_id") == etf_id)
+        & (pl.col("effective_date") <= upto)
+        & ((pl.col("effective_date") > after) if after is not None else pl.lit(True))
+    ).sort("effective_date")
+    added: set[str] = set()
+    removed: set[str] = set()
+    for sid, action in e.select("stock_id", "action").iter_rows():
+        if action == "add":
+            if sid in removed:
+                removed.discard(sid)
+            else:
+                added.add(sid)
+        elif sid in added:
+            added.discard(sid)
+        else:
+            removed.add(sid)
+    return added, removed

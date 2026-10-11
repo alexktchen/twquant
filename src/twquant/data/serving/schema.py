@@ -463,6 +463,35 @@ FUND_FLOW_SPECS: tuple[TableSpec, ...] = (
         pk=("etf_id", "date"),
         indexes=(("date",),),
     ),
+    TableSpec(
+        "etf_holdings_daily",
+        (
+            ("date", "date"),
+            ("etf_id", "text"),
+            ("stock_id", "text"),
+            ("shares", "bigint"),
+            ("weight", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("etf_id", "date", "stock_id"),
+        indexes=(("date",), ("stock_id", "date")),
+    ),
+    TableSpec(
+        "index_rebalance_events",
+        (
+            ("etf_id", "text"),
+            ("stock_id", "text"),
+            ("action", "text"),
+            ("effective_date", "date"),
+            ("prev_base_date", "date"),
+            ("announce_date", "date"),
+            ("source", "text"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("etf_id", "effective_date", "stock_id", "action"),
+        snapshot=True,  # 由 etf_holdings_daily 整份重算
+        indexes=(("stock_id", "effective_date"),),
+    ),
 )
 
 _ALL_SPECS: tuple[TableSpec, ...] = (

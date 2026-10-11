@@ -387,6 +387,36 @@ ETF_UNITS_DAILY = _schema(
     },
 )
 
+ETF_HOLDINGS_DAILY = _schema(
+    "etf_holdings_daily",
+    1,
+    {
+        "date": _col(pl.Date),  # 持股基準日（不是公布日、不是 PCF 適用日）
+        "etf_id": _col(pl.String),
+        "stock_id": _col(pl.String),
+        "shares": _nonneg(pl.Int64),  # 股
+        "weight": pa.Column(pl.Float64, checks=[pa.Check.ge(0.0), pa.Check.le(1.0)]),  # 小數
+        "available_at": _col(TW_DT),  # max(基準日 18:00, 來源公布時點)
+    },
+)
+
+INDEX_REBALANCE_EVENTS = _schema(
+    "index_rebalance_events",
+    1,
+    {
+        "etf_id": _col(pl.String),  # 由哪一檔指數型 ETF 的持股推導
+        "stock_id": _col(pl.String),
+        "action": pa.Column(pl.String, checks=pa.Check.isin(["add", "remove"])),
+        "effective_date": _col(pl.Date),  # 新清單第一個出現（add）／消失（remove）的基準日
+        "prev_base_date": _col(
+            pl.Date
+        ),  # 前一份清單的基準日：生效日落在 (prev_base_date, effective_date]
+        "announce_date": _col(pl.Date, nullable=True),  # 由持股推導拿不到 → null（T-334）
+        "source": _col(pl.String),  # holdings_diff
+        "available_at": _col(TW_DT),  # 推導來源那份清單的 available_at
+    },
+)
+
 # 表名 → schema 的註冊表（唯一入口）
 SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "prices_daily": PRICES_DAILY,
@@ -413,6 +443,8 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "ml_scores": ML_SCORES,
     "etf_meta": ETF_META,
     "etf_units_daily": ETF_UNITS_DAILY,
+    "etf_holdings_daily": ETF_HOLDINGS_DAILY,
+    "index_rebalance_events": INDEX_REBALANCE_EVENTS,
 }
 
 

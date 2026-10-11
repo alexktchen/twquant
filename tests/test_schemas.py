@@ -72,10 +72,10 @@ def test_all_tables_registered_with_version() -> None:
     # 18 張 clean 層表都要有 schema 與版本（含 index_daily、market_holidays、
     # ml_scores、stock_valuation——T-068/SPEC-010 §5、T-010/D-044 新增）
     assert (
-        len(schemas.SCHEMAS) == 24
+        len(schemas.SCHEMAS) == 26
     )  # +stock_valuation（T-010／D-044）+financial_statements（T-097）
     # +attention_stocks、daytrade_daily、sbl_short_daily（T-309／D-154）
-    # +etf_meta、etf_units_daily（T-335／SPEC-016）
+    # +etf_meta、etf_units_daily（T-335）、etf_holdings_daily（T-336）、index_rebalance_events（T-337）（SPEC-016）
     for name in schemas.SCHEMAS:
         assert schemas.schema_version(name) >= 1
 

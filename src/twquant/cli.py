@@ -1335,6 +1335,41 @@ def _run_etf_units_day(day: dt.date) -> str:
     return f"補 {len(res.fetched)} 天（{res.fetched[0]}～{res.fetched[-1]}）、{res.rows} 列{tail}"
 
 
+def _run_etf_holdings_day(day: dt.date) -> str:
+    """每日 pipeline「ETF 持股」步驟（T-336／SPEC-016）：元大、統一的每日持股清單 → `etf_holdings_daily`。
+
+    補 day 之前最近 `holdings.catchup_trading_days` 個交易日裡 PG 還沒有的 (ETF, 基準日)。
+    全有或全無：任一份抓不到（來源缺那天、權重和不對）→ raise、一列都不寫（步驟標 failed，不擋主線）。
+    """
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import fund_flow_ingest as ffi
+    from twquant.data.serving import store
+    from twquant.data.sources import etf_pcf
+
+    scfg = _load_serving()
+    if not scfg.enabled:
+        return "未啟用（serving.yaml enabled=false）"
+    if not store.ping(scfg):
+        return "PG 不可達，略過"
+    cfg, meta = _load_fund_flow()
+    yuanta = HttpClient(source="yuanta_pcf", rate=_load_system().source_rates["twse_rwd"])
+    ez = etf_pcf.EzmoneySession(pace_seconds=cfg.holdings.pace_seconds)
+    fetchers: dict[str, ffi.QueryFetch] = {
+        "元大": lambda etf_id, q: etf_pcf.fetch_yuanta(yuanta, etf_id, q),
+        "統一": ez.fetch,
+    }
+    with store.connect(scfg) as conn:
+        res = ffi.ingest_recent_holdings(conn, scfg.pg_schema, cfg, meta, day, fetchers)
+        if not res.fetched:
+            return f"最近 {len(res.window)} 個交易日都已有"
+        n_events = ffi.rebuild_rebalance(conn, scfg.pg_schema, meta)  # T-337：換股事件跟著重算
+    days = sorted({b for _, b in res.fetched})
+    return (
+        f"補 {len(res.fetched)} 份（{days[0]}～{days[-1]}）、{res.rows} 列；"
+        f"換股事件重算共 {n_events} 筆"
+    )
+
+
 def _run_daily_pipeline(
     day: dt.date, pg_signals: bool = False, cloud: bool = False
 ) -> PipelineResult:
@@ -1446,6 +1481,10 @@ def _run_daily_pipeline(
     def _etf_units_step() -> str:
         # T-335／SPEC-016：ETF 已發行單位數（資金流研究）。不依賴當天行情，非關鍵步驟。
         return _run_etf_units_day(day)
+
+    def _etf_holdings_step() -> str:
+        # T-336／SPEC-016：元大、統一的每日持股清單（資金流研究）。非關鍵步驟。
+        return _run_etf_holdings_day(day)
 
     def _chip_step() -> str:
         # T-310：官方當沖／借券（前幾個交易日＋缺日）、處置／注意公告 → 直寫 PG。
@@ -1628,6 +1667,7 @@ def _run_daily_pipeline(
         PipelineStep("品質閘門", _gate_step, critical=True),
         PipelineStep("籌碼（當沖／借券／處置／注意）", _chip_step),
         PipelineStep("ETF 單位數", _etf_units_step),
+        PipelineStep("ETF 持股", _etf_holdings_step),
         PipelineStep("券商買賣超", _broker_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),
@@ -3548,7 +3588,9 @@ def insights_import(
 
 # ── ML 排序層（SPEC-010，T-067）──────────────────────────────────────
 
-fund_flow_app = typer.Typer(help="投信／ETF 資金流（SPEC-016）：ETF 基本資料與已發行單位數。")
+fund_flow_app = typer.Typer(
+    help="投信／ETF 資金流（SPEC-016）：ETF 基本資料、已發行單位數與每日持股。"
+)
 app.add_typer(fund_flow_app, name="fund-flow")
 
 
@@ -3563,6 +3605,32 @@ def fund_flow_meta() -> None:
     with store.connect(scfg) as conn:
         n = ffi.write_meta(conn, scfg.pg_schema, meta)
     typer.secho(f"[OK] etf_meta {n} 檔", fg=typer.colors.GREEN)
+
+
+@fund_flow_app.command("holdings")
+def fund_flow_holdings(
+    date: str | None = typer.Option(
+        None, "--date", help="以這天為「今天」（預設今天）；補它之前的缺日"
+    ),
+) -> None:
+    """補 ETF 每日持股（元大、統一）：與每日 pipeline 的「ETF 持股」步驟相同。"""
+    from twquant.conventions import now_tw
+
+    day = dt.date.fromisoformat(date) if date else now_tw().date()
+    typer.secho(f"[OK] {_run_etf_holdings_day(day)}", fg=typer.colors.GREEN)
+
+
+@fund_flow_app.command("rebalance")
+def fund_flow_rebalance() -> None:
+    """由 PG 的 ETF 持股整份重算指數換股事件（`index_rebalance_events`，T-337）。"""
+    from twquant.data.serving import fund_flow_ingest as ffi
+    from twquant.data.serving import store
+
+    scfg = _load_serving()
+    _, meta = _load_fund_flow()
+    with store.connect(scfg) as conn:
+        n = ffi.rebuild_rebalance(conn, scfg.pg_schema, meta)
+    typer.secho(f"[OK] index_rebalance_events {n} 筆", fg=typer.colors.GREEN)
 
 
 @fund_flow_app.command("units")

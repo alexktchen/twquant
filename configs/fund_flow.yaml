@@ -13,6 +13,15 @@ units:
   split_null_sessions_before: 1 # 0050／0052 的單位數跳動在分割事件日的前一個交易日
   jump_report_ratio: 1.5
 
+holdings: # T-336：每日持股（PCF）；T-334 只確認元大、統一可回查歷史
+  issuers: [元大, 統一]
+  available_hour: 18 # available_at＝max(基準日 18:00, 來源公布時點)；實測公布在基準日 15:50～16:55
+  weight_sum_max: 1.02
+  catchup_trading_days: 5
+  index_sample_sessions: 5 # 指數型歷史每週一份、成分變動區間逐日補；主動式逐日
+  pace_seconds: 1.0
+  probe_calendar_days: 7
+
 events:
   flow_hi_pctl: 0.95 # E3 申購潮
   flow_lo_pctl: 0.05 # E4 贖回潮

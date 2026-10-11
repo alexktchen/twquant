@@ -628,6 +628,25 @@ class FundFlowUnitsConfig(BaseConfig):
     jump_report_ratio: float = Field(default=1.5, gt=1.0)
 
 
+class FundFlowHoldingsConfig(BaseConfig):
+    """ETF 每日持股（`etf_holdings_daily`，T-336）的來源與取樣。"""
+
+    issuers: tuple[str, ...] = ("元大", "統一")  # 有歷史持股 API 的投信（T-334）
+    available_hour: int = Field(
+        default=18, ge=0, le=23
+    )  # available_at＝max(基準日此時, 來源公布時點)
+    weight_sum_max: float = Field(
+        default=1.02, gt=1.0
+    )  # 股票權重和上限（AC-8）；主動式持現金，不設下限
+    catchup_trading_days: int = Field(default=5, ge=1)
+    # 歷史回補：指數型每 N 個交易日取一份，成分變動的區間再逐日補（找出生效日）；主動式逐日
+    index_sample_sessions: int = Field(default=5, ge=1)
+    pace_seconds: float = Field(default=1.0, gt=0.0)
+    probe_calendar_days: int = Field(
+        default=7, ge=1
+    )  # 找「基準日之後第一個可查詢日」最多往後試幾天
+
+
 class FundFlowEventsConfig(BaseConfig):
     """SPEC-016 §4 的事件定義（D-171 §一 事前登記；不得依結果修改）。"""
 
@@ -687,6 +706,7 @@ class FundFlowConfig(BaseConfig):
 
     etf_meta_path: str = "configs/etf_meta.yaml"
     units: FundFlowUnitsConfig = FundFlowUnitsConfig()
+    holdings: FundFlowHoldingsConfig = FundFlowHoldingsConfig()
     events: FundFlowEventsConfig = FundFlowEventsConfig()
     factors: FundFlowFactorsConfig = FundFlowFactorsConfig()
     traces: FundFlowTracesConfig = FundFlowTracesConfig()
