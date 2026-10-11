@@ -181,6 +181,9 @@ def summarize(
         "per_day": float(net.sum() / days.sum()),
         "days": float(days.mean()),
         "hit": float(hit.mean()),
+        "win": float(
+            (net > 0).mean()
+        ),  # 扣成本後有賺的比例（2026-10-11 使用者要「機率高」時補的描述欄）
         "loss15": float((net <= BIG_LOSS).mean()),
         "t": t,
         "months": nm,
