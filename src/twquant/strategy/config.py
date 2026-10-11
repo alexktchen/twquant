@@ -319,6 +319,18 @@ class SlotExcludeConfig(BaseConfig):
     params: dict[str, object] = Field(default_factory=dict)
 
 
+class SlotRequireConfig(BaseConfig):
+    """補位模式的進場必要條件（D-174）：因子原始值 ≥ `min_value` 才是候選；值為 null（資料不足）→ 不是候選。
+
+    與 `entry_filters` 的 score_below 不同：那邊查不到分數「不擋」（缺分數不等於模型說賣），
+    這邊查不到就「不買」——必要條件沒被證實，就不算滿足。
+    """
+
+    factor: str
+    min_value: float
+    params: dict[str, object] = Field(default_factory=dict)
+
+
 class SlotsConfig(BaseConfig):
     """每日補位模式（T-247／D-120 §五）。給了它，`rebalance`／`selection`／`weighting` 一律不用。
 
@@ -332,6 +344,7 @@ class SlotsConfig(BaseConfig):
     conditional_vol: ConditionalVolConfig | None = None  # D-149 F1／F2
     inverse_vol: InverseVolSizingConfig | None = None  # D-149 F3
     exclude: list[SlotExcludeConfig] = Field(default_factory=list)  # D-172：進場排除規則
+    require: list[SlotRequireConfig] = Field(default_factory=list)  # D-174：進場必要條件
 
     @model_validator(mode="after")
     def _one_exposure_rule(self) -> SlotsConfig:

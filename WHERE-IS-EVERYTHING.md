@@ -31,6 +31,9 @@
 - **只留兩條線（D-163，2026-09-28）**：**大盤精選**（`CORE`＝E0，`lw_e0_ctrl`、排序模型 `lgbm_lw_net_h20_20260225_83890036`，紙上交易中）
   與 **潛伏飆股**（`QUIET`＝A20，`lgbm_quietA20_tu_h20_20260430_655df6d7`，每日名單 `scripts/a20_picks.py`，出場待第二保留期）。
   名字只是別名，檔名與指紋不改；不再開新的選股或出場輪次。
+- **第三條線「高分爆量（驗證中）」（D-174，2026-10-11）**：`QUIETV`＝`quiet_p35v`（潛伏飆股分數 ≥ 0.35 **且**當天成交量 ≥ 前 20 日平均 1.5 倍；`slots.require`）。
+  只上線觀察（看板／每日名單／網站），不下單；第二保留期登記 `configs/holdout2_quiet_volume.yaml`，2027-03 判讀前規則不得改。
+  大多數日子名單是空的——網站與 API 照樣列出這條線並寫「今天沒有符合條件的股票」。
 - **每日選股看板（D-164，前端首頁 `#/picks`）**：`data/pick_board/pick_board.json`，每天排程「潛伏飆股打分」→「每日選股看板」產生；
   手動重建 `TWQUANT_DATA_DIR=D:/project/twquant/data uv run --all-groups python -m twquant pick-board --date <日> --out D:/project/twquant/data`，
   補潛伏飆股分數 `... python -m twquant ml score-quiet --from <日> --to <日>`。持股是從 2026-05-01 起的引擎重播（`configs/pick_board.yaml`），**不顯示報酬**。

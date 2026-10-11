@@ -7,6 +7,7 @@ import datetime as dt
 import polars as pl
 
 from twquant.reporting import flow_flags as ff
+from twquant.reporting.pick_board_html import _Names
 
 D1, D2 = dt.date(2026, 10, 7), dt.date(2026, 10, 8)
 
@@ -78,3 +79,18 @@ def test_ac24_board_html_flow_column() -> None:
     flags = ff.build_flow_flags(["2330"], D2, pressure=None, streak=None, events=None, changes=None)
     some = _Flow({"flow_flags": {"note": ff.NOTE, "as_of": str(D2), "stocks": flags}})
     assert "無資料" in some.td("2330") and "無資料" in some.td("9999")
+
+
+def test_d174_empty_list_is_not_missing_scores() -> None:
+    """D-174：有門檻的線當天沒有股票＝「沒有符合條件」，不是「模型沒有打分」。"""
+    from twquant.reporting.pick_board_html import _picks_table
+
+    s = {"code": "QUIETV", "picks_ordered": True}
+    empty = _picks_table(s, [{"date": "2026-10-08", "picks": []}], _names(), {})
+    missing = _picks_table(s, [{"date": "2026-10-08", "picks": None}], _names(), {})
+    assert "沒有符合條件" in empty and "沒有打分" not in empty
+    assert "沒有打分" in missing
+
+
+def _names() -> _Names:
+    return _Names({})

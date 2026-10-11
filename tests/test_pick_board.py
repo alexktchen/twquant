@@ -184,7 +184,8 @@ def test_ac4_api_serves_the_saved_board_and_is_empty_before_the_first_run(tmp_pa
 
 def test_ac5_board_config_loads_and_points_at_real_strategies() -> None:
     cfg = load_config(ROOT / "pick_board.yaml", PickBoardConfig)
-    assert [s.code for s in cfg.strategies] == ["CORE", "QUIET"]
+    # D-163 兩條正式線＋D-174（使用者 2026-10-11 決定）第三條「高分爆量（驗證中）」
+    assert [s.code for s in cfg.strategies] == ["CORE", "QUIET", "QUIETV"]
     for s in cfg.strategies:
         assert (ROOT / "strategies" / f"{s.config}.yaml").exists(), s.config
 

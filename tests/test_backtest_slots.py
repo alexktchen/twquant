@@ -279,3 +279,39 @@ def test_ac13_exclude_rule_blocks_entry_but_never_sells(tmp_path: Path) -> None:
                 "slots": {"n": 2, "entry_threshold": 0.05, "exclude": [{"factor": "x"}]},
             }
         )
+
+
+def test_ac14_require_rule_keeps_only_confirmed_and_drops_unknown(tmp_path: Path) -> None:
+    """D-174：`slots.require` 因子值 ≥ min_value 才是候選；查不到值（資料不足）不是候選。"""
+    from twquant.strategy.slots import slot_candidates
+
+    wh = _wh(tmp_path)
+    day = _day(START)
+    base = _cfg(threshold=0.05).model_dump()
+    plain = [sid for sid, _ in slot_candidates(_cfg(threshold=0.05), wh, day)]
+    need = StrategyConfig.model_validate(
+        {
+            **base,
+            "slots": {
+                "n": 2,
+                "entry_threshold": 0.05,
+                "require": [{"factor": "price.mom_20d", "min_value": 0.30}],
+            },
+        }
+    )
+    picked = [sid for sid, _ in slot_candidates(need, wh, day)]
+    assert picked == [s for s in plain if s == "2330"]  # 2330 第 25 天 20 日漲幅 36%；1101 只有 22%
+    early = StrategyConfig.model_validate(
+        {
+            **base,
+            "slots": {
+                "n": 2,
+                "entry_threshold": 0.05,
+                "require": [
+                    {"factor": "price.mom_20d", "min_value": -1.0, "params": {"window": 60}}
+                ],
+            },
+        }
+    )
+    # 60 日動能在第 25 天還算不出來（null）→ 必要條件不成立 → 沒有候選
+    assert slot_candidates(early, wh, day) == []

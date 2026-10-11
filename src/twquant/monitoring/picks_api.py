@@ -133,10 +133,13 @@ def picks_payload(
         )
     }
     lines = []
+    # D-174：登記過的線一律列出——有門檻的線當天沒有股票是正常的一天（picks 為空），不是整條線消失
     for code in sorted(
-        {r["line"] for r in today_rows}, key=lambda c: list(names).index(c) if c in names else 99
+        {r["line"] for r in today_rows} | set(names),
+        key=lambda c: list(names).index(c) if c in names else 99,
     ):
-        today = [r["stock_id"] for r in by_day[(target, code)]]
+        today_list = by_day.get((target, code), [])
+        today = [r["stock_id"] for r in today_list]
         previous = [[r["stock_id"] for r in by_day.get((d, code), [])] for d in dates[1:]]
         marks = annotate(today, previous)
         recent_lists = [
@@ -144,7 +147,7 @@ def picks_payload(
             for d in window
         ]
         picks = []
-        for r in by_day[(target, code)]:
+        for r in today_list:
             c, p = close.get(r["stock_id"], (None, None))
             streak, is_new = marks[r["stock_id"]]
             picks.append(

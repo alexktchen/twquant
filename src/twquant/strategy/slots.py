@@ -38,6 +38,21 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
         return []
     uni = universe_ids(view, day, cfg.universe)
     df = df.filter(pl.col("stock_id").is_in(uni))
+    for need in cfg.slots.require:
+        # D-174：必要條件；null（資料不足）不算滿足
+        rq = compute(
+            [need.factor],
+            view,
+            dates=[day],
+            params={need.factor: dict(need.params)},
+            trim_lookback=True,
+        )
+        ok_ids = rq.filter(pl.col("value").is_not_null() & (pl.col("value") >= need.min_value))[
+            "stock_id"
+        ].to_list()
+        df = df.filter(pl.col("stock_id").is_in(ok_ids))
+        if df.is_empty():
+            return []
     for rule in cfg.slots.exclude:
         # D-172：排除規則的因子可能不在 builtins（資金流因子只在地端有資料），用到時才註冊
         import twquant.factors.fund_flow  # noqa: F401

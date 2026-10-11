@@ -85,6 +85,8 @@
 .cq-chg.down { background: var(--down); }
 .cq-chg.flat { background: #3a3d46; }
 .cq-note { color: var(--mute); font-size: 12.5px; padding: 10px 14px; margin: 0; }
+.cq-line-note { color: var(--text); border-top: 1px solid var(--line); }
+.cq-empty { color: var(--mute); font-size: 14px; padding: 18px 14px; margin: 0; text-align: center; }
 
 .cq-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px 20px; gap: 10px; }
 .cq-quote { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }

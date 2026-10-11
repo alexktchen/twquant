@@ -256,8 +256,11 @@ def _picks_table(
 ) -> str:
     last = shown[-1]
     picks = last.get("picks")
-    if not picks:
+    if picks is None:
         return f"<p class='lede'>{_md(str(last['date']))} <strong>模型沒有打分</strong>，沒有推薦名單。</p>"
+    if not picks:
+        # D-174：有門檻或必要條件的線，沒有股票符合是正常的一天，不是資料缺漏
+        return f"<p class='lede'>{_md(str(last['date']))} <strong>沒有符合條件的股票</strong>。</p>"
     code = str(s["code"])
     member = [(str(d["date"]), {str(p["stock_id"]) for p in (d.get("picks") or [])}) for d in shown]
     rows = []

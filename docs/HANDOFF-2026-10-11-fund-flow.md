@@ -34,7 +34,9 @@
 
 ## 四、還沒做
 
-- 部署：排程容器要重建映像才會跑「ETF 單位數」「ETF 持股」兩步與看板旗標（照 memory 的部署步驟）。
+- 部署：排程容器要重建映像才會跑「ETF 單位數」「ETF 持股」兩步、看板旗標與第三條線（照 memory 的部署步驟）；網站由 main 的 GHA 自動部署。
+- 第三條線的紙上交易帳本（現行帳本只支援月換股；補位型要另寫）。
+- D-174 §三：判讀標準與真錢比例待使用者填。
 - 國泰、群益、凱基、復華等的歷史持股來源（T-336 只做了 T-334 確認過的兩家）。
 - T-340：使用者填 D-171 §二 之後才做。
 
@@ -79,4 +81,7 @@
 - 《技術分析精論》總結與可回測的進出依據：`docs/reports/pring-technical-analysis-summary.md`。
 - 核心＋伺機（大盤精選 70%＋高分潛伏飆股 30%）開發期描述：`docs/reports/core-opportunistic-blend-dev.md`（Calmar 0.67 → 0.78）；尚未登記。
 - D-173 排列組合 512 組：無組合過運氣門檻，不送保留期（`docs/reports/d173-ta-grid-dev.md`）。
+- **D-174 第三條線「高分爆量（驗證中）」**（使用者：「好，上線變第三條」）：`slots.require` 進場必要條件＋`quiet_p35v.yaml`；
+  看板、每日名單、網站多一條線，登記過的線當天沒股票也列出（空名單）。開發期參考回測 `data/tracks_d172/quiet_p35v_10m_lot1.json`。
+  爆量條件的截取計算只會漏掉權證／ETN，一般股票與整段計算完全一致（D-174 §三之一）。
 - HTML 版（含目錄）：`data/reports/html/index.html`，用 `scripts/md_reports_to_html.py` 從 markdown 重轉。

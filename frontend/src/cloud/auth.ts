@@ -56,13 +56,17 @@ export function guestPicks(n = 15, seed = 20261010): Pick[] {
 }
 
 export const GUEST_LINES = [
-  { code: 'CORE', name: '大盤精選' },
-  { code: 'QUIET', name: '潛伏飆股' },
+  { code: 'CORE', name: '大盤精選', n: 15 },
+  { code: 'QUIET', name: '潛伏飆股', n: 15 },
+  { code: 'QUIETV', name: '高分爆量', n: 3 }, // D-174：多數日子很少或沒有
 ]
 
-/** 沒登入時某一天的假名單（兩條線各 15 檔）；日期是公開的真實交易日，股票全是假的。 */
+/** 沒登入時某一天的假名單（三條線，股票全是假的）；日期是公開的真實交易日，股票全是假的。 */
 export function guestDay(date: string): PicksDay {
-  return { date, lines: GUEST_LINES.map((l) => ({ ...l, picks: guestPicks(15, seedOf(`${date}:${l.code}`)) })) }
+  return {
+    date,
+    lines: GUEST_LINES.map(({ n, ...l }) => ({ ...l, picks: guestPicks(n, seedOf(`${date}:${l.code}`)) })),
+  }
 }
 
 export type GuestCandle = { o: number; h: number; l: number; c: number }

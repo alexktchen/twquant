@@ -34,3 +34,12 @@ strategies:
         path: tracks_round13/quiet_s0_10m_lot1.json
       - label: D-162 事後檢驗（模型重訓到 2026-02、考 2026-03～09；1,000 萬、零股）
         path: tracks_d162/quiet_s0_2602.json
+  # D-174（2026-10-11，使用者：「好，上線變第三條」）：驗證中，2027-03 在第二保留期判讀；判讀前規則不得修改。
+  - code: QUIETV
+    name: 高分爆量（驗證中）
+    config: quiet_p35v
+    summary: 潛伏飆股裡模型分數 0.35 以上、而且當天爆量（成交量是前 20 天平均的 1.5 倍以上）才買；每檔抱滿 20 個交易日。大多數日子不會有符合的股票，崩盤後的反彈期會一次出現很多。驗證中，2027 年 3 月用新資料檢驗前只供觀察。
+    watch: true
+    references:
+      - label: 開發期回測（1,000 萬、零股；只當參考，開發期已用過）
+        path: tracks_d172/quiet_p35v_10m_lot1.json

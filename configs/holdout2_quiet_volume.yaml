@@ -1,0 +1,15 @@
+# D-174（2026-10-11，使用者：「好，上線變第三條」）：第三條線「潛伏飆股・高分爆量」登記進第二保留期（D-109）。
+# 與 D-172 的十支臂一起在 2027-03 判讀；另立一份登記（holdout2.yaml、holdout2_quiet_threshold.yaml 開啟前都不得修改）。
+# 指紋由 tests/test_holdout2_quiet_volume.py 守著。判讀門檻由使用者填 D-174 §三。
+registration: D-174
+holdout_start: 2026-09-09
+opens_on: 2027-03-01
+min_sessions: 120
+entries:
+  - code: QUIET-P35V
+    strategy: quiet_p35v
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 5bf238f258a106f74e86dd09d5edc7fbe8bd0dac040182db96786b690f31e11d
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
