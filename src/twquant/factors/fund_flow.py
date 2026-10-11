@@ -123,11 +123,31 @@ def _to_next_session(df: pl.LazyFrame, view: PitView) -> pl.LazyFrame:
     )
 
 
+def _wsum(col: str, window: int, *, group: str | None = "stock_id", poison: bool = True) -> pl.Expr:
+    """以交易日位置（不是列數）為窗口的滾動和，**逐格、固定順序相加**（呼叫端須先依 group、_pos 排序）。
+
+    不用 polars 的增量滾動和：它「加進來、減出去」逐步算，值離開窗口後會留下 1e-18 級的殘差——
+    過去 5 日全是 0 的股票算出 −7e-18，被當成「< 0」的贖回潮（D-172 驗證時抓到）；而且裁切下界
+    會改變殘差，使 `trim_lookback` 前後不相等。逐格相加：全 0 就是 0、同一組列永遠同一個結果。
+    `poison`：窗口內有 null → null（不得當 0）。
+    """
+
+    def over(e: pl.Expr) -> pl.Expr:
+        return e.over(group) if group else e
+
+    total: pl.Expr = pl.lit(0.0)
+    n_null: pl.Expr = pl.lit(0)
+    for k in range(window):
+        v = over(pl.col(col).shift(k)).cast(pl.Float64)
+        inside = over(pl.col("_pos").shift(k)) > pl.col("_pos") - window
+        total = total + pl.when(inside).then(v.fill_null(0.0)).otherwise(0.0)
+        n_null = n_null + pl.when(inside & v.is_null()).then(1).otherwise(0)
+    return pl.when(n_null > 0).then(None).otherwise(total) if poison else total
+
+
 def _rolling_sum(col: str, window: int) -> pl.Expr:
-    """以交易日位置（不是列數）為窗口的滾動和；窗口內有 null → null（不得當 0）。"""
-    s = pl.col(col).fill_null(0.0).rolling_sum_by("_pos", window_size=f"{window}i")
-    n_null = pl.col(col).is_null().cast(pl.Int64).rolling_sum_by("_pos", window_size=f"{window}i")
-    return pl.when(n_null > 0).then(None).otherwise(s).over("stock_id")
+    """個股的滾動和（見 `_wsum`）；窗口內有 null → null。"""
+    return _wsum(col, window)
 
 
 @factor(
@@ -135,7 +155,7 @@ def _rolling_sum(col: str, window: int) -> pl.Expr:
     category="chip",
     direction=-1,
     tables=["etf_units_daily", "etf_holdings_daily", "prices_daily"],
-    lookback_days=40,
+    lookback_days=60,
     params={"window": 5, "adv_window": 20, "max_stale": 10},
 )
 def etf_flow_pressure_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
@@ -199,10 +219,7 @@ def trust_disc_net_10d(view: PitView, params: dict[str, object]) -> pl.DataFrame
         .sort("stock_id", "_pos")
         .with_columns(
             _net=_rolling_sum("disc", window),
-            _vol=pl.col("volume")
-            .cast(pl.Float64)
-            .rolling_sum_by("_pos", window_size=f"{window}i")
-            .over("stock_id"),
+            _vol=_wsum("volume", window, poison=False),
         )
         .with_columns(
             value=pl.when(pl.col("_vol") > 0).then(pl.col("_net") / pl.col("_vol")).otherwise(None)
@@ -336,14 +353,12 @@ def etf_flow_total_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
     window = _int(params, "window", 5)
     daily = _to_next_session(_market_daily(view, _int(params, "max_stale", 10)), view).sort("_pos")
     out = daily.with_columns(
-        _f=pl.col("flow_all").fill_null(0.0).rolling_sum_by("_pos", window_size=f"{window}i"),
-        _nf=pl.col("flow_all")
-        .is_null()
-        .cast(pl.Int64)
-        .rolling_sum_by("_pos", window_size=f"{window}i"),
-        _m=pl.col("mkt_amount").rolling_sum_by("_pos", window_size=f"{window}i"),
+        _f=_wsum("flow_all", window, group=None),
+        _m=_wsum("mkt_amount", window, group=None, poison=False),
     ).with_columns(
-        value=pl.when((pl.col("_nf") == 0) & (pl.col("_m") > 0)).then(pl.col("_f") / pl.col("_m"))
+        value=pl.when(pl.col("_f").is_not_null() & (pl.col("_m") > 0)).then(
+            pl.col("_f") / pl.col("_m")
+        )
     )
     return _broadcast(out, view)
 
@@ -385,14 +400,8 @@ def sbl_sell_ratio(view: PitView, window: int) -> pl.DataFrame:
         .join(sess, on="date", how="inner")
         .sort("stock_id", "_pos")
         .with_columns(
-            _s=pl.col("sbl_sell")
-            .cast(pl.Float64)
-            .rolling_sum_by("_pos", window_size=f"{window}i")
-            .over("stock_id"),
-            _v=pl.col("volume")
-            .cast(pl.Float64)
-            .rolling_sum_by("_pos", window_size=f"{window}i")
-            .over("stock_id"),
+            _s=_wsum("sbl_sell", window, poison=False),
+            _v=_wsum("volume", window, poison=False),
         )
         .with_columns(value=pl.when(pl.col("_v") > 0).then(pl.col("_s") / pl.col("_v")))
         .select("date", "stock_id", "_pos", "value")
@@ -411,7 +420,7 @@ def sbl_sell_ratio(view: PitView, window: int) -> pl.DataFrame:
     category="chip",
     direction=-1,
     tables=["etf_units_daily", "etf_holdings_daily", "prices_daily"],
-    lookback_days=40,
+    lookback_days=60,
     params={"window": 5, "adv_window": 20, "max_stale": 10, "hi_pctl": 0.95, "lo_pctl": 0.05},
 )
 def etf_flow_wave(view: PitView, params: dict[str, object]) -> pl.DataFrame:

@@ -306,3 +306,28 @@ def test_ac13_etf_flow_wave_marks_only_cross_sectional_tails(tmp_path: Path) -> 
     assert _val(w, D[3], "2317") == 1.0 and _val(w, D[3], "1101") == 0.0
     # 差分未知的那天沒有列（不是 0）
     assert _val(w, D[5], "2330") is None
+
+
+@pytest.mark.parametrize("name", ["chip.etf_flow_pressure_5d", "chip.etf_flow_wave"])
+def test_ac12_trimmed_lookback_is_equivalent(tmp_path: Path, name: str) -> None:
+    """D-172 的排除規則逐日以 trim_lookback=True 呼叫：裁切下界後的值必須與整段歷史逐位元相同。"""
+    from twquant.factors.compute import compute
+
+    wh = _build(tmp_path)
+    for day in (D[5], D[7]):
+        full = compute([name], wh.view(day), dates=[day])
+        trim = compute([name], wh.view(day), dates=[day], trim_lookback=True)
+        assert full.height and trim.equals(full)
+
+
+def test_ac14_window_sum_leaves_no_residual_after_values_leave() -> None:
+    """D-172 抓到的 bug：增量滾動和在大額值離開窗口後留下 ±1e-18，被當成「< 0」的贖回潮。"""
+    from twquant.factors.fund_flow import _wsum
+
+    vals = [1.0e9 / 3, -2.0e9 / 7, 5.0e8 / 11, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    df = pl.DataFrame({"stock_id": ["2247"] * len(vals), "_pos": list(range(len(vals))), "x": vals})
+    out = df.sort("stock_id", "_pos").with_columns(s=_wsum("x", 5))["s"].to_list()
+    assert out[-1] == 0.0 and out[-2] == 0.0  # 窗口內全是 0 → 剛好 0，不是殘差
+    assert out[2] == pytest.approx(sum(vals[:3]))
+    gap = df.filter(pl.col("_pos") != 1).sort("stock_id", "_pos").with_columns(s=_wsum("x", 2))
+    assert gap.filter(pl.col("_pos") == 2)["s"][0] == pytest.approx(vals[2])  # 缺 pos 1：不跨缺日

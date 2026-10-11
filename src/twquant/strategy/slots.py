@@ -42,7 +42,15 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
         # D-172：排除規則的因子可能不在 builtins（資金流因子只在地端有資料），用到時才註冊
         import twquant.factors.fund_flow  # noqa: F401
 
-        ex = compute([rule.factor], view, dates=[day], params={rule.factor: dict(rule.params)})
+        # 逐日補位會呼叫上千次：依因子宣告的回看裁下界（T-083；只動下界、不可能引入前視，
+        # 等價性由 tests/test_fund_flow_factors.py 的 trim 測試守著）
+        ex = compute(
+            [rule.factor],
+            view,
+            dates=[day],
+            params={rule.factor: dict(rule.params)},
+            trim_lookback=True,
+        )
         blocked = ex.filter(pl.col("value").is_not_null() & (pl.col("value") >= rule.min_value))[
             "stock_id"
         ].to_list()
