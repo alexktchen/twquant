@@ -48,6 +48,30 @@ def replace_line(
     return len(picks)
 
 
+def write_line(
+    conn: Any,
+    schema: str,
+    day: dt.date,
+    line: str,
+    picks: Sequence[tuple[str, float | None]],
+    model_id: str | None,
+    created_at: dt.datetime,
+    allow_empty: bool,
+) -> int:
+    """每日名單寫入的入口（D-174）：有名單＝`replace_line`；空名單只有 `allow_empty` 的線才接受，
+    此時清掉那天這條線的舊名單（重跑同日變成沒股票也要一致），回 0。其他線空名單照樣 raise。"""
+    if picks or not allow_empty:
+        return replace_line(conn, schema, day, line, picks, model_id, created_at)
+    ensure_tables(conn, (DAILY_PICKS_SPEC,), schema)
+    with conn.cursor() as cur:
+        cur.execute(
+            f'DELETE FROM "{schema}"."{DAILY_PICKS_SPEC.name}" WHERE date = %s AND line = %s',
+            (day, line),
+        )
+    conn.commit()
+    return 0
+
+
 def read_line(
     conn: Any, schema: str, day: dt.date, line: str
 ) -> list[tuple[int, str, float | None]]:

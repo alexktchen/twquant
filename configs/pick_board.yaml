@@ -38,6 +38,7 @@ strategies:
   - code: QUIETV
     name: 高分爆量（驗證中）
     config: quiet_p35v
+    allow_empty: true # 大多數日子沒有符合的股票；每日名單寫 0 檔，不是錯誤
     summary: 潛伏飆股裡模型分數 0.35 以上、而且當天爆量（成交量是前 20 天平均的 1.5 倍以上）才買；每檔抱滿 20 個交易日。大多數日子不會有符合的股票，崩盤後的反彈期會一次出現很多。驗證中，2027 年 3 月用新資料檢驗前只供觀察。
     watch: true
     references:
