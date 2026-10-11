@@ -521,3 +521,117 @@ def research_entries(
                 }
             )
     return rows
+
+
+# ── 右尾（D-171 §一之四）──────────────────────────────────────────────────────
+
+TAIL_SCOPE = "flow:tails"
+TAIL_COL = "r20"  # matched_excess 的報酬欄放 0／1 命中；y_ 欄＝命中 − 配對組命中率
+
+
+def _tail_node(e: pl.DataFrame, tcfg: FundFlowTracesConfig) -> dict[str, Any]:
+    raw, y = e[f"raw_{TAIL_COL}"], e[f"y_{TAIL_COL}"]
+    ok = raw.is_not_null() & y.is_not_null()
+    raw, y = raw.filter(ok), y.filter(ok)
+    if not raw.len():
+        return {"n": 0}
+    hit = float(raw.mean())  # type: ignore[arg-type]
+    ctrl = float((raw - y).mean())  # type: ignore[arg-type]
+    return {
+        "n": raw.len(),
+        "stocks": e.filter(ok)["stock_id"].n_unique(),
+        "hit": hit,
+        "ctrl": ctrl,
+        "lift": hit / ctrl if ctrl > 0 else None,
+        "diff": hit - ctrl,
+        "boot": block_bootstrap(e.filter(ok), f"y_{TAIL_COL}", tcfg.bootstrap_n, tcfg.seed),
+    }
+
+
+def tail_summary(
+    matched: pl.DataFrame, *, stratum: str, tcfg: FundFlowTracesConfig
+) -> dict[str, Any]:
+    """matched_excess（報酬欄是 0／1 命中）→ {分層: {事件: 命中率、配對命中率、倍率、差、t、逐年}}。"""
+    out: dict[str, Any] = {}
+    for ev in sorted(matched["event"].unique().to_list()):
+        e = matched.filter(pl.col("event") == ev)
+        node = _tail_node(e, tcfg)
+        node["by_year"] = {
+            str(y): {k: v for k, v in _tail_node(g, tcfg).items() if k in ("n", "lift", "diff")}
+            for (y,), g in e.with_columns(_y=pl.col("date").dt.year())
+            .sort("_y")
+            .group_by(["_y"], maintain_order=True)
+        }
+        out[ev] = node
+    return {stratum: out}
+
+
+def render_tail_markdown(report: Mapping[str, Any]) -> str:
+    """右尾報告（只有數字與定義，沒有判讀字句）。"""
+    meta = report["meta"]
+    lines = [
+        f"# 投信／ETF 資金流：右尾命中率（D-171 §一之四，{meta['run_date']}）",
+        "",
+        "標籤與潛伏飆股 A20 相同：T+1 開盤進場後 20 個交易日內任一收盤 ≥ +20%。"
+        "**只報不判**：倍率要多少才算有用由使用者填 D-171 §二 第 6 項"
+        "（參考：A20 對配對 1.34×～1.40×，TAIL-B 1.08×）。",
+        f"期間 {meta['first_date']}～{meta['last_date']}；配對：同日、同 20 日波動×60 日漲幅×ADV 各切 "
+        f"{meta['match_bins']} 等分、非同型事件，至少 {meta['matched_min']} 檔。"
+        "「@lag」列是描述（含前視），不可交易。",
+        "",
+    ]
+    for stratum, evs in report["results"].items():
+        lines += [
+            f"## {stratum}",
+            "",
+            "| 事件 | 筆數 | 檔數 | 事件命中率 | 配對命中率 | 倍率 | 差 | t |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for ev in EVENT_TYPES:
+            for key in sorted(k for k in evs if k == ev or k.startswith(ev + "@")):
+                n = evs[key]
+                if not n.get("n"):
+                    continue
+                lift = n.get("lift")
+                lines.append(
+                    f"| {key} {EVENT_NAMES[ev]} | {n['n']} | {n['stocks']} | {_f(n['hit']).lstrip('+')} | "
+                    f"{_f(n['ctrl']).lstrip('+')} | {'—' if lift is None else f'{lift:.2f}×'} | "
+                    f"{_f(n['diff'])} | {_f((n.get('boot') or {}).get('t'), pct=False)} |"
+                )
+        lines.append("")
+    full = report["results"].get(meta["strata"][0], {})
+    lines += ["## 逐年倍率（全市場）", ""]
+    for ev in sorted(full):
+        yr = full[ev].get("by_year", {})
+        lines.append(
+            f"- {ev}："
+            + "、".join(
+                f"{y} {v.get('n', 0)} 筆 {'—' if v.get('lift') is None else format(v['lift'], '.2f') + '×'}"
+                for y, v in yr.items()
+            )
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def tail_research_entries(
+    report: Mapping[str, Any], params_hash: str, run_date: str
+) -> list[dict[str, object]]:
+    """研究登記簿列：每個 (分層, 事件) 一列倍率，trial_scope＝flow:tails。"""
+    rows: list[dict[str, object]] = []
+    for stratum, evs in report["results"].items():
+        for ev, node in evs.items():
+            lift = node.get("lift")
+            rows.append(
+                {
+                    "entry_type": "trace",
+                    "strategy": stratum,
+                    "factor": ev,
+                    "params_hash": params_hash,
+                    "date": run_date,
+                    "metric_name": "tail_lift_20d_20pct",
+                    "metric_value": float("nan") if lift is None else float(lift),
+                    "trial_scope": TAIL_SCOPE,
+                }
+            )
+    return rows
