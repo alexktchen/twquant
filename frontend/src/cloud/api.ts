@@ -1,7 +1,7 @@
 // 雲端版（T-332）的 API：每日名單、日期清單、個股 K 線與被推薦的日子。
 import { apiUrl } from '../api'
 import { LoginRequired, needsLogin } from './auth'
-import type { Bar, PicksDay } from './format'
+import type { Bar, DateCounts, PicksDay } from './format'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -34,7 +34,12 @@ export const fetchMe = () => get<{ email: string }>('/api/me')
 export const fetchPicks = (date?: string) =>
   get<PicksDay>(date ? `/api/picks?date=${encodeURIComponent(date)}` : '/api/picks')
 
-export const fetchPickDates = () => get<{ dates: string[] }>('/api/picks/dates').then((r) => r.dates)
+/** 有名單的日期（新到舊），附每天每條線的檔數（舊後端沒有 counts/since → null）。 */
+export const fetchPickDates = () =>
+  get<{ dates: string[]; counts?: DateCounts['counts']; since?: DateCounts['since'] }>('/api/picks/dates').then((r) => ({
+    dates: r.dates,
+    counts: r.counts && r.since ? { counts: r.counts, since: r.since } : null,
+  }))
 
 /** 有名單的交易日（公開，不含任何股票），讓沒登入的人也能切到歷史名單選日期。 */
 export const fetchPublicDates = () => get<{ dates: string[] }>('/pub/dates').then((r) => r.dates)
