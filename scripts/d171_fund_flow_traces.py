@@ -40,7 +40,12 @@ from twquant.config import (  # noqa: E402
 from twquant.conventions import now_tw  # noqa: E402
 from twquant.data.serving.pg_view import PgTableSource  # noqa: E402
 from twquant.factors.registry import get  # noqa: E402
-from twquant.ml.dataset import attach_adjustment, liquid_pool, state_pool  # noqa: E402
+from twquant.ml.dataset import (  # noqa: E402
+    attach_adjustment,
+    liquid_pool,
+    state_pool,
+    tail_up_labels,
+)
 from twquant.reporting import fund_flow_traces as ft  # noqa: E402
 from twquant.reporting.research_log import append_research_log  # noqa: E402
 from twquant.strategy.config import StrategyConfig  # noqa: E402
@@ -72,6 +77,9 @@ def main() -> int:
     )
     ap.add_argument("--data-dir", required=True, help="正本 data/ 的絕對路徑（CLAUDE.md §0.2）")
     ap.add_argument("--report-dir", required=True, help="docs/reports 的絕對路徑")
+    ap.add_argument(
+        "--tail", action="store_true", help="D-171 §一之四：右尾命中率（trial_scope flow:tails）"
+    )
     args = ap.parse_args()
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -179,6 +187,26 @@ def main() -> int:
         t.pre_sessions,
     )
 
+    if args.tail:
+        tl = cfg.tails
+        lab = tail_up_labels(
+            adj.select("date", "stock_id", "open", "close", "adj"),
+            horizon=tl.horizon,
+            up=tl.up,
+            adjusted=True,
+            max_span_sessions=tl.max_span_sessions,
+        )
+        rets = lab.select(
+            "date",
+            "stock_id",
+            pl.col("label").alias(ft.TAIL_COL),
+            pl.lit(None, pl.Float64).alias("pre"),
+        )
+        log(
+            f"右尾標籤：{lab['label'].drop_nulls().len():,} 筆成熟、"
+            f"基礎命中率 {lab['label'].mean():.4f}"
+        )
+
     log("偵測事件")
     events = ft.detect_events(
         sessions=sessions,
@@ -221,8 +249,15 @@ def main() -> int:
         pool = pools[stratum]
         ev_s = all_events.join(pool, on=["date", "stock_id"], how="semi")
         pb = ft.buckets(chars, pool, t.match_deciles)
-        x, d = ft.matched_excess(ev_s, pb, rets, list(t.horizons), t.matched_min)
+        hz_used = [int(ft.TAIL_COL[1:])] if args.tail else list(t.horizons)
+        x, d = ft.matched_excess(ev_s, pb, rets, hz_used, t.matched_min)
         drops[stratum] = d
+        if args.tail:
+            results.update(
+                ft.tail_summary(x, stratum=stratum, tcfg=t) if not x.is_empty() else {stratum: {}}
+            )
+            log(f"{stratum}：{x.height:,} 筆有配對；丟棄 {d}")
+            continue
         if x.is_empty():
             results[stratum] = {}
             continue
@@ -247,6 +282,7 @@ def main() -> int:
             "last_date": str(t.last_date),
             "horizons": hz,
             "ref": max(h for h in hz if h <= 20),
+            "kind": "tails" if args.tail else "traces",
             "cost": cost,
             "matched_min": t.matched_min,
             "match_bins": t.match_deciles,
@@ -265,17 +301,22 @@ def main() -> int:
     }
     out_dir = Path(args.data_dir) / "reports" / "fund_flow_traces"
     out_dir.mkdir(parents=True, exist_ok=True)
-    jpath = out_dir / f"{run_date}.json"
+    jpath = out_dir / f"{run_date}{'_tails' if args.tail else ''}.json"
     jpath.write_text(
         json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8"
     )
-    mpath = Path(args.report_dir) / f"fund-flow-traces-{run_date}.md"
-    mpath.write_text(
-        ft.render_markdown(json.loads(jpath.read_text(encoding="utf-8"))), encoding="utf-8"
-    )
-    append_research_log(args.data_dir, ft.research_entries(report, config_hash(cfg), run_date))
+    loaded = json.loads(jpath.read_text(encoding="utf-8"))
+    if args.tail:
+        mpath = Path(args.report_dir) / f"fund-flow-tails-{run_date}.md"
+        mpath.write_text(ft.render_tail_markdown(loaded), encoding="utf-8")
+        entries = ft.tail_research_entries(report, config_hash(cfg), run_date)
+    else:
+        mpath = Path(args.report_dir) / f"fund-flow-traces-{run_date}.md"
+        mpath.write_text(ft.render_markdown(loaded), encoding="utf-8")
+        entries = ft.research_entries(report, config_hash(cfg), run_date)
+    append_research_log(args.data_dir, entries)
     log(
-        f"[OK] {jpath}\n     {mpath}\n     research_log +{sum(len(v) for v in results.values())} 列（{ft.TRIAL_SCOPE}）"
+        f"[OK] {jpath}\n     {mpath}\n     research_log +{len(entries)} 列（{ft.TAIL_SCOPE if args.tail else ft.TRIAL_SCOPE}）"
     )
     return 0
 

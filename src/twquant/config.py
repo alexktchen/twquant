@@ -701,6 +701,14 @@ class FundFlowTracesConfig(BaseConfig):
         return self
 
 
+class FundFlowTailsConfig(BaseConfig):
+    """D-171 §一之四：右尾標籤（與潛伏飆股 A20 逐字相同）。"""
+
+    horizon: int = Field(default=20, ge=1)
+    up: float = Field(default=0.20, gt=0.0)
+    max_span_sessions: int = Field(default=42, ge=1)
+
+
 class FundFlowConfig(BaseConfig):
     """`configs/fund_flow.yaml`（SPEC-016）：資金流資料、事件、因子與軌跡量測的全部參數。"""
 
@@ -710,6 +718,7 @@ class FundFlowConfig(BaseConfig):
     events: FundFlowEventsConfig = FundFlowEventsConfig()
     factors: FundFlowFactorsConfig = FundFlowFactorsConfig()
     traces: FundFlowTracesConfig = FundFlowTracesConfig()
+    tails: FundFlowTailsConfig = FundFlowTailsConfig()
 
 
 class EtfMetaEntry(BaseConfig):

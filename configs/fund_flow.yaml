@@ -48,3 +48,8 @@ traces:
   bootstrap_n: 2000
   seed: 42
   last_date: 2026-08-31 # D-109 第二保留期不碰
+
+tails: # D-171 §一之四（事前登記）：與 configs/ml_quiet_a20.yaml 的 label 逐字相同
+  horizon: 20
+  up: 0.20
+  max_span_sessions: 42
