@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DATE_RE, SID_RE, annotate, change, lineOrder, recentFlags } from '../functions/_lib/picks.ts'
+import { DATE_RE, LINES, SID_RE, annotate, change, lineOrder, linesForDay, recentFlags } from '../functions/_lib/picks.ts'
 
 test('T-332 AC9: Cloudflare 版連續上榜／新進與 Python 版相同', () => {
   assert.deepEqual(annotate(['A', 'B', 'C'], [['A', 'B'], ['A', 'X'], ['A']]), {
@@ -24,4 +24,13 @@ test('T-332 AC10: 近 6 日方格舊到新、沒打分的日子是 null（與 Py
   const window = [['A'], null, ['A', 'B']] // 由近到遠
   assert.deepEqual(recentFlags('A', window), [true, null, true])
   assert.deepEqual(recentFlags('B', window), [true, null, false])
+})
+
+
+test('D-174：登記過的線一律列出（沒有股票的那天名單為空），第三條線在最後', () => {
+  assert.deepEqual(linesForDay(['QUIET']), ['CORE', 'QUIET', 'QUIETV'])
+  assert.deepEqual(linesForDay([]), ['CORE', 'QUIET', 'QUIETV'])
+  assert.deepEqual(linesForDay(['ZZZ', 'CORE']), ['CORE', 'QUIET', 'QUIETV', 'ZZZ'])
+  const v = LINES.find((l) => l.code === 'QUIETV')
+  assert.ok(v && v.note && v.note.includes('驗證中'))
 })

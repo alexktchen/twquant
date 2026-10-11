@@ -607,3 +607,153 @@ def config_hash(model: BaseConfig) -> str:
     """配置內容的決定性 hash（供 artifact metadata，SPEC-000 §可重現性）。"""
     payload = json.dumps(model.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+# ── 投信／ETF 資金流（SPEC-016／D-171）──────────────────────────────────────
+
+
+class FundFlowUnitsConfig(BaseConfig):
+    """ETF 已發行單位數（`etf_units_daily`，T-335）的來源與每日補抓窗。"""
+
+    finmind_dataset: str = "TaiwanStockShareholding"
+    finmind_field: str = "NumberOfSharesIssued"
+    available_hour: int = Field(default=21, ge=0, le=23)  # 與外資持股統計同表：同日 21:00
+    history_start: dt.date = dt.date(2015, 6, 1)  # PG prices_daily（交易日曆）起點
+    catchup_trading_days: int = Field(default=5, ge=1)
+    # 分割／反分割：corporate_events 的事件日，以及它**之前**幾個交易日的 units_delta 設 null
+    # （T-335 實測：0050、0052 的單位數跳動落在事件日的前一個交易日）
+    split_event_types: tuple[str, ...] = ("split", "reverse_split")
+    split_null_sessions_before: int = Field(default=1, ge=0)
+    # 只報不修：單日 units 比值超出 [1/x, x] 且不在分割窗內 → 回補時列出（新 ETF 初期會有真的大申購）
+    jump_report_ratio: float = Field(default=1.5, gt=1.0)
+
+
+class FundFlowHoldingsConfig(BaseConfig):
+    """ETF 每日持股（`etf_holdings_daily`，T-336）的來源與取樣。"""
+
+    issuers: tuple[str, ...] = ("元大", "統一")  # 有歷史持股 API 的投信（T-334）
+    available_hour: int = Field(
+        default=18, ge=0, le=23
+    )  # available_at＝max(基準日此時, 來源公布時點)
+    weight_sum_max: float = Field(
+        default=1.02, gt=1.0
+    )  # 股票權重和上限（AC-8）；主動式持現金，不設下限
+    catchup_trading_days: int = Field(default=5, ge=1)
+    # 歷史回補：指數型每 N 個交易日取一份，成分變動的區間再逐日補（找出生效日）；主動式逐日
+    index_sample_sessions: int = Field(default=5, ge=1)
+    pace_seconds: float = Field(default=1.0, gt=0.0)
+    probe_calendar_days: int = Field(
+        default=7, ge=1
+    )  # 找「基準日之後第一個可查詢日」最多往後試幾天
+
+
+class FundFlowEventsConfig(BaseConfig):
+    """SPEC-016 §4 的事件定義（D-171 §一 事前登記；不得依結果修改）。"""
+
+    flow_hi_pctl: float = Field(default=0.95, gt=0.0, lt=1.0)  # E3
+    flow_lo_pctl: float = Field(default=0.05, gt=0.0, lt=1.0)  # E4
+    quarter_end_pctl: float = Field(default=0.90, gt=0.0, lt=1.0)  # E7
+    absorb_pctl: float = Field(default=0.80, gt=0.0, lt=1.0)  # E8 的借券與融資
+    streak_start: int = Field(default=3, ge=1)  # E5／E6
+    quiet_before: int = Field(default=5, ge=1)  # E5／E6 的前置空窗
+    quarter_end_sessions: int = Field(default=5, ge=1)  # E7
+    dedup_sessions: int = Field(default=20, ge=1)
+
+    @model_validator(mode="after")
+    def _tails_ordered(self) -> FundFlowEventsConfig:
+        if not self.flow_lo_pctl < self.flow_hi_pctl:
+            raise ValueError(
+                f"flow_lo_pctl（{self.flow_lo_pctl}）須小於 flow_hi_pctl（{self.flow_hi_pctl}）"
+            )
+        return self
+
+
+class FundFlowFactorsConfig(BaseConfig):
+    """SPEC-016 §3 的因子窗口（交易日）。"""
+
+    pressure_window: int = Field(default=5, ge=1)
+    disc_window: int = Field(default=10, ge=1)
+    market_window: int = Field(default=5, ge=1)
+    adv_window: int = Field(default=20, ge=1)  # SPEC-003：20 日成交金額中位數
+
+
+class FundFlowTracesConfig(BaseConfig):
+    """SPEC-016 §5 的軌跡量測（D-171 §一）。"""
+
+    pre_sessions: int = Field(default=20, ge=1)
+    post_sessions: int = Field(default=60, ge=1)
+    horizons: tuple[int, ...] = (1, 5, 10, 20, 40, 60)
+    matched_min: int = Field(default=5, ge=1)
+    match_deciles: int = Field(default=10, ge=2)
+    flow_lags: tuple[int, ...] = (0, 1, 2)
+    bootstrap_n: int = Field(default=2000, ge=100)
+    seed: int = 42
+    last_date: dt.date = dt.date(2026, 8, 31)  # D-109：第二保留期（2026-09-09 起）不碰
+
+    @model_validator(mode="after")
+    def _horizons_valid(self) -> FundFlowTracesConfig:
+        if not self.horizons or any(h < 1 or h > self.post_sessions for h in self.horizons):
+            raise ValueError(
+                f"horizons 須在 1..post_sessions（{self.post_sessions}），得到 {self.horizons}"
+            )
+        if any(lag < 0 for lag in self.flow_lags):
+            raise ValueError(f"flow_lags 不得為負，得到 {self.flow_lags}")
+        return self
+
+
+class FundFlowTailsConfig(BaseConfig):
+    """D-171 §一之四：右尾標籤（與潛伏飆股 A20 逐字相同）。"""
+
+    horizon: int = Field(default=20, ge=1)
+    up: float = Field(default=0.20, gt=0.0)
+    max_span_sessions: int = Field(default=42, ge=1)
+
+
+class FundFlowConfig(BaseConfig):
+    """`configs/fund_flow.yaml`（SPEC-016）：資金流資料、事件、因子與軌跡量測的全部參數。"""
+
+    etf_meta_path: str = "configs/etf_meta.yaml"
+    units: FundFlowUnitsConfig = FundFlowUnitsConfig()
+    holdings: FundFlowHoldingsConfig = FundFlowHoldingsConfig()
+    events: FundFlowEventsConfig = FundFlowEventsConfig()
+    factors: FundFlowFactorsConfig = FundFlowFactorsConfig()
+    traces: FundFlowTracesConfig = FundFlowTracesConfig()
+    tails: FundFlowTailsConfig = FundFlowTailsConfig()
+
+
+class EtfMetaEntry(BaseConfig):
+    """`configs/etf_meta.yaml` 的一檔 ETF（SPEC-016 §2.2）。"""
+
+    etf_id: str = Field(pattern=r"^00[0-9A-Z]{2,5}$")
+    name: str
+    issuer: str
+    fund_type: str
+    is_active: bool
+    index_name: str | None = None
+    listed_date: dt.date
+    delisted_date: dt.date | None = None
+    # False＝不追蹤單位數（來源沒有它），須在 note 寫原因；完整性閘門與機械流量都不算它
+    units_tracked: bool = True
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _untracked_has_reason(self) -> EtfMetaEntry:
+        if not self.units_tracked and not (self.note or "").strip():
+            raise ValueError(f"{self.etf_id}：units_tracked=false 必須在 note 寫原因")
+        return self
+
+
+class EtfMetaConfig(BaseConfig):
+    """`configs/etf_meta.yaml`：資金流研究涵蓋的國內成分股票型 ETF。"""
+
+    etfs: tuple[EtfMetaEntry, ...]
+
+    @model_validator(mode="after")
+    def _unique(self) -> EtfMetaConfig:
+        ids = [e.etf_id for e in self.etfs]
+        dup = sorted({i for i in ids if ids.count(i) > 1})
+        if dup:
+            raise ValueError(f"etf_id 重複：{dup}")
+        if not ids:
+            raise ValueError("etfs 不得為空")
+        return self

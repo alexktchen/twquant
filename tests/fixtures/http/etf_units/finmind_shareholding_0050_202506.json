@@ -1,0 +1,21 @@
+{
+"msg": "success",
+"status": 200,
+"data": [
+{
+"date": "2025-06-16",
+"stock_id": "0050",
+"NumberOfSharesIssued": 3487500000
+},
+{
+"date": "2025-06-17",
+"stock_id": "0050",
+"NumberOfSharesIssued": 13950000000
+},
+{
+"date": "2025-06-18",
+"stock_id": "0050",
+"NumberOfSharesIssued": 13455000000
+}
+]
+}

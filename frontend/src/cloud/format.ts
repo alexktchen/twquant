@@ -14,7 +14,8 @@ export type Pick = {
   /** 近 6 日漲幅：窗口第一天收盤到當天收盤 */
   chg6: number | null
 }
-export type Line = { code: string; name: string; picks: Pick[] }
+/** note：這條線的補充說明（例：驗證中）；沒有就不顯示 */
+export type Line = { code: string; name: string; note?: string | null; picks: Pick[] }
 export type PicksDay = { date: string; window?: string[]; lines: Line[] }
 export type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }
 

@@ -1,4 +1,4 @@
-# 東西在哪（2026-10-09，資料到 10-08）
+# 東西在哪（2026-10-11，資料到 10-08）
 
 > **給下一個 session 的第一份文件。** 讀完這頁就能動手，不必翻其他文件。
 > **雲端（2026-10-09 起，D-170）**：Supabase 維持免費版 500 MB、**不升級**。雲端只做「每天算因子 → 模型推薦 → 記錄每日名單」，空間允許放 K 線；
@@ -16,9 +16,24 @@
 
 ## 0. 三十秒版本
 
+- **投信／ETF 資金流（SPEC-016／D-171，2026-10-11，分支 `claude/spec-016-fund-flow-traces`，PR #152）**：
+  新表四張（只在地端 PG）：`etf_meta`（88 檔）、`etf_units_daily`（2015-06 起每日單位數與申贖量）、
+  `etf_holdings_daily`（元大 9 檔＋統一 3 檔的每日持股，指數型每週一份＋換股區間逐日）、`index_rebalance_events`（由持股推導）。
+  每日 pipeline 多兩步「ETF 單位數」「ETF 持股」（雲端略過）；CLI `fund-flow meta|units|holdings|rebalance`。
+  歷史回補：`scripts/backfill_etf_units.py`（FinMind）、`scripts/backfill_etf_holdings.py`（元大／統一 API，可續傳）。
+  因子在 `factors/fund_flow.py`，**不在 builtins**（雲端沒有這些表）；軌跡腳本 `scripts/d171_fund_flow_traces.py`（只報不判）。
+  **排除濾網（T-340）等使用者填 D-171 §二 的門檻**；看板多一欄「資金流（監控、未回測）」。**以上都尚未部署**。
+  盤點與陷阱：`docs/reports/fund-flow-data-inventory-2026-10-11.md`（分割日單位數跳動在事件日前一天、假日查詢回空、主動式持股權重和 < 1）。
+  **軌跡結果（T-339）**：登記統計量有右偏偏誤；同口徑診斷欄八種事件 +20 日 t 全在 ±2 內。交接 `docs/HANDOFF-2026-10-11-fund-flow.md`。
+  **右尾（§一之四）**：ETF 申購／贖回潮的股票 20 日內 +20% 的機率是同類的 ~0.8 倍（t −4 左右，兩個方向一樣）→ 可能是潛伏飆股的排除條件，待使用者裁決。
+  **D-172 潛伏飆股分數門檻臂**（2026-10-11）：十支臂登記在 `configs/holdout2_quiet_threshold.yaml`（2027-03 開）；開發期參考 `docs/reports/d172-threshold-arms-dev.md`（0.35 年化 +11.7%、回撤 −19.3%、曝險 23%）。
+
 - **只留兩條線（D-163，2026-09-28）**：**大盤精選**（`CORE`＝E0，`lw_e0_ctrl`、排序模型 `lgbm_lw_net_h20_20260225_83890036`，紙上交易中）
   與 **潛伏飆股**（`QUIET`＝A20，`lgbm_quietA20_tu_h20_20260430_655df6d7`，每日名單 `scripts/a20_picks.py`，出場待第二保留期）。
   名字只是別名，檔名與指紋不改；不再開新的選股或出場輪次。
+- **第三條線「高分爆量（驗證中）」（D-174，2026-10-11）**：`QUIETV`＝`quiet_p35v`（潛伏飆股分數 ≥ 0.35 **且**當天成交量 ≥ 前 20 日平均 1.5 倍；`slots.require`）。
+  只上線觀察（看板／每日名單／網站），不下單；第二保留期登記 `configs/holdout2_quiet_volume.yaml`，2027-03 判讀前規則不得改。
+  大多數日子名單是空的——網站與 API 照樣列出這條線並寫「今天沒有符合條件的股票」。
 - **每日選股看板（D-164，前端首頁 `#/picks`）**：`data/pick_board/pick_board.json`，每天排程「潛伏飆股打分」→「每日選股看板」產生；
   手動重建 `TWQUANT_DATA_DIR=D:/project/twquant/data uv run --all-groups python -m twquant pick-board --date <日> --out D:/project/twquant/data`，
   補潛伏飆股分數 `... python -m twquant ml score-quiet --from <日> --to <日>`。持股是從 2026-05-01 起的引擎重播（`configs/pick_board.yaml`），**不顯示報酬**。
@@ -153,6 +168,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | `docs/HANDOFF-2026-09-06-tracks-and-gates.md` | **本輪完整交接**：進度、五個未解問題、產物清單 |
 | `docs/reports/backtest-results.md` | 結果的版控版（與 HTML 同源） |
 | `docs/specs/SPEC-013-two-track-strategies.md` | 雙軌策略的規格 |
+| `docs/specs/SPEC-016-fund-flow-traces.md` | **投信／ETF 資金流軌跡 PRD（2026-10-11，D-171 待裁決）**：給低階模型的實作規格，任務 T-334～T-341 |
 | `docs/reports/volume-lead-price-ic.md` | **量先價行鏈 9 因子 11 年 IC**（2026-09-07）：連買天數正、買超÷量反向、放量 U 型 |
 | `docs/research/PAPERS-KEYLEVELS.md` + DECISIONS **D-093** | 關鍵價位文獻 ＋ K 系列事前登記草稿（待裁決） |
 

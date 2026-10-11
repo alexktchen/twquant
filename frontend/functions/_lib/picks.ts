@@ -2,9 +2,15 @@
 // 純函數放這裡供 node 單元測試；資料庫存取在 db.ts。
 
 /** 線別順序與顯示名稱——以 configs/pick_board.yaml 為準，改那邊時要同步改這裡。 */
-export const LINES: { code: string; name: string }[] = [
+export const LINES: { code: string; name: string; note?: string }[] = [
   { code: 'CORE', name: '大盤精選' },
   { code: 'QUIET', name: '潛伏飆股' },
+  // D-174（2026-10-11）：第三條線，驗證中。大多數日子沒有符合的股票，所以當天沒名單也照樣列出
+  {
+    code: 'QUIETV',
+    name: '高分爆量',
+    note: '驗證中：潛伏飆股裡模型分數 0.35 以上、而且當天爆量（成交量是前 20 天平均的 1.5 倍以上）才列入，每檔抱 20 個交易日。2027 年 3 月用新資料檢驗前只供觀察。',
+  },
 ]
 /** 連續上榜最多回看幾個有名單的日子（同 picks_api.STREAK_LOOKBACK）。 */
 export const STREAK_LOOKBACK = 60
@@ -48,4 +54,9 @@ export function lineOrder(codes: string[]): string[] {
     return i < 0 ? LINES.length : i
   }
   return [...new Set(codes)].sort((a, b) => idx(a) - idx(b) || a.localeCompare(b))
+}
+
+/** 當天要顯示的線：登記過的線一律列出（沒有股票＝名單為空），再加上未登記但當天有資料的線。 */
+export function linesForDay(todayCodes: string[]): string[] {
+  return lineOrder([...LINES.map((l) => l.code), ...todayCodes])
 }

@@ -22,7 +22,7 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
     這與 `build_targets` 不同：那邊宇宙為空是資料問題所以 raise；這邊宇宙照樣由
     `universe_ids` 把關（空宇宙它會回空，缺表它會 raise），只有「沒人過門檻」才安靜回空。
     """
-    import twquant.factors.builtins  # noqa: F401  # 匯入觸發全因子註冊
+    import twquant.factors.builtins  # 匯入觸發全因子註冊
     from twquant.factors.compute import compute
 
     if cfg.slots is None:
@@ -38,6 +38,40 @@ def slot_candidates(cfg: StrategyConfig, wh: TableSource, day: dt.date) -> list[
         return []
     uni = universe_ids(view, day, cfg.universe)
     df = df.filter(pl.col("stock_id").is_in(uni))
+    for need in cfg.slots.require:
+        # D-174：必要條件；null（資料不足）不算滿足
+        rq = compute(
+            [need.factor],
+            view,
+            dates=[day],
+            params={need.factor: dict(need.params)},
+            trim_lookback=True,
+        )
+        ok_ids = rq.filter(pl.col("value").is_not_null() & (pl.col("value") >= need.min_value))[
+            "stock_id"
+        ].to_list()
+        df = df.filter(pl.col("stock_id").is_in(ok_ids))
+        if df.is_empty():
+            return []
+    for rule in cfg.slots.exclude:
+        # D-172：排除規則的因子可能不在 builtins（資金流因子只在地端有資料），用到時才註冊
+        import twquant.factors.fund_flow  # noqa: F401
+
+        # 逐日補位會呼叫上千次：依因子宣告的回看裁下界（T-083；只動下界、不可能引入前視，
+        # 等價性由 tests/test_fund_flow_factors.py 的 trim 測試守著）
+        ex = compute(
+            [rule.factor],
+            view,
+            dates=[day],
+            params={rule.factor: dict(rule.params)},
+            trim_lookback=True,
+        )
+        blocked = ex.filter(pl.col("value").is_not_null() & (pl.col("value") >= rule.min_value))[
+            "stock_id"
+        ].to_list()
+        df = df.filter(~pl.col("stock_id").is_in(blocked))
+        if df.is_empty():
+            return []
     rows = sorted(
         ((str(r["stock_id"]), float(r["value"])) for r in df.to_dicts()),
         key=lambda item: (-item[1], item[0]),

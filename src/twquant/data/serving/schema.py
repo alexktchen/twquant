@@ -429,6 +429,71 @@ DAILY_PICKS_SPEC = TableSpec(
     pk=("date", "line", "stock_id"),
 )
 
+# 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
+# （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
+# 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
+FUND_FLOW_SPECS: tuple[TableSpec, ...] = (
+    TableSpec(
+        "etf_meta",
+        (
+            ("etf_id", "text"),
+            ("name", "text"),
+            ("issuer", "text"),
+            ("fund_type", "text"),
+            ("is_active", "boolean"),
+            ("index_name", "text"),
+            ("listed_date", "date"),
+            ("delisted_date", "date"),
+            ("units_tracked", "boolean"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("etf_id",),
+        snapshot=True,  # 無 date：整份由 configs/etf_meta.yaml 重載
+    ),
+    TableSpec(
+        "etf_units_daily",
+        (
+            ("date", "date"),
+            ("etf_id", "text"),
+            ("units", "bigint"),
+            ("units_delta", "bigint"),
+            ("nav", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("etf_id", "date"),
+        indexes=(("date",),),
+    ),
+    TableSpec(
+        "etf_holdings_daily",
+        (
+            ("date", "date"),
+            ("etf_id", "text"),
+            ("stock_id", "text"),
+            ("shares", "bigint"),
+            ("weight", "double precision"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("etf_id", "date", "stock_id"),
+        indexes=(("date",), ("stock_id", "date")),
+    ),
+    TableSpec(
+        "index_rebalance_events",
+        (
+            ("etf_id", "text"),
+            ("stock_id", "text"),
+            ("action", "text"),
+            ("effective_date", "date"),
+            ("prev_base_date", "date"),
+            ("announce_date", "date"),
+            ("source", "text"),
+            ("available_at", "timestamptz"),
+        ),
+        pk=("etf_id", "effective_date", "stock_id", "action"),
+        snapshot=True,  # 由 etf_holdings_daily 整份重算
+        indexes=(("stock_id", "effective_date"),),
+    ),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -439,11 +504,13 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     *DIRECT_PG_SPECS,
     DAYTRADE_FIRST_PUB_SPEC,
     DAILY_PICKS_SPEC,
+    *FUND_FLOW_SPECS,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
 FACTOR_TABLES: tuple[str, ...] = tuple(s.name for s in FACTOR_SPECS)
 DIRECT_PG_TABLES: tuple[str, ...] = tuple(s.name for s in DIRECT_PG_SPECS)
+FUND_FLOW_TABLES: tuple[str, ...] = tuple(s.name for s in FUND_FLOW_SPECS)
 ALL_TABLES: tuple[str, ...] = tuple(s.name for s in _ALL_SPECS)
 
 

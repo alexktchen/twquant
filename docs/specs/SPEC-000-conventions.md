@@ -75,6 +75,7 @@
 | `configs/ml_h20_cost_aware.yaml` | SPEC-011（Phase 2 H20 成本感知候選） |
 | `configs/llm.yaml` | MODEL-POLICY §3、SPEC-008（含 pricing 與 usd_twd） |
 | `configs/serving.yaml` | SPEC-009 §1（PG 供應層；DSN 本體在 .env） |
+| `configs/fund_flow.yaml`、`configs/etf_meta.yaml` | SPEC-016（投信／ETF 資金流；事件定義為 D-171 事前登記） |
 
   各 config 的 pydantic 模型必填欄位清單直接列在對應 SPEC，使 AC-2 可寫成
   確定性測試。

@@ -89,6 +89,10 @@ def test_t332_ac6_picks_payload_reads_pg() -> None:
         out = picks_payload(cfg, None, names)
         assert out["date"] == "2026-10-08"
         assert [ln["code"] for ln in out["lines"]] == ["CORE", "QUIET"]  # 依 pick_board 順序
+        # D-174：登記過但當天沒有股票的線也要列出，名單為空
+        out3 = picks_payload(cfg, None, {**names, "QUIETV": "高分爆量（驗證中）"})
+        assert [ln["code"] for ln in out3["lines"]] == ["CORE", "QUIET", "QUIETV"]
+        assert out3["lines"][2]["picks"] == []
         quiet = out["lines"][1]["picks"]
         top = quiet[0]
         assert (top["sid"], top["name"], top["close"], top["streak"], top["new"]) == (
@@ -112,7 +116,10 @@ def test_t332_ac6_picks_payload_reads_pg() -> None:
         )
         assert quiet[1]["recent"] == [False, False, True] and quiet[1]["chg6"] is None
         older = picks_payload(cfg, _D2, names)
-        assert older["date"] == "2026-10-07" and older["lines"][0]["picks"][0]["streak"] == 2
+        older_quiet = next(ln for ln in older["lines"] if ln["code"] == "QUIET")
+        assert older["date"] == "2026-10-07" and older_quiet["picks"][0]["streak"] == 2
+        # D-174：那天 CORE 沒有名單也照樣列出（空的），不是整條線消失
+        assert next(ln for ln in older["lines"] if ln["code"] == "CORE")["picks"] == []
         with pytest.raises(DataError, match="沒有名單"):
             picks_payload(cfg, dt.date(2026, 10, 9), names)
         assert pick_dates(cfg, 2) == ["2026-10-08", "2026-10-07"]

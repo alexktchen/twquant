@@ -180,8 +180,12 @@ export default function CloudApp() {
                 <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
               ))}
             </ul>
+            {current && current.picks.length === 0 && (
+              <p className="cq-empty">今天沒有符合條件的股票。</p>
+            )}
             {guest && <Gate />}
           </div>
+          {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
           <p className="cq-note">
             方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
           </p>

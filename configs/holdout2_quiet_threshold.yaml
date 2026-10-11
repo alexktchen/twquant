@@ -1,0 +1,85 @@
+# D-172（2026-10-11）：潛伏飆股分數門檻臂＋ETF 資金流排除，登記進第二保留期（D-109）。
+# 另立一份登記（D-163：holdout2.yaml 開啟前不得修改）；指紋由 tests/test_holdout2_quiet_threshold.py 守著。
+# 對照組＝quiet_s0（現行潛伏飆股），同資本、同成本、同模型；開啟時十一支一起判讀，判讀門檻由使用者填 D-172 §二。
+registration: D-172
+holdout_start: 2026-09-09
+opens_on: 2027-03-01
+min_sessions: 120
+entries:
+  - code: QUIET-S0
+    strategy: quiet_s0
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 5ef5b536132fd6003773b30bd9dbd64ed7d765864beedd0ae3fc345e91cd31fe
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P30
+    strategy: quiet_p30
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 158038301e3403e7cdb5170a54d8f7df20d5c1789e46c81f87460c2b211d0395
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P30X
+    strategy: quiet_p30x
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 2d2d61d7b0e5feebae01ede80ef2efc2b9dfecfe161a9b7b404a81a9d420bd6e
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P35
+    strategy: quiet_p35
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: acaf75a11909edbf1261670a1c79116f338195365d48ebd2bb7e61a016c5c8c4
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P35X
+    strategy: quiet_p35x
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 6e2e6899ac15bc45e5ea03d48ad92c7532002c038a4e85e826d6f3265b362c57
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P40
+    strategy: quiet_p40
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 2aead1ecf5107eb6a1cfb3225de01ed0e482fcf699660c7c5d391be8c9968909
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P40X
+    strategy: quiet_p40x
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: f123106141b27354b893028a670f61a6fd65ae3f43c745844b4264ab088c0285
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P45
+    strategy: quiet_p45
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 7a4df0520edd5237144336af8ed77c84c2d2af14a7d79fe22f20927954b3d3c7
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P45X
+    strategy: quiet_p45x
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: a1780d28c868395faf648a6d07208b5e09d48231a83becd184b116a878059fef
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P50
+    strategy: quiet_p50
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 4e44e03673cc8821bd9201ce02ffdda9a518af1840f2a620472f76dccfe74ca7
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-P50X
+    strategy: quiet_p50x
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: b933033c344557f8375bbe136ff130540b5a38c24f37e10e76bb7d2e5aef12d4
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000

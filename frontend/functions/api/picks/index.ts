@@ -1,6 +1,6 @@
-// GET /api/picks?date=YYYY-MM-DD（空＝最新）：兩條線的名單，附收盤、當日漲跌、連續上榜、新進。
+// GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進。
 import { fail, guarded, json, type Env } from '../../_lib/db'
-import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, lineOrder, recentFlags, type PickRow } from '../../_lib/picks'
+import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const want = new URL(request.url).searchParams.get('date')
@@ -35,7 +35,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     }
     const names = new Map(meta.map((r) => [r.stock_id, r.name]))
     const byDay = (d: string, line: string) => rows.filter((r) => r.date === d && r.line === line)
-    const lines = lineOrder(todayRows.map((r) => r.line)).map((code) => {
+    const lines = linesForDay(todayRows.map((r) => r.line)).map((code) => {
       const today = byDay(target, code)
       const recentLists = window.map((d) => {
         const day = byDay(d, code)
@@ -48,6 +48,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       return {
         code,
         name: LINES.find((l) => l.code === code)?.name ?? code,
+        note: LINES.find((l) => l.code === code)?.note ?? null,
         picks: today.map((r) => {
           const p = close.get(r.stock_id)
           const c = p?.close ?? null
