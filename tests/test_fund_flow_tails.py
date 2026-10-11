@@ -75,7 +75,7 @@ def test_tail_null_label_is_not_zero() -> None:
 
 
 def test_tail_zero_control_rate_has_no_lift() -> None:
-    hits: list[float | None] = [1.0] + [0.0] * 9
+    hits: list[float | None] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     x = _matched(["1000"], hits, 10)
     node = ft.tail_summary(x, stratum="全市場", tcfg=TC)["全市場"]["E3"]
     assert node["ctrl"] == 0.0 and node["lift"] is None
