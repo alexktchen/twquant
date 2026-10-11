@@ -74,8 +74,7 @@ def rsi_expr(col: str, n: int) -> pl.Expr:
 def add_indicators(px: pl.DataFrame) -> pl.DataFrame:
     """逐檔指標（列為單位，依股票、日期排序）。需要 date, stock_id, ac（還原收盤）, volume, taiex_ok。"""
     ac = pl.col("ac")
-    ema = lambda span: ac.ewm_mean(span=span, adjust=False)  # noqa: E731
-    macd = ema(MACD_FAST) - ema(MACD_SLOW)
+    macd = ac.ewm_mean(span=MACD_FAST, adjust=False) - ac.ewm_mean(span=MACD_SLOW, adjust=False)
     out = px.sort(_S, "date").with_columns(
         ma200=ac.rolling_mean(MA_LONG).over(_S),
         ma50=ac.rolling_mean(MA_MID).over(_S),
@@ -324,7 +323,7 @@ def main() -> int:
                     t_any |= trig[x]
                 ex = exit_day(t_any, EXIT_DAY)
                 o = trade_outcomes(ao_path, ac_path, ex)
-                row = {"combo": f"{host}|{''.join(fs) or '-'}|{''.join(xs) or '-'}"}
+                row: dict[str, Any] = {"combo": f"{host}|{''.join(fs) or '-'}|{''.join(xs) or '-'}"}
                 row.update(summarize(o["net"], o["days"], o["hit"], month))
                 results.append(row)
             print(f"  {host} 濾網 {''.join(fs) or '無'}：{rr.size:,} 筆", flush=True)
