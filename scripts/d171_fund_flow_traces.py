@@ -249,6 +249,7 @@ def main() -> int:
             "ref": max(h for h in hz if h <= 20),
             "cost": cost,
             "matched_min": t.matched_min,
+            "match_bins": t.match_deciles,
             "drops": {
                 "not_in_pool": sum(v["not_in_pool"] for v in drops.values()),
                 "few_matches": sum(v["few_matches"] for v in drops.values()),

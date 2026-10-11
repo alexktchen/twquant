@@ -285,7 +285,12 @@ def matched_excess(
         ctrl = (
             base.join(excluded, on=["date", "stock_id"], how="anti")
             .group_by(keys)
-            .agg(pl.len().alias("_n"), *[pl.col(c).median().alias(f"_m_{c}") for c in rcols])
+            .agg(
+                pl.len().alias("_n"),
+                *[pl.col(c).median().alias(f"_m_{c}") for c in rcols],
+                # D-171 §一之三 診斷：配對組平均（與事件股的平均同口徑，避開右偏的平均－中位數落差）
+                *[pl.col(c).mean().alias(f"_a_{c}") for c in rcols],
+            )
         )
         gg = g.join(ctrl, on=keys, how="left").with_columns(pl.col("_n").fill_null(0))
         few = gg.filter(pl.col("_n") < matched_min)
@@ -300,6 +305,7 @@ def matched_excess(
                 "stock_id",
                 pl.col("_n").alias("n_matched"),
                 *[(pl.col(c) - pl.col(f"_m_{c}")).alias(f"x_{c}") for c in rcols],
+                *[(pl.col(c) - pl.col(f"_a_{c}")).alias(f"y_{c}") for c in rcols],
                 *[pl.col(c).alias(f"raw_{c}") for c in rcols],
             )
         )
@@ -353,6 +359,16 @@ def _stats(
             "net_mean": mean - cost,
             "net_per_day": (mean - cost) / k,
             "boot": block_bootstrap(x, f"x_r{k}", tcfg.bootstrap_n, tcfg.seed),
+            # D-171 §一之三 診斷：對配對組「平均」的超額（舊報告沒有這欄時為 None）
+            **(
+                {
+                    "vs_mean": _mean(x[f"y_r{k}"]),
+                    "vs_mean_median": _median(x[f"y_r{k}"]),
+                    "vs_mean_boot": block_bootstrap(x, f"y_r{k}", tcfg.bootstrap_n, tcfg.seed),
+                }
+                if f"y_r{k}" in x.columns
+                else {}
+            ),
         }
     res["horizons"] = hz
     return res
@@ -397,6 +413,11 @@ def summarize(
     return out
 
 
+def _median(s: pl.Series) -> float | None:
+    s = s.drop_nulls()
+    return float(s.median()) if s.len() else None  # type: ignore[arg-type]
+
+
 def _mean(s: pl.Series) -> float | None:
     s = s.drop_nulls()
     return float(s.mean()) if s.len() else None  # type: ignore[arg-type]
@@ -417,7 +438,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "SPEC-016 §5、D-171 §一 的量測結果。**只報不判**：採用門檻由使用者填 D-171 §二。",
         f"期間 {meta['first_date']}～{meta['last_date']}（第二保留期不碰）；來回成本 {meta['cost'] * 100:.3f}%。",
-        f"配對：同日、同 20 日波動×60 日漲幅×ADV 十分位、非同型事件，至少 {meta['matched_min']} 檔。",
+        f"配對：同日、同 20 日波動×60 日漲幅×ADV 各切 {meta.get('match_bins', 10)} 等分、非同型事件，"
+        f"至少 {meta['matched_min']} 檔（D-171 §一之二）。",
         f"丟棄：不在池內 {meta['drops']['not_in_pool']}、配對不足 {meta['drops']['few_matches']}。",
         "",
     ]
@@ -442,6 +464,27 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                     + f" | {_f(r.get('per_day'))} | {_f(r.get('net_per_day'))} | {_f(r.get('hit'))} | {_f((r.get('boot') or {}).get('t'), pct=False)} |"
                 )
         lines.append("")
+        diag = [k for k in evs if "vs_mean" in evs[k]["horizons"].get(str(meta["ref"]), {})]
+        if diag:
+            lines += [
+                "**診斷（D-171 §一之三）：對配對組平均的超額**——上表「超額」是事件股平均減配對組中位數，"
+                "股票報酬右偏，平均天生高於中位數，任何一群股票都會是正的；這張表才是同口徑比較。",
+                "",
+                "| 事件 | "
+                + " | ".join(f"+{h} 對平均" for h in hz)
+                + f" | +{meta['ref']} 中位數 | +{meta['ref']} t |",
+                "|" + "---|" * (len(hz) + 3),
+            ]
+            for ev in EVENT_TYPES:
+                for key in sorted(k for k in diag if k == ev or k.startswith(ev + "@")):
+                    h = evs[key]["horizons"]
+                    r = h.get(str(meta["ref"]), {})
+                    lines.append(
+                        f"| {key} {EVENT_NAMES[ev]} | "
+                        + " | ".join(_f(h.get(k, {}).get("vs_mean")) for k in hz)
+                        + f" | {_f(r.get('vs_mean_median'))} | {_f((r.get('vs_mean_boot') or {}).get('t'), pct=False)} |"
+                    )
+            lines.append("")
     lines += ["## 逐年筆數與 +{} 超額（全市場）".format(meta["ref"]), ""]
     full = report["results"].get(meta["strata"][0], {})
     for ev in sorted(full):

@@ -43,7 +43,7 @@ traces:
   post_sessions: 60
   horizons: [1, 5, 10, 20, 40, 60]
   matched_min: 5
-  match_deciles: 10
+  match_deciles: 3 # D-171 §一之二：十等分每格平均 < 2 檔，配對不成立（第 1 次試驗封存）
   flow_lags: [0, 1, 2]
   bootstrap_n: 2000
   seed: 42
