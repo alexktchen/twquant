@@ -127,3 +127,25 @@ def test_d175_system_yaml_requires_both_markets_but_not_margin() -> None:
     assert {"twse/prices_daily", "tpex/prices_daily", "twse/stock_valuation"} <= req
     assert {"tpex/stock_valuation", "twse/institutional_daily"} <= req
     assert not any(t.endswith("/margin_daily") for t in req)
+
+
+def test_revenue_month_is_previous_calendar_month() -> None:
+    """每日 pipeline 的月營收步驟抓「上個月」（M 月營收在 M+1 月 10 日前公布）；跨年要對。"""
+    from twquant.pipeline import revenue_month
+
+    assert revenue_month(dt.date(2026, 10, 12)) == "2026-09"
+    assert revenue_month(dt.date(2026, 1, 5)) == "2025-12"
+
+
+def test_local_daily_pipeline_fetches_monthly_revenue_before_serving() -> None:
+    """本機每日排程原本沒抓月營收，9 月營收公布後本機名單與雲端分歧（2026-10-12）。
+    「月營收」步驟要排在「供應層」之前（供應層才把它同步進 PG）；雲端由 workflow 先抓，所以略過。"""
+    from twquant.config import ServingConfig, load_config
+
+    source = Path("src/twquant/cli.py").read_text(encoding="utf-8")
+    rev = source.index('PipelineStep("月營收"')
+    assert rev < source.index('PipelineStep("供應層"')
+    assert (
+        "月營收"
+        in load_config(Path("configs/serving.yaml"), ServingConfig).cloud.skip_pipeline_steps
+    )

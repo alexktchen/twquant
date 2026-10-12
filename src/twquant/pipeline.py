@@ -35,6 +35,12 @@ def with_skips(steps: list[PipelineStep], names: Sequence[str], reason: str) -> 
     return [replace(s, skip_reason=reason) if s.name in skip else s for s in steps]
 
 
+def revenue_month(day: dt.date) -> str:
+    """每日 pipeline 該抓哪個月的營收（YYYY-MM）：上個月——M 月營收在 M+1 月 10 日前公布，重抓冪等。"""
+    first = day.replace(day=1) - dt.timedelta(days=1)
+    return f"{first.year:04d}-{first.month:02d}"
+
+
 def missing_required(required: Sequence[str], failed: Sequence[str]) -> list[str]:
     """D-175：必要的表（"來源/表"）裡這次沒抓到的，依必要清單的順序。"""
     bad = set(failed)

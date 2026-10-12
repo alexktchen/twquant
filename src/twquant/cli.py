@@ -827,6 +827,13 @@ def ingest_revenue(
     month: str = typer.Option(..., help="營收月份 YYYY-MM（例如 2026-05）"),
 ) -> None:
     """抓某月 MOPS 月營收（上市+上櫃）、清洗、存入 clean 資料湖。"""
+    for ok, msg in _ingest_revenue_month(month):
+        typer.secho(msg, fg=typer.colors.GREEN if ok else typer.colors.YELLOW)
+
+
+def _ingest_revenue_month(month: str) -> list[tuple[bool, str]]:
+    """月營收（上市＋上櫃）抓→清洗→存 clean 資料湖；回傳每個市場的 (成功, 訊息)。
+    單一市場抓不到（例：還沒公布）記進 ingest log、不中斷另一個市場。每日 pipeline 的「月營收」步驟也走這裡。"""
     from twquant.data.clean import clean_monthly_revenue
     from twquant.data.http import HttpClient
     from twquant.data.sources.mops import MopsSource
@@ -840,7 +847,7 @@ def ingest_revenue(
     ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0 Safari/537.36"
     src = MopsSource(client=HttpClient(source="mops", rate=cfg.source_rates["mops"], user_agent=ua))
     wh = Warehouse(cfg.data_dir)
-
+    out: list[tuple[bool, str]] = []
     for market in ["sii", "otc"]:
         typer.secho(f">> [{market}] 月營收 {month}", fg=typer.colors.CYAN)
         try:
@@ -851,12 +858,13 @@ def ingest_revenue(
             record(
                 cfg.data_dir, f"mops_{market}", "monthly_revenue", month, "failed", detail=str(exc)
             )
-            typer.secho(f"[SKIP] {market}：{exc}", fg=typer.colors.YELLOW)
+            out.append((False, f"[SKIP] {market}：{exc}"))
             continue
         record(
             cfg.data_dir, f"mops_{market}", "monthly_revenue", month, "success", rows=clean.height
         )
-        typer.secho(f"[OK] {market} {month}：{clean.height} 家已存入", fg=typer.colors.GREEN)
+        out.append((True, f"[OK] {market} {month}：{clean.height} 家已存入"))
+    return out
 
 
 @app.command(name="ingest-index")
@@ -1462,6 +1470,16 @@ def _run_daily_pipeline(
         ingest_index(month=f"{day:%Y-%m}")
         return f"已重抓 {day:%Y-%m} 當月指數"
 
+    def _revenue_step() -> str:
+        # 本機排程原本沒抓月營收：9 月營收（10-10 公布）進了雲端卻沒進本機，10-12 兩邊名單分歧。
+        # 抓上個月（冪等）；某市場還沒公布只記一筆、不擋主線。排在「供應層」前，同步才帶得進 PG。
+        from twquant.pipeline import revenue_month
+
+        res = _ingest_revenue_month(revenue_month(day))
+        if not any(ok for ok, _ in res):
+            raise DataError("monthly_revenue", day, "；".join(m for _, m in res))
+        return "；".join(m for _, m in res)
+
     def _serving_step() -> str:
         # 尾波：鏡射同步 + 物化當日因子 → PG 供應層（display-only，best-effort）。
         # 物化讀取源＝PG 鏡射（PgTableSource，D-026/T-057）：與 CLI serving materialize
@@ -1688,6 +1706,7 @@ def _run_daily_pipeline(
         PipelineStep("券商買賣超", _broker_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),
+        PipelineStep("月營收", _revenue_step),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
