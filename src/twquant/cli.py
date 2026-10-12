@@ -2582,7 +2582,7 @@ def _daily_picks_for_day(day: dt.date) -> str:
     from twquant.config import load_config
     from twquant.conventions import now_tw
     from twquant.data.serving import store
-    from twquant.data.serving.picks_store import replace_line
+    from twquant.data.serving.picks_store import write_line
     from twquant.errors import DataError
     from twquant.factors.registry import list_factors
     from twquant.reporting.pick_board import PickBoardConfig
@@ -2602,8 +2602,15 @@ def _daily_picks_for_day(day: dt.date) -> str:
             picks = _line_picks(cfg, source, day, n)
             if picks is None:
                 raise DataError("daily_picks", day, f"{strat.code}：排序模型當天沒有分數")
-            written = replace_line(
-                conn, scfg.pg_schema, day, strat.code, picks, _strategy_model_id(cfg), now_tw()
+            written = write_line(
+                conn,
+                scfg.pg_schema,
+                day,
+                strat.code,
+                picks,
+                _strategy_model_id(cfg),
+                now_tw(),
+                strat.allow_empty,
             )
             done.append(f"{strat.name} {written} 檔")
     finally:

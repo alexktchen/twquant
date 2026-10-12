@@ -40,6 +40,9 @@ class BoardStrategy(BaseConfig):
     # 每天的推薦名單（模型前 n 名，位子滿不滿都列）與其中的新名字（過去 watch_lookback_sessions 天沒進過前 n）
     watch: bool = False
     references: tuple[ReferenceResult, ...] = ()  # HTML 版的研究回測參考（T-330）
+    # D-174：有門檻的線（例：高分爆量）當天可以沒有股票——每日名單寫 0 檔而不是報錯。
+    # 兩條正式線不開：它們空名單代表上游沒算出來。
+    allow_empty: bool = False
 
 
 class PickBoardConfig(BaseConfig):

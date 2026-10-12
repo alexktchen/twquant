@@ -291,3 +291,16 @@ def test_ac8_split_keeps_the_change_on_the_same_money() -> None:
 def test_ac8_missing_close_on_the_buy_day_raises() -> None:
     with pytest.raises(ValueError, match="沒有收盤價"):
         replay_days(D[:2], [_tp(0, "2330", "buy", 100, 10.0)], [], {D[1]: {"2330": 10.0}})
+
+
+def test_d174_only_threshold_line_allows_empty_list() -> None:
+    """D-174：只有「高分爆量」宣告當天可以沒有股票；兩條正式線空名單仍是錯誤。"""
+    from twquant.config import load_config
+    from twquant.reporting.pick_board import PickBoardConfig
+
+    cfg = load_config(Path("configs/pick_board.yaml"), PickBoardConfig)
+    assert {s.code: s.allow_empty for s in cfg.strategies} == {
+        "CORE": False,
+        "QUIET": False,
+        "QUIETV": True,
+    }

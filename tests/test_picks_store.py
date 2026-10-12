@@ -79,3 +79,21 @@ def test_t332_ac4_rejects_empty_duplicate_and_naive_time() -> None:
             )
     finally:
         _drop(conn)
+
+
+def test_d174_write_line_allows_empty_only_when_line_says_so() -> None:
+    """D-174：有門檻的線（allow_empty）沒有股票＝正常的一天：清掉那天舊名單、回 0；其他線空名單照樣報錯。"""
+    conn = _connect_or_skip()
+    from twquant.data.serving.picks_store import read_line, write_line
+
+    try:
+        assert write_line(conn, _SCHEMA, _DAY, "QUIETV", [("2330", 0.4)], "m1", _AT, True) == 1
+        # 重跑同一天變成沒有股票：舊名單要清掉，不能留著讓網站以為那天有推薦
+        assert write_line(conn, _SCHEMA, _DAY, "QUIETV", [], "m1", _AT, True) == 0
+        assert read_line(conn, _SCHEMA, _DAY, "QUIETV") == []
+        # 沒宣告 allow_empty 的線：空名單仍代表上游壞了
+        with pytest.raises(ValueError, match="空"):
+            write_line(conn, _SCHEMA, _DAY, "QUIET", [], "m1", _AT, False)
+        assert write_line(conn, _SCHEMA, _DAY, "QUIET", [("2317", 0.3)], "m1", _AT, False) == 1
+    finally:
+        _drop(conn)
