@@ -5,6 +5,8 @@
 > 網站不再有回測。10-09 已用地端切片整個覆蓋（699.8 → 237 MB），切片定義 `configs/cloud_seed.yaml`，
 > 重灌 `uv run --all-groups python scripts/cloud_seed_needed.py --env-file D:/project/twquant/.env [--tables prices_daily]`（會刪雲端表，先 `--dry-run`）。
 > 模型還沒上雲、每日名單還沒落 PG（T-332），所以雲端目前只算因子、不產生推薦。
+> **雲端排程（D-175，2026-10-12）**：台北 17:33 主跑、22:43 補跑，由 Cloudflare Worker `cron-trigger/`（`twquant-cron-trigger`）準時觸發 GitHub；
+> GitHub 自己的 schedule 常態晚約 5 小時，只當備援。17:33 時必要的表（`system.yaml` `quality_gate.required_tables`）缺一張就不打分，交給 22:43。
 > **2026-10-07 交接：[docs/HANDOFF-2026-10-07-data-catchup.md](docs/HANDOFF-2026-10-07-data-catchup.md)**——
 > 機器在 10-01 ~ 10-07 停擺；10-08 凌晨已照它的 §4 補齊九月尾巴與十月五天、重建看板、備份（完成紀錄見該文件 §7）。
 > 排程的三個洞由 T-327（PR #116）修正，已於 10-08 04:04 部署。**T-329／T-330（看板 HTML，#118／#120）10-09 已合併、尚未部署**

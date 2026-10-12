@@ -51,8 +51,8 @@ def test_ac4_invalid_inputs_raise_and_output_is_deterministic() -> None:
 
 def test_ac5_workflow_uses_off_peak_cron_and_resolver() -> None:
     text = (_ROOT / ".github" / "workflows" / "daily-pipeline.yml").read_text(encoding="utf-8")
-    assert 'cron: "23 12 * * 1-5"' in text  # T-332：20:23 台北，晚於 D-008 截點
+    assert 'cron: "33 9 * * 1-5"' in text  # D-175：17:33 台北（Cloudflare 準時觸發，這裡是備援）
     assert 'cron: "43 14 * * 1-5"' in text
     assert "scripts/resolve_pipeline_day.py" in text
-    assert '--slot "20:23" --slot "22:43"' in text
+    assert '--slot "17:33" --slot "22:43"' in text
     assert 'DAY="${{ inputs.date }}"' in text
