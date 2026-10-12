@@ -15,3 +15,7 @@ crons = ["33 9 * * MON-FRI", "43 14 * * MON-FRI"]
 [vars]
 GITHUB_REPO = "alexktchen/twquant"
 WORKFLOW = "daily-pipeline.yml"
+
+# 保存執行紀錄（含錯誤訊息），Cloudflare 後台 Workers → twquant-cron-trigger → Logs 看得到；觸發失敗時才查得出原因。
+[observability]
+enabled = true
