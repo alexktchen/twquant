@@ -35,6 +35,12 @@ def with_skips(steps: list[PipelineStep], names: Sequence[str], reason: str) -> 
     return [replace(s, skip_reason=reason) if s.name in skip else s for s in steps]
 
 
+def missing_required(required: Sequence[str], failed: Sequence[str]) -> list[str]:
+    """D-175：必要的表（"來源/表"）裡這次沒抓到的，依必要清單的順序。"""
+    bad = set(failed)
+    return [t for t in required if t in bad]
+
+
 @dataclass(frozen=True)
 class StepResult:
     name: str

@@ -105,3 +105,25 @@ def test_watchdog_missing_and_stale(tmp_path: Path) -> None:
     assert stale.ok is False and "2026-06-29" in stale.reason  # 停在昨日
     write_heartbeat(tmp_path, _DAY, "x", _NOW)
     assert watchdog_check(tmp_path, _DAY).ok is True
+
+
+def test_d175_required_tables_missing_names_each_absent_table() -> None:
+    """D-175：提早跑時，當天必要的表（上市、上櫃各一份）有沒抓到的就列出來；融資券不在必要清單。"""
+    from twquant.pipeline import missing_required
+
+    req = ("twse/prices_daily", "tpex/prices_daily", "tpex/stock_valuation")
+    assert missing_required(req, ["twse/margin_daily"]) == []
+    assert missing_required(req, ["tpex/stock_valuation", "twse/margin_daily"]) == [
+        "tpex/stock_valuation"
+    ]
+    assert missing_required((), ["tpex/prices_daily"]) == []
+
+
+def test_d175_system_yaml_requires_both_markets_but_not_margin() -> None:
+    """D-175：必要清單含上市與上櫃的行情、估值與上市法人；21:00 才公布的融資券不在裡面（D-008 以 T-1 進訊號）。"""
+    from twquant.config import SystemConfig, load_config
+
+    req = set(load_config(Path("configs/system.yaml"), SystemConfig).quality_gate.required_tables)
+    assert {"twse/prices_daily", "tpex/prices_daily", "twse/stock_valuation"} <= req
+    assert {"tpex/stock_valuation", "twse/institutional_daily"} <= req
+    assert not any(t.endswith("/margin_daily") for t in req)

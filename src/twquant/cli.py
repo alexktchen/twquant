@@ -149,7 +149,9 @@ def _load_system() -> SystemConfig:
     return cfg.model_copy(update={"data_dir": override}) if override else cfg
 
 
-def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> int:
+def _ingest_date(
+    day: dt.date, tables: list[str] | None, *, tolerant: bool, failed: list[str] | None = None
+) -> int:
     """抓→清洗→存單日每日來源（TWSE+TPEX）。tolerant=True 時單表失敗只警告不中斷。
 
     來源由註冊表驅動（D-017）：新增每日來源 = data/ingest/builtins.py 一筆 register，
@@ -160,6 +162,7 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
     （公告一天一個查詢窗，逐日回補只會重複查同一段、白白逼近證交所 WAF 門檻）。
 
     回傳「證明當天有交易」的成功表數（公告類不算，見 SourceSpec.proves_trading）。
+    `failed` 給了就把沒抓到的表以 "來源/表" 附加進去（D-175 必要表檢查用）。
     """
     import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
     from twquant.data.ingest.orchestrator import run_ingest, trading_evidence
@@ -193,6 +196,8 @@ def _ingest_date(day: dt.date, tables: list[str] | None, *, tolerant: bool) -> i
     ok = [o for o in outcomes if o.status == "success"]
     evidence = trading_evidence(outcomes, {s.source_tag: s.proves_trading for s in specs})
     bad = [o for o in outcomes if o.status != "success"]
+    if failed is not None:
+        failed.extend(f"{o.source_tag}/{o.table}" for o in bad)
     for o in ok:
         typer.secho(f"[OK] {o.source_tag}/{o.table}：{o.rows} 列已存入", fg=typer.colors.GREEN)
     # T-276：**有表成功就代表當天有交易**，那麼失敗的表就不是休市，是真的沒抓到。
@@ -1396,13 +1401,23 @@ def _run_daily_pipeline(
     cfg = _load_system()
     wh = Warehouse(cfg.data_dir)
 
+    ingest_failed: list[str] = []
+
     def _ingest_step() -> str:
-        return f"{_ingest_date(day, None, tolerant=True)} 表"
+        return f"{_ingest_date(day, None, tolerant=True, failed=ingest_failed)} 表"
 
     def _gate_step() -> str:
+        from twquant.pipeline import missing_required
+
         latest = wh.latest_date("prices_daily")
         if latest != day:  # 訊號前硬性斷言：最新行情日 == 今日（D-008）
             raise DataError("prices_daily", day, f"最新行情日 {latest} ≠ 今日 {day}")
+        # D-175：提早跑時有的表可能還沒公布；缺必要表就擋下，不拿缺欄特徵打分
+        miss = missing_required(cfg.quality_gate.required_tables, ingest_failed)
+        if miss:
+            raise DataError(
+                "ingest", day, f"當天必要的表沒抓到（可能還沒公布）：{miss}；交給下一輪"
+            )
         return f"latest={latest}"
 
     def _signal_step() -> str:

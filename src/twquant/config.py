@@ -39,6 +39,9 @@ class QualityGateConfig(BaseConfig):
     min_rows_ratio: float = 0.8
     inst_cross_check_tol: float = 0.005
     disk_min_gb: float = 50.0
+    # D-175：當天打分前必須抓到的表（"來源/表"）。缺任何一張＝還沒公布完，閘門擋下、交給下一輪，
+    # 不拿缺欄特徵打分（之後補跑看到「已有分數」不會重算）。空＝不檢查。
+    required_tables: tuple[str, ...] = ()
 
 
 #: T-310：每日 pipeline 會重抓的兩張直寫表（其餘直寫表是公告，依查詢窗抓）。

@@ -32,6 +32,14 @@ quality_gate:
   min_rows_ratio: 0.8
   inst_cross_check_tol: 0.005
   disk_min_gb: 50.0
+  # D-175：雲端提早到 17:3x 跑，打分前這些表當天都要抓到（上市、上櫃都要）；缺一張就擋下交給下一輪。
+  # 融資券（21:00 公布）不列：D-008 以 T-1 進當天訊號，當天的晚上那一輪才抓。
+  required_tables:
+    - twse/prices_daily
+    - twse/institutional_daily
+    - twse/stock_valuation
+    - tpex/prices_daily
+    - tpex/stock_valuation
 
 # T-310：官方每日當沖、借券賣出、處置、注意 → 直寫 PG（D-154 §五、D-157）。每日 pipeline 的「籌碼」步驟用。
 chip_daily:
