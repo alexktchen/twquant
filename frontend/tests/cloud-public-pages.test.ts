@@ -19,3 +19,16 @@ test('T-332 公開頁：不載入腳本、不碰 API', () => {
     assert.doesNotMatch(html, /\/api\//, `${name} 不可呼叫 /api/`)
   }
 })
+
+test('公開的研究報告（/reports/）：每頁都不給搜尋引擎收錄、沒有 email、沒有登入後才看得到的名單 API', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs')
+  const dir = new URL('../public/reports/', import.meta.url)
+  const pages = readdirSync(dir).filter((f) => f.endsWith('.html'))
+  assert.ok(pages.includes('index.html') && pages.length >= 2)
+  for (const f of pages) {
+    const html = readFileSync(new URL(f, dir), 'utf8')
+    assert.ok(html.includes('<meta name="robots" content="noindex,nofollow">'), `${f} 要有 noindex`)
+    assert.ok(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(html), `${f} 不能有 email`)
+    assert.ok(!html.includes('/api/'), `${f} 不能連到要登入的 /api`)
+  }
+})
