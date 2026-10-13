@@ -1,67 +1,269 @@
 {
-  "intro": "twquant 從 2026 年 9 月到現在的研究報告。標「開發期」的數字只當參考：規則是在同一段資料上反覆試出來的，正式判讀在第二保留期（最早 2027-03-01，只開一次）。內容是研究紀錄，非投資建議。",
+  "intro": "twquant 從 2026 年 9 月到現在的研究報告、訓練過的模型與讀過的論文。標「開發期」的數字只當參考：規則是在同一段資料上反覆試出來的，正式判讀在第二保留期（最早 2027-03-01，只開一次）。內容是研究紀錄，非投資建議。",
   "sections": [
     {
       "title": "先看這裡",
       "items": [
-        { "md": "docs/reports/key-numbers-2026-10-13.md", "date": "2026-10-13", "title": "關鍵數字表：上線中的模型與策略", "note": "大盤精選、潛伏飆股、高分爆量與 0050 在同一段期間、同一套公式下的年化、夏普、回撤、每筆報酬，附三個模型的說明。" },
-        { "md": "docs/reports/research-report-2026-10-11.md", "date": "2026-10-11", "title": "研究總報告：資金流、潛伏飆股門檻、技術分析規則", "note": "一整天的研究整理：大盤氣氛看空有沒有用、投信與 ETF 資金流、潛伏飆股的分數門檻、技術分析能不能當進出依據。" },
-        { "html": "reports/rounds_report.html", "date": "2026-09-21", "title": "五輪研究總結", "note": "九月中五輪事前登記研究的結果彙整。" },
-        { "html": "reports/台股ML選股實驗總覽.html", "date": "2026-09-04", "title": "台股 ML 選股實驗總覽（投資人版）", "note": "早期 24 個回測的白話總覽，含失敗的結果。停在 9 月初，還沒有大盤精選、潛伏飆股兩條線。" }
+        {
+          "md": "docs/reports/key-numbers-2026-10-13.md",
+          "date": "2026-10-13",
+          "title": "關鍵數字表：上線中的模型與策略",
+          "note": "大盤精選、潛伏飆股、高分爆量與 0050 在同一段期間、同一套公式下的年化、夏普、回撤、每筆報酬，附三個模型的說明。"
+        },
+        {
+          "md": "docs/reports/research-report-2026-10-11.md",
+          "date": "2026-10-11",
+          "title": "研究總報告：資金流、潛伏飆股門檻、技術分析規則",
+          "note": "一整天的研究整理：大盤氣氛看空有沒有用、投信與 ETF 資金流、潛伏飆股的分數門檻、技術分析能不能當進出依據。"
+        },
+        {
+          "md": "docs/reports/models-catalog-2026-10-13.md",
+          "date": "2026-10-13",
+          "title": "模型清冊：訓練過的所有模型",
+          "note": "41 個模型（含封存與作廢）分 15 個系列：每個在預測什麼、用了多少特徵、訓練到哪天、樣本外成績、現在的狀態。"
+        },
+        {
+          "html": "reports/rounds_report.html",
+          "date": "2026-09-21",
+          "title": "五輪研究總結",
+          "note": "九月中五輪事前登記研究的結果彙整。"
+        },
+        {
+          "html": "reports/台股ML選股實驗總覽.html",
+          "date": "2026-09-04",
+          "title": "台股 ML 選股實驗總覽（投資人版）",
+          "note": "早期 24 個回測的白話總覽，含失敗的結果。停在 9 月初，還沒有大盤精選、潛伏飆股兩條線。"
+        }
+      ]
+    },
+    {
+      "title": "讀過的論文",
+      "items": [
+        {
+          "md": "docs/research/PAPERS.md",
+          "title": "研究文獻總表（驗證版）",
+          "note": "76 篇：因子、動能、籌碼、擇時、台股實證；每篇標了出處核對的程度（✓ 已核對、△ 部分、○ 未核對）。"
+        },
+        {
+          "md": "docs/research/PAPERS-SHORTTERM.md",
+          "title": "短線操作文獻",
+          "note": "20 篇：短期反轉、隔夜與盤中報酬、日頻動能、散戶注意力、交易成本。"
+        },
+        {
+          "md": "docs/research/PAPERS-PATTERNS.md",
+          "title": "技術型態文獻",
+          "note": "36 篇：K 線與型態偵測、均線與突破規則、資料窺探檢定、用深度學習讀價格圖。"
+        },
+        {
+          "md": "docs/research/PAPERS-KEYLEVELS.md",
+          "title": "價量關鍵價位文獻",
+          "note": "9 篇：持有人未實現損益（CGO）、處分效果、支撐壓力與整數價位。"
+        },
+        {
+          "md": "docs/reports/pring-technical-analysis-summary.md",
+          "date": "2026-10-11",
+          "title": "《技術分析精論》摘要與可回測的進出依據",
+          "note": "Martin J. Pring 第五版上冊的重點，以及哪些規則能寫成程式回測。"
+        },
+        {
+          "md": "docs/reports/2026-09-25-exit-literature.md",
+          "date": "2026-09-25",
+          "title": "停利與出場策略：文獻回顧",
+          "note": "學術文獻怎麼看停損、停利與持有期。"
+        },
+        {
+          "md": "docs/reports/papers-other-citations-2026-10-13.md",
+          "date": "2026-10-13",
+          "title": "研究過程引用的其他論文",
+          "note": "上面幾份沒收到、但在研究決策與規格裡引用過的約 30 篇：ML 組合建構、資金流與指數、放空與台股市場結構。"
+        }
       ]
     },
     {
       "title": "潛伏飆股、出場與技術分析",
       "items": [
-        { "md": "docs/reports/d172-threshold-arms-dev.md", "date": "2026-10-11", "title": "潛伏飆股的分數門檻（開發期參考回測）", "note": "分數 0.30～0.50 各一組，與現行抱滿 15 檔相比；門檻 0.35 回撤明顯變淺，但大部分時間空手。" },
-        { "md": "docs/reports/d173-ta-grid-dev.md", "date": "2026-10-11", "title": "技術分析進出規則的排列組合（512 組）", "note": "4 種進場濾網 × 4 種出場 × 兩種候選，逐筆統計；沒有任何一組過運氣門檻。" },
-        { "md": "docs/reports/core-opportunistic-blend-dev.md", "date": "2026-10-11", "title": "核心＋伺機：大盤精選搭配高分潛伏飆股", "note": "把兩條線放在同一個帳戶裡的開發期描述。" },
-        { "md": "docs/reports/pring-technical-analysis-summary.md", "date": "2026-10-11", "title": "《技術分析精論》摘要與可回測的進出依據", "note": "Martin J. Pring 第五版上冊的重點，以及哪些規則能寫成程式回測。" },
-        { "md": "docs/reports/2026-09-28-round15-trailing-exits.md", "date": "2026-09-28", "title": "第十五輪：讓賺的抱久、賠的早走", "note": "移動停利、ATR 出場等規則的回測。" },
-        { "md": "docs/reports/auto-drawing-methods.md", "date": "2026-09-28", "title": "自動畫線的規則與出處", "note": "支撐壓力、趨勢線等自動畫線方法的定義與文獻。" },
-        { "md": "docs/reports/2026-09-25-exit-literature.md", "date": "2026-09-25", "title": "停利與出場策略：文獻回顧", "note": "學術文獻怎麼看停損、停利與持有期。" }
+        {
+          "md": "docs/reports/d172-threshold-arms-dev.md",
+          "date": "2026-10-11",
+          "title": "潛伏飆股的分數門檻（開發期參考回測）",
+          "note": "分數 0.30～0.50 各一組，與現行抱滿 15 檔相比；門檻 0.35 回撤明顯變淺，但大部分時間空手。"
+        },
+        {
+          "md": "docs/reports/d173-ta-grid-dev.md",
+          "date": "2026-10-11",
+          "title": "技術分析進出規則的排列組合（512 組）",
+          "note": "4 種進場濾網 × 4 種出場 × 兩種候選，逐筆統計；沒有任何一組過運氣門檻。"
+        },
+        {
+          "md": "docs/reports/core-opportunistic-blend-dev.md",
+          "date": "2026-10-11",
+          "title": "核心＋伺機：大盤精選搭配高分潛伏飆股",
+          "note": "把兩條線放在同一個帳戶裡的開發期描述。"
+        },
+        {
+          "md": "docs/reports/2026-09-28-round15-trailing-exits.md",
+          "date": "2026-09-28",
+          "title": "第十五輪：讓賺的抱久、賠的早走",
+          "note": "移動停利、ATR 出場等規則的回測。"
+        },
+        {
+          "md": "docs/reports/auto-drawing-methods.md",
+          "date": "2026-09-28",
+          "title": "自動畫線的規則與出處",
+          "note": "支撐壓力、趨勢線等自動畫線方法的定義與文獻。"
+        }
       ]
     },
     {
       "title": "資金流與籌碼",
       "items": [
-        { "md": "docs/reports/fund-flow-traces-2026-10-11.md", "date": "2026-10-11", "title": "投信／ETF 資金流軌跡", "note": "八種資金流事件前後的股價軌跡，與同類股票比較。" },
-        { "md": "docs/reports/fund-flow-tails-2026-10-11.md", "date": "2026-10-11", "title": "投信／ETF 資金流：飆股命中率", "note": "被 ETF 重押的股票，20 日內飆 20% 的機率反而比較低。" },
-        { "md": "docs/reports/fund-flow-data-inventory-2026-10-11.md", "date": "2026-10-11", "title": "資金流資料來源盤點", "note": "ETF 單位數、持股、指數換股等資料從哪裡來、涵蓋多久。" },
-        { "md": "docs/reports/event-signal-data-inventory-2026-09-28.md", "date": "2026-09-28", "title": "事件前「知情者痕跡」資料盤點", "note": "重大訊息、法說會、權證、內部人申報等資料的盤點。" },
-        { "md": "docs/reports/volume-lead-price-ic.md", "date": "2026-09-07", "title": "量先價行：法人與成交量的預測力", "note": "外資、投信連買天數與異常放量，對未來報酬的 11 年 IC。" }
+        {
+          "md": "docs/reports/fund-flow-traces-2026-10-11.md",
+          "date": "2026-10-11",
+          "title": "投信／ETF 資金流軌跡",
+          "note": "八種資金流事件前後的股價軌跡，與同類股票比較。"
+        },
+        {
+          "md": "docs/reports/fund-flow-tails-2026-10-11.md",
+          "date": "2026-10-11",
+          "title": "投信／ETF 資金流：飆股命中率",
+          "note": "被 ETF 重押的股票，20 日內飆 20% 的機率反而比較低。"
+        },
+        {
+          "md": "docs/reports/fund-flow-data-inventory-2026-10-11.md",
+          "date": "2026-10-11",
+          "title": "資金流資料來源盤點",
+          "note": "ETF 單位數、持股、指數換股等資料從哪裡來、涵蓋多久。"
+        },
+        {
+          "md": "docs/reports/event-signal-data-inventory-2026-09-28.md",
+          "date": "2026-09-28",
+          "title": "事件前「知情者痕跡」資料盤點",
+          "note": "重大訊息、法說會、權證、內部人申報等資料的盤點。"
+        },
+        {
+          "md": "docs/reports/volume-lead-price-ic.md",
+          "date": "2026-09-07",
+          "title": "量先價行：法人與成交量的預測力",
+          "note": "外資、投信連買天數與異常放量，對未來報酬的 11 年 IC。"
+        }
       ]
     },
     {
       "title": "回測結果（九月）",
       "items": [
-        { "html": "reports/backtest_report.html", "date": "2026-09-07", "title": "台股策略回測總覽", "note": "83 筆回測的總表與圖。" },
-        { "md": "docs/reports/backtest-results.md", "date": "2026-09-06", "title": "回測總覽（文字版）", "note": "同一批回測的文字版摘要。" },
-        { "md": "docs/reports/d088-long-window-verdict.md", "date": "2026-09-07", "title": "長窗口三條線的判讀", "note": "2017 起的長期間回測，三條策略線的結論。" },
-        { "md": "docs/reports/d087-long-window-verdict.md", "date": "2026-09-07", "title": "長窗口四格回測的判讀", "note": "長期間回測第一批的結論。" },
-        { "html": "reports/v2_report.html", "date": "2026-09-06", "title": "排序模型第二版檢定", "note": "ml_rank_v2 模型的樣本外檢定。" },
-        { "html": "reports/回測分析_ml_net_h20_m.html", "date": "2026-09-05", "title": "成本感知模型（月頻）回測分析", "note": "扣成本後年化 +14.2% 那個候選的完整分析。" },
-        { "md": "docs/reports/ladder-results.md", "date": "2026-09-05", "title": "控制組階梯結果", "note": "從最簡單的規則一步步加複雜度的對照組。" },
-        { "md": "docs/reports/SPEC-013-review-2026-09-05.md", "date": "2026-09-05", "title": "雙軌策略規格的驗證報告", "note": "雙軌策略規格與實作的逐條驗證。" },
-        { "html": "reports/trade_journal.html", "date": "2026-09-19", "title": "換股進出清單（ML 策略回測）", "note": "回測裡每一筆買賣（歷史回測，不是現在的名單）。檔案較大。" },
-        { "html": "reports/trade_journal_exits.html", "date": "2026-09-20", "title": "換股進出清單（出場規則・模型沒看過的半年）", "note": "2026-03～08 各出場規則的每一筆買賣（歷史回測）。" }
+        {
+          "html": "reports/backtest_report.html",
+          "date": "2026-09-07",
+          "title": "台股策略回測總覽",
+          "note": "83 筆回測的總表與圖。"
+        },
+        {
+          "md": "docs/reports/backtest-results.md",
+          "date": "2026-09-06",
+          "title": "回測總覽（文字版）",
+          "note": "同一批回測的文字版摘要。"
+        },
+        {
+          "md": "docs/reports/d088-long-window-verdict.md",
+          "date": "2026-09-07",
+          "title": "長窗口三條線的判讀",
+          "note": "2017 起的長期間回測，三條策略線的結論。"
+        },
+        {
+          "md": "docs/reports/d087-long-window-verdict.md",
+          "date": "2026-09-07",
+          "title": "長窗口四格回測的判讀",
+          "note": "長期間回測第一批的結論。"
+        },
+        {
+          "html": "reports/v2_report.html",
+          "date": "2026-09-06",
+          "title": "排序模型第二版檢定",
+          "note": "ml_rank_v2 模型的樣本外檢定。"
+        },
+        {
+          "html": "reports/回測分析_ml_net_h20_m.html",
+          "date": "2026-09-05",
+          "title": "成本感知模型（月頻）回測分析",
+          "note": "扣成本後年化 +14.2% 那個候選的完整分析。"
+        },
+        {
+          "md": "docs/reports/ladder-results.md",
+          "date": "2026-09-05",
+          "title": "控制組階梯結果",
+          "note": "從最簡單的規則一步步加複雜度的對照組。"
+        },
+        {
+          "md": "docs/reports/SPEC-013-review-2026-09-05.md",
+          "date": "2026-09-05",
+          "title": "雙軌策略規格的驗證報告",
+          "note": "雙軌策略規格與實作的逐條驗證。"
+        },
+        {
+          "html": "reports/trade_journal.html",
+          "date": "2026-09-19",
+          "title": "換股進出清單（ML 策略回測）",
+          "note": "回測裡每一筆買賣（歷史回測，不是現在的名單）。檔案較大。"
+        },
+        {
+          "html": "reports/trade_journal_exits.html",
+          "date": "2026-09-20",
+          "title": "換股進出清單（出場規則・模型沒看過的半年）",
+          "note": "2026-03～08 各出場規則的每一筆買賣（歷史回測）。"
+        }
       ]
     },
     {
       "title": "資料與程式稽核",
       "items": [
-        { "md": "docs/reports/data-audit.md", "date": "2026-09-19", "title": "全資料健檢", "note": "各資料表的缺日、重複、單位檢查。" },
-        { "md": "docs/reports/silent-audit.md", "date": "2026-09-06", "title": "靜默失效稽核", "note": "找出「看起來成功、其實算錯」的程式寫法。" },
-        { "md": "docs/reports/universe-drift.md", "date": "2026-09-05", "title": "股票池門檻的長期漂移", "note": "成交額門檻在長歷史上的變化。" },
-        { "md": "docs/reports/universe-drift-p30-since2015.md", "date": "2026-09-06", "title": "股票池門檻的長期漂移（2015 起、前 30%）", "note": "同上，換成 2015 起、成交額前 30%。" }
+        {
+          "md": "docs/reports/data-audit.md",
+          "date": "2026-09-19",
+          "title": "全資料健檢",
+          "note": "各資料表的缺日、重複、單位檢查。"
+        },
+        {
+          "md": "docs/reports/silent-audit.md",
+          "date": "2026-09-06",
+          "title": "靜默失效稽核",
+          "note": "找出「看起來成功、其實算錯」的程式寫法。"
+        },
+        {
+          "md": "docs/reports/universe-drift.md",
+          "date": "2026-09-05",
+          "title": "股票池門檻的長期漂移",
+          "note": "成交額門檻在長歷史上的變化。"
+        },
+        {
+          "md": "docs/reports/universe-drift-p30-since2015.md",
+          "date": "2026-09-06",
+          "title": "股票池門檻的長期漂移（2015 起、前 30%）",
+          "note": "同上，換成 2015 起、成交額前 30%。"
+        }
       ]
     },
     {
       "title": "舊版（修正前，保留作紀錄）",
       "items": [
-        { "md": "docs/reports/fund-flow-traces-2026-10-11-pre-fix.md", "date": "2026-10-11", "title": "資金流軌跡（浮點誤差修正前）", "note": "修正前的版本，結論不變；以「資金流與籌碼」那份為準。" },
-        { "md": "docs/reports/fund-flow-traces-2026-10-11-trial1-deciles.md", "date": "2026-10-11", "title": "資金流軌跡（第一版十分位）", "note": "第一次試算的版本。" },
-        { "md": "docs/reports/fund-flow-tails-2026-10-11-pre-fix.md", "date": "2026-10-11", "title": "資金流飆股命中率（修正前）", "note": "修正前的版本，結論不變。" }
+        {
+          "md": "docs/reports/fund-flow-traces-2026-10-11-pre-fix.md",
+          "date": "2026-10-11",
+          "title": "資金流軌跡（浮點誤差修正前）",
+          "note": "修正前的版本，結論不變；以「資金流與籌碼」那份為準。"
+        },
+        {
+          "md": "docs/reports/fund-flow-traces-2026-10-11-trial1-deciles.md",
+          "date": "2026-10-11",
+          "title": "資金流軌跡（第一版十分位）",
+          "note": "第一次試算的版本。"
+        },
+        {
+          "md": "docs/reports/fund-flow-tails-2026-10-11-pre-fix.md",
+          "date": "2026-10-11",
+          "title": "資金流飆股命中率（修正前）",
+          "note": "修正前的版本，結論不變。"
+        }
       ]
     }
   ]

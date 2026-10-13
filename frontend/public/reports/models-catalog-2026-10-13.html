@@ -1,0 +1,712 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>模型清冊：訓練過的所有模型（2026-10-13）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>模型清冊：訓練過的所有模型（2026-10-13）</h1>
+<blockquote>
+<p>共 41 個模型（含封存與作廢），全部是 LightGBM。資料直接讀每個模型訓練時寫下的說明檔（<code>data/models/*/meta.json</code>），依用途分系列；每個系列先說它在預測什麼、結果如何，再列出每一個版本。上線中的只有三個（見「狀態」欄）。</p>
+</blockquote>
+<p><strong>怎麼讀「樣本外 IC」</strong>：每一天只用更早的資料訓練、再對當天打分（walk-forward），分數和實際結果的排名相關。報酬類模型 +0.05 以上就算有用；標「*」的是分類模型（預測會不會發生），算法是預測機率和「有沒有發生」的排名相關，數字天生比較大，不能和報酬類直接比。回撤類模型的 IC 很高，主要來自「波動大的股票跌得深」這個定義。</p>
+<h2>第一代：10 日報酬排名</h2>
+<p>2026-09 初的第一批模型（D-038～D-051）：預測未來 10 個交易日報酬的全市場排名，25～30 項價量、籌碼、基本面特徵，2020 年起的資料。樣本外 Rank IC 0.08～0.09 看起來不錯，但做成每週換股的策略扣成本後幾乎沒賺——這種標籤偏好低波動、容易小勝的股票，錯過少數大贏家。之後改成「扣成本的報酬」當標籤。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>10 日報酬排名</td>
+<td>迴歸</td>
+<td style="text-align:right">25</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">+0.068</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_h10_20260225_2f5a21a9</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>10 日報酬排名</td>
+<td>迴歸</td>
+<td style="text-align:right">28</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">+0.089</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_h10_20260225_5526f2c2</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>10 日報酬排名</td>
+<td>迴歸</td>
+<td style="text-align:right">30</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">+0.087</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_h10_20260225_a48b262c</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>10 日報酬排名</td>
+<td>迴歸</td>
+<td style="text-align:right">25</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">+0.080</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_h10_20260225_b2348c46</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>成本感知：20 日扣成本報酬（短窗口）</h2>
+<p>預測未來 20 個交易日、扣掉交易成本後相對大盤的報酬（D-040、D-052、D-059），12 項特徵，2020 年起的資料。最好的月頻版本扣成本年化 +14.2%，但回撤 −40.8%，判定只當零件（D-066）。封存的兩版是發現資料缺陷之前訓練的；2026-03-05 那版訓練資料越過保留期邊界三天，作廢。2026-09-09 由下面的長窗口版取代（D-110）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>封存（資料缺陷前，留作證據）</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">-0.019</td>
+<td style="text-align:right">16</td>
+<td><code>_archive/lgbm_net_h20_20260225_9a575e97__pre-D040-inf-defect</code></td>
+</tr>
+<tr>
+<td>封存（資料缺陷前，留作證據）</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">+0.036</td>
+<td style="text-align:right">16</td>
+<td><code>_archive/lgbm_net_h20_20260225_9a575e97__pre-D064-data-defects</code></td>
+</tr>
+<tr>
+<td>作廢：越過保留期邊界</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2020-01-02～2026-03-05</td>
+<td style="text-align:right">+0.045</td>
+<td style="text-align:right">16</td>
+<td><code>_rejected/lgbm_net_h20_20260305_6a798962__vault-eroded-3-sessions</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2020-01-02～2026-02-25</td>
+<td style="text-align:right">+0.045</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_net_h20_20260225_6a798962</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2020-01-01～2026-02-25</td>
+<td style="text-align:right">+0.036</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_net_h20_20260225_9a575e97</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>營收驚奇（短窗口）</h2>
+<p>預測下一次公布的月營收年增率，會不會超出「本月年增＋加速度」的預期（D-074）——預測的是基本面，不是股價。短窗口版因為幾支稀疏因子失效而作廢，由長窗口版取代。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>作廢：稀疏因子失效</td>
+<td>下次月營收的驚奇</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2020-01-02～2026-02-25</td>
+<td style="text-align:right">+0.066</td>
+<td style="text-align:right">16</td>
+<td><code>_rejected/lgbm_rev_h15_20260225_a3227e06__sparse-factors-dead</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>下次月營收的驚奇</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2020-01-02～2026-02-25</td>
+<td style="text-align:right">+0.066</td>
+<td style="text-align:right">16</td>
+<td><code>lgbm_rev_h15_20260225_a3227e06</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>回撤風險（短窗口）</h2>
+<p>預測未來 60 個交易日內最深會跌多少（排名）。短窗口版因為幾支稀疏因子失效而作廢，由長窗口版取代。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>作廢：稀疏因子失效</td>
+<td>60 日最深跌幅</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2020-01-02～2026-02-25</td>
+<td style="text-align:right">+0.408</td>
+<td style="text-align:right">15</td>
+<td><code>_rejected/lgbm_dd_h60_20260225_1a2c3a8e__sparse-factors-dead</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>60 日最深跌幅</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2020-01-02～2026-02-25</td>
+<td style="text-align:right">+0.407</td>
+<td style="text-align:right">15</td>
+<td><code>lgbm_dd_h60_20260225_1a2c3a8e</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>長窗口：20 日扣成本報酬（大盤精選用）</h2>
+<p>同成本感知標籤，但資料拉長到 2015-09 起，訓練涵蓋 2018 Q4、2020、2022 三段下跌期（D-110）。同期測試 Rank IC +0.0629（短窗口 +0.0452）；模型沒看過的半年（2026-03～08）+0.0816，是整個研究唯一在沒看過的資料上站得住的結果（D-107）。目前大盤精選用它。「pre_t180」是補完 2020 Q1 因子資料之前的版本。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>上線：大盤精選的排序模型</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.066</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw_net_h20_20260225_83890036</code></td>
+</tr>
+<tr>
+<td>舊版（補資料前）</td>
+<td>20 日扣成本報酬</td>
+<td>迴歸</td>
+<td style="text-align:right">12</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.064</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw_net_h20_20260225_83890036_pre_t180</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>長窗口：回撤風險</h2>
+<p>預測未來 60 個交易日內最深跌幅的排名，原本當風控閘門（剔除最危險的 10%，D-111）。Rank IC 0.42 看起來很高，但光按 20 日波動排序就有 0.39——94% 是「波動大的股票跌得深」這個定義，模型多出來的只有約 +0.03（D-089）。現在每天照樣打分，兩條線都沒用。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>每日打分（參考，兩條線都沒用）</td>
+<td>60 日最深跌幅</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2017-01-03～2026-02-25</td>
+<td style="text-align:right">+0.424</td>
+<td style="text-align:right">27</td>
+<td><code>lgbm_lw_dd_h60_20260225_1bd7c6a0</code></td>
+</tr>
+<tr>
+<td>舊版（補資料前）</td>
+<td>60 日最深跌幅</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2017-01-03～2026-02-25</td>
+<td style="text-align:right">+0.419</td>
+<td style="text-align:right">27</td>
+<td><code>lgbm_lw_dd_h60_20260225_1bd7c6a0_pre_t180</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>長窗口：營收驚奇</h2>
+<p>長窗口版的營收驚奇模型，曾當營收類策略的輔助分數（D-112）；那類策略下架後不再每日打分（D-163）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>下次月營收的驚奇</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2017-01-03～2026-02-25</td>
+<td style="text-align:right">+0.066</td>
+<td style="text-align:right">28</td>
+<td><code>lgbm_lw_rev_h15_20260225_9d4a149c</code></td>
+</tr>
+<tr>
+<td>舊版（補資料前）</td>
+<td>下次月營收的驚奇</td>
+<td>迴歸</td>
+<td style="text-align:right">15</td>
+<td>2017-01-03～2026-02-25</td>
+<td style="text-align:right">+0.063</td>
+<td style="text-align:right">28</td>
+<td><code>lgbm_lw_rev_h15_20260225_9d4a149c_pre_t180</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>長窗口＋籌碼特徵版</h2>
+<p>回撤與營收驚奇兩個模型加入籌碼特徵的版本（D-104）。第二段檢驗沒過，結案（D-105）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>60 日最深跌幅</td>
+<td>迴歸</td>
+<td style="text-align:right">16</td>
+<td>2017-01-03～2026-02-25</td>
+<td style="text-align:right">+0.424</td>
+<td style="text-align:right">27</td>
+<td><code>lgbm_lwc_dd_h60_20260225_cfc040d3</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>下次月營收的驚奇</td>
+<td>迴歸</td>
+<td style="text-align:right">16</td>
+<td>2017-01-03～2026-02-25</td>
+<td style="text-align:right">+0.067</td>
+<td style="text-align:right">28</td>
+<td><code>lgbm_lwc_rev_h15_20260225_e7c81ef4</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>買進模型：三重障礙</h2>
+<p>預測 20 個交易日內先碰到 +10% 還是 −10%（e823c63f 是不對稱版：+10%／−5%），二元分類（D-120、D-121）。「_cal」是做過機率校準的版本。兩關診斷都沒過，不進回測。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內先漲還是先跌（+10%／−10%）</td>
+<td>分類</td>
+<td style="text-align:right">16</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.210</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw_tb_h20_20260225_a7cee0de</code></td>
+</tr>
+<tr>
+<td>研究（校準版）</td>
+<td>20 日內先漲還是先跌（+10%／−10%）</td>
+<td>分類</td>
+<td style="text-align:right">16</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.210</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw_tb_h20_20260225_a7cee0de_cal</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內先漲還是先跌（+10%／−5%）</td>
+<td>分類</td>
+<td style="text-align:right">16</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.162*</td>
+<td style="text-align:right">32</td>
+<td><code>lgbm_lw_tb_h20_20260225_e823c63f</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>買進模型：三重障礙（波動標準化）</h2>
+<p>障礙改成「一倍自身波動」而不是固定 ±10%，23 項特徵。診斷沒過，收線。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內先漲還是先跌（±1 倍波動）</td>
+<td>分類</td>
+<td style="text-align:right">23</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.130</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw3_tb_h20_20260225_331a7da2</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>買進模型：三重障礙（波動標準化＋籌碼）</h2>
+<p>同上，特徵加到 41 項（含籌碼）；「_cal」是校準版。診斷沒過，收線。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內先漲還是先跌（±1 倍波動）</td>
+<td>分類</td>
+<td style="text-align:right">41</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.133</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw4_tb_h20_20260225_4f12e0f4</code></td>
+</tr>
+<tr>
+<td>研究（校準版）</td>
+<td>20 日內先漲還是先跌（±1 倍波動）</td>
+<td>分類</td>
+<td style="text-align:right">41</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.133</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw4_tb_h20_20260225_4f12e0f4_cal</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>下跌機率</h2>
+<p>預測 20 個交易日內會不會跌 10%，41 項特徵（第六輪，D-131）。Rank IC 0.31，但贏不過單用 20 日波動，三條診斷全部未通過，收線（D-132）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內跌 10%</td>
+<td>分類</td>
+<td style="text-align:right">41</td>
+<td>2015-09-01～2026-02-25</td>
+<td style="text-align:right">+0.306</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_lw6_dp_h20_20260225_d632b8a8</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>右尾：60 日飆 50%</h2>
+<p>預測 60 個交易日內會不會漲到 +50%（第九、十輪，D-143～D-150；A、B、B′、C 是特徵與資料期間不同的臂）。B 臂曾上架平台前向追蹤（D-147）。結論：前幾名的命中率看起來是 3 倍，但和同波動、同動能的股票比只有 1.08 倍——其實是動能篩選，不是額外的預測力。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>60 日內漲到 +50%</td>
+<td>分類</td>
+<td style="text-align:right">12</td>
+<td>2015-09-01～2026-04-30</td>
+<td style="text-align:right">+0.148</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_taila_tu_h60_20260430_af88e6d6</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>60 日內漲到 +50%</td>
+<td>分類</td>
+<td style="text-align:right">20</td>
+<td>2022-03-01～2026-04-30</td>
+<td style="text-align:right">+0.169</td>
+<td style="text-align:right">8</td>
+<td><code>lgbm_tailb2_tu_h60_20260430_83674195</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>60 日內漲到 +50%</td>
+<td>分類</td>
+<td style="text-align:right">20</td>
+<td>2015-09-01～2026-04-30</td>
+<td style="text-align:right">+0.159</td>
+<td style="text-align:right">33</td>
+<td><code>lgbm_tailb_tu_h60_20260430_7ab9b0f9</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>60 日內漲到 +50%</td>
+<td>分類</td>
+<td style="text-align:right">23</td>
+<td>2022-03-01～2026-04-30</td>
+<td style="text-align:right">+0.167</td>
+<td style="text-align:right">8</td>
+<td><code>lgbm_tailc_tu_h60_20260430_855ea8b1</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>安靜股：20 日飆漲機率（潛伏飆股用）</h2>
+<p>只看「安靜又買得到」的股票（近 60 日漲不到 20%、波動不在最高的 30%、成交金額前 30%、股價 10 元以上），預測 20 個交易日內會不會漲到門檻（A／A22／Ap：+30%，A25：+25%，A20：+20%；第十二輪，D-151、D-152）。A20 的前 20 名碰到 +30% 的比例是同波動、同漲幅股票的 1.40 倍，選為潛伏飆股的模型（D-163）。A22 只用 2022 年起的資料（分點資料從那時才有），Ap 再加 3 支分點特徵；分點特徵只多 0.02～0.09 倍。2026-02-26 那版是事後檢驗用（D-162：訓練到 2026-02、考 3～9 月）。優勢在機率，不在平均報酬：九成五不會飆、單檔報酬中位數為負。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內漲到 +20%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2015-09-01～2026-02-26</td>
+<td style="text-align:right">+0.150*</td>
+<td style="text-align:right">23</td>
+<td><code>lgbm_quietA20_tu_h20_20260226_0ac86788</code></td>
+</tr>
+<tr>
+<td>上線：潛伏飆股、高分爆量</td>
+<td>20 日內漲到 +20%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2015-09-01～2026-04-30</td>
+<td style="text-align:right">+0.155*</td>
+<td style="text-align:right">24</td>
+<td><code>lgbm_quietA20_tu_h20_20260430_655df6d7</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內漲到 +30%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2022-03-01～2026-04-30</td>
+<td style="text-align:right">+0.109*</td>
+<td style="text-align:right">6</td>
+<td><code>lgbm_quietA22_tu_h20_20260430_ca316983</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內漲到 +25%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2015-09-01～2026-04-30</td>
+<td style="text-align:right">+0.150*</td>
+<td style="text-align:right">14</td>
+<td><code>lgbm_quietA25_tu_h20_20260430_9979d4c7</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內漲到 +30%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2015-09-01～2026-04-30</td>
+<td style="text-align:right">+0.152*</td>
+<td style="text-align:right">7</td>
+<td><code>lgbm_quietA_tu_h20_20260430_8bdcd508</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內漲到 +30%</td>
+<td>分類</td>
+<td style="text-align:right">43</td>
+<td>2022-03-01～2026-04-30</td>
+<td style="text-align:right">+0.107*</td>
+<td style="text-align:right">6</td>
+<td><code>lgbm_quietAp_tu_h20_20260430_6a46fa9f</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2>已飆股：會不會再跌 15%</h2>
+<p>第十二輪的模型 B（D-151）：已經飆過的股票，20 個交易日內會不會再跌 15%。九年平均沒用，只在含 2026-07 下跌的保留段有用（學到的是大盤狀態）；B22、Bp 同樣是 2022 年起資料與加分點特徵的對照版。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>預測什麼</th>
+<th>類型</th>
+<th style="text-align:right">特徵數</th>
+<th>訓練資料</th>
+<th style="text-align:right">樣本外 IC</th>
+<th style="text-align:right">驗證窗</th>
+<th>模型代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內跌 15%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2022-03-01～2026-04-30</td>
+<td style="text-align:right">+0.084*</td>
+<td style="text-align:right">2</td>
+<td><code>lgbm_hotB22_dp_h20_20260430_660b5e14</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內跌 15%</td>
+<td>分類</td>
+<td style="text-align:right">40</td>
+<td>2015-09-01～2026-04-30</td>
+<td style="text-align:right">+0.196*</td>
+<td style="text-align:right">7</td>
+<td><code>lgbm_hotB_dp_h20_20260430_b12a17d8</code></td>
+</tr>
+<tr>
+<td>研究用，已收線</td>
+<td>20 日內跌 15%</td>
+<td>分類</td>
+<td style="text-align:right">43</td>
+<td>2022-03-01～2026-04-30</td>
+<td style="text-align:right">+0.084*</td>
+<td style="text-align:right">2</td>
+<td><code>lgbm_hotBp_dp_h20_20260430_b9272adf</code></td>
+</tr>
+</tbody>
+</table></div>
+</article><div class='foot'>來源 <code>docs/reports/models-catalog-2026-10-13.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:44。</div></div></body></html>

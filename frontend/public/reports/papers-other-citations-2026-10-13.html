@@ -1,0 +1,204 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>研究過程引用的其他論文（2026-10-13 整理）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>研究過程引用的其他論文（2026-10-13 整理）</h1>
+<blockquote>
+<p>四份文獻總表（研究文獻總表、短線操作、技術型態、關鍵價位）與出場文獻回顧之外，研究決策紀錄（DECISIONS）、
+策略與規格文件、對抗審查（REVIEW）裡引用過的論文。每篇一句「在研究裡用在哪裡」；
+卷期頁碼以原文為準，標「作者未核實」的是研究筆記裡只核對過題名與期刊的。</p>
+</blockquote>
+<h2>機器學習選股與組合建構</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>論文</th>
+<th>在研究裡用在哪裡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gu, Kelly &amp; Xiu (2020), <em>Empirical Asset Pricing via Machine Learning</em>, RFS</td>
+<td>用樹模型與神經網路預測橫斷面報酬的基準研究；本專案 ML 選股的出發點。</td>
+</tr>
+<tr>
+<td>Avramov, Cheng &amp; Metzker (2023), <em>Machine Learning vs. Economic Restrictions</em>, Management Science</td>
+<td>提醒 ML 訊號的獲利多半集中在難交易的股票，加上可交易性限制後會大幅縮水；我們的流動性門檻（成交金額前 30%）與此一致。</td>
+</tr>
+<tr>
+<td>Jensen, Kelly, Malamud &amp; Pedersen (2026), <em>Machine Learning and the Implementable Efficient Frontier</em>, RFS</td>
+<td>主張把交易成本直接放進組合目標、學習動態權重；用來說明「模型分數不是直接的買進名單」。</td>
+</tr>
+<tr>
+<td>Gârleanu &amp; Pedersen (2013), <em>Dynamic Trading with Predictable Returns and Transaction Costs</em>, JF</td>
+<td>慢衰減的訊號給較大權重、每次只朝目標持倉移動一部分；降周轉設計的依據。</td>
+</tr>
+<tr>
+<td>Novy-Marx &amp; Velikov (2019), FAJ（換股緩衝帶）</td>
+<td>新進門檻高、續抱門檻低（banding）；我們用「前 10% 才買、掉出前 30% 才賣」，周轉降了 47%（SPEC-012）。</td>
+</tr>
+<tr>
+<td>Li, Wu &amp; Zhou (2026), <em>Machine+Heuristics</em>, Journal of Financial Markets</td>
+<td>列在 ML 選股研究筆記的主要參考（筆記裡沒有摘要內容）。</td>
+</tr>
+<tr>
+<td>Baruník, Hronec &amp; Tobek (2026), <em>Forecasting Stock Return Distributions Around the Globe with Quantile Neural Networks</em>, IJF</td>
+<td>預測整個報酬分布而不是單一排名；右尾（飆股）模型方向的參考。</td>
+</tr>
+</tbody>
+</table></div>
+<h2>動能與擇時</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>論文</th>
+<th>在研究裡用在哪裡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Chan, Jegadeesh &amp; Lakonishok (1996), <em>Momentum Strategies</em>, JF</td>
+<td>價格動能與盈餘（營收）動能各自獨立；回答「營收驚奇模型能不能再配動能」。</td>
+</tr>
+<tr>
+<td>Antonacci (2014), <em>Dual Momentum Investing</em>（書）</td>
+<td>相對動能＋絕對動能的擇時；大盤擇時規則的候選之一。</td>
+</tr>
+<tr>
+<td>Zakamulin (2014), Journal of Asset Management</td>
+<td>均線擇時的反面證據：樣本外弱、對參數敏感；提醒擇時規則不要調參。</td>
+</tr>
+</tbody>
+</table></div>
+<h2>產業與關聯公司</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>論文</th>
+<th>在研究裡用在哪裡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cohen &amp; Frazzini (2008), <em>Economic Links and Predictable Returns</em>, JF</td>
+<td>客戶的股價變動能預測供應商的報酬；「關聯公司」因子最強的文獻，因為需要供應鏈資料，列為獨立專案。</td>
+</tr>
+<tr>
+<td>Ali &amp; Hirshleifer (2020), <em>Shared Analyst Coverage</em>, JFE</td>
+<td>共同分析師覆蓋能統一解釋多種動能外溢；同儕關係的另一種定義。</td>
+</tr>
+<tr>
+<td>Hoberg &amp; Phillips（以文字定義的產業，TNIC）</td>
+<td>用公司描述文字定義同業；同儕因子的設計精神。</td>
+</tr>
+</tbody>
+</table></div>
+<h2>資金流、指數與基金行為</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>論文</th>
+<th>在研究裡用在哪裡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coval &amp; Stafford (2007), <em>Asset Fire Sales (and Purchases) in Equity Markets</em>, JFE</td>
+<td>基金被迫買賣造成的價格壓力與之後的反轉；投信／ETF 資金流研究（SPEC-016）的理論依據。</td>
+</tr>
+<tr>
+<td>Lou (2012), <em>A Flow-Based Explanation for Return Predictability</em>, RFS</td>
+<td>資金流入預測短期報酬與之後的反轉；同上。</td>
+</tr>
+<tr>
+<td>Chang, Hong &amp; Liskovich (2015), <em>Regression Discontinuity and the Price Effects of Stock Market Indexing</em>, RFS</td>
+<td>指數納入／剔除的價格效應；指數換股事件的設計參考。</td>
+</tr>
+<tr>
+<td>Brown, Davies &amp; Ringgenberg (2021), <em>ETF Arbitrage, Non-Fundamental Demand, and Return Predictability</em>, Review of Finance</td>
+<td>ETF 申贖帶來的是非基本面需求；ETF 申購潮／贖回潮事件的依據。</td>
+</tr>
+<tr>
+<td>Chen, Jegadeesh &amp; Wermers (2000), <em>The Value of Active Mutual Fund Management</em>, JFQA</td>
+<td>基金經理人買進的股票有資訊、賣出的沒有；投信買超與賣超分開看的依據。</td>
+</tr>
+<tr>
+<td>Carhart, Kaniel, Musto &amp; Reed (2002), <em>Leaning for the Tape</em>, JF</td>
+<td>基金季底拉抬持股；投信季底窗飾的參考。</td>
+</tr>
+<tr>
+<td>MSCI 台灣指數調整的交易者行為與價格反應（2016, Journal of Multinational Financial Management；作者未核實）</td>
+<td>新增股宣告到生效前約 +3.9%、生效日反轉；外資獲利、散戶提供流動性——指數調整事件的台股實證。</td>
+</tr>
+</tbody>
+</table></div>
+<h2>放空、事件與台股市場結構</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>論文</th>
+<th>在研究裡用在哪裡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Christophe, Ferri &amp; Angel (2004), JF</td>
+<td>放空者在財報公告前就先行動；事件前「知情者痕跡」研究的依據。</td>
+</tr>
+<tr>
+<td><em>Shorting Flows and Return Predictability in Taiwan</em>（Pacific-Basin Finance Journal, 2022；作者未核實）</td>
+<td>台股放空流量帶有資訊；與我們量到的融券方向一致。</td>
+</tr>
+<tr>
+<td><em>Short Sale and Stock Returns: Evidence from the Taiwan Stock Exchange</em>（Journal of Economics and Business, 2009；作者未核實）</td>
+<td>高融券股之後有負的異常報酬；融券可當負向篩選，搭配強制回補日曆。</td>
+</tr>
+<tr>
+<td>Hsieh, Kim &amp; Yang (2009), <em>The Magnet Effect of Price Limits: A Logit Approach</em>, Journal of Empirical Finance</td>
+<td>股價接近漲跌停時續漲（跌）機率上升；回測裡「觸及漲停買不到」的成交假設依據。</td>
+</tr>
+<tr>
+<td><em>Frequent Batch Auctions vs. Continuous Trading: Evidence from Taiwan</em>（Journal of Financial Markets, 2026；作者未核實）</td>
+<td>2020-03-23 台股從 5 秒集合競價改逐筆交易，中小型股成交量增加、價差收斂；滑價模型在 2020/3 前後要分段。</td>
+</tr>
+<tr>
+<td>Hartzmark &amp; Solomon (2013), <em>The Dividend Month Premium</em>, JFE</td>
+<td>預期配息月份有正異常報酬、除息後反轉；股利事件策略的參考（尚未回測）。</td>
+</tr>
+<tr>
+<td>Gatev, Goetzmann &amp; Rouwenhorst (2006), <em>Pairs Trading</em>, RFS</td>
+<td>配對交易的經典；統計套利家族的基準（未採用）。</td>
+</tr>
+<tr>
+<td>Do &amp; Faff (2010), <em>Does Simple Pairs Trading Still Work?</em>, FAJ</td>
+<td>配對交易報酬逐年衰減、扣成本後大致無利；說明為什麼不做配對交易。</td>
+</tr>
+<tr>
+<td>Israelov (2019), <em>Pathetic Protection: The Elusive Benefits of Protective Puts</em>, Journal of Alternative Investments</td>
+<td>買保護性賣權不如直接降曝險；尾部風險用降曝險處理的依據。</td>
+</tr>
+</tbody>
+</table></div>
+</article><div class='foot'>來源 <code>docs/reports/papers-other-citations-2026-10-13.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:44。</div></div></body></html>

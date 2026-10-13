@@ -1,0 +1,389 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>PAPERS-PATTERNS — 技術型態文獻總表（第四批研究）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>PAPERS-PATTERNS — 技術型態文獻總表（第四批研究）</h1>
+<p>2026-07-22 三代理並行網路調查產出（古典型態統計檢驗／交易規則與資料窺探／旗形·AI
+看圖·台股線），逐篇對照出版社頁面（Wiley/OUP/Elsevier/Springer/T&amp;F）或 RePEc/SSRN
+核實出處。標記沿用 PAPERS.md 慣例：✓ 出處與關鍵發現已核、△ 存在但細節有修正、
+○ 來源已讀但數字未完成驗證——實作遇 ○ 級數字請先覆核。</p>
+<p>背景：本批研究緣起 T-042~T-045 型態因子的台股實證（STRATEGY §4b.4）——
+順向突破/跌破全部無正向 alpha、逐筆淨勝率 37–46%。本表回答「文獻怎麼說」。</p>
+<h2>A. 古典型態的統計檢驗（頭肩/雙頂底/三角/矩形）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Lo, Mamaysky &amp; Wang (2000), &quot;Foundations of Technical Analysis,&quot; <em>JF</em> 55(4):1705-1765</td>
+<td>核回歸自動偵測十種型態（CRSP 1962–1996）：多個型態的<strong>條件報酬分布顯著異於無條件分布</strong>（Nasdaq 強於 NYSE）；措辭僅到「有增量資訊」，<strong>未做策略損益、未扣成本</strong>，明確區隔資訊含量與可獲利性</td>
+<td>型態偵測方法論的開山之作；我們的樞紐點/確認延遲是其簡化版</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Savin, Weller &amp; Zvingelis (2007), <em>J. Financial Econometrics</em> 5(2):243-265</td>
+<td>頭肩頂（LMW 演算法＋分析師過濾），S&amp;P500/Russell2000 1990–99：<strong>獨立策略幾乎不獲利</strong>，但當<strong>條件變數</strong>有年化 5–7% 風險調整超額</td>
+<td>「當特徵不當訊號」的直接依據——與我們頭肩 RankIC 顯著但逐筆全虧一致</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Chang &amp; Osler (1999), &quot;Methodical Madness,&quot; <em>Economic Journal</em> 109(458):636-661</td>
+<td>頭肩在外匯 1973–94：僅日圓/馬克顯著獲利，且<strong>被更簡單規則支配</strong>（&quot;profitable, but not efficient&quot;）；各幣別精確數字未核（○ 級）</td>
+<td>型態即使有效也常輸給簡單動能/反轉規則</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Lucke (2003), <em>Applied Economics</em> 35(1):33-40</td>
+<td>頭肩規則多種定義變體下報酬<strong>皆不顯著</strong>，若有方向是負</td>
+<td>頭肩的反面證據；我們台股頭肩「跌破後反漲」同向</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Dawson &amp; Steeley (2003), <em>JBFA</em> 30(1-2):263-293</td>
+<td>英股 LMW 複製：條件<strong>分布</strong>顯著不同、<strong>平均報酬無異</strong>，勝不過基準</td>
+<td>「形狀有資訊、期望報酬沒有」——與台股結果同構</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Friesen, Weller &amp; Dunham (2009), <em>JBF</em> 33(6):1089-1100</td>
+<td><strong>確認偏誤</strong>模型內生產生型態與先動能後反轉的自相關結構</td>
+<td>型態成因的行為理論；台股散戶佔比高 → 偏誤更強但方向未必同美股</td>
+</tr>
+<tr>
+<td>△</td>
+<td>雙頂/雙底、矩形箱型：<strong>查無專門頂刊單篇</strong>（agent 明確回報）</td>
+<td>最強證據即內含於 LMW/Dawson 十型態框架（僅到「分布不同」）</td>
+<td>別引用「某論文證明雙底可獲利」——不存在</td>
+</tr>
+</tbody>
+</table></div>
+<h2>B. 支撐/壓力（證據最強的一類）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Osler (2000), <em>FRBNY Econ. Policy Review</em> 6(2):53-68</td>
+<td>六家機構實際發布的 S/R 點位：日內<strong>反彈頻率顯著高於隨機點位</strong>（馬克 +4.2%/日圓 +5.6%/英鎊 +4.0%），效力維持 ≥5 日；未檢驗可獲利性</td>
+<td>S/R「觸價反彈」統計上是真的</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Osler (2003), <em>JF</em> 58(5):1791-1819</td>
+<td>真實委託簿：<strong>停利單聚集在整數價位</strong>（→支撐壓力反彈）、停損單聚集其外側（→突破加速）——技術分析兩大預言的微觀結構解釋</td>
+<td>「整理有撐」的機制基礎存在；flag_hold 的觸撐反彈定義有學理依據</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Zapranis &amp; Tsinaslanidis (2012), <em>Applied Financial Economics</em> 22(19):1571-1585</td>
+<td>美股水平 S/R 自動偵測：點位辨識有效，<strong>做成策略勝不過買進持有</strong></td>
+<td>機制真 ≠ 可交易——與我們 flag_hold 全虧一致</td>
+</tr>
+</tbody>
+</table></div>
+<h2>C. K 線組合（證據最弱的一類；含台股）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Caginalp &amp; Laurent (1998), <em>Applied Math. Finance</em> 5(3-4):181-205</td>
+<td>三日反轉組合 S&amp;P500 1992–96 顯著（兩日持有近 1%）；<strong>未扣成本</strong></td>
+<td>唯一強正面，被下列翻案</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Marshall, Young &amp; Rose (2006), <em>JBF</em> 30(8):2303-2323</td>
+<td>DJIA 1992–2002，OHLC bootstrap：K 線策略<strong>與隨機無異</strong></td>
+<td>美股翻案</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Marshall, Young &amp; Cahan (2008), <em>RQFA</em> 31(2):191-207</td>
+<td>東證前百大 1975–2004（K 線母國）：<strong>無異常報酬</strong></td>
+<td>日股翻案</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Horton (2009), <em>QREF</em> 49(2):283-294</td>
+<td>星形/烏鴉/十字 349 檔美股：無價值</td>
+<td class="num">—</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Lu (2014), <em>PBFJ</em> 26:65-78</td>
+<td><strong>台股</strong> 1992–2009 單日 K 線系統分類：<strong>4 種型態扣成本後仍獲利</strong>（bootstrap＋樣本外）</td>
+<td>台股型態文獻中成本處理最完整的正面結果；值得日後做 K 線事件因子時對照</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Lu &amp; Shiu (2012), <em>EMFT</em> 48(S1):41-57</td>
+<td>台灣 50 成分股兩日 K 線窮舉：教科書型態多不獲利、少數新型態顯著</td>
+<td>台股 K 線＝教科書版無效、資料驅動版有微弱訊號</td>
+</tr>
+</tbody>
+</table></div>
+<h2>D. 交易規則與資料窺探（負面證據鏈）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Brock, Lakonishok &amp; LeBaron (1992), <em>JF</em> 47(5):1731-1764</td>
+<td>DJIA 1897–1986，26 條均線/箱型突破規則 vs 四個 null 模型：買賣訊號差顯著（日均值 △ 級：買 +0.042%/賣 −0.025%）；<strong>未扣成本未校正窺探</strong></td>
+<td>箱型突破的正面起點</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Sullivan, Timmermann &amp; White (1999), <em>JF</em> 54(5):1647-1691</td>
+<td>7,846 條規則 Reality Check：BLL 樣本內非純窺探，但 1987–96 <strong>樣本外失效</strong></td>
+<td class="num">—</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Bajgrowicz &amp; Scaillet (2012), <em>JFE</em> 106(3):473-491</td>
+<td>FDR＋成本：<strong>事前選不出會贏的規則</strong>，低成本即抵銷全部樣本內獲利</td>
+<td>逐筆規則路線的死刑判決</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Fang, Jacobsen &amp; Qin (2014), <em>Rev. Financial Economics</em> 23(1):30-45</td>
+<td>BLL 原規則 1987–2011 全新資料：<strong>零預測力</strong></td>
+<td class="num">—</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Bessembinder &amp; Chan (1995), <em>PBFJ</em> 3(2-3):257-284</td>
+<td>亞洲六市場 BLL 規則：買賣訊號差 0.095%/日（年化 ~26.8%），<strong>台灣/馬/泰最強</strong>；損益兩平來回成本 1.57%</td>
+<td>台股技術訊號「毛」的存在最直接的學術證據；成本是門檻——與我們毛/淨勝率差 4–7pp 相符</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Bessembinder &amp; Chan (1998), <em>Financial Management</em> 27(2):5-17</td>
+<td>預測力部分為非同步交易假象；breakeven 成本低於實際成本</td>
+<td class="num">—</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Park &amp; Irwin (2007), <em>J. Econ. Surveys</em> 21(4):786-826</td>
+<td>95 篇現代研究 56 正/20 負/19 混合；正面者多受窺探/成本/風險調整問題污染；1990s 後利潤衰退</td>
+<td>全域總覽</td>
+</tr>
+</tbody>
+</table></div>
+<h2>E. 正面路線：技術資訊的橫斷面因子形式</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Zhu &amp; Zhou (2009), <em>JFE</em> 92(3):519-544</td>
+<td>理論：報酬可預測/參數不確定時，均線對資產配置有加值</td>
+<td>均線的理論正當性</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Han, Yang &amp; Zhou (2013), <em>JFQA</em> 48(5):1433-1461</td>
+<td>均線擇時 alpha 集中在<strong>高波動/高資訊不確定</strong>股票，超過動能</td>
+<td>「條件化」的正確形式＝股票特性分組</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Han, Zhou &amp; Zhu (2016), <em>JFE</em> 122(2):352-375</td>
+<td><strong>trend factor</strong> 月均 1.63%（vs 動能/反轉 0.79%），Sharpe 兩倍以上，危機期 +0.75%/月</td>
+<td>技術資訊做成橫斷面因子的最強證據</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>George &amp; Hwang (2004), <em>JF</em> 59(5):2145-2176</td>
+<td>52 週高接近度 ~0.45%/月（△ 級數字）、支配個股/產業動能、不反轉——錨定＋反應不足</td>
+<td>突破型態的行為基礎；<strong>但台股實證反向</strong>（D-020：high_52w IC 為負）——美式錨定動能在台股失效是本 repo 的在地事實</td>
+</tr>
+</tbody>
+</table></div>
+<h2>F. 旗形與計算式型態辨識</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>△</td>
+<td>Leigh, Modani, Purvis &amp; Roberts (2002), <em>ESWA</em> 23(2):155-159</td>
+<td>NYSE Composite 1981–96 bull flag 10×10 模板：樣本外「有效」；報酬數字不可核（○）；<strong>注意</strong>：常被誤引成 DSS 那篇——DSS 32(4):361-377 是 Leigh, Purvis &amp; Ragusa (2002)（模板＋NN＋GA）</td>
+<td>旗形模板法起點；無正式失敗複製，但普遍缺成本與窺探處理</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Wang &amp; Chan (2007), <em>ESWA</em> 33(2):304-315</td>
+<td>bull flag 模板：<strong>NASDAQ＋TAIEX 兩市場</strong>；「買進後為正報酬」比率 TAIEX 66.02%、NASDAQ 73.27%；短擬合視窗較佳；成本處理未確認（○）</td>
+<td>台股旗形唯一直接文獻之一；其「勝率」為毛且指數層級，與我們個股含成本 37–42% 不可直接比</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Cervelló-Royo et al. (2015), <em>ESWA</em> 42(14):5963-5975</td>
+<td>DJIA 日內 flag 模板＋停損停利：宣稱風險調整後勝過市場</td>
+<td class="num">—</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Arévalo et al. (2017), <em>ESWA</em> 81:177-192</td>
+<td>flag＋EMA 過濾＋動態停損停利：<strong>扣成本後</strong>仍優於前作與買進持有——此線成本處理最完整的一篇</td>
+<td>旗形要活下來需要過濾器＋動態出場，不是裸型態</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Chen &amp; Chen (2016), <em>Information Sciences</em> 346-347:261-274</td>
+<td>PIP＋浮動加權 bull flag：TAIEX＋NASDAQ 優於前人模板</td>
+<td>台股旗形第二篇</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Tsinaslanidis &amp; Zapranis (2016), <em>Technical Analysis for Algorithmic Pattern Recognition</em>（Springer 專書）</td>
+<td>H&amp;S/雙重頂底/flags/wedges 的演算法化辨識與統計評估</td>
+<td>型態偵測演算法的系統參考書</td>
+</tr>
+</tbody>
+</table></div>
+<h2>G. AI／機器學習看圖（最高等級的現代證據）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>對本系統含義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Jiang, Kelly &amp; Xiu (2023), &quot;(Re-)Imag(in)ing Price Trends,&quot; <em>JF</em> 78(6):3193-3249</td>
+<td>CNN 讀 5/20/60 日價量 OHLC 圖（美股 1993 訓練、2001–19 樣本外）：等權多空十分位年化 <strong>Sharpe ~2.4</strong>（市值加權 ~0.5），為最強傳統訊號（週反轉）2–3 倍；<strong>美股訓練直接遷移國際市場有效</strong>；短天期型態放長天期也有效；成本以換手率間接處理（△）</td>
+<td>「圖形有可學的訊號」的最高等級證據；與 D-027 的洞悉層離線標註路線相容——但注意其訊號本質偏短期反轉家族，台股在地驗證仍必要</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Murray, Xia &amp; Xiao (2024), &quot;Charting by machines,&quot; <em>JFE</em> 153:103791</td>
+<td>深度學習讀 12 個月價格史（美股 1927–2022）：多空月超額 ~1.08%（△ 級，2015–22 仍 1.20%）；<strong>不被動能/反轉/既有技術訊號涵蓋</strong></td>
+<td>ML 技術訊號有獨立資訊——值得列入日後研究</td>
+</tr>
+<tr>
+<td>○</td>
+<td>延伸：Jeong, Byun &amp; Kim (2026), <em>RIBF</em> 82（JKX 法用於韓股）；Hao (2025), <em>J. Futures Markets</em>（商品）</td>
+<td>亞洲市場複製開始出現</td>
+<td>台股複製 JKX 是可行的研究缺口</td>
+</tr>
+</tbody>
+</table></div>
+<h2>H. 對照本 repo 台股實證（STRATEGY §4b.4，T-042~T-045）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>文獻結論</th>
+<th>我們的台股結果</th>
+<th>一致性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>型態有資訊、獨立策略不獲利（LMW/Savin/Dawson）</td>
+<td>RankIC 顯著（|t| 至 13.6）、逐筆淨勝率 37–46% 全虧</td>
+<td>✓ 完全一致</td>
+</tr>
+<tr>
+<td>條件化/因子化才有價值（Savin/Han 系列）</td>
+<td>型態當事件過濾＋主力粗 proxy 分桶無改善</td>
+<td>✓（過濾≠正確條件化形式）</td>
+</tr>
+<tr>
+<td>突破/52週高錨定在美股正向（George-Hwang/BLL）</td>
+<td>台股方向<strong>相反</strong>（D-020 動能全反、突破買進勝率 37%）</td>
+<td>✗ 方向反——台股反轉主導的在地事實</td>
+</tr>
+<tr>
+<td>台灣技術訊號毛預測力強（Bessembinder-Chan）但成本是門檻</td>
+<td>毛勝率 43–50% vs 淨 37–46%（成本吃 4–7pp）</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>S/R 機制真實（Osler）但策略不賺（Zapranis）</td>
+<td>flag_hold 觸撐定義成立、逐筆仍虧</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table></div>
+<h2>結論（落地指引）</h2>
+<ol>
+<li><strong>不做</strong>：裸型態進場訊號（文獻與在地實證雙重否決）、教科書 K 線組合（美日台三殺，
+除 Lu 2014 的資料驅動子集）。</li>
+<li><strong>可做</strong>：(a) 型態值當<strong>橫斷面特徵</strong>進多因子組合（Savin 條件化＋HZZ trend factor
+形式；台股符號以 RankIC 定，多為反向）；(b) K 線事件因子對照 Lu (2014) 的四型態
+（台股扣成本後唯一正面）；(c) JKX 式 CNN 標註走洞悉層（D-027 架構已預留），
+台股複製是文獻空白。</li>
+<li><strong>方法紅線</strong>：任何型態研究必附資料窺探控制（bootstrap/FDR；research_log 的
+trials 累計即為此設計）與成本敏感度——這正是 Park &amp; Irwin 對整個領域的批評。</li>
+</ol>
+</article><div class='foot'>來源 <code>docs/research/PAPERS-PATTERNS.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:44。</div></div></body></html>

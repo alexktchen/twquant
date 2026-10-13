@@ -1,0 +1,283 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>PAPERS-SHORTTERM — 短線操作文獻總表（第二批研究）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>PAPERS-SHORTTERM — 短線操作文獻總表（第二批研究）</h1>
+<p>2026-07-08 由 deep-research 多代理調查產出（5 搜尋角度 → 25 來源 → 116 claim → 對抗驗證）。
+驗證中途撞到用量上限：<strong>11 條 claim 完成 3 票對抗驗證、14 條僅完成來源抓取</strong>；引用書目
+另以人工搜尋逐篇補核。標記沿用 PAPERS.md 慣例：✓ 引用與關鍵數字已驗證、△ 存在但
+細節有修正（以修正欄為準）、○ 來源已讀但未完成全數驗證——實作遇 ○ 級數字請先覆核。</p>
+<p>範圍：(a) 盤中～次日（當沖/隔夜）、(b) 數日～兩週短線反轉。排除已在 PAPERS.md 的
+Jegadeesh 1990、Lehmann 1990、Lee/Liu/Roll/Subrahmanyam 2004、Barber/Lee/Liu/Odean
+當沖系列、Gervais/Kaniel/Mingelgrin 2001、Lee/Swaminathan 2000、Llorente et al. 2002、
+Nagel 2012。</p>
+<h2>A. 短期反轉的跨市場證據與驅動機制</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>因子對應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>△</td>
+<td>Butt, Högholm &amp; Sadaqat (2021), &quot;Reversal returns and expected returns from liquidity provision: Evidence from emerging markets,&quot; <em>J. of Multinational Financial Mgmt</em> 59, 100664</td>
+<td>21 個新興市場的 1 月期反轉報酬顯著為正且多模型 alpha 存活；集中在<strong>小型/低流動性/高波動股</strong>；<strong>市場波動高時反轉報酬更高</strong>（與公司特徵無關）；「主動投資人退出」多的股票反轉更強 → 支持流動性提供解釋。修正：搜尋初報 Kolari/2020，逐篇驗證為 Högholm/2021（DOI 10.1016/j.mulfin.2020.100664，3-0 票確認）</td>
+<td>現有 <code>price.reversal_5d</code> 延伸：與 size/turnover/波動交乘分層；加市場波動 regime 條件（台指已實現波動高 → 反轉權重加碼）。免費 OHLCV ✓</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Da, Liu &amp; Schaumburg (2014), &quot;A Closer Look at the Short-Term Return Reversal,&quot; <em>Management Science</em> 60(3):658-674</td>
+<td>把近期報酬拆成「基本面新聞」與「殘差」：<strong>只有殘差部分會反轉</strong>；過濾掉基本面驅動的漲跌後，風險調整後報酬是原始反轉策略的 <strong>4 倍</strong>（3-0 票逐字確認）</td>
+<td><code>price.residual_reversal_5d</code>：5 日報酬先對產業報酬（stock_meta 產業別可用）或月營收意外殘差化，再取負向。免費資料可近似 ✓（原文用分析師修正，台股可用營收 YoY 加速代理）</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Neszveda, Till, Timár &amp; Varga (2022), &quot;Is short-term reversal driven by liquidity provision in emerging markets? Evidence from China,&quot; <em>Finance Research Letters</em> 50:103220</td>
+<td>中國短期反轉普遍存在，<strong>但與流動性約束無關</strong>——美式 Nagel 流動性提供解釋在散戶主導市場不成立</td>
+<td>警示：波動/流動性條件化在散戶主導市場（台股類似）效果需實測，勿直接假設美式機制成立</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Gao, Jiang, Xiong &amp; Xiong (2023, rev. 2025), &quot;Daily Momentum and New Investors in an Emerging Stock Market,&quot; NBER WP 31839（SZSE 帳戶級資料 2005-2019）</td>
+<td><strong>日頻動能</strong>：按前一日報酬排序的多空組合次日 +0.37%（年化 ~92%），第 2 日起反轉；<strong>14/21 新興市場（含台灣）呈顯著正日動能</strong>，已開發市場 16/21 反而日反轉；機制 = 新手散戶追漲（日周轉 18.12% vs 一般 8.03%/大戶 3.26%），其買入預測數週後反轉（多票逐字確認，含台灣點名）</td>
+<td><code>price.day_mom_1d</code>（前 1 日報酬，+1，持有 1 日）——周轉極高，先當研究/擇時 overlay 而非週頻 sleeve；「1 日續勢 → 2-5 日反轉」與現有 <code>reversal_5d</code>(−1) 相容。免費 OHLCV ✓</td>
+</tr>
+</tbody>
+</table></div>
+<h2>B. 隔夜 vs 盤中報酬分解（台股可直接算）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>因子對應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Lou, Polk &amp; Skouras (2019), &quot;A Tug of War: Overnight versus Intraday Expected Returns,&quot; <em>JFE</em> 134(1):192-213</td>
+<td>按上月<strong>隔夜報酬</strong>排序：次月隔夜 alpha <strong>+3.47%/月</strong>（t=16.8）、盤中 alpha <strong>−3.02%/月</strong>（t=−9.7）——同時段續勢、跨時段反轉，效果持續數年</td>
+<td><code>price.overnight_ret_20d</code> = Σln(open/前日close)、<code>price.intraday_ret_20d</code> = Σln(close/open)。只需日 OHLC ✓（○ 級數字：驗證票未跑完，抓取代理已對 PDF 原文核過）</td>
+</tr>
+<tr>
+<td>○</td>
+<td>Ho, Hsiao, Lo &amp; Yang (2023), &quot;Momentum investing and a tale of intraday and overnight returns: Evidence from Taiwan,&quot; <em>Pacific-Basin Finance J.</em> 82:102151</td>
+<td><strong>台股直接證據</strong>：盤中報酬動能（IMOM）顯著為正、隔夜報酬動能（OMOM）顯著為負，效果最長達一年；解釋：投資人對盤中資訊反應不足、對隔夜資訊過度反應</td>
+<td>台股版雙因子：<code>price.intraday_mom</code>（+1）、<code>price.overnight_mom</code>（−1）。與 Lou et al. 方向一致，台股已複製 ✓ 免費 OHLC</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Bogousslavsky (2021), &quot;The Cross-Section of Intraday and Overnight Returns,&quot; <em>JFE</em> 141(1):172-194</td>
+<td>錯價因子白天賺、<strong>收盤前虧</strong>：套利者因隔夜保證金/借券費在尾盤減倉，錯價尾盤反而擴大</td>
+<td>執行層指引：因子訊號的進出場時點避開尾盤效應；完整利用需盤中資料（旗標：非免費日頻可作）</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Berkman, Koch, Tuttle &amp; Zhang (2012), &quot;Paying Attention: Overnight Returns and the Hidden Cost of Buying at the Open,&quot; <em>JFQA</em> 47(4):715-741</td>
+<td>隔夜正報酬→盤中反轉的型態<strong>集中在近期吸引散戶注意的股票</strong>（開盤價被散戶買盤推高）；開盤買進的隱性成本常超過半價差</td>
+<td>條件化：對「高注意力」股（前日爆量/漲停/新聞股）做空隔夜強勢開盤。註意力代理 = 異常量+前日大漲。免費 OHLCV ✓</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Lu, Malliaris &amp; Qin (2023), &quot;Heterogeneous liquidity providers and night-minus-day return predictability,&quot; <em>JFE</em> 148(3):175-200</td>
+<td>理論+實證：特徵排序組合隔夜/盤中報酬<strong>系統性反號</strong>——開盤資訊不對稱高，快套利者索取大價差吸收失衡，盤中衰減</td>
+<td>支持 night-minus-day 分解為一整類因子家族（機制檢驗需 HFT 資料，訊號本身免費 OHLC ✓）</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Baltussen, Da &amp; Soebhag (2024), &quot;End-of-Day Reversal,&quot; SSRN 5039009</td>
+<td>美股<strong>尾盤 30 分鐘反轉</strong>：當日早段輸家在最後 30 分鐘可靠跑贏贏家（t&gt;10）；驅動 = 散戶注意力買盤+空方尾盤風控</td>
+<td>需盤中資料——<strong>免費日頻不可作</strong>，列為 T-016 級後續（若接入盤中快照可做尾盤擇時）</td>
+</tr>
+<tr>
+<td>○</td>
+<td>&quot;Overnight returns and investor sentiment: Further evidence from the Taiwan stock market,&quot; <em>Pacific-Basin Finance J.</em> 80 (2023), S0927538X23001646（作者未逐篇核）</td>
+<td><strong>台股</strong>隔夜報酬造成短期持續+長期反轉，兩者皆由投資人情緒驅動</td>
+<td>佐證 B 類因子在台股成立；情緒代理（融資/量能）可作條件變數。免費 ✓</td>
+</tr>
+</tbody>
+</table></div>
+<h2>C. 散戶/當沖行為與訂單流（含台灣制度事件）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>因子對應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✓</td>
+<td>Boehmer, Jones, Zhang &amp; Zhang (2021), &quot;Tracking Retail Investor Activity,&quot; <em>J. of Finance</em> 76(5):2249-2305</td>
+<td>週頻散戶淨買失衡正向預測次週報酬約 <strong>+10bp</strong>（美股 2010-2015，sub-penny 識別法）</td>
+<td>識別法美股限定；台股散戶失衡代理 = 融資變化、或(全市場成交−三大法人)淨額。方向注意：是<strong>續勢</strong>非反轉</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Kelley &amp; Tetlock (2013), &quot;How Wise Are Crowds?&quot; <em>J. of Finance</em> 68(3):1229-1265</td>
+<td>散戶淨買 [1,20] 日累積預測力：市價單 35.6bp、限價單 29.8bp（年化多空 ~8.0%/7.1%），<strong>無反轉證據</strong>；市價單=資訊管道（預測財報意外）、限價單=流動性提供管道</td>
+<td>打臉「無腦反著散戶做」：散戶失衡在美股是正向訊號。台股方向必須用 RankIC 實測定奪（與 STRATEGY §1-2 散戶虧損結論的張力來自台灣 vs 美國市場結構差異）</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Barber, Lin &amp; Odean (2024), &quot;Resolving a Paradox: Retail Trades Positively Predict Returns but Are Not Profitable,&quot; <em>JFQA</em> 59(6):2547-2581</td>
+<td>悖論解答：等權失衡預測報酬，但散戶實際虧錢——買盤集中在注意力股；重散戶股的失衡多空<strong>年化 −15.3%</strong>、其餘股 +6.8%</td>
+<td>「散戶擁擠度」負向條件因子：融資增速 × 異常量交乘，剔除/反向重散戶注意力股。免費資料 ✓</td>
+</tr>
+<tr>
+<td>○</td>
+<td>Chen, Ching-Tse (JMP ~2023-24), &quot;The Economic Consequences of Lower Retail Trading Costs&quot;（TWSE 帳戶級）</td>
+<td><strong>台灣當沖降稅自然實驗</strong>：2017/4/28 現股當沖證交稅 30bp→15bp（僅普通股當沖；自營商 2018/4/28 才適用）——乾淨的制度斷點</td>
+<td>非因子、是<strong>回測制度斷點</strong>：當沖相關訊號（量比、日內波動）樣本應以 2017/4/28 分段</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Cheng, Chen, Huang, Ni &amp; Liang (2023), &quot;The impact and profitability of day trading following the relaxation of day trading restrictions in Taiwan,&quot; <em>Heliyon</em> 9(4)</td>
+<td>2016/2/1 放寬現股當沖後<strong>當沖量約 2.7 倍</strong>；高 VIX 期間當沖獲利性上升</td>
+<td>第二個制度斷點 2016/2/1；當沖強度（可用 TWSE 每日當沖統計）作市場狀態變數</td>
+</tr>
+<tr>
+<td class="num">—</td>
+<td>（既有集）Barber/Lee/Liu/Odean 當沖系列補充數字：TSE 1992-2006 當沖者平均<strong>每日毛 −7bp / 淨 −23.9bp</strong>（含手續費+30bp 證交稅），僅 1992 年例外</td>
+<td>已在 PAPERS.md，此處僅補逐字數據</td>
+<td>反散戶當沖流的結構性 alpha 佐證</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>隔日沖分點缺口</strong>：本輪未找到針對「隔日沖分點行為」的嚴謹學術論文（僅實務來源，已在
+STRATEGY §3.1 黑名單清單 ○ 級）。最接近的是 Chen JMP 的當沖稅制研究。學術驗證仍缺,
+維持 T-016 以 broker_trades 資料自行統計標籤的路線。</p>
+<h2>D. 法人群聚短窗效應（台股）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>因子對應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>△</td>
+<td>&quot;Individual and institutional herding and the impact on stock returns: Evidence from Taiwan stock market,&quot; <em>Int'l Review of Financial Analysis</em> 29 (2013):175-188（作者欄未在本輪核實，RePEc 確認題名/卷期）</td>
+<td>台股高頻資料：法人群聚強於散戶；<strong>法人買群聚股其後 20 日跑贏賣群聚股 +1.009%</strong>；散戶買群聚股其後 20 日 −0.829%；法人群聚集中在小型/低周轉股、正回饋</td>
+<td>直接支持現有 <code>chip.trust_net_10d</code>/<code>foreign_net_10d</code> 的 10-20 日窗設計；散戶群聚負向 → 與 C 類散戶擁擠度因子互相印證</td>
+</tr>
+</tbody>
+</table></div>
+<h2>E. 高周轉策略的成本/容量紀律（實作前必讀）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>文獻</th>
+<th>關鍵發現</th>
+<th>因子對應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>○</td>
+<td>Frazzini, Israel &amp; Moskowitz, &quot;Trading Costs of Asset Pricing Anomalies&quot;（SSRN 2294498，~1 兆美元實盤成交 1998-2011）</td>
+<td><strong>短期反轉是最吃成本的策略</strong>：損益兩平基金規模僅 ~$9B（美）/$13B（全球），對照 size $103B/value $83B/momentum $52B</td>
+<td>短線因子回測<strong>必須</strong>過成本後閘門（LOOP.md 已有）；容量遠小於中長線因子</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>Novy-Marx &amp; Velikov (2016), &quot;A Taxonomy of Anomalies and Their Trading Costs,&quot; <em>RFS</em> 29(1):104-147</td>
+<td>單邊月周轉 &lt;50% 的異常多數扣成本後仍顯著；<strong>高周轉異常多數不行</strong>，但成本緩解設計（限大市值、緩衝帶換股）能救回部分</td>
+<td>短線 sleeve 引入<strong>緩衝帶（banding）換股</strong>與參與率上限；周轉預算寫進策略 config</td>
+</tr>
+<tr>
+<td>✓</td>
+<td>De Groot, Huij &amp; Zhou (2012), &quot;Another look at trading costs and short-term reversal profits,&quot; <em>J. of Banking &amp; Finance</em> 36(2):371-382</td>
+<td>標準反轉被成本吃掉主因是極端分位被小型/高波動/高成本股主導；<strong>限大市值宇宙後反轉扣成本仍獲利</strong></td>
+<td>台股短線反轉限制在 ADV 門檻以上宇宙（呼應 STRATEGY Sleeve C 的 ADV 紀律），與 A 類「反轉集中在小型股」發現正面衝突——<strong>alpha 大但做不了 vs alpha 小但做得了</strong>，用成本後 Sharpe 裁決</td>
+</tr>
+</tbody>
+</table></div>
+<h2>台灣制度斷點時間表（短線回測分段用）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>日期</th>
+<th>事件</th>
+<th>影響</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2016-02-01</td>
+<td>放寬現股當沖標的</td>
+<td>當沖量 ~2.7×（Heliyon 2023）</td>
+</tr>
+<tr>
+<td>2017-04-28</td>
+<td>當沖證交稅 30bp→15bp（散戶）</td>
+<td>當沖占比躍升（Chen JMP）</td>
+</tr>
+<tr>
+<td>2018-04-28</td>
+<td>降稅擴及自營商</td>
+<td>第二段斷點</td>
+</tr>
+</tbody>
+</table></div>
+<h2>落地優先序建議（以現有免費資料）</h2>
+<p><strong>P0（純日頻 OHLCV，馬上可算）</strong></p>
+<ol>
+<li><code>price.overnight_ret_20d</code>（−1，隔夜累報，Lou/Polk/Skouras + Ho et al. 台股複製）</li>
+<li><code>price.intraday_ret_20d</code>（+1，盤中累報，同上）——與現有 <code>mom_20d</code> 相關性需檢查</li>
+<li><code>price.residual_reversal_5d</code>（−1，產業殘差化反轉，Da/Liu/Schaumburg）</li>
+<li><code>price.day_mom_1d</code>（+1，1 日持有——先進因子健檢看 RankIC 型態，未必進組合）</li>
+</ol>
+<p><strong>P1（需交乘/條件化）</strong>
+5. 反轉 × 市場波動 regime（Butt et al.）；反轉限 ADV 宇宙（De Groot et al.）
+6. 散戶擁擠度負向條件：<code>margin_velocity</code> × <code>vol_ratio</code> 交乘（Barber/Lin/Odean、Berkman et al.）</p>
+<p><strong>需新資料（旗標）</strong></p>
+<ul>
+<li>尾盤 30 分反轉、Bogousslavsky 尾盤效應 → 盤中資料</li>
+<li>真散戶訂單失衡 → 逐筆/帳戶級（台股可用當沖統計+融資近似）</li>
+<li>隔日沖分點 → broker_trades（T-016）</li>
+</ul>
+<h2>與現有因子庫的張力（實測前須知）</h2>
+<ol>
+<li><strong>散戶失衡方向</strong>：美股文獻（Kelley/Tetlock、Boehmer et al.）是續勢正訊號,
+STRATEGY §1-2（台股散戶虧損）暗示負訊號——台股散戶結構不同,方向交給 RankIC 實測。</li>
+<li><strong>日動能 vs 5 日反轉</strong>:Gao et al. 說台灣有 1 日續勢,現有 <code>reversal_5d</code> 是 5 日反轉—
+—兩者相容(1 日續、2 日起反),但意味 <code>reversal_5d</code> 的視窗起點可實驗 t-1 剔除。</li>
+<li><strong>反轉的甜蜜點矛盾</strong>:alpha 集中在小型股(Butt et al.)但成本也集中在小型股
+(De Groot et al.)——一律以成本後指標裁決,參照 Sleeve C 的 ADV 3% 參與率紀律。</li>
+</ol>
+</article><div class='foot'>來源 <code>docs/research/PAPERS-SHORTTERM.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:44。</div></div></body></html>
