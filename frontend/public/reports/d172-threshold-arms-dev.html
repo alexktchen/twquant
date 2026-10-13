@@ -1,0 +1,239 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>D-172 開發期參考回測：潛伏飆股分數門檻臂＋ETF 資金流排除（T-342，2026-10-11）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>D-172 開發期參考回測：潛伏飆股分數門檻臂＋ETF 資金流排除（T-342，2026-10-11）</h1>
+<p><strong>只當「空手的代價」參考，不當通過依據</strong>：開發期資料（2017-10-02～2026-04-30）已被看過很多次（D-141），
+門檻臂又是看過開發期描述才提出的。正式判讀在第二保留期（<code>configs/holdout2_quiet_threshold.yaml</code>，最早 2027-03-01）。</p>
+<p>設定：與第十三輪 S0 零股組相同（1,000 萬、<code>--lot-size 1</code>、<code>costs.yaml</code>、抱滿 20 個交易日、15 個位子），
+只改 <code>entry_threshold</code>（A20 模型分數）與 <code>slots.exclude</code>（x＝當天處於 ETF 申購潮／贖回潮狀態不進場）。
+結果包 <code>data/tracks_d172/</code>（S0 為 <code>data/tracks_round13/quiet_s0_10m_lot1.json</code> 的複本）；腳本 <code>scripts/run_d172.sh</code>。
+每筆淨報酬扣來回成本 0.40%（<code>d143_verdict._round_trip_cost</code>）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>臂</th>
+<th style="text-align:right">年化</th>
+<th style="text-align:right">最大回撤</th>
+<th style="text-align:right">Calmar</th>
+<th style="text-align:right">平均曝險</th>
+<th style="text-align:right">交易筆數</th>
+<th style="text-align:right">每筆淨報酬</th>
+<th style="text-align:right">每筆中位數</th>
+<th style="text-align:right">每筆虧 &gt;15%</th>
+<th style="text-align:right">平均持股檔數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>quiet_s0（現行，前 15 名）</td>
+<td style="text-align:right">+8.3%</td>
+<td style="text-align:right">−44.4%</td>
+<td style="text-align:right">0.19</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">1,347</td>
+<td style="text-align:right">+1.03%</td>
+<td style="text-align:right">−0.61%</td>
+<td style="text-align:right">11.3%</td>
+<td style="text-align:right">13.5</td>
+</tr>
+<tr>
+<td>p30（分數 ≥ 0.30）</td>
+<td style="text-align:right">+10.0%</td>
+<td style="text-align:right">−23.5%</td>
+<td style="text-align:right">0.43</td>
+<td style="text-align:right">34%</td>
+<td style="text-align:right">496</td>
+<td style="text-align:right">+2.81%</td>
+<td style="text-align:right">+0.08%</td>
+<td style="text-align:right">6.5%</td>
+<td style="text-align:right">6.5</td>
+</tr>
+<tr>
+<td>p30x</td>
+<td style="text-align:right">+10.2%</td>
+<td style="text-align:right">−23.3%</td>
+<td style="text-align:right">0.44</td>
+<td style="text-align:right">32%</td>
+<td style="text-align:right">480</td>
+<td style="text-align:right">+2.96%</td>
+<td style="text-align:right">+0.27%</td>
+<td style="text-align:right">6.5%</td>
+<td style="text-align:right">6.2</td>
+</tr>
+<tr>
+<td>p35</td>
+<td style="text-align:right">+11.7%</td>
+<td style="text-align:right">−19.3%</td>
+<td style="text-align:right">0.60</td>
+<td style="text-align:right">23%</td>
+<td style="text-align:right">335</td>
+<td style="text-align:right">+4.50%</td>
+<td style="text-align:right">+2.60%</td>
+<td style="text-align:right">7.2%</td>
+<td style="text-align:right">4.9</td>
+</tr>
+<tr>
+<td>p35x</td>
+<td style="text-align:right">+12.1%</td>
+<td style="text-align:right">−20.5%</td>
+<td style="text-align:right">0.59</td>
+<td style="text-align:right">22%</td>
+<td style="text-align:right">324</td>
+<td style="text-align:right">+4.83%</td>
+<td style="text-align:right">+2.83%</td>
+<td style="text-align:right">6.5%</td>
+<td style="text-align:right">4.8</td>
+</tr>
+<tr>
+<td>p40</td>
+<td style="text-align:right">+8.1%</td>
+<td style="text-align:right">−17.7%</td>
+<td style="text-align:right">0.46</td>
+<td style="text-align:right">15%</td>
+<td style="text-align:right">221</td>
+<td style="text-align:right">+4.69%</td>
+<td style="text-align:right">+2.30%</td>
+<td style="text-align:right">5.9%</td>
+<td style="text-align:right">3.5</td>
+</tr>
+<tr>
+<td>p40x</td>
+<td style="text-align:right">+8.3%</td>
+<td style="text-align:right">−18.3%</td>
+<td style="text-align:right">0.46</td>
+<td style="text-align:right">15%</td>
+<td style="text-align:right">215</td>
+<td style="text-align:right">+4.95%</td>
+<td style="text-align:right">+2.30%</td>
+<td style="text-align:right">5.6%</td>
+<td style="text-align:right">3.5</td>
+</tr>
+<tr>
+<td>p45</td>
+<td style="text-align:right">+6.5%</td>
+<td style="text-align:right">−15.2%</td>
+<td style="text-align:right">0.42</td>
+<td style="text-align:right">10%</td>
+<td style="text-align:right">153</td>
+<td style="text-align:right">+5.19%</td>
+<td style="text-align:right">+3.45%</td>
+<td style="text-align:right">5.2%</td>
+<td style="text-align:right">2.9</td>
+</tr>
+<tr>
+<td>p45x</td>
+<td style="text-align:right">+6.8%</td>
+<td style="text-align:right">−15.8%</td>
+<td style="text-align:right">0.43</td>
+<td style="text-align:right">10%</td>
+<td style="text-align:right">148</td>
+<td style="text-align:right">+5.70%</td>
+<td style="text-align:right">+3.52%</td>
+<td style="text-align:right">4.7%</td>
+<td style="text-align:right">3.0</td>
+</tr>
+<tr>
+<td>p50</td>
+<td style="text-align:right">+3.8%</td>
+<td style="text-align:right">−15.9%</td>
+<td style="text-align:right">0.24</td>
+<td style="text-align:right">7%</td>
+<td style="text-align:right">109</td>
+<td style="text-align:right">+4.39%</td>
+<td style="text-align:right">+3.45%</td>
+<td style="text-align:right">4.6%</td>
+<td style="text-align:right">2.3</td>
+</tr>
+<tr>
+<td>p50x</td>
+<td style="text-align:right">+4.1%</td>
+<td style="text-align:right">−16.1%</td>
+<td style="text-align:right">0.26</td>
+<td style="text-align:right">7%</td>
+<td style="text-align:right">106</td>
+<td style="text-align:right">+4.91%</td>
+<td style="text-align:right">+3.73%</td>
+<td style="text-align:right">4.7%</td>
+<td style="text-align:right">2.5</td>
+</tr>
+</tbody>
+</table></div>
+<h2>讀表（描述，不是判讀）</h2>
+<ul>
+<li><strong>門檻改變的是「何時有部位」</strong>：設門檻後平均曝險從 93% 掉到 7%～34%，最大回撤從 −44% 縮到 −15%～−24%，
+每筆淨報酬從 +1.0% 升到 +2.8%～+5.7%，每筆中位數由負轉正。</li>
+<li><strong>年化在 0.35 最高</strong>（+11.7%／Calmar 0.60），往上每筆更好但次數太少，0.50 只剩 +3.8%。
+0.35 是看過這張表才知道的位置，不能直接採用；它和其他門檻一樣已登記，等保留期判讀。</li>
+<li><strong>ETF 排除每一組都只差一點</strong>：交易少 3～16 筆，每筆淨報酬高 0.15～0.5 個百分點，年化高 0.2～0.4 個百分點，
+回撤有時更深（p35x −20.5% 對 −19.3%）。差距在雜訊量級。</li>
+<li><strong>崩盤後反彈</strong>：分數 ≥ 0.40 的名單有一半擠在 2024-08、2025-04 的 10 天裡（D-172 §一），門檻臂的報酬有一大段來自那幾天。</li>
+</ul>
+<h2>附：資金流研究修 bug 前後（2026-10-11 晚上重跑）</h2>
+<p><code>chip.etf_flow_pressure_5d</code> 的滾動和原本用 polars 增量算法，全 0 窗口會留下 ±1e-18～1e-8 的殘差，被判成「&lt; 0」的贖回潮
+（修正 <code>9bd286a</code>）。用同一份登記設定重跑 T-339 軌跡與右尾；修正前的結果另存 <code>*-pre-fix.md</code>／<code>*_pre_fix.json</code>：</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align:right">修正前</th>
+<th style="text-align:right">修正後</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E3 申購潮事件數</td>
+<td style="text-align:right">8,455</td>
+<td style="text-align:right">8,148</td>
+</tr>
+<tr>
+<td>E4 贖回潮事件數</td>
+<td style="text-align:right">7,075</td>
+<td style="text-align:right">6,695</td>
+</tr>
+<tr>
+<td>E8 接貨事件數</td>
+<td style="text-align:right">1,488</td>
+<td style="text-align:right">1,418</td>
+</tr>
+<tr>
+<td>右尾倍率 E3／E4／E8（全市場）</td>
+<td style="text-align:right">0.81×／0.79×／0.79×</td>
+<td style="text-align:right">0.80×／0.80×／0.77×</td>
+</tr>
+<tr>
+<td>右尾 t（全市場）</td>
+<td style="text-align:right">−4.4／−4.2／−2.5</td>
+<td style="text-align:right">−4.4／−3.9／−2.8</td>
+</tr>
+<tr>
+<td>平均報酬診斷 +20 日 |t| 最大值（全部事件×池）</td>
+<td style="text-align:right">1.76</td>
+<td style="text-align:right">1.84</td>
+</tr>
+</tbody>
+</table></div>
+<p>結論不變：ETF 資金流股票 20 日內 +20% 的機率約為同類股票的 0.8 倍；平均報酬看不出差別。</p>
+</article><div class='foot'>來源 <code>docs/reports/d172-threshold-arms-dev.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:26。</div></div></body></html>

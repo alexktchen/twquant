@@ -1,0 +1,953 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>2026-10-11 研究總報告：資金流、潛伏飆股高分門檻、技術分析規則</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>2026-10-11 研究總報告：資金流、潛伏飆股高分門檻、技術分析規則</h1>
+<p>這份報告整理 2026-10-11 一整天的研究：從「大盤氣氛看空有沒有用」一路問到「技術分析能不能當進出依據」。
+每一節都用同一個格式：<strong>問了什麼 → 怎麼做 → 結果 → 能不能用</strong>。</p>
+<p>所有回測數字都已扣買賣成本（手續費、證交稅、價差）。報酬一律用還原價（含除權息）。</p>
+<h2>一頁看完</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>問題</th>
+<th>答案</th>
+<th>能不能用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>大盤氣氛看空，能不能拿來選股或避險？</td>
+<td>學術上只在極端值、長期間有用；日常沒有</td>
+<td>不做</td>
+</tr>
+<tr>
+<td>投信、ETF 的買賣，事後能不能看出多空？</td>
+<td>平均報酬看不出差別；但「被 ETF 大量申購或贖回的股票」比同類股票<strong>更不容易飆</strong>（約 0.8 倍）</td>
+<td>只能當避開的參考，不是買進訊號</td>
+</tr>
+<tr>
+<td>潛伏飆股只買模型分數高的，會不會比較好？</td>
+<td>會。分數 0.35 以上：每筆 +4.5%、最大回撤 −19%（現在的做法每筆 +1.0%、回撤 −44%）</td>
+<td>很可能有用，但大部分時間空手；要等 2027-03 用新資料驗證</td>
+</tr>
+<tr>
+<td>大盤精選加上高分潛伏飆股，組合會不會更好？</td>
+<td>會。七三分配，回撤從 −41% 降到 −31%，報酬風險比從 0.67 升到 0.78</td>
+<td>方向對，尚未正式登記</td>
+</tr>
+<tr>
+<td>《技術分析精論》的規則能不能當進出依據？</td>
+<td>試了 512 種搭配，沒有一種強到能排除運氣；出場規則（停損、跌破均線）全部讓結果變差</td>
+<td>只有「爆量才買」值得再驗證</td>
+</tr>
+<tr>
+<td>分數 0.35 以上再加「爆量才買」？</td>
+<td>勝率 77%、每筆 +9.4%；但三分之二的交易集中在兩次崩盤後的反彈</td>
+<td>值得登記驗證，不能直接上線</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>最重要的一句</strong>：今天所有「看起來好」的結果，都是在已經被反覆研究過的歷史資料上算的。真正的答案要等 2027 年 3 月，
+用 2026-09-09 之後、模型與我都沒看過的新資料檢驗。</p>
+<hr />
+<h2>第一部分：大盤氣氛看空，有沒有論文支撐？</h2>
+<ul>
+<li><strong>有，但用途很窄</strong>。Baker &amp; Wurgler 的投資人情緒指數、Huang 等人改良版，對大盤報酬有反向預測力，但是以<strong>年</strong>為單位，而且主要在極端值。</li>
+<li><strong>台灣的研究</strong>：融資融券餘額比是少數可靠的反向指標（餘額越高、之後報酬越低）。</li>
+<li><strong>對動能型策略</strong>：Daniel &amp; Moskowitz 發現動能在「大跌後、高波動、市場反彈」時崩得最慘——該做的是降部位，不是反向放空。</li>
+<li><strong>反面證據</strong>：Cederburg 等人用 103 個策略檢驗「依波動調部位」，樣本外整體沒有贏。本專案第七、十一輪也得到一樣的結果。</li>
+</ul>
+<p><strong>結論</strong>：不做大盤擇時。</p>
+<hr />
+<h2>第二部分：投信與 ETF 的買賣，能不能看出多空？</h2>
+<h3>問了什麼</h3>
+<p>「投信買賣超」裡混了兩種性質相反的交易：</p>
+<ol>
+<li><strong>ETF 的機械性買賣</strong>——ETF 被申購就得買成分股、被贖回就得賣、指數換股就得換。</li>
+<li><strong>投信經理人自己判斷的買賣</strong>。</li>
+</ol>
+<p>文獻預期兩者方向相反：機械性買賣推高的價格之後會回吐；經理人自己的判斷可能有資訊。所以把兩者拆開，看八種事件之後股價怎麼走。</p>
+<h3>怎麼做</h3>
+<ul>
+<li><strong>建了新資料</strong>：88 檔國內股票型 ETF 的每日已發行單位數（2015-06 起，8.4 萬筆）；元大 9 檔、統一 3 檔 ETF 的每日持股（46.8 萬筆，沒有缺日）；
+由持股變化推導出 2,631 次指數換股（0050 和元大官網的 15 次換股紀錄比對，13 次一致）。</li>
+<li><strong>八種事件</strong>：</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>事件</th>
+<th>怎麼定義</th>
+<th style="text-align:right">次數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>指數納入</td>
+<td>某檔股票被加進指數型 ETF 的持股</td>
+<td style="text-align:right">1,167</td>
+</tr>
+<tr>
+<td>指數剔除</td>
+<td>某檔股票被移出</td>
+<td style="text-align:right">1,106</td>
+</tr>
+<tr>
+<td>ETF 申購潮</td>
+<td>ETF 申購帶來的買盤，占這檔股票成交額的比例在全市場前 5%</td>
+<td style="text-align:right">8,148</td>
+</tr>
+<tr>
+<td>ETF 贖回潮</td>
+<td>贖回帶來的賣壓，在全市場最大的 5%</td>
+<td style="text-align:right">6,695</td>
+</tr>
+<tr>
+<td>投信自己連買</td>
+<td>扣掉 ETF 機械買賣後，投信連續 3 天買超（之前 5 天沒買）</td>
+<td style="text-align:right">7,066</td>
+</tr>
+<tr>
+<td>投信自己連賣</td>
+<td>同上，連續 3 天賣超</td>
+<td style="text-align:right">7,038</td>
+</tr>
+<tr>
+<td>季底拉抬</td>
+<td>季底最後 5 天，投信自己的買超在全市場前 10%</td>
+<td style="text-align:right">7,297</td>
+</tr>
+<tr>
+<td>ETF 接貨</td>
+<td>申購潮，同時借券放空與融資都在增加</td>
+<td style="text-align:right">1,418</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>比較對象</strong>：同一天、波動相近、近期漲幅相近、成交量相近、但沒有發生這件事的股票。</li>
+</ul>
+<h3>結果一：平均報酬看不出差別</h3>
+<p>事件發生後 20 個交易日，事件股和比較對象的平均報酬差（全市場）：</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>事件</th>
+<th style="text-align:right">差距</th>
+<th style="text-align:right">t 值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>指數納入</td>
+<td style="text-align:right">+0.36%</td>
+<td style="text-align:right">+0.73</td>
+</tr>
+<tr>
+<td>指數剔除</td>
+<td style="text-align:right">+0.56%</td>
+<td style="text-align:right">+1.75</td>
+</tr>
+<tr>
+<td>ETF 申購潮</td>
+<td style="text-align:right">+0.18%</td>
+<td style="text-align:right">+0.79</td>
+</tr>
+<tr>
+<td>ETF 贖回潮</td>
+<td style="text-align:right">−0.01%</td>
+<td style="text-align:right">−0.02</td>
+</tr>
+<tr>
+<td>投信自己連買</td>
+<td style="text-align:right">−0.11%</td>
+<td style="text-align:right">−0.70</td>
+</tr>
+<tr>
+<td>投信自己連賣</td>
+<td style="text-align:right">+0.28%</td>
+<td style="text-align:right">+1.76</td>
+</tr>
+<tr>
+<td>季底拉抬</td>
+<td style="text-align:right">+0.04%</td>
+<td style="text-align:right">+0.17</td>
+</tr>
+<tr>
+<td>ETF 接貨</td>
+<td style="text-align:right">+0.24%</td>
+<td style="text-align:right">+0.84</td>
+</tr>
+</tbody>
+</table></div>
+<p>全部都在雜訊範圍內（t 值沒有超過 2）。指數納入後回吐、投信連買後續漲、季底作帳後鬆手——這些常聽到的說法，台股 2015～2026 都量不出來。</p>
+<h3>結果二：ETF 資金流大的股票，比較不容易飆</h3>
+<p>「20 個交易日內漲到 +20%」的機率（全市場的平均是 8.4%）：</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>事件</th>
+<th style="text-align:right">事件股</th>
+<th style="text-align:right">比較對象</th>
+<th style="text-align:right">倍數</th>
+<th style="text-align:right">t 值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ETF 申購潮</td>
+<td style="text-align:right">6.82%</td>
+<td style="text-align:right">8.57%</td>
+<td style="text-align:right">0.80 倍</td>
+<td style="text-align:right">−4.45</td>
+</tr>
+<tr>
+<td>ETF 贖回潮</td>
+<td style="text-align:right">6.69%</td>
+<td style="text-align:right">8.34%</td>
+<td style="text-align:right">0.80 倍</td>
+<td style="text-align:right">−3.88</td>
+</tr>
+<tr>
+<td>ETF 接貨</td>
+<td style="text-align:right">5.77%</td>
+<td style="text-align:right">7.50%</td>
+<td style="text-align:right">0.77 倍</td>
+<td style="text-align:right">−2.77</td>
+</tr>
+<tr>
+<td>指數納入</td>
+<td style="text-align:right">9.42%</td>
+<td style="text-align:right">9.09%</td>
+<td style="text-align:right">1.04 倍</td>
+<td style="text-align:right">+0.37</td>
+</tr>
+<tr>
+<td>指數剔除</td>
+<td style="text-align:right">8.22%</td>
+<td style="text-align:right">7.51%</td>
+<td style="text-align:right">1.09 倍</td>
+<td style="text-align:right">+0.88</td>
+</tr>
+<tr>
+<td>投信自己連買</td>
+<td style="text-align:right">10.58%</td>
+<td style="text-align:right">11.08%</td>
+<td style="text-align:right">0.95 倍</td>
+<td style="text-align:right">−1.28</td>
+</tr>
+<tr>
+<td>投信自己連賣</td>
+<td style="text-align:right">9.37%</td>
+<td style="text-align:right">10.10%</td>
+<td style="text-align:right">0.93 倍</td>
+<td style="text-align:right">−1.85</td>
+</tr>
+<tr>
+<td>季底拉抬</td>
+<td style="text-align:right">9.53%</td>
+<td style="text-align:right">10.35%</td>
+<td style="text-align:right">0.92 倍</td>
+<td style="text-align:right">−1.79</td>
+</tr>
+</tbody>
+</table></div>
+<p>在「大盤精選」會挑的高流動股票裡也一樣（申購潮 0.79 倍、贖回潮 0.77 倍、接貨 0.72 倍），2020～2025 每一年都小於 1。</p>
+<p><strong>怎麼解讀</strong>：申購和贖回是相反方向，結果卻一樣低——所以不是「資金往哪邊流」，比較像「<strong>被大型 ETF 重押的股票，本來就不容易飆</strong>」。
+它不是買進訊號；頂多是潛伏飆股可以避開的參考。</p>
+<h3>兩個做研究時抓到的錯（已修正、已重跑）</h3>
+<ol>
+<li><strong>比較方法的偏誤</strong>：一開始事件股取「平均」、比較對象取「中位數」。股票報酬右偏（少數大漲拉高平均），這樣比任何一群股票都會是正的，
+八種事件全部顯示 +1.5%～+2%，連方向相反的事件也一樣。改成「平均對平均」之後才是上面的結果。</li>
+<li><strong>計算的浮點誤差</strong>：滾動加總會留下 0.000000000000000007 這種殘差，讓「過去 5 天全是 0」被誤判成「小於 0」（假的贖回潮）。
+修正後申購潮少了 3.6% 的事件、贖回潮少了 5.4%，結論不變。<strong>這個錯只影響今天新寫的資金流程式</strong>；其他模型加總的是整數或只拿來排名，不受影響。</li>
+</ol>
+<hr />
+<h2>第三部分：潛伏飆股只買模型分數高的</h2>
+<h3>問了什麼</h3>
+<p>潛伏飆股的模型會給每檔股票一個「20 天內漲 20% 的機率」分數。現在的做法是每天買分數最高的 15 名，不管分數多少。
+如果只買分數夠高的（例如 0.40 以上），會不會比較好？</p>
+<h3>先看每一筆交易（2017-09 到 2026-07）</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>只買分數高於</th>
+<th style="text-align:right">筆數</th>
+<th style="text-align:right">有候選的日子</th>
+<th style="text-align:right">漲到 +20%</th>
+<th style="text-align:right">每筆平均</th>
+<th style="text-align:right">每筆中位數</th>
+<th style="text-align:right">虧超過 15%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>不限（現在的前 15 名）</td>
+<td style="text-align:right">32,295</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">12.8%</td>
+<td style="text-align:right">+1.71%</td>
+<td style="text-align:right">−0.32%</td>
+<td style="text-align:right">6.9%</td>
+</tr>
+<tr>
+<td class="num">0.30</td>
+<td style="text-align:right">5,156</td>
+<td style="text-align:right">37%</td>
+<td style="text-align:right">20.6%</td>
+<td style="text-align:right">+6.20%</td>
+<td style="text-align:right">+5.18%</td>
+<td style="text-align:right">4.8%</td>
+</tr>
+<tr>
+<td class="num">0.35</td>
+<td style="text-align:right">3,574</td>
+<td style="text-align:right">26%</td>
+<td style="text-align:right">23.2%</td>
+<td style="text-align:right">+7.48%</td>
+<td style="text-align:right">+6.87%</td>
+<td style="text-align:right">4.0%</td>
+</tr>
+<tr>
+<td class="num">0.39</td>
+<td style="text-align:right">2,782</td>
+<td style="text-align:right">20%</td>
+<td style="text-align:right">25.1%</td>
+<td style="text-align:right">+8.40%</td>
+<td style="text-align:right">+7.80%</td>
+<td style="text-align:right">3.2%</td>
+</tr>
+<tr>
+<td class="num">0.40</td>
+<td style="text-align:right">2,597</td>
+<td style="text-align:right">18%</td>
+<td style="text-align:right">25.8%</td>
+<td style="text-align:right">+8.69%</td>
+<td style="text-align:right">+8.02%</td>
+<td style="text-align:right">3.1%</td>
+</tr>
+<tr>
+<td class="num">0.45</td>
+<td style="text-align:right">1,839</td>
+<td style="text-align:right">12%</td>
+<td style="text-align:right">28.3%</td>
+<td style="text-align:right">+9.48%</td>
+<td style="text-align:right">+8.83%</td>
+<td style="text-align:right">2.6%</td>
+</tr>
+<tr>
+<td class="num">0.50</td>
+<td style="text-align:right">1,330</td>
+<td style="text-align:right">8%</td>
+<td style="text-align:right">29.4%</td>
+<td style="text-align:right">+10.10%</td>
+<td style="text-align:right">+9.35%</td>
+<td style="text-align:right">2.0%</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>門檻越高，每筆越好、機會越少</strong>——沒有「最棒的一點」，取捨在你能接受空手多久。</li>
+<li><strong>模型高估了機率</strong>：分數 0.40～0.50 的股票，實際漲到 +20% 的只有 22%；0.50 以上的是 29%。所以只能說「分數 0.40」，不能說「機率 40%」。</li>
+<li><strong>很集中</strong>：分數 0.40 以上的股票，一半擠在 10 天裡（2024 年 8 月日圓套利崩盤、2025 年 4 月關稅崩盤之後的反彈）。</li>
+</ul>
+<h3>再看整個組合（1,000 萬、可買零股、15 個位子、每檔抱 20 個交易日，2017-10 到 2026-04）</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>只買分數高於</th>
+<th style="text-align:right">年化報酬</th>
+<th style="text-align:right">最大回撤</th>
+<th style="text-align:right">報酬÷回撤</th>
+<th style="text-align:right">平均資金使用率</th>
+<th style="text-align:right">交易筆數</th>
+<th style="text-align:right">每筆淨報酬</th>
+<th style="text-align:right">每筆中位數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>不限（現在的做法）</td>
+<td style="text-align:right">+8.3%</td>
+<td style="text-align:right">−44.4%</td>
+<td style="text-align:right">0.19</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">1,347</td>
+<td style="text-align:right">+1.03%</td>
+<td style="text-align:right">−0.61%</td>
+</tr>
+<tr>
+<td class="num">0.30</td>
+<td style="text-align:right">+10.0%</td>
+<td style="text-align:right">−23.5%</td>
+<td style="text-align:right">0.43</td>
+<td style="text-align:right">34%</td>
+<td style="text-align:right">496</td>
+<td style="text-align:right">+2.81%</td>
+<td style="text-align:right">+0.08%</td>
+</tr>
+<tr>
+<td>0.30，避開 ETF 資金流股</td>
+<td style="text-align:right">+10.2%</td>
+<td style="text-align:right">−23.3%</td>
+<td style="text-align:right">0.44</td>
+<td style="text-align:right">32%</td>
+<td style="text-align:right">480</td>
+<td style="text-align:right">+2.96%</td>
+<td style="text-align:right">+0.27%</td>
+</tr>
+<tr>
+<td class="num"><strong>0.35</strong></td>
+<td style="text-align:right"><strong>+11.7%</strong></td>
+<td style="text-align:right"><strong>−19.3%</strong></td>
+<td style="text-align:right"><strong>0.60</strong></td>
+<td style="text-align:right">23%</td>
+<td style="text-align:right">335</td>
+<td style="text-align:right">+4.50%</td>
+<td style="text-align:right">+2.60%</td>
+</tr>
+<tr>
+<td>0.35，避開 ETF 資金流股</td>
+<td style="text-align:right">+12.1%</td>
+<td style="text-align:right">−20.5%</td>
+<td style="text-align:right">0.59</td>
+<td style="text-align:right">22%</td>
+<td style="text-align:right">324</td>
+<td style="text-align:right">+4.83%</td>
+<td style="text-align:right">+2.83%</td>
+</tr>
+<tr>
+<td class="num">0.40</td>
+<td style="text-align:right">+8.1%</td>
+<td style="text-align:right">−17.7%</td>
+<td style="text-align:right">0.46</td>
+<td style="text-align:right">15%</td>
+<td style="text-align:right">221</td>
+<td style="text-align:right">+4.69%</td>
+<td style="text-align:right">+2.30%</td>
+</tr>
+<tr>
+<td>0.40，避開 ETF 資金流股</td>
+<td style="text-align:right">+8.3%</td>
+<td style="text-align:right">−18.3%</td>
+<td style="text-align:right">0.46</td>
+<td style="text-align:right">15%</td>
+<td style="text-align:right">215</td>
+<td style="text-align:right">+4.95%</td>
+<td style="text-align:right">+2.30%</td>
+</tr>
+<tr>
+<td class="num">0.45</td>
+<td style="text-align:right">+6.5%</td>
+<td style="text-align:right">−15.2%</td>
+<td style="text-align:right">0.42</td>
+<td style="text-align:right">10%</td>
+<td style="text-align:right">153</td>
+<td style="text-align:right">+5.19%</td>
+<td style="text-align:right">+3.45%</td>
+</tr>
+<tr>
+<td>0.45，避開 ETF 資金流股</td>
+<td style="text-align:right">+6.8%</td>
+<td style="text-align:right">−15.8%</td>
+<td style="text-align:right">0.43</td>
+<td style="text-align:right">10%</td>
+<td style="text-align:right">148</td>
+<td style="text-align:right">+5.70%</td>
+<td style="text-align:right">+3.52%</td>
+</tr>
+<tr>
+<td class="num">0.50</td>
+<td style="text-align:right">+3.8%</td>
+<td style="text-align:right">−15.9%</td>
+<td style="text-align:right">0.24</td>
+<td style="text-align:right">7%</td>
+<td style="text-align:right">109</td>
+<td style="text-align:right">+4.39%</td>
+<td style="text-align:right">+3.45%</td>
+</tr>
+<tr>
+<td>0.50，避開 ETF 資金流股</td>
+<td style="text-align:right">+4.1%</td>
+<td style="text-align:right">−16.1%</td>
+<td style="text-align:right">0.26</td>
+<td style="text-align:right">7%</td>
+<td style="text-align:right">106</td>
+<td style="text-align:right">+4.91%</td>
+<td style="text-align:right">+3.73%</td>
+</tr>
+</tbody>
+</table></div>
+<p>（「報酬÷回撤」＝年化報酬 ÷ 最大回撤，越高越好。「避開 ETF 資金流股」＝當天處於 ETF 申購潮或贖回潮的股票不買。）</p>
+<ul>
+<li><strong>設門檻真的有用</strong>：每筆報酬從 +1% 拉到 +3%～+5%，中位數由虧轉賺，回撤從 −44% 縮到 −15%～−24%。</li>
+<li><strong>0.35 是年化與報酬÷回撤的高點</strong>，代價是平均只有 23% 的資金在市場上。</li>
+<li><strong>避開 ETF 資金流股幾乎沒差</strong>：差距在雜訊範圍。</li>
+<li><strong>已經寫死登記</strong>：這十種做法加上現在的做法，在 2027-03 一起用新資料檢驗，結果出來前不得修改。</li>
+</ul>
+<hr />
+<h2>第四部分：大盤精選＋高分潛伏飆股的組合</h2>
+<h3>規則</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>部分</th>
+<th style="text-align:right">比例</th>
+<th>內容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>核心</td>
+<td style="text-align:right">70%</td>
+<td><strong>大盤精選</strong>：全市場排序模型每月挑 15 檔、平均分配、不設停損。這是整個專案唯一在模型沒看過的資料上驗證過的訊號</td>
+</tr>
+<tr>
+<td>伺機</td>
+<td style="text-align:right">30%</td>
+<td><strong>潛伏飆股只買分數 0.35 以上</strong>，每檔抱 20 個交易日；沒有高分股的日子這 30% 放現金</td>
+</tr>
+<tr>
+<td>不放</td>
+<td style="text-align:right">—</td>
+<td>停損、跌破均線出場、依波動調部位、ETF 資金流、分點籌碼——都測過，沒有一個贏「不做」</td>
+</tr>
+</tbody>
+</table></div>
+<h3>結果（兩者重疊的 2019-05 到 2026-02）</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>組合</th>
+<th style="text-align:right">年化報酬</th>
+<th style="text-align:right">最大回撤</th>
+<th style="text-align:right">報酬÷回撤</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>只有大盤精選</td>
+<td style="text-align:right">+27.8%</td>
+<td style="text-align:right">−41.4%</td>
+<td style="text-align:right">0.67</td>
+</tr>
+<tr>
+<td>大盤精選 80% ＋ 高分潛伏飆股 20%</td>
+<td style="text-align:right">+25.6%</td>
+<td style="text-align:right">−34.7%</td>
+<td style="text-align:right">0.74</td>
+</tr>
+<tr>
+<td><strong>大盤精選 70% ＋ 高分潛伏飆股 30%</strong></td>
+<td style="text-align:right"><strong>+24.4%</strong></td>
+<td style="text-align:right"><strong>−31.4%</strong></td>
+<td style="text-align:right"><strong>0.78</strong></td>
+</tr>
+<tr>
+<td>大盤精選 50% ＋ 高分潛伏飆股 50%</td>
+<td style="text-align:right">+21.7%</td>
+<td style="text-align:right">−24.7%</td>
+<td style="text-align:right">0.88</td>
+</tr>
+<tr>
+<td>只有高分潛伏飆股</td>
+<td style="text-align:right">+14.1%</td>
+<td style="text-align:right">−19.3%</td>
+<td style="text-align:right">0.73</td>
+</tr>
+<tr>
+<td>對照：大盤精選 70% ＋ 現在的潛伏飆股 30%</td>
+<td style="text-align:right">+22.2%</td>
+<td style="text-align:right">−35.6%</td>
+<td style="text-align:right">0.62</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>兩者互補</strong>：高分潛伏飆股和大盤精選的每日漲跌相關只有 0.42（現在的潛伏飆股是 0.68）。高分股多半出現在崩盤後——剛好是大盤精選正在虧、手上有閒錢的時候。</li>
+<li><strong>不只是少押一點</strong>：大盤精選只放七成、其餘放現金，報酬÷回撤還是約 0.67；換成高分潛伏飆股才升到 0.78。</li>
+<li><strong>沒有挑最好看的比例</strong>：五五分的數字更高，但那是看完表才挑的。七三是依「平時持有約 15 檔、崩盤後才加碼」的用法訂的。</li>
+<li><strong>還沒正式登記</strong>。</li>
+</ul>
+<hr />
+<h2>第五部分：《技術分析精論》（Martin J. Pring，第五版上冊）</h2>
+<h3>核心觀念</h3>
+<ul>
+<li><strong>技術分析是在找趨勢反轉點</strong>：預設趨勢延續，直到證據顯示反轉。</li>
+<li><strong>證據權重</strong>：單一指標不可靠，多個獨立指標同時指向同一方向才行動。</li>
+<li><strong>三種趨勢</strong>：主要（一到兩年）、中期（幾週到幾個月）、短期；先看大的。</li>
+<li><strong>工具</strong>：道氏理論、價格型態（頭肩、雙重頂底、三角形、旗形）、趨勢線與支撐壓力、移動平均與布林通道、動能指標（RSI、KD、MACD、作者自創的 KST）、K 線、點數圖。</li>
+<li><strong>最重要的動能訊號是背離</strong>（價格創新高、動能沒有），但要等價格本身轉向才算數。</li>
+</ul>
+<h3>整理成可以照做的規則</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>類別</th>
+<th>規則</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>大方向</td>
+<td>個股與大盤都在 200 日均線之上，均線往上</td>
+</tr>
+<tr>
+<td>進場確認一：突破</td>
+<td>收盤比過去 60 天最高點再高 3%</td>
+</tr>
+<tr>
+<td>進場確認二：爆量</td>
+<td>當天成交量是過去 20 天平均的 1.5 倍以上</td>
+</tr>
+<tr>
+<td>進場確認三：動能</td>
+<td>MACD 翻多，而且 RSI 在 40～80（太熱的不追）</td>
+</tr>
+<tr>
+<td>出場一</td>
+<td>突破後又跌回突破點以下</td>
+</tr>
+<tr>
+<td>出場二</td>
+<td>跌破 50 日均線，而且均線往下</td>
+</tr>
+<tr>
+<td>出場三</td>
+<td>價格創新高但 RSI 沒有，之後又跌破近期低點</td>
+</tr>
+<tr>
+<td>出場四</td>
+<td>虧 15% 停損</td>
+</tr>
+</tbody>
+</table></div>
+<p>學術上，趨勢與動能有最多證據支持；圖形型態只有微弱的資訊量；傳統指標扣掉成本後，近年的獲利證據普遍變弱。</p>
+<hr />
+<h2>第六部分：技術規則排列組合（512 種）</h2>
+<h3>什麼是 512 種</h3>
+<p><strong>2 種選股來源 × 16 種進場確認 × 16 種出場規則 ＝ 512 種買賣方式</strong>：</p>
+<ul>
+<li><strong>選股來源</strong>：潛伏飆股每天的前 15 名；或只挑分數 0.35 以上。</li>
+<li><strong>進場確認</strong>：上面的大方向、突破、爆量、動能四個條件，每個用或不用，16 種搭配（包含都不用＝模型選了就買）。</li>
+<li><strong>出場規則</strong>：上面的四條出場規則，每條用或不用，16 種搭配（包含都不用＝抱滿 20 天）。</li>
+</ul>
+<h3>結果</h3>
+<ul>
+<li><strong>沒有任何一種強到能排除運氣</strong>（見第七部分的「運氣門檻」）。</li>
+<li><strong>出場規則全部沒幫助</strong>：跌破 50 日均線就賣，會把持有天數從 21 天砍到約 6 天，每筆報酬從 +7.7% 掉到約 +1%；15% 停損讓每筆變差；
+突破失敗就賣、背離後跌破就賣，結果和抱滿 20 天差不多。</li>
+<li><strong>進場確認大多沒幫助</strong>：</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>選股來源</th>
+<th>進場確認</th>
+<th style="text-align:right">筆數</th>
+<th style="text-align:right">勝率（扣成本有賺）</th>
+<th style="text-align:right">每筆平均</th>
+<th style="text-align:right">每筆中位數</th>
+<th style="text-align:right">漲到 +20%</th>
+<th style="text-align:right">虧超過 15%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>每天前 15 名</td>
+<td>不確認（現在的做法）</td>
+<td style="text-align:right">7,133</td>
+<td style="text-align:right">48.1%</td>
+<td style="text-align:right">+1.27%</td>
+<td style="text-align:right">−0.40%</td>
+<td style="text-align:right">13.1%</td>
+<td style="text-align:right">7.5%</td>
+</tr>
+<tr>
+<td>每天前 15 名</td>
+<td>突破</td>
+<td style="text-align:right">248</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">+0.94%</td>
+<td style="text-align:right">−1.66%</td>
+<td style="text-align:right">17.3%</td>
+<td style="text-align:right">13.3%</td>
+</tr>
+<tr>
+<td>每天前 15 名</td>
+<td>爆量</td>
+<td style="text-align:right">3,277</td>
+<td style="text-align:right">46.9%</td>
+<td style="text-align:right">+1.30%</td>
+<td style="text-align:right">−0.87%</td>
+<td style="text-align:right">14.2%</td>
+<td style="text-align:right">7.6%</td>
+</tr>
+<tr>
+<td>每天前 15 名</td>
+<td>動能</td>
+<td style="text-align:right">4,255</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">+1.28%</td>
+<td style="text-align:right">−0.83%</td>
+<td style="text-align:right">13.2%</td>
+<td style="text-align:right">7.7%</td>
+</tr>
+<tr>
+<td>分數 0.35 以上</td>
+<td>不確認</td>
+<td style="text-align:right">980</td>
+<td style="text-align:right">72.6%</td>
+<td style="text-align:right">+7.71%</td>
+<td style="text-align:right">+6.54%</td>
+<td style="text-align:right">22.8%</td>
+<td style="text-align:right">2.9%</td>
+</tr>
+<tr>
+<td>分數 0.35 以上</td>
+<td>動能</td>
+<td style="text-align:right">299</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">+2.27%</td>
+<td style="text-align:right">+0.48%</td>
+<td style="text-align:right">14.0%</td>
+<td style="text-align:right">7.0%</td>
+</tr>
+<tr>
+<td>分數 0.35 以上</td>
+<td>爆量＋動能</td>
+<td style="text-align:right">125</td>
+<td style="text-align:right">55.2%</td>
+<td style="text-align:right">+3.55%</td>
+<td style="text-align:right">+2.22%</td>
+<td style="text-align:right">16.0%</td>
+<td style="text-align:right">3.2%</td>
+</tr>
+<tr>
+<td><strong>分數 0.35 以上</strong></td>
+<td><strong>爆量</strong></td>
+<td style="text-align:right"><strong>428</strong></td>
+<td style="text-align:right"><strong>77.3%</strong></td>
+<td style="text-align:right"><strong>+9.37%</strong></td>
+<td style="text-align:right"><strong>+7.81%</strong></td>
+<td style="text-align:right"><strong>25.0%</strong></td>
+<td style="text-align:right"><strong>1.2%</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>（「—」＝這幾組當時沒有算勝率；勝率是後來補的，只補了含爆量的組合。）</p>
+<h3>除了爆量，還有哪些規則可以用</h3>
+<p>只有兩條<strong>出場</strong>規則「不傷」，而且讓大虧的筆數少一點；其他規則都讓結果變差。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>選股來源</th>
+<th>出場規則</th>
+<th style="text-align:right">勝率</th>
+<th style="text-align:right">每筆平均</th>
+<th style="text-align:right">虧超過 15%</th>
+<th style="text-align:right">平均持有</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>分數 0.35 以上</td>
+<td>抱滿 20 天</td>
+<td style="text-align:right">72.6%</td>
+<td style="text-align:right">+7.71%</td>
+<td style="text-align:right">2.9%</td>
+<td style="text-align:right">21.0 天</td>
+</tr>
+<tr>
+<td>分數 0.35 以上</td>
+<td>突破失敗（跌回突破點）就賣</td>
+<td style="text-align:right">72.0%</td>
+<td style="text-align:right">+7.73%</td>
+<td style="text-align:right">2.7%</td>
+<td style="text-align:right">20.7 天</td>
+</tr>
+<tr>
+<td>分數 0.35 以上</td>
+<td>背離後跌破就賣</td>
+<td style="text-align:right">72.4%</td>
+<td style="text-align:right">+7.67%</td>
+<td style="text-align:right">2.8%</td>
+<td style="text-align:right">20.7 天</td>
+</tr>
+<tr>
+<td>分數 0.35 以上</td>
+<td>兩條都用</td>
+<td style="text-align:right">71.9%</td>
+<td style="text-align:right">+7.68%</td>
+<td style="text-align:right">2.6%</td>
+<td style="text-align:right">20.5 天</td>
+</tr>
+<tr>
+<td>分數 0.35 以上＋爆量</td>
+<td>抱滿 20 天</td>
+<td style="text-align:right">77.3%</td>
+<td style="text-align:right">+9.37%</td>
+<td style="text-align:right">1.2%</td>
+<td style="text-align:right">21.0 天</td>
+</tr>
+<tr>
+<td>分數 0.35 以上＋爆量</td>
+<td>突破失敗就賣</td>
+<td style="text-align:right">76.2%</td>
+<td style="text-align:right">+9.36%</td>
+<td style="text-align:right">0.7%</td>
+<td style="text-align:right">20.5 天</td>
+</tr>
+<tr>
+<td>分數 0.35 以上＋爆量</td>
+<td>兩條都用</td>
+<td style="text-align:right">76.2%</td>
+<td style="text-align:right">+9.21%</td>
+<td style="text-align:right">0.7%</td>
+<td style="text-align:right">20.3 天</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>突破失敗就賣、背離後跌破就賣</strong>：報酬幾乎一樣，大虧比例小幅下降。可以當「安心用」的保險，但不會讓你多賺。</li>
+<li><strong>虧 15% 停損</strong>：反而讓大虧比例上升（分數 0.35 以上從 2.9% 變 3.7%），因為很多跌深的後來會漲回來，停損把它們鎖在虧損。</li>
+<li><strong>大方向（站上 200 日均線）</strong>：每天前 15 名每筆略高（+1.43% 對 +1.27%），但中位數更差、筆數少一半；高分股加了反而變差（+6.80% 對 +7.71%）。</li>
+<li><strong>突破、動能</strong>：都讓高分股變差，前面已說明原因。</li>
+</ul>
+<h3>為什麼「模型推薦＋技術確認」在這裡不靈</h3>
+<ol>
+<li><strong>資訊重疊</strong>：潛伏飆股的模型本來就看價格和成交量；技術指標不是第二個獨立證人，比較像同一個證人再講一次。</li>
+<li><strong>確認的代價是買貴</strong>：潛伏飆股挑的是「還沒動的安靜股」，賺的是起漲那段。等突破、MACD 翻多才進場，最肥的那段已經過去——高分股幾乎不會同時出現突破訊號（只有 7 筆）。</li>
+<li><strong>「比較準」不等於「比較賺」</strong>：突破確認把漲到 +20% 的比例從 13% 拉到 17%，但大虧的比例也從 7.5% 跳到 13.3%。</li>
+</ol>
+<h3>「分數 0.35 以上＋爆量才買」要特別注意</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align:right">筆數</th>
+<th style="text-align:right">勝率</th>
+<th style="text-align:right">每筆平均</th>
+<th style="text-align:right">每筆中位數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>全部</td>
+<td style="text-align:right">428</td>
+<td style="text-align:right">77.3%</td>
+<td style="text-align:right">+9.37%</td>
+<td style="text-align:right">+7.81%</td>
+</tr>
+<tr>
+<td>其中 2024 年 8 月與 2025 年 4 月兩個月</td>
+<td style="text-align:right">286</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">—</td>
+</tr>
+<tr>
+<td>扣掉這兩個月</td>
+<td style="text-align:right">142</td>
+<td style="text-align:right">59.9%</td>
+<td style="text-align:right">+5.50%</td>
+<td style="text-align:right">+2.52%</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>2025-04-08 一天就有 112 筆、2024-08-05 有 66 筆。那兩天的爆量是<strong>崩盤時的恐慌賣壓</strong>，不是書裡講的「突破時的爆量」。</li>
+<li>2022 年那種慢慢跌的空頭，勝率只有 38%。</li>
+<li>扣掉兩次崩盤，平均一年約 17 筆、勝率約六成、每筆 +5.5%——仍比現在的做法好，但沒有表面上漂亮。</li>
+</ul>
+<hr />
+<h2>第七部分：怎麼看這些數字</h2>
+<h3>t 值</h3>
+<ul>
+<li><strong>t 值＝平均報酬 ÷ 這個平均數的誤差範圍</strong>，可以想成「訊號是雜訊的幾倍」。計算時先算每個月的平均，避免同一天一起買的股票被重複計算。</li>
+<li><strong>t 約 2</strong>：假如策略其實沒用，只靠運氣得到這種結果的機率約 5%。只測一種做法時，這是常用門檻。</li>
+<li><strong>t 高代表「不是運氣」的把握，不是賺得多</strong>：每天前 15 名每筆只賺 +1.27%，但有 7,133 筆，t 有 2.52；分數 0.35 以上加爆量每筆賺 +9.37%，但只有 428 筆，t 是 3.13。</li>
+</ul>
+<h3>運氣門檻 3.89</h3>
+<p>同時試 512 種做法，就算每一種其實都沒用，最好的那幾種光靠運氣也會很好看——像丟 512 次硬幣，總有幾次連續出現好幾個正面。
+<strong>3.89 是「512 種裡任何一種只靠運氣超過它的機率只有 5%」的門檻</strong>。512 種裡筆數夠多的有 320 種，沒有一種超過 3.89。</p>
+<h3>為什麼要等 2027 年 3 月</h3>
+<p>2015 到 2026 年 8 月的資料，這個專案已經研究了十幾輪，每一個想法都是看過這段資料才提出的——在這段資料上「看起來好」，有很大一部分是挑出來的。
+<strong>2026-09-09 之後的資料是唯一乾淨的</strong>：從那天起，所有要驗證的做法都先寫死，2027-03-01 之後（累積至少 120 個交易日）才開來看，而且只能開一次。</p>
+<hr />
+<h2>第八部分：已經做好、尚未上線的東西</h2>
+<ul>
+<li><strong>新資料</strong>：ETF 每日單位數、元大與統一 ETF 每日持股、指數換股紀錄——都在本機資料庫，雲端不放。</li>
+<li><strong>每日更新</strong>：每日排程多兩步「ETF 單位數」「ETF 持股」。<strong>要重建排程的程式映像才會開始每天跑</strong>。</li>
+<li><strong>每日選股看板</strong>：多一欄「資金流（監控、未回測）」，列出 ETF 申購壓力、投信自己連買天數、近 20 天發生的事件、主動式 ETF 的增減持。</li>
+<li><strong>已寫死登記、2027-03 判讀</strong>：潛伏飆股分數 0.30～0.50（每 0.05 一格）共 5 種，各自有「避開 ETF 資金流股」版本，加上現在的做法，共 11 種。</li>
+</ul>
+<h2>第九部分：需要你決定的事</h2>
+<ol>
+<li><strong>2027-03 判讀的標準</strong>：高分做法要比現在好多少才算數（例如報酬÷回撤更高、而且回撤不更深）；最低能接受多少資金使用率。</li>
+<li><strong>「大盤精選 70%＋高分潛伏飆股 30%」要不要正式登記</strong>（建議同時登記 80/20、70/30、50/50 三種）。</li>
+<li><strong>「分數 0.35 以上＋爆量才買」要不要登記</strong>，以及要不要在看板上先列出來觀察（標「還沒驗證」）。</li>
+<li><strong>要不要部署</strong>新的每日資料步驟。</li>
+</ol>
+<hr />
+<h2>附錄：內部代號對照（給之後查檔案用）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>本報告的說法</th>
+<th>內部代號</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>大盤精選</td>
+<td>E0、<code>lw_e0_ctrl</code></td>
+</tr>
+<tr>
+<td>潛伏飆股（現在的做法）</td>
+<td>A20、<code>quiet_s0</code></td>
+</tr>
+<tr>
+<td>潛伏飆股只買分數 0.30～0.50</td>
+<td><code>quiet_p30</code>～<code>quiet_p50</code>；避開 ETF 資金流股＝<code>quiet_p30x</code>～<code>quiet_p50x</code>；裁決 D-172</td>
+</tr>
+<tr>
+<td>八種資金流事件</td>
+<td>E1～E8；裁決 D-171、規格 SPEC-016</td>
+</tr>
+<tr>
+<td>512 種技術規則搭配</td>
+<td>裁決 D-173；分數 0.35 以上＝H35、每天前 15 名＝H0</td>
+</tr>
+<tr>
+<td>2027-03 才能開的新資料</td>
+<td>第二保留期（D-109）</td>
+</tr>
+</tbody>
+</table></div>
+<p>明細報告：<code>docs/reports/</code> 底下的 <code>fund-flow-traces-2026-10-11.md</code>、<code>fund-flow-tails-2026-10-11.md</code>、<code>d172-threshold-arms-dev.md</code>、
+<code>core-opportunistic-blend-dev.md</code>、<code>pring-technical-analysis-summary.md</code>、<code>d173-ta-grid-dev.md</code>。</p>
+</article><div class='foot'>來源 <code>docs/reports/research-report-2026-10-11.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:26。</div></div></body></html>

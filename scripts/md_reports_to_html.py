@@ -69,14 +69,24 @@ def _cells(body: str) -> str:
     )
 
 
-def render(md_text: str, title: str, src: str, index_name: str | None) -> str:
+# 放上網站分享的頁面：拿到連結就能看，但不讓搜尋引擎收錄
+NOINDEX = '<meta name="robots" content="noindex,nofollow">'
+INTRO = (
+    "2026-10-11 的研究整理。標「開發期」的數字只當參考，正式判讀在第二保留期（最早 2027-03-01）。"
+)
+
+
+def render(
+    md_text: str, title: str, src: str, index_name: str | None, noindex: bool = False
+) -> str:
     md = MarkdownIt("commonmark", {"html": False}).enable("table")
     body = _cells(md.render(md_text))
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     return (
         '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>{html.escape(title)}</title><style>{STYLE}</style></head><body><div class='wrap'>"
+        + (NOINDEX if noindex else "")
+        + f"<title>{html.escape(title)}</title><style>{STYLE}</style></head><body><div class='wrap'>"
         + (f"<nav class='top'><a href='{index_name}'>← 報告目錄</a></nav>" if index_name else "")
         + f"<article>{body}</article>"
         f"<div class='foot'>來源 <code>{html.escape(src)}</code>（版控的 markdown 原文）；轉檔於 {now}。</div>"
@@ -107,6 +117,12 @@ def main() -> int:
     ap.add_argument(
         "--no-index", action="store_true", help="只轉單一份、不做目錄頁也不放回目錄的連結"
     )
+    ap.add_argument(
+        "--public",
+        action="store_true",
+        help="要放上網站分享：每頁加 noindex（拿到連結的人看得到，搜尋引擎不收錄）",
+    )
+    ap.add_argument("--intro", default=INTRO, help="目錄頁的說明文字")
     ap.add_argument("files", nargs="+")
     args = ap.parse_args()
     out = pathlib.Path(args.out)
@@ -121,7 +137,8 @@ def main() -> int:
         title = _title(text, p.stem)
         name = p.stem + ".html"
         (out / name).write_text(
-            render(text, title, str(p).replace("\\", "/"), index_name), encoding="utf-8"
+            render(text, title, str(p).replace("\\", "/"), index_name, args.public),
+            encoding="utf-8",
         )
         items.append((name, title, _lede(text)))
         print(f"[OK] {out / name}")
@@ -133,8 +150,9 @@ def main() -> int:
     page = (
         '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>研究報告目錄</title><style>{STYLE}</style></head><body><div class='wrap'>"
-        f"<article><h1>研究報告目錄</h1><p>2026-10-11 的研究整理。標「開發期」的數字只當參考，正式判讀在第二保留期（最早 2027-03-01）。</p>"
+        + (NOINDEX if args.public else "")
+        + f"<title>研究報告目錄</title><style>{STYLE}</style></head><body><div class='wrap'>"
+        f"<article><h1>研究報告目錄</h1><p>{html.escape(args.intro)}</p>"
         f"<ul class='index'>{lis}</ul></article></div></body></html>"
     )
     (out / "index.html").write_text(page, encoding="utf-8")
