@@ -1,8 +1,9 @@
 // GET /api/stocks/search?q=2330 或 q=台積：代號開頭相符或名稱含這幾個字的股票（只列雲端有股價的，最多 SEARCH_LIMIT 檔）。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { SEARCH_LIMIT, searchPattern } from '../../_lib/scores'
+import { cached, cacheKey } from '../../_lib/cache'
 
-export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
+const handle: PagesFunction<Env> = async ({ request, env }) => {
   const q = searchPattern(new URL(request.url).searchParams.get('q'))
   if (q === null) return fail(400, '請輸入 1～20 個字的股號或名稱')
   return guarded(env, async (db) => {
@@ -15,3 +16,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return json({ q: q.text, items })
   })
 }
+
+// 每個人看到都一樣、一天只更新兩次：同一執行個體 60 秒暫存，省下連資料庫的 CPU（_lib/cache.ts）
+export const onRequestGet: PagesFunction<Env> = (ctx) => cached(cacheKey(ctx.request), async () => handle(ctx))

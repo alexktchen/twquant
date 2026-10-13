@@ -26,6 +26,18 @@ class BaseConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class PushConfig(BaseConfig):
+    """configs/push.yaml：網頁推播（T-348）。"""
+
+    vapid_public_key: str = Field(min_length=80)
+    vapid_private_key_env: str = Field(min_length=1)
+    vapid_subject: str = Field(pattern=r"^(mailto:|https://)")
+    site_url: str = Field(pattern=r"^https://")
+    request_timeout_seconds: float = Field(gt=0)
+    ttl_seconds: int = Field(ge=60)
+    allowed_hosts: tuple[str, ...] = Field(min_length=1)
+
+
 class SourceRate(BaseConfig):
     """單一來源的限流設定（滑動窗語意，SPEC-001 §7）。"""
 

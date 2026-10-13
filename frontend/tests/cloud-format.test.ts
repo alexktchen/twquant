@@ -86,3 +86,12 @@ test('日期選單檔數：有記錄的日子寫幾檔（沒股票寫 0 檔）�
   assert.equal(dateOption('2026-10-08', 0), '2026-10-08　0 檔')
   assert.equal(dateOption('2026-10-06', null), '2026-10-06')
 })
+
+test('重抓回來的 K 線沒變就不重畫：根數與最後一根的日期、量價都一樣才算相同', async () => {
+  const { sameBars } = await import('../src/cloud/format.ts')
+  const b = (date: string, close: number) => ({ date, open: 1, high: 2, low: 0.5, close, volume: 10 })
+  assert.equal(sameBars([b('2026-10-12', 1), b('2026-10-13', 2)], [b('2026-10-12', 1), b('2026-10-13', 2)]), true)
+  assert.equal(sameBars([b('2026-10-12', 1)], [b('2026-10-12', 1), b('2026-10-13', 2)]), false) // 資料庫多了今天
+  assert.equal(sameBars([b('2026-10-13', 2)], [b('2026-10-13', 2.1)]), false)
+  assert.equal(sameBars([], []), true)
+})

@@ -6,3 +6,11 @@ name = "twquant"
 pages_build_output_dir = "dist"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+
+# 資料庫連線池（Hyperdrive，免費方案可用；2026-10-13 建立，對 Supabase 的 session pooler :5432，查詢快取關閉）。
+# 沒有它時每個 API 請求都要自己對 Supabase 做加密連線與密碼驗證，常超過免費方案 10ms CPU 而被砍（error 1102）。
+# 本機 `wrangler pages dev` 要先設環境變數 CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE（連線字串，不要寫進這裡）。
+# 換密碼或資料庫時：npx wrangler hyperdrive update 3cef1c1a4fcd4715ab0f34534895770f --origin-password ...
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "3cef1c1a4fcd4715ab0f34534895770f"

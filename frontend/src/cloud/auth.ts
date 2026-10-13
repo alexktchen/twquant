@@ -18,6 +18,28 @@ export function needsLogin(res: { type: string; status: number; ok: boolean; hea
   return res.ok && !(res.headers.get('content-type') ?? '').includes('json')
 }
 
+/** Cloudflare Access 的登入網域（Zero Trust 組織）。 */
+export const ACCESS_TEAM = 'https://twquant-pages.cloudflareaccess.com'
+
+/** 登入網域的登出：刪掉那邊的登入 cookie（CF_Authorization、CF_Session…）再導回本站首頁。
+ *  只清本站 cookie 的話，那邊會留著已撤銷的登入；下次按「登入」，Cloudflare 拿它換通行證，
+ *  換到的是作廢的，就跳出「Current authentication token is expired」（2026-10-13 使用者回報）。
+ *  沒有 cookie 時一樣直接導回來，不會出現錯誤頁（2026-10-13 實測）。 */
+export const teamLogout = (origin: string): string =>
+  `${ACCESS_TEAM}/cdn-cgi/access/logout?returnTo=${encodeURIComponent(`${origin}/`)}`
+
+/** 按登出後要去哪：
+ *  - 伺服器撤銷登入成功，或登入早就過期（Access 把登出請求導去登入頁、或 401／403）→ 登入網域登出後回首頁；
+ *  - 其他失敗（撤銷失敗、斷線）→ 本站的 Cloudflare 登出頁，確保還登入著的人一定登得出去。 */
+export function logoutDestination(
+  res: { type: string; status: number; ok: boolean; headers: Headers } | null,
+  origin: string,
+): string {
+  if (res === null) return '/cdn-cgi/access/logout'
+  if (res.ok || needsLogin(res)) return teamLogout(origin)
+  return '/cdn-cgi/access/logout'
+}
+
 const GUEST_NAMES = ['登入後查看', '範例股票', '示範名單', '模型選股', '每日更新', '收盤產生', '範例資料', '登入查看', '示範股票', '範例名單']
 
 function rng(seed: number): () => number {
