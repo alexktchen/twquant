@@ -12,6 +12,7 @@ import {
   fetchStockPicks,
   fetchWatchlist,
   logoutTarget,
+  saveWatchOrder,
   searchStocks,
   setTracked,
 } from './api'
@@ -19,6 +20,7 @@ import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPic
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { dateOption, dayCount, hits, pct, price, quoteBar, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
+import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
 type Tab = 'today' | 'history' | 'watch'
@@ -45,6 +47,8 @@ export default function CloudApp() {
   const [watchErr, setWatchErr] = useState('')
   // 追蹤分頁正在看的股票：清單裡的，或剛搜尋到、還沒加入的
   const [watchSel, setWatchSel] = useState<{ sid: string; name: string | null } | null>(null)
+  // 追蹤清單的編輯模式（拖曳排序、置頂、刪除）
+  const [editing, setEditing] = useState(false)
   // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 版面照常可操作，只有股票列與 K 線換成模糊的假資料；其他錯誤照常顯示
   const onFail = (e: Error) => {
     if (!(e instanceof LoginRequired)) return setErr(e.message)
@@ -136,6 +140,26 @@ export default function CloudApp() {
   const tracked = useMemo(() => new Set((watch?.items ?? []).map((w) => w.sid)), [watch])
   const watchCurrent = watchSel ?? watch?.items[0] ?? null
   const toggleTrack = (s: string, on: boolean) => setTracked(s, on).then(loadWatch)
+  // 存順序：畫面先照新順序排，再一筆一筆依序送出（連拖幾次也不會後送先到）；失敗就顯示原因並重抓伺服器上的順序
+  const orderChain = useRef<Promise<void>>(Promise.resolve())
+  const reorderWatch = (order: string[]) => {
+    setWatch((w) => w && { ...w, items: order.flatMap((sid) => w.items.filter((i) => i.sid === sid)) })
+    orderChain.current = orderChain.current
+      .then(() => saveWatchOrder(order))
+      .then(() => undefined)
+      .catch((e: Error) => {
+        setWatchErr(watchError(e))
+        loadWatch()
+      })
+  }
+  const removeWatch = (sid: string) => {
+    setWatch((w) => w && { ...w, items: w.items.filter((i) => i.sid !== sid) })
+    setTracked(sid, false).catch((e: Error) => {
+      setWatchErr(watchError(e))
+      loadWatch()
+    })
+  }
+  const editMode = editing && !guest && (watch?.items.length ?? 0) > 0
   const detailRef = useRef<HTMLElement>(null)
 
   return (
@@ -217,19 +241,33 @@ export default function CloudApp() {
                 if (window.matchMedia('(max-width: 820px)').matches) detailRef.current?.scrollIntoView({ behavior: 'smooth' })
               }}
             />
-            <div className="cq-head">
-              <span>代號／名稱／模型評分</span>
-              <span>收盤</span>
-              <span>漲跌幅</span>
-            </div>
+            {!guest && watch && watch.items.length > 0 && (
+              <div className="cq-watchbar">
+                <span>{editMode ? '按住右邊的 ≡ 上下拖曳排序' : `共 ${watch.items.length} 檔`}</span>
+                <button className="cq-edit-btn" onClick={() => setEditing(!editMode)}>
+                  {editMode ? '完成' : '編輯'}
+                </button>
+              </div>
+            )}
+            {!editMode && (
+              <div className="cq-head">
+                <span>代號／名稱／模型評分</span>
+                <span>收盤</span>
+                <span>漲跌幅</span>
+              </div>
+            )}
             <div className="cq-rows">
-              <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
-                {guest
-                  ? guestPicks(6, 20261013).map((p) => <Row key={p.sid} p={p} on={false} onClick={() => undefined} />)
-                  : watch?.items.map((w) => (
-                      <WatchRow key={w.sid} w={w} on={w.sid === watchCurrent?.sid} onClick={() => setWatchSel(w)} />
-                    ))}
-              </ul>
+              {editMode && watch ? (
+                <WatchEditor items={watch.items} onOrder={reorderWatch} onRemove={removeWatch} />
+              ) : (
+                <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
+                  {guest
+                    ? guestPicks(6, 20261013).map((p) => <Row key={p.sid} p={p} on={false} onClick={() => undefined} />)
+                    : watch?.items.map((w) => (
+                        <WatchRow key={w.sid} w={w} on={w.sid === watchCurrent?.sid} onClick={() => setWatchSel(w)} />
+                      ))}
+                </ul>
+              )}
               {!guest && watchErr && <p className="cq-empty">{watchErr}</p>}
               {!guest && !watchErr && watch && watch.items.length === 0 && (
                 <p className="cq-empty">還沒有追蹤股。在上面輸入股號或名稱，查到後按「＋ 追蹤」。</p>
@@ -390,6 +428,111 @@ function WatchRow({ w, on, onClick }: { w: WatchItem; on: boolean; onClick: () =
       </span>
       <span className={`cq-chg ${t}`}>{pct(w.chg)}</span>
     </li>
+  )
+}
+
+/** 編輯追蹤股：按住右邊 ≡ 上下拖曳排序（放開才存）、置頂、刪除（按一次變「確定刪除」，再按才刪）。 */
+function WatchEditor({
+  items,
+  onOrder,
+  onRemove,
+}: {
+  items: WatchItem[]
+  onOrder: (order: string[]) => void
+  onRemove: (sid: string) => void
+}) {
+  const list = useRef<HTMLUListElement>(null)
+  // 拖曳中的暫時順序：放開才交給 onOrder 存
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<string | null>(null)
+  const sids = items.map((i) => i.sid)
+  const shown = (dragOrder ?? sids).flatMap((sid) => items.filter((i) => i.sid === sid))
+
+  const startDrag = (sid: string) => (e: React.PointerEvent) => {
+    const box = list.current
+    if (!box || !e.isPrimary) return
+    e.preventDefault()
+    let order = sids
+    let y = e.clientY
+    let frame = 0
+    setConfirm(null)
+    setDragging(sid)
+    setDragOrder(order)
+    // 每一列高度相同（編輯模式只有代號名稱），第 i 個格子永遠是第 i 列，畫面還沒重畫也算得對
+    const place = () => {
+      const to = rowAt([...box.children].map((li) => li.getBoundingClientRect()), y)
+      const from = order.indexOf(sid)
+      if (to >= 0 && to !== from) {
+        order = moveItem(order, from, to)
+        setDragOrder(order)
+      }
+    }
+    // 拖到清單上下緣時自動捲動（手指停著不動也要繼續捲）
+    const tick = () => {
+      const r = box.getBoundingClientRect()
+      const dy = edgeScroll(y, r.top, r.bottom)
+      if (dy !== 0 && box.scrollHeight > box.clientHeight) {
+        box.scrollTop += dy
+        place()
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return
+      y = ev.clientY
+      place()
+    }
+    const end = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      cancelAnimationFrame(frame)
+      setDragging(null)
+      setDragOrder(null)
+      if (order.join(',') !== sids.join(',')) onOrder(order)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    frame = requestAnimationFrame(tick)
+  }
+
+  return (
+    <ul ref={list} className="cq-editing">
+      {shown.map((w, i) => (
+        <li key={w.sid} className={w.sid === dragging ? 'cq-edit-row dragging' : 'cq-edit-row'}>
+          <div className="cq-name">
+            <b>
+              <em>{w.sid}</em>
+              {w.name ?? ''}
+            </b>
+          </div>
+          <button className="cq-row-btn" disabled={i === 0} onClick={() => onOrder([w.sid, ...sids.filter((s) => s !== w.sid)])}>
+            置頂
+          </button>
+          {confirm === w.sid ? (
+            <button
+              className="cq-row-btn danger"
+              onClick={() => {
+                setConfirm(null)
+                onRemove(w.sid)
+              }}
+            >
+              確定刪除
+            </button>
+          ) : (
+            <button className="cq-row-btn" onClick={() => setConfirm(w.sid)}>
+              刪除
+            </button>
+          )}
+          <span className="cq-handle" role="button" aria-label={`拖曳 ${w.sid} 調整順序`} onPointerDown={startDrag(w.sid)}>
+            ≡
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

@@ -7,10 +7,16 @@ import type { SearchHit, StockScores, WatchList } from './scores'
 const OFFLINE = '連線中斷，請重新整理頁面'
 
 // redirect: 'manual'：沒登入時 Access 會把 /api 導去登入頁，攔下來改丟 LoginRequired，畫面切成預覽模式。
-async function get<T>(path: string, method = 'GET'): Promise<T> {
+async function get<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   let res: Response
   try {
-    res = await fetch(apiUrl(path), { method, headers: { accept: 'application/json' }, redirect: 'manual', cache: 'no-store' })
+    const init: RequestInit = { method, headers: { accept: 'application/json' }, redirect: 'manual', cache: 'no-store' }
+    // 只有存順序（PUT）帶內容
+    if (body !== undefined) {
+      init.headers = { accept: 'application/json', 'content-type': 'application/json' }
+      init.body = JSON.stringify(body)
+    }
+    res = await fetch(apiUrl(path), init)
   } catch {
     throw new Error(OFFLINE)
   }
@@ -64,3 +70,6 @@ export const fetchWatchlist = () => get<WatchList>('/api/watchlist')
 /** 加入（on）或移除追蹤股；兩個都冪等。 */
 export const setTracked = (sid: string, on: boolean) =>
   get<{ ok: boolean }>(`/api/watchlist/${encodeURIComponent(sid)}`, on ? 'PUT' : 'DELETE')
+
+/** 存追蹤股的順序（由上到下的代號）。 */
+export const saveWatchOrder = (order: string[]) => get<{ ok: boolean }>('/api/watchlist', 'PUT', { order })
