@@ -34,7 +34,7 @@ async function get<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
  *  不能讓瀏覽器跟著跳到 cloudflareaccess.com（跨網域會被擋成網路錯誤，分不出是過期還是斷線）。 */
 export async function logoutTarget(): Promise<string> {
   const res = await fetch('/api/logout', { method: 'POST', redirect: 'manual', cache: 'no-store' }).catch(() => null)
-  return logoutDestination(res)
+  return logoutDestination(res, window.location.origin)
 }
 
 /** 目前登入的 email；沒登入時丟 LoginRequired。 */
