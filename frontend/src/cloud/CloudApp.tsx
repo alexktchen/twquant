@@ -20,7 +20,7 @@ import {
 import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { dateOption, dayCount, hits, pct, price, quoteBar, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
+import { dateOption, dayCount, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
 import { LIVE_POLL_MS, liveBar, liveLabel, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
@@ -31,6 +31,8 @@ type Tab = 'today' | 'history' | 'watch'
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
 const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
+// 從背景回到前景時，距離上次重抓至少隔多久才再抓
+const REFRESH_MIN_MS = 30_000
 const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e.message)
 
 export default function CloudApp() {
@@ -51,6 +53,8 @@ export default function CloudApp() {
   const [watchErr, setWatchErr] = useState('')
   // 追蹤分頁正在看的股票：清單裡的，或剛搜尋到、還沒加入的
   const [watchSel, setWatchSel] = useState<{ sid: string; name: string | null } | null>(null)
+  // 從背景回來時加一：名單、追蹤股、個股跟著重抓（見下方 visibilitychange）
+  const [refresh, setRefresh] = useState(0)
   // 🔔 通知：這台裝置的狀態（登入後才算）與按下後的說明
   const [push, setPush] = useState<PushState | null>(null)
   const [notice, setNotice] = useState('')
@@ -98,13 +102,23 @@ export default function CloudApp() {
 
   // 從背景回到前景時重新確認登入：登入 24 小時就過期，iPhone 主畫面 App 常常隔天才回來，
   // 畫面卻還停在登入狀態（頭像、登出、舊名單）。過期就換成沒登入的畫面，不留舊資料
+  // 還登入著就重抓名單、追蹤股與個股：網頁開著不會自己更新，下午打開、晚上回來（或點通知回來）會停在舊資料——
+  // 追蹤股會一直顯示下午從證交所抓的價格，而資料庫 17:40 左右就有今天的收盤了。30 秒內重複切換不重抓
+  const lastRefresh = useRef(Date.now())
   useEffect(() => {
     if (guest) return
     const onShow = () => {
       if (document.visibilityState !== 'visible') return
-      fetchMe().catch((e: Error) => {
-        if (e instanceof LoginRequired) onFail(e)
-      })
+      fetchMe()
+        .then(() => {
+          if (Date.now() - lastRefresh.current < REFRESH_MIN_MS) return
+          lastRefresh.current = Date.now()
+          setRefresh((n) => n + 1)
+          loadWatch()
+        })
+        .catch((e: Error) => {
+          if (e instanceof LoginRequired) onFail(e)
+        })
     }
     document.addEventListener('visibilitychange', onShow)
     return () => document.removeEventListener('visibilitychange', onShow)
@@ -144,7 +158,7 @@ export default function CloudApp() {
     }
     // line/sid 只用來保留使用者目前的選擇，不該觸發重抓
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, date, guest])
+  }, [tab, date, guest, refresh])
 
   // 沒登入時畫面只讀假資料：就算有真名單寫進 day，也不會出現在沒登入的畫面
   const guestView = useMemo(
@@ -391,6 +405,7 @@ export default function CloudApp() {
                 lineNames={lineNames}
                 tracked={tracked.has(watchCurrent.sid)}
                 onTrack={watch ? toggleTrack : undefined}
+                refresh={refresh}
               />
             ) : (
               <p className="cq-empty">輸入股號或名稱，看三個模型的評分。</p>
@@ -405,6 +420,7 @@ export default function CloudApp() {
               lineNames={lineNames}
               tracked={tracked.has(selected.sid)}
               onTrack={watch ? toggleTrack : undefined}
+              refresh={refresh}
             />
           ) : null}
         </section>
@@ -695,6 +711,7 @@ function Detail({
   lineNames,
   tracked,
   onTrack,
+  refresh,
 }: {
   sid: string
   name: string | null
@@ -706,6 +723,8 @@ function Detail({
   lineNames: Record<string, string>
   tracked: boolean
   onTrack?: (sid: string, on: boolean) => Promise<void>
+  /** 從背景回來時加一：重抓 K 線、被推薦日與評分 */
+  refresh: number
 }) {
   // K 線資料記著是哪一檔：換股時舊圖先留著（不閃白），但報價列只用這一檔自己的資料
   const [chart, setChart] = useState<{ sid: string; bars: Bar[]; days: Record<string, string[]> }>({ sid: '', bars: [], days: {} })
@@ -716,10 +735,17 @@ function Detail({
     // stale：快速切換時，晚到的上一檔回應不能蓋到這一檔
     let stale = false
     setErr('')
-    setScores(null)
     setScoreErr('')
+    // 換股時分數靠 scores.sid 判斷（不先清空，重抓同一檔時不會閃「計算中」）；K 線內容沒變就不換，免得整張圖重畫
     Promise.all([fetchBars(sid), fetchStockPicks(sid)])
-      .then(([bars, days]) => !stale && setChart({ sid, bars, days }))
+      .then(([bars, days]) => {
+        if (stale) return
+        setChart((prev) =>
+          prev.sid === sid && sameBars(prev.bars, bars) && JSON.stringify(prev.days) === JSON.stringify(days)
+            ? prev
+            : { sid, bars, days },
+        )
+      })
       .catch((e: Error) => !stale && setErr(e.message))
     fetchScores(sid)
       .then((s) => !stale && setScores(s))
@@ -727,7 +753,7 @@ function Detail({
     return () => {
       stale = true
     }
-  }, [sid])
+  }, [sid, refresh])
   const bars = chart.sid === sid ? chart.bars : []
   // 分數同理：換股後到新分數回來前，不拿上一檔的分數與名稱
   const sc = scores?.sid === sid ? scores : null

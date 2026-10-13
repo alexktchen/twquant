@@ -34,6 +34,15 @@ export function dateOption(date: string, n: number | null): string {
 
 export type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }
 
+/** 兩份 K 線內容是否相同（根數一樣、最後一根的日期與量價一樣）：重抓回來沒變就不重畫圖。 */
+export function sameBars(a: Bar[], b: Bar[]): boolean {
+  if (a.length !== b.length) return false
+  const x = a.at(-1)
+  const y = b.at(-1)
+  if (!x || !y) return x === y
+  return x.date === y.date && x.open === y.open && x.high === y.high && x.low === y.low && x.close === y.close && x.volume === y.volume
+}
+
 /** 台股習慣：漲紅、跌綠、平盤灰。 */
 export function trend(chg: number | null): 'up' | 'down' | 'flat' {
   if (chg === null || !Number.isFinite(chg) || chg === 0) return 'flat'
