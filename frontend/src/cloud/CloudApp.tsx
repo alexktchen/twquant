@@ -1,14 +1,31 @@
-// 雲端版網站（T-332／D-170）：只有每日推薦、歷史名單、個股 K 線。介面仿富途牛牛：
+// 雲端版網站（T-332／D-170）：每日推薦、歷史名單、追蹤股（T-345）與個股 K 線。介面仿富途牛牛：
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './cloud.css'
-import { fetchBars, fetchMe, fetchPickDates, fetchPicks, fetchPublicDates, fetchStockPicks, logoutTarget } from './api'
-import { LOGIN_URL, LoginRequired, guestCandles, guestDay } from './auth'
+import {
+  fetchBars,
+  fetchMe,
+  fetchPickDates,
+  fetchPicks,
+  fetchPublicDates,
+  fetchScores,
+  fetchStockPicks,
+  fetchWatchlist,
+  logoutTarget,
+  searchStocks,
+  setTracked,
+} from './api'
+import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { dateOption, dayCount, hits, pct, price, quoteBar, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
+import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
-type Tab = 'today' | 'history'
+type Tab = 'today' | 'history' | 'watch'
+
+// 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
+const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
+const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e.message)
 
 export default function CloudApp() {
   const [tab, setTab] = useState<Tab>('today')
@@ -23,17 +40,33 @@ export default function CloudApp() {
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
+  // 追蹤股：存在帳號裡（伺服器），手機和電腦同一份
+  const [watch, setWatch] = useState<WatchList | null>(null)
+  const [watchErr, setWatchErr] = useState('')
+  // 追蹤分頁正在看的股票：清單裡的，或剛搜尋到、還沒加入的
+  const [watchSel, setWatchSel] = useState<{ sid: string; name: string | null } | null>(null)
   // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 版面照常可操作，只有股票列與 K 線換成模糊的假資料；其他錯誤照常顯示
   const onFail = (e: Error) => {
     if (!(e instanceof LoginRequired)) return setErr(e.message)
     setGuest(true)
     setDay(null) // 登入過期：先前的真名單不留在狀態裡
+    setWatch(null)
   }
+  const loadWatch = () =>
+    fetchWatchlist()
+      .then((w) => {
+        setWatch(w)
+        setWatchErr('')
+      })
+      .catch((e: Error) => setWatchErr(watchError(e)))
 
   useEffect(() => {
-    // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可
+    // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可。確定登入了才抓追蹤股
     fetchMe()
-      .then((m) => setEmail(m.email))
+      .then((m) => {
+        setEmail(m.email)
+        loadWatch()
+      })
       .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
     fetchPickDates()
       .then((r) => {
@@ -58,7 +91,8 @@ export default function CloudApp() {
   }, [tab, date, dates])
 
   useEffect(() => {
-    if (guest) return
+    // 追蹤分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）
+    if (guest || tab === 'watch') return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
     const want = tab === 'today' ? undefined : date
@@ -85,22 +119,29 @@ export default function CloudApp() {
 
   // 沒登入時畫面只讀假資料：就算有真名單寫進 day，也不會出現在沒登入的畫面
   const guestView = useMemo(
-    () => (guest ? guestDay((tab === 'today' ? undefined : date) ?? guestToday ?? '') : null),
+    () => (guest ? guestDay((tab === 'history' ? date : undefined) ?? guestToday ?? '') : null),
     [guest, tab, date, guestToday],
   )
   const view = guest ? guestView : day
 
+  // K 線推薦日的圖例：線別名稱；追蹤分頁還沒載過名單時用固定的三條線
   const lineNames = useMemo(
-    () => Object.fromEntries((view?.lines ?? []).map((l) => [l.code, l.name])),
+    () => Object.fromEntries((view?.lines ?? GUEST_LINES).map((l) => [l.code, l.name])),
     [view],
   )
   const current = view?.lines.find((l) => l.code === line) ?? view?.lines[0]
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   const idx = date ? dates.indexOf(date) : -1
 
+  const tracked = useMemo(() => new Set((watch?.items ?? []).map((w) => w.sid)), [watch])
+  const watchCurrent = watchSel ?? watch?.items[0] ?? null
+  const toggleTrack = (s: string, on: boolean) => setTracked(s, on).then(loadWatch)
+  const detailRef = useRef<HTMLElement>(null)
+
   return (
     <div className="cq">
-      <header className="cq-top">
+      {/* 歷史名單的日期選單在手機上放不進分頁那一列：另起一列（cloud.css .cq-top-hist） */}
+      <header className={tab === 'history' ? 'cq-top cq-top-hist' : 'cq-top'}>
         <div className="cq-brand">
           <img className="cq-logo" src="/icon.svg" alt="" width="26" height="26" />
           twquant
@@ -117,6 +158,9 @@ export default function CloudApp() {
             }}
           >
             歷史名單
+          </button>
+          <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
+            追蹤
           </button>
         </nav>
         <div className="cq-date">
@@ -136,6 +180,11 @@ export default function CloudApp() {
                 ›
               </button>
             </>
+          ) : tab === 'watch' ? (
+            <span>
+              {guest ? guestToday : watch?.date}
+              <span className="cq-date-suffix"> 評分</span>
+            </span>
           ) : (
             <span>
               {view?.date}
@@ -157,52 +206,107 @@ export default function CloudApp() {
       {err && <div className="cq-err">{err}</div>}
 
       <main className="cq-body">
-        <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
-          <div className="cq-seg">
-            {view?.lines.map((l) => (
-              <button
-                key={l.code}
-                className={l.code === current?.code ? 'on' : ''}
-                onClick={() => {
-                  setLine(l.code)
-                  savePref(LINE_KEY, l.code)
-                  setSid(l.picks[0]?.sid ?? '')
-                }}
-              >
-                {l.name}
-                <em>{l.picks.length}</em>
-              </button>
-            ))}
-          </div>
-          <div className="cq-head">
-            <span>代號／名稱／近 6 日上榜</span>
-            <span>收盤／6日</span>
-            <span>漲跌幅</span>
-          </div>
-          <div className="cq-rows">
-            <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
-              {current?.picks.map((p) => (
-                <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
+        {tab === 'watch' ? (
+          <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
+            <StockSearch
+              disabled={guest}
+              tracked={tracked}
+              onPick={(h) => {
+                setWatchSel(h)
+                // 手機上名單在上、個股在下：查到就捲到個股
+                if (window.matchMedia('(max-width: 820px)').matches) detailRef.current?.scrollIntoView({ behavior: 'smooth' })
+              }}
+            />
+            <div className="cq-head">
+              <span>代號／名稱／模型評分</span>
+              <span>收盤</span>
+              <span>漲跌幅</span>
+            </div>
+            <div className="cq-rows">
+              <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
+                {guest
+                  ? guestPicks(6, 20261013).map((p) => <Row key={p.sid} p={p} on={false} onClick={() => undefined} />)
+                  : watch?.items.map((w) => (
+                      <WatchRow key={w.sid} w={w} on={w.sid === watchCurrent?.sid} onClick={() => setWatchSel(w)} />
+                    ))}
+              </ul>
+              {!guest && watchErr && <p className="cq-empty">{watchErr}</p>}
+              {!guest && !watchErr && watch && watch.items.length === 0 && (
+                <p className="cq-empty">還沒有追蹤股。在上面輸入股號或名稱，查到後按「＋ 追蹤」。</p>
+              )}
+              {guest && <Gate title="登入後查個股評分" text="輸入任何股號，看三個模型怎麼評它，並存成自己的追蹤股。" />}
+            </div>
+            <p className="cq-note">
+              追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新，非投資建議。
+            </p>
+          </aside>
+        ) : (
+          <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
+            <div className="cq-seg">
+              {view?.lines.map((l) => (
+                <button
+                  key={l.code}
+                  className={l.code === current?.code ? 'on' : ''}
+                  onClick={() => {
+                    setLine(l.code)
+                    savePref(LINE_KEY, l.code)
+                    setSid(l.picks[0]?.sid ?? '')
+                  }}
+                >
+                  {l.name}
+                  <em>{l.picks.length}</em>
+                </button>
               ))}
-            </ul>
-            {current && current.picks.length === 0 && (
-              <p className="cq-empty">今天沒有符合條件的股票。</p>
-            )}
-            {guest && <Gate />}
-          </div>
-          {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
-          <p className="cq-note">
-            方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
-          </p>
-        </aside>
+            </div>
+            <div className="cq-head">
+              <span>代號／名稱／近 6 日上榜</span>
+              <span>收盤／6日</span>
+              <span>漲跌幅</span>
+            </div>
+            <div className="cq-rows">
+              <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
+                {current?.picks.map((p) => (
+                  <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
+                ))}
+              </ul>
+              {current && current.picks.length === 0 && <p className="cq-empty">今天沒有符合條件的股票。</p>}
+              {guest && <Gate />}
+            </div>
+            {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
+            <p className="cq-note">
+              方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
+            </p>
+          </aside>
+        )}
 
-        <section className="cq-detail">
+        <section className="cq-detail" ref={detailRef}>
           {guest ? (
             <div className="cq-locked cq-guest-detail" aria-hidden="true">
               <GuestChart />
             </div>
+          ) : tab === 'watch' ? (
+            watchCurrent ? (
+              <Detail
+                sid={watchCurrent.sid}
+                name={watchCurrent.name}
+                lineNames={lineNames}
+                tracked={tracked.has(watchCurrent.sid)}
+                onTrack={watch ? toggleTrack : undefined}
+              />
+            ) : (
+              <p className="cq-empty">輸入股號或名稱，看三個模型的評分。</p>
+            )
           ) : selected ? (
-            <Detail p={selected} asOf={view?.date} lineNames={lineNames} />
+            <Detail
+              sid={selected.sid}
+              name={selected.name}
+              close={selected.close}
+              chg={selected.chg}
+              asOf={view?.date}
+              lineNames={lineNames}
+              tracked={tracked.has(selected.sid)}
+              onTrack={watch ? toggleTrack : undefined}
+            />
           ) : null}
         </section>
       </main>
@@ -263,31 +367,163 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
   )
 }
 
-function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lineNames: Record<string, string> }) {
-  const [bars, setBars] = useState<Bar[]>([])
-  const [days, setDays] = useState<Record<string, string[]>>({})
+/** 追蹤股一列：最新收盤、漲跌，和三個模型的重點（漲幅排名、在潛伏池才有的飆漲機率、回檔風險高才標）。 */
+function WatchRow({ w, on, onClick }: { w: WatchItem; on: boolean; onClick: () => void }) {
+  const t = trend(w.chg)
+  return (
+    <li className={on ? 'on' : ''} onClick={onClick}>
+      <div className="cq-name">
+        <b>
+          <em>{w.sid}</em>
+          {w.name ?? ''}
+        </b>
+        <small>
+          {scoreTags(w.models).map((g) => (
+            <i key={g.text} className={`cq-tag ${g.tone}`}>
+              {g.text}
+            </i>
+          ))}
+        </small>
+      </div>
+      <span className="cq-pxcol">
+        <span className={`cq-px ${t}`}>{price(w.close)}</span>
+      </span>
+      <span className={`cq-chg ${t}`}>{pct(w.chg)}</span>
+    </li>
+  )
+}
+
+/** 輸入股號或名稱：邊打邊找（停 0.2 秒才查），Enter 選第一筆；四碼數字直接查那一檔。 */
+function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked: Set<string>; onPick: (h: SearchHit) => void }) {
+  const [q, setQ] = useState('')
+  const [found, setFound] = useState<{ q: string; hits: SearchHit[] } | null>(null)
+  const [err, setErr] = useState('')
+  const [open, setOpen] = useState(false)
+  const text = q.trim()
+  useEffect(() => {
+    if (!text) return setFound(null)
+    let stale = false
+    const timer = setTimeout(() => {
+      searchStocks(text)
+        .then((hits) => {
+          if (stale) return
+          setFound({ q: text, hits })
+          setErr('')
+        })
+        .catch((e: Error) => !stale && setErr(watchError(e)))
+    }, 200)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
+  }, [text])
+  const hits = found?.q === text ? found.hits : []
+  const pick = (h: SearchHit) => {
+    onPick(h)
+    setQ('')
+    setOpen(false)
+  }
+  return (
+    <div className="cq-search">
+      <input
+        type="search"
+        enterKeyHint="search"
+        autoComplete="off"
+        placeholder="輸入股號或名稱，例如 2330、台積電"
+        value={q}
+        disabled={disabled}
+        onChange={(e) => {
+          setQ(e.target.value)
+          setOpen(true)
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') return setQ('')
+          if (e.key !== 'Enter') return
+          if (hits[0]) pick(hits[0])
+          else if (/^[0-9]{4}$/.test(text)) pick({ sid: text, name: null, industry: null })
+        }}
+      />
+      {open && text && (
+        <ul className="cq-hitlist">
+          {hits.map((h) => (
+            // mousedown 先於 blur：不攔的話清單在點到之前就關了
+            <li key={h.sid} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(h)}>
+              <em>{h.sid}</em>
+              <span>{h.name ?? ''}</span>
+              <small>{tracked.has(h.sid) ? '已追蹤' : h.industry ?? ''}</small>
+            </li>
+          ))}
+          {err && <li className="cq-hit-none">{err}</li>}
+          {!err && found?.q === text && hits.length === 0 && (
+            <li className="cq-hit-none">找不到「{text}」：只收上市櫃普通股（ETF 沒有評分）</li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function Detail({
+  sid,
+  name,
+  close,
+  chg,
+  asOf,
+  lineNames,
+  tracked,
+  onTrack,
+}: {
+  sid: string
+  name: string | null
+  /** 名單上的收盤與漲跌（名單日期那天）；不給就用 K 線最後一根 */
+  close?: number | null
+  chg?: number | null
+  asOf?: string
+  lineNames: Record<string, string>
+  tracked: boolean
+  onTrack?: (sid: string, on: boolean) => Promise<void>
+}) {
+  // K 線資料記著是哪一檔：換股時舊圖先留著（不閃白），但報價列只用這一檔自己的資料
+  const [chart, setChart] = useState<{ sid: string; bars: Bar[]; days: Record<string, string[]> }>({ sid: '', bars: [], days: {} })
+  const [scores, setScores] = useState<StockScores | null>(null)
+  const [scoreErr, setScoreErr] = useState('')
   const [err, setErr] = useState('')
   useEffect(() => {
+    // stale：快速切換時，晚到的上一檔回應不能蓋到這一檔
+    let stale = false
     setErr('')
-    Promise.all([fetchBars(p.sid), fetchStockPicks(p.sid)])
-      .then(([b, d]) => {
-        setBars(b)
-        setDays(d)
-      })
-      .catch((e: Error) => setErr(e.message))
-  }, [p.sid])
-  const t = trend(p.chg)
+    setScores(null)
+    setScoreErr('')
+    Promise.all([fetchBars(sid), fetchStockPicks(sid)])
+      .then(([bars, days]) => !stale && setChart({ sid, bars, days }))
+      .catch((e: Error) => !stale && setErr(e.message))
+    fetchScores(sid)
+      .then((s) => !stale && setScores(s))
+      .catch((e: Error) => !stale && setScoreErr(e.message))
+    return () => {
+      stale = true
+    }
+  }, [sid])
+  const bars = chart.sid === sid ? chart.bars : []
+  // 分數同理：換股後到新分數回來前，不拿上一檔的分數與名稱
+  const sc = scores?.sid === sid ? scores : null
   // 報價列：名單日期那根（歷史名單選 9/24 就顯示 9/24，不是最新一天）；長按看別天在 K 線上的浮框
   const q = quoteBar(bars, asOf, null)
+  const bigClose = close !== undefined ? close : (q?.bar.close ?? null)
+  const bigChg = chg !== undefined ? chg : (q?.chg ?? null)
+  const t = trend(bigChg)
   return (
     <>
       <div className="cq-quote">
         <div>
           <h1>
-            <small>{p.sid}</small> {p.name ?? ''}
+            <small>{sid}</small> {name ?? sc?.name ?? ''}
+            {onTrack && <TrackButton sid={sid} on={tracked} onTrack={onTrack} />}
           </h1>
           <div className={`cq-big ${t}`}>
-            {price(p.close)} <span>{pct(p.chg)}</span>
+            {price(bigClose)} <span>{pct(bigChg)}</span>
           </div>
         </div>
         {q && (
@@ -308,6 +544,7 @@ function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lin
           </dl>
         )}
       </div>
+      <ModelPanel scores={sc} err={scoreErr} />
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (
           <span key={m.n} style={{ color: m.color }}>
@@ -316,26 +553,129 @@ function Detail({ p, asOf, lineNames }: { p: Pick; asOf: string | undefined; lin
         ))}
         <span className="cq-legend-note">
           推薦日
-          {Object.entries(lineNames).map(([code, name]) => (
+          {Object.entries(lineNames).map(([code, n]) => (
             <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }}>
-              ▼{name}
+              ▼{n}
             </b>
           ))}
         </span>
       </div>
-      {err ? <div className="cq-err">{err}</div> : <KChart bars={bars} pickDays={days} lineNames={lineNames} />}
+      {err ? <div className="cq-err">{err}</div> : <KChart bars={chart.bars} pickDays={chart.days} lineNames={lineNames} />}
     </>
   )
 }
 
+/** 加入／移除追蹤股。送出中停用，失敗把原因寫在按鈕旁。 */
+function TrackButton({ sid, on, onTrack }: { sid: string; on: boolean; onTrack: (sid: string, on: boolean) => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  return (
+    <>
+      <button
+        className={on ? 'cq-track on' : 'cq-track'}
+        disabled={busy}
+        onClick={() => {
+          setBusy(true)
+          setErr('')
+          onTrack(sid, !on)
+            .catch((e: Error) => setErr(watchError(e)))
+            .finally(() => setBusy(false))
+        }}
+      >
+        {on ? '✓ 已追蹤' : '＋ 追蹤'}
+      </button>
+      {err && <span className="cq-track-err">{err}</span>}
+    </>
+  )
+}
+
+/** 三個模型的評分卡：大字＋一行說明＋近幾日走勢；「這些分數是什麼」展開說明。 */
+function ModelPanel({ scores, err }: { scores: StockScores | null; err: string }) {
+  const [help, setHelp] = useState(false)
+  if (err) return <div className="cq-models cq-models-msg">模型評分：{err}</div>
+  if (!scores) return <div className="cq-models cq-models-msg">模型評分計算中…</div>
+  const views = scores.models.map((m) => ({ m, v: modelView(m) }))
+  const date = scores.models.map((m) => m.date).find((d) => d !== null) ?? null
+  return (
+    <div className="cq-models">
+      <div className="cq-models-head">
+        <b>模型評分</b>
+        {date && <span>{date} 收盤後</span>}
+        {scores.lists.map((l) => (
+          <i key={l.line} className="cq-tag new" title={`${l.date} 的名單`}>
+            {l.name}第 {l.rank} 名
+          </i>
+        ))}
+        <button className="cq-help" onClick={() => setHelp(!help)}>
+          {help ? '收起說明' : '這些分數是什麼？'}
+        </button>
+      </div>
+      <div className="cq-cards">
+        {views.map(({ m, v }) => (
+          <div key={m.code} className="cq-card" title={v.what}>
+            <div className="cq-card-top">
+              <b>{v.title}</b>
+              <small>{v.who}</small>
+            </div>
+            <div className="cq-card-mid">
+              <span className={`cq-card-big ${v.tone}`}>{v.big}</span>
+              <Spark points={sparkPoints(m)} />
+            </div>
+            <div className="cq-card-sub">
+              {v.sub}
+              {m.date !== null && date !== null && m.date !== date && `（${m.date}）`}
+            </div>
+          </div>
+        ))}
+      </div>
+      {help && (
+        <ul className="cq-models-help">
+          {views.map(({ m, v }) => (
+            <li key={m.code}>
+              <b>{v.title}</b>（{v.who}）：{v.what}
+            </li>
+          ))}
+          <li>右上小折線是最近幾個交易日的變化，越往上越好。分數是模型的估計，不保證會發生，非投資建議。</li>
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** 近幾日走勢的小折線（舊到新，越高越好）；少於兩天不畫。 */
+function Spark({ points }: { points: { date: string; value: number }[] }) {
+  if (points.length < 2) return null
+  const W = 56
+  const H = 20
+  const vs = points.map((p) => p.value)
+  const lo = Math.min(...vs)
+  const hi = Math.max(...vs)
+  const x = (i: number) => (i / (points.length - 1)) * (W - 4) + 2
+  const y = (v: number) => (hi === lo ? H / 2 : H - 2 - ((v - lo) / (hi - lo)) * (H - 4))
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join('')
+  const last = points[points.length - 1]
+  return (
+    <svg className="cq-spark" viewBox={`0 0 ${W} ${H}`} width={W} height={H} aria-hidden="true">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx={x(points.length - 1)} cy={y(last.value)} r="2" fill="currentColor" />
+    </svg>
+  )
+}
+
 /** 沒登入：蓋在模糊名單上的登入卡片。股票列與 K 線是假資料，真資料只從 /api 給已登入的人。 */
-function Gate() {
+function Gate({
+  title = '登入後查看名單',
+  text = '每個交易日收盤後，AI 模型挑出的大盤精選與潛伏飆股。',
+}: {
+  title?: string
+  text?: string
+}) {
   return (
     <div className="cq-gate">
       <div className="cq-gate-card">
         <img src="/icon-192.png" alt="" width="52" height="52" />
-        <h2>登入後查看名單</h2>
-        <p>每個交易日收盤後，AI 模型挑出的大盤精選與潛伏飆股。</p>
+        <h2>{title}</h2>
+        <p>{text}</p>
         <a className="cq-google" href={LOGIN_URL}>
           登入／註冊
         </a>
