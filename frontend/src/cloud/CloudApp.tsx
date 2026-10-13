@@ -19,6 +19,8 @@ import {
 } from './api'
 import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
 import { LINE_KEY, loadPref, savePref } from './prefs'
+import { RISK_KEY, riskAccepted, riskRecord } from './risk'
+import { RiskNotice } from './RiskNotice'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { dateOption, dayCount, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
@@ -44,6 +46,8 @@ export default function CloudApp() {
   const [day, setDay] = useState<PicksDay | null>(null)
   // 上次看的策略（大盤精選／潛伏飆股）：重新整理、重開都停在那一條
   const [line, setLine] = useState<string>(() => loadPref(LINE_KEY) ?? '')
+  // 投資風險警語：這台裝置還沒同意過（或警語改版）就先擋在最前面
+  const [riskOk, setRiskOk] = useState(() => riskAccepted(loadPref(RISK_KEY)))
   const [sid, setSid] = useState<string>('')
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
@@ -425,6 +429,14 @@ export default function CloudApp() {
           ) : null}
         </section>
       </main>
+      {!riskOk && (
+        <RiskNotice
+          onAgree={() => {
+            savePref(RISK_KEY, riskRecord(taipeiNow().date))
+            setRiskOk(true)
+          }}
+        />
+      )}
     </div>
   )
 }
