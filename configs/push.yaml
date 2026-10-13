@@ -1,0 +1,16 @@
+# 網頁推播（T-348）：每個交易日雲端排程寫好名單後，發一則「今日名單已更新」給開了通知的裝置。
+# 私密金鑰只在環境變數（.env／GitHub secret），這裡只放公開的那半與名稱。
+
+vapid_public_key: BCj5A9F92nMUJyViSXzW6_Z64i26W_fvID4SiyAtgzGzKhiwYpqUinQE4-uRRKZ8jfB-Cc6e9_7rWVUSYyJ8onc # 與 frontend/src/cloud/push.ts 的 VAPID_PUBLIC_KEY 相同（tests/test_push_notify.py 守著）
+vapid_private_key_env: TWQUANT_VAPID_PRIVATE_KEY # 存私密金鑰的環境變數名稱
+vapid_subject: https://twquant.pages.dev # 推播服務出問題時聯絡誰（規格要 mailto: 或 https:，用網站網址免得公開 email）
+site_url: https://twquant.pages.dev/ # 點通知打開哪裡
+request_timeout_seconds: 15 # 單一推播服務請求的逾時
+ttl_seconds: 43200 # 手機關機時推播服務最多替我們留 12 小時；隔天才收到的「今日名單」沒有意義
+# 只接受這些推播服務的網址（瀏覽器給的訂閱網址）：避免有人登記任意網址，讓排程替他打請求。
+# 與 frontend/functions/_lib/push.ts 的 PUSH_HOSTS 相同（測試守著）。
+allowed_hosts:
+  - web.push.apple.com
+  - fcm.googleapis.com
+  - updates.push.services.mozilla.com
+  - notify.windows.com

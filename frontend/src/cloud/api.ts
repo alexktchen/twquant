@@ -79,3 +79,9 @@ export const saveWatchOrder = (order: string[]) => get<{ ok: boolean }>('/api/wa
 /** 盤中即時量價（證交所，約 5 秒更新）；最多 100 檔。 */
 export const fetchQuotes = (sids: string[]) =>
   get<{ quotes: Quote[] }>(`/api/quotes?sids=${encodeURIComponent(sids.join(','))}`).then((r) => r.quotes)
+
+/** 這台裝置開通知：存瀏覽器給的推播訂閱。 */
+export const savePushSubscription = (sub: PushSubscriptionJSON) => get<{ ok: boolean }>('/api/push', 'POST', sub)
+
+/** 這台裝置關通知。 */
+export const deletePushSubscription = (endpoint: string) => get<{ ok: boolean }>('/api/push', 'DELETE', { endpoint })

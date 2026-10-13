@@ -21,6 +21,8 @@ import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPic
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { dateOption, dayCount, hits, pct, price, quoteBar, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
+import { PUSH_HINT, type PushState } from './push'
+import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
 import { LIVE_POLL_MS, liveBar, liveLabel, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
@@ -49,6 +51,9 @@ export default function CloudApp() {
   const [watchErr, setWatchErr] = useState('')
   // 追蹤分頁正在看的股票：清單裡的，或剛搜尋到、還沒加入的
   const [watchSel, setWatchSel] = useState<{ sid: string; name: string | null } | null>(null)
+  // 🔔 通知：這台裝置的狀態（登入後才算）與按下後的說明
+  const [push, setPush] = useState<PushState | null>(null)
+  const [notice, setNotice] = useState('')
   // 追蹤清單的編輯模式（拖曳排序、置頂、刪除）
   const [editing, setEditing] = useState(false)
   // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 版面照常可操作，只有股票列與 K 線換成模糊的假資料；其他錯誤照常顯示
@@ -71,6 +76,9 @@ export default function CloudApp() {
     fetchMe()
       .then((m) => {
         setEmail(m.email)
+        currentPushState()
+          .then(setPush)
+          .catch((e: Error) => console.warn('通知狀態讀取失敗', e))
         loadWatch()
       })
       .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
@@ -177,6 +185,24 @@ export default function CloudApp() {
     })
   }
   const editMode = editing && !guest && (watch?.items.length ?? 0) > 0
+  // 按 🔔：不能開的狀態只顯示說明；能開的就開／關。開的時候第一步就要權限（iPhone 要在按下的當下要）
+  const onBell = () => {
+    if (!push) return
+    if (push === 'needs-install' || push === 'unsupported' || push === 'denied') return setNotice(PUSH_HINT[push])
+    const was = push
+    ;(was === 'on' ? disablePush() : enablePush())
+      .then((next) => {
+        setPush(next)
+        setNotice(was === 'on' ? '已關閉通知。' : PUSH_HINT[next])
+      })
+      .catch((e: Error) => setNotice(`通知設定失敗：${watchError(e)}`))
+  }
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(''), 8000)
+    return () => clearTimeout(t)
+  }, [notice])
+  useEffect(() => registerServiceWorker(), [])
   // 追蹤清單的盤中價格（編輯時不抓）
   const watchSids = useMemo(() => (watch?.items ?? []).map((w) => w.sid), [watch])
   const watchLive = useLiveQuotes(watchSids, tab === 'watch' && !guest && !editMode)
@@ -244,11 +270,19 @@ export default function CloudApp() {
             </a>
           </div>
         ) : (
-          <User email={email} />
+          <User email={email} push={push} onBell={onBell} />
         )}
       </header>
 
       {err && <div className="cq-err">{err}</div>}
+      {notice && (
+        <div className="cq-notice" role="status">
+          <span>{notice}</span>
+          <button aria-label="關閉" onClick={() => setNotice('')}>
+            ✕
+          </button>
+        </div>
+      )}
 
       <main className="cq-body">
         {tab === 'watch' ? (
@@ -380,10 +414,15 @@ export default function CloudApp() {
 }
 
 /** 登入身分與登出（Cloudflare Access）。沒開 Access 時整塊不顯示。 */
-function User({ email }: { email: string | null }) {
+function User({ email, push, onBell }: { email: string | null; push: PushState | null; onBell: () => void }) {
   if (!email) return null
   return (
     <div className="cq-user" title={email}>
+      {push && (
+        <button className={push === 'on' ? 'cq-bell on' : 'cq-bell'} aria-label={PUSH_HINT[push]} title={PUSH_HINT[push]} onClick={onBell}>
+          <BellMark on={push === 'on'} />
+        </button>
+      )}
       <span className="cq-avatar">{email.slice(0, 1).toUpperCase()}</span>
       <span className="cq-email">{email}</span>
       <a
@@ -955,6 +994,15 @@ function GoogleMark() {
       <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.5 5.8c4.4-4 6.8-10 6.8-17.2z" />
       <path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.8-6.1C1 16.5 0 20.1 0 24s1 7.5 2.6 10.8l7.8-6.1z" />
       <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.7-4.1-13.6-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z" />
+    </svg>
+  )
+}
+
+function BellMark({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
     </svg>
   )
 }

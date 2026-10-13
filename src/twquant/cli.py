@@ -1722,6 +1722,65 @@ def _run_daily_pipeline(
     return run_pipeline(day, steps, data_dir=cfg.data_dir, git_hash=_git_hash(), now=now_tw())
 
 
+@app.command("notify-picks")
+def notify_picks(
+    date: str = typer.Option(..., "--date", help="交易日 YYYY-MM-DD"),
+    test: bool = typer.Option(False, "--test", help="試發：不管這天發過沒、不記錄、不刪失效訂閱"),
+) -> None:
+    """網頁推播（T-348）：當天名單寫好後通知開了通知的裝置；每個交易日只發一次（雲端排程呼叫）。"""
+    import os
+
+    from twquant.config import PushConfig, load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.errors import ConfigError
+    from twquant.monitoring import push_notify as pn
+    from twquant.reporting.pick_board import PickBoardConfig
+
+    day = dt.date.fromisoformat(date)
+    cfg = load_config(_CONFIG_DIR / "push.yaml", PushConfig)
+    board = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
+    key = os.environ.get(cfg.vapid_private_key_env, "")
+    if not key:
+        raise ConfigError(
+            f"缺推播私密金鑰：環境變數 {cfg.vapid_private_key_env}（.env 或 GitHub secret）"
+        )
+    kind = "picks"
+    scfg = _load_serving()
+    conn = store.connect_cloud(scfg)
+    try:
+        if not test and pn.already_sent(conn, day, kind):
+            typer.echo(f"{day} 的名單通知已經發過，略過")
+            return
+        lines = pn.load_line_counts(
+            conn, scfg.pg_schema, day, [(s.code, s.name) for s in board.strategies]
+        )
+        if lines is None:
+            typer.echo(f"{day} 還沒有名單，不發")
+            return
+        subs = pn.load_subscriptions(conn)
+        allowed = [s for s in subs if pn.host_allowed(s.endpoint, cfg.allowed_hosts)]
+        if len(allowed) != len(subs):
+            typer.secho(
+                f"[WARN] 略過 {len(subs) - len(allowed)} 個不是已知推播服務的訂閱",
+                fg=typer.colors.YELLOW,
+            )
+        payload = pn.compose(day, lines, cfg.site_url)
+        send = pn.webpush_sender(
+            key, cfg.vapid_subject, cfg.ttl_seconds, cfg.request_timeout_seconds
+        )
+        result = pn.send_all(allowed, payload, send)
+        if not test:
+            pn.record(conn, day, kind, result, now_tw())
+    finally:
+        conn.close()
+    typer.echo(f"{payload['title']}：{payload['body']}")
+    typer.echo(f"發出 {result.sent}、失效（已刪） {len(result.gone)}、失敗 {len(result.failed)}")
+    if result.failed:
+        typer.secho("[FAIL] " + "；".join(result.failed), fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
 def _echo_pipeline_result(res: PipelineResult) -> None:
     typer.secho(f"=== 每日 pipeline @ {res.day} ===", fg=typer.colors.CYAN, bold=True)
     for s in res.steps:
