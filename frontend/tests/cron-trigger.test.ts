@@ -4,7 +4,7 @@ import { dispatchRequest, taipeiDate } from '../../cron-trigger/src/dispatch.ts'
 
 test('D-175：觸發時刻換成台北日期（UTC 16:00 以後已是台北隔天）', () => {
   assert.equal(taipeiDate(new Date('2026-10-12T09:33:00Z')), '2026-10-12') // 台北 17:33
-  assert.equal(taipeiDate(new Date('2026-10-12T14:43:00Z')), '2026-10-12') // 台北 22:43
+  assert.equal(taipeiDate(new Date('2026-10-12T13:13:00Z')), '2026-10-12') // 台北 21:13
   assert.equal(taipeiDate(new Date('2026-10-12T16:00:00Z')), '2026-10-13') // 台北隔天 00:00
 })
 
