@@ -5,14 +5,14 @@ cron 移離每小時起始尖峰。裁決見 D-040；每日資料流程本身仍
 
 ## 1. 排程
 
-- `.github/workflows/daily-pipeline.yml` 兩班為 UTC `09:33`、`14:43`（Asia/Taipei
-  `17:33`、`22:43`），週一至週五（D-175；之前是 20:23／22:43）。
+- `.github/workflows/daily-pipeline.yml` 兩班為 UTC `09:33`、`13:13`（Asia/Taipei
+  `17:33`、`21:13`），週一至週五（D-175；之前是 20:23／22:43，2026-10-13 晚上那班提早到 21:13：融資券實測約 20:40 公布）。
 - **準時觸發（D-175）**：Cloudflare Worker `cron-trigger/` 在同兩個時點呼叫 GitHub API 的
   `workflow_dispatch`，帶 `date`＝當下台北日期，走下面「手動 date 路徑」。workflow 的 `schedule`
   只是備援（2026-10 實測 GHA schedule 常態晚約 5 小時）；Worker 驗證可用後應移除，免得每天跑兩倍、吃光私有 repo 的分鐘額度。
-- 17:33 跑時有的表可能還沒公布：`configs/system.yaml` 的 `quality_gate.required_tables` 缺任何一張，品質閘門就擋下（不打分），由 22:43 那一輪補。
+- 17:33 跑時有的表可能還沒公布：`configs/system.yaml` 的 `quality_gate.required_tables` 缺任何一張，品質閘門就擋下（不打分），由 21:13 那一輪補。
 - 班次時間必須由 workflow 傳給 resolver；Python 函數只接受配置化的 `slots`，不得
-  寫死 19:23 / 22:43。
+  寫死班次時間。
 - `workflow_dispatch.inputs.date` 非空時直接採用該日；不得再做自動改寫。
 
 ## 2. 最近預定班次

@@ -1,5 +1,5 @@
 # D-175：準時觸發雲端每日 pipeline。GitHub Actions 的 schedule 常態晚約 5 小時（2026-10 實測），
-# 改由 Cloudflare Cron Trigger 在台北 17:33／22:43 呼叫 workflow_dispatch（帶當天台北日期）。
+# 改由 Cloudflare Cron Trigger 在台北 17:33／21:13 呼叫 workflow_dispatch（帶當天台北日期）。晚上那班 2026-10-13 由 22:43 提早到 21:13。
 # 部署：cd cron-trigger && npx wrangler deploy
 # 祕密：GITHUB_TOKEN（fine-grained token，只給 alexktchen/twquant 的 Actions: Read and write），
 #       在 Cloudflare 後台 Workers → twquant-cron-trigger → Settings → Variables and Secrets 加，或 wrangler secret put。
@@ -10,7 +10,7 @@ workers_dev = false
 
 [triggers]
 # UTC；台北＝UTC+8。MON-FRI 用名稱，避免星期數字從 0 或 1 起算的歧義。平日國定假日交給品質閘門。
-crons = ["33 9 * * MON-FRI", "43 14 * * MON-FRI"]
+crons = ["33 9 * * MON-FRI", "13 13 * * MON-FRI"]
 
 [vars]
 GITHUB_REPO = "alexktchen/twquant"
