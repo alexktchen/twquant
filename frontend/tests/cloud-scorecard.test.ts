@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { lineOk, rawJson } from '../functions/_lib/scorecard.ts'
-import { filterRows, md, navLines, ratio, statusText, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
+import { filterRows, md, navLines, ratio, statusText, stockTitle, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
 
 const nav: NavPoint[] = [
   { d: '2026-10-06', v: 100, b: 200, x: 0 },
@@ -63,6 +63,13 @@ test('D-176 AC10: 逐筆狀態的白話與篩選', () => {
     ['B'],
   )
   assert.equal(filterRows(rows, 'all').length, 2)
+})
+
+test('逐筆明細的大字是中文股名，查不到名字才用代號', () => {
+  assert.equal(stockTitle({ sid: '2330', name: '台積電' }), '台積電')
+  assert.equal(stockTitle({ sid: '3661', name: '世芯-KY' }), '世芯-KY')
+  assert.equal(stockTitle({ sid: '9999', name: null }), '9999')
+  assert.equal(stockTitle({ sid: '9999', name: '  ' }), '9999')
 })
 
 test('D-176 AC10: 日期、比例、金額格式', () => {

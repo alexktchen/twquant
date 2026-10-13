@@ -90,6 +90,12 @@ export function navLines(nav: NavPoint[], liveSince: string | null): { backfill:
   return out
 }
 
+/** 明細那一列的大字：中文股名；資料庫查不到名字才退回代號（代號另外以小字列在下面）。 */
+export function stockTitle(r: Pick<TradeRow, 'sid' | 'name'>): string {
+  const name = r.name?.trim()
+  return name ? name : r.sid
+}
+
 /** 逐筆狀態的白話。 */
 export function statusText(r: TradeRow): string {
   if (r.status === 'closed') return r.reason === 'price_jump' ? '已賣（價格異常）' : '已賣'

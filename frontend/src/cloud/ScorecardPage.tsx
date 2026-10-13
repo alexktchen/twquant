@@ -12,6 +12,7 @@ import {
   navLines,
   ratio,
   statusText,
+  stockTitle,
   wan,
   type RowFilter,
   type Scorecard,
@@ -313,7 +314,7 @@ function TradeTable({ rows }: { rows: TradeRow[] }) {
   return (
     <div className="cq-score-trades">
       <div className="cq-trade cq-trade-head">
-        <span>公布日／股票</span>
+        <span>股票／公布日</span>
         <span>買進</span>
         <span>賣出</span>
         <span>報酬</span>
@@ -321,14 +322,12 @@ function TradeTable({ rows }: { rows: TradeRow[] }) {
       {rows.map((r) => (
         <div key={`${r.signal}-${r.sid}`} className="cq-trade">
           <span className="cq-trade-name">
+            <b>{stockTitle(r)}</b>
             <small>
-              {md(r.signal)}
+              {r.name && <em>{r.sid}</em>}
+              {md(r.signal)} 公布
               <i className={r.live ? 'cq-tag new' : 'cq-tag'}>{r.live ? '即時' : '補'}</i>
             </small>
-            <b>
-              <em>{r.sid}</em>
-              {r.name ?? ''}
-            </b>
           </span>
           <span className="cq-trade-px">
             {r.entry_price !== null ? (
