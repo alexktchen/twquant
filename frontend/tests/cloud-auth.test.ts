@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { afterLogin, me } from '../functions/_lib/auth.ts'
 import { EMAIL_HEADER } from '../functions/_lib/logout.ts'
-import { LOGIN_URL, LoginRequired, guestCandles, guestDay, logoutDestination, needsLogin } from '../src/cloud/auth.ts'
+import { LOGIN_URL, LoginRequired, guestCandles, guestDay, logoutDestination, needsLogin, teamLogout } from '../src/cloud/auth.ts'
 
 const res = (type: string, status: number, ct: string) => ({
   type,
@@ -58,16 +58,20 @@ test('T-332 登入：/api/me 只回 Access 給的 email，/api/login 登入後�
   assert.equal(back.headers.get('location'), 'https://twquant.pages.dev/')
 })
 
-test('登出去哪：撤銷成功或登入早已過期都回首頁；撤銷失敗、斷線才退回 Cloudflare 登出頁', () => {
+test('登出去哪：撤銷成功或登入早已過期 → 先清 Cloudflare 登入網域的 cookie 再回首頁；撤銷失敗、斷線才走本站的 Cloudflare 登出頁', () => {
+  const origin = 'https://twquant.pages.dev'
+  const team = 'https://twquant-pages.cloudflareaccess.com/cdn-cgi/access/logout?returnTo=https%3A%2F%2Ftwquant.pages.dev%2F'
   const json = new Headers({ 'content-type': 'application/json' })
   const res = (status: number, type = 'basic') => ({ type, status, ok: status >= 200 && status < 300, headers: json })
-  assert.equal(logoutDestination(res(200)), '/')
+  assert.equal(teamLogout(origin), team)
+  assert.equal(logoutDestination(res(200), origin), team)
   // 登入過期：Access 把 POST /api/logout 導去登入頁（manual 模式下是 opaqueredirect），或回 401／403
-  assert.equal(logoutDestination({ type: 'opaqueredirect', status: 0, ok: false, headers: new Headers() }), '/')
-  assert.equal(logoutDestination(res(401)), '/')
-  assert.equal(logoutDestination(res(403)), '/')
+  assert.equal(logoutDestination({ type: 'opaqueredirect', status: 0, ok: false, headers: new Headers() }, origin), team)
+  assert.equal(logoutDestination(res(401), origin), team)
+  assert.equal(logoutDestination(res(403), origin), team)
   // 還登入著但撤銷失敗：要走 Cloudflare 的登出頁，確保登得出去
-  assert.equal(logoutDestination(res(502)), '/cdn-cgi/access/logout')
-  assert.equal(logoutDestination(res(503)), '/cdn-cgi/access/logout')
-  assert.equal(logoutDestination(null), '/cdn-cgi/access/logout')
+  assert.equal(logoutDestination(res(502), origin), '/cdn-cgi/access/logout')
+  assert.equal(logoutDestination(null, origin), '/cdn-cgi/access/logout')
+  // 預覽網址導回自己
+  assert.ok(teamLogout('https://abc.twquant.pages.dev').endsWith('returnTo=https%3A%2F%2Fabc.twquant.pages.dev%2F'))
 })
