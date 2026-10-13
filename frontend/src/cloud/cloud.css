@@ -187,6 +187,13 @@
   touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 .cq-edit-row.dragging .cq-handle { color: var(--accent); cursor: grabbing; }
+/* 盤中即時價（T-347）：價格旁的狀態、追蹤清單價格下的小字 */
+.cq-live {
+  font-style: normal; font-size: 13.5px; font-weight: 600; margin-left: 10px; padding: 2px 9px; border-radius: 999px;
+  background: rgba(255, 122, 0, .14); color: var(--accent); vertical-align: middle; white-space: nowrap;
+}
+.cq-live.off { background: #262830; color: var(--mute); font-weight: 400; }
+.cq-pxcol small.cq-live-tag { color: var(--accent); font-size: 12px; }
 .cq-tag.hot { background: rgba(255, 122, 0, .18); color: var(--accent); }
 .cq-tag.warn { background: rgba(255, 176, 32, .16); color: #ffc04d; }
 

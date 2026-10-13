@@ -1,5 +1,5 @@
 // 雲端版（T-332）個股 K 線：富途式深色底、紅漲綠跌、MA5/20/60、下方成交量、被推薦日標記。
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CandlestickSeries,
   ColorType,
@@ -8,6 +8,7 @@ import {
   LineSeries,
   createChart,
   createSeriesMarkers,
+  type ISeriesApi,
 } from 'lightweight-charts'
 import { loadPref, savePref } from './prefs'
 import { KEPT_BARS_KEY, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from './format'
@@ -31,19 +32,32 @@ function keepBars(n: number) {
 
 export function KChart({
   bars,
+  live = null,
   pickDays,
   lineNames,
 }: {
   bars: Bar[]
+  /** 盤中今天到目前為止的那根（資料庫傍晚才有今天）；每 10 秒換一次，只更新最後一根、不重畫整張圖 */
+  live?: Bar | null
   pickDays: Record<string, string[]>
   lineNames: Record<string, string>
 }) {
   const el = useRef<HTMLDivElement>(null)
   // 長按（觸控進入十字線追蹤）或滑鼠指到的那根；left＝資訊框放左邊（手指在右半邊）
   const [tip, setTip] = useState<{ i: number; left: boolean } | null>(null)
+  const all = useMemo(() => (live ? [...bars, live] : bars), [bars, live])
+  // 建圖時要用到最新的那根，但盤中那根變動不該觸發重畫（使用者拉到哪就停在哪）
+  const allRef = useRef(all)
+  allRef.current = all
+  const series = useRef<{
+    candle: ISeriesApi<'Candlestick'>
+    vol: ISeriesApi<'Histogram'>
+    mas: { n: number; s: ISeriesApi<'Line'> }[]
+  } | null>(null)
   useEffect(() => {
     const box = el.current
-    if (!box || bars.length === 0) return
+    const data = allRef.current
+    if (!box || data.length === 0) return
     const chart = createChart(box, {
       width: box.clientWidth,
       height: box.clientHeight,
@@ -71,7 +85,8 @@ export function KChart({
       wickUpColor: UP,
       wickDownColor: DOWN,
     })
-    candle.setData(bars.map((b) => ({ time: b.date, open: b.open, high: b.high, low: b.low, close: b.close })))
+    candle.setData(data.map((b) => ({ time: b.date, open: b.open, high: b.high, low: b.low, close: b.close })))
+    const mas: { n: number; s: ISeriesApi<'Line'> }[] = []
     for (const m of MA) {
       const s = chart.addSeries(LineSeries, {
         color: m.color,
@@ -80,12 +95,14 @@ export function KChart({
         lastValueVisible: false,
         crosshairMarkerVisible: false,
       })
-      s.setData(sma(bars, m.n))
+      s.setData(sma(data, m.n))
+      mas.push({ n: m.n, s })
     }
     const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' } }, 1)
     vol.setData(
-      bars.map((b) => ({ time: b.date, value: b.volume, color: b.close >= b.open ? `${UP}99` : `${DOWN}99` })),
+      data.map((b) => ({ time: b.date, value: b.volume, color: b.close >= b.open ? `${UP}99` : `${DOWN}99` })),
     )
+    series.current = { candle, vol, mas }
     chart.panes()[1]?.setHeight(Math.round(box.clientHeight * 0.22))
     createSeriesMarkers(
       candle,
@@ -100,12 +117,12 @@ export function KChart({
     // 長按（觸控會進入十字線追蹤模式）或滑鼠移動：在圖上浮出指到那天的量價
     chart.subscribeCrosshairMove((param) => {
       const i = param.point && param.logical !== undefined ? Math.round(param.logical) : -1
-      if (!param.point || i < 0 || i >= bars.length) return setTip(null)
+      if (!param.point || i < 0 || i >= allRef.current.length) return setTip(null)
       const left = param.point.x > box.clientWidth / 2
       setTip((t) => (t && t.i === i && t.left === left ? t : { i, left }))
     })
     // 先看最近約半年（120 根）；要等版面算好才設，否則會被自動縮放蓋掉
-    const frame = requestAnimationFrame(() => chart.timeScale().setVisibleLogicalRange(latestRange(bars.length, keptBars)))
+    const frame = requestAnimationFrame(() => chart.timeScale().setVisibleLogicalRange(latestRange(data.length, keptBars)))
     // 只有使用者自己縮放（觸控、滑鼠、滾輪）後才記住根數；開圖時程式設的範圍不算
     let touched = false
     const mark = () => {
@@ -120,6 +137,7 @@ export function KChart({
     const ro = new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight }))
     ro.observe(box)
     return () => {
+      series.current = null
       cancelAnimationFrame(frame)
       ro.disconnect()
       box.removeEventListener('pointerdown', mark)
@@ -129,7 +147,19 @@ export function KChart({
       chart.remove()
     }
   }, [bars, pickDays, lineNames])
-  const q = tip ? quoteBar(bars, undefined, tip.i) : null
+  // 盤中那根：只更新最後一根 K 棒、量、三條均線的最後一點
+  useEffect(() => {
+    const s = series.current
+    if (!s || !live) return
+    s.candle.update({ time: live.date, open: live.open, high: live.high, low: live.low, close: live.close })
+    s.vol.update({ time: live.date, value: live.volume, color: live.close >= live.open ? `${UP}99` : `${DOWN}99` })
+    const data = [...bars, live]
+    for (const m of s.mas) {
+      const p = sma(data, m.n).at(-1)
+      if (p && p.time === live.date) m.s.update(p)
+    }
+  }, [bars, live])
+  const q = tip ? quoteBar(all, undefined, tip.i) : null
   return (
     <div className="cq-chart-wrap">
       <div ref={el} className="cq-chart" />
