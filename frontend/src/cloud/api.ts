@@ -1,6 +1,6 @@
 // 雲端版（T-332）的 API：每日名單、日期清單、個股 K 線與被推薦的日子。
 import { apiUrl } from '../api'
-import { LoginRequired, needsLogin } from './auth'
+import { LoginRequired, logoutDestination, needsLogin } from './auth'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Quote } from './live'
@@ -30,10 +30,11 @@ async function get<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   return (await res.json()) as T
 }
 
-/** 登出後要去的網址：伺服器撤銷登入成功就回首頁（沒登入的預覽畫面），否則退回 Cloudflare 的登出頁，確保一定登得出去。 */
+/** 登出後要去的網址（規則見 auth.ts logoutDestination）。redirect: 'manual'：登入過期時 Access 的導向要攔下來判斷，
+ *  不能讓瀏覽器跟著跳到 cloudflareaccess.com（跨網域會被擋成網路錯誤，分不出是過期還是斷線）。 */
 export async function logoutTarget(): Promise<string> {
-  const res = await fetch('/api/logout', { method: 'POST' }).catch(() => null)
-  return res?.ok ? '/' : '/cdn-cgi/access/logout'
+  const res = await fetch('/api/logout', { method: 'POST', redirect: 'manual', cache: 'no-store' }).catch(() => null)
+  return logoutDestination(res)
 }
 
 /** 目前登入的 email；沒登入時丟 LoginRequired。 */
