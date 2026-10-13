@@ -7,7 +7,7 @@
 > 模型還沒上雲、每日名單還沒落 PG（T-332），所以雲端目前只算因子、不產生推薦。
 > **雲端排程（D-175，2026-10-12）**：台北 17:33 主跑、22:43 補跑，由 Cloudflare Worker `cron-trigger/`（`twquant-cron-trigger`）準時觸發 GitHub；
 > GitHub 自己的 schedule 常態晚約 5 小時，只當備援。17:33 時必要的表（`system.yaml` `quality_gate.required_tables`）缺一張就不打分，交給 22:43。
-> **網站追蹤股（T-345，2026-10-13）**：「追蹤」分頁可輸入任何股號看三個模型的評分（漲幅排名、飆漲機率、回檔風險），並存成追蹤股。清單存在 Supabase 的 **`web.watchlist`**（email、代號、加入時間；第一次有人加入時才建表），刻意不放 `serving`：`cloud_seed_needed.py` 預設會 DROP `serving` 全部表、`serving prune` 也只修剪 `serving`。這張表沒有備份（Drive 歸檔不含它）。網站讀的模型代號寫在 `frontend/functions/_lib/scores.ts`，換模型時 `tests/test_cloud_web_models.py` 會紅。身分從 Cloudflare Access 簽的權杖驗（`functions/_lib/identity.ts`，AUD 寫死在那裡；重建 Access 應用要改）。
+> **網站追蹤股（T-345，2026-10-13）**：「追蹤」分頁可輸入任何股號看三個模型的評分（漲幅排名、飆漲機率、回檔風險），並存成追蹤股。清單存在 Supabase 的 **`web.watchlist`**（email、代號、加入時間、`position`＝使用者排的順序；建表與加欄位都在第一次讀寫時自動做，`functions/_lib/watchlist-db.ts`），刻意不放 `serving`：`cloud_seed_needed.py` 預設會 DROP `serving` 全部表、`serving prune` 也只修剪 `serving`。這張表沒有備份（Drive 歸檔不含它）。網站讀的模型代號寫在 `frontend/functions/_lib/scores.ts`，換模型時 `tests/test_cloud_web_models.py` 會紅。身分從 Cloudflare Access 簽的權杖驗（`functions/_lib/identity.ts`，AUD 寫死在那裡；重建 Access 應用要改）。
 > **2026-10-07 交接：[docs/HANDOFF-2026-10-07-data-catchup.md](docs/HANDOFF-2026-10-07-data-catchup.md)**——
 > 機器在 10-01 ~ 10-07 停擺；10-08 凌晨已照它的 §4 補齊九月尾巴與十月五天、重建看板、備份（完成紀錄見該文件 §7）。
 > 排程的三個洞由 T-327（PR #116）修正，已於 10-08 04:04 部署。**T-329／T-330（看板 HTML，#118／#120）10-09 已合併、尚未部署**

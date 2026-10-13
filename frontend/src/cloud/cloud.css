@@ -172,6 +172,21 @@
 .cq-hitlist small { margin-left: auto; color: var(--mute); font-size: 12.5px; white-space: nowrap; }
 .cq-hitlist li.cq-hit-none { color: var(--mute); cursor: default; font-size: 14px; }
 .cq-hitlist li.cq-hit-none:hover { background: none; }
+/* 追蹤清單的編輯模式：右邊 ≡ 拖曳排序（觸控時不讓瀏覽器把手勢當成捲動）、置頂、刪除 */
+.cq-watchbar { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 8px; color: var(--mute); font-size: 13.5px; }
+.cq .cq-edit-btn { color: var(--accent); font-size: 14.5px; font-weight: 600; padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; }
+.cq-list li.cq-edit-row { grid-template-columns: 1fr auto auto auto; column-gap: 6px; min-height: 56px; cursor: default; padding-right: 4px; }
+.cq-list li.cq-edit-row:hover { background: none; }
+.cq-list li.cq-edit-row.dragging { background: #23262f; box-shadow: inset 3px 0 0 var(--accent), 0 6px 18px rgba(0, 0, 0, .45); position: relative; z-index: 1; }
+.cq-editing { -webkit-user-select: none; user-select: none; }
+.cq .cq-row-btn { font-size: 13.5px; padding: 6px 10px; border-radius: 6px; background: var(--bg); color: var(--text); white-space: nowrap; }
+.cq .cq-row-btn:disabled { opacity: .35; cursor: default; }
+.cq .cq-row-btn.danger { background: #3a1c22; color: #ffb4bd; font-weight: 600; }
+.cq-handle {
+  width: 44px; height: 44px; display: grid; place-items: center; color: var(--mute); font-size: 22px; cursor: grab;
+  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.cq-edit-row.dragging .cq-handle { color: var(--accent); cursor: grabbing; }
 .cq-tag.hot { background: rgba(255, 122, 0, .18); color: var(--accent); }
 .cq-tag.warn { background: rgba(255, 176, 32, .16); color: #ffc04d; }
 

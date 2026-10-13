@@ -1,21 +1,21 @@
-// GET /api/watchlist：登入者的追蹤股，新加的在前；每檔附最新收盤、漲跌與三個模型最新一天的分數。
+// GET /api/watchlist：登入者的追蹤股，照使用者排的順序；每檔附最新收盤、漲跌與三個模型最新一天的分數。
+// PUT /api/watchlist：存順序，內容 { order: [代號…] }（由上到下）。不在清單上的代號略過；
+// 清單上卻沒列到的（例：另一台裝置剛加入的）保留原位置——新加入的本來就排最上面。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { accessEmail } from '../../_lib/identity'
 import { loadScores } from '../../_lib/scores-db'
-import { WATCH_MAX, latestDate, watchItems } from '../../_lib/watchlist'
+import { ORDER_BODY_MAX, WATCH_MAX, latestDate, parseOrder, sameOrigin, watchItems } from '../../_lib/watchlist'
+import { ensureWatchlist } from '../../_lib/watchlist-db'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) =>
   guarded(env, async (db) => {
     const email = await accessEmail(request)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
-    const [{ ok }] = await db<{ ok: boolean }[]>`SELECT to_regclass('web.watchlist') IS NOT NULL AS ok`
-    // 還沒有人加過追蹤股時表還沒建（第一次加入才建，見 watchlist/[sid].ts）
-    const list = ok
-      ? await db<{ sid: string; name: string | null; added_at: string }[]>`
-          SELECT w.stock_id AS sid, m.name, w.added_at::text AS added_at
-          FROM web.watchlist w LEFT JOIN serving.stock_meta m ON m.stock_id = w.stock_id
-          WHERE w.email = ${email} ORDER BY w.added_at DESC, w.stock_id`
-      : []
+    await ensureWatchlist(db)
+    const list = await db<{ sid: string; name: string | null; added_at: string }[]>`
+      SELECT w.stock_id AS sid, m.name, w.added_at::text AS added_at
+      FROM web.watchlist w LEFT JOIN serving.stock_meta m ON m.stock_id = w.stock_id
+      WHERE w.email = ${email} ORDER BY w.position, w.added_at DESC, w.stock_id`
     const ids = list.map((w) => w.sid)
     const px = ids.length
       ? await db<{ sid: string; date: string; close: number | null }[]>`
@@ -28,3 +28,27 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) =>
     const scores = await loadScores(db, ids)
     return json({ max: WATCH_MAX, date: latestDate(scores.days), items: watchItems(list, px, scores) })
   })
+
+export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
+  if (!sameOrigin(request)) return fail(403, '只接受本站送出的變更')
+  const text = await request.text()
+  if (text.length > ORDER_BODY_MAX) return fail(413, '順序內容太長')
+  let body: unknown = null
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return fail(400, '順序內容不是 JSON')
+  }
+  const order = parseOrder(body)
+  if (order === null) return fail(400, `順序要是 1～${WATCH_MAX} 個不重複的股票代號`)
+  return guarded(env, async (db) => {
+    const email = await accessEmail(request)
+    if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
+    await ensureWatchlist(db)
+    await db`
+      UPDATE web.watchlist w SET position = o.k::int
+      FROM unnest(string_to_array(${order.join(',')}, ',')) WITH ORDINALITY AS o(sid, k)
+      WHERE w.email = ${email} AND w.stock_id = o.sid`
+    return json({ ok: true })
+  })
+}

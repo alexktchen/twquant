@@ -2,7 +2,8 @@
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { accessEmail } from '../../_lib/identity'
 import { SID_RE } from '../../_lib/picks'
-import { WATCHLIST_DDL, WATCH_MAX, sameOrigin } from '../../_lib/watchlist'
+import { WATCH_MAX, sameOrigin } from '../../_lib/watchlist'
+import { ensureWatchlist } from '../../_lib/watchlist-db'
 
 function check(request: Request, sid: string): Response | null {
   if (!sameOrigin(request)) return fail(403, '只接受本站送出的變更')
@@ -19,11 +20,12 @@ export const onRequestPut: PagesFunction<Env, 'sid'> = async ({ request, params,
       if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
       const known = await db`SELECT 1 FROM serving.prices_daily WHERE stock_id = ${sid} LIMIT 1`
       if (known.length === 0) return fail(404, `雲端沒有 ${sid} 的股價（只收上市櫃四碼普通股）`)
-      const [{ ok }] = await db<{ ok: boolean }[]>`SELECT to_regclass('web.watchlist') IS NOT NULL AS ok`
-      if (!ok) for (const stmt of WATCHLIST_DDL) await db.unsafe(stmt)
+      await ensureWatchlist(db)
+      // 新加入的排最上面：位置比目前最小的再小 1
       const added = await db`
-        INSERT INTO web.watchlist (email, stock_id)
-        SELECT ${email}, ${sid} WHERE (SELECT count(*) FROM web.watchlist WHERE email = ${email}) < ${WATCH_MAX}
+        INSERT INTO web.watchlist (email, stock_id, position)
+        SELECT ${email}, ${sid}, (SELECT coalesce(min(position), 1) - 1 FROM web.watchlist WHERE email = ${email})
+        WHERE (SELECT count(*) FROM web.watchlist WHERE email = ${email}) < ${WATCH_MAX}
         ON CONFLICT (email, stock_id) DO NOTHING RETURNING stock_id`
       if (added.length === 0) {
         const has = await db`SELECT 1 FROM web.watchlist WHERE email = ${email} AND stock_id = ${sid}`
@@ -41,8 +43,8 @@ export const onRequestDelete: PagesFunction<Env, 'sid'> = async ({ request, para
     guarded(env, async (db) => {
       const email = await accessEmail(request)
       if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
-      const [{ ok }] = await db<{ ok: boolean }[]>`SELECT to_regclass('web.watchlist') IS NOT NULL AS ok`
-      if (ok) await db`DELETE FROM web.watchlist WHERE email = ${email} AND stock_id = ${sid}`
+      await ensureWatchlist(db)
+      await db`DELETE FROM web.watchlist WHERE email = ${email} AND stock_id = ${sid}`
       return json({ ok: true, sid })
     })
   )

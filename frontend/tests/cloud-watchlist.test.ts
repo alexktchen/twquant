@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ACCESS_AUD, ACCESS_TEAM, JWT_HEADER, accessEmail } from '../functions/_lib/identity.ts'
 import { MODELS, modelScores, searchPattern, type ModelDay, type ScoreRow } from '../functions/_lib/scores.ts'
-import { WATCH_MAX, WATCHLIST_DDL, latestDate, sameOrigin, watchItems } from '../functions/_lib/watchlist.ts'
+import { WATCH_MAX, WATCHLIST_DDL, latestDate, parseOrder, sameOrigin, watchItems } from '../functions/_lib/watchlist.ts'
 
 // ── 身分：Cloudflare Access 簽的權杖 ───────────────────────────────────────────
 const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
@@ -158,4 +158,22 @@ test('T-345 AC5: 寫入只收本站送出的請求；表在 web schema（pipelin
   assert.ok(WATCHLIST_DDL.join('\n').includes('web.watchlist'))
   assert.ok(!WATCHLIST_DDL.join('\n').includes('serving.'))
   assert.ok(WATCH_MAX >= 20)
+})
+
+test('T-346 AC1: 存順序只收 1～上限個、不重複、格式正確的代號', () => {
+  assert.deepEqual(parseOrder({ order: ['5340', '2330', '2887G'] }), ['5340', '2330', '2887G'])
+  assert.equal(parseOrder({ order: [] }), null)
+  assert.equal(parseOrder({ order: ['2330', '2330'] }), null)
+  assert.equal(parseOrder({ order: ['2330', "x';--"] }), null)
+  assert.equal(parseOrder({ order: ['2330', 2317] }), null)
+  assert.equal(parseOrder({ order: '2330' }), null)
+  assert.equal(parseOrder(null), null)
+  assert.equal(parseOrder({ order: Array.from({ length: WATCH_MAX + 1 }, (_, i) => String(1000 + i)) }), null)
+})
+
+test('T-346 AC2: 舊表升級補 position 欄，照原本的顯示順序（新加的在前）編號，只補還沒編號的', () => {
+  const ddl = WATCHLIST_DDL.join(' ')
+  assert.match(ddl, /ADD COLUMN IF NOT EXISTS position/)
+  assert.match(ddl, /ORDER BY added_at DESC, stock_id/)
+  assert.match(ddl, /position IS NULL/)
 })

@@ -1,21 +1,40 @@
 // 追蹤股（每個登入帳號自己的清單）：存在 Supabase 的 web.watchlist，跟每日 pipeline 的 serving 分開，
 // 修剪、重建、同步都不會碰到它。純函數放這裡供 node 單元測試。
-import { change } from './picks.ts'
+import { SID_RE, change } from './picks.ts'
 import { modelScores, type ModelDay, type ModelScore, type ScoreRow } from './scores.ts'
 
 /** 每個帳號最多追蹤幾檔（清單一次查完分數與報價，太多會拖慢）。 */
 export const WATCH_MAX = 100
 
-/** 第一次有人加追蹤股時才建表（冪等）。email 一律存小寫（identity.ts 已轉）。 */
+/** 建表與升級（冪等；watchlist-db.ts 發現缺 position 欄才跑）。email 一律存小寫（identity.ts 已轉）。
+ *  position：使用者排的順序，小的在上；新加入的放最上面（比目前最小的再小 1）。
+ *  第一版的表沒有 position（2026-10-13 上線）：補欄位後照原本的顯示順序（新加的在前）編號，畫面順序不變。 */
 export const WATCHLIST_DDL = [
   'CREATE SCHEMA IF NOT EXISTS web',
   `CREATE TABLE IF NOT EXISTS web.watchlist (
     email text NOT NULL,
     stock_id text NOT NULL,
     added_at timestamptz NOT NULL DEFAULT now(),
+    position integer,
     PRIMARY KEY (email, stock_id)
   )`,
+  'ALTER TABLE web.watchlist ADD COLUMN IF NOT EXISTS position integer',
+  `UPDATE web.watchlist w SET position = r.k
+   FROM (SELECT email, stock_id, row_number() OVER (PARTITION BY email ORDER BY added_at DESC, stock_id)::int AS k
+         FROM web.watchlist) r
+   WHERE w.email = r.email AND w.stock_id = r.stock_id AND w.position IS NULL`,
 ]
+
+/** 存順序的請求內容最多幾個字（100 檔代號的 JSON 約 1,000 字）。 */
+export const ORDER_BODY_MAX = 4000
+
+/** 「存順序」的內容：{ order: [代號…] }，由上到下。代號格式不對、重複、空的或超過上限 → null。 */
+export function parseOrder(body: unknown): string[] | null {
+  const order = (body as { order?: unknown } | null)?.order
+  if (!Array.isArray(order) || order.length === 0 || order.length > WATCH_MAX) return null
+  if (!order.every((s) => typeof s === 'string' && SID_RE.test(s))) return null
+  return new Set(order).size === order.length ? (order as string[]) : null
+}
 
 /** 寫入只接受本站網頁送來的請求：跨站表單或腳本帶著登入 cookie 送 PUT／DELETE 一律擋（瀏覽器對這兩種方法一定帶 Origin）。 */
 export function sameOrigin(request: Request): boolean {
