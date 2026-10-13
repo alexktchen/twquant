@@ -121,7 +121,7 @@ class CloudConfig(BaseConfig):
     pattern_tables: tuple[str, ...] = ("prices_daily", "broker_trades")
     # pattern_tables 中仍保留「stock_meta 有產業別」股票的表（特別股會進產業平均，刪了產業因子就和地端不同）
     industry_member_tables: tuple[str, ...] = ()
-    # pattern_tables 剔除非白名單時仍保留的代號（成績單的對照 0050，D-176；它不是四碼普通股）
+    # pattern_tables 剔除非白名單時仍保留的代號（名單績效的對照 0050，D-176；它不是四碼普通股）
     keep_stocks: tuple[str, ...] = ()
     # 滾動窗口（交易日數）；未列出的表全史保留（小表）。硬下限＝因子最大回看（有測試把關）
     windows: dict[str, int] = {}

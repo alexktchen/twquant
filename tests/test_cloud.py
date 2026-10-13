@@ -208,7 +208,7 @@ def test_t331_ac1_prune_keeps_industry_members_outside_pattern() -> None:
 
 
 def test_t349_ac9_prune_keeps_benchmark_stock() -> None:
-    """D-176：成績單對照 0050 不是四碼普通股，`keep_stocks` 列了就留下；其他 ETF 照刪。"""
+    """D-176：名單績效對照 0050 不是四碼普通股，`keep_stocks` 列了就留下；其他 ETF 照刪。"""
     conn = _connect_or_skip()
     from twquant.data.serving.cloud import prune
 
@@ -230,7 +230,7 @@ def test_t349_ac9_prune_keeps_benchmark_stock() -> None:
 
 
 def test_t349_ac9_benchmark_is_kept_and_seeded() -> None:
-    """成績單的對照代號要同時在修剪白名單與雲端切片裡，否則當晚就被修掉或重灌後不見（靜態）。"""
+    """名單績效的對照代號要同時在修剪白名單與雲端切片裡，否則當晚就被修掉或重灌後不見（靜態）。"""
     from pathlib import Path
 
     import yaml

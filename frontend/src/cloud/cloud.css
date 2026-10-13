@@ -39,11 +39,6 @@
 .cq-tabs button { white-space: nowrap; padding: 0 14px; font-size: 17px; color: var(--mute); border-bottom: 2px solid transparent; }
 .cq-tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .cq-date { white-space: nowrap; margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--mute); font-size: 15px; }
-.cq-date select {
-  background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
-}
-.cq-date button { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--line); }
-.cq-date button:disabled { opacity: .35; cursor: default; }
 
 .cq-user { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--mute); margin-left: 14px; }
 .cq-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; }
@@ -51,7 +46,16 @@
 .cq-err { margin: 12px 20px 0; padding: 8px 12px; border-radius: 6px; background: #3a1c22; color: #ffb4bd; font-size: 15px; }
 
 .cq-body { flex: 1; display: grid; grid-template-columns: 400px 1fr; min-height: 0; overflow: hidden; }
-.cq-list { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.cq-list { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+/* 每日名單的日期列（今日推薦與歷史名單合併後）：‹ 日期選單 ›，看過去某天時多一顆「回到最新」 */
+.cq-day { display: flex; align-items: center; gap: 6px; padding: 12px 12px 0; }
+.cq-day select {
+  flex: 1; min-width: 0; height: 34px; padding: 0 8px; border-radius: 6px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 15px;
+}
+.cq .cq-day > button { flex: none; width: 34px; height: 34px; border-radius: 6px; border: 1px solid var(--line); }
+.cq .cq-day > button:disabled { opacity: .35; cursor: default; }
+.cq .cq-day > button.cq-day-latest { width: auto; padding: 0 10px; color: var(--accent); font-size: 14px; white-space: nowrap; }
 .cq-seg { display: flex; gap: 6px; padding: 12px; }
 .cq-seg button {
   flex: 1; padding: 8px 0; border-radius: 6px; background: var(--bg); color: var(--mute); font-size: 15px;
@@ -123,8 +127,8 @@
   /* 只改左右：padding 簡寫會把上面安全區的 padding-top 歸零（PR #135 就是這樣失效） */
   /* 手機整頁捲動：頂欄釘在上面，捲動時清單才不會跑到時鐘底下 */
   .cq-top { gap: 10px; padding-left: 12px; padding-right: 12px; position: sticky; top: 0; z-index: 10; }
-  /* 品牌、分頁、日期、帳號排一列要約 560px，手機放不下：改兩列，上列品牌＋日期＋帳號，下列四個分頁獨佔一整列
-     （四個分頁約 285px，再擠日期就超過 375px 寬，D-176 加「成績單」時改成這樣） */
+  /* 品牌、分頁、日期、帳號排一列手機放不下：改兩列，上列品牌＋日期（只有追蹤分頁有）＋帳號，下列分頁獨佔一整列。
+     每日名單的日期選單放在名單區最上面（cq-day），不佔頂欄 */
   .cq-top {
     display: grid; grid-template-columns: 1fr auto auto; grid-template-rows: 48px 44px;
     grid-template-areas: "brand date user" "tabs tabs tabs"; height: auto; row-gap: 0;
@@ -136,16 +140,10 @@
   .cq-tabs button:first-child { padding-left: 0; }
   .cq-date { grid-area: date; margin-left: 0; justify-self: end; }
   .cq-brand { font-size: 17px; }
-  /* 375px 寬時四個分頁一列、品牌列擠日期與帳號：分頁字與日期箭頭略縮 */
+  /* 375px 寬時分頁字略縮 */
   .cq-tabs button { padding: 0 8px; font-size: 16px; }
-  .cq-date button { width: 28px; height: 28px; }
   .cq-date { font-size: 13.5px; }
   .cq-date-suffix { display: none; }
-  /* 歷史日期選單（箭頭、日期、檔數）放不進品牌那一列：另起第三列、撐滿寬度 */
-  .cq-top.cq-top-hist { grid-template-rows: 48px 44px 44px; grid-template-areas: "brand brand user" "tabs tabs tabs" "date date date"; }
-  .cq-top-hist .cq-tabs { justify-self: start; }
-  .cq-top-hist .cq-date { justify-self: stretch; }
-  .cq-top-hist .cq-date select { flex: 1; min-width: 0; height: 32px; }
   .cq-email { display: none; }
   .cq-user { margin-left: 0; gap: 8px; }
   .cq-body { grid-template-columns: 1fr; overflow: visible; }
@@ -309,7 +307,7 @@
   .cq-gate-card h2 { margin-top: 0; }
 }
 
-/* 成績單（D-176）：左欄模擬帳戶數字與規則，右欄淨值曲線（對 0050）、逐筆統計與明細 */
+/* 名單績效（D-176）：左欄模擬帳戶數字與規則，右欄淨值曲線（對 0050）、逐筆統計與明細 */
 .cq-score-side { overflow-y: auto; }
 .cq-score-main { overflow-y: auto; gap: 22px; }
 .cq-score-acct { padding: 2px 14px 16px; display: flex; flex-direction: column; gap: 12px; }

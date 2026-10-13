@@ -1,5 +1,5 @@
-// 成績單 API（D-176）的純函數：線別檢查、把資料庫回來的 JSON 文字原樣包成回應。
-// 成績單每天由排程整份算好存在 serving.scorecard（每條線一列 jsonb），網站只讀不算。
+// 名單績效 API（D-176）的純函數：線別檢查、把資料庫回來的 JSON 文字原樣包成回應。
+// 名單績效每天由排程整份算好存在 serving.scorecard（每條線一列 jsonb），網站只讀不算。
 // 回應直接用資料庫給的文字、不在這裡 JSON.parse 再 stringify：逐筆明細一條線可達上千列，免費方案每次請求只有 10ms CPU。
 import { LINES } from './picks.ts'
 

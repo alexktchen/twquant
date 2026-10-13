@@ -1,4 +1,4 @@
-// 雲端版網站（T-332／D-170）：每日推薦、歷史名單、追蹤股（T-345）與個股 K 線。介面仿富途牛牛：
+// 雲端版網站（T-332／D-170）：每日名單（今天與過去每一天）、名單績效（D-176）、追蹤股（T-345）與個股 K 線。介面仿富途牛牛：
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './cloud.css'
@@ -23,14 +23,14 @@ import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { dateOption, dayCount, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
+import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
 import { LIVE_POLL_MS, liveBar, liveLabel, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
-type Tab = 'today' | 'history' | 'score' | 'watch'
+type Tab = 'picks' | 'score' | 'watch'
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
 const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
@@ -39,10 +39,11 @@ const REFRESH_MIN_MS = 30_000
 const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e.message)
 
 export default function CloudApp() {
-  const [tab, setTab] = useState<Tab>('today')
+  const [tab, setTab] = useState<Tab>('picks')
   const [dates, setDates] = useState<string[]>([])
   // 日期選單旁的檔數（只有登入後的 /api 才給；公開日期清單沒有）
   const [dateCounts, setDateCounts] = useState<DateCounts | null>(null)
+  // 每日名單看哪一天；undefined＝最新一天（資料進來新的一天就自動跟上）
   const [date, setDate] = useState<string | undefined>(undefined)
   const [day, setDay] = useState<PicksDay | null>(null)
   // 上次看的策略（大盤精選／潛伏飆股）：重新整理、重開都停在那一條
@@ -99,7 +100,7 @@ export default function CloudApp() {
       .catch((e: Error) => {
         if (!(e instanceof LoginRequired)) return setErr(e.message)
         setGuest(true)
-        // 日期是公開資訊：沒登入也能切到歷史名單選日期
+        // 日期是公開資訊：沒登入也能選日期
         fetchPublicDates().then(setDates).catch(onFail)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -130,22 +131,27 @@ export default function CloudApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guest])
 
-  // 沒登入時「今日」用公開日期清單的最新一天；登入時這個值固定 undefined，不會多抓一次
+  // 沒登入時「最新一天」用公開日期清單的第一天；登入時這個值固定 undefined，不會多抓一次
   const guestToday = guest ? dates[0] : undefined
 
-  // 歷史名單：日期清單晚到時（沒登入要多一趟），一到就選最新一天，否則選單會停在空值
+  // 從背景回來時日期清單也重抓：隔天回來，選單才有新的一天（停在最新的人名單會自動換成新的一天）
   useEffect(() => {
-    if (tab === 'history' && !date && dates[0]) setDate(dates[0])
-  }, [tab, date, dates])
+    if (refresh === 0 || guest) return
+    fetchPickDates()
+      .then((r) => {
+        setDates(r.dates)
+        setDateCounts(r.counts)
+      })
+      .catch((e: Error) => console.warn('日期清單重抓失敗', e))
+  }, [refresh, guest])
 
   useEffect(() => {
-    // 追蹤、成績單分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）
-    if (guest || tab === 'watch' || tab === 'score') return
+    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）
+    if (guest || tab !== 'picks') return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
-    const want = tab === 'today' ? undefined : date
     setErr('')
-    fetchPicks(want)
+    fetchPicks(date)
       .then((d) => {
         if (stale) return
         setDay(d)
@@ -167,8 +173,8 @@ export default function CloudApp() {
 
   // 沒登入時畫面只讀假資料：就算有真名單寫進 day，也不會出現在沒登入的畫面
   const guestView = useMemo(
-    () => (guest ? guestDay((tab === 'history' ? date : undefined) ?? guestToday ?? '') : null),
-    [guest, tab, date, guestToday],
+    () => (guest ? guestDay(date ?? guestToday ?? '') : null),
+    [guest, date, guestToday],
   )
   const view = guest ? guestView : day
 
@@ -179,7 +185,8 @@ export default function CloudApp() {
   )
   const current = view?.lines.find((l) => l.code === line) ?? view?.lines[0]
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
-  const idx = date ? dates.indexOf(date) : -1
+  // 每日名單的日期列（date＝undefined 是最新一天）；past＝正在看過去某天：K 線停在那天、不抓即時價
+  const nav = dayNav(dates, date)
 
   const tracked = useMemo(() => new Set((watch?.items ?? []).map((w) => w.sid)), [watch])
   const watchCurrent = watchSel ?? watch?.items[0] ?? null
@@ -230,58 +237,27 @@ export default function CloudApp() {
 
   return (
     <div className="cq">
-      {/* 歷史名單的日期選單在手機上放不進分頁那一列：另起一列（cloud.css .cq-top-hist） */}
-      <header className={tab === 'history' ? 'cq-top cq-top-hist' : 'cq-top'}>
+      <header className="cq-top">
         <div className="cq-brand">
           <img className="cq-logo" src="/icon.svg" alt="" width="26" height="26" />
           twquant
         </div>
         <nav className="cq-tabs">
-          <button className={tab === 'today' ? 'on' : ''} onClick={() => setTab('today')}>
-            今日推薦
-          </button>
-          <button
-            className={tab === 'history' ? 'on' : ''}
-            onClick={() => {
-              setTab('history')
-              if (!date && dates[0]) setDate(dates[0])
-            }}
-          >
-            歷史名單
+          <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
+            每日名單
           </button>
           <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
-            成績單
+            績效
           </button>
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
             追蹤
           </button>
         </nav>
         <div className="cq-date">
-          {tab === 'history' ? (
-            <>
-              <button disabled={idx < 0 || idx >= dates.length - 1} onClick={() => setDate(dates[idx + 1])}>
-                ‹
-              </button>
-              <select value={date ?? ''} onChange={(e) => setDate(e.target.value)}>
-                {dates.map((d) => (
-                  <option key={d} value={d}>
-                    {dateOption(d, dayCount(dateCounts, d, current?.code ?? line))}
-                  </option>
-                ))}
-              </select>
-              <button disabled={idx <= 0} onClick={() => setDate(dates[idx - 1])}>
-                ›
-              </button>
-            </>
-          ) : tab === 'score' ? null : tab === 'watch' ? (
+          {tab === 'watch' && (
             <span>
               {guest ? guestToday : watch?.date}
               <span className="cq-date-suffix"> 評分</span>
-            </span>
-          ) : (
-            <span>
-              {view?.date}
-              <span className="cq-date-suffix"> 收盤後</span>
             </span>
           )}
         </div>
@@ -311,7 +287,7 @@ export default function CloudApp() {
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
               <div className="cq-rows">
-                <Gate title="登入後看成績單" text="每條線照公布的名單自動操作的模擬帳戶，跟同期 0050 比；以及每一檔新進名單的逐筆結果。" />
+                <Gate title="登入後看名單績效" text="把每天的名單照固定規則當成真的買了：模擬帳戶的淨值，以及每一檔新進名單的逐筆結果，賠的也照列。" />
               </div>
             </aside>
             <section className="cq-detail" />
@@ -384,6 +360,26 @@ export default function CloudApp() {
             </aside>
           ) : (
             <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
+              <div className="cq-day">
+                <button aria-label="前一個交易日" disabled={nav.older === null} onClick={() => nav.older && setDate(chooseDay(dates, nav.older))}>
+                  ‹
+                </button>
+                <select aria-label="名單日期" value={nav.shown ?? ''} onChange={(e) => setDate(chooseDay(dates, e.target.value))}>
+                  {dates.map((d) => (
+                    <option key={d} value={d}>
+                      {dateOption(d, dayCount(dateCounts, d, current?.code ?? line), d === dates[0])}
+                    </option>
+                  ))}
+                </select>
+                <button aria-label="後一個交易日" disabled={nav.newer === null} onClick={() => nav.newer && setDate(chooseDay(dates, nav.newer))}>
+                  ›
+                </button>
+                {nav.past && (
+                  <button className="cq-day-latest" onClick={() => setDate(undefined)}>
+                    回到最新
+                  </button>
+                )}
+              </div>
               <div className="cq-seg">
                 {view?.lines.map((l) => (
                   <button
@@ -445,7 +441,7 @@ export default function CloudApp() {
                 name={selected.name}
                 close={selected.close}
                 chg={selected.chg}
-                asOf={tab === 'history' ? view?.date : undefined}
+                asOf={nav.past ? view?.date : undefined}
                 lineNames={lineNames}
                 tracked={tracked.has(selected.sid)}
                 onTrack={watch ? toggleTrack : undefined}
@@ -753,10 +749,10 @@ function Detail({
 }: {
   sid: string
   name: string | null
-  /** 名單上的收盤與漲跌：歷史名單顯示名單那天的；其他分頁只在 K 線還沒到時先頂著 */
+  /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
-  /** 歷史名單的日期：報價列停在那天，不顯示即時價 */
+  /** 看過去某天的名單時的日期：報價列停在那天，不顯示即時價 */
   asOf?: string
   lineNames: Record<string, string>
   tracked: boolean
@@ -801,7 +797,7 @@ function Detail({
   const quote = live.quotes[sid]
   const todayBar = liveBar(bars, quote, today)
   const all = todayBar ? [...bars, todayBar] : bars
-  // 報價列：歷史名單停在名單那天（選 9/24 就顯示 9/24）；其他分頁是最後一根（盤中就是即時那根）
+  // 報價列：看過去某天的名單時停在那天（選 9/24 就顯示 9/24）；其他時候是最後一根（盤中就是即時那根）
   const q = quoteBar(all, asOf, null)
   const bigClose = asOf ? (close ?? q?.bar.close ?? null) : (q?.bar.close ?? close ?? null)
   const bigChg = asOf ? (chg ?? q?.chg ?? null) : (q?.chg ?? chg ?? null)

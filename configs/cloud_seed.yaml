@@ -21,7 +21,7 @@ tables:
   prices_daily:
     - {last_sessions: 500, stock_pattern: true}
     - {last_sessions: 500, industry_members: true}
-    # 成績單（D-176）對照「同期買 0050 抱著」；與 serving.yaml cloud.keep_stocks 一致
+    # 名單績效（D-176）對照「同期買 0050 抱著」；與 serving.yaml cloud.keep_stocks 一致
     - {last_sessions: 500, in: {stock_id: ["0050"]}}
   # 潛伏飆股的「安靜股」篩選用還原價算過去 60 日漲幅（ml/quiet_live.py attach_adjustment），
   # 少了除權息就拒絕打分（2026-10-10 雲端實測）。價格回看 200 日曆日，多留一年當緩衝。

@@ -429,7 +429,7 @@ DAILY_PICKS_SPEC = TableSpec(
     pk=("date", "line", "stock_id"),
 )
 
-# 成績單（D-176）：每條線一列，存網站要的整份 JSON（模擬帳戶淨值、逐筆明細）。每天由 daily_picks＋行情
+# 名單績效（D-176）：每條線一列，存網站要的整份 JSON（模擬帳戶淨值、逐筆明細）。每天由 daily_picks＋行情
 # 從頭重算後整列覆蓋，可隨時重建；網站 `/api/scorecard` 原樣讀出。sync/rebuild/prune 都不碰。
 SCORECARD_SPEC = TableSpec(
     "scorecard",

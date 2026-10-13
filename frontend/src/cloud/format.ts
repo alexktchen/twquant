@@ -27,9 +27,33 @@ export function dayCount(c: DateCounts | null, date: string, line: string): numb
   return c.counts[date]?.[line] ?? 0
 }
 
-/** 日期選單的一個選項文字：「2026-10-08　2 檔」；沒有檔數就只寫日期。 */
-export function dateOption(date: string, n: number | null): string {
-  return n === null ? date : `${date}　${n} 檔`
+/** 日期選單的一個選項文字：「2026-10-08　2 檔」；沒有檔數就只寫日期；最新一天後面加「・最新」。 */
+export function dateOption(date: string, n: number | null, latest = false): string {
+  return (n === null ? date : `${date}　${n} 檔`) + (latest ? '・最新' : '')
+}
+
+/**
+ * 每日名單的日期列（今日推薦與歷史名單合併後）：date＝undefined 代表「最新一天」，資料進來新的一天就自動跟上。
+ * shown＝選單上顯示的日子；older／newer＝按 ‹ › 會去的日子（沒有就是 null）；past＝正在看過去某天（K 線停在那天、不抓即時價）。
+ * dates 新到舊。
+ */
+export function dayNav(
+  dates: string[],
+  date: string | undefined,
+): { shown: string | undefined; older: string | null; newer: string | null; past: boolean } {
+  const shown = date ?? dates[0]
+  const i = shown === undefined ? -1 : dates.indexOf(shown)
+  return {
+    shown,
+    older: i >= 0 && i < dates.length - 1 ? dates[i + 1] : null,
+    newer: i > 0 ? dates[i - 1] : null,
+    past: date !== undefined && date !== dates[0],
+  }
+}
+
+/** 選了某天：選到最新那天就記成 undefined（之後有新的一天會自動跟上），其他照記。 */
+export function chooseDay(dates: string[], d: string): string | undefined {
+  return d === dates[0] ? undefined : d
 }
 
 export type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }

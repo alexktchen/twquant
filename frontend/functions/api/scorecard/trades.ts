@@ -9,7 +9,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
   return guarded(env, async (db) => {
     const rows = await db<{ body: string | null }[]>`
       SELECT (payload->'trades'->'rows')::text AS body FROM serving.scorecard WHERE line = ${line}`
-    if (rows.length === 0 || rows[0].body === null) return fail(404, '這條線的成績單還沒算出來')
+    if (rows.length === 0 || rows[0].body === null) return fail(404, '這條線的名單績效還沒算出來')
     return rawJson(rows[0].body, 'rows')
   })
 }

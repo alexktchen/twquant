@@ -56,7 +56,7 @@ def prune(
     industry_member_tables：這些表剔除非白名單股票時，**保留 stock_meta 有產業別的**。
     特別股（2887G 等）不是四碼，卻會進產業平均；刪掉它們，產業相對因子
     （residual_reversal_5d、industry_rs_20d、industry_mom_6m）就和地端不同（2026-10-09 實測各約 241 檔）。
-    keep_stocks：剔除非白名單時明確保留的代號（成績單對照用的 0050，D-176）。
+    keep_stocks：剔除非白名單時明確保留的代號（名單績效對照用的 0050，D-176）。
     """
     results: list[PruneResult] = []
     with conn.cursor() as cur:

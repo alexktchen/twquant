@@ -87,9 +87,9 @@ export const savePushSubscription = (sub: PushSubscriptionJSON) => get<{ ok: boo
 /** 這台裝置關通知。 */
 export const deletePushSubscription = (endpoint: string) => get<{ ok: boolean }>('/api/push', 'DELETE', { endpoint })
 
-/** 成績單（D-176）：這條線的模擬帳戶與逐筆統計（不含明細）。 */
+/** 名單績效（D-176）：這條線的模擬帳戶與逐筆統計（不含明細）。 */
 export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?line=${encodeURIComponent(line)}`)
 
-/** 成績單的逐筆明細（新到舊）。 */
+/** 名單績效的逐筆明細（新到舊）。 */
 export const fetchScorecardTrades = (line: string) =>
   get<{ rows: TradeRow[] }>(`/api/scorecard/trades?line=${encodeURIComponent(line)}`).then((r) => r.rows)

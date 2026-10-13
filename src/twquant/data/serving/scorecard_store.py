@@ -1,4 +1,4 @@
-"""成績單（D-176）的 PG 讀寫：讀公布的每日名單（含寫入時間），寫回每條線一份成績單 JSON。
+"""名單績效（D-176）的 PG 讀寫：讀公布的每日名單（含寫入時間），寫回每條線一份名單績效 JSON。
 
 只在 CLI／pipeline 邊界呼叫；連線由呼叫端提供（沿 picks_store.py 慣例）。
 """
@@ -43,7 +43,7 @@ def write_scorecard(
     payload: dict[str, Any],
     created_at: dt.datetime,
 ) -> None:
-    """整列覆蓋這條線的成績單（每天從頭重算，冪等）。NaN／無限大 raise：網站讀不出來，不是 0。"""
+    """整列覆蓋這條線的名單績效（每天從頭重算，冪等）。NaN／無限大 raise：網站讀不出來，不是 0。"""
     if created_at.tzinfo is None:
         raise ValueError("created_at 必須帶時區")
     body = json.dumps(payload, ensure_ascii=False, allow_nan=False)

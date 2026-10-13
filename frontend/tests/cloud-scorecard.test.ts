@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { lineOk, rawJson } from '../functions/_lib/scorecard.ts'
-import { beatText, excess, filterRows, md, navLines, ratio, statusText, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
+import { filterRows, md, navLines, ratio, statusText, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
 
 const nav: NavPoint[] = [
   { d: '2026-10-06', v: 100, b: 200, x: 0 },
@@ -10,7 +10,7 @@ const nav: NavPoint[] = [
   { d: '2026-10-09', v: 121, b: null, x: 1 },
 ]
 
-test('D-176 AC10: 淨值曲線換成累積報酬 %，事後補與即時在即時第一天接起來', () => {
+test('D-176 AC10: 淨值曲線換成累積報酬 %，事後補與即時在即時第一天接起來；頁面不畫 0050', () => {
   const l = navLines(nav, '2026-10-08')
   assert.deepEqual(
     l.backfill.map((p) => p.time),
@@ -22,31 +22,12 @@ test('D-176 AC10: 淨值曲線換成累積報酬 %，事後補與即時在即時
   )
   assert.ok(Math.abs(l.live[1].value - 21) < 1e-9) // 121 / 100 − 1
   assert.ok(Math.abs(l.backfill[2].value - -1) < 1e-9)
-  // 0050 缺的那天不畫（不補 0）
-  assert.deepEqual(
-    l.bench.map((p) => [p.time, Math.round(p.value)]),
-    [
-      ['2026-10-06', 0],
-      ['2026-10-07', 5],
-      ['2026-10-08', 10],
-    ],
-  )
+  assert.deepEqual(Object.keys(l).sort(), ['backfill', 'live']) // D-176 修訂：不放 0050
   // 沒有即時段：全部是事後補
   const all = navLines(nav, null)
   assert.equal(all.backfill.length, 4)
   assert.equal(all.live.length, 0)
-  assert.deepEqual(navLines([], null), { backfill: [], live: [], bench: [] })
-})
-
-test('D-176 AC10: 比 0050 多賺／少賺；沒有對照是 —，不是 0', () => {
-  const s = { start: '', n_days: 3, ret: 0.1, cagr: 0, mdd: -0.1, short: true, bench_ret: 0.25, bench_mdd: -0.2 }
-  assert.ok(Math.abs((excess(s) ?? 0) - -0.15) < 1e-12)
-  assert.equal(excess({ ...s, bench_ret: null }), null)
-  assert.equal(excess(null), null)
-  assert.equal(beatText(-0.15), '少賺 15.0 個百分點')
-  assert.equal(beatText(0.031), '多賺 3.1 個百分點')
-  assert.equal(beatText(0.0001), '差不多')
-  assert.equal(beatText(null), '—')
+  assert.deepEqual(navLines([], null), { backfill: [], live: [] })
 })
 
 const row = (over: Partial<TradeRow>): TradeRow => ({

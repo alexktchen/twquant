@@ -185,7 +185,7 @@ def build_targets(
 
 
 def list_weights(cfg: StrategyConfig, ids: Sequence[str]) -> dict[str, float]:
-    """成績單（D-176）：換股日照**公布的名單**給目標權重——不重算分數，只套配置的加權與截頂。
+    """名單績效（D-176）：換股日照**公布的名單**給目標權重——不重算分數，只套配置的加權與截頂。
 
     公布的名單只有代號沒有分數與市值，所以只支援不需要它們的加權（equal、fixed_slot），
     也不能有 overlay（要讀行情改權重）。其他配置 raise，不悄悄改成等權。

@@ -1,4 +1,4 @@
-"""成績單（D-176）：每條線照公布的名單自動操作的模擬帳戶（A），以及每一檔新進名單的逐筆結果（B）。
+"""名單績效（D-176）：每條線照公布的名單自動操作的模擬帳戶（A），以及每一檔新進名單的逐筆結果（B）。
 
 名單由系統照固定規則全部當成買了、事後結算，使用者不能挑——這是名單的成績，不是個人損益
 （個人損益是另一個功能「我的持股」）。這裡只做純運算：把回測結果、逐筆結果與名單的公布時間
@@ -213,7 +213,7 @@ def line_payload(
     names: Mapping[str, str],
     costs: Mapping[str, float],
 ) -> dict[str, Any]:
-    """一條線的成績單 JSON（網站 `/api/scorecard?line=` 原樣回傳）。"""
+    """一條線的名單績效 JSON（網站 `/api/scorecard?line=` 原樣回傳）。"""
     if not equity:
         raise ValueError(f"{code}：沒有淨值")
     values = [p.equity for p in equity]
@@ -323,7 +323,7 @@ def build_scorecards(
     as_of: dt.date,
     generated_at: dt.datetime,
 ) -> list[dict[str, Any]]:
-    """每條線一份成績單：照公布的名單重播帳戶（A）＋每一檔新進名單的逐筆（B）。
+    """每條線一份名單績效：照公布的名單重播帳戶（A）＋每一檔新進名單的逐筆（B）。
 
     `source` 只要有行情、除權息（讀取下界涵蓋開戶日前 `warmup_days`）；`published` 是
     [cfg.start, as_of] 的 `daily_picks`。不重算任何模型分數。
@@ -340,7 +340,7 @@ def build_scorecards(
 
     sessions = cal.load(source).between(cfg.start, as_of)
     if not sessions or sessions[-1] != as_of:
-        raise DataError("prices_daily", as_of, "成績單算到這天，但這天沒有行情")
+        raise DataError("prices_daily", as_of, "名單績效算到這天，但這天沒有行情")
     day_written: dict[dt.date, dt.datetime] = {}
     for p in published:
         day_written[p.date] = max(day_written.get(p.date, p.created_at), p.created_at)

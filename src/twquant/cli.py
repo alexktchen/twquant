@@ -1618,14 +1618,14 @@ def _run_daily_pipeline(
         return _daily_picks_for_day(day)
 
     def _scorecard_step() -> str:
-        # D-176 成績單：照公布的名單重播模擬帳戶＋逐筆。排在每日名單之後（要讀當天剛寫的名單）。
+        # D-176 名單績效：照公布的名單重播模擬帳戶＋逐筆。排在每日名單之後（要讀當天剛寫的名單）。
         from twquant.data.serving import store
 
         scfg = _load_serving()
         if not scfg.enabled or not store.ping(scfg):
             return "PG 不可達，略過"
         if not _pg_has_prices(day):
-            return f"{day} 沒有行情（休市或尚未擷取），成績單維持上一個交易日"
+            return f"{day} 沒有行情（休市或尚未擷取），名單績效維持上一個交易日"
         return _scorecard_for_day(day)
 
     def _paper_trading_step() -> str:
@@ -1724,7 +1724,7 @@ def _run_daily_pipeline(
         PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
-        PipelineStep("成績單", _scorecard_step),
+        PipelineStep("名單績效", _scorecard_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -1847,7 +1847,7 @@ def daily_picks(
 def scorecard(
     date: str = typer.Option("", help="算到哪個交易日 YYYY-MM-DD；空＝PG 最新行情日"),
 ) -> None:
-    """成績單（D-176）：每條線照公布的名單自動操作的模擬帳戶＋逐筆統計，寫進 PG `scorecard`（網站讀）。"""
+    """名單績效（D-176）：每條線照公布的名單自動操作的模擬帳戶＋逐筆統計，寫進 PG `scorecard`（網站讀）。"""
     day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
     typer.secho(f"[OK] {day}：{_scorecard_for_day(day)}", fg=typer.colors.GREEN)
 
@@ -2733,7 +2733,7 @@ def _daily_picks_for_day(day: dt.date) -> str:
 
 
 def _scorecard_for_day(day: dt.date) -> str:
-    """成績單（D-176）：每條線照公布的名單（`daily_picks`）從開戶日重播到 `day`，連同逐筆寫進 PG `scorecard`。
+    """名單績效（D-176）：每條線照公布的名單（`daily_picks`）從開戶日重播到 `day`，連同逐筆寫進 PG `scorecard`。
 
     只讀名單、行情、除權息與股名——不重算模型分數，所以雲端的滾動窗口就夠（行情 500 日）。
     """
@@ -2749,7 +2749,7 @@ def _scorecard_for_day(day: dt.date) -> str:
 
     cfg = load_config(_CONFIG_DIR / "scorecard.yaml", ScorecardConfig)
     if day < cfg.start:
-        raise typer.BadParameter(f"{day} 早於成績單開戶日 {cfg.start}")
+        raise typer.BadParameter(f"{day} 早於名單績效開戶日 {cfg.start}")
     board = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
     cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
     lines = [
