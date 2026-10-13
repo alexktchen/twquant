@@ -123,10 +123,11 @@
   /* 只改左右：padding 簡寫會把上面安全區的 padding-top 歸零（PR #135 就是這樣失效） */
   /* 手機整頁捲動：頂欄釘在上面，捲動時清單才不會跑到時鐘底下 */
   .cq-top { gap: 10px; padding-left: 12px; padding-right: 12px; position: sticky; top: 0; z-index: 10; }
-  /* 品牌、分頁、日期、帳號排一列要約 470px，手機放不下：改兩列，上列品牌＋帳號，下列分頁＋日期 */
+  /* 品牌、分頁、日期、帳號排一列要約 560px，手機放不下：改兩列，上列品牌＋日期＋帳號，下列四個分頁獨佔一整列
+     （四個分頁約 285px，再擠日期就超過 375px 寬，D-176 加「成績單」時改成這樣） */
   .cq-top {
-    display: grid; grid-template-columns: 1fr auto; grid-template-rows: 48px 44px;
-    grid-template-areas: "brand user" "tabs date"; height: auto; row-gap: 0;
+    display: grid; grid-template-columns: 1fr auto auto; grid-template-rows: 48px 44px;
+    grid-template-areas: "brand date user" "tabs tabs tabs"; height: auto; row-gap: 0;
   }
   .cq-brand { grid-area: brand; }
   /* 右欄寬度由較寬的日期列決定，帳號要自己靠右 */
@@ -135,13 +136,13 @@
   .cq-tabs button:first-child { padding-left: 0; }
   .cq-date { grid-area: date; margin-left: 0; justify-self: end; }
   .cq-brand { font-size: 17px; }
-  /* 375px 寬時分頁＋日期列剛好塞滿，分頁字與日期箭頭略縮 */
+  /* 375px 寬時四個分頁一列、品牌列擠日期與帳號：分頁字與日期箭頭略縮 */
   .cq-tabs button { padding: 0 8px; font-size: 16px; }
   .cq-date button { width: 28px; height: 28px; }
   .cq-date { font-size: 13.5px; }
   .cq-date-suffix { display: none; }
-  /* 三個分頁＋歷史日期選單（箭頭、日期、檔數）在 375px 要約 470px：歷史名單時日期選單另起第三列、撐滿寬度 */
-  .cq-top.cq-top-hist { grid-template-rows: 48px 44px 44px; grid-template-areas: "brand user" "tabs tabs" "date date"; }
+  /* 歷史日期選單（箭頭、日期、檔數）放不進品牌那一列：另起第三列、撐滿寬度 */
+  .cq-top.cq-top-hist { grid-template-rows: 48px 44px 44px; grid-template-areas: "brand brand user" "tabs tabs tabs" "date date date"; }
   .cq-top-hist .cq-tabs { justify-self: start; }
   .cq-top-hist .cq-date { justify-self: stretch; }
   .cq-top-hist .cq-date select { flex: 1; min-width: 0; height: 32px; }
@@ -306,4 +307,61 @@
   .cq-gate-card { padding: 14px 16px; }
   .cq-gate-card img, .cq-gate-card p { display: none; }
   .cq-gate-card h2 { margin-top: 0; }
+}
+
+/* 成績單（D-176）：左欄模擬帳戶數字與規則，右欄淨值曲線（對 0050）、逐筆統計與明細 */
+.cq-score-side { overflow-y: auto; }
+.cq-score-main { overflow-y: auto; gap: 22px; }
+.cq-score-acct { padding: 2px 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.cq-score-label { color: var(--mute); font-size: 13.5px; }
+.cq-big .cq-score-sub { display: block; margin: 2px 0 0; font-size: 13.5px; font-weight: 400; color: var(--mute); }
+.cq-score-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 14.5px; }
+.cq-score-dl dt { color: var(--mute); }
+.cq-score-dl dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.cq-score-dl dd small { color: var(--mute); font-size: 12.5px; margin-left: 4px; }
+.cq-score-dl dd.wide { grid-column: 1 / -1; text-align: left; font-size: 13px; line-height: 1.5; }
+.cq-score-live { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.cq-score-live b { font-size: 14.5px; }
+.cq-score-live small { color: var(--mute); font-size: 12.5px; }
+.cq-score-notes p { margin: 0 0 8px; font-size: 13px; line-height: 1.65; color: #c9ccd3; }
+.cq-score-notes b { color: var(--text); margin-right: 6px; }
+.cq .cq-score-warn { color: #ffc04d; }
+.cq-score-block { display: flex; flex-direction: column; gap: 8px; }
+.cq-score-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 14px; flex-wrap: wrap; }
+.cq-score-head h2 { margin: 0; font-size: 17px; }
+.cq-score-at { display: flex; gap: 10px; color: var(--mute); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.cq-score-at b { font-weight: 600; }
+.cq-score-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--mute); }
+.cq-score-legend i { display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+.cq-score-legend i.dash { height: 0; border-top: 2px dashed; border-radius: 0; }
+.cq-score-chart { height: 340px; flex: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.cq-score-p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--mute); }
+.cq-score-stats { width: 100%; border-collapse: collapse; font-size: 14.5px; font-variant-numeric: tabular-nums; }
+.cq-score-stats th, .cq-score-stats td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.cq-score-stats thead th { color: var(--mute); font-weight: 500; font-size: 13px; }
+.cq-score-stats tbody th { text-align: left; color: var(--mute); font-weight: 400; }
+.cq-seg.cq-seg-small { padding: 0; }
+.cq-seg-small button { flex: none; padding: 5px 12px; font-size: 13.5px; }
+.cq-score-trades { border-top: 1px solid var(--line); }
+.cq-trade {
+  display: grid; grid-template-columns: minmax(0, 1fr) 86px 86px 112px; align-items: center; gap: 8px;
+  padding: 8px 4px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.cq-trade-head { color: var(--mute); font-size: 12.5px; padding: 6px 4px; }
+.cq-trade-head span:not(:first-child) { text-align: right; }
+.cq-trade-name { min-width: 0; }
+.cq-trade-name small { display: flex; align-items: center; gap: 6px; color: var(--mute); font-size: 12.5px; }
+.cq-trade-name b { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-trade-name b em { font-style: normal; font-weight: 400; color: var(--mute); margin-right: 6px; font-size: 13.5px; }
+.cq-trade-px, .cq-trade-ret { display: flex; flex-direction: column; align-items: flex-end; font-size: 14.5px; line-height: 1.3; }
+.cq-trade-px small, .cq-trade-ret small { color: var(--mute); font-size: 12px; white-space: nowrap; }
+.cq-trade-ret b { font-size: 15px; }
+.cq .cq-more { align-self: center; margin-top: 4px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); font-size: 14px; }
+@media (max-width: 820px) {
+  .cq-score .cq-list { max-height: none; border-bottom: 1px solid var(--line); }
+  .cq-score-main { overflow: visible; padding: 14px 12px 20px; }
+  .cq-score-chart { height: 260px; }
+  .cq-trade { grid-template-columns: minmax(0, 1fr) 64px 64px 92px; gap: 4px; padding: 8px 0; }
+  .cq-trade-px { font-size: 13.5px; }
+  .cq-score-stats th, .cq-score-stats td { padding: 6px 4px; font-size: 13.5px; }
 }

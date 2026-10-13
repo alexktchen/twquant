@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,7 @@ from twquant.backtest.exposure import (
 )
 from twquant.backtest.fill import decide_fill
 from twquant.backtest.metrics import Metrics, compute_metrics
+from twquant.errors import DataError
 from twquant.strategy.overlays import _realized_vol
 
 if TYPE_CHECKING:
@@ -602,6 +604,7 @@ def run_backtest(
     max_participation: float = 0.05,
     credit_dividends: bool = True,
     lot_size: int = _LOT,
+    picks: Mapping[dt.date, Sequence[str]] | None = None,
 ) -> BacktestResult:
     """跑回測，回傳 BacktestResult（權益曲線、ledger、unfilled、指標）。
 
@@ -613,9 +616,14 @@ def run_backtest(
     存在的理由是 D-086：含息與不含息兩次相減，才分離得出「股利本身」與
     「部位變大之後撞參與率上限」——後者實測占了 A 軌 47.3M 期末差裡的 13.6M。
     **不是預設**：真實投資人收得到股利，關掉它只是為了做對照。
+
+    `picks` 給了就**照公布的名單操作**（成績單，D-176）：不重算模型，名單＝收盤後公布的那一份
+    （日期 → 依名次排列的代號）。補位型的候選序就是當天的名單（沒有那天＝沒有候選）；
+    月換股型在換股日把當天名單照配置的加權買滿（`list_weights`），換股日沒有名單 raise。
+    其餘成交語意（隔日開盤、成本、漲跌停、出場規則）與不給 `picks` 時完全相同。
     """
     from twquant.data import calendar as cal
-    from twquant.strategy.build import build_targets, signal_dates
+    from twquant.strategy.build import build_targets, list_weights, signal_dates
     from twquant.strategy.slots import slot_candidates
 
     calendar = cal.load(warehouse)
@@ -751,9 +759,17 @@ def run_backtest(
         )
 
         if day in sig_dates:
-            # SPEC-012：banding 需要「昨天在不在裡面」；狀態留在引擎，build_targets 保持純函數
-            tdf = build_targets(strategy_cfg, warehouse, day, held=frozenset(state.holdings))
-            pending = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
+            if picks is not None:
+                published = picks.get(day)
+                if published is None:
+                    raise DataError(
+                        "daily_picks", day, f"策略「{strategy_cfg.name}」換股日沒有公布的名單"
+                    )
+                pending = list_weights(strategy_cfg, list(published))
+            else:
+                # SPEC-012：banding 需要「昨天在不在裡面」；狀態留在引擎，build_targets 保持純函數
+                tdf = build_targets(strategy_cfg, warehouse, day, held=frozenset(state.holdings))
+                pending = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
 
         if exit_rules and state.holdings and pending is None:
             exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
@@ -786,7 +802,11 @@ def run_backtest(
             # 空位只算「現在真的空著的」：今晚才判定要賣的，明天賣不賣得掉還不知道（跌停）
             free = slot_cfg.n - len(state.holdings)
             if free > 0:
-                ranked = slot_candidates(strategy_cfg, warehouse, day)
+                ranked = (
+                    [(sid, 0.0) for sid in picks.get(day, ())]
+                    if picks is not None
+                    else slot_candidates(strategy_cfg, warehouse, day)
+                )
                 cands = [sid for sid, _ in ranked if sid not in state.holdings]
                 blocked = entry_blocked(
                     [*exit_rules, *strategy_cfg.entry_filters], cands, day_px, warehouse, day
@@ -863,3 +883,12 @@ ExecutionState = _State
 execute_at_open = _execute
 force_exit_on_price_jump = _forced_exit
 price_panel = _price_panel
+
+
+# ── 成績單逐筆用的公開名字（D-176）──────────────────────────────────────────
+# 逐筆統計（每一檔新進名單各算一筆）不受帳戶位子與現金限制，不能直接跑 `run_backtest`；
+# 但除息、分割、漲跌停的判斷必須與帳戶同一份，所以同樣換個名字公開、不另寫。
+dividends_by_date = _dividends_by_date
+splits_by_date = _splits_by_date
+limit_up_of = _limit_up
+limit_down_of = _limit_down

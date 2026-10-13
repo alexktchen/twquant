@@ -1617,6 +1617,17 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），不寫名單"
         return _daily_picks_for_day(day)
 
+    def _scorecard_step() -> str:
+        # D-176 成績單：照公布的名單重播模擬帳戶＋逐筆。排在每日名單之後（要讀當天剛寫的名單）。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），成績單維持上一個交易日"
+        return _scorecard_for_day(day)
+
     def _paper_trading_step() -> str:
         # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
         # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
@@ -1713,6 +1724,7 @@ def _run_daily_pipeline(
         PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
+        PipelineStep("成績單", _scorecard_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -1829,6 +1841,15 @@ def daily_picks(
 
     day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
     typer.secho(f"[OK] {day}：{_daily_picks_for_day(day)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="scorecard")
+def scorecard(
+    date: str = typer.Option("", help="算到哪個交易日 YYYY-MM-DD；空＝PG 最新行情日"),
+) -> None:
+    """成績單（D-176）：每條線照公布的名單自動操作的模擬帳戶＋逐筆統計，寫進 PG `scorecard`（網站讀）。"""
+    day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
+    typer.secho(f"[OK] {day}：{_scorecard_for_day(day)}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -2711,6 +2732,68 @@ def _daily_picks_for_day(day: dt.date) -> str:
     return "、".join(done)
 
 
+def _scorecard_for_day(day: dt.date) -> str:
+    """成績單（D-176）：每條線照公布的名單（`daily_picks`）從開戶日重播到 `day`，連同逐筆寫進 PG `scorecard`。
+
+    只讀名單、行情、除權息與股名——不重算模型分數，所以雲端的滾動窗口就夠（行情 500 日）。
+    """
+    from twquant.backtest.costs import CostConfig
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.pg_view import PgTableSource
+    from twquant.data.serving.scorecard_store import read_published, write_scorecard
+    from twquant.reporting.pick_board import PickBoardConfig
+    from twquant.reporting.scorecard import ScorecardConfig, build_scorecards
+    from twquant.strategy.config import load_strategy
+
+    cfg = load_config(_CONFIG_DIR / "scorecard.yaml", ScorecardConfig)
+    if day < cfg.start:
+        raise typer.BadParameter(f"{day} 早於成績單開戶日 {cfg.start}")
+    board = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
+    cost = load_config(_CONFIG_DIR / "costs.yaml", CostConfig)
+    lines = [
+        (s, load_strategy(str(_CONFIG_DIR / "strategies" / f"{s.config}.yaml")))
+        for s in board.strategies
+    ]
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        # 只讀開戶日前 warmup_days 起的行情與除權息（前收、20 日成交額中位數），不整張全掃（T-278）
+        source = PgTableSource(
+            conn,
+            scfg.pg_schema,
+            cache=True,
+            since=cfg.start - dt.timedelta(days=cfg.warmup_days),
+        )
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT stock_id, name FROM "{scfg.pg_schema}"."stock_meta"')
+            names = {str(sid): str(nm) for sid, nm in cur.fetchall() if nm}
+        payloads = build_scorecards(
+            source=source,
+            published=read_published(conn, scfg.pg_schema, cfg.start, day),
+            names=names,
+            lines=lines,
+            cfg=cfg,
+            cost=cost,
+            as_of=day,
+            generated_at=now_tw(),
+        )
+        now = now_tw()
+        for p in payloads:
+            write_scorecard(conn, scfg.pg_schema, str(p["code"]), day, p, now)
+    finally:
+        conn.close()
+    parts = []
+    for p in payloads:
+        acct = p["account"]["all"]
+        stats = p["trades"]["stats"]["all"]
+        parts.append(f"{p['name']} 帳戶 {acct['ret']:+.1%}、逐筆已結算 {stats['n']} 筆")
+    bench_err = payloads[0]["benchmark"]["error"] if payloads else None
+    tail = f"（⚠ {cfg.benchmark} 對照算不出來：{bench_err}）" if bench_err else ""
+    return "；".join(parts) + tail
+
+
 def _closes_for(
     conn: Any, schema: str, ledger: Sequence[Any], start: dt.date, end: dt.date
 ) -> dict[dt.date, dict[str, float]]:
@@ -3590,6 +3673,7 @@ def serving_prune(
             cfg.cloud.stock_pattern,
             tuple(cfg.cloud.pattern_tables),
             tuple(cfg.cloud.industry_member_tables),
+            tuple(cfg.cloud.keep_stocks),
         )
     finally:
         conn.close()

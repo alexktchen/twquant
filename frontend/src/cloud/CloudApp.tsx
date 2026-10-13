@@ -21,6 +21,7 @@ import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPic
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
+import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { dateOption, dayCount, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
@@ -29,7 +30,7 @@ import { LIVE_POLL_MS, liveBar, liveLabel, rowPrice, shouldPoll, taipeiNow, type
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
-type Tab = 'today' | 'history' | 'watch'
+type Tab = 'today' | 'history' | 'score' | 'watch'
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
 const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
@@ -138,8 +139,8 @@ export default function CloudApp() {
   }, [tab, date, dates])
 
   useEffect(() => {
-    // 追蹤分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）
-    if (guest || tab === 'watch') return
+    // 追蹤、成績單分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）
+    if (guest || tab === 'watch' || tab === 'score') return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
     const want = tab === 'today' ? undefined : date
@@ -248,6 +249,9 @@ export default function CloudApp() {
           >
             歷史名單
           </button>
+          <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
+            成績單
+          </button>
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
             追蹤
           </button>
@@ -269,7 +273,7 @@ export default function CloudApp() {
                 ›
               </button>
             </>
-          ) : tab === 'watch' ? (
+          ) : tab === 'score' ? null : tab === 'watch' ? (
             <span>
               {guest ? guestToday : watch?.date}
               <span className="cq-date-suffix"> 評分</span>
@@ -302,133 +306,155 @@ export default function CloudApp() {
         </div>
       )}
 
-      <main className="cq-body">
-        {tab === 'watch' ? (
-          <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
-            <StockSearch
-              disabled={guest}
-              tracked={tracked}
-              onPick={(h) => {
-                setWatchSel(h)
-                // 手機上名單在上、個股在下：查到就捲到個股
-                if (window.matchMedia('(max-width: 820px)').matches) detailRef.current?.scrollIntoView({ behavior: 'smooth' })
-              }}
-            />
-            {!guest && watch && watch.items.length > 0 && (
-              <div className="cq-watchbar">
-                <span>{editMode ? '按住右邊的 ≡ 上下拖曳排序' : `共 ${watch.items.length} 檔`}</span>
-                <button className="cq-edit-btn" onClick={() => setEditing(!editMode)}>
-                  {editMode ? '完成' : '編輯'}
-                </button>
+      {tab === 'score' ? (
+        guest ? (
+          <main className="cq-body">
+            <aside className="cq-list cq-list-guest">
+              <div className="cq-rows">
+                <Gate title="登入後看成績單" text="每條線照公布的名單自動操作的模擬帳戶，跟同期 0050 比；以及每一檔新進名單的逐筆結果。" />
               </div>
-            )}
-            {!editMode && (
+            </aside>
+            <section className="cq-detail" />
+          </main>
+        ) : (
+          <ScorecardPage
+            line={GUEST_LINES.some((l) => l.code === line) ? line : 'CORE'}
+            onLine={(code) => {
+              setLine(code)
+              savePref(LINE_KEY, code)
+            }}
+            refresh={refresh}
+          />
+        )
+      ) : (
+        <main className="cq-body">
+          {tab === 'watch' ? (
+            <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
+              <StockSearch
+                disabled={guest}
+                tracked={tracked}
+                onPick={(h) => {
+                  setWatchSel(h)
+                  // 手機上名單在上、個股在下：查到就捲到個股
+                  if (window.matchMedia('(max-width: 820px)').matches) detailRef.current?.scrollIntoView({ behavior: 'smooth' })
+                }}
+              />
+              {!guest && watch && watch.items.length > 0 && (
+                <div className="cq-watchbar">
+                  <span>{editMode ? '按住右邊的 ≡ 上下拖曳排序' : `共 ${watch.items.length} 檔`}</span>
+                  <button className="cq-edit-btn" onClick={() => setEditing(!editMode)}>
+                    {editMode ? '完成' : '編輯'}
+                  </button>
+                </div>
+              )}
+              {!editMode && (
+                <div className="cq-head">
+                  <span>代號／名稱／模型評分</span>
+                  <span>股價</span>
+                  <span>漲跌幅</span>
+                </div>
+              )}
+              <div className="cq-rows">
+                {editMode && watch ? (
+                  <WatchEditor items={watch.items} onOrder={reorderWatch} onRemove={removeWatch} />
+                ) : (
+                  <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
+                    {guest
+                      ? guestPicks(6, 20261013).map((p) => <Row key={p.sid} p={p} on={false} onClick={() => undefined} />)
+                      : watch?.items.map((w) => (
+                          <WatchRow
+                            key={w.sid}
+                            w={w}
+                            live={rowPrice(w, watchLive.quotes[w.sid], today)}
+                            on={w.sid === watchCurrent?.sid}
+                            onClick={() => setWatchSel(w)}
+                          />
+                        ))}
+                  </ul>
+                )}
+                {!guest && watchErr && <p className="cq-empty">{watchErr}</p>}
+                {!guest && !watchErr && watch && watch.items.length === 0 && (
+                  <p className="cq-empty">還沒有追蹤股。在上面輸入股號或名稱，查到後按「＋ 追蹤」。</p>
+                )}
+                {guest && <Gate title="登入後查個股評分" text="輸入任何股號，看三個模型怎麼評它，並存成自己的追蹤股。" />}
+              </div>
+              <p className="cq-note">
+                追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。非投資建議。
+              </p>
+            </aside>
+          ) : (
+            <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
+              <div className="cq-seg">
+                {view?.lines.map((l) => (
+                  <button
+                    key={l.code}
+                    className={l.code === current?.code ? 'on' : ''}
+                    onClick={() => {
+                      setLine(l.code)
+                      savePref(LINE_KEY, l.code)
+                      setSid(l.picks[0]?.sid ?? '')
+                    }}
+                  >
+                    {l.name}
+                    <em>{l.picks.length}</em>
+                  </button>
+                ))}
+              </div>
               <div className="cq-head">
-                <span>代號／名稱／模型評分</span>
-                <span>股價</span>
+                <span>代號／名稱／近 6 日上榜</span>
+                <span>收盤／6日</span>
                 <span>漲跌幅</span>
               </div>
-            )}
-            <div className="cq-rows">
-              {editMode && watch ? (
-                <WatchEditor items={watch.items} onOrder={reorderWatch} onRemove={removeWatch} />
-              ) : (
+              <div className="cq-rows">
                 <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
-                  {guest
-                    ? guestPicks(6, 20261013).map((p) => <Row key={p.sid} p={p} on={false} onClick={() => undefined} />)
-                    : watch?.items.map((w) => (
-                        <WatchRow
-                          key={w.sid}
-                          w={w}
-                          live={rowPrice(w, watchLive.quotes[w.sid], today)}
-                          on={w.sid === watchCurrent?.sid}
-                          onClick={() => setWatchSel(w)}
-                        />
-                      ))}
+                  {current?.picks.map((p) => (
+                    <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
+                  ))}
                 </ul>
-              )}
-              {!guest && watchErr && <p className="cq-empty">{watchErr}</p>}
-              {!guest && !watchErr && watch && watch.items.length === 0 && (
-                <p className="cq-empty">還沒有追蹤股。在上面輸入股號或名稱，查到後按「＋ 追蹤」。</p>
-              )}
-              {guest && <Gate title="登入後查個股評分" text="輸入任何股號，看三個模型怎麼評它，並存成自己的追蹤股。" />}
-            </div>
-            <p className="cq-note">
-              追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。非投資建議。
-            </p>
-          </aside>
-        ) : (
-          <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
-            <div className="cq-seg">
-              {view?.lines.map((l) => (
-                <button
-                  key={l.code}
-                  className={l.code === current?.code ? 'on' : ''}
-                  onClick={() => {
-                    setLine(l.code)
-                    savePref(LINE_KEY, l.code)
-                    setSid(l.picks[0]?.sid ?? '')
-                  }}
-                >
-                  {l.name}
-                  <em>{l.picks.length}</em>
-                </button>
-              ))}
-            </div>
-            <div className="cq-head">
-              <span>代號／名稱／近 6 日上榜</span>
-              <span>收盤／6日</span>
-              <span>漲跌幅</span>
-            </div>
-            <div className="cq-rows">
-              <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
-                {current?.picks.map((p) => (
-                  <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
-                ))}
-              </ul>
-              {current && current.picks.length === 0 && <p className="cq-empty">今天沒有符合條件的股票。</p>}
-              {guest && <Gate />}
-            </div>
-            {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
-            <p className="cq-note">
-              方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
-            </p>
-          </aside>
-        )}
+                {current && current.picks.length === 0 && <p className="cq-empty">今天沒有符合條件的股票。</p>}
+                {guest && <Gate />}
+              </div>
+              {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
+              <p className="cq-note">
+                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
+              </p>
+            </aside>
+          )}
 
-        <section className="cq-detail" ref={detailRef}>
-          {guest ? (
-            <div className="cq-locked cq-guest-detail" aria-hidden="true">
-              <GuestChart />
-            </div>
-          ) : tab === 'watch' ? (
-            watchCurrent ? (
+          <section className="cq-detail" ref={detailRef}>
+            {guest ? (
+              <div className="cq-locked cq-guest-detail" aria-hidden="true">
+                <GuestChart />
+              </div>
+            ) : tab === 'watch' ? (
+              watchCurrent ? (
+                <Detail
+                  sid={watchCurrent.sid}
+                  name={watchCurrent.name}
+                  lineNames={lineNames}
+                  tracked={tracked.has(watchCurrent.sid)}
+                  onTrack={watch ? toggleTrack : undefined}
+                  refresh={refresh}
+                />
+              ) : (
+                <p className="cq-empty">輸入股號或名稱，看三個模型的評分。</p>
+              )
+            ) : selected ? (
               <Detail
-                sid={watchCurrent.sid}
-                name={watchCurrent.name}
+                sid={selected.sid}
+                name={selected.name}
+                close={selected.close}
+                chg={selected.chg}
+                asOf={tab === 'history' ? view?.date : undefined}
                 lineNames={lineNames}
-                tracked={tracked.has(watchCurrent.sid)}
+                tracked={tracked.has(selected.sid)}
                 onTrack={watch ? toggleTrack : undefined}
                 refresh={refresh}
               />
-            ) : (
-              <p className="cq-empty">輸入股號或名稱，看三個模型的評分。</p>
-            )
-          ) : selected ? (
-            <Detail
-              sid={selected.sid}
-              name={selected.name}
-              close={selected.close}
-              chg={selected.chg}
-              asOf={tab === 'history' ? view?.date : undefined}
-              lineNames={lineNames}
-              tracked={tracked.has(selected.sid)}
-              onTrack={watch ? toggleTrack : undefined}
-              refresh={refresh}
-            />
-          ) : null}
-        </section>
-      </main>
+            ) : null}
+          </section>
+        </main>
+      )}
       {!riskOk && (
         <RiskNotice
           onAgree={() => {

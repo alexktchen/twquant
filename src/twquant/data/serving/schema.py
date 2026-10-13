@@ -429,6 +429,20 @@ DAILY_PICKS_SPEC = TableSpec(
     pk=("date", "line", "stock_id"),
 )
 
+# 成績單（D-176）：每條線一列，存網站要的整份 JSON（模擬帳戶淨值、逐筆明細）。每天由 daily_picks＋行情
+# 從頭重算後整列覆蓋，可隨時重建；網站 `/api/scorecard` 原樣讀出。sync/rebuild/prune 都不碰。
+SCORECARD_SPEC = TableSpec(
+    "scorecard",
+    (
+        ("line", "text"),
+        ("as_of", "date"),
+        ("payload", "jsonb"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("line",),
+    snapshot=True,  # 沒有 date 分區：每次整份重算
+)
+
 # 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
 # （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
 # 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
@@ -504,6 +518,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     *DIRECT_PG_SPECS,
     DAYTRADE_FIRST_PUB_SPEC,
     DAILY_PICKS_SPEC,
+    SCORECARD_SPEC,
     *FUND_FLOW_SPECS,
 )
 

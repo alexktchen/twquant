@@ -207,6 +207,44 @@ def test_t331_ac1_prune_keeps_industry_members_outside_pattern() -> None:
         conn.close()
 
 
+def test_t349_ac9_prune_keeps_benchmark_stock() -> None:
+    """D-176：成績單對照 0050 不是四碼普通股，`keep_stocks` 列了就留下；其他 ETF 照刪。"""
+    conn = _connect_or_skip()
+    from twquant.data.serving.cloud import prune
+
+    days = [dt.date(2026, 6, 25), dt.date(2026, 6, 26)]
+    pattern = "^[1-9][0-9]{3}$"
+    try:
+        _drop(conn)
+        _seed_prices(conn, _SRC, days, ["2330", "0050", "0056"])
+        kept = prune(
+            conn, _SRC, {"prices_daily": 10}, pattern, ("prices_daily",), keep_stocks=("0050",)
+        )
+        assert kept[0].deleted == 2  # 只刪 0056 的兩天
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT DISTINCT stock_id FROM "{_SRC}".prices_daily')
+            assert {r[0] for r in cur.fetchall()} == {"2330", "0050"}
+    finally:
+        _drop(conn)
+        conn.close()
+
+
+def test_t349_ac9_benchmark_is_kept_and_seeded() -> None:
+    """成績單的對照代號要同時在修剪白名單與雲端切片裡，否則當晚就被修掉或重灌後不見（靜態）。"""
+    from pathlib import Path
+
+    import yaml
+
+    from twquant.config import ServingConfig, load_config
+    from twquant.reporting.scorecard import ScorecardConfig
+
+    bench = load_config(Path("configs/scorecard.yaml"), ScorecardConfig).benchmark
+    cfg = load_config(Path("configs/serving.yaml"), ServingConfig)
+    assert bench in cfg.cloud.keep_stocks
+    seed = yaml.safe_load(Path("configs/cloud_seed.yaml").read_text(encoding="utf-8"))["tables"]
+    assert any(bench in (p.get("in") or {}).get("stock_id", []) for p in seed["prices_daily"])
+
+
 def test_t331_ac2_seed_slices_fit_prune_windows() -> None:
     """configs/cloud_seed.yaml 灌進去的天數不能超過 cloud.windows，否則當晚 prune 就修掉（靜態）。"""
     from pathlib import Path

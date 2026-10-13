@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -181,6 +182,29 @@ def build_targets(
         weights = get_overlay(name)(signal_date, weights, view, cfg.overlay_params.get(name, {}))
 
     return weights.select("date", "stock_id", "target_weight").sort("stock_id")
+
+
+def list_weights(cfg: StrategyConfig, ids: Sequence[str]) -> dict[str, float]:
+    """成績單（D-176）：換股日照**公布的名單**給目標權重——不重算分數，只套配置的加權與截頂。
+
+    公布的名單只有代號沒有分數與市值，所以只支援不需要它們的加權（equal、fixed_slot），
+    也不能有 overlay（要讀行情改權重）。其他配置 raise，不悄悄改成等權。
+    """
+    if cfg.overlays:
+        raise ConfigError(
+            f"策略「{cfg.name}」有 overlay {cfg.overlays}，無法只憑公布的名單重現權重"
+        )
+    if cfg.weighting not in ("equal", "fixed_slot"):
+        raise ConfigError(
+            f"策略「{cfg.name}」weighting={cfg.weighting} 需要分數或市值，無法只憑公布的名單重現"
+        )
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"公布的名單有重複代號：{list(ids)}")
+    if not ids:
+        return {}
+    picked = pl.DataFrame({"stock_id": list(ids)}, schema={"stock_id": pl.Utf8})
+    w = _weight(picked, cfg, score_min=0.0, log_mktcap={})
+    return dict(zip(w["stock_id"].to_list(), w["target_weight"].to_list(), strict=True))
 
 
 def _select(

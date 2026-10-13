@@ -19,6 +19,15 @@
 
 ## 0. 三十秒版本
 
+- **網站「成績單」（D-176／T-349／T-350，2026-10-13，分支 `claude/simulated-account-backtest-0cdu9l`）**：每條線照**公布的名單**（`daily_picks`）
+  自動操作的模擬帳戶（2026-05-04 起、1,000 萬、零股、隔天開盤、扣成本含股利）＋每一檔新進名單的逐筆（抱 20 個交易日）。
+  每日 pipeline「每日名單」之後多一步「成績單」（雲端也跑），結果整份存 PG **`serving.scorecard`**（每條線一列 jsonb，每天從頭重算覆蓋）；
+  手動重算 `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant scorecard --date <日>`。規則寫死在 `configs/scorecard.yaml`（**事前登記，不得改**）。
+  「即時」＝名單在下一交易日 09:00 前寫入（看 `daily_picks.created_at`），之前回頭補的標「事後補」。網站 API `/api/scorecard?line=`、`/api/scorecard/trades?line=`。
+  **部署後要做一次**：雲端沒有 0050 行情（以前修剪掉了；現在 `cloud.keep_stocks` 會留），要從地端補：
+  `uv run --all-groups python scripts/cloud_seed_needed.py --env-file D:/project/twquant/.env --tables prices_daily`（先 `--dry-run`）。補之前頁面寫「0050 對照算不出來」。
+  已知：`corporate_events` 沒每日更新（T-333），09-07 後的除息會被算成下跌。
+
 - **投信／ETF 資金流（SPEC-016／D-171，2026-10-11，分支 `claude/spec-016-fund-flow-traces`，PR #152）**：
   新表四張（只在地端 PG）：`etf_meta`（88 檔）、`etf_units_daily`（2015-06 起每日單位數與申贖量）、
   `etf_holdings_daily`（元大 9 檔＋統一 3 檔的每日持股，指數型每週一份＋換股區間逐日）、`index_rebalance_events`（由持股推導）。
