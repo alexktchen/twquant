@@ -1,8 +1,9 @@
 // GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
+import { cached, cacheKey } from '../../_lib/cache'
 
-export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
+const handle: PagesFunction<Env> = async ({ request, env }) => {
   const want = new URL(request.url).searchParams.get('date')
   if (want !== null && !DATE_RE.test(want)) return fail(400, `日期格式錯誤：${want}`)
   return guarded(env, async (db) => {
@@ -71,3 +72,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return json({ date: target, window: [...window].reverse(), lines })
   })
 }
+
+// 每個人看到都一樣、一天只更新兩次：同一執行個體 60 秒暫存，省下連資料庫的 CPU（_lib/cache.ts）
+export const onRequestGet: PagesFunction<Env> = (ctx) => cached(cacheKey(ctx.request), async () => handle(ctx))

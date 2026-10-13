@@ -1,12 +1,16 @@
 // Supabase 連線（Cloudflare Workers 的 TCP socket，需 nodejs_compat）。
-// transaction pooler（:6543）不支援 prepared statements → prepare: false。
+// 正式環境走 Hyperdrive（Cloudflare 的資料庫連線池，wrangler.toml 的 HYPERDRIVE 綁定）：
+// 每個請求自己對 Supabase 開加密連線＋密碼驗證，在免費方案每次請求 10ms CPU 的上限下常被砍（error 1102，2026-10-13 實測
+// 公開的 /pub/dates 十次失敗七次）。Hyperdrive 在 Cloudflare 那端保留連線，請求只要連到它。
+// 本機 `wrangler pages dev` 沒有綁定時直連 TWQUANT_PG_DSN（transaction pooler :6543，不支援 prepared statements → prepare: false）。
 import postgres from 'postgres'
 
-export type Env = { TWQUANT_PG_DSN: string }
+export type Env = { TWQUANT_PG_DSN?: string; HYPERDRIVE?: { connectionString: string } }
 
 export function sql(env: Env) {
-  if (!env.TWQUANT_PG_DSN) throw new Error('TWQUANT_PG_DSN 未設定')
-  return postgres(env.TWQUANT_PG_DSN, { prepare: false, max: 1, fetch_types: false, idle_timeout: 5 })
+  const dsn = env.HYPERDRIVE?.connectionString ?? env.TWQUANT_PG_DSN
+  if (!dsn) throw new Error('沒有資料庫連線：HYPERDRIVE 綁定與 TWQUANT_PG_DSN 都沒設定')
+  return postgres(dsn, { prepare: false, max: 1, fetch_types: false, idle_timeout: 5 })
 }
 
 export const json = (body: unknown, status = 200) =>

@@ -1,5 +1,6 @@
 // GET /api/picks/dates?limit=250：有名單的日期，新到舊；附 counts[日期][線別]＝檔數、since[線別]＝第一天。
 import { guarded, json, type Env } from '../../_lib/db'
+import { cached, cacheKey } from '../../_lib/cache'
 import { groupCounts } from '../../_lib/picks'
 
 /** 日期清單（只有日期）；公開的 /pub/dates 也用這個，傳 publicDetail 讓錯誤不帶資料庫細節。 */
@@ -25,4 +26,5 @@ export function listDates(request: Request, env: Env, publicDetail?: string): Pr
   )
 }
 
-export const onRequestGet: PagesFunction<Env> = ({ request, env }) => listDates(request, env)
+// 60 秒暫存（_lib/cache.ts）
+export const onRequestGet: PagesFunction<Env> = ({ request, env }) => cached(cacheKey(request), () => listDates(request, env))
