@@ -88,6 +88,21 @@ export default function CloudApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 從背景回到前景時重新確認登入：登入 24 小時就過期，iPhone 主畫面 App 常常隔天才回來，
+  // 畫面卻還停在登入狀態（頭像、登出、舊名單）。過期就換成沒登入的畫面，不留舊資料
+  useEffect(() => {
+    if (guest) return
+    const onShow = () => {
+      if (document.visibilityState !== 'visible') return
+      fetchMe().catch((e: Error) => {
+        if (e instanceof LoginRequired) onFail(e)
+      })
+    }
+    document.addEventListener('visibilitychange', onShow)
+    return () => document.removeEventListener('visibilitychange', onShow)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guest])
+
   // 沒登入時「今日」用公開日期清單的最新一天；登入時這個值固定 undefined，不會多抓一次
   const guestToday = guest ? dates[0] : undefined
 

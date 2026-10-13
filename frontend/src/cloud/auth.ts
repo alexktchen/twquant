@@ -18,6 +18,18 @@ export function needsLogin(res: { type: string; status: number; ok: boolean; hea
   return res.ok && !(res.headers.get('content-type') ?? '').includes('json')
 }
 
+/** 按登出後要去哪：
+ *  - 伺服器撤銷登入成功 → 首頁（沒登入的預覽畫面）；
+ *  - 登入早就過期（Access 把登出請求導去登入頁、或 401／403）→ 本來就沒登入，也回首頁。
+ *    以前這裡會退回 Cloudflare 的登出頁，而那頁在沒有登入 cookie 時只顯示「No Access cookie found」錯誤
+ *    （登入 24 小時過期，iPhone 主畫面 App 隔天回來按登出就會遇到）；
+ *  - 其他失敗（撤銷失敗、斷線）→ Cloudflare 的登出頁，確保還登入著的人一定登得出去。 */
+export function logoutDestination(res: { type: string; status: number; ok: boolean; headers: Headers } | null): string {
+  if (res === null) return '/cdn-cgi/access/logout'
+  if (res.ok || needsLogin(res)) return '/'
+  return '/cdn-cgi/access/logout'
+}
+
 const GUEST_NAMES = ['登入後查看', '範例股票', '示範名單', '模型選股', '每日更新', '收盤產生', '範例資料', '登入查看', '示範股票', '範例名單']
 
 function rng(seed: number): () => number {
