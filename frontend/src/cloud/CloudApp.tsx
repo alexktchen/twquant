@@ -8,6 +8,7 @@ import {
   fetchPickDates,
   fetchPicks,
   fetchPublicDates,
+  fetchQuotes,
   fetchScores,
   fetchStockPicks,
   fetchWatchlist,
@@ -20,6 +21,7 @@ import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPic
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { dateOption, dayCount, hits, pct, price, quoteBar, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
+import { LIVE_POLL_MS, liveBar, liveLabel, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
@@ -160,6 +162,10 @@ export default function CloudApp() {
     })
   }
   const editMode = editing && !guest && (watch?.items.length ?? 0) > 0
+  // 追蹤清單的盤中價格（編輯時不抓）
+  const watchSids = useMemo(() => (watch?.items ?? []).map((w) => w.sid), [watch])
+  const watchLive = useLiveQuotes(watchSids, tab === 'watch' && !guest && !editMode)
+  const today = taipeiNow().date
   const detailRef = useRef<HTMLElement>(null)
 
   return (
@@ -252,7 +258,7 @@ export default function CloudApp() {
             {!editMode && (
               <div className="cq-head">
                 <span>代號／名稱／模型評分</span>
-                <span>收盤</span>
+                <span>股價</span>
                 <span>漲跌幅</span>
               </div>
             )}
@@ -264,7 +270,13 @@ export default function CloudApp() {
                   {guest
                     ? guestPicks(6, 20261013).map((p) => <Row key={p.sid} p={p} on={false} onClick={() => undefined} />)
                     : watch?.items.map((w) => (
-                        <WatchRow key={w.sid} w={w} on={w.sid === watchCurrent?.sid} onClick={() => setWatchSel(w)} />
+                        <WatchRow
+                          key={w.sid}
+                          w={w}
+                          live={rowPrice(w, watchLive.quotes[w.sid], today)}
+                          on={w.sid === watchCurrent?.sid}
+                          onClick={() => setWatchSel(w)}
+                        />
                       ))}
                 </ul>
               )}
@@ -275,7 +287,7 @@ export default function CloudApp() {
               {guest && <Gate title="登入後查個股評分" text="輸入任何股號，看三個模型怎麼評它，並存成自己的追蹤股。" />}
             </div>
             <p className="cq-note">
-              追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新，非投資建議。
+              追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。非投資建議。
             </p>
           </aside>
         ) : (
@@ -340,7 +352,7 @@ export default function CloudApp() {
               name={selected.name}
               close={selected.close}
               chg={selected.chg}
-              asOf={view?.date}
+              asOf={tab === 'history' ? view?.date : undefined}
               lineNames={lineNames}
               tracked={tracked.has(selected.sid)}
               onTrack={watch ? toggleTrack : undefined}
@@ -406,8 +418,19 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
 }
 
 /** 追蹤股一列：最新收盤、漲跌，和三個模型的重點（漲幅排名、在潛伏池才有的飆漲機率、回檔風險高才標）。 */
-function WatchRow({ w, on, onClick }: { w: WatchItem; on: boolean; onClick: () => void }) {
-  const t = trend(w.chg)
+function WatchRow({
+  w,
+  live,
+  on,
+  onClick,
+}: {
+  w: WatchItem
+  /** 要顯示的價格：盤中是即時價（tag＝盤中／今日收盤），否則是資料庫的收盤 */
+  live: { close: number | null; chg: number | null; tag: string | null }
+  on: boolean
+  onClick: () => void
+}) {
+  const t = trend(live.chg)
   return (
     <li className={on ? 'on' : ''} onClick={onClick}>
       <div className="cq-name">
@@ -424,9 +447,10 @@ function WatchRow({ w, on, onClick }: { w: WatchItem; on: boolean; onClick: () =
         </small>
       </div>
       <span className="cq-pxcol">
-        <span className={`cq-px ${t}`}>{price(w.close)}</span>
+        <span className={`cq-px ${t}`}>{price(live.close)}</span>
+        {live.tag && <small className="cq-live-tag">{live.tag}</small>}
       </span>
-      <span className={`cq-chg ${t}`}>{pct(w.chg)}</span>
+      <span className={`cq-chg ${t}`}>{pct(live.chg)}</span>
     </li>
   )
 }
@@ -620,9 +644,10 @@ function Detail({
 }: {
   sid: string
   name: string | null
-  /** 名單上的收盤與漲跌（名單日期那天）；不給就用 K 線最後一根 */
+  /** 名單上的收盤與漲跌：歷史名單顯示名單那天的；其他分頁只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
+  /** 歷史名單的日期：報價列停在那天，不顯示即時價 */
   asOf?: string
   lineNames: Record<string, string>
   tracked: boolean
@@ -652,10 +677,17 @@ function Detail({
   const bars = chart.sid === sid ? chart.bars : []
   // 分數同理：換股後到新分數回來前，不拿上一檔的分數與名稱
   const sc = scores?.sid === sid ? scores : null
-  // 報價列：名單日期那根（歷史名單選 9/24 就顯示 9/24，不是最新一天）；長按看別天在 K 線上的浮框
-  const q = quoteBar(bars, asOf, null)
-  const bigClose = close !== undefined ? close : (q?.bar.close ?? null)
-  const bigChg = chg !== undefined ? chg : (q?.chg ?? null)
+  // 盤中：今天到目前為止的那根接在 K 線最後（資料庫傍晚才有今天）
+  const today = taipeiNow().date
+  const live = useLiveQuotes([sid], true)
+  const quote = live.quotes[sid]
+  const todayBar = liveBar(bars, quote, today)
+  const all = todayBar ? [...bars, todayBar] : bars
+  // 報價列：歷史名單停在名單那天（選 9/24 就顯示 9/24）；其他分頁是最後一根（盤中就是即時那根）
+  const q = quoteBar(all, asOf, null)
+  const bigClose = asOf ? (close ?? q?.bar.close ?? null) : (q?.bar.close ?? close ?? null)
+  const bigChg = asOf ? (chg ?? q?.chg ?? null) : (q?.chg ?? chg ?? null)
+  const label = asOf ? null : todayBar ? liveLabel(quote, today) : quote?.date === today && quote.last === null ? '尚未成交' : null
   const t = trend(bigChg)
   return (
     <>
@@ -667,6 +699,12 @@ function Detail({
           </h1>
           <div className={`cq-big ${t}`}>
             {price(bigClose)} <span>{pct(bigChg)}</span>
+            {label && (
+              <em className="cq-live" title="證交所即時報價，約延遲 5 秒；盤中每 10 秒更新">
+                {label}
+              </em>
+            )}
+            {!asOf && live.error && shouldPoll(taipeiNow(), []) && <em className="cq-live off">即時報價暫時取不到</em>}
           </div>
         </div>
         {q && (
@@ -703,9 +741,45 @@ function Detail({
           ))}
         </span>
       </div>
-      {err ? <div className="cq-err">{err}</div> : <KChart bars={chart.bars} pickDays={chart.days} lineNames={lineNames} />}
+      {err ? <div className="cq-err">{err}</div> : <KChart bars={chart.bars} live={chart.sid === sid ? todayBar : null} pickDays={chart.days} lineNames={lineNames} />}
     </>
   )
+}
+
+/** 盤中每 10 秒抓一次即時量價（畫面在背景、或不在盤中時不抓；打開時先抓一次）。代號換了就重抓。 */
+function useLiveQuotes(sids: string[], enabled: boolean): { quotes: Record<string, Quote>; error: string } {
+  // 排序後當鍵：追蹤清單只是換順序時不用重抓
+  const key = enabled ? [...sids].sort().join(',') : ''
+  const [state, setState] = useState<{ key: string; quotes: Record<string, Quote>; error: string }>({ key: '', quotes: {}, error: '' })
+  useEffect(() => {
+    if (!key) return
+    let stale = false
+    let dates: string[] = []
+    const load = () =>
+      fetchQuotes(key.split(','))
+        .then((qs) => {
+          if (stale) return
+          dates = qs.map((x) => x.date)
+          setState({ key, quotes: Object.fromEntries(qs.map((x) => [x.sid, x])), error: '' })
+        })
+        // 抓不到就沿用資料庫的收盤價，畫面標「即時報價暫時取不到」，下一輪再試
+        .catch((e: Error) => !stale && setState((s) => ({ key, quotes: s.key === key ? s.quotes : {}, error: e.message })))
+    const tick = () => {
+      if (document.visibilityState === 'visible' && shouldPoll(taipeiNow(), dates)) load()
+    }
+    load()
+    const timer = setInterval(tick, LIVE_POLL_MS)
+    const onShow = () => {
+      if (document.visibilityState === 'visible') tick()
+    }
+    document.addEventListener('visibilitychange', onShow)
+    return () => {
+      stale = true
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onShow)
+    }
+  }, [key])
+  return state.key === key ? state : { quotes: {}, error: '' }
 }
 
 /** 加入／移除追蹤股。送出中停用，失敗把原因寫在按鈕旁。 */

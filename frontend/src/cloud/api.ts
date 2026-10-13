@@ -3,6 +3,7 @@ import { apiUrl } from '../api'
 import { LoginRequired, needsLogin } from './auth'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
+import type { Quote } from './live'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -73,3 +74,7 @@ export const setTracked = (sid: string, on: boolean) =>
 
 /** 存追蹤股的順序（由上到下的代號）。 */
 export const saveWatchOrder = (order: string[]) => get<{ ok: boolean }>('/api/watchlist', 'PUT', { order })
+
+/** 盤中即時量價（證交所，約 5 秒更新）；最多 100 檔。 */
+export const fetchQuotes = (sids: string[]) =>
+  get<{ quotes: Quote[] }>(`/api/quotes?sids=${encodeURIComponent(sids.join(','))}`).then((r) => r.quotes)
