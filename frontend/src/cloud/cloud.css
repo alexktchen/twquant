@@ -187,6 +187,18 @@
   touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 .cq-edit-row.dragging .cq-handle { color: var(--accent); cursor: grabbing; }
+/* 通知（T-348）：帳號旁的 🔔，與按下後的說明列 */
+.cq .cq-bell { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: var(--mute); }
+.cq .cq-bell svg { width: 19px; height: 19px; }
+.cq .cq-bell.on { color: var(--accent); }
+.cq-notice {
+  margin: 10px 20px 0; padding: 8px 12px; border-radius: 6px; background: #1f2a3a; color: #cfe3ff; font-size: 14.5px;
+  display: flex; align-items: flex-start; gap: 10px; line-height: 1.5;
+}
+.cq-notice span { flex: 1; }
+.cq .cq-notice button { color: #cfe3ff; opacity: .7; }
+@media (max-width: 820px) { .cq-notice { margin: 8px 12px 0; } }
+
 /* 盤中即時價（T-347）：價格旁的狀態、追蹤清單價格下的小字 */
 .cq-live {
   font-style: normal; font-size: 13.5px; font-weight: 600; margin-left: 10px; padding: 2px 9px; border-radius: 999px;

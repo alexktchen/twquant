@@ -80,6 +80,14 @@ jobs:
       - name: 每日 pipeline（擷取→閘門→因子→打分→每日名單；雲端略過的步驟見 serving.yaml）
         run: uv run python -m twquant pipeline --date "$DAY" --pg-signals --cloud --fail-on-degraded
 
+      - name: 推播通知（今日名單已更新；每個交易日只發一次，T-348）
+        # pipeline 降級（紅燈）時名單可能已經寫好，所以照跑；當天沒有名單、或已經發過，這步自己會略過
+        if: ${{ !cancelled() }}
+        continue-on-error: true # 通知失敗不影響名單
+        env:
+          TWQUANT_VAPID_PRIVATE_KEY: ${{ secrets.TWQUANT_VAPID_PRIVATE_KEY }}
+        run: uv run python -m twquant notify-picks --date "$DAY"
+
       - name: Install rclone（Drive 歸檔用；排在推薦之後，失敗不影響當天名單）
         if: ${{ !cancelled() }}
         continue-on-error: true
