@@ -1,0 +1,181 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>全資料健檢（T-138）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>全資料健檢（T-138）</h1>
+<p>執行時間：2026-09-19 19:18　範圍：2026-08-01 起　表：8 張</p>
+<p><strong>0 項 critical、3 項 warn。</strong></p>
+<p>每一項檢查都對應一個<strong>真的發生過</strong>的缺陷，不是憑空想像的風險。
+所有檢查只讀不寫；發現問題只回報，修補走各自的任務與裁決。</p>
+<h2>發現</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>嚴重度</th>
+<th>表</th>
+<th>檢查</th>
+<th>詳情</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🟡 warn</td>
+<td><code>factor_values</code></td>
+<td>橫斷面常數因子</td>
+<td>1 個因子在 &gt;10% 的日子整個橫斷面同值（標準化後即被刪除）：<code>price.flag_hold_50d</code> 20%</td>
+</tr>
+<tr>
+<td>🟡 warn</td>
+<td><code>ml_scores</code></td>
+<td>稀疏日</td>
+<td>1 天列數低於鄰近中位數的 70%（最嚴重 2026-09-03：3,886 vs 預期 5,827）</td>
+</tr>
+<tr>
+<td>🟡 warn</td>
+<td><code>prices_daily</code></td>
+<td>個股列數斷層</td>
+<td>12 處缺口 &gt; 5 個開市日（最大 <strong>15</strong> 日）。標籤的 <code>shift()</code> 是列位移，跨過缺口的「20 日報酬」實際會橫跨數月而無任何標記</td>
+</tr>
+</tbody>
+</table></div>
+<h2>各表概況</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>表</th>
+<th>列數</th>
+<th>日期數</th>
+<th>區間</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prices_daily</code></td>
+<td class="num">237,004</td>
+<td class="num">35</td>
+<td>2026-08-03 ~ 2026-09-18</td>
+</tr>
+<tr>
+<td><code>institutional_daily</code></td>
+<td class="num">46,686</td>
+<td class="num">35</td>
+<td>2026-08-03 ~ 2026-09-18</td>
+</tr>
+<tr>
+<td><code>margin_daily</code></td>
+<td class="num">45,322</td>
+<td class="num">35</td>
+<td>2026-08-03 ~ 2026-09-18</td>
+</tr>
+<tr>
+<td><code>monthly_revenue</code></td>
+<td class="num">1,854</td>
+<td class="num">1</td>
+<td>2026-08-31 ~ 2026-08-31</td>
+</tr>
+<tr>
+<td><code>financial_statements</code></td>
+<td class="num">0</td>
+<td class="num">0</td>
+<td>（空）</td>
+</tr>
+<tr>
+<td><code>stock_valuation</code></td>
+<td class="num">68,910</td>
+<td class="num">35</td>
+<td>2026-08-03 ~ 2026-09-18</td>
+</tr>
+<tr>
+<td><code>factor_values</code></td>
+<td class="num">1,579,897</td>
+<td class="num">35</td>
+<td>2026-08-03 ~ 2026-09-18</td>
+</tr>
+<tr>
+<td><code>ml_scores</code></td>
+<td class="num">150,504</td>
+<td class="num">27</td>
+<td>2026-08-03 ~ 2026-09-08</td>
+</tr>
+</tbody>
+</table></div>
+<h2>檢查清單與其對應的真實缺陷</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>檢查</th>
+<th>抓的是什麼</th>
+<th>曾經漏掉它的原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>整腿缺席</td>
+<td>某個分組（上市／上櫃／ETF）的佔比整段塌陷</td>
+<td><code>sparse_dates</code> 以鄰近日為基準，停擺超過視窗時鄰居也全壞，一天都抓不到（T-136 的 61 天缺口即如此）</td>
+</tr>
+<tr>
+<td>稀疏日</td>
+<td>短暫的列數塌陷</td>
+<td>跨日重複偵測只找<strong>多出來</strong>的列，找不到少掉的</td>
+</tr>
+<tr>
+<td>跨日重複快照</td>
+<td>某天寫了別天的資料（含未來價格）</td>
+<td>擷取回報成功；只有比對 (close, volume) 完全相同才抓得到</td>
+</tr>
+<tr>
+<td>個股列數斷層</td>
+<td>缺口讓 <code>shift()</code> 的列位移跨越曆日缺口</td>
+<td>標籤與因子都用列位移，跨過缺口的「20 日報酬」實際橫跨數月而<strong>無任何標記</strong></td>
+</tr>
+<tr>
+<td>因子數／股票覆蓋率塌陷</td>
+<td>缺表讓因子靜默消失</td>
+<td><code>materialize</code> 逐因子 catch <code>DataError</code> 並只記 DEBUG，然後回報該日成功</td>
+</tr>
+<tr>
+<td>非有限值</td>
+<td>除以零的 inf</td>
+<td>inf <strong>不是</strong> null，<code>drop_nulls</code> 放它過去；標籤含 inf 會被橫斷面平均擴散到當日所有樣本</td>
+</tr>
+<tr>
+<td>橫斷面常數因子</td>
+<td>MAD=0 時 winsorize 把因子壓成常數</td>
+<td>每一步都「正確」，合起來刪除因子，全程無錯誤</td>
+</tr>
+<tr>
+<td>無市場別的股票</td>
+<td>有行情但 <code>stock_meta.market</code> 為 null</td>
+<td><code>markets</code> 濾網<strong>排除</strong> null，缺 meta 的股票會無聲地離開宇宙——正是存活者偏誤的形狀</td>
+</tr>
+<tr>
+<td>未還原的公司行動／零收盤價</td>
+<td>分割與減資不在 <code>corporate_events</code></td>
+<td>兩端都是正價，<code>_entry &gt; 0</code> 與跨距防護都攔不住；0050 的 1:4 分割會變成 −74.8% 的單日報酬</td>
+</tr>
+</tbody>
+</table></div>
+</article><div class='foot'>來源 <code>docs/reports/data-audit.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

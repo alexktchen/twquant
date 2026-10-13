@@ -1,0 +1,223 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>停利與出場策略：文獻回顧（2026-09-25）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>停利與出場策略：文獻回顧（2026-09-25）</h1>
+<blockquote>
+<p>使用者要求：「查查論文關於停利策略」。由 AI 代理檢索，<strong>每篇都打開摘要頁或原文核對</strong>；需要保留的地方標 ⚠。
+用途：第十四輪（D-153 §〇：模型出場）的登記依據。本文不含任何本專案的新回測數字，最後一節除外。</p>
+</blockquote>
+<h2>一、論文清單</h2>
+<h3>A. 停損、移動停損與動能</h3>
+<ol>
+<li><strong>Kaminski, K. M. &amp; Lo, A. W. (2014). <em>When do stop-loss rules stop losses?</em> Journal of Financial Markets 18, 234–254.</strong> <a href="https://doi.org/10.1016/j.finmar.2013.07.001">doi:10.1016/j.finmar.2013.07.001</a>
+<ul>
+<li>股價是隨機漫步時，0/1 停損一定降低期望報酬；報酬有動能（正自相關）才可能加值，均值回歸時一定有害。</li>
+<li>S&amp;P 期貨對 10 年債期貨（1993–2011 日資料）：窗口短、逐日評估的停損在大範圍參數下都是負貢獻；一個月以上窗口較好，其中一組報酬 +1.5%、波動 −5%、Sharpe 最多 +20%。<a href="https://ideas.repec.org/p/hhs/sifrwp/0063.html">工作論文版</a>用美股月資料（1950–2004）：停損期間每月多 50–100 bp。</li>
+<li><strong>對我們</strong>：論文把「每單位時間的差距」與「總報酬差距」分開算——比較 S0 與 S1 也要這樣分（見第四節）。</li>
+<li>另見 Clare, Seaton, Smith &amp; Thomas (2013), <em>Breaking into the blackbox</em>, J. Asset Management 14(3):182–194（<a href="https://doi.org/10.1057/jam.2013.11">doi</a>）：200 日均線規則上加停損沒有加值；月底才決策勝過更頻繁交易。</li>
+</ul>
+</li>
+<li><strong>Lo, A. W. &amp; Remorov, A. (2017). <em>Stop-loss strategies with serial correlation, regime switching, and transaction costs.</em> JFM 34, 1–15.</strong> <a href="https://doi.org/10.2139/ssrn.2695383">SSRN</a>
+<ul>
+<li>大量美國個股：緊停損因交易成本，在均值–變異架構下輸給買進持有；只有報酬自相關夠高的個股能贏，降低下檔風險的效果也有限。</li>
+<li><strong>對我們</strong>：與「個股、來回成本 0.4%」最接近的證據。</li>
+</ul>
+</li>
+<li><strong>Han, Y., Zhou, G. &amp; Zhu, Y. <em>Taming Momentum Crashes: A Simple Stop-Loss Strategy.</em> SSRN WP 2407199（2014 初稿，2016 修訂）。</strong> <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2407199">SSRN</a> ⚠ 未找到期刊版。
+<ul>
+<li>美股 1926–2013，持股自月初價跌 10% 就賣、其餘時間放國庫券。多空（WML）最大單月虧損 −49.79% → −11.36%，月報酬 0.99% → 1.69%。</li>
+<li>多方單腿（原文 Table 1）：不停損 1.24%/月（最差月 −33.06%）；停損 5% 1.53%（−8.48%）；10% 1.27%（−12.87%）；15% 1.05%（−16.82%）。</li>
+<li>限制：改善主要來自放空腿；假設盤中剛好在停損價成交（跳空才用開盤價），停損越緊越樂觀。</li>
+</ul>
+</li>
+<li><strong>Dai, B., Marshall, B. R., Nguyen, N. H. &amp; Visaltanachoti, N. (2021). <em>Risk reduction using trailing stop-loss rules.</em> International Review of Finance 21(4), 1334–1352.</strong> <a href="https://doi.org/10.1111/irfi.12328">doi</a>
+<ul>
+<li>美股 1926–2016，離高點 1–20% 的移動停損：平均報酬低於買進持有，但下檔風險顯著降低（對後來下市的股票特別有效）。</li>
+<li><strong>對我們</strong>：移動停損買到的是保險，不是報酬。</li>
+</ul>
+</li>
+</ol>
+<h3>B. 停利與最適賣出（理論）</h3>
+<ol start="5">
+<li><strong>Dybvig, P. H. (1988). <em>Inefficient Dynamic Portfolio Strategies or How to Throw Away a Million Dollars in the Stock Market.</em> RFS 1(1), 67–88.</strong> <a href="https://academic.oup.com/rfs/article-abstract/1/1/67/1601406">連結</a>
+<ul>
+<li>lock-in（漲到目標就換成債券，即停利）與停損都是劣勢策略；最壞情況一年效率損失約 0.8%（lock-in）與接近 1%（停損）。停利的代價是結構性的，不是參數沒調好。</li>
+<li>另見 Acar &amp; Toffel (2000), <em>Stop-loss and Investment Returns</em>（<a href="https://www.actuaries.org.uk/system/files/documents/pdf/stop-loss-and-investment-returns.pdf">PDF</a>）⚠ 研討會草稿：有漂移的隨機漫步下停利降低期望報酬，只有盤整（負自相關）時條件式停利才贏；S&amp;P 500 日內實測停利是反效果。</li>
+</ul>
+</li>
+<li><strong>du Toit, J. &amp; Peskir, G. (2009). <em>Selling a stock at the ultimate maximum.</em> Annals of Applied Probability 19(3), 983–1014.</strong> <a href="https://doi.org/10.1214/08-AAP566">doi</a>
+<ul>
+<li>研究「怎麼賣在期間最高點附近」（＝我們的天花板）：μ ≤ σ²/2 就立刻賣，否則抱到期；只有 0 &lt; μ &lt; σ² 的中間區間，最適解才是「從最高點回撤到一條隨時間變動的界線就賣」（移動停損型）。</li>
+<li>另見 Shiryaev, Xu &amp; Zhou (2008), <em>Thou shalt buy and hold</em>, Quantitative Finance 8(8):765–776（<a href="https://doi.org/10.1080/14697680802563732">doi</a>）：好股指數 α＝超額報酬／σ²；α ≥ 1/2 抱到期，α ≤ 0 立刻賣。</li>
+</ul>
+</li>
+<li><strong>Dai, M., Zhang, Q. &amp; Zhu, Q. J. (2010). <em>Trend following trading under a regime switching model.</em> SIAM J. Financial Mathematics 1(1), 780–810.</strong> <a href="https://doi.org/10.1137/090770552">doi</a>
+<ul>
+<li>多空狀態切換模型下，最適買賣點由「目前是多頭的條件機率」兩條門檻決定：出場看狀態機率，不看漲跌幅。<strong>我們每天的模型重評分就是這種機率的替代指標。</strong></li>
+<li>另見 Zhang, Q. (2001), <em>Stock Trading: An Optimal Selling Rule</em>, SIAM J. Control Optim. 40(1):64–87（<a href="https://doi.org/10.1137/S0363012999356325">doi</a>）：目標價＋停損價兩道門檻（純理論）。</li>
+</ul>
+</li>
+<li><strong>Lipton, A. &amp; López de Prado, M. (2020). <em>A closed-form solution for optimal mean-reverting trading strategies.</em> arXiv:2003.10502.</strong> <a href="https://arxiv.org/abs/2003.10502">arXiv</a>
+<ul>
+<li>均值回歸（OU）下：錯價強→不設停利停損、抱到期；錯價弱→不宜停損，但可能適合提早停利。停利只在「優勢弱、價格會回歸」時有理論支持。</li>
+<li>另見 Leung &amp; Li (2015), IJTAF 18(3)（<a href="https://doi.org/10.1142/S021902491550020X">doi</a>）；Leung &amp; Zhang (2021), Applied Math. &amp; Optimization 83:669–698（<a href="https://doi.org/10.1007/s00245-019-09559-0">doi</a>）。</li>
+</ul>
+</li>
+</ol>
+<h3>C. 行為證據</h3>
+<ol start="9">
+<li><strong>Odean, T. (1998). <em>Are Investors Reluctant to Realize Their Losses?</em> JF 53(5), 1775–1798.</strong> <a href="https://doi.org/10.1111/0022-1082.00072">doi</a>
+<ul>
+<li>1 萬個券商帳戶（1987–93）：獲利部位實現比例 0.148，虧損只有 0.098；被賣掉的贏家下一年超額報酬比留著的輸家高 3.4 個百分點。</li>
+<li>另見 Grinblatt &amp; Han (2005), JFE 78(2):311–339（<a href="https://doi.org/10.1016/j.jfineco.2004.10.006">doi</a>）：持有人未實現獲利是動能的關鍵變數；Frazzini (2006), JF 61(4):2017–2046（<a href="https://doi.org/10.1111/j.1540-6261.2006.00896.x">doi</a>）。</li>
+</ul>
+</li>
+<li><strong>Akepanidtaworn, K., Di Mascio, R., Imas, A. &amp; Schmidt, L. (2023). <em>Selling Fast and Buying Slow.</em> JF 78(6), 3055–3098.</strong> <a href="https://doi.org/10.1111/jofi.13271">doi</a>（數字取自 <a href="https://www.nber.org/papers/w29076">NBER w29076</a>）
+<ul>
+<li>783 個機構投資組合（2000–2016）：買進比隨機加碼多賺 &gt;100 bp/年；<strong>賣出比「隨機賣掉另一檔持股」少賺約 80 bp/年</strong>；報酬最極端的持股被賣機率高 50% 以上。</li>
+<li><strong>對我們</strong>：ML 出場的對照組應包含「同一天隨機賣掉一檔持股」。</li>
+</ul>
+</li>
+</ol>
+<h3>D. 台灣市場</h3>
+<ol start="11">
+<li><strong>Barber, B. M., Lee, Y.-T., Liu, Y.-J. &amp; Odean, T. (2007). <em>Is the Aggregate Investor Reluctant to Realise Losses? Evidence from Taiwan.</em> European Financial Management 13(3), 423–447.</strong> <a href="https://doi.org/10.1111/j.1468-036X.2007.00367.x">doi</a>
+<ul>
+<li>證交所 1995–99 全部交易：獲利時被賣的機率約是虧損時的兩倍；84% 的投資人賣贏家比賣輸家快；投信與外資沒有這個傾向。另見 Barber 等 (2009) RFS 22(2)：台灣散戶整體每年落後 3.8 個百分點。</li>
+</ul>
+</li>
+<li><strong>Lee, S. &amp; Chou, R. K. (2025). <em>Price formation around historical highs in retail-dominated stock markets: Evidence from Taiwan.</em> Pacific-Basin Finance Journal 93, 102853.</strong> <a href="https://ideas.repec.org/a/eee/pacfin/v93y2025ics0927538x25001908.html">IDEAS</a>
+<ul>
+<li>台股個人占成交量 74%；突破歷史高點後市場由過度反應轉為反應不足、後續有正報酬，小型股與散戶多的股票更明顯。</li>
+<li>另見 Wang &amp; Lien (2023) NAJEF 67:101904（彩票股異常集中在離 52 週高點遠的股票）；Hung &amp; Yang (2018) JFM 41:77–91；Huang, Fu &amp; Ke (2001) IREF 10(3) ⚠（漲跌停後隔夜延續、下一時段反轉；摘要經轉述、7% 漲跌幅時代）。</li>
+</ul>
+</li>
+</ol>
+<h3>E. 機器學習出場</h3>
+<ol start="13">
+<li><strong>López de Prado, M. (2018). <em>Advances in Financial Machine Learning.</em> Wiley.</strong> 第 3 章三重障礙與 meta-labeling、第 4 章重疊標籤的樣本權重、第 7 章 purged k-fold＋embargo。另見 Joubert (2022) JFDS 4(3)；Hwang 等 (2023) Finance Research Letters 58（停損一致的標籤）。</li>
+<li><strong>Longstaff, F. A. &amp; Schwartz, E. S. (2001). <em>Valuing American Options by Simulation: A Simple Least-Squares Approach.</em> RFS 14(1), 113–147.</strong> 用迴歸估「繼續持有」的價值、從到期日往回推——「現在賣還是繼續抱」就是這個問題。另見 Becker, Cheridito &amp; Jentzen (2019), <em>Deep optimal stopping</em>, JMLR 20。</li>
+<li><strong>Kumar, N., Prabhala, N. &amp; Ranjan, R. (2026). <em>Anomaly Premiums with Dynamic Exits.</em> SSRN WP 6076808.</strong> ⚠ 數字取自 <a href="https://larryswedroe.substack.com/p/rethinking-exit-strategies-how-machine">二手摘要</a>，須核對原文。
+<ul>
+<li>美國大型股 1975–2023，價值／動能／獲利三個異常，用最近 15 日報酬形態以 ML 決定出場：合併 Sharpe 0.55 → 1.61、扣成本 alpha 約 60–70 bp/月，但只拿到完美預知的 11–12%。<strong>與我們要做的事最接近。</strong></li>
+</ul>
+</li>
+</ol>
+<h2>二、綜合</h2>
+<p><strong>(a) 固定停利對右偏的飆股策略</strong>：理論方向一致——有正漂移或動能時，固定停利就是截掉右尾，期望報酬必然下降
+（Dybvig、du Toit &amp; Peskir、Acar &amp; Toffel）；只有「優勢弱＋價格會回歸」時才支持停利（Lipton &amp; López de Prado）。
+我們「八成五不飆、一成五飆」的分布正是停利傷害最大的形狀。台股證據偏向讓獲利跑（散戶賣贏家太快、突破歷史高點後反應不足）；
+反例都有條件（離 52 週高點遠的彩票股、舊制漲停後反轉）→ 停利要交給 ML 依條件判斷，不是一個固定參數。<strong>不建議登記固定停利臂</strong>（只能當負對照）。</p>
+<p><strong>(b) 移動停損 vs 時間出場</strong>：停損只在報酬有正自相關時加值；個股加成本，緊停損多半輸（Kaminski &amp; Lo、Lo &amp; Remorov）；
+移動停損主要是降低下檔風險（Dai 等）。評估窗口一個月以上比逐日好。理論上移動停損只在中間漂移區間最適，而且回撤寬度應隨剩餘天數與漂移估計改變。</p>
+<p><strong>(c) ML 出場的標籤與評估</strong>：</p>
+<ul>
+<li>「繼續抱」的價值要假設之後照某個政策走（Longstaff &amp; Schwartz）；簡單版：逐日比「現在賣」與「照 S1 繼續」哪個高。</li>
+<li>實際會執行的停損、0.4% 成本、賣出後資金的替代報酬都要寫進標籤。</li>
+<li>每檔每天一筆樣本、標籤高度重疊 → 樣本唯一性權重＋purged／embargo 交叉驗證。</li>
+<li>主對照是「同一天、同樣數量、隨機賣掉其他持股」；要檢查模型是否只學會「賣掉損益最極端的部位」。</li>
+<li>不宜期待 ML 出場逼近天花板（Kumar 等只拿到完美預知的 11–12%）。</li>
+</ul>
+<p><strong>(d) 可事前登記的對照臂（參數來自文獻）</strong>：隨機賣出（多個亂數種子）；Han 等的固定停損 −10%（每日檢查、觸發後放現金到第 20 日），與 S1 的 −15% 並列；
+理論臂——每天用校準後的重評分估剩餘期間的預期對數報酬（μ̂ − σ̂²/2），≤ 0 就賣、否則抱滿 20 日（du Toit &amp; Peskir 的門檻，無可調參數）。</p>
+<h2>三、查證註記</h2>
+<p>沒找到可查證的台灣碩博士論文專門研究個股停利（國圖 NDLTD 需互動查詢）。⚠ 保留項：第 3 篇是 SSRN 工作論文；Acar &amp; Toffel 是研討會草稿；
+第 15 篇數字來自二手摘要；Huang, Fu &amp; Ke 的結論經搜尋引擎轉述；第 10 篇數字來自 NBER 工作論文版。</p>
+<h2>四、這份回顧立刻抓到的一個錯（D-153 §六 更正）</h2>
+<p>第十三輪的「天花板攫取率」拿<strong>每筆</strong>淨報酬比，但 S1／S3 最長可抱 60 日、天花板只看 20 日——持有天數不同的每筆報酬不能直接比（第 1 篇的教訓）。
+用既有結果包換算成「每持有一日」（淨報酬總和 ÷ 持有日總和；2026-09-25 補算，不是新回測）：</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>臂</th>
+<th style="text-align:right">平均持有</th>
+<th style="text-align:right">每筆淨</th>
+<th style="text-align:right"><strong>每持有日淨</strong></th>
+<th style="text-align:right">換算 20 日</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S0 抱滿 20 日（8,000 萬）</td>
+<td style="text-align:right">21.5 日</td>
+<td style="text-align:right">+1.46%</td>
+<td style="text-align:right"><strong>+0.068%</strong></td>
+<td style="text-align:right">+1.36%</td>
+</tr>
+<tr>
+<td>S1 ratchet（8,000 萬）</td>
+<td style="text-align:right">45.8 日</td>
+<td style="text-align:right">+2.43%</td>
+<td style="text-align:right"><strong>+0.053%</strong></td>
+<td style="text-align:right">+1.06%</td>
+</tr>
+<tr>
+<td>S2 訊號消失（8,000 萬）</td>
+<td style="text-align:right">20.6 日</td>
+<td style="text-align:right">+1.40%</td>
+<td style="text-align:right"><strong>+0.068%</strong></td>
+<td style="text-align:right">+1.36%</td>
+</tr>
+<tr>
+<td>S3 ratchet＋訊號（8,000 萬）</td>
+<td style="text-align:right">39.4 日</td>
+<td style="text-align:right">+2.71%</td>
+<td style="text-align:right"><strong>+0.069%</strong></td>
+<td style="text-align:right">+1.37%</td>
+</tr>
+<tr>
+<td>S0（1,000 萬）</td>
+<td style="text-align:right">21.0 日</td>
+<td style="text-align:right">+0.95%</td>
+<td style="text-align:right">+0.045%</td>
+<td style="text-align:right">+0.90%</td>
+</tr>
+<tr>
+<td>S1（1,000 萬）</td>
+<td style="text-align:right">43.1 日</td>
+<td style="text-align:right">+1.31%</td>
+<td style="text-align:right">+0.030%</td>
+<td style="text-align:right">+0.61%</td>
+</tr>
+<tr>
+<td>S2（1,000 萬）</td>
+<td style="text-align:right">20.2 日</td>
+<td style="text-align:right">+1.38%</td>
+<td style="text-align:right">+0.068%</td>
+<td style="text-align:right">+1.37%</td>
+</tr>
+<tr>
+<td>S3（1,000 萬）</td>
+<td style="text-align:right">37.4 日</td>
+<td style="text-align:right">+2.27%</td>
+<td style="text-align:right">+0.061%</td>
+<td style="text-align:right">+1.22%</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>S1 每筆多賺，是因為抱了兩倍多的時間；換算成每日，它比抱滿 20 日還差。</strong> 8,000 萬組四臂每日幾乎一樣，攫取率 11.6%／14.9% 是持有天數造成的假象。
+D-153 §四「攫取率 &lt; 50% → 做第十四輪」的結論不變（真正的攫取率更低），但第十四輪的天花板與比較都要<strong>同一個最長持有期</strong>、並報每持有日。</p>
+</article><div class='foot'>來源 <code>docs/reports/2026-09-25-exit-literature.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

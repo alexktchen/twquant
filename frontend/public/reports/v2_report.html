@@ -1,0 +1,734 @@
+<meta charset="utf-8">
+<title>ml_rank_v2 模型檢定</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --paper:#f7f8f6; --paper-2:#eef1ed; --paper-3:#e4e8e3;
+  --rule:#d6dcd7; --rule-soft:#e6eae6;
+  --ink:#141a17; --ink-2:#5a6560; --ink-3:#8b948f;
+  --real:#2a78d6; --real-wash:rgba(42,120,214,.10);
+  --cf:#eb6834; --cf-wash:rgba(235,104,52,.10);
+  --base:#98a29c; --base-wash:rgba(152,162,156,.14);
+  --fail:#b3261e; --fail-wash:rgba(179,38,30,.10);
+  --pass:#2e7d5b; --pass-wash:rgba(46,125,91,.10);
+  --tip-bg:#141a17; --tip-ink:#f7f8f6;
+  --sans:"IBM Plex Sans","Noto Sans TC",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono","Noto Sans TC",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#151917; --paper-2:#1d2320; --paper-3:#252c28;
+    --rule:#333b37; --rule-soft:#262c29;
+    --ink:#eef1ed; --ink-2:#b2bab5; --ink-3:#7d8681;
+    --real:#3987e5; --real-wash:rgba(57,135,229,.16);
+    --cf:#d95926; --cf-wash:rgba(217,89,38,.16);
+    --base:#6e7873; --base-wash:rgba(110,120,115,.20);
+    --fail:#e06a60; --fail-wash:rgba(224,106,96,.14);
+    --pass:#5fb98d; --pass-wash:rgba(95,185,141,.14);
+    --tip-bg:#eef1ed; --tip-ink:#141a17;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#151917; --paper-2:#1d2320; --paper-3:#252c28;
+  --rule:#333b37; --rule-soft:#262c29;
+  --ink:#eef1ed; --ink-2:#b2bab5; --ink-3:#7d8681;
+  --real:#3987e5; --real-wash:rgba(57,135,229,.16);
+  --cf:#d95926; --cf-wash:rgba(217,89,38,.16);
+  --base:#6e7873; --base-wash:rgba(110,120,115,.20);
+  --fail:#e06a60; --fail-wash:rgba(224,106,96,.14);
+  --pass:#5fb98d; --pass-wash:rgba(95,185,141,.14);
+  --tip-bg:#eef1ed; --tip-ink:#141a17;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.65;
+  -webkit-font-smoothing:antialiased;margin:0;padding:0 20px 96px}
+.wrap{max-width:1060px;margin:0 auto}
+h1,h2,h3{text-wrap:balance;margin:0}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+/* ── 表頭 ───────────────────────────────────────── */
+header{padding:56px 0 0}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3)}
+h1{font-size:clamp(29px,4.4vw,42px);font-weight:600;letter-spacing:-.02em;line-height:1.14;margin:14px 0 0}
+h1 .id{font-family:var(--mono);font-weight:500;font-size:.5em;color:var(--ink-2);display:block;margin-top:12px;letter-spacing:0}
+.verdict{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;margin:26px 0 0;padding:16px 20px;
+  border:1px solid var(--rule);border-left:3px solid var(--fail);background:var(--fail-wash);border-radius:3px}
+.verdict b{font-size:19px;font-weight:600;color:var(--fail)}
+.verdict span{color:var(--ink-2);font-size:14px}
+.lede{margin:26px 0 0;font-size:17px;line-height:1.7;color:var(--ink);max-width:64ch}
+.lede em{font-style:normal;border-bottom:2px solid var(--real-wash);box-shadow:inset 0 -6px 0 var(--real-wash)}
+
+/* ── 頭條數字 ─────────────────────────────────── */
+.heads{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--rule);
+  border:1px solid var(--rule);margin:30px 0 0;border-radius:3px;overflow:hidden}
+.head{background:var(--paper);padding:16px 18px}
+.head .k{font-size:12px;color:var(--ink-3);letter-spacing:.02em}
+.head .v{font-family:var(--mono);font-size:27px;font-weight:500;letter-spacing:-.02em;margin-top:5px;line-height:1.1}
+.head .d{font-size:12px;color:var(--ink-2);margin-top:5px}
+.up{color:var(--pass)} .down{color:var(--fail)} .blue{color:var(--real)} .orange{color:var(--cf)}
+
+/* ── 區塊 ─────────────────────────────────────── */
+section{margin:64px 0 0}
+h2{font-size:12px;font-family:var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
+  padding-bottom:9px;border-bottom:1px solid var(--rule)}
+h2 .n{color:var(--ink-3);opacity:.6;margin-right:10px}
+h3{font-size:15.5px;font-weight:600;margin:26px 0 8px}
+p{margin:12px 0 0;color:var(--ink-2);max-width:70ch}
+p strong{color:var(--ink);font-weight:600}
+.note{font-size:13px;color:var(--ink-3);margin-top:9px;max-width:76ch}
+
+/* ── 表格 ─────────────────────────────────────── */
+.tw{overflow-x:auto;margin:18px 0 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:520px}
+th,td{text-align:right;padding:8px 11px;border-bottom:1px solid var(--rule-soft);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+thead th{font-size:11.5px;font-weight:500;color:var(--ink-3);border-bottom:1px solid var(--rule);
+  letter-spacing:.04em;text-transform:none}
+tbody tr:hover{background:var(--paper-2)}
+td.v{font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr.hi td{background:var(--real-wash)}
+tr.hi td:first-child{font-weight:600}
+.tag{display:inline-block;font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:2px;
+  border:1px solid currentColor;vertical-align:1px;margin-left:7px}
+.tag.f{color:var(--fail)} .tag.p{color:var(--pass)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:7px;vertical-align:0}
+
+/* ── 圖 ───────────────────────────────────────── */
+figure{margin:20px 0 0}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:9px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.grid line{stroke:var(--rule-soft);stroke-width:1}
+.axis text{font-family:var(--mono);font-size:10px;fill:var(--ink-3)}
+.zero{stroke:var(--rule);stroke-width:1}
+.lab{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin:14px 0 0;font-size:12.5px;color:var(--ink-2)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:7px;vertical-align:-1px}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:30px}
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);
+  padding:8px 11px;border-radius:3px;font-size:12px;line-height:1.5;opacity:0;transition:opacity .1s;
+  font-family:var(--mono);box-shadow:0 4px 14px rgba(0,0,0,.18);max-width:260px}
+#tip b{font-family:var(--sans);font-weight:600;display:block;margin-bottom:3px;font-size:12.5px}
+
+/* ── 規格清單 ─────────────────────────────────── */
+.spec{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;background:var(--rule);
+  border:1px solid var(--rule);margin-top:18px;border-radius:3px;overflow:hidden}
+.spec div{background:var(--paper);padding:12px 15px}
+.spec dt{font-size:11.5px;color:var(--ink-3)}
+.spec dd{margin:4px 0 0;font-family:var(--mono);font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:3px 8px;border:1px solid var(--rule);
+  border-radius:2px;color:var(--ink-2);background:var(--paper-2)}
+.chip.new{border-color:var(--cf);color:var(--cf);background:var(--cf-wash)}
+
+/* ── 注意事項 ─────────────────────────────────── */
+.caveats{margin-top:18px;border-left:2px solid var(--rule);padding-left:20px}
+.caveats h3{margin-top:20px;font-size:14.5px}
+.caveats h3:first-child{margin-top:0}
+footer{margin:76px 0 0;padding-top:22px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink-3)}
+footer code{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+@media (max-width:640px){
+  body{padding:0 15px 64px}
+  .heads{grid-template-columns:repeat(2,1fr)}
+  header{padding-top:38px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<nav style='max-width:1080px;margin:0 auto;padding:10px 20px;font:15px system-ui,sans-serif'><a href='index.html' style='color:#656d76;text-decoration:none'>← 報告目錄</a></nav><div id="tip" role="status" aria-live="polite"></div>
+<div class="wrap">
+
+<header><meta name="robots" content="noindex,nofollow">
+  <div class="eyebrow">TWQUANT · D-048 ／ T-096 · 第二代候選</div>
+  <h1>橫斷面排序升級，前段組合反而退步
+    <span class="id" id="model-id"></span></h1>
+  <div class="verdict">
+    <b>裁定：不晉升</b>
+    <span id="verdict-line"></span>
+  </div>
+  <p class="lede">把七個籌碼因子的覆蓋從 219 天補到 1,620 天、再加三個評價因子之後，模型的
+    <em>全橫斷面排序力確實變強</em>；但週頻選出的前 20 名組合，連在<strong>零成本</strong>的反事實下都比舊模型差。
+    這代表新特徵改變的是「選到誰」，而不是把同一批股票排得更準。</p>
+
+  <div class="heads" id="heads"></div>
+</header>
+
+<section id="s-spec">
+  <h2><span class="n">01</span>模型規格</h2>
+  <p>與第一代（<span class="mono" id="rp-id"></span>）<strong>逐字相同</strong>，差異只有特徵集：25 → 28。
+     標籤、視窗、LightGBM 參數、再訓練排程都沒有動，因此兩者的差異可歸因於特徵。</p>
+  <div class="spec" id="spec"></div>
+  <h3>28 個特徵</h3>
+  <div class="chips" id="feature-chips"></div>
+  <p class="note">橘框是本代新增的三個評價因子。訓練資料 <span class="num" id="sample-line"></span>。</p>
+</section>
+
+<section id="s-ladder">
+  <h2><span class="n">02</span>訊號品質 · 階梯第 1 級</h2>
+  <p>同一份共同樣本（<span class="num" id="common-n"></span> 筆）下，把 ML 分數與兩個基準比較。
+     ML 在每一項都勝出，且五分位<strong>嚴格單調</strong>——這一級是通過的。</p>
+  <div class="tw"><table id="ladder-table"></table></div>
+  <figure>
+    <svg id="chart-ladder" viewBox="0 0 640 150" role="img" aria-label="三種訊號的 RankIC 對比"></svg>
+    <figcaption>橫斷面 RankIC 均值。基準 A 是 28 個因子等權，基準 B 是 D-020 篩出的三個有效因子。</figcaption>
+  </figure>
+  <p class="note"><strong>「IC 為正的日數」不是賺錢的比率。</strong>它是「當天的排序方向與未來 10 日報酬同向」的日數占比
+     （程式定義：<span class="mono">ic &gt; 0 的日數 ÷ 總日數</span>），衡量的是全市場約 1,700 檔的<em>排序方向</em>，
+     而策略只買前 20 名；而且 RankIC 均值只有 +0.0888，方向對但幅度很小，也完全不含成本。
+     真正對應賺賠的是下面回測的日勝率（1× 為 51.8%）與逐筆勝率（1× 為 46.8%）。</p>
+</section>
+
+<section id="s-windows">
+  <h2><span class="n">03</span>十六個滾動視窗的樣本外 RankIC</h2>
+  <p id="window-summary"></p>
+  <figure>
+    <svg id="chart-windows" viewBox="0 0 660 250" role="img" aria-label="16 個滾動視窗的樣本外 RankIC，v2 對照第一代"></svg>
+    <figcaption>每個視窗為 3 個月的測試期，訓練期在其之前並留 10 個交易日的禁區。</figcaption>
+  </figure>
+  <div class="legend">
+    <span><i style="background:var(--real)"></i>v2（28 特徵）</span>
+    <span><i style="background:var(--base)"></i>第一代（25 特徵）</span>
+  </div>
+  <p class="note" id="window-note"></p>
+</section>
+
+<section id="s-equity">
+  <h2><span class="n">04</span>回測淨值與回撤</h2>
+  <p>週頻、等權、前 20 名，886 個交易日。藍線是<strong>實際成本</strong>，橘線是<strong>零成本反事實</strong>——
+     兩者的成交路徑幾乎相同，差距就是成本吃掉的部分。</p>
+  <figure>
+    <svg id="chart-equity" viewBox="0 0 660 260" role="img" aria-label="1× 與 0× 成本的月度淨值曲線"></svg>
+    <figcaption>月末淨值，起始資金 1,000 萬元。</figcaption>
+  </figure>
+  <figure>
+    <svg id="chart-dd" viewBox="0 0 660 150" role="img" aria-label="1× 與 0× 成本的月內最大回撤"></svg>
+    <figcaption>當月最深回撤（相對歷史高點）。</figcaption>
+  </figure>
+  <div class="legend">
+    <span><i style="background:var(--real)"></i>1× 實際成本</span>
+    <span><i style="background:var(--cf)"></i>0× 零成本反事實</span>
+  </div>
+  <div class="tw"><table id="bt-table"></table></div>
+</section>
+
+<section id="s-gates">
+  <h2><span class="n">05</span>晉升門檻 · D-038 §5</h2>
+  <p>六條門檻在事前登記時就已固定，不因結果調整。<strong>1× 成本下六條全失</strong>；
+     即使把成本歸零，仍有三條不過。</p>
+  <div class="tw"><table id="gate-table"></table></div>
+  <p class="note" id="gate-note"></p>
+</section>
+
+<section id="s-cost">
+  <h2><span class="n">06</span>成本結構</h2>
+  <p id="cost-lede"></p>
+  <figure>
+    <svg id="chart-cost" viewBox="0 0 660 118" role="img" aria-label="交易成本三分項拆解"></svg>
+    <figcaption>證交稅是最大單項，且與周轉率成正比——這是降周轉之所以是唯一解方的原因。</figcaption>
+  </figure>
+</section>
+
+<section id="s-trades">
+  <h2><span class="n">07</span>逐筆交易</h2>
+  <p>用先進先出把買賣配成往返單。<strong>零成本下每筆平均賺 <span class="num" id="ev0"></span>，
+     扣掉成本後變成 <span class="num" id="ev1"></span></strong>——期望值幾乎全部被成本消化。</p>
+  <div class="tw"><table id="trade-table"></table></div>
+  <figure>
+    <svg id="chart-hist" viewBox="0 0 660 210" role="img" aria-label="逐筆報酬分布"></svg>
+    <figcaption>每筆往返的淨報酬，1% 一格。左右尾（超出 ±20%）另計於兩端標註。</figcaption>
+  </figure>
+  <div class="legend">
+    <span><i style="background:var(--real)"></i>1× 實際成本</span>
+    <span><i style="background:var(--cf);opacity:.55"></i>0× 零成本</span>
+  </div>
+  <div class="pair">
+    <div>
+      <h3>逐年勝率</h3>
+      <div class="tw"><table id="year-table"></table></div>
+    </div>
+    <div>
+      <h3>四段報酬</h3>
+      <div class="tw"><table id="seg-table"></table></div>
+      <p class="note">§5 要求四段至少三段為正。1× 只有一段正、0× 有三段正。</p>
+    </div>
+  </div>
+</section>
+
+<section id="s-importance">
+  <h2><span class="n">08</span>特徵重要度</h2>
+  <p id="imp-lede"></p>
+  <figure>
+    <svg id="chart-imp" viewBox="0 0 660 470" role="img" aria-label="28 個特徵的 gain 佔比"></svg>
+    <figcaption>LightGBM 的 gain 佔比（400 棵樹）。顏色代表因子類別。</figcaption>
+  </figure>
+  <div class="legend" id="imp-legend"></div>
+  <h3>相對第一代的位移</h3>
+  <div class="tw"><table id="shift-table"></table></div>
+  <p class="note">兩件事同時發生：新增的三個評價因子直接拿走 21.1% 的 gain，把價量型態壓下 22.4 個百分點；
+     而籌碼因子的 gain <strong>不減反增</strong>（4.2% → 13.8%），因為它們的覆蓋從 219 天補到 1,620 天，
+     模型這次才真的有東西可用。也就是說模型確實改用了新資訊——只是這沒有轉化成前段組合的報酬。</p>
+</section>
+
+<section id="s-caveats">
+  <h2><span class="n">09</span>解讀時要注意的事</h2>
+  <div class="caveats">
+    <h3>兩代模型的訓練資料並非完全相同</h3>
+    <p>第一代在籌碼回補<em>之前</em>訓練，樣本外分數 <span class="num">1,738,793</span> 列、<span class="num">2,034</span> 檔；
+       v2 是 <span class="num">1,834,571</span> 列、<span class="num">2,049</span> 檔。兩者的視窗 5 與 6 樣本數差距最大。
+       因此「v2 vs 第一代」是<strong>特徵集加資料量</strong>的合併效果，不是純特徵效果。</p>
+    <h3>特徵集裡有一對完全重複的特徵</h3>
+    <p>20 日動能與相對大盤強弱的逐日橫斷面 Spearman 相關為 <span class="num">1.000</span>：後者只是前者減去當日大盤報酬，
+       而那對所有股票是同一個常數，排序完全不變。兩者在 v2 各拿 <span class="num">4.0%</span> 與 <span class="num">3.9%</span> 的 gain，
+       等於同一份資訊被拆成兩半。已登記為 T-106，依「只加不減」原則不在本代處理。</p>
+    <h3>去膨脹夏普比率的母體</h3>
+    <p>DSR 的母體是所有 <span class="mono">bt:ml_rank*</span> 範圍的歷史試驗，目前 <span class="num" id="dsr-pop"></span> 個。
+       試驗越多，同一個夏普值的 DSR 越低——這是刻意的懲罰項，防止反覆嘗試後挑出最好看的結果。</p>
+    <h3>這份報告不是投資建議</h3>
+    <p>所有數字都是歷史回測與研究診斷，模型未經部署裁決，不得用於實盤。</p>
+  </div>
+</section>
+
+<footer>
+  <p>資料來源：模型檔 <code>meta.json</code> 與 <code>model.txt</code>、訓練與回測日誌 <code>run_t096.log</code>、
+     研究登記簿 <code>research_log</code>（parquet）、逐筆檔 <code>trades_ml_rank_v2_{1x,0x}.json</code>、
+     門檻計算 <code>compare_v3.py</code>。</p>
+  <p>頁面上每個數字都先由抽取代理標註出處，再由獨立的驗證代理從<strong>另一個來源</strong>重算比對
+     （視窗 IC 由樣本外分數重算、回測指標由研究登記簿交叉核對、逐筆統計由淨值與報酬陣列重算、重要度重跑 LightGBM）。
+     四份資料集共 <span class="num">1,750</span> 項檢查，不符 <span class="num">0</span> 項。</p>
+</footer>
+</div>
+
+<script id="bundle" type="application/json">{"model":{"id":"lgbm_h10_20260225_5526f2c2","config_hash":"5526f2c23342b538","train_end":"2026-02-25","data_from":"2020-01-01","data_to":"2026-08-28","horizon":10,"aux":[5,20],"lgbm":{"num_leaves":31,"learning_rate":0.05,"min_data_in_leaf":100,"feature_fraction":0.8,"n_estimators":400,"seed":42},"label":{"adv_window_sessions":20,"downside_penalty":0.25,"excess":"market_mean","execution":"next_open","position_notional_twd":500000.0,"transform":"rank_pct"},"split":{"train_min_years":2.0,"test_months":3,"embargo_days":10,"vault_months":6,"days_per_year":244,"days_per_month":21},"n_features":28,"features_by_category":{"chip":["chip.foreign_net_10d","chip.foreign_streak","chip.inst_net_10d","chip.margin_velocity_5d","chip.short_margin_ratio","chip.trust_net_10d","chip.trust_streak"],"fundamental":["fundamental.revenue_accel","fundamental.revenue_yoy","fundamental.earnings_yield","fundamental.book_yield","fundamental.dividend_yield"],"price":["price.box_breakout_60d","price.double_bottom_120d","price.flag_hold_50d","price.high_52w","price.hs_top_120d","price.intraday_ret_20d","price.mom_1d","price.mom_20d","price.mom_60d","price.overnight_ret_20d","price.residual_reversal_5d","price.reversal_5d","price.rs_market_20d","price.vol_20d"],"volume":["volume.turnover_z_20d","volume.vol_ratio_5d"]},"added_vs_repaired":["fundamental.earnings_yield","fundamental.book_yield","fundamental.dividend_yield"],"oos_rank_ic":0.08874829098816685,"oos_period":{"start":"2022-01-14","end":"2026-02-25"},"lightgbm":"4.7.0","sample":{"trading_days":1617,"features":28,"rows":2954798,"rows_label_non_null":2817137,"label_date_from":"2020-01-02","label_date_to":"2026-08-13","windows":16},"coverage_gate":"特徵覆蓋最低 5 個：chip.foreign_net_10d 100%、chip.foreign_streak 100%、chip.inst_net_10d 100%、chip.margin_velocity_5d 100%、chip.short_margin_ratio 100%"},"repaired":{"id":"lgbm_h10_20260225_b2348c46","n_features":25,"oos_rank_ic":0.07956902861716834},"windows":[{"i":1,"start":"2022-01-14","end":"2022-04-26","v2":0.09819880177684708},{"i":2,"start":"2022-04-27","end":"2022-07-26","v2":0.12480782480028806},{"i":3,"start":"2022-07-27","end":"2022-10-25","v2":0.10742992524382419},{"i":4,"start":"2022-10-26","end":"2023-02-02","v2":-0.018608884914584067},{"i":5,"start":"2023-02-03","end":"2023-05-10","v2":0.09522014658723837},{"i":6,"start":"2023-05-11","end":"2023-08-10","v2":0.10018608152069196},{"i":7,"start":"2023-08-11","end":"2023-11-10","v2":0.07456390184597503},{"i":8,"start":"2023-11-13","end":"2024-02-19","v2":0.08021133349876931},{"i":9,"start":"2024-02-20","end":"2024-05-22","v2":0.12690735254312008},{"i":10,"start":"2024-05-23","end":"2024-08-22","v2":0.10816482597450977},{"i":11,"start":"2024-08-23","end":"2024-11-26","v2":0.07967595351865579},{"i":12,"start":"2024-11-27","end":"2025-03-06","v2":0.11538947948592426},{"i":13,"start":"2025-03-07","end":"2025-06-09","v2":0.09198821638591567},{"i":14,"start":"2025-06-10","end":"2025-09-04","v2":0.026950927663137426},{"i":15,"start":"2025-09-05","end":"2025-12-08","v2":0.12341889379464041},{"i":16,"start":"2025-12-09","end":"2026-02-25","v2":0.08444274642870032}],"repairedWindows":[0.08058762690251838,0.11047339623275527,0.10295287039208546,0.0032512169013468716,0.09054960061202177,0.0797637605736786,0.06915750223054058,0.06099343803810431,0.10731848768296276,0.0999958960040127,0.09537167331235637,0.10312492648883827,0.0939992233364944,0.021164051907742717,0.07489187564307444,0.07949012505334566],"ladder":{"common_n":1738609,"oos_rows":1834571,"rows":[{"name":"ML（LightGBM）","key":"ml","rank_ic":0.0888,"ir":0.748,"win_rate":0.796,"t_nw10":9.1,"t_naive":23.57,"quintile_spread":0.0874,"strictly_monotonic":true},{"name":"基準 B：D-020 有效子集 3 因子","key":"b","rank_ic":0.0339,"ir":0.402,"win_rate":0.66,"t_nw10":6.65,"t_naive":12.68,"quintile_spread":0.0376,"strictly_monotonic":false},{"name":"基準 A：28 因子等權","key":"a","rank_ic":0.0144,"ir":0.135,"win_rate":0.573,"t_nw10":1.65,"t_naive":4.26,"quintile_spread":0.0135,"strictly_monotonic":false}],"verdict":{"line":"=== 階梯第 1 級：ML 勝出（對最強基準「基準B D-020 有效子集」）｜RankIC 差 +0.0549（ML +0.0888 vs +0.0339）、分位頭尾差 +0.0497 ===","winner":"ML","strongest_baseline":"基準B D-020 有效子集","rank_ic_diff":{"value":0.0549,"_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/run_t096.log:40"},"quintile_spread_diff":{"value":0.0497,"_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/run_t096.log:40"},"_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/run_t096.log:40"}},"backtest":{"1x":{"total_return":-0.1574,"cagr":-0.0476,"sharpe":-0.18,"sortino":-0.2,"calmar":-0.12,"mdd":-0.4133,"win_rate":0.518,"turnover":28.83,"fills":4626,"unfilled":196,"cost":{"total":6367997,"commission":986958,"tax":2957947,"slippage":2423092,"share_of_initial_capital":0.6368},"gross":{"same_path_gross_cagr":0.118,"same_path_gross_sharpe":0.91}},"0x":{"total_return":0.5587,"cagr":0.1347,"sharpe":0.77,"sortino":0.84,"calmar":0.4,"mdd":-0.3348,"win_rate":0.553,"turnover":29.51,"fills":4775,"unfilled":198,"cost":{"total":0,"commission":0,"tax":0,"slippage":0,"share_of_initial_capital":0.0},"gross":{"same_path_gross_cagr":0.1347,"same_path_gross_sharpe":0.77}}},"gates":{"definition":["CAGR>0","Sharpe≥0.5","MDD≤30%","周轉≤1500%","ΔSharpe≥0.25 (vs linear baseline 1x Sharpe)","DSR≥0.95"],"rows":[{"策略":"ml_rank_v2","成本":"1x","CAGR":-0.04760660439926667,"Sharpe":-0.1777274079688329,"MDD":-0.4133450176088529,"周轉":28.830569332215585,"毛CAGR":0.11796570974429965,"日勝率":0.5175141242937853,"DSR":0.012630539944188113,"過":0,"缺":["CAGR>0","Sharpe≥0.5","MDD≤30%","周轉≤1500%","ΔSharpe≥0.25","DSR≥0.95"],"hash":"3136d15a","_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/compare_v3.json[策略=ml_rank_v2,成本=1x] (array index 8)"},{"策略":"ml_rank_v2","成本":"0x","CAGR":0.13471938405245987,"Sharpe":0.766895289052906,"MDD":-0.3347859874746675,"周轉":29.513767532205232,"毛CAGR":0.13471938405245987,"日勝率":0.5525423728813559,"DSR":0.32026631826646196,"過":3,"缺":["MDD≤30%","周轉≤1500%","DSR≥0.95"],"hash":"2d04b436","_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/compare_v3.json[策略=ml_rank_v2,成本=0x] (array index 1)"},{"策略":"ml_rank_repaired","成本":"1x","CAGR":-9.359234983230547e-05,"Sharpe":0.08666867395037456,"MDD":-0.3591599570962366,"周轉":28.236350455000654,"毛CAGR":0.15989280715269039,"日勝率":0.5163841807909605,"DSR":0.04075741569009478,"過":0,"缺":["CAGR>0","Sharpe≥0.5","MDD≤30%","周轉≤1500%","ΔSharpe≥0.25","DSR≥0.95"],"hash":"6bd8fbda","_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/compare_v3.json[策略=ml_rank_repaired,成本=1x] (array index 7)"},{"策略":"ml_rank_repaired","成本":"0x","CAGR":0.219000347803473,"Sharpe":1.2101193387960125,"MDD":-0.27162628049803816,"周轉":29.541204975197473,"毛CAGR":0.219000347803473,"日勝率":0.5514124293785311,"DSR":0.6416422514219827,"過":4,"缺":["周轉≤1500%","DSR≥0.95"],"hash":"a790c051","_src":"C:/Users/Alex/AppData/Local/Temp/claude/D--project-twquant--claude-worktrees-strange-kalam-3ec702/5681af54-7901-4325-b1a7-122e152a538d/scratchpad/compare_v3.json[策略=ml_rank_repaired,成本=0x] (array index 0)"}],"dsr_pop":18,"linear_baseline":0.31233087605475096},"trades":{"1x":{"scalars":{"scale":1.0,"n":2472,"win_rate":0.4684466019417476,"avg_win":0.04615942855720275,"avg_loss":-0.04120624043842554,"profit_factor":0.9229743830080751,"ev":-0.0002800896710559748,"median_hold":7.0,"cost_commission":986957.7142125,"cost_tax":2957946.84,"cost_slippage":2423092.2268489045,"day_win_rate":0.5175141242937853,"cagr":-0.04760660439926667,"sharpe":-0.1777274079688329,"mdd":-0.4133450176088529,"total_ret":-0.157431678106142},"by_year":{"2022":{"win_rate":0.4596774193548387,"n":372},"2023":{"win_rate":0.5119047619047619,"n":588},"2024":{"win_rate":0.43994943109987356,"n":791},"2025":{"win_rate":0.4605873261205564,"n":647},"2026":{"win_rate":0.5405405405405406,"n":74}},"segments":[{"seg":"H2-2022","ret":-0.06897120000000001},{"seg":"2023","ret":0.15898605929268772},{"seg":"2024","ret":-0.12152001567305448},{"seg":"2025","ret":-0.14153592384531533}],"equity_monthly":[["2022-07",9839602],["2022-08",9917514],["2022-09",9446513],["2022-10",9156564],["2022-11",9815228],["2022-12",9310288],["2023-01",9397888],["2023-02",9712827],["2023-03",9907796],["2023-04",9899721],["2023-05",10122025],["2023-06",10261998],["2023-07",10277303],["2023-08",9810569],["2023-09",9943424],["2023-10",9766706],["2023-11",10452124],["2023-12",10790494],["2024-01",10385075],["2024-02",10434620],["2024-03",10865533],["2024-04",11452075],["2024-05",11697555],["2024-06",11561706],["2024-07",11393572],["2024-08",11636145],["2024-09",10935849],["2024-10",10023335],["2024-11",10118128],["2024-12",9479233],["2025-01",9430316],["2025-02",9656441],["2025-03",8892971],["2025-04",8644797],["2025-05",8640562],["2025-06",8296554],["2025-07",8392257],["2025-08",8359486],["2025-09",8508074],["2025-10",8365187],["2025-11",8112881],["2025-12",8137581],["2026-01",8161964],["2026-02",8425683]],"drawdown_monthly":[["2022-07",-0.055987],["2022-08",-0.048216],["2022-09",-0.098535],["2022-10",-0.130759],["2022-11",-0.089428],["2022-12",-0.084805],["2023-01",-0.079634],["2023-02",-0.069559],["2023-03",-0.034931],["2023-04",-0.026655],["2023-05",-0.021546],["2023-06",-0.02932],["2023-07",-0.029689],["2023-08",-0.076905],["2023-09",-0.064714],["2023-10",-0.061086],["2023-11",-0.055607],["2023-12",-0.013996],["2024-01",-0.054878],["2024-02",-0.052629],["2024-03",-0.048427],["2024-04",-0.0278],["2024-05",-0.016956],["2024-06",-0.024863],["2024-07",-0.053496],["2024-08",-0.152442],["2024-09",-0.087701],["2024-10",-0.160422],["2024-11",-0.158067],["2024-12",-0.20367],["2025-01",-0.227796],["2025-02",-0.217421],["2025-03",-0.25292],["2025-04",-0.413345],["2025-05",-0.292835],["2025-06",-0.30739],["2025-07",-0.300741],["2025-08",-0.301026],["2025-09",-0.306714],["2025-10",-0.297258],["2025-11",-0.344127],["2025-12",-0.322491],["2026-01",-0.319639],["2026-02",-0.322253]],"max_drawdown":{"value":-0.41334500258618223,"trough_date":"2025-04-09","peak_date":"2024-07-15","provenance":"min of dd_t over scratchpad/trades_ml_rank_v2_1x.json key 'equity'","stored_mdd_key":-0.4133450176088529,"matches_stored":false},"hist":{"bins":[{"bin":"[-20%,-19%)","lo":-0.2,"hi":-0.19,"count":2},{"bin":"[-19%,-18%)","lo":-0.19,"hi":-0.18,"count":4},{"bin":"[-18%,-17%)","lo":-0.18,"hi":-0.17,"count":3},{"bin":"[-17%,-16%)","lo":-0.17,"hi":-0.16,"count":6},{"bin":"[-16%,-15%)","lo":-0.16,"hi":-0.15,"count":5},{"bin":"[-15%,-14%)","lo":-0.15,"hi":-0.14,"count":9},{"bin":"[-14%,-13%)","lo":-0.14,"hi":-0.13,"count":14},{"bin":"[-13%,-12%)","lo":-0.13,"hi":-0.12,"count":19},{"bin":"[-12%,-11%)","lo":-0.12,"hi":-0.11,"count":14},{"bin":"[-11%,-10%)","lo":-0.11,"hi":-0.1,"count":28},{"bin":"[-10%,-9%)","lo":-0.1,"hi":-0.09,"count":26},{"bin":"[-9%,-8%)","lo":-0.09,"hi":-0.08,"count":21},{"bin":"[-8%,-7%)","lo":-0.08,"hi":-0.07,"count":49},{"bin":"[-7%,-6%)","lo":-0.07,"hi":-0.06,"count":65},{"bin":"[-6%,-5%)","lo":-0.06,"hi":-0.05,"count":75},{"bin":"[-5%,-4%)","lo":-0.05,"hi":-0.04,"count":102},{"bin":"[-4%,-3%)","lo":-0.04,"hi":-0.03,"count":142},{"bin":"[-3%,-2%)","lo":-0.03,"hi":-0.02,"count":179},{"bin":"[-2%,-1%)","lo":-0.02,"hi":-0.01,"count":243},{"bin":"[-1%,+0%)","lo":-0.01,"hi":0.0,"count":289},{"bin":"[+0%,+1%)","lo":0.0,"hi":0.01,"count":242},{"bin":"[+1%,+2%)","lo":0.01,"hi":0.02,"count":207},{"bin":"[+2%,+3%)","lo":0.02,"hi":0.03,"count":158},{"bin":"[+3%,+4%)","lo":0.03,"hi":0.04,"count":115},{"bin":"[+4%,+5%)","lo":0.04,"hi":0.05,"count":100},{"bin":"[+5%,+6%)","lo":0.05,"hi":0.06,"count":68},{"bin":"[+6%,+7%)","lo":0.06,"hi":0.07,"count":54},{"bin":"[+7%,+8%)","lo":0.07,"hi":0.08,"count":44},{"bin":"[+8%,+9%)","lo":0.08,"hi":0.09,"count":24},{"bin":"[+9%,+10%)","lo":0.09,"hi":0.1,"count":24},{"bin":"[+10%,+11%)","lo":0.1,"hi":0.11,"count":13},{"bin":"[+11%,+12%)","lo":0.11,"hi":0.12,"count":14},{"bin":"[+12%,+13%)","lo":0.12,"hi":0.13,"count":21},{"bin":"[+13%,+14%)","lo":0.13,"hi":0.14,"count":8},{"bin":"[+14%,+15%)","lo":0.14,"hi":0.15,"count":9},{"bin":"[+15%,+16%)","lo":0.15,"hi":0.16,"count":7},{"bin":"[+16%,+17%)","lo":0.16,"hi":0.17,"count":4},{"bin":"[+17%,+18%)","lo":0.17,"hi":0.18,"count":4},{"bin":"[+18%,+19%)","lo":0.18,"hi":0.19,"count":6},{"bin":"[+19%,+20%)","lo":0.19,"hi":0.2,"count":3}],"tail_below_-20%":19,"tail_at_or_above_+20%":33,"n":2472,"provenance":"scratchpad/trades_ml_rank_v2_1x.json key 'returns' (per-round-trip net return, rounded to 5 dp by tradewin.py line 52); bin = [lo,hi), 1% width from -20% to +20%"},"holds":{"median":7.0,"mean":12.352750809061488,"min":1,"max":112,"n_le_3":18,"n_le_7":1517,"n_le_14":2055,"n_gt_30":138,"provenance":"scratchpad/trades_ml_rank_v2_1x.json key 'holds' (calendar days between buy and sell, tradewin.py line 37)"}},"0x":{"scalars":{"scale":0.0,"n":2588,"win_rate":0.5278207109737248,"avg_win":0.0466039671062133,"avg_loss":-0.03988670086381964,"profit_factor":1.1937851504942685,"ev":0.005764864996715523,"median_hold":7.0,"cost_commission":0.0,"cost_tax":0.0,"cost_slippage":0.0,"day_win_rate":0.5525423728813559,"cagr":0.13471938405245987,"sharpe":0.766895289052906,"mdd":-0.3347859874746675,"total_ret":0.558702},"by_year":{"2022":{"win_rate":0.5203252032520326,"n":369},"2023":{"win_rate":0.5524126455906821,"n":601},"2024":{"win_rate":0.5048426150121066,"n":826},"2025":{"win_rate":0.5275813295615276,"n":707},"2026":{"win_rate":0.611764705882353,"n":85}},"segments":[{"seg":"H2-2022","ret":0.023535000000000084},{"seg":"2023","ret":0.31212708896129593},{"seg":"2024","ret":0.10642081059829867},{"seg":"2025","ret":-0.007601289964816682}],"equity_monthly":[["2022-07",10021600],["2022-08",10295050],["2022-09",9965350],["2022-10",9812150],["2022-11",10674750],["2022-12",10235350],["2023-01",10418600],["2023-02",10883950],["2023-03",11241400],["2023-04",11222450],["2023-05",11439550],["2023-06",11761550],["2023-07",11916930],["2023-08",11522580],["2023-09",11851330],["2023-10",11766980],["2023-11",12803080],["2023-12",13430080],["2024-01",13210880],["2024-02",13463980],["2024-03",14216220],["2024-04",15349420],["2024-05",16034270],["2024-06",16112820],["2024-07",16162820],["2024-08",17027020],["2024-09",16292070],["2024-10",15109820],["2024-11",15564170],["2024-12",14859320],["2025-01",14969770],["2025-02",15559370],["2025-03",14469170],["2025-04",14212770],["2025-05",14386770],["2025-06",13957670],["2025-07",14313970],["2025-08",14450820],["2025-09",14883320],["2025-10",15006520],["2025-11",14418170],["2025-12",14746370],["2026-01",14959620],["2026-02",15587020]],"drawdown_monthly":[["2022-07",-0.05074],["2022-08",-0.031066],["2022-09",-0.081965],["2022-10",-0.100021],["2022-11",-0.054435],["2022-12",-0.052155],["2023-01",-0.043609],["2023-02",-0.025583],["2023-03",-0.00813],["2023-04",-0.007256],["2023-05",-0.012139],["2023-06",-0.020841],["2023-07",-0.027294],["2023-08",-0.067582],["2023-09",-0.04354],["2023-10",-0.028669],["2023-11",-0.022659],["2023-12",-0.010027],["2024-01",-0.041858],["2024-02",-0.028934],["2024-03",-0.015192],["2024-04",-0.023582],["2024-05",-0.012544],["2024-06",-0.01758],["2024-07",-0.049216],["2024-08",-0.146453],["2024-09",-0.068484],["2024-10",-0.117136],["2024-11",-0.111575],["2024-12",-0.129151],["2025-01",-0.154718],["2025-02",-0.129954],["2025-03",-0.152016],["2025-04",-0.334786],["2025-05",-0.190002],["2025-06",-0.190274],["2025-07",-0.174685],["2025-08",-0.156344],["2025-09",-0.16229],["2025-10",-0.137364],["2025-11",-0.191235],["2025-12",-0.16008],["2026-01",-0.140781],["2026-02",-0.133657]],"max_drawdown":{"value":-0.3347859874746675,"trough_date":"2025-04-09","peak_date":"2024-08-27","provenance":"min of dd_t over scratchpad/trades_ml_rank_v2_0x.json key 'equity'","stored_mdd_key":-0.3347859874746675,"matches_stored":true},"hist":{"bins":[{"bin":"[-20%,-19%)","lo":-0.2,"hi":-0.19,"count":2},{"bin":"[-19%,-18%)","lo":-0.19,"hi":-0.18,"count":2},{"bin":"[-18%,-17%)","lo":-0.18,"hi":-0.17,"count":2},{"bin":"[-17%,-16%)","lo":-0.17,"hi":-0.16,"count":6},{"bin":"[-16%,-15%)","lo":-0.16,"hi":-0.15,"count":7},{"bin":"[-15%,-14%)","lo":-0.15,"hi":-0.14,"count":6},{"bin":"[-14%,-13%)","lo":-0.14,"hi":-0.13,"count":12},{"bin":"[-13%,-12%)","lo":-0.13,"hi":-0.12,"count":18},{"bin":"[-12%,-11%)","lo":-0.12,"hi":-0.11,"count":20},{"bin":"[-11%,-10%)","lo":-0.11,"hi":-0.1,"count":19},{"bin":"[-10%,-9%)","lo":-0.1,"hi":-0.09,"count":29},{"bin":"[-9%,-8%)","lo":-0.09,"hi":-0.08,"count":26},{"bin":"[-8%,-7%)","lo":-0.08,"hi":-0.07,"count":38},{"bin":"[-7%,-6%)","lo":-0.07,"hi":-0.06,"count":52},{"bin":"[-6%,-5%)","lo":-0.06,"hi":-0.05,"count":64},{"bin":"[-5%,-4%)","lo":-0.05,"hi":-0.04,"count":89},{"bin":"[-4%,-3%)","lo":-0.04,"hi":-0.03,"count":123},{"bin":"[-3%,-2%)","lo":-0.03,"hi":-0.02,"count":154},{"bin":"[-2%,-1%)","lo":-0.02,"hi":-0.01,"count":218},{"bin":"[-1%,+0%)","lo":-0.01,"hi":0.0,"count":257},{"bin":"[+0%,+1%)","lo":0.0,"hi":0.01,"count":317},{"bin":"[+1%,+2%)","lo":0.01,"hi":0.02,"count":232},{"bin":"[+2%,+3%)","lo":0.02,"hi":0.03,"count":208},{"bin":"[+3%,+4%)","lo":0.03,"hi":0.04,"count":142},{"bin":"[+4%,+5%)","lo":0.04,"hi":0.05,"count":114},{"bin":"[+5%,+6%)","lo":0.05,"hi":0.06,"count":93},{"bin":"[+6%,+7%)","lo":0.06,"hi":0.07,"count":63},{"bin":"[+7%,+8%)","lo":0.07,"hi":0.08,"count":49},{"bin":"[+8%,+9%)","lo":0.08,"hi":0.09,"count":39},{"bin":"[+9%,+10%)","lo":0.09,"hi":0.1,"count":20},{"bin":"[+10%,+11%)","lo":0.1,"hi":0.11,"count":24},{"bin":"[+11%,+12%)","lo":0.11,"hi":0.12,"count":12},{"bin":"[+12%,+13%)","lo":0.12,"hi":0.13,"count":22},{"bin":"[+13%,+14%)","lo":0.13,"hi":0.14,"count":18},{"bin":"[+14%,+15%)","lo":0.14,"hi":0.15,"count":8},{"bin":"[+15%,+16%)","lo":0.15,"hi":0.16,"count":10},{"bin":"[+16%,+17%)","lo":0.16,"hi":0.17,"count":7},{"bin":"[+17%,+18%)","lo":0.17,"hi":0.18,"count":5},{"bin":"[+18%,+19%)","lo":0.18,"hi":0.19,"count":3},{"bin":"[+19%,+20%)","lo":0.19,"hi":0.2,"count":6}],"tail_below_-20%":19,"tail_at_or_above_+20%":33,"n":2588,"provenance":"scratchpad/trades_ml_rank_v2_0x.json key 'returns' (per-round-trip net return, rounded to 5 dp by tradewin.py line 52); bin = [lo,hi), 1% width from -20% to +20%"},"holds":{"median":7.0,"mean":12.488021638330757,"min":1,"max":112,"n_le_3":19,"n_le_7":1567,"n_le_14":2135,"n_gt_30":145,"provenance":"scratchpad/trades_ml_rank_v2_0x.json key 'holds' (calendar days between buy and sell, tradewin.py line 37)"}}},"importance":{"v2":[{"feature":"price.vol_20d","group":"price","gain":8452.075414061546,"gain_share":0.11120830583305141,"split":815,"split_share":0.06791666666666667,"rank_gain":1,"rank_split":8},{"feature":"fundamental.book_yield","group":"fundamental_valuation","gain":6212.104433298111,"gain_share":0.08173585490443429,"split":808,"split_share":0.06733333333333333,"rank_gain":2,"rank_split":9},{"feature":"price.high_52w","group":"price","gain":6105.240722060204,"gain_share":0.08032979406143367,"split":939,"split_share":0.07825,"rank_gain":3,"rank_split":4},{"feature":"fundamental.revenue_yoy","group":"fundamental_revenue","gain":5945.042370736599,"gain_share":0.07822198191173291,"split":983,"split_share":0.08191666666666667,"rank_gain":4,"rank_split":2},{"feature":"fundamental.dividend_yield","group":"fundamental_valuation","gain":5730.535969138145,"gain_share":0.0753996107965366,"split":1059,"split_share":0.08825,"rank_gain":5,"rank_split":1},{"feature":"chip.short_margin_ratio","group":"chip","gain":5025.036401629448,"gain_share":0.06611698992237063,"split":946,"split_share":0.07883333333333334,"rank_gain":6,"rank_split":3},{"feature":"fundamental.revenue_accel","group":"fundamental_revenue","gain":4905.5817729234695,"gain_share":0.0645452638986999,"split":933,"split_share":0.07775,"rank_gain":7,"rank_split":5},{"feature":"price.mom_60d","group":"price","gain":4405.538080453873,"gain_share":0.05796593170420343,"split":828,"split_share":0.069,"rank_gain":8,"rank_split":7},{"feature":"fundamental.earnings_yield","group":"fundamental_valuation","gain":4116.449699997902,"gain_share":0.05416224711177263,"split":864,"split_share":0.072,"rank_gain":9,"rank_split":6},{"feature":"price.residual_reversal_5d","group":"price","gain":3710.2984461784363,"gain_share":0.048818306051558194,"split":281,"split_share":0.023416666666666665,"rank_gain":10,"rank_split":17},{"feature":"price.mom_20d","group":"price","gain":3074.43750166893,"gain_share":0.040451956377647064,"split":389,"split_share":0.03241666666666667,"rank_gain":11,"rank_split":11},{"feature":"price.rs_market_20d","group":"price","gain":2926.8243021965027,"gain_share":0.03850973354742784,"split":283,"split_share":0.023583333333333335,"rank_gain":12,"rank_split":16},{"feature":"price.overnight_ret_20d","group":"price","gain":2644.266224384308,"gain_share":0.034791971507508006,"split":475,"split_share":0.03958333333333333,"rank_gain":13,"rank_split":10},{"feature":"price.mom_1d","group":"price","gain":2562.756001472473,"gain_share":0.03371949955783528,"split":159,"split_share":0.01325,"rank_gain":14,"rank_split":20},{"feature":"chip.foreign_net_10d","group":"chip","gain":1689.3964220881462,"gain_share":0.022228258123238902,"split":338,"split_share":0.028166666666666666,"rank_gain":15,"rank_split":14},{"feature":"chip.margin_velocity_5d","group":"chip","gain":1613.8607014417648,"gain_share":0.02123439577447336,"split":352,"split_share":0.029333333333333333,"rank_gain":16,"rank_split":13},{"feature":"chip.inst_net_10d","group":"chip","gain":1527.1219013929367,"gain_share":0.020093128744676867,"split":364,"split_share":0.030333333333333334,"rank_gain":17,"rank_split":12},{"feature":"price.reversal_5d","group":"price","gain":1155.1217694282532,"gain_share":0.015198531569569034,"split":169,"split_share":0.014083333333333333,"rank_gain":18,"rank_split":19},{"feature":"price.intraday_ret_20d","group":"price","gain":1000.1912190318108,"gain_share":0.013160030587584647,"split":287,"split_share":0.023916666666666666,"rank_gain":19,"rank_split":15},{"feature":"volume.vol_ratio_5d","group":"volume","gain":926.6082532405853,"gain_share":0.012191861639375832,"split":155,"split_share":0.012916666666666667,"rank_gain":20,"rank_split":22},{"feature":"price.double_bottom_120d","group":"price","gain":734.4407676458359,"gain_share":0.009663415138101657,"split":183,"split_share":0.01525,"rank_gain":21,"rank_split":18},{"feature":"chip.foreign_streak","group":"chip","gain":668.3115233778954,"gain_share":0.008793318639811688,"split":159,"split_share":0.01325,"rank_gain":22,"rank_split":21},{"feature":"volume.turnover_z_20d","group":"volume","gain":542.1448513269424,"gain_share":0.007133278807696849,"split":117,"split_share":0.00975,"rank_gain":23,"rank_split":23},{"feature":"price.box_breakout_60d","group":"price","gain":182.4401010274887,"gain_share":0.002400458296612404,"split":54,"split_share":0.0045,"rank_gain":24,"rank_split":24},{"feature":"price.hs_top_120d","group":"price","gain":100.5204861164093,"gain_share":0.0013225997657241495,"split":48,"split_share":0.004,"rank_gain":25,"rank_split":25},{"feature":"price.flag_hold_50d","group":"price","gain":45.850279808044434,"gain_share":0.0006032757269227623,"split":12,"split_share":0.001,"rank_gain":26,"rank_split":26},{"feature":"chip.trust_net_10d","group":"chip","gain":0.0,"gain_share":0.0,"split":0,"split_share":0.0,"rank_gain":27,"rank_split":27},{"feature":"chip.trust_streak","group":"chip","gain":0.0,"gain_share":0.0,"split":0,"split_share":0.0,"rank_gain":28,"rank_split":28}],"v2_groups":{"price":{"n_features":14,"gain_share":0.4881438097251794,"split_share":0.4101666666666667,"features":["price.vol_20d","price.high_52w","price.mom_60d","price.residual_reversal_5d","price.mom_20d","price.rs_market_20d","price.overnight_ret_20d","price.mom_1d","price.reversal_5d","price.intraday_ret_20d","price.double_bottom_120d","price.box_breakout_60d","price.hs_top_120d","price.flag_hold_50d"]},"fundamental_valuation":{"n_features":3,"gain_share":0.2112977128127435,"split_share":0.2275833333333333,"features":["fundamental.book_yield","fundamental.dividend_yield","fundamental.earnings_yield"]},"fundamental_revenue":{"n_features":2,"gain_share":0.14276724581043282,"split_share":0.15966666666666668,"features":["fundamental.revenue_yoy","fundamental.revenue_accel"]},"chip":{"n_features":7,"gain_share":0.13846609120457146,"split_share":0.17991666666666667,"features":["chip.short_margin_ratio","chip.foreign_net_10d","chip.margin_velocity_5d","chip.inst_net_10d","chip.foreign_streak","chip.trust_net_10d","chip.trust_streak"]},"volume":{"n_features":2,"gain_share":0.019325140447072682,"split_share":0.02266666666666667,"features":["volume.vol_ratio_5d","volume.turnover_z_20d"]}},"repaired_groups":{"price":{"n_features":14,"gain_share":0.7117956414002253,"split_share":0.6459166666666666,"features":["price.vol_20d","price.high_52w","price.mom_60d","price.residual_reversal_5d","price.overnight_ret_20d","price.rs_market_20d","price.mom_1d","price.mom_20d","price.intraday_ret_20d","price.reversal_5d","price.double_bottom_120d","price.box_breakout_60d","price.hs_top_120d","price.flag_hold_50d"]},"fundamental_revenue":{"n_features":2,"gain_share":0.21389148743565312,"split_share":0.25558333333333333,"features":["fundamental.revenue_yoy","fundamental.revenue_accel"]},"volume":{"n_features":2,"gain_share":0.03254473219841739,"split_share":0.04566666666666666,"features":["volume.vol_ratio_5d","volume.turnover_z_20d"]},"chip":{"n_features":7,"gain_share":0.04176813896570428,"split_share":0.05283333333333334,"features":["chip.inst_net_10d","chip.foreign_net_10d","chip.foreign_streak","chip.trust_streak","chip.trust_net_10d","chip.margin_velocity_5d","chip.short_margin_ratio"]}},"shift":[{"feature":"fundamental.book_yield","group":"fundamental_valuation","repaired_gain_share":null,"v2_gain_share":0.08173585490443429,"delta_pp":null,"repaired_rank_gain":null,"v2_rank_gain":2,"repaired_split_share":null,"v2_split_share":0.06733333333333333,"note":"new in v2 (not in repaired 25-feature model)"},{"feature":"fundamental.dividend_yield","group":"fundamental_valuation","repaired_gain_share":null,"v2_gain_share":0.0753996107965366,"delta_pp":null,"repaired_rank_gain":null,"v2_rank_gain":5,"repaired_split_share":null,"v2_split_share":0.08825,"note":"new in v2 (not in repaired 25-feature model)"},{"feature":"fundamental.earnings_yield","group":"fundamental_valuation","repaired_gain_share":null,"v2_gain_share":0.05416224711177263,"delta_pp":null,"repaired_rank_gain":null,"v2_rank_gain":9,"repaired_split_share":null,"v2_split_share":0.072,"note":"new in v2 (not in repaired 25-feature model)"},{"feature":"chip.short_margin_ratio","group":"chip","repaired_gain_share":0.0,"v2_gain_share":0.06611698992237063,"delta_pp":6.611698992237063,"repaired_rank_gain":25,"v2_rank_gain":6,"repaired_split_share":0.0,"v2_split_share":0.07883333333333334},{"feature":"chip.margin_velocity_5d","group":"chip","repaired_gain_share":0.0,"v2_gain_share":0.02123439577447336,"delta_pp":2.123439577447336,"repaired_rank_gain":24,"v2_rank_gain":16,"repaired_split_share":0.0,"v2_split_share":0.029333333333333333},{"feature":"chip.foreign_net_10d","group":"chip","repaired_gain_share":0.014720534068052524,"v2_gain_share":0.022228258123238902,"delta_pp":0.7507724055186379,"repaired_rank_gain":16,"v2_rank_gain":15,"repaired_split_share":0.0185,"v2_split_share":0.028166666666666666},{"feature":"chip.inst_net_10d","group":"chip","repaired_gain_share":0.017952341080938763,"v2_gain_share":0.020093128744676867,"delta_pp":0.21407876637381043,"repaired_rank_gain":15,"v2_rank_gain":17,"repaired_split_share":0.022166666666666668,"v2_split_share":0.030333333333333334},{"feature":"chip.foreign_streak","group":"chip","repaired_gain_share":0.007887962269131774,"v2_gain_share":0.008793318639811688,"delta_pp":0.09053563706799134,"repaired_rank_gain":18,"v2_rank_gain":22,"repaired_split_share":0.011083333333333334,"v2_split_share":0.01325},{"feature":"chip.trust_net_10d","group":"chip","repaired_gain_share":0.00029506668470910227,"v2_gain_share":0.0,"delta_pp":-0.029506668470910227,"repaired_rank_gain":23,"v2_rank_gain":27,"repaired_split_share":0.00016666666666666666,"v2_split_share":0.0},{"feature":"chip.trust_streak","group":"chip","repaired_gain_share":0.0009122348628721022,"v2_gain_share":0.0,"delta_pp":-0.09122348628721022,"repaired_rank_gain":22,"v2_rank_gain":28,"repaired_split_share":0.0009166666666666666,"v2_split_share":0.0},{"feature":"price.flag_hold_50d","group":"price","repaired_gain_share":0.0020534074941901295,"v2_gain_share":0.0006032757269227623,"delta_pp":-0.14501317672673672,"repaired_rank_gain":21,"v2_rank_gain":26,"repaired_split_share":0.0033333333333333335,"v2_split_share":0.001},{"feature":"price.hs_top_120d","group":"price","repaired_gain_share":0.00329536080131572,"v2_gain_share":0.0013225997657241495,"delta_pp":-0.19727610355915703,"repaired_rank_gain":20,"v2_rank_gain":25,"repaired_split_share":0.00825,"v2_split_share":0.004},{"feature":"volume.turnover_z_20d","group":"volume","repaired_gain_share":0.010673918427813005,"v2_gain_share":0.007133278807696849,"delta_pp":-0.35406396201161555,"repaired_rank_gain":17,"v2_rank_gain":23,"repaired_split_share":0.02033333333333333,"v2_split_share":0.00975},{"feature":"price.box_breakout_60d","group":"price","repaired_gain_share":0.006003118335636752,"v2_gain_share":0.002400458296612404,"delta_pp":-0.3602660039024348,"repaired_rank_gain":19,"v2_rank_gain":24,"repaired_split_share":0.01125,"v2_split_share":0.0045},{"feature":"price.mom_20d","group":"price","repaired_gain_share":0.047989397315514215,"v2_gain_share":0.040451956377647064,"delta_pp":-0.7537440937867151,"repaired_rank_gain":10,"v2_rank_gain":11,"repaired_split_share":0.04758333333333333,"v2_split_share":0.03241666666666667},{"feature":"volume.vol_ratio_5d","group":"volume","repaired_gain_share":0.02187081377060439,"v2_gain_share":0.012191861639375832,"delta_pp":-0.9678952131228556,"repaired_rank_gain":13,"v2_rank_gain":20,"repaired_split_share":0.025333333333333333,"v2_split_share":0.012916666666666667},{"feature":"price.reversal_5d","group":"price","repaired_gain_share":0.02597122997462279,"v2_gain_share":0.015198531569569034,"delta_pp":-1.0772698405053758,"repaired_rank_gain":12,"v2_rank_gain":18,"repaired_split_share":0.03133333333333333,"v2_split_share":0.014083333333333333},{"feature":"price.double_bottom_120d","group":"price","repaired_gain_share":0.02054465047040542,"v2_gain_share":0.009663415138101657,"delta_pp":-1.0881235332303765,"repaired_rank_gain":14,"v2_rank_gain":21,"repaired_split_share":0.034916666666666665,"v2_split_share":0.01525},{"feature":"price.rs_market_20d","group":"price","repaired_gain_share":0.052833349126296635,"v2_gain_share":0.03850973354742784,"delta_pp":-1.4323615578868798,"repaired_rank_gain":8,"v2_rank_gain":12,"repaired_split_share":0.03075,"v2_split_share":0.023583333333333335},{"feature":"price.mom_60d","group":"price","repaired_gain_share":0.07265113447730269,"v2_gain_share":0.05796593170420343,"delta_pp":-1.468520277309926,"repaired_rank_gain":5,"v2_rank_gain":8,"repaired_split_share":0.093,"v2_split_share":0.069},{"feature":"price.mom_1d","group":"price","repaired_gain_share":0.04929125698590239,"v2_gain_share":0.03371949955783528,"delta_pp":-1.5571757428067114,"repaired_rank_gain":9,"v2_rank_gain":14,"repaired_split_share":0.02225,"v2_split_share":0.01325},{"feature":"price.intraday_ret_20d","group":"price","repaired_gain_share":0.029443279689668273,"v2_gain_share":0.013160030587584647,"delta_pp":-1.6283249102083626,"repaired_rank_gain":11,"v2_rank_gain":19,"repaired_split_share":0.05075,"v2_split_share":0.023916666666666666},{"feature":"price.residual_reversal_5d","group":"price","repaired_gain_share":0.06823027974606301,"v2_gain_share":0.048818306051558194,"delta_pp":-1.9411973694504814,"repaired_rank_gain":6,"v2_rank_gain":10,"repaired_split_share":0.036833333333333336,"v2_split_share":0.023416666666666665},{"feature":"price.high_52w","group":"price","repaired_gain_share":0.10183417464637991,"v2_gain_share":0.08032979406143367,"delta_pp":-2.150438058494623,"repaired_rank_gain":4,"v2_rank_gain":3,"repaired_split_share":0.104,"v2_split_share":0.07825},{"feature":"price.overnight_ret_20d","group":"price","repaired_gain_share":0.05921108490298329,"v2_gain_share":0.034791971507508006,"delta_pp":-2.4419113395475285,"repaired_rank_gain":7,"v2_rank_gain":13,"repaired_split_share":0.06933333333333333,"v2_split_share":0.03958333333333333},{"feature":"fundamental.revenue_yoy","group":"fundamental_revenue","repaired_gain_share":0.11048653646132803,"v2_gain_share":0.07822198191173291,"delta_pp":-3.226455454959512,"repaired_rank_gain":2,"v2_rank_gain":4,"repaired_split_share":0.12708333333333333,"v2_split_share":0.08191666666666667},{"feature":"fundamental.revenue_accel","group":"fundamental_revenue","repaired_gain_share":0.10340495097432507,"v2_gain_share":0.0645452638986999,"delta_pp":-3.8859687075625176,"repaired_rank_gain":3,"v2_rank_gain":7,"repaired_split_share":0.1285,"v2_split_share":0.07775},{"feature":"price.vol_20d","group":"price","repaired_gain_share":0.17244391743394402,"v2_gain_share":0.11120830583305141,"delta_pp":-6.1235611600892605,"repaired_rank_gain":1,"v2_rank_gain":1,"repaired_split_share":0.10233333333333333,"v2_split_share":0.06791666666666667}],"shift_groups":{"price":{"repaired_gain_share":0.7117956414002253,"v2_gain_share":0.4881438097251794,"delta_pp":-22.365183167504593,"repaired_n":14,"v2_n":14},"fundamental_valuation":{"repaired_gain_share":null,"v2_gain_share":0.2112977128127435,"delta_pp":null,"repaired_n":0,"v2_n":3},"fundamental_revenue":{"repaired_gain_share":0.21389148743565312,"v2_gain_share":0.14276724581043282,"delta_pp":-7.1124241625220295,"repaired_n":2,"v2_n":2},"chip":{"repaired_gain_share":0.04176813896570428,"v2_gain_share":0.13846609120457146,"delta_pp":9.669795223886718,"repaired_n":7,"v2_n":7},"volume":{"repaired_gain_share":0.03254473219841739,"v2_gain_share":0.019325140447072682,"delta_pp":-1.321959175134471,"repaired_n":2,"v2_n":2}},"total_gain":76002.19561612606,"num_trees":400},"repaired_trades_lines":{"1x":"ml_rank_repaired 1x  往返 2,374  逐筆勝率 47.1%  PF 0.994  EV +0.092%  逐年 { 2022:49%, 2023:51%, 2024:47%, 2025:43%, 2026:42% }  → trades_1x.json","0x":"ml_rank_repaired 0x  往返 2,509  逐筆勝率 54.0%  PF 1.361  EV +0.829%  逐年 { 2022:54%, 2023:57%, 2024:56%, 2025:50%, 2026:53% }  → trades_0x.json"}}</script>
+<script>
+(function(){
+'use strict';
+const D = JSON.parse(document.getElementById('bundle').textContent);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (t, a) => { const n = document.createElementNS(NS, t); for (const k in (a||{})) n.setAttribute(k, a[k]); return n; };
+const pct = (v, d) => (v == null ? '—' : (v * 100).toFixed(d === undefined ? 1 : d) + '%');
+const spct = (v, d) => (v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(d === undefined ? 1 : d) + '%');
+const sgn = (v, d) => (v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d === undefined ? 2 : d));
+const twd = v => Math.round(v).toLocaleString('en-US');
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* 提示層 */
+const tip = document.getElementById('tip');
+function showTip(e, title, rows){
+  tip.innerHTML = '<b>' + title + '</b>' + rows.join('<br>');
+  tip.style.opacity = '1';
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY - 10;
+  if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - 14;
+  if (y + r.height > window.innerHeight - 8) y = window.innerHeight - r.height - 8;
+  tip.style.left = x + 'px'; tip.style.top = Math.max(8, y) + 'px';
+}
+const hideTip = () => { tip.style.opacity = '0'; };
+function hover(node, title, rows){
+  node.addEventListener('mousemove', e => showTip(e, title, rows));
+  node.addEventListener('mouseleave', hideTip);
+  node.style.cursor = 'crosshair';
+}
+
+/* ── 表頭 ───────────────────────────────────── */
+document.getElementById('model-id').textContent = D.model.id;
+document.getElementById('rp-id').textContent = D.repaired.id;
+const g1 = D.gates.rows.find(r => r['策略'] === 'ml_rank_v2' && r['成本'] === '1x');
+const g0 = D.gates.rows.find(r => r['策略'] === 'ml_rank_v2' && r['成本'] === '0x');
+document.getElementById('verdict-line').textContent =
+  'D-038 §5 六條門檻，1× 成本 ' + g1['過'] + '／6 通過，0× 成本 ' + g0['過'] + '／6';
+
+const b1 = D.backtest['1x'], b0 = D.backtest['0x'];
+const heads = [
+  ['樣本外 RankIC', sgn(D.model.oos_rank_ic, 4), '第一代 ' + sgn(D.repaired.oos_rank_ic, 4), 'up'],
+  ['1× 年化報酬', spct(b1.cagr, 2), '第一代 −0.01%', 'down'],
+  ['0× 夏普', b0.sharpe.toFixed(2), '第一代 1.21', 'down'],
+  ['年化周轉', (b1.turnover * 100).toFixed(0) + '%', '門檻 ≤ 1500%', 'down'],
+  ['成本／初始資金', pct(b1.cost.share_of_initial_capital, 1), twd(b1.cost.total) + ' 元', 'down'],
+];
+document.getElementById('heads').innerHTML = heads.map(h =>
+  '<div class="head"><div class="k">' + h[0] + '</div><div class="v ' + h[3] + '">' + h[1] +
+  '</div><div class="d">' + h[2] + '</div></div>').join('');
+
+/* ── 規格 ───────────────────────────────────── */
+const L = D.model.label, S = D.model.split, G = D.model.lgbm;
+const spec = [
+  ['設定指紋', D.model.config_hash],
+  ['標籤視窗', D.model.horizon + ' 交易日（對照 ' + D.model.aux.join('／') + '）'],
+  ['標籤定義', '次日開盤起算 · 超額於當日均值 · 橫斷面百分位'],
+  ['訓練期間', D.model.data_from + ' → ' + D.model.data_to],
+  ['樣本外起點', D.model.oos_period.start + ' → ' + D.model.oos_period.end],
+  ['切分', '測試 ' + S.test_months + ' 個月 · 禁區 ' + S.embargo_days + ' 日 · 金庫 ' + S.vault_months + ' 個月'],
+  ['LightGBM', G.num_leaves + ' 葉 · lr ' + G.learning_rate + ' · ' + G.n_estimators + ' 樹 · seed ' + G.seed],
+  ['再訓練', D.model.lgbm ? '每月' : '—'],
+];
+document.getElementById('spec').innerHTML = spec.map(s =>
+  '<div><dt>' + s[0] + '</dt><dd>' + s[1] + '</dd></div>').join('');
+
+const added = new Set(D.model.added_vs_repaired || []);
+const cats = D.model.features_by_category;
+const allFeat = [];
+Object.keys(cats).forEach(c => cats[c].forEach(f => allFeat.push(f)));
+document.getElementById('feature-chips').innerHTML = allFeat.map(f =>
+  '<span class="chip' + (added.has(f) ? ' new' : '') + '">' + f + '</span>').join('');
+if (D.model.sample) {
+  const s = D.model.sample;
+  document.getElementById('sample-line').textContent =
+    (s.trading_days || s.days || '1,617') + ' 個交易日、' + (s.rows ? s.rows.toLocaleString('en-US') : '2,954,798') + ' 列';
+} else { document.getElementById('sample-line').textContent = '1,617 個交易日、2,954,798 列'; }
+
+/* ── 階梯 ───────────────────────────────────── */
+document.getElementById('common-n').textContent = D.ladder.common_n.toLocaleString('en-US');
+const lad = D.ladder.rows;
+document.getElementById('ladder-table').innerHTML =
+  '<thead><tr><th>訊號</th><th>RankIC</th><th>資訊比</th><th>IC 為正的日數</th><th>t（NW,10）</th><th>五分位頭尾差</th><th>單調</th></tr></thead><tbody>' +
+  lad.map(r => '<tr' + (r.key === 'ml' ? ' class="hi"' : '') + '><td>' + r.name +
+    '</td><td class="v">' + sgn(r.rank_ic, 4) + '</td><td class="v">' + r.ir.toFixed(3) +
+    '</td><td class="v">' + pct(r.win_rate) + '</td><td class="v">' + sgn(r.t_nw10) +
+    '</td><td class="v">' + sgn(r.quintile_spread, 4) + '</td><td class="v">' +
+    (r.strictly_monotonic ? '<span class="tag p">是</span>' : '<span class="tag f">否</span>') +
+    '</td></tr>').join('') + '</tbody>';
+
+(function ladderChart(){
+  const svg = document.getElementById('chart-ladder');
+  const W = 640, H = 150, m = {l: 168, r: 56, t: 10, b: 22};
+  const max = Math.max.apply(null, lad.map(r => r.rank_ic)) * 1.12;
+  const bw = (H - m.t - m.b) / lad.length;
+  lad.forEach((r, i) => {
+    const y = m.t + i * bw, h = Math.min(20, bw - 12);
+    const w = (r.rank_ic / max) * (W - m.l - m.r);
+    const short = {ml: 'ML（LightGBM）', b: '基準 B（3 因子）', a: '基準 A（28 因子等權）'}[r.key];
+    svg.appendChild(el('text', {x: m.l - 12, y: y + h / 2 + 4, 'text-anchor': 'end', class: 'lab'})).textContent = short;
+    const rect = el('rect', {x: m.l, y: y, width: Math.max(3, w), height: h, rx: 3,
+      fill: r.key === 'ml' ? css('--real') : css('--base')});
+    hover(rect, r.name, ['RankIC ' + sgn(r.rank_ic, 4), '資訊比 ' + r.ir.toFixed(3), 't(NW,10) ' + sgn(r.t_nw10)]);
+    svg.appendChild(rect);
+    const t = el('text', {x: m.l + Math.max(3, w) + 9, y: y + h / 2 + 4, class: 'lab'});
+    t.textContent = sgn(r.rank_ic, 4); svg.appendChild(t);
+  });
+})();
+
+/* ── 16 窗 ──────────────────────────────────── */
+(function windowChart(){
+  const svg = document.getElementById('chart-windows');
+  const W = 660, H = 250, m = {l: 46, r: 10, t: 12, b: 40};
+  const wins = D.windows, rp = (D.repairedWindows || []);
+  const vals = wins.map(w => w.v2).concat(rp);
+  const lo = Math.min(-0.03, Math.min.apply(null, vals) * 1.15);
+  const hi = Math.max.apply(null, vals) * 1.12;
+  const x = i => m.l + i * ((W - m.l - m.r) / wins.length);
+  const bw = (W - m.l - m.r) / wins.length;
+  const y = v => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const gg = el('g', {class: 'grid'});
+  [-0.02, 0, 0.04, 0.08, 0.12].forEach(v => {
+    if (v < lo || v > hi) return;
+    gg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v)}));
+    const t = el('text', {x: m.l - 8, y: y(v) + 3.5, 'text-anchor': 'end', class: 'lab'});
+    t.textContent = v.toFixed(2); gg.appendChild(t);
+  });
+  svg.appendChild(gg);
+  svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), class: 'zero'}));
+  wins.forEach((w, i) => {
+    const hasRp = rp.length === wins.length;
+    const half = hasRp ? (bw - 6) / 2 : bw - 8;
+    if (hasRp) {
+      const v = rp[i];
+      const r2 = el('rect', {x: x(i) + 3 + half, y: Math.min(y(v), y(0)), width: half,
+        height: Math.max(1.5, Math.abs(y(v) - y(0))), rx: 2, fill: css('--base')});
+      hover(r2, '視窗 ' + w.i + '（第一代）', [w.start + ' → ' + w.end, 'RankIC ' + sgn(v, 4)]);
+      svg.appendChild(r2);
+    }
+    const r1 = el('rect', {x: x(i) + 3, y: Math.min(y(w.v2), y(0)), width: half,
+      height: Math.max(1.5, Math.abs(y(w.v2) - y(0))), rx: 2,
+      fill: w.v2 >= 0 ? css('--real') : css('--fail')});
+    hover(r1, '視窗 ' + w.i + '（v2）', [w.start + ' → ' + w.end, 'RankIC ' + sgn(w.v2, 4)]);
+    svg.appendChild(r1);
+    if (i % 2 === 0) {
+      const t = el('text', {x: x(i) + bw / 2, y: H - m.b + 16, 'text-anchor': 'middle', class: 'lab'});
+      t.textContent = w.start.slice(2, 7); svg.appendChild(t);
+    }
+  });
+})();
+const wpos = D.windows.filter(w => w.v2 > 0).length;
+const wmin = D.windows.reduce((a, w) => w.v2 < a.v2 ? w : a);
+const wmax = D.windows.reduce((a, w) => w.v2 > a.v2 ? w : a);
+document.getElementById('window-summary').innerHTML =
+  '十六個視窗有 <strong>' + wpos + ' 個為正</strong>，唯一為負的是 ' + wmin.start + ' 起的那一窗（' +
+  sgn(wmin.v2, 4) + '，對應 2022 年底的空頭）；最強是 ' + wmax.start + ' 起（' + sgn(wmax.v2, 4) + '）。';
+document.getElementById('window-note').textContent =
+  '樣本外 RankIC 平均 ' + sgn(D.model.oos_rank_ic, 4) + '，第一代為 ' + sgn(D.repaired.oos_rank_ic, 4) +
+  '，提升 ' + ((D.model.oos_rank_ic / D.repaired.oos_rank_ic - 1) * 100).toFixed(1) + '%。';
+
+/* ── 淨值 ───────────────────────────────────── */
+(function equityChart(){
+  const svg = document.getElementById('chart-equity');
+  const W = 660, H = 260, m = {l: 52, r: 12, t: 12, b: 30};
+  const s1 = D.trades['1x'].equity_monthly, s0 = D.trades['0x'].equity_monthly;
+  const all = s1.concat(s0).map(p => p[1]);
+  const lo = Math.min.apply(null, all) * .98, hi = Math.max.apply(null, all) * 1.02;
+  const x = i => m.l + i * ((W - m.l - m.r) / (s1.length - 1));
+  const y = v => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const gg = el('g', {class: 'grid'});
+  for (let v = 8e6; v <= hi; v += 2e6) {
+    if (v < lo) continue;
+    gg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v)}));
+    const t = el('text', {x: m.l - 8, y: y(v) + 3.5, 'text-anchor': 'end', class: 'lab'});
+    t.textContent = (v / 1e6).toFixed(0) + 'M'; gg.appendChild(t);
+  }
+  svg.appendChild(gg);
+  svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(1e7), y2: y(1e7), class: 'zero'}));
+  [[s0, css('--cf')], [s1, css('--real')]].forEach(([s, c]) => {
+    const d = s.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ');
+    svg.appendChild(el('path', {d: d, fill: 'none', stroke: c, 'stroke-width': 2,
+      'stroke-linejoin': 'round', 'stroke-linecap': 'round'}));
+  });
+  s1.forEach((p, i) => {
+    if (i % 3) return;
+    const t = el('text', {x: x(i), y: H - m.b + 16, 'text-anchor': 'middle', class: 'lab'});
+    t.textContent = p[0].slice(2); svg.appendChild(t);
+  });
+  const band = el('rect', {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent'});
+  const cross = el('line', {x1: 0, x2: 0, y1: m.t, y2: H - m.b, stroke: css('--ink-3'), 'stroke-width': 1, opacity: 0});
+  svg.appendChild(band); svg.appendChild(cross);
+  band.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width * W;
+    let i = Math.round((px - m.l) / ((W - m.l - m.r) / (s1.length - 1)));
+    i = Math.max(0, Math.min(s1.length - 1, i));
+    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('opacity', .45);
+    showTip(e, s1[i][0], ['1× ' + twd(s1[i][1]) + '　' + spct(s1[i][1] / 1e7 - 1),
+      '0× ' + twd(s0[i][1]) + '　' + spct(s0[i][1] / 1e7 - 1)]);
+  });
+  band.addEventListener('mouseleave', () => { cross.setAttribute('opacity', 0); hideTip(); });
+  band.style.cursor = 'crosshair';
+})();
+
+(function ddChart(){
+  const svg = document.getElementById('chart-dd');
+  const W = 660, H = 150, m = {l: 52, r: 12, t: 10, b: 24};
+  const d1 = D.trades['1x'].drawdown_monthly, d0 = D.trades['0x'].drawdown_monthly;
+  const lo = Math.min.apply(null, d1.concat(d0).map(p => p[1])) * 1.06;
+  const x = i => m.l + i * ((W - m.l - m.r) / (d1.length - 1));
+  const y = v => m.t + (0 - v) / (0 - lo) * (H - m.t - m.b);
+  const gg = el('g', {class: 'grid'});
+  [-0.1, -0.2, -0.3, -0.4].forEach(v => {
+    if (v < lo) return;
+    gg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v)}));
+    const t = el('text', {x: m.l - 8, y: y(v) + 3.5, 'text-anchor': 'end', class: 'lab'});
+    t.textContent = (v * 100).toFixed(0) + '%'; gg.appendChild(t);
+  });
+  svg.appendChild(gg);
+  [[d0, css('--cf'), css('--cf-wash')], [d1, css('--real'), css('--real-wash')]].forEach(([s, c, w]) => {
+    const line = s.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ');
+    svg.appendChild(el('path', {d: line + ' L' + x(s.length - 1) + ' ' + y(0) + ' L' + x(0) + ' ' + y(0) + ' Z', fill: w}));
+    svg.appendChild(el('path', {d: line, fill: 'none', stroke: c, 'stroke-width': 1.6}));
+  });
+  svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), class: 'zero'}));
+  const band = el('rect', {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent'});
+  svg.appendChild(band);
+  band.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect();
+    let i = Math.round(((e.clientX - r.left) / r.width * W - m.l) / ((W - m.l - m.r) / (d1.length - 1)));
+    i = Math.max(0, Math.min(d1.length - 1, i));
+    showTip(e, d1[i][0], ['1× ' + pct(d1[i][1]), '0× ' + pct(d0[i][1])]);
+  });
+  band.addEventListener('mouseleave', hideTip);
+  band.style.cursor = 'crosshair';
+})();
+
+const btRows = [
+  ['總報酬', spct(b1.total_return), spct(b0.total_return)],
+  ['年化報酬', spct(b1.cagr, 2), spct(b0.cagr, 2)],
+  ['夏普', b1.sharpe.toFixed(2), b0.sharpe.toFixed(2)],
+  ['索提諾', b1.sortino.toFixed(2), b0.sortino.toFixed(2)],
+  ['卡瑪', b1.calmar.toFixed(2), b0.calmar.toFixed(2)],
+  ['最大回撤', pct(b1.mdd, 2), pct(b0.mdd, 2)],
+  ['日報酬為正的日數', pct(b1.win_rate), pct(b0.win_rate)],
+  ['年化周轉', (b1.turnover * 100).toFixed(0) + '%', (b0.turnover * 100).toFixed(0) + '%'],
+  ['成交／未成交', b1.fills.toLocaleString('en-US') + ' ／ ' + b1.unfilled, b0.fills.toLocaleString('en-US') + ' ／ ' + b0.unfilled],
+  ['成本（元）', twd(b1.cost.total), '0'],
+];
+document.getElementById('bt-table').innerHTML =
+  '<thead><tr><th>指標</th><th><span class="dot" style="background:var(--real)"></span>1× 實際成本</th>' +
+  '<th><span class="dot" style="background:var(--cf)"></span>0× 反事實</th></tr></thead><tbody>' +
+  btRows.map(r => '<tr><td>' + r[0] + '</td><td class="v">' + r[1] + '</td><td class="v">' + r[2] + '</td></tr>').join('') +
+  '</tbody>';
+
+/* ── 門檻 ───────────────────────────────────── */
+(function gates(){
+  const defs = [
+    ['CAGR > 0', r => r.CAGR, v => spct(v, 2), 'CAGR>0'],
+    ['夏普 ≥ 0.5', r => r.Sharpe, v => v.toFixed(2), 'Sharpe≥0.5'],
+    ['最大回撤 ≤ 30%', r => r.MDD, v => pct(v, 1), 'MDD≤30%'],
+    ['年化周轉 ≤ 1500%', r => r['周轉'], v => (v * 100).toFixed(0) + '%', '周轉≤1500%'],
+    ['對線性基準 Δ夏普 ≥ 0.25', r => r.Sharpe - D.gates.linear_baseline, v => sgn(v), 'ΔSharpe≥0.25'],
+    ['去膨脹夏普 ≥ 0.95', r => r.DSR, v => v.toFixed(3), 'DSR≥0.95'],
+  ];
+  const cell = (r, d) => {
+    const bad = (r['缺'] || []).indexOf(d[3]) >= 0;
+    return '<td class="v">' + d[2](d[1](r)) + '<span class="tag ' + (bad ? 'f">未過' : 'p">過') + '</span></td>';
+  };
+  document.getElementById('gate-table').innerHTML =
+    '<thead><tr><th>門檻（事前登記）</th><th><span class="dot" style="background:var(--real)"></span>1× 實際成本</th>' +
+    '<th><span class="dot" style="background:var(--cf)"></span>0× 反事實</th></tr></thead><tbody>' +
+    defs.map(d => '<tr><td>' + d[0] + '</td>' + cell(g1, d) + cell(g0, d) + '</tr>').join('') +
+    '<tr class="hi"><td>通過數</td><td class="v">' + g1['過'] + ' ／ 6</td><td class="v">' + g0['過'] + ' ／ 6</td></tr>' +
+    '</tbody>';
+  document.getElementById('gate-note').textContent =
+    '線性基準的 1× 夏普為 ' + D.gates.linear_baseline.toFixed(3) + '；去膨脹夏普的母體含 ' +
+    D.gates.dsr_pop + ' 個歷史試驗、886 個觀測日。§5 另有「1.5× 成本後仍為正」與「四段至少三段正」兩條，' +
+    '本代在 1× 已全失，未再往下評估 1.5×。';
+  document.getElementById('dsr-pop').textContent = D.gates.dsr_pop;
+})();
+
+/* ── 成本 ───────────────────────────────────── */
+(function costChart(){
+  const c = b1.cost;
+  document.getElementById('cost-lede').innerHTML =
+    '三年八個月累計成本 <span class="num">' + twd(c.total) + '</span> 元，等於初始資金的 <strong>' +
+    pct(c.share_of_initial_capital, 1) + '</strong>。同一條成交路徑的毛年化報酬是 <span class="num">' +
+    spct(b1.gross.same_path_gross_cagr, 1) + '</span>、毛夏普 <span class="num">' +
+    b1.gross.same_path_gross_sharpe.toFixed(2) + '</span>——訊號本身賺得到錢，是成本把它吃光的。';
+  const svg = document.getElementById('chart-cost');
+  const W = 660, H = 118, m = {l: 12, r: 12, t: 34, b: 40};
+  const parts = [['證交稅', c.tax, '#184f95'], ['滑價', c.slippage, css('--real')], ['手續費', c.commission, '#6da7ec']];
+  let x0 = m.l; const scale = (W - m.l - m.r) / c.total;
+  parts.forEach(p => {
+    const w = p[1] * scale;
+    const rect = el('rect', {x: x0, y: m.t, width: Math.max(1, w - 2), height: 30, rx: 3, fill: p[2]});
+    hover(rect, p[0], [twd(p[1]) + ' 元', '佔成本 ' + pct(p[1] / c.total), '佔初始資金 ' + pct(p[1] / 1e7)]);
+    svg.appendChild(rect);
+    const t1 = el('text', {x: x0, y: m.t - 10, class: 'lab'});
+    t1.textContent = p[0]; svg.appendChild(t1);
+    const t2 = el('text', {x: x0, y: m.t + 48, class: 'lab'});
+    t2.textContent = twd(p[1]) + '　' + pct(p[1] / c.total, 0); svg.appendChild(t2);
+    x0 += w;
+  });
+})();
+
+/* ── 逐筆 ───────────────────────────────────── */
+const t1 = D.trades['1x'].scalars, t0 = D.trades['0x'].scalars;
+document.getElementById('ev1').textContent = spct(t1.ev, 3);
+document.getElementById('ev0').textContent = spct(t0.ev, 3);
+const tradeRows = [
+  ['往返筆數', t1.n.toLocaleString('en-US'), t0.n.toLocaleString('en-US')],
+  ['逐筆勝率（往返為正）', pct(t1.win_rate), pct(t0.win_rate)],
+  ['平均獲利', spct(t1.avg_win, 2), spct(t0.avg_win, 2)],
+  ['平均虧損', spct(t1.avg_loss, 2), spct(t0.avg_loss, 2)],
+  ['賺賠比', t1.profit_factor.toFixed(3), t0.profit_factor.toFixed(3)],
+  ['每筆期望值', spct(t1.ev, 3), spct(t0.ev, 3)],
+  ['持有中位數', t1.median_hold.toFixed(0) + ' 日', t0.median_hold.toFixed(0) + ' 日'],
+];
+document.getElementById('trade-table').innerHTML =
+  '<thead><tr><th>逐筆統計</th><th><span class="dot" style="background:var(--real)"></span>1×</th>' +
+  '<th><span class="dot" style="background:var(--cf)"></span>0×</th><th>第一代 1×</th></tr></thead><tbody>' +
+  tradeRows.map((r, i) => {
+    const rp = ['2,374', '47.1%', '—', '—', '0.994', '+0.092%', '—'][i];
+    return '<tr><td>' + r[0] + '</td><td class="v">' + r[1] + '</td><td class="v">' + r[2] +
+      '</td><td class="v" style="color:var(--ink-3)">' + rp + '</td></tr>';
+  }).join('') + '</tbody>';
+
+(function histChart(){
+  const svg = document.getElementById('chart-hist');
+  const W = 660, H = 210, m = {l: 42, r: 12, t: 12, b: 34};
+  const h1 = D.trades['1x'].hist.bins, h0 = D.trades['0x'].hist.bins;
+  const max = Math.max(Math.max.apply(null, h1.map(b => b.count)), Math.max.apply(null, h0.map(b => b.count)));
+  const bw = (W - m.l - m.r) / h1.length;
+  const y = v => m.t + (1 - v / max) * (H - m.t - m.b);
+  const gg = el('g', {class: 'grid'});
+  [0, 50, 100, 150, 200].forEach(v => {
+    if (v > max) return;
+    gg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v)}));
+    const t = el('text', {x: m.l - 8, y: y(v) + 3.5, 'text-anchor': 'end', class: 'lab'});
+    t.textContent = v; gg.appendChild(t);
+  });
+  svg.appendChild(gg);
+  h1.forEach((b, i) => {
+    const x = m.l + i * bw;
+    const c0 = h0[i] ? h0[i].count : 0;
+    svg.appendChild(el('rect', {x: x + .5, y: y(c0), width: bw - 1, height: Math.max(0, y(0) - y(c0)),
+      fill: css('--cf'), opacity: .30}));
+    const r = el('rect', {x: x + .5, y: y(b.count), width: bw - 1, height: Math.max(0, y(0) - y(b.count)),
+      fill: b.lo < 0 ? css('--real') : css('--real'), opacity: b.lo < 0 ? .75 : 1});
+    hover(r, b.bin, ['1× ' + b.count + ' 筆', '0× ' + c0 + ' 筆']);
+    svg.appendChild(r);
+    if (b.lo === 0) svg.appendChild(el('line', {x1: x, x2: x, y1: m.t, y2: y(0), stroke: css('--ink-3'), 'stroke-width': 1, opacity: .5}));
+  });
+  [-0.2, -0.1, 0, 0.1, 0.2].forEach(v => {
+    const i = Math.round((v + 0.2) / 0.01);
+    const t = el('text', {x: m.l + i * bw, y: H - m.b + 16, 'text-anchor': 'middle', class: 'lab'});
+    t.textContent = (v * 100).toFixed(0) + '%'; svg.appendChild(t);
+  });
+  const lt = el('text', {x: m.l + 2, y: H - m.b + 30, class: 'lab'});
+  lt.textContent = '← 低於 −20%：1× ' + D.trades['1x'].hist['tail_below_-20%'] + ' 筆';
+  svg.appendChild(lt);
+  const rt = el('text', {x: W - m.r, y: H - m.b + 30, 'text-anchor': 'end', class: 'lab'});
+  rt.textContent = '高於 +20%：1× ' + D.trades['1x'].hist['tail_at_or_above_+20%'] + ' 筆 →';
+  svg.appendChild(rt);
+})();
+
+const years = Object.keys(D.trades['1x'].by_year).sort();
+document.getElementById('year-table').innerHTML =
+  '<thead><tr><th>年</th><th>1× 勝率</th><th>0× 勝率</th><th>筆數</th></tr></thead><tbody>' +
+  years.map(y => {
+    const a = D.trades['1x'].by_year[y], b = D.trades['0x'].by_year[y];
+    return '<tr><td>' + y + '</td><td class="v">' + pct(a.win_rate, 0) + '</td><td class="v">' +
+      pct(b.win_rate, 0) + '</td><td class="v" style="color:var(--ink-3)">' + a.n + '</td></tr>';
+  }).join('') + '</tbody>';
+
+const seg1 = D.trades['1x'].segments, seg0 = D.trades['0x'].segments;
+document.getElementById('seg-table').innerHTML =
+  '<thead><tr><th>期間</th><th>1×</th><th>0×</th></tr></thead><tbody>' +
+  seg1.map((s, i) => '<tr><td>' + s.seg + '</td><td class="v" style="color:' +
+    (s.ret > 0 ? 'var(--pass)' : 'var(--fail)') + '">' + spct(s.ret) + '</td><td class="v" style="color:' +
+    (seg0[i].ret > 0 ? 'var(--pass)' : 'var(--fail)') + '">' + spct(seg0[i].ret) + '</td></tr>').join('') +
+  '<tr class="hi"><td>正段數</td><td class="v">' + seg1.filter(s => s.ret > 0).length + ' ／ 4</td><td class="v">' +
+  seg0.filter(s => s.ret > 0).length + ' ／ 4</td></tr></tbody>';
+
+/* ── 重要度 ─────────────────────────────────── */
+(function importance(){
+  const gcolor = {
+    price: css('--real'), fundamental_valuation: css('--cf'),
+    fundamental_revenue: '#c9963f', chip: '#5f9e7c', volume: '#8d7bb8',
+  };
+  const gname = {price: '價量型態', fundamental_valuation: '評價（本代新增）',
+    fundamental_revenue: '營收成長', chip: '籌碼', volume: '成交量'};
+  const gv = D.importance.v2_groups;
+  const parts = Object.keys(gv).map(k => gname[k] + ' ' + pct(gv[k].gain_share)).join('、');
+  document.getElementById('imp-lede').innerHTML =
+    '本代新增的三個評價因子合計拿走 <strong>' + pct(gv.fundamental_valuation.gain_share) +
+    '</strong> 的 gain，七個籌碼因子合計 <strong>' + pct(gv.chip.gain_share) +
+    '</strong>。各類別：' + parts + '。';
+  const feats = D.importance.v2;
+  const svg = document.getElementById('chart-imp');
+  const W = 660, H = 470, m = {l: 196, r: 52, t: 8, b: 8};
+  const max = feats[0].gain_share * 1.06;
+  const bh = (H - m.t - m.b) / feats.length;
+  feats.forEach((f, i) => {
+    const y = m.t + i * bh, h = Math.max(6, bh - 3.5);
+    const w = (f.gain_share / max) * (W - m.l - m.r);
+    const t1 = el('text', {x: m.l - 10, y: y + h / 2 + 3.5, 'text-anchor': 'end', class: 'lab'});
+    t1.textContent = f.feature; svg.appendChild(t1);
+    const r = el('rect', {x: m.l, y: y, width: Math.max(2, w), height: h, rx: 2, fill: gcolor[f.group] || css('--base')});
+    hover(r, f.feature, ['gain ' + pct(f.gain_share, 2), '分裂次數 ' + f.split, '排名 ' + f.rank_gain + ' ／ 28']);
+    svg.appendChild(r);
+    const t2 = el('text', {x: m.l + Math.max(2, w) + 8, y: y + h / 2 + 3.5, class: 'lab'});
+    t2.textContent = pct(f.gain_share, 1); svg.appendChild(t2);
+  });
+  document.getElementById('imp-legend').innerHTML = Object.keys(gname).map(k =>
+    '<span><i style="background:' + gcolor[k] + '"></i>' + gname[k] + '</span>').join('');
+  const sg = D.importance.shift_groups;
+  document.getElementById('shift-table').innerHTML =
+    '<thead><tr><th>類別</th><th>第一代 gain</th><th>v2 gain</th><th>變化</th></tr></thead><tbody>' +
+    Object.keys(sg).map(k => {
+      const s = sg[k];
+      const a = s.repaired_gain_share, b = s.v2_gain_share, d = s.delta_pp;
+      return '<tr><td><span class="dot" style="background:' + (gcolor[k] || css('--base')) + '"></span>' +
+        (gname[k] || k) + '</td><td class="v">' + (a == null ? '—' : pct(a)) + '</td><td class="v">' + pct(b) +
+        '</td><td class="v" style="color:' + (d == null ? 'var(--ink-3)' : d > 0 ? 'var(--pass)' : 'var(--fail)') + '">' +
+        (d == null ? '新增' : (d > 0 ? '+' : '−') + Math.abs(d).toFixed(1) + 'pp') + '</td></tr>';
+    }).join('') + '</tbody>';
+})();
+})();
+</script>

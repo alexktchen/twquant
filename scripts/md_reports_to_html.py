@@ -3,6 +3,12 @@
     uv run --all-groups python scripts/md_reports_to_html.py --out D:/project/twquant/data/reports/html \
         docs/reports/pring-technical-analysis-summary.md docs/reports/core-opportunistic-blend-dev.md ...
 
+網站上公開的報告（https://twquant.pages.dev/reports/）照 docs/reports/public-reports.json 的分區產生：
+
+    uv run --all-groups python scripts/md_reports_to_html.py --public \
+        --manifest docs/reports/public-reports.json --data-dir D:/project/twquant/data \
+        --out <repo 絕對路徑>/frontend/public/reports
+
 只做排版：內容就是 markdown 原文（數字的來源與口徑都寫在原文裡）。數字欄自動靠右，正負號上色（紅漲綠跌）。
 """
 
@@ -11,6 +17,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import html
+import json
 import pathlib
 import re
 import sys
@@ -109,6 +116,65 @@ def _lede(md_text: str) -> str:
     return ""
 
 
+def _copy_html(src: pathlib.Path, index_name: str, noindex: bool) -> tuple[str, str]:
+    """已經是 HTML 的舊報告：原樣複製，只在 head 加 noindex、在 body 開頭加回目錄的連結。回傳 (內容, 標題)。"""
+    page = src.read_text(encoding="utf-8")
+    m = re.search(r"<title>(.*?)</title>", page, re.S)
+    title = html.unescape(m.group(1).strip()) if m else src.stem
+    if noindex:
+        # 有 <head> 就放在裡面；沒有（HTML 允許省略）就放最前面，瀏覽器會把開頭的 <meta> 歸進隱含的 head
+        page, n = re.subn(
+            r"<head([^>]*)>", lambda h: h.group(0) + NOINDEX, page, count=1, flags=re.I
+        )
+        if n != 1:
+            page = NOINDEX + page
+    back = (
+        "<nav style='max-width:1080px;margin:0 auto;padding:10px 20px;font:15px system-ui,sans-serif'>"
+        f"<a href='{index_name}' style='color:#656d76;text-decoration:none'>← 報告目錄</a></nav>"
+    )
+    # 有 <body> 就放在開頭；沒有就放在第一個內容區塊之前
+    page, n = re.subn(r"<body([^>]*)>", lambda b: b.group(0) + back, page, count=1, flags=re.I)
+    if n != 1:
+        page, n = re.subn(
+            r"<(header|main|article|div|h1)\b",
+            lambda b: back + b.group(0),
+            page,
+            count=1,
+            flags=re.I,
+        )
+    if n != 1:
+        raise SystemExit(f"{src} 找不到 <body> 或內容區塊，加不了回目錄的連結")
+    return page, title
+
+
+def _index_page(
+    sections: list[tuple[str, list[tuple[str, str, str, str]]]], intro: str, noindex: bool
+) -> str:
+    """目錄頁：每區一個標題，底下每份報告的標題、日期、一句說明。"""
+    parts = []
+    for sec_title, items in sections:
+        lis = "".join(
+            f"<li><a href='{n}'>{html.escape(t)}</a>"
+            + (f" <span class='date'>{html.escape(d)}</span>" if d else "")
+            + f"<p>{html.escape(note)}</p></li>"
+            for n, t, d, note in items
+        )
+        parts.append(
+            (f"<h2>{html.escape(sec_title)}</h2>" if sec_title else "")
+            + f"<ul class='index'>{lis}</ul>"
+        )
+    return (
+        '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        + (NOINDEX if noindex else "")
+        + f"<title>研究報告目錄</title><style>{STYLE}"
+        "ul.index .date{color:var(--muted);font-size:.85rem;margin-left:.4em;white-space:nowrap}</style></head>"
+        f"<body><div class='wrap'><article><h1>研究報告目錄</h1><p>{html.escape(intro)}</p>"
+        + "".join(parts)
+        + "</article></div></body></html>"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -122,15 +188,68 @@ def main() -> int:
         action="store_true",
         help="要放上網站分享：每頁加 noindex（拿到連結的人看得到，搜尋引擎不收錄）",
     )
-    ap.add_argument("--intro", default=INTRO, help="目錄頁的說明文字")
-    ap.add_argument("files", nargs="+")
+    ap.add_argument(
+        "--intro", default=INTRO, help="目錄頁的說明文字（--manifest 時用清單裡的 intro）"
+    )
+    ap.add_argument(
+        "--manifest",
+        help="分區清單 JSON（例：docs/reports/public-reports.json）：每區的標題與報告（md 或已是 HTML 的舊報告）",
+    )
+    ap.add_argument("--data-dir", help="資料正本（絕對路徑）：清單裡 html 項目相對於這裡")
+    ap.add_argument("files", nargs="*")
     args = ap.parse_args()
     out = pathlib.Path(args.out)
     if not out.is_absolute():
         raise SystemExit(f"--out 要給絕對路徑：{out}")
     out.mkdir(parents=True, exist_ok=True)
     index_name: str | None = None if args.no_index else "index.html"
-    items = []
+
+    if args.manifest:
+        if index_name is None:
+            raise SystemExit("--manifest 一定要有目錄頁，不能和 --no-index 一起用")
+        spec = json.loads(pathlib.Path(args.manifest).read_text(encoding="utf-8"))
+        data_dir = pathlib.Path(args.data_dir) if args.data_dir else None
+        sections: list[tuple[str, list[tuple[str, str, str, str]]]] = []
+        names: set[str] = set()
+        for sec in spec["sections"]:
+            items: list[tuple[str, str, str, str]] = []
+            for it in sec["items"]:
+                if "md" in it:
+                    p = pathlib.Path(it["md"])
+                    text = p.read_text(encoding="utf-8")
+                    page = render(
+                        text,
+                        _title(text, p.stem),
+                        str(p).replace("\\", "/"),
+                        index_name,
+                        args.public,
+                    )
+                    title = it.get("title") or _title(text, p.stem)
+                    note = it.get("note") or _lede(text)
+                else:
+                    if data_dir is None or not data_dir.is_absolute():
+                        raise SystemExit("清單裡有 html 項目：要給 --data-dir（絕對路徑）")
+                    p = data_dir / it["html"]
+                    page, own_title = _copy_html(p, index_name, args.public)
+                    title = it.get("title") or own_title
+                    note = it.get("note", "")
+                name = p.stem + ".html"
+                if name in names:
+                    raise SystemExit(f"兩份報告輸出同一個檔名：{name}")
+                names.add(name)
+                (out / name).write_text(page, encoding="utf-8")
+                items.append((name, title, it.get("date", ""), note))
+                print(f"[OK] {out / name}")
+            sections.append((sec["title"], items))
+        (out / "index.html").write_text(
+            _index_page(sections, spec.get("intro", args.intro), args.public), encoding="utf-8"
+        )
+        print(f"[OK] {out / 'index.html'}（{sum(len(i) for _, i in sections)} 份）")
+        return 0
+
+    if not args.files:
+        raise SystemExit("沒有要轉的檔案（給 markdown 檔，或用 --manifest）")
+    flat: list[tuple[str, str, str, str]] = []
     for f in args.files:
         p = pathlib.Path(f)
         text = p.read_text(encoding="utf-8")
@@ -140,22 +259,13 @@ def main() -> int:
             render(text, title, str(p).replace("\\", "/"), index_name, args.public),
             encoding="utf-8",
         )
-        items.append((name, title, _lede(text)))
+        flat.append((name, title, "", _lede(text)))
         print(f"[OK] {out / name}")
     if index_name is None:
         return 0
-    lis = "".join(
-        f"<li><a href='{n}'>{html.escape(t)}</a><p>{html.escape(d)}</p></li>" for n, t, d in items
+    (out / "index.html").write_text(
+        _index_page([("", flat)], args.intro, args.public), encoding="utf-8"
     )
-    page = (
-        '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        + (NOINDEX if args.public else "")
-        + f"<title>研究報告目錄</title><style>{STYLE}</style></head><body><div class='wrap'>"
-        f"<article><h1>研究報告目錄</h1><p>{html.escape(args.intro)}</p>"
-        f"<ul class='index'>{lis}</ul></article></div></body></html>"
-    )
-    (out / "index.html").write_text(page, encoding="utf-8")
     print(f"[OK] {out / 'index.html'}")
     return 0
 

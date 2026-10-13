@@ -1,0 +1,157 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>自動畫線的規則與出處（T-321）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>自動畫線的規則與出處（T-321）</h1>
+<p>K 線圖「自動畫線」列（<a href="../../frontend/src/stock/drawings.ts">frontend/src/stock/drawings.ts</a>）用的每條規則、預設參數與出處。
+<strong>只描述圖形結構，給人判讀，不是訊號</strong>：不進回測、不進 ML。</p>
+<h2>證據強度（先講清楚）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>畫法</th>
+<th>證據</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>水平支撐壓力（轉折點聚集）</td>
+<td>Zapranis &amp; Tsinaslanidis 2012：美股 20 年，有「趨勢中斷」效果，但<strong>扣掉買進持有後沒有超額報酬</strong>（亦見 <a href="../research/PAPERS-KEYLEVELS.md">PAPERS-KEYLEVELS.md</a> §B）</td>
+</tr>
+<tr>
+<td>區間突破（N 日高低）</td>
+<td>Brock–Lakonishok–LeBaron 1992 在道瓊有效；Sullivan–Timmermann–White 1999 做資料窺探校正後效果消失</td>
+</tr>
+<tr>
+<td>型態（頭肩、雙頂）</td>
+<td>Lo–Mamaysky–Wang 2000：有「增量資訊」，但沒有證明能獲利</td>
+</tr>
+<tr>
+<td>趨勢線、黃金切割、缺口回補、3% 破線</td>
+<td><strong>只是慣例</strong>，找不到嚴謹的正面證據；黃金切割比例沒有理論依據</td>
+</tr>
+</tbody>
+</table></div>
+<p>所以這些線頂多有「很多人看同一條線」的自我實現效果。</p>
+<h2>規則與預設參數（全部在 <code>DRAW</code> 常數）</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>圖層</th>
+<th>規則</th>
+<th>預設</th>
+<th>出處</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>轉折點</td>
+<td>左右各 span 根內的最高／最低；左側嚴格、右側可相等（平台只標一次）。最後 span 根無法確認</td>
+<td>短 3、長 10</td>
+<td>TradingView <code>ta.pivothigh</code>；Bill Williams fractal</td>
+</tr>
+<tr>
+<td>趨勢線</td>
+<td>最近 6 個同類轉折點兩兩相連、錨點相隔 ≥ 5 根；兩錨點間 K 棒不得越線 &gt; 1%；延伸到今天 ≤ 錨點距離 2 倍（否則視為過時）；排序：未破 → 碰觸多 → 錨點新</td>
+<td>碰觸容忍 1%</td>
+<td>StockCharts ChartSchool；TradingView Auto Trendlines（延伸 2 倍上限）</td>
+</tr>
+<tr>
+<td>破線</td>
+<td>收盤越線 &gt; 3%</td>
+<td class="num">3%</td>
+<td>台股散戶慣例（「收盤突破／跌破 3%」）</td>
+</tr>
+<tr>
+<td>軌道線</td>
+<td>趨勢線平移，過錨點後另一側最遠的 high／low</td>
+<td class="num">—</td>
+<td>麻紗宅在家「軌道線」；StockCharts 平行通道</td>
+</tr>
+<tr>
+<td>水平支撐壓力</td>
+<td>所有轉折點依價格併帶（相距 ≤ 2%），碰 ≥ 2 次；收盤上下各取最近 2 條</td>
+<td>2%、2 次</td>
+<td>Zapranis &amp; Tsinaslanidis 2012</td>
+</tr>
+<tr>
+<td>前高／前低</td>
+<td>收盤上方最近一個轉折高、下方最近一個轉折低</td>
+<td class="num">—</td>
+<td>台股慣例</td>
+</tr>
+<tr>
+<td>大量K棒</td>
+<td>量 ≥ 2 倍前 20 日均量，且實體 ≥ 3%；高點＝壓力、低點＝支撐（站上高點＝換手成功、跌破低點＝換手失敗）</td>
+<td>最近 3 根</td>
+<td>台股慣例（scantrader 等）</td>
+</tr>
+<tr>
+<td>箱型</td>
+<td>連續 ≥ 15 根的（最高−最低）／最低 ≤ 12%，箱頂、箱底各碰 ≥ 2 次；由左往右貪婪找</td>
+<td>最近 2 個</td>
+<td>Darvas 箱型；麻紗宅在家的方框</td>
+</tr>
+<tr>
+<td>缺口</td>
+<td>今低 &gt; 昨高（上跳）或今高 &lt; 昨低（下跳），≥ 1%；之後有 K 棒完全穿過就算回補、不再畫</td>
+<td>最近 3 個</td>
+<td>CMoney、玉山證券缺口文章</td>
+</tr>
+<tr>
+<td>黃金切割</td>
+<td>視窗內（最多 120 根）最高、最低為波段；低點在前＝回檔、高點在前＝反彈</td>
+<td>0.191／0.382／0.5／0.618／0.809</td>
+<td>台股軟體常用比例（CMoney、XQ）</td>
+</tr>
+<tr>
+<td>回歸通道</td>
+<td>收盤對 K 棒序數最小平方，± 2σ 殘差</td>
+<td>≥ 20 根</td>
+<td>常見線性回歸通道</td>
+</tr>
+</tbody>
+</table></div>
+<p>所有圖層都用<strong>目前視窗</strong>（全部／120 日／60 日）的 K 棒偵測，換視窗線就跟著換。</p>
+<h2>已知限制</h2>
+<ul>
+<li>除權息造成的機械性缺口與假轉折點無法從未還原的 K 棒分辨，照樣畫出。</li>
+<li>沒做：頭肩／三角收斂等型態、整數關卡、均線扣抵。研究整理裡都有演算法，需要時再加。</li>
+<li>參數是文獻與慣例的預設值，<strong>沒有也不應該</strong>依回測結果調整。</li>
+</ul>
+<h2>研究來源</h2>
+<ul>
+<li>TradingView Auto Trendlines：https://www.tradingview.com/support/solutions/43000741165-auto-trendlines/</li>
+<li>StockCharts 趨勢線：https://chartschool.stockcharts.com/table-of-contents/chart-analysis/trend-lines</li>
+<li>Zapranis &amp; Tsinaslanidis 2012：https://ideas.repec.org/a/taf/apfiec/v22y2012i19p1571-1585.html</li>
+<li>Lo–Mamaysky–Wang 2000：https://www.nber.org/papers/w7613</li>
+<li>Brock–Lakonishok–LeBaron 1992：https://ideas.repec.org/a/bla/jfinan/v47y1992i5p1731-64.html</li>
+<li>趨勢線與 3% 突破：https://www.stockfeel.com.tw/%E6%8A%80%E8%A1%93%E5%88%86%E6%9E%90-%E8%B6%A8%E5%8B%A2%E7%B7%9A-%E5%BB%B6%E4%BC%B8-%E9%81%8B%E7%94%A8/</li>
+<li>缺口：https://money.cmoney.tw/article/11914 ；https://www.esunsec.com.tw/article/post/57</li>
+<li>黃金切割率：https://www.cmoney.tw/notes/note-detail.aspx?nid=106633</li>
+<li>大量K棒／箱型：https://scantrader.com/article/016f76113e9900000600000000000000 ；https://www.rayskyinvest.com/88933/darvas-box-theory</li>
+<li>軌道線、方框畫法：YouTube「麻紗宅在家」（@masaathome）「只畫線不說話」系列</li>
+</ul>
+</article><div class='foot'>來源 <code>docs/reports/auto-drawing-methods.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

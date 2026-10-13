@@ -1,0 +1,330 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>D-088 判讀：長窗口三條線</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>D-088 判讀：長窗口三條線</h1>
+<p>門檻抄自 D-088 寫定當時的文字，本腳本不得調整。</p>
+<h2>基礎 H20（ml_h20_cost_aware_lw）</h2>
+<ul>
+<li>模型 <code>lgbm_lw_net_h20_20260225_83890036</code>；訓練資料 2015-09-01 ~ 2026-08-28、33 窗</li>
+<li><strong>OOS RankIC +0.0637</strong>（門檻 ≥ +0.03） → 通過</li>
+<li><strong>100% 窗為正</strong>（33/33，門檻 ≥ 65%） → 通過</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>年</th>
+<th style="text-align:right">RankIC</th>
+<th style="text-align:right">為正的日數</th>
+<th style="text-align:right">交易日</th>
+<th style="text-align:right">平均檔數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="num">2017</td>
+<td style="text-align:right">+0.0917</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">67</td>
+<td style="text-align:right">1562</td>
+</tr>
+<tr>
+<td class="num">2018</td>
+<td style="text-align:right">+0.0624</td>
+<td style="text-align:right">83%</td>
+<td style="text-align:right">247</td>
+<td style="text-align:right">1591</td>
+</tr>
+<tr>
+<td class="num">2019</td>
+<td style="text-align:right">+0.0766</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">242</td>
+<td style="text-align:right">1635</td>
+</tr>
+<tr>
+<td class="num">2020</td>
+<td style="text-align:right">+0.0565</td>
+<td style="text-align:right">82%</td>
+<td style="text-align:right">240</td>
+<td style="text-align:right">1690</td>
+</tr>
+<tr>
+<td class="num">2021</td>
+<td style="text-align:right">+0.0545</td>
+<td style="text-align:right">77%</td>
+<td style="text-align:right">244</td>
+<td style="text-align:right">1721</td>
+</tr>
+<tr>
+<td class="num">2022</td>
+<td style="text-align:right">+0.0670</td>
+<td style="text-align:right">83%</td>
+<td style="text-align:right">246</td>
+<td style="text-align:right">1734</td>
+</tr>
+<tr>
+<td class="num">2023</td>
+<td style="text-align:right">+0.0804</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">239</td>
+<td style="text-align:right">1772</td>
+</tr>
+<tr>
+<td class="num">2024</td>
+<td style="text-align:right">+0.0486</td>
+<td style="text-align:right">79%</td>
+<td style="text-align:right">242</td>
+<td style="text-align:right">1822</td>
+</tr>
+<tr>
+<td class="num">2025</td>
+<td style="text-align:right">+0.0546</td>
+<td style="text-align:right">81%</td>
+<td style="text-align:right">243</td>
+<td style="text-align:right">1872</td>
+</tr>
+<tr>
+<td class="num">2026</td>
+<td style="text-align:right">+0.0766</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">32</td>
+<td style="text-align:right">1920</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>逐年 IC <strong>全為正</strong> → 不是單一順風期的產物。</li>
+<li>短窗口對照 <code>lgbm_net_h20_20260225_6a798962</code>：RankIC +0.0452、94% 窗為正（16 窗）</li>
+<li><strong>共同測試期 2022-02-08 ~ 2026-02-25（983 個交易日）</strong>：長 +0.0629 vs 短 +0.0452 → <strong>+0.0176</strong>
+<ul>
+<li>長窗口另有 1059 個交易日的測試期是短窗口沒有的（2017 起）。<strong>總和的差不可直接歸因於樣本長度</strong>——那一段混著年份難易度。</li>
+</ul>
+</li>
+</ul>
+<p><strong>判定：通過</strong>（IC／窗比例／逐年三項全過才算）</p>
+<h2>F 營收驚奇（ml_f_revenue_surprise_lw）</h2>
+<ul>
+<li>模型 <code>lgbm_lw_rev_h15_20260225_9d4a149c</code>；訓練資料 2017-01-03 ~ 2026-08-28、28 窗</li>
+<li><strong>OOS RankIC +0.0632</strong>（門檻 ≥ +0.02） → 通過</li>
+<li><strong>79% 窗為正</strong>（22/28，門檻 ≥ 65%） → 通過</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>年</th>
+<th style="text-align:right">RankIC</th>
+<th style="text-align:right">為正的日數</th>
+<th style="text-align:right">交易日</th>
+<th style="text-align:right">平均檔數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="num">2019</td>
+<td style="text-align:right">+0.0299</td>
+<td style="text-align:right">64%</td>
+<td style="text-align:right">11</td>
+<td style="text-align:right">1517</td>
+</tr>
+<tr>
+<td class="num">2020</td>
+<td style="text-align:right">+0.0659</td>
+<td style="text-align:right">83%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1551</td>
+</tr>
+<tr>
+<td class="num">2021</td>
+<td style="text-align:right">+0.0958</td>
+<td style="text-align:right">83%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1604</td>
+</tr>
+<tr>
+<td class="num">2022</td>
+<td style="text-align:right">+0.0806</td>
+<td style="text-align:right">67%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1621</td>
+</tr>
+<tr>
+<td class="num">2023</td>
+<td style="text-align:right">+0.1287</td>
+<td style="text-align:right">83%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1668</td>
+</tr>
+<tr>
+<td class="num">2024</td>
+<td style="text-align:right">+0.0437</td>
+<td style="text-align:right">67%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1724</td>
+</tr>
+<tr>
+<td class="num">2025</td>
+<td style="text-align:right">+0.0015</td>
+<td style="text-align:right">42%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1760</td>
+</tr>
+<tr>
+<td class="num">2026</td>
+<td style="text-align:right">-0.0127</td>
+<td style="text-align:right">0%</td>
+<td style="text-align:right">1</td>
+<td style="text-align:right">1809</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>逐年為負的年份：[2026]</strong> → 依 D-088，IC 若集中在少數順風年即視同未通過，需逐年檢視而不是只看總和。</li>
+<li>短窗口對照 <code>lgbm_rev_h15_20260225_a3227e06</code>：RankIC +0.0656、75% 窗為正（16 窗）</li>
+<li><strong>共同測試期 2022-02-25 ~ 2026-01-30（48 個交易日）</strong>：長 +0.0642 vs 短 +0.0656 → <strong>-0.0014</strong>
+<ul>
+<li>長窗口另有 37 個交易日的測試期是短窗口沒有的（2017 起）。<strong>總和的差不可直接歸因於樣本長度</strong>——那一段混著年份難易度。</li>
+</ul>
+</li>
+</ul>
+<p><strong>判定：未通過</strong>（IC／窗比例／逐年三項全過才算）</p>
+<h2>R 60 日回撤（ml_r_drawdown60_lw）</h2>
+<ul>
+<li>模型 <code>lgbm_lw_dd_h60_20260225_1bd7c6a0</code>；訓練資料 2017-01-03 ~ 2026-08-28、27 窗</li>
+<li><strong>OOS RankIC +0.4189</strong>（門檻 ≥ +0.05） → 通過</li>
+<li><strong>100% 窗為正</strong>（27/27，門檻 ≥ 75%） → 通過</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>年</th>
+<th style="text-align:right">RankIC</th>
+<th style="text-align:right">為正的日數</th>
+<th style="text-align:right">交易日</th>
+<th style="text-align:right">平均檔數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="num">2019</td>
+<td style="text-align:right">+0.4092</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">9</td>
+<td style="text-align:right">1639</td>
+</tr>
+<tr>
+<td class="num">2020</td>
+<td style="text-align:right">+0.3170</td>
+<td style="text-align:right">92%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1670</td>
+</tr>
+<tr>
+<td class="num">2021</td>
+<td style="text-align:right">+0.5356</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1714</td>
+</tr>
+<tr>
+<td class="num">2022</td>
+<td style="text-align:right">+0.4368</td>
+<td style="text-align:right">92%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1734</td>
+</tr>
+<tr>
+<td class="num">2023</td>
+<td style="text-align:right">+0.4183</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1776</td>
+</tr>
+<tr>
+<td class="num">2024</td>
+<td style="text-align:right">+0.4493</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1825</td>
+</tr>
+<tr>
+<td class="num">2025</td>
+<td style="text-align:right">+0.3655</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">12</td>
+<td style="text-align:right">1877</td>
+</tr>
+<tr>
+<td class="num">2026</td>
+<td style="text-align:right">+0.3967</td>
+<td style="text-align:right">100%</td>
+<td style="text-align:right">1</td>
+<td style="text-align:right">1927</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>逐年 IC <strong>全為正</strong> → 不是單一順風期的產物。</li>
+<li>短窗口對照 <code>lgbm_dd_h60_20260225_1a2c3a8e</code>：RankIC +0.4071、100% 窗為正（15 窗）</li>
+<li><strong>共同測試期 2022-04-29 ~ 2026-01-30（46 個交易日）</strong>：長 +0.4106 vs 短 +0.4071 → <strong>+0.0035</strong>
+<ul>
+<li>長窗口另有 36 個交易日的測試期是短窗口沒有的（2017 起）。<strong>總和的差不可直接歸因於樣本長度</strong>——那一段混著年份難易度。</li>
+</ul>
+</li>
+</ul>
+<p><strong>判定：通過</strong>（IC／窗比例／逐年三項全過才算）</p>
+<hr />
+<h2>附錄：R 線的 +0.4189 有多少是單一因子？（D-089 待裁決二）</h2>
+<p><code>scripts/r_single_factor_ic.py</code>——把 <code>factor_values.z</code> 接到模型自己的 OOS 列上
+（同一批 date×stock_id、同一個標籤），逐日算單因子 RankIC。不訓練模型，故無調參空間。</p>
+<pre><code>模型 OOS：143,835 列、82 個訊號日 2019-04-30 ~ 2026-01-30
+factor_values：2,021,260 列、15 個因子
+
+單因子 RankIC（與模型同一批列、同一個標籤）：
+  price.vol_20d                    -0.3926　為正的日數    2%　81 日
+  chip.short_margin_ratio          -0.2730　為正的日數    4%　82 日
+  price.overnight_ret_20d          -0.1824　為正的日數   10%　81 日
+  price.high_52w                   +0.1747　為正的日數   94%　70 日
+  price.intraday_ret_20d           +0.0833　為正的日數   79%　81 日
+  price.mom_60d                    -0.0460　為正的日數   35%　79 日
+  chip.inst_net_10d                -0.0427　為正的日數   33%　82 日
+  price.mom_20d                    -0.0386　為正的日數   41%　81 日
+  chip.foreign_net_10d             -0.0371　為正的日數   37%　82 日
+  volume.vol_ratio_5d              +0.0253　為正的日數   66%　82 日
+  chip.margin_velocity_5d          -0.0116　為正的日數   37%　82 日
+  chip.trust_streak                -0.0076　為正的日數   50%　82 日
+  price.residual_reversal_5d       -0.0066　為正的日數   46%　82 日
+  volume.turnover_z_20d            +0.0042　為正的日數   48%　81 日
+  price.reversal_5d                -0.0035　為正的日數   41%　82 日
+
+模型（重算，應等於 meta 的值）  +0.4189　為正的日數 98%
+最強單因子 price.vol_20d  -0.3926
+→ **LightGBM 相對最強單因子的增量：+0.0263**
+</code></pre>
+<p><strong>讀法</strong>：光按 20 日波動度排序就有絕對值 0.3926、98% 的日子同號；
+模型 +0.4189 相對它的增量只有 <strong>+0.0263</strong>。R 的頭條數字裡 94% 是
+「波動大的股票跌得深」這個定義，不是預測力。
+單獨引用 +0.42 即屬誤導——一律同時寫出基準與增量。</p>
+</article><div class='foot'>來源 <code>docs/reports/d088-long-window-verdict.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

@@ -1,0 +1,156 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>SPEC-013 / D-060 / T-121～T-130 驗證報告</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>SPEC-013 / D-060 / T-121～T-130 驗證報告</h1>
+<p>日期：2026-09-05。結論：<strong>需要修訂；可以保留雙軌研究方向，但目前不能照判讀表直接裁決策略成敗。</strong></p>
+<h2>審查範圍與證據</h2>
+<ul>
+<li>工作樹：<code>D:/project/twquant/.claude/worktrees/strange-kalam-3ec702</code>。</li>
+<li>分支：<code>claude/handoff-2026-08-31-ml-phase-2-c618a1</code>；開始時 HEAD：<code>32d3c92464e5a5b3f1c4574645586a5c99899605</code>；審查期間另一程序提交規格為 <code>a19aa56</code>，本次未執行 commit。</li>
+<li>開始時 SPEC 是未追蹤草稿，DECISIONS / TASKS 有既有未提交變更。SPEC 從 454 行增加到 481 行後又整理章節/AC 順序；以下已重核新增的 §2.2.1、AC-13、AC-14。</li>
+<li>最後核對的 481 行版本 SHA256：<code>24f68f8f4bbcfc0e529f5f01ef3bd3cffdda3ebcaf0e7efebdf8284e21811e38</code>。後續若有改動，以章節和摘述定位，不把舊行號當作最新位置。</li>
+<li>查核了策略組合、配置、排程、宇宙、成交、回測、研究登記簿的實作，並執行離線合成反例。</li>
+<li>未執行新的績效回測、未讀保險庫、未變動策略或模型；歷史績效數字是文件記載，並未獨立重算。</li>
+</ul>
+<h2>必須修訂</h2>
+<h3>R1 [P1] §3.7 的機械判讀不能從實驗結果推出</h3>
+<p>位置：SPEC §3.7、§8.3；D-060 的推翻條件；T-127。</p>
+<p>「X1 也輸基準 → 問題不在 ML」不成立。假設基準 +10%、ML −10%、四因子 +5%，兩策略都輸基準，但 ML 相對四因子仍落後 15pp。這個結果不能替 ML 排除責任，也不能證明資料有錯。</p>
+<p>「零成本仍輸 → 成本不是元凶」只能改成「<strong>移除成本仍不足以解釋全部落後</strong>」。成本仍可能是重要拖累。「X1 明顯優於 L0」沒有事先定義指標、最小效果與不確定性，不能據此關閉整個 ML 路線。</p>
+<p>另外，B1/B2 同時換宇宙、選股檔數、訊號和權重，不能直接驗證「架構貢獻大於訊號貢獻」。階梯能識別的是各步在當前條件下的增量，不是普遍因果。</p>
+<p><strong>修訂</strong>：列出每個配對比較的 estimand（例如同日淨報酬差、CAGR 差、MDD 差）；按月份或時間區塊估計配對差的不確定性，避免把每日或重疊持有期當獨立樣本。保留「未能區分原因」這個合法結果。若要分解 B 軌貢獻，另行登記必要對照；不要暗增原定 18 次。</p>
+<h3>R2 [P1] A 軌的成功條件相互矛盾，股利對稱也未完成</h3>
+<p>位置：SPEC §1.1、§1.2、§8.2、§9；D-060 的晉升條款；T-128。</p>
+<p>§1.2 與 §9 禁止用輸給 0050 判 A 軌失敗；§8.2 又要求全部沿用 D-058「須勝過 0050」。D-060 同一段也同時保留兩種標準。執行者可依不同條文得到相反裁決。</p>
+<p>「小型股選股是否加值」和「相對直接持有 0050 是否值得配置資金」是兩個不同問題，兩者都能比較，不能說沒有台積電就比較無意義。至於策略和基準都不含息，僅是價格口徑一致；若殖利率不同，仍可能與真正總報酬的優劣相反。</p>
+<p><strong>修訂</strong>：分開「研究通過」與「可部署」：A 的研究判定用同宇宙可交易基準；資金配置另保留 0050 機會成本比較。部署前須依 T-113 完成股利/股數事件會計，或明確僅核可價格報酬診斷。將 D-038 九條逐條映射到 A/B，含最強線性基準究竟是哪一條，不再籠統引用。</p>
+<h3>R3 [P1] 新增的分數平移仍未定義出唯一的平方加權</h3>
+<p>位置：SPEC §2.2.1、§3.5、AC-5/13；T-123。</p>
+<p>已確認 <code>rank_avg</code> 用「正向百分位減掉負向百分位」，不是把低波動反向排名成正分再相加。在完整四因子樣本下，兩者排序可相同，但有常數位移；<strong>平方後權重不相同</strong>。</p>
+<p>實際呼叫現有 <code>rank_avg</code>，五股票四因子合成得到：</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>股票</th>
+<th style="text-align:right">框架分數</th>
+<th style="text-align:right">直接平方</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="num">1001</td>
+<td style="text-align:right">0.75</td>
+<td style="text-align:right">0.5625</td>
+</tr>
+<tr>
+<td class="num">1002</td>
+<td style="text-align:right">0.50</td>
+<td style="text-align:right">0.2500</td>
+</tr>
+<tr>
+<td class="num">1003</td>
+<td style="text-align:right">0.25</td>
+<td style="text-align:right">0.0625</td>
+</tr>
+<tr>
+<td class="num">1004</td>
+<td style="text-align:right">0.00</td>
+<td style="text-align:right">0.0000</td>
+</tr>
+<tr>
+<td class="num">1005</td>
+<td style="text-align:right">−0.25</td>
+<td style="text-align:right">0.0625</td>
+</tr>
+</tbody>
+</table></div>
+<p>481 行版已加入平移，避免這個直接平方反轉；但正文要求一律平移，AC-13 只要求含負分時平移，且沒有指定在<strong>全宇宙</strong>或<strong>選中名單</strong>上取最小值。若選中分數是 0.50、0.40，一律平移後權重是 100% / 0%；只對負分平移則約 61% / 39%。全部同分時還會得到零分母。</p>
+<p><strong>修訂</strong>：明定正向百分位公式、排名母體、同分/缺因子處理、何時平移、零分母處置、p 的欄位名稱與合法範圍。若要複製外部規則，應採原始正向排名定義；最低分平移是另一個權重假設。另刪除「B 軌也用 p=2」：B1/B2 YAML 明明是 <code>mktcap</code>。</p>
+<h3>R4 [P1] AC-14 用設定 top_n 而非實際持股數，且重分配可能取消 overlay</h3>
+<p>位置：SPEC §2.2、AC-7/14；<code>strategy/build.py</code> 的 <code>_select</code>、<code>_weight</code> 與 overlay 次序；T-123。</p>
+<p>設定選 40 檔，不代表每天有 40 檔通過營收/財報/歷史資料門檻。假設只剩 10 檔、cap=5%，設定檢查 40×5%=2 會通過，但實際最多只能配置 50%。不論反覆重分配幾次，都不可能同時滿足總和 1 和單股上限。</p>
+<p>現有呼叫順序是權重 → overlay → 截頂；在末端強制歸一到 1，還可能把 overlay 刻意降低的曝險補回，改變既有策略。</p>
+<p><strong>修訂</strong>：以實際合格且可分配的持股數驗證可行性；為零分數持股補權重是否允許也要定義。把 cap 重分配放在 overlay 前，或保存 overlay 後的目標總曝險而非固定 1。增加「40 檔設定但只剩 10 檔」「overlay=0.5」「全部同分」測試及舊配置相容條件。</p>
+<h3>R5 [P1] DSR 的 47 筆無法由現有 scope / 去重規則得到</h3>
+<p>位置：SPEC §8.1、各策略 YAML；D-060 名額表；T-127～129；<code>reporting/research_log.py:72</code> 起。</p>
+<p>實際呼叫確認：</p>
+<ul>
+<li>L0 不改配置，其 scope 是 <code>bt:ml_net_h20_turnover</code>，不會進 <code>bt:ladder_diag</code>。</li>
+<li>YAML 寫 <code>trial_scope: bt:smallcap_momentum</code>，函數又加一次前綴，實際登記成 <code>bt:bt:smallcap_momentum</code>。</li>
+<li><code>trials_count</code> 算的是<strong>單一 scope 內 distinct params_hash</strong>，不是執行次數，也不會自動把四個新家族與歷史 29 個合成 47。</li>
+<li>完全相同身分的 L0 重跑通常不增加 distinct hash。研究登記簿每個 run 又有多個 metric 列，列數也不是 trial 數。</li>
+</ul>
+<p><strong>修訂</strong>：列明「候選」「成本情境」「run」「ledger metric 列」「DSR 有效 trial」的關係；YAML scope 不帶 <code>bt:</code>；用明確的研究集合收納既有 L0 與新增候選，按既有規則去重，給出實際傳給 DSR 的 Sharpe 序列和資料長度。正常/零成本保守計數可以保留，但不能用執行次數取代既有身分定義。</p>
+<p>DSR 原論文處理多重選擇偏誤、樣本長度與非正態性，不支持僅改家族名稱就把選擇歷史清零：<a href="https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf">Bailey &amp; López de Prado 原論文</a>。</p>
+<h3>R6 [P1] 將舊資料診斷定為不可重驗，繞過已知前置問題</h3>
+<p>位置：SPEC §0、§2、T-127 依賴；D-060 背景；既有 D-054、T-112/T-113。</p>
+<p>D-060 宣稱「不是實作有缺陷，是已知天花板」，但同一分支已記錄股利標籤、退市股特徵和重物化/重訓的未竟工作；T-110 註記也明說數字取自修正前資料、修後見 T-112。這不能直接升格成模型能力上限。</p>
+<p>另一個可核實錯置：<code>ml_net_h20_m</code> pin 的成本感知配置是 <strong>12 個特徵</strong>，不是先前貼文所說的 25 特徵，而且其中沒有 ROE。12 特徵仍可能間接帶有品質資訊，但「品質已被模型吸收」只能是待測假說。</p>
+<p><strong>修訂</strong>：§0 改成有版本/限制的診斷證據；凍結資料、程式、模型及基準身分。同一階梯所有候選使用一致資料快照。修正前研究可保留為舊版本診斷，正式模型優劣裁決需等 T-112/T-113 等相關前置完成；不可用不含息對稱一句話跳過特徵/標籤問題。</p>
+<h3>R7 [P1] 事前凍結和依階梯結果改兩軌，沒有一致的狀態規則</h3>
+<p>位置：SPEC §3.7、§4/5、§8.1、§9；D-060「不得再改」；T-128/129。</p>
+<p>判讀表規定 L1 過門檻就「兩軌都採 40 檔」，L2 過門檻就「兩軌都採營收篩」。但固定 YAML 是 A=15、B1=30、B2=50；B 軌沒有營收篩。到底固定 YAML 是候選還是條件模板，沒有指定。</p>
+<p><strong>修訂</strong>：選擇其一：固定候選完整跑完，再解讀階梯；或在回測前寫出所有分支的確切配置、優先順序和 trial 身分。不得在已有結果之後把新配置仍稱作原候選。L1 的廣宇宙效果也不能直接外推到不同市值宇宙的 A/B。</p>
+<h3>R8 [P1] 既有指令不保存曲線，18 次計畫又不足以驗收宣稱的門檻</h3>
+<p>位置：SPEC §3.3/3.6、§4.3、§8.1/8.2；T-124～129。</p>
+<p><code>twquant backtest</code> 目前印指標並只把標量寫入 research_log，沒有保存 <code>BacktestResult</code> 的曲線/ledger。照 §3.3 執行完 12 次，§3.6「只切既有曲線、不得重跑」所需 artifact 不一定存在。</p>
+<p>此外，D-038 §5 明確要求 <strong>1.5× 全成本</strong>仍為正；新計畫只登記正常成本和高滑價。兩者不是同一個壓測。A 的「滑價加倍」未明定加倍整個 slippage 結果，還是只改係數；B 的高滑價情境也未給可執行配置。不同選擇會得到不同結果。</p>
+<p><strong>修訂</strong>：將統一 runner/結果包落地列為 T-127 前置，一次 run 保存曲線、ledger、未成交、日期、配置與資料指紋，再由同一 artifact 做分段/報表。對 A/B 列出成本情境確切 YAML/指令、AC 與額度；若不做 1.5×，就不能宣稱已完成 D-038 晉升驗收。</p>
+<h3>R9 [P1] T-130 長歷史計畫缺少 ML OOS 分數生成前置</h3>
+<p>位置：SPEC 範圍、§3.6、§10；T-130。</p>
+<p>SPEC 禁止重訓模型；T-130 卻要求回補至 2005 後重跑整個含 L0/L1/L2 的階梯。這些格子依赖 pin 住的 ML 歷史分數，價格回補本身不會產生更早的 OOS 分數。拿 2026 模型回推更早年份則可能把訓練內資料當樣本外。</p>
+<p><strong>修訂</strong>：T-130 另列歷史財報/特徵覆蓋、最短訓練暖身期、purged walk-forward 分數生成與獨立的重訓授權。或明定早期只跑非 ML 候選，不宣稱重跑完整階梯。增加年份能增加樣本，不能保證 DSR 達標，也不能把已反覆檢視的開發期重新稱為最終樣本外。</p>
+<h2>其他應補齊事項</h2>
+<h3>R10 [P2] B 軌的設計不保證低追蹤誤差，Beta 不能單獨判因子責任</h3>
+<p>位置：SPEC §5.1～5.5；T-129。</p>
+<p>先用因子排前 30/50，再對入選者市值加權，仍可能完全不選台積電；加權本身不會把未入選的權值股加回來。單股 25% 上限也無法保證貼近文中約 57% 的基準權重。Beta&lt;0.8 可能正是選股導致，不能據此說「不得歸因於因子」。</p>
+<p>若目標是指數增強，應事先定義基準持股/主動權重限制或核心指數部位、TE 上限與估計方法；若只做主動大型股策略，就刪除「必須像0050」「不可能追上」等定論。25% 是 30 檔等權 3.33% 的 <strong>7.5 倍</strong>，不是 5 倍。</p>
+<h3>R11 [P2] 外部先驗可保留，但目前不能稱原策略複製</h3>
+<p>位置：SPEC §3.4/3.5、§3.2 L4、§4/5 的月頻配置。</p>
+<p>核對 <a href="https://finlab.finance/blog/multi-factor-stock-selection-beat-0050">FinLab 四因子原文</a>：因子家族、60 日波動、營收 3 月/10–150% 大致有來源；但原文使用低波動的正向百分位、月頻延後 14 天。新階梯沿用月初，低波動用 signed rank，L4 又繼承 L0 的 5% cap。這可以是刻意的控制實驗，卻不是完整複製。</p>
+<p><strong>修訂</strong>：附來源日期及逐項差異表，標為「受外部啟發的本地對照」；精確定義營收邊界（原文示例為 &gt;10、&lt;150）、缺月/修訂/月序和公告切點。外部參數不需搜尋，但在同一開發期比較並選擇候選仍屬選擇歷史，不能因「外部先驗」免記錄。</p>
+<h3>R12 [P2] 市值、持股與基準契約還不足以讓小 context 執行者照做</h3>
+<p>位置：SPEC §2.1、AC-1/6/9/10、§6.2；T-121/123/125。</p>
+<ul>
+<li>市值前 100 名是在全體普通股，還是流動性/营收過濾後的池子排名？同分如何處理？需明定。</li>
+<li><code>log_market_cap</code> 回傳對數市值。可用原始值排序，但市值權重應使用 <code>exp(value)</code>，不能按 log 值比例；也不可套用此因子的 direction=-1，否則大/小市值反轉。</li>
+<li>季報股本/固定面額的代理值不是每日精確流通市值，缺值覆蓋會隨年代變化；固定前 100 名也不代表占全部上市公司比例不變。</li>
+<li>四因子缺一項時，現有 <code>rank_avg</code> 會對剩下的列求和；缺少負向波動因子的股票可能反而少被扣分。需完整四因子資格或明確缺值政策，不能無聲變成三因子股票。</li>
+<li>由 ledger 重建股數可行；但年度損益、跨年未平倉、部分出場/再進場、費用分攤、MAE 用盤中 low 或收盤等均未定义。僅末日股數相等與無負數的 AC 不能驗收這些報表數字。</li>
+<li>A 軌的等權宇宙基準需固定調倉日、成交/成本、入退市、缺價、股利及共同期間規則；否則基準本身不可重現。</li>
+<li><code>capacity --strategy &lt;path&gt;</code> 不傳日期時預設最新日，與「不碰保險庫」意圖不一致。指定開發期日期，並以歷史容量分布而非最新一日當全期容量證據。</li>
+<li><code>limit_up</code> 未成交已在 <code>decide_fill</code> 拒單並影響實際曲線；未成交占比高不等於曲線必然高估。應報下單/成交/未成交的清楚分母與執行風險，不機械宣稱偏誤方向。</li>
+</ul>
+<h2>驗證與建議順序</h2>
+<ol>
+<li>先定義 R1/R2/R7 的判定規則，停止用結果預先封死原因。</li>
+<li>補 R3/R4/R5/R8 的可執行契約與合成測試，再跑實驗。</li>
+<li>R6/R9 作為正式結論與長歷史的前置條件；舊版本診斷可保留但需明確標示。</li>
+<li>最後做報表。分開呈現交易勝率、賺賠比、成本後期望值與相對基準表現，避免把 IC 勝率、日勝率和逐筆勝率混用。</li>
+</ol>
+<p>快速與完整閘門均完成：<code>uv run --all-groups python -m twquant check</code> → ruff check、ruff format（170 files）、mypy（170 source files）全綠，pytest <strong>575 passed / 23 skipped</strong>（34.88 秒）。既有 skipped 未變更，不代表未實作的新 AC 已通過。合成驗證確認了 scope 雙前綴、L0 家族歸屬、signed rank 平方反例、實際持股數的 cap 可行性，以及 H20 配置的 12 個特徵。</p>
+<p>目前沒有證據可承諾以上任何策略修改會提高交易勝率；可以確定的是，先修規格能降低把錯誤回測當作策略優勢的機率。</p>
+</article><div class='foot'>來源 <code>docs/reports/SPEC-013-review-2026-09-05.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

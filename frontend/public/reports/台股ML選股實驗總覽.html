@@ -1,0 +1,679 @@
+<meta charset="utf-8">
+<title>台股 ML 選股實驗總覽</title>
+
+<!--
+═══════════════════════════════════════════════════════════════════════════
+  給共編者（人或 AI）的說明 — 請先讀這段再改任何東西
+═══════════════════════════════════════════════════════════════════════════
+
+  【這份文件是什麼】
+  一個台股機器學習選股專案，從 2026 年 2 月到 9 月做過的全部實驗紀錄，
+  寫給投資人看，不是寫給工程師看。所以正文刻意不用專業術語，
+  必要的名詞都在「詞彙表」那一節用白話解釋過一次。
+
+  【怎麼改】
+  1. 所有回測數字都在文件最下方的 <script id="data" type="application/json"> 裡面，
+     市場研究與文獻放在 <script id="research-data">。版面不寫死研究數字。
+  2. 那塊 JSON 由 scratchpad/build_investor_bundle.py 從研究登記簿
+     （D:/project/twquant/data/research_log，每次回測會自動寫入）產生。
+     要加新實驗，先跑回測，再跑那支腳本重新產生 JSON。
+  3. JSON 的結構：
+       meta        回測期間、初始資金、交易規則
+       cost_model  交易成本的三個組成
+       diagnosis   核心診斷的數字（為什麼賺不到錢）
+       gate        上線門檻的七個條件
+       best        目前最佳候選的逐條體檢
+       runs[]      全部 29 次回測，每筆有 strategy / zh / note / cost / cagr / sharpe / mdd / turnover
+       closed[]    已經排除的方向
+       next[]      建議的下一步
+     research-data：市場常見流程、尚未回測的架構候選、濾網原則與文獻連結。
+  4. 每個 <section> 前面都有註解標明它在講什麼。改文字請保持白話，
+     一個段落講一件事，數字後面要能說出出處。
+
+  【不要做的事】
+  - 不要把數字直接寫進 HTML 正文（會和 JSON 不同步）。
+  - 不要加入沒有出處的數字。這份文件的價值在於每個數字都可追溯。
+  - 不要把這份文件當成投資建議。它是研究紀錄，所有策略都還沒上線。
+═══════════════════════════════════════════════════════════════════════════
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --paper:#f7f8f6; --paper-2:#eef1ed; --rule:#d6dcd7; --rule-soft:#e6eae6;
+  --ink:#141a17; --ink-2:#5a6560; --ink-3:#8b948f;
+  --after:#2a78d6; --after-wash:rgba(42,120,214,.10);   /* 扣掉成本後（真實） */
+  --before:#eb6834; --before-wash:rgba(235,104,52,.10); /* 不算成本（假想） */
+  --base:#98a29c;
+  --bad:#b3261e; --bad-wash:rgba(179,38,30,.10);
+  --good:#2e7d5b; --good-wash:rgba(46,125,91,.10);
+  --tip-bg:#141a17; --tip-ink:#f7f8f6;
+  --sans:"IBM Plex Sans","Noto Sans TC",-apple-system,BlinkMacSystemFont,sans-serif;
+  --mono:"IBM Plex Mono","Noto Sans TC",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#151917; --paper-2:#1d2320; --rule:#333b37; --rule-soft:#262c29;
+  --ink:#eef1ed; --ink-2:#b2bab5; --ink-3:#7d8681;
+  --after:#3987e5; --after-wash:rgba(57,135,229,.16);
+  --before:#d95926; --before-wash:rgba(217,89,38,.16);
+  --base:#6e7873; --bad:#e06a60; --bad-wash:rgba(224,106,96,.14);
+  --good:#5fb98d; --good-wash:rgba(95,185,141,.14);
+  --tip-bg:#eef1ed; --tip-ink:#141a17;
+}}
+:root[data-theme="dark"]{
+  --paper:#151917; --paper-2:#1d2320; --rule:#333b37; --rule-soft:#262c29;
+  --ink:#eef1ed; --ink-2:#b2bab5; --ink-3:#7d8681;
+  --after:#3987e5; --after-wash:rgba(57,135,229,.16);
+  --before:#d95926; --before-wash:rgba(217,89,38,.16);
+  --base:#6e7873; --bad:#e06a60; --bad-wash:rgba(224,106,96,.14);
+  --good:#5fb98d; --good-wash:rgba(95,185,141,.14);
+  --tip-bg:#eef1ed; --tip-ink:#141a17;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75;
+  -webkit-font-smoothing:antialiased;margin:0;padding:0 20px 100px}
+.wrap{max-width:1000px;margin:0 auto}
+h1,h2,h3{text-wrap:balance;margin:0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+header{padding:60px 0 0}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+h1{font-size:clamp(30px,4.6vw,44px);font-weight:600;letter-spacing:-.02em;line-height:1.15;margin:14px 0 0}
+.sub{margin:18px 0 0;font-size:17.5px;line-height:1.7;max-width:62ch;color:var(--ink)}
+.sub b{font-weight:600}
+.meta{margin:24px 0 0;font-size:13px;color:var(--ink-3);font-family:var(--mono)}
+
+.heads{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--rule);
+  border:1px solid var(--rule);margin:32px 0 0;border-radius:3px;overflow:hidden}
+.head{background:var(--paper);padding:17px 19px}
+.head .k{font-size:12.5px;color:var(--ink-3)}
+.head .v{font-family:var(--mono);font-size:28px;font-weight:500;letter-spacing:-.02em;margin-top:6px;line-height:1.05}
+.head .d{font-size:12.5px;color:var(--ink-2);margin-top:6px;line-height:1.5}
+.up{color:var(--good)} .down{color:var(--bad)}
+
+section{margin:68px 0 0}
+h2{font-size:12px;font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);
+  padding-bottom:10px;border-bottom:1px solid var(--rule)}
+h2 .n{opacity:.55;margin-right:11px}
+h3{font-size:16px;font-weight:600;margin:30px 0 8px}
+p{margin:13px 0 0;color:var(--ink-2);max-width:68ch}
+p strong{color:var(--ink);font-weight:600}
+.note{font-size:13px;color:var(--ink-3);margin-top:10px;max-width:74ch}
+.lead{font-size:16.5px;color:var(--ink);max-width:66ch}
+
+.tw{overflow-x:auto;margin:20px 0 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:560px}
+th,td{text-align:right;padding:9px 11px;border-bottom:1px solid var(--rule-soft);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+thead th{font-size:11.5px;font-weight:500;color:var(--ink-3);border-bottom:1px solid var(--rule)}
+tbody tr:hover{background:var(--paper-2)}
+td.v{font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr.hi td{background:var(--after-wash)}
+tr.hi td:first-child{font-weight:600}
+.sm{font-size:12px;color:var(--ink-3);display:block;font-weight:400;margin-top:2px}
+.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:2px;border:1px solid currentColor;margin-left:8px}
+.tag.p{color:var(--good)} .tag.f{color:var(--bad)}
+
+.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1px;background:var(--rule);
+  border:1px solid var(--rule);margin-top:20px;border-radius:3px;overflow:hidden}
+.gloss div{background:var(--paper);padding:15px 18px}
+.gloss dt{font-weight:600;font-size:14.5px}
+.gloss dd{margin:6px 0 0;color:var(--ink-2);font-size:13.5px;line-height:1.65}
+
+figure{margin:22px 0 0}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:10px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.grid line{stroke:var(--rule-soft);stroke-width:1}
+.zero{stroke:var(--rule);stroke-width:1}
+.lab{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin:15px 0 0;font-size:13px;color:var(--ink-2)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:8px;vertical-align:-1px}
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);
+  padding:9px 12px;border-radius:3px;font-size:12.5px;line-height:1.55;opacity:0;transition:opacity .1s;
+  font-family:var(--mono);box-shadow:0 4px 14px rgba(0,0,0,.2);max-width:290px}
+#tip b{font-family:var(--sans);font-weight:600;display:block;margin-bottom:4px}
+
+.callout{margin:26px 0 0;padding:18px 22px;border:1px solid var(--rule);border-left:3px solid var(--after);
+  background:var(--after-wash);border-radius:3px}
+.callout.warn{border-left-color:var(--bad);background:var(--bad-wash)}
+.callout p{margin:0;color:var(--ink);max-width:none}
+.callout p + p{margin-top:10px}
+
+ol.steps{margin:20px 0 0;padding-left:0;list-style:none;counter-reset:s}
+ol.steps li{counter-increment:s;position:relative;padding:0 0 0 42px;margin-top:20px;color:var(--ink-2);max-width:68ch}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:27px;height:27px;border-radius:50%;
+  border:1px solid var(--rule);display:grid;place-items:center;font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}
+ol.steps b{color:var(--ink)}
+
+.research-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--rule);
+  border:1px solid var(--rule);margin-top:22px;border-radius:3px;overflow:hidden}
+.research-flow article{background:var(--paper);padding:17px 18px;min-height:150px}
+.research-flow .step-no{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.research-flow h3{font-size:14.5px;margin:9px 0 0}
+.research-flow p{font-size:13px;line-height:1.6;margin-top:7px}
+.research-principles{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:20px}
+.principle{border:1px solid var(--rule);border-radius:3px;padding:17px 19px;background:var(--paper)}
+.principle h3{font-size:15px;margin:0}
+.principle p{font-size:13.5px;margin-top:7px}
+.ref-link{color:var(--after);text-decoration:none;border-bottom:1px solid transparent}
+.ref-link:hover{border-bottom-color:currentColor}
+.status-pill{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;
+  color:var(--before);border:1px solid currentColor;border-radius:2px;padding:2px 7px;margin-left:8px}
+
+footer{margin:80px 0 0;padding-top:24px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink-3)}
+footer code{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
+@media (max-width:760px){.research-flow{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:640px){body{padding:0 15px 70px}.heads{grid-template-columns:repeat(2,1fr)}header{padding-top:40px}.research-principles{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<nav style='max-width:1080px;margin:0 auto;padding:10px 20px;font:15px system-ui,sans-serif'><a href='index.html' style='color:#656d76;text-decoration:none'>← 報告目錄</a></nav><div id="tip" role="status" aria-live="polite"></div>
+<div class="wrap">
+
+<!-- ═══ 開頭：一句話結論與四個頭條數字 ═══ -->
+<header><meta name="robots" content="noindex,nofollow">
+  <div class="eyebrow">台股量化研究 · 實驗總覽 · 2026-02 ~ 2026-09</div>
+  <h1>第一次留下成本後獲利，但還不能上線</h1>
+  <p class="sub">我們用機器學習替台股排序，挑出每次最看好的 20 檔。模型的排序能力經得起檢驗，
+    <b>但在扣掉手續費、證交稅與滑價之後，前面的做法不是虧錢，就是只剩不足以承擔風險的小利。</b>
+    直到最近一次調整——把換股頻率從每週改成每月，並改用「以扣成本後報酬為目標」訓練的模型——
+    才第一次同時跨過正報酬與基本風險調整門檻；但回撤和防運氣檢定仍未過關。</p>
+  <div class="meta" id="meta-line"></div>
+  <div class="heads" id="heads"></div>
+  <div id="caveats"></div>
+</header>
+
+<!-- ═══ 01 詞彙表：把後面會用到的名詞先用白話講一次 ═══ -->
+<section id="s-gloss">
+  <h2><span class="n">01</span>先講清楚五個名詞</h2>
+  <p class="lead">後面所有數字都只會用到這五個概念。看完這一節就不需要再查任何術語。</p>
+  <dl class="gloss" id="gloss"></dl>
+</section>
+
+<!-- ═══ 02 核心故事：成本吃掉一切 ═══ -->
+<section id="s-cost">
+  <h2><span class="n">02</span>核心問題：每買賣一次，就先付掉 0.65%</h2>
+  <p id="cost-lede"></p>
+  <figure>
+    <svg id="chart-cost" viewBox="0 0 660 120" role="img" aria-label="交易成本的三個組成"></svg>
+    <figcaption>買進再賣出一次的總成本拆解。證交稅是最大一塊，而且完全無法靠技巧降低。</figcaption>
+  </figure>
+  <div class="callout warn">
+    <p><strong>把這個數字放大來看：</strong>原本每週換股的做法，一年要換手約 32 次，
+      光成本就吃掉本金的 <span class="num" id="cost-annual"></span>。
+      而模型挑股票所帶來的額外報酬，經過同樣嚴謹的量測，只有<strong>每年 0.4 個百分點</strong>，
+      而且在統計上與零沒有差別。</p>
+    <p>換句話說，<strong>成本大約是選股效益的 50 倍。</strong>這不是靠調整模型參數能補上的差距——
+      問題出在「交易太頻繁」，不是「模型不夠聰明」。</p>
+  </div>
+</section>
+
+<!-- ═══ 03 全部實驗一覽 ═══ -->
+<section id="s-runs">
+  <h2><span class="n">03</span>做過的每一次實驗</h2>
+  <p class="lead">同一段期間、同一套規則，只換一個變數，這樣才知道差異是哪裡來的。
+    橘色是<strong>假裝沒有交易成本</strong>的結果，藍色是<strong>扣掉成本後的真實結果</strong>——
+    兩者的落差就是成本。</p>
+  <figure>
+    <svg id="chart-runs" viewBox="0 0 660 460" role="img" aria-label="各策略扣成本前後的年化報酬對比"></svg>
+    <figcaption>年化報酬率。同一列的兩點距離越遠，代表這個做法被成本吃掉越多。</figcaption>
+  </figure>
+  <div class="legend">
+    <span><i style="background:var(--before)"></i>不算成本（假想上限）</span>
+    <span><i style="background:var(--after)"></i>扣掉成本（真實結果）</span>
+  </div>
+  <div class="tw"><table id="runs-table"></table></div>
+  <p class="note" id="runs-note"></p>
+</section>
+
+<!-- ═══ 04 勝率的陷阱：勝率高不等於賺得多 ═══ -->
+<section id="s-winrate">
+  <h2><span class="n">04</span>勝率高，不等於賺得多</h2>
+  <p class="lead">多數人挑策略先看勝率。但把每一次「買進再賣出」拆開來看，
+    我們的資料呈現的是<strong>相反的關係</strong>——勝率最高的做法幾乎不賺，勝率最低的反而賺最多。</p>
+  <figure>
+    <svg id="chart-winrate" viewBox="0 0 660 320" role="img" aria-label="逐筆勝率與年化報酬的關係"></svg>
+    <figcaption>橫軸是每筆交易的勝率，縱軸是扣掉成本後的年化報酬。如果勝率越高越好，點應該由左下往右上排列——實際上剛好相反。</figcaption>
+  </figure>
+  <div class="callout">
+    <p><strong>關鍵在「對的時候賺多少」。</strong>賺最多的那個做法平均持有約一個月，
+      對的時候平均賺 <span class="num" id="w-avgwin"></span>，錯的時候平均賠 <span class="num" id="w-avgloss"></span>——
+      就算十次只對四次，整體還是划算。</p>
+    <p>反過來，勝率 52% 的「分數平滑」做法平均只持有兩週，賺賠幅度都小，
+      每筆的微薄獲利被 0.65% 的來回成本吃掉大半，一年只剩 <span class="num" id="w-ema"></span>。</p>
+  </div>
+  <div class="tw"><table id="winrate-table"></table></div>
+  <p class="note">只有實際跑過逐筆分析的策略列在這裡；沒跑過的不列，也不補估計值。</p>
+</section>
+
+<!-- ═══ 04 機制：為什麼模型排得準卻挑錯股票 ═══ -->
+<section id="s-why">
+  <h2><span class="n">05</span>模型排得準，為什麼還是挑錯股票</h2>
+  <p class="lead">這是整個專案最重要的發現，而且原因不在模型，在<strong>我們給它的考題</strong>。</p>
+  <p>我們原本要模型預測「這檔股票會不會排在市場的前段班」。聽起來合理，但它導致一個副作用：
+    模型學會偏好<strong>波動很小的股票</strong>——因為波動小的股票比較容易「穩穩地贏過中位數」。</p>
+  <p>問題是，股市的報酬分布極度不平均：<strong>少數幾檔暴漲的股票貢獻了絕大部分的獲利</strong>，
+    而這些股票幾乎都是高波動的。模型為了追求「排名穩定」，剛好系統性地避開了它們。</p>
+  <div class="callout">
+    <p><strong>一組數字說明全部：</strong>真正漲最多的那 5% 股票，貢獻了整個市場
+      <span class="num" id="d-var"></span> 的報酬差異；
+      而模型評分最高的那 5%，只涵蓋了 <span class="num" id="d-score"></span>，
+      對「賺錢的部分」幾乎沒有覆蓋到。</p>
+    <p>模型真正學會的其實是<strong>「哪些股票會跌」</strong>——這個能力很有價值，
+      但一個只做多、只買 20 檔的策略，結構上用不到它。</p>
+  </div>
+  <figure>
+    <svg id="chart-vol" viewBox="0 0 660 210" role="img" aria-label="波動度與平均超額報酬的關係"></svg>
+    <figcaption>把股票依波動度分成五組。左軸是各組後續 10 天的平均超額報酬——波動越大的組別表現越好，
+      但模型的持股卻集中在最左邊那一組。</figcaption>
+  </figure>
+</section>
+
+<!-- ═══ 05 突破：目前最好的候選 ═══ -->
+<section id="s-best">
+  <h2><span class="n">06</span>目前最好的做法，以及它為什麼還不能上線</h2>
+  <p class="lead" id="best-lede"></p>
+  <div class="tw"><table id="best-table"></table></div>
+  <p class="note" id="best-note"></p>
+  <div class="callout warn">
+    <p><strong>兩個沒過的條件，性質完全不同。</strong></p>
+    <p><strong>最大跌幅 −40.8%</strong>是可以處理的——這代表中途曾經從高點虧掉四成，一般人抱不住。
+      系統裡已經有兩個現成工具可以降低它（大盤走弱時減碼、把資金分配偏向波動小的股票），還沒試過。</p>
+    <p><strong>「去膨脹夏普 0.199」比較麻煩。</strong>它的意思是：我們總共試了 29 種做法，
+      光靠運氣也可能撞出好看的結果，所以統計上要打折——打折後只剩兩成把握。
+      這個門檻要過，要嘛績效再明顯提升，要嘛承認試太多次、換一個全新的想法重新開始。</p>
+  </div>
+</section>
+
+<!-- ═══ 06 已經排除的路 ═══ -->
+<section id="s-closed">
+  <h2><span class="n">07</span>已經確定走不通的方向</h2>
+  <p class="lead">這些都不是猜測，是實際做過、有數字的結論。列出來是為了避免重複投入。</p>
+  <div class="tw"><table id="closed-table"></table></div>
+</section>
+
+<!-- ═══ 07 下一步 ═══ -->
+<section id="s-next">
+  <h2><span class="n">08</span>接下來要做的三件事</h2>
+  <ol class="steps" id="next-list"></ol>
+</section>
+
+<!-- ═══ 09 市場做法、自己的濾網與文獻 ═══ -->
+<section id="s-research">
+  <h2><span class="n">09</span>市場怎麼做，以及這對我們代表什麼</h2>
+  <p class="lead">成熟的量化流程通常不會把模型分數直接變成「前 20 名全部買進」。模型先提供相對機會，組合層再把風險、成本和現有持股一起算進去。</p>
+  <div class="research-flow" id="research-flow"></div>
+  <div class="callout" id="research-candidate"></div>
+  <div class="research-principles" id="research-principles"></div>
+  <h3>值得優先閱讀的市場證據</h3>
+  <div class="tw"><table id="research-table"></table></div>
+  <p class="note">這一節整理的是市場做法與下一個可驗證的研究方向，不是新的回測成績。標示「尚未回測」的構想，在完成同樣的成本、分段與防運氣檢定前，不應視為有效策略。</p>
+</section>
+
+<!-- ═══ 10 給共編者 ═══ -->
+<section id="s-edit">
+  <h2><span class="n">10</span>給共同編輯者</h2>
+  <p class="lead">這份文件的版面不寫死回測數字或研究清單，內容都來自文件底部的資料區塊。</p>
+  <p><strong>要更新結果</strong>：改文件底部 <code>&lt;script id="data"&gt;</code> 裡的 JSON。
+    那塊 JSON 由 <code>scratchpad/build_investor_bundle.py</code> 從研究登記簿自動產生——
+    每跑一次回測，結果就會自動寫進登記簿，重跑那支腳本即可。</p>
+  <p><strong>要加新實驗</strong>：在腳本的 <code>NAMES</code> 對照表補一列中文名與一句話說明，其餘自動處理。</p>
+  <p><strong>要更新市場研究</strong>：改 <code>&lt;script id="research-data"&gt;</code> 裡的流程、候選架構與文獻。
+    尚未完成本專案回測的做法，必須保留「尚未回測」標示，不能和實驗結果混在一起。</p>
+  <p><strong>寫作原則</strong>：一段講一件事；不用專業術語，需要的名詞在第 01 節解釋過一次；
+    每個數字都要能說出來源。這份文件的價值在於可追溯，不在於好看。</p>
+  <div class="callout warn">
+    <p><strong>這不是投資建議。</strong>所有數字都是歷史回測，沒有任何一個策略通過上線審查，
+      也沒有任何一個策略在實盤運行過。過去的回測結果不代表未來績效。</p>
+  </div>
+</section>
+
+<footer>
+  <p>資料來源：研究登記簿 <code>data/research_log</code>（每次回測自動寫入，含 29 次回測紀錄）、
+    成本設定 <code>configs/costs.yaml</code>、五份唯讀診斷 <code>scratchpad/lever_*.json</code>。
+    決策紀錄見 <code>DECISIONS.md</code> 的 D-038、D-046 至 D-052；市場來源與可驗證的新架構見第 09 節。</p>
+  <p id="footer-meta"></p>
+</footer>
+</div>
+
+<script id="research-data" type="application/json">
+{
+  "as_of": "2026-09-04",
+  "market_flow": [
+    {"title": "先定可買範圍", "detail": "只排除資料不完整、停牌或實際買不到的股票，避免先用主觀看法把機會刪掉。"},
+    {"title": "模型估相對機會", "detail": "模型負責判斷哪些股票相對較值得持有；分數是一項證據，不是直接下單指令。"},
+    {"title": "組合層算風險與成本", "detail": "把產業集中、個股風險、流動性和這次換股要付的成本一起算進持股。"},
+    {"title": "只做值得的交易", "detail": "從目前持股出發；新股票要明顯更好才換入，訊號小幅變動時先不動。"}
+  ],
+  "candidate": {
+    "title": "最值得新增的候選：避雷型加強指數",
+    "status": "尚未回測",
+    "detail": "從穩定的流動性股票組合開始，把模型最低分的股票降權或拿掉，中間股票維持接近市場，高分股票只適度加碼。這樣能利用模型目前最可信的「避開輸家」能力，不必立刻承擔放空與借券成本，也不會把全部資金集中在前二十名。",
+    "why": "它不是再調一次排名門檻，而是把策略從「猜中少數贏家」改成「持有市場、避開模型最不看好的股票」。若要執行，應另立規格，並和多空、低頻事件型架構公平比較。"
+  },
+  "filters": [
+    {"title": "硬濾網：只管不能妥協的事", "detail": "資料必須在當時已公開、品質合格，而且股票確實可交易。停牌、公司行動未處理或成交量不足以容納部位時，直接不下單。"},
+    {"title": "軟條件：用權重處理不確定性", "detail": "波動、流動性、產業、beta 和模型信心應影響持股大小與換股門檻，而不是一律刪除。高波動股票可以少買，不宜因為波動高就完全排除。"}
+  ],
+  "reading": [
+    {"kind": "市場實務", "title": "BlackRock Systematic Investing", "year": "持續更新", "lesson": "公開流程是先產生個股相對報酬預測，再由組合層平衡風險、限制與交易成本。", "url": "https://www.blackrock.com/sg/en/investment-strategies/systematic-investing"},
+    {"kind": "學術研究", "title": "Machine Learning and the Implementable Efficient Frontier", "year": "2026", "lesson": "評估重點應是成本後可實現的結果；模型也可直接學習動態持倉，而不只預測下期報酬。", "url": "https://academic.oup.com/rfs/advance-article/doi/10.1093/rfs/hhag022/8524346"},
+    {"kind": "學術研究", "title": "Dynamic Trading with Predictable Returns and Transaction Costs", "year": "2013", "lesson": "從舊持倉逐步移向目標持倉，並讓衰減較慢的訊號得到較大權重。", "url": "https://onlinelibrary.wiley.com/doi/10.1111/jofi.12080"},
+    {"kind": "學術研究", "title": "A Taxonomy of Anomalies and Their Trading Costs", "year": "2016", "lesson": "新進股票用較高門檻、舊持股用較低續抱門檻，是最有效的簡單降成本方法之一。", "url": "https://academic.oup.com/rfs/article/29/1/104/1844143"},
+    {"kind": "學術研究", "title": "Machine Learning and Heuristics for a Long-only Asset Allocation", "year": "2026", "lesson": "只做多的機器學習組合也需要持倉平滑與不交易區；模型更複雜不等於成本後更好。", "url": "https://www.sciencedirect.com/science/article/pii/S1386418125000412"},
+    {"kind": "學術研究", "title": "Distributional Machine Learning for Cross-sectional Equity Returns", "year": "2026", "lesson": "預測整個報酬分布比只給一個點估計更能處理偏斜與不確定性，但尾端訊號仍要嚴格驗證。", "url": "https://www.sciencedirect.com/science/article/pii/S0169207026000348"},
+    {"kind": "學術研究", "title": "Empirical Asset Pricing via Machine Learning", "year": "2020", "lesson": "樹模型與較淺神經網路已能捕捉重要交互作用；金融資料不一定需要追求更深模型。", "url": "https://academic.oup.com/rfs/article/33/5/2223/5758276"},
+    {"kind": "學術研究", "title": "Machine Learning versus Economic Restrictions", "year": "2023", "lesson": "硬刪除難交易股票可能同時刪掉模型優勢，但高周轉與極端持倉也會讓成本後績效快速惡化。", "url": "https://pubsonline.informs.org/doi/abs/10.1287/mnsc.2022.4449"},
+    {"kind": "台股研究", "title": "Machine Learning and Deep Learning for Stock Selection in the Taiwan Market", "year": "2023", "lesson": "台股 ML 訊號可能同時存在於多空兩側；論文結果不能取代本專案的完整成本驗證。", "url": "https://www.sciencedirect.com/science/article/pii/S0927538X23002494"}
+  ]
+}
+</script>
+
+<script id="data" type="application/json">{"meta":{"period":"2022-07-01 ~ 2026-02-28","sessions":886,"years":3.66,"initial_capital":10000000,"market":"台股（上市＋上櫃）","rule":"每次持有 20 檔、等權重、隔日開盤成交；流動性門檻為 20 日成交金額中位數 ≥ 3,000 萬元、股價 ≥ 10 元","source":"D:/project/twquant/data/research_log（研究登記簿，每次回測自動寫入）","generated":"2026-09-04"},"cost_model":{"round_trip_pct":0.648,"parts":[{"name":"證交稅","pct":0.3,"note":"賣出時課 0.3%，政府收的，執行面完全無法降低"},{"name":"滑價","pct":0.25,"note":"主要是最小跳動單位造成的，成交價總是差一點"},{"name":"手續費","pct":0.1,"note":"0.1425% 打 3.5 折，買賣各一次"}],"src":"configs/costs.yaml；三種方法交叉驗證（獨立重算 0.648%、回測實際成交檔 0.646%／0.645%）"},"diagnosis":{"edge_vs_universe_pp_per_year":0.4,"edge_tstat":0.06,"cost_pp_per_year_weekly":21.0,"turnover_weekly_pct":3244,"vol_corr_low":-0.48,"vol_corr_high":-0.57,"top20_vol_percentile":[0.24,0.31],"lowvol_share_of_picks":[0.55,0.69],"excess_by_vol_quintile":[-0.33,0.31],"top5pct_realized_variance_share":0.46,"top5pct_realized_positive_mass":0.41,"top5pct_by_score_variance_share":0.034,"top5pct_by_score_positive_mass":0.0,"src":"scratchpad/lever_objective.json、lever_hysteresis.json、lever_cost.json、lever_horizon.json"},"gate":{"name":"D-038 §5","items":[{"k":"年化報酬 > 0","plain":"扣掉所有成本後還要賺錢"},{"k":"夏普 ≥ 0.5","plain":"每承擔一單位風險，至少換到 0.5 單位報酬"},{"k":"最大回撤 ≤ 30%","plain":"從最高點跌下來，最深不能超過三成"},{"k":"年周轉 ≤ 1500%","plain":"一年換手不超過 15 次，避免成本失控"},{"k":"勝過線性基準 0.25","plain":"夏普要比不用 ML 的簡單做法高出 0.25 以上"},{"k":"成本再貴 50% 仍賺","plain":"假設成本比預估高五成，還是要正報酬"},{"k":"四段期間至少三段賺錢","plain":"把四年切成四段，至少三段要是賺的（不能只靠某一年）"},{"k":"去膨脹夏普 ≥ 0.95","plain":"把「試了很多次」的運氣成分扣掉後，還要有 95% 把握"}],"linear_baseline_sharpe":0.3123,"dsr_population":29},"best":{"strategy":"ml_net_h20_m","zh":"成本感知模型 · 月頻","one_line_change":"只把設定檔裡的 schedule: weekly 改成 monthly，模型完全沒有重訓","checks":[{"k":"年化報酬 > 0","value":"+14.20%","pass":true},{"k":"夏普 ≥ 0.5","value":"0.644","pass":true},{"k":"最大回撤 ≤ 30%","value":"−40.8%","pass":false},{"k":"年周轉 ≤ 1500%","value":"928%","pass":true},{"k":"勝過線性基準 0.25","value":"+0.332","pass":true},{"k":"成本再貴 50% 仍賺","value":"+9.30%／0.475","pass":true},{"k":"四段期間至少三段賺錢","value":"3／4","pass":true},{"k":"去膨脹夏普 ≥ 0.95","value":"0.199","pass":false}],"segments":[{"seg":"2022 下半年","ret":0.011},{"seg":"2023 全年","ret":0.417},{"seg":"2024 全年","ret":0.017},{"seg":"2025 全年","ret":-0.082}],"per_trade_1x":{"n":772,"win_rate":0.438,"profit_factor":1.155,"ev":0.03186,"hold_sessions":24.3}},"caveats":[{"t":"所有報酬都不含股利","d":"回測用的是未還原的股價，公司配息時股價會扣掉配息金額，但策略沒有收到那筆現金。2022 年 7 月以來的平均股利殖利率是 3.16%，所以表中每一個年化報酬大約都低估了 3 個百分點——真實的總報酬會比這裡看到的高。","why":"不同做法之間的比較仍然公平（大家都少算），但絕對數字要往上修正。修正工作見 T-098。"},{"t":"少數已下市公司缺部分資料","d":"2,056 檔有股價的股票中，有 64 檔後來下市的公司不在基本資料表裡，導致三個因子對它們沒有數值。好消息是股價資料本身完整保留了這些公司，所以不存在「只看活下來的公司」這種偏誤。","why":"但缺的正好是後來下市的公司，可能讓「模型很會避開壞股票」這個結論偏樂觀。修正工作見 T-111。"}],"runs":[{"strategy":"ml_net_h20","cost":"0x","cagr":0.23746623972687408,"sharpe":0.9273767471686328,"mdd":-0.3390548853674691,"turnover":29.168300541936276,"total_cost":0.0,"win_rate":0.5412429378531074,"same_path_gross_cagr":0.23746623972687408,"params_hash":"88835f4622d883c3","trial_scope":"bt:ml_net_h20","zh":"成本感知模型 · 週頻","note":"訓練目標改成「扣掉交易成本後的報酬」","is_ml":true},{"strategy":"ml_net_h20","cost":"1x","cagr":-0.0008673651994269838,"sharpe":0.12590421762508489,"mdd":-0.4342243298972035,"turnover":27.68498938278083,"total_cost":6192677.870921205,"win_rate":0.5107344632768361,"same_path_gross_cagr":0.14648931039696178,"params_hash":"2d078f916ab5b606","trial_scope":"bt:ml_net_h20","zh":"成本感知模型 · 週頻","note":"訓練目標改成「扣掉交易成本後的報酬」","is_ml":true},{"strategy":"ml_net_h20_m","cost":"0x","cagr":0.20740050369799645,"sharpe":0.8518240502013791,"mdd":-0.412524695004976,"turnover":9.363073760361107,"total_cost":0.0,"win_rate":0.5378531073446328,"same_path_gross_cagr":0.20740050369799645,"params_hash":"ba874780e8623ce7","trial_scope":"bt:ml_net_h20_turnover","zh":"成本感知模型 · 月頻","note":"同上但改成每月換股 ← 目前最好的組合","is_ml":true},{"strategy":"ml_net_h20_m","cost":"1x","cagr":0.14204562459507364,"sharpe":0.6443832114119216,"mdd":-0.4078323977774927,"turnover":9.280927608400328,"total_cost":2811158.7228779495,"win_rate":0.5322033898305085,"same_path_gross_cagr":0.19609451616775253,"params_hash":"16bd3f49a7ace3e8","trial_scope":"bt:ml_net_h20_turnover","zh":"成本感知模型 · 月頻","note":"同上但改成每月換股 ← 目前最好的組合","is_ml":true},{"strategy":"ml_net_h20_m","cost":"1.5x","cagr":0.09295123889477686,"sharpe":0.4750105359111158,"mdd":-0.4162235839446663,"turnover":9.224660132636227,"total_cost":3979369.7598443464,"win_rate":0.5265536723163842,"same_path_gross_cagr":0.17546476281968637,"params_hash":"539663233b92ab96","trial_scope":"bt:ml_net_h20_turnover","zh":"成本感知模型 · 月頻","note":"同上但改成每月換股 ← 目前最好的組合","is_ml":true},{"strategy":"ml_rank_2w","cost":"0x","cagr":0.16633856585265683,"sharpe":0.9951680762501655,"mdd":-0.2740375002300063,"turnover":16.906347280444002,"total_cost":0.0,"win_rate":0.5480225988700564,"same_path_gross_cagr":0.16633856585265683,"params_hash":"ce8c5e60c4763467","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 雙週頻","note":"只把每週換股改成每兩週","is_ml":true},{"strategy":"ml_rank_2w","cost":"1x","cagr":0.03419437085274901,"sharpe":0.28388892208992855,"mdd":-0.34018457438132077,"turnover":16.536517899977873,"total_cost":4099110.3027480785,"win_rate":0.5152542372881356,"same_path_gross_cagr":0.12983053741463402,"params_hash":"df3e6069bb81ba68","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 雙週頻","note":"只把每週換股改成每兩週","is_ml":true},{"strategy":"ml_rank_band","cost":"1x","cagr":-0.1557428983228214,"sharpe":-0.3303545736144859,"mdd":-0.6202805331870069,"turnover":15.190974835239356,"total_cost":3458742.421723231,"win_rate":0.5186440677966102,"same_path_gross_cagr":-0.0302683734038367,"params_hash":"85bac503d98ad674","trial_scope":"bt:ml_rank_h10_band","zh":"第一代 · 遲滯換股","note":"進場要前 10%，跌出前 30% 才賣","is_ml":true},{"strategy":"ml_rank_ema10","cost":"0x","cagr":0.13275537928471182,"sharpe":0.9049591835536577,"mdd":-0.24881373398890927,"turnover":17.12032532132962,"total_cost":0.0,"win_rate":0.5468926553672316,"same_path_gross_cagr":0.13275537928471182,"params_hash":"0ddb18d64efa65f7","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 分數平滑","note":"把每日分數做 10 日平滑後再選股","is_ml":true},{"strategy":"ml_rank_ema10","cost":"1x","cagr":0.0126742796289121,"sharpe":0.15940562783091194,"mdd":-0.31590876571629545,"turnover":16.70151188598196,"total_cost":4232540.670529657,"win_rate":0.5322033898305085,"same_path_gross_cagr":0.11561616321447277,"params_hash":"afdde301a7749456","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 分數平滑","note":"把每日分數做 10 日平滑後再選股","is_ml":true},{"strategy":"ml_rank_ema10_2w","cost":"0x","cagr":0.12187390283319366,"sharpe":0.8631559116015375,"mdd":-0.23840634131687466,"turnover":12.271173555208719,"total_cost":0.0,"win_rate":0.5389830508474577,"same_path_gross_cagr":0.12187390283319366,"params_hash":"61f2a06061e117ee","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 平滑＋雙週","note":"兩種降周轉手法一起用","is_ml":true},{"strategy":"ml_rank_ema10_2w","cost":"1x","cagr":0.033924978832233554,"sharpe":0.30103645179445776,"mdd":-0.2808616083198785,"turnover":12.09471736563436,"total_cost":2987601.469845793,"win_rate":0.5231638418079096,"same_path_gross_cagr":0.1056816313066935,"params_hash":"db56cd4fc17dc36e","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 平滑＋雙週","note":"兩種降周轉手法一起用","is_ml":true},{"strategy":"ml_rank_m","cost":"0x","cagr":0.11872552043378715,"sharpe":0.7572809022949891,"mdd":-0.32678305612785763,"turnover":8.837539441831037,"total_cost":0.0,"win_rate":0.5536723163841808,"same_path_gross_cagr":0.11872552043378715,"params_hash":"4301fd83d688882c","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 月頻","note":"只把每週換股改成每月","is_ml":true},{"strategy":"ml_rank_m","cost":"1x","cagr":0.05185614440676756,"sharpe":0.3887492420536798,"mdd":-0.3445440508183587,"turnover":8.790109606087945,"total_cost":2364032.780297704,"win_rate":0.5401129943502825,"same_path_gross_cagr":0.10736535963187754,"params_hash":"7a08b3e8f2a3e2da","trial_scope":"bt:ml_rank_h10_turnover","zh":"第一代 · 月頻","note":"只把每週換股改成每月","is_ml":true},{"strategy":"ml_rank_repaired","cost":"0x","cagr":0.219000347803473,"sharpe":1.2101193387960125,"mdd":-0.27162628049803816,"turnover":29.541204975197473,"total_cost":0.0,"win_rate":0.5514124293785311,"same_path_gross_cagr":0.219000347803473,"params_hash":"a790c0511e11efa9","trial_scope":"bt:ml_rank_h10","zh":"第一代（資料修復後）","note":"同上，但資料修好後重訓，是後續的比較基準","is_ml":true},{"strategy":"ml_rank_repaired","cost":"1x","cagr":-9.359234983230547e-05,"sharpe":0.08666867395037456,"mdd":-0.3591599570962366,"turnover":28.236350455000654,"total_cost":6838916.487844816,"win_rate":0.5163841807909605,"same_path_gross_cagr":0.15989280715269039,"params_hash":"6bd8fbdafd805d02","trial_scope":"bt:ml_rank_h10","zh":"第一代（資料修復後）","note":"同上，但資料修好後重訓，是後續的比較基準","is_ml":true},{"strategy":"ml_rank_v2","cost":"0x","cagr":0.13471938405245987,"sharpe":0.766895289052906,"mdd":-0.3347859874746675,"turnover":29.513767532205232,"total_cost":0.0,"win_rate":0.5525423728813559,"same_path_gross_cagr":0.13471938405245987,"params_hash":"2d04b4363eeec2fa","trial_scope":"bt:ml_rank_h10","zh":"第二代（+3 個評價因子）","note":"補齊籌碼資料並加入本益比等評價因子","is_ml":true},{"strategy":"ml_rank_v2","cost":"1x","cagr":-0.04760660439926667,"sharpe":-0.1777274079688329,"mdd":-0.4133450176088529,"turnover":28.830569332215585,"total_cost":6367996.781061404,"win_rate":0.5175141242937853,"same_path_gross_cagr":0.11796570974429965,"params_hash":"3136d15a1d971dce","trial_scope":"bt:ml_rank_h10","zh":"第二代（+3 個評價因子）","note":"補齊籌碼資料並加入本益比等評價因子","is_ml":true},{"strategy":"ml_rank_v3","cost":"0x","cagr":0.1497253842953079,"sharpe":0.8394350130186211,"mdd":-0.35030798727629275,"turnover":28.927495210026002,"total_cost":0.0,"win_rate":0.5694915254237288,"same_path_gross_cagr":0.1497253842953079,"params_hash":"20c92aa76101742b","trial_scope":"bt:ml_rank_h10","zh":"第三代（+2 個財報因子）","note":"再加入股東權益報酬率與盈餘驚奇","is_ml":true},{"strategy":"ml_rank_v3","cost":"1x","cagr":-0.047329482224440333,"sharpe":-0.17654036359765718,"mdd":-0.4232918156490818,"turnover":28.025462955115184,"total_cost":5882543.641831351,"win_rate":0.5310734463276836,"same_path_gross_cagr":0.10758437831718659,"params_hash":"778f16a35032dfd2","trial_scope":"bt:ml_rank_h10","zh":"第三代（+2 個財報因子）","note":"再加入股東權益報酬率與盈餘驚奇","is_ml":true},{"strategy":"ml_rank_v3","cost":"1.5x","cagr":-0.11847188381058371,"sharpe":-0.6071349287219107,"mdd":-0.47792777361623395,"turnover":27.504871330996206,"total_cost":7546595.845213946,"win_rate":0.5220338983050847,"same_path_gross_cagr":0.09984680881608377,"params_hash":"af0f097fa571d00b","trial_scope":"bt:ml_rank_h10","zh":"第三代（+2 個財報因子）","note":"再加入股東權益報酬率與盈餘驚奇","is_ml":true},{"strategy":"reversal_revenue","cost":"1.5x","cagr":-0.1969693207609221,"sharpe":-0.715879580155264,"mdd":-0.6288610853219434,"turnover":null,"total_cost":null,"win_rate":null,"same_path_gross_cagr":null,"params_hash":"00b8fba617b8","trial_scope":"bt:reversal_revenue","zh":"線性基準（非 ML）","note":"三個傳統因子等權，用來比較 ML 有沒有加值","is_ml":false},{"strategy":"reversal_revenue","cost":"1x","cagr":-0.12539983719898673,"sharpe":-0.44287107290467,"mdd":-0.5380772505495433,"turnover":35.88799846810032,"total_cost":6648743.175622601,"win_rate":0.5276836158192091,"same_path_gross_cagr":0.07509016147848491,"params_hash":"c58c1a09aa8e2e4b","trial_scope":"bt:reversal_revenue","zh":"線性基準（非 ML）","note":"三個傳統因子等權，用來比較 ML 有沒有加值","is_ml":false},{"strategy":"reversal_revenue_m","cost":"1x","cagr":0.04668275686637724,"sharpe":0.31233087605475096,"mdd":-0.3835663399762459,"turnover":9.506587339559035,"total_cost":2272107.7814354594,"win_rate":0.5457627118644067,"same_path_gross_cagr":0.10077177551652539,"params_hash":"3fab9f1f40d1c8cc","trial_scope":"bt:reversal_revenue_m","zh":"線性基準 · 月頻","note":"同上但每月換股","is_ml":false}],"per_trade":[{"strategy":"ml_net_h20_m","zh":"成本感知模型 · 月頻","cost":"1x","n":772,"win_rate":0.4378238341968912,"profit_factor":1.1551698571674838,"avg_win":0.2211344093053978,"avg_loss":-0.1155553477102731,"ev":0.03185545264114757,"median_hold":31.0,"cagr":0.14204562459507364},{"strategy":"ml_net_h20_m","zh":"成本感知模型 · 月頻","cost":"0x","n":792,"win_rate":0.4583333333333333,"profit_factor":1.2493637763953163,"avg_win":0.21312967170904112,"avg_loss":-0.11949439710096318,"ev":0.03295830110362213,"median_hold":31.0,"cagr":0.20740050369799645},{"strategy":"ml_rank_m","zh":"第一代 · 月頻","cost":"1x","n":706,"win_rate":0.4447592067988669,"profit_factor":1.1057963152432644,"avg_win":0.08605953500658274,"avg_loss":-0.06002944057307022,"ev":0.00494497632779526,"median_hold":31.0,"cagr":0.05185614440676756},{"strategy":"ml_rank_m","zh":"第一代 · 月頻","cost":"0x","n":717,"win_rate":0.48675034867503486,"profit_factor":1.3057559204709135,"avg_win":0.08595978266841134,"avg_loss":-0.05900976136478755,"ev":0.01155421474063283,"median_hold":31,"cagr":0.11872552043378715},{"strategy":"ml_rank_2w","zh":"第一代 · 雙週頻","cost":"1x","n":1353,"win_rate":0.4781966001478197,"profit_factor":1.043502815257171,"avg_win":0.056273915981838334,"avg_loss":-0.04805487288389638,"ev":0.0018347992492376633,"median_hold":14,"cagr":0.03419437085274901},{"strategy":"ml_rank_2w","zh":"第一代 · 雙週頻","cost":"0x","n":1397,"win_rate":0.5390121689334287,"profit_factor":1.3428742017113857,"avg_win":0.05729834547479018,"avg_loss":-0.04719157872737738,"ev":0.00912976194852253,"median_hold":14,"cagr":0.16633856585265683},{"strategy":"ml_rank_ema10","zh":"第一代 · 分數平滑","cost":"1x","n":1640,"win_rate":0.5225609756097561,"profit_factor":1.0313865776832232,"avg_win":0.0447239189022923,"avg_loss":-0.04170932484733354,"ev":0.0034573153315867904,"median_hold":14.0,"cagr":0.0126742796289121},{"strategy":"ml_rank_ema10","zh":"第一代 · 分數平滑","cost":"0x","n":1729,"win_rate":0.5841526894158473,"profit_factor":1.3620634205099555,"avg_win":0.048170360430705154,"avg_loss":-0.04047860835225612,"ev":0.011305925176252205,"median_hold":14,"cagr":0.13275537928471182},{"strategy":"ml_rank_ema10_2w","zh":"第一代 · 平滑＋雙週","cost":"1x","n":1087,"win_rate":0.5179392824287029,"profit_factor":1.0828259422205055,"avg_win":0.05293018591315265,"avg_loss":-0.04663517245780642,"ev":0.0049336378116047646,"median_hold":14,"cagr":0.033924978832233554},{"strategy":"ml_rank_ema10_2w","zh":"第一代 · 平滑＋雙週","cost":"0x","n":1106,"win_rate":0.5732368896925859,"profit_factor":1.391092358585902,"avg_win":0.053850516139808326,"avg_loss":-0.045950195885748106,"ev":0.011259253864887318,"median_hold":14.0,"cagr":0.12187390283319366},{"strategy":"ml_rank_v2","zh":"第二代（+3 個評價因子）","cost":"1x","n":2472,"win_rate":0.4684466019417476,"profit_factor":0.9229743830080751,"avg_win":0.04615942855720275,"avg_loss":-0.04120624043842554,"ev":-0.0002800896710559748,"median_hold":7.0,"cagr":-0.04760660439926667},{"strategy":"ml_rank_v2","zh":"第二代（+3 個評價因子）","cost":"0x","n":2588,"win_rate":0.5278207109737248,"profit_factor":1.1937851504942685,"avg_win":0.0466039671062133,"avg_loss":-0.03988670086381964,"ev":0.005764864996715523,"median_hold":7.0,"cagr":0.13471938405245987},{"strategy":"ml_rank_v3","zh":"第三代（+2 個財報因子）","cost":"1x","n":2420,"win_rate":0.46859504132231405,"profit_factor":0.918247832578998,"avg_win":0.04667778274319937,"avg_loss":-0.04205694187619566,"ev":-0.00047628992644608545,"median_hold":7.0,"cagr":-0.047329482224440333},{"strategy":"ml_rank_v3","zh":"第三代（+2 個財報因子）","cost":"0x","n":2522,"win_rate":0.5344964314036479,"profit_factor":1.2306397811262952,"avg_win":0.047567286111915685,"avg_loss":-0.04110522747984229,"ev":0.006289914598543812,"median_hold":7.0,"cagr":0.1497253842953079}],"excluded":{"n":5,"why":"另有 5 筆最早期的實驗沒有列入。那批是在資料修復之前跑的——當時有 43 個交易日的價格資料是別天的、還有整張表缺席，結果不可信，專案已正式宣告作廢。列出來只會混淆，因為它們的數字看起來反而最漂亮（其中一筆不算成本時年化 +31%）。"},"closed":[{"what":"加更多因子","why":"第二代加 3 個、第三代再加 2 個，扣成本後都沒有變好"},{"what":"只降低換股頻率","why":"月頻、雙週、分數平滑四種組合都試過，最好的夏普 0.39"},{"what":"拉長持有時間","why":"看起來變好其實是大盤在漲；模型選的股票在每個持有期都輸大盤"},{"what":"只挑特定股票池","why":"不管用股價還是成交量分類，沒有任何一群是扣成本後賺錢的"},{"what":"遲滯換股（緩衝帶）","why":"緩衝超過一定寬度後，跟已經失敗的分數平滑是同一回事"}],"next":[{"what":"控制回撤","detail":"目前唯一卡住的可修項目。系統已內建市場寬度濾網與反波動加權兩個工具，都是針對回撤設計的","cost":"各約 20 分鐘回測"},{"what":"修好被消滅的因子","detail":"標準化步驟的一個瑕疵把 7 個因子壓成常數，其中投信買賣超的原始訊號其實很強（而且方向與直覺相反）","cost":"約 4.5 小時"},{"what":"重新檢視「去膨脹夏普」門檻","detail":"試驗次數已達 29 次，連歷史最佳的 1.21 夏普都只拿到 0.584。這個門檻對本家族可能已接近不可達，值得單獨討論","cost":"需要決策，不需計算"}]}</script>
+<script>
+(function(){
+'use strict';
+const D = JSON.parse(document.getElementById('data').textContent);
+const R = JSON.parse(document.getElementById('research-data').textContent);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (t, a) => { const n = document.createElementNS(NS, t); for (const k in (a || {})) n.setAttribute(k, a[k]); return n; };
+const pct = (v, d) => v == null ? '—' : (v * 100).toFixed(d === undefined ? 1 : d) + '%';
+const spct = (v, d) => v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(d === undefined ? 1 : d) + '%';
+const twd = v => v == null ? '—' : Math.round(v).toLocaleString('en-US');
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+const tip = document.getElementById('tip');
+function showTip(e, title, rows){
+  tip.innerHTML = '<b>' + title + '</b>' + rows.join('<br>');
+  tip.style.opacity = '1';
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX + 15, y = e.clientY - 10;
+  if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - 15;
+  if (y + r.height > window.innerHeight - 8) y = window.innerHeight - r.height - 8;
+  tip.style.left = x + 'px'; tip.style.top = Math.max(8, y) + 'px';
+}
+const hideTip = () => { tip.style.opacity = '0'; };
+function hover(node, title, rows){
+  node.addEventListener('mousemove', e => showTip(e, title, rows));
+  node.addEventListener('mouseleave', hideTip);
+  node.style.cursor = 'crosshair';
+}
+
+/* ── 頭部 ─────────────────────────────────── */
+const M = D.meta;
+document.getElementById('meta-line').textContent =
+  M.period + '　|　' + M.sessions + ' 個交易日（約 ' + M.years + ' 年）　|　起始資金 ' + twd(M.initial_capital) + ' 元　|　' + M.market;
+document.getElementById('footer-meta').textContent =
+  '回測規則：' + M.rule + '。資料產生於 ' + M.generated + '。';
+
+const runs = D.runs;
+const byKey = (s, c) => runs.find(r => r.strategy === s && r.cost === c);
+const best1 = byKey(D.best.strategy, '1x'), best0 = byKey(D.best.strategy, '0x');
+const rep1 = byKey('ml_rank_repaired', '1x');
+const heads = [
+  ['最好的扣成本後報酬', spct(best1.cagr, 2), D.best.zh + '（每年）', 'up'],
+  ['同一做法的每週版本', spct(byKey('ml_net_h20', '1x').cagr, 2), '只差在換股頻率', 'down'],
+  ['交易成本吃掉本金', pct(D.diagnosis.cost_pp_per_year_weekly / 100, 1), '每週換股時，每年', 'down'],
+  ['選股帶來的額外報酬', '+0.4%', '每年，統計上等於零', 'down'],
+];
+document.getElementById('heads').innerHTML = heads.map(h =>
+  '<div class="head"><div class="k">' + h[0] + '</div><div class="v ' + h[3] + '">' + h[1] +
+  '</div><div class="d">' + h[2] + '</div></div>').join('');
+
+/* ── 讀數字前的兩個告示 ───────────────────── */
+(function caveats(){
+  const cs = D.caveats || [];
+  if (!cs.length) return;
+  document.getElementById('caveats').innerHTML =
+    '<div class="callout warn" style="margin-top:28px"><p><strong>讀這些數字之前，有兩件事要先知道</strong></p>' +
+    cs.map(c => '<p><strong>' + c.t + '</strong>　' + c.d + '<span class="sm" style="margin-top:6px">' + c.why + '</span></p>').join('') +
+    '</div>';
+})();
+
+/* ── 01 詞彙表 ────────────────────────────── */
+const GLOSS = [
+  ['年化報酬', '把整段期間的總報酬換算成「平均每年賺幾 %」。例如 3.66 年總共賺 59%，換算後就是每年 14.2%。'],
+  ['最大跌幅', '從帳戶最高點跌到最低點，中間最深虧了多少。這個數字決定你抱不抱得住——跌四成時多數人會停損。'],
+  ['夏普值', '每承擔一單位的波動，換到多少報酬。同樣賺 10%，坐雲霄飛車賺到的比穩穩賺到的分數低。一般認為 0.5 以上才值得考慮。'],
+  ['周轉率', '一年把整個投資組合換掉幾次。300% 代表一年換三輪。換越多次，付的稅和手續費越多。'],
+  ['兩種勝率', '「上漲天數」是帳戶當天賺錢的日子占比，各種做法都在五成上下，幾乎分辨不出好壞。「逐筆勝率」是每一次買進再賣出賺錢的比例，才是有意義的那一個——但它高不代表賺得多，見第 04 節。'],
+  ['去膨脹夏普', '一個防作弊的檢定。你試越多種做法，光靠運氣也會撞出好看的結果；這個指標把「試了幾次」算進去，回答「這有多大機率不是運氣」。滿分 1，我們要求 0.95。'],
+];
+document.getElementById('gloss').innerHTML = GLOSS.map(g =>
+  '<div><dt>' + g[0] + '</dt><dd>' + g[1] + '</dd></div>').join('');
+
+/* ── 02 成本 ──────────────────────────────── */
+const C = D.cost_model;
+document.getElementById('cost-lede').innerHTML =
+  '在台股，每完成一次「買進再賣出」，平均要付掉本金的 <strong>' + C.round_trip_pct.toFixed(2) +
+  '%</strong>。這個數字經過三種方法交叉驗證，不是估計值。它由三部分組成，其中最大的一塊是政府課的證交稅——' +
+  '這部分無論交易技巧多好都無法降低，<strong>唯一的辦法是減少交易次數</strong>。';
+document.getElementById('cost-annual').textContent = pct(D.diagnosis.cost_pp_per_year_weekly / 100, 0);
+(function costChart(){
+  const svg = document.getElementById('chart-cost');
+  const W = 660, m = { l: 12, r: 12, t: 36 };
+  const total = C.round_trip_pct;
+  const shades = ['#184f95', css('--after'), '#6da7ec'];
+  let x = m.l;
+  C.parts.forEach((p, i) => {
+    const w = (p.pct / total) * (W - m.l - m.r);
+    const rect = el('rect', { x: x, y: m.t, width: Math.max(1, w - 2), height: 32, rx: 3, fill: shades[i] });
+    hover(rect, p.name, [p.pct.toFixed(2) + '%（占成本 ' + Math.round(p.pct / total * 100) + '%）', p.note]);
+    svg.appendChild(rect);
+    const t1 = el('text', { x: x, y: m.t - 11, class: 'lab' }); t1.textContent = p.name; svg.appendChild(t1);
+    const t2 = el('text', { x: x, y: m.t + 51, class: 'lab' }); t2.textContent = p.pct.toFixed(2) + '%'; svg.appendChild(t2);
+    x += w;
+  });
+})();
+
+/* ── 03 全部實驗 ──────────────────────────── */
+(function runsChart(){
+  const svg = document.getElementById('chart-runs');
+  const strategies = [];
+  runs.forEach(r => { if (!strategies.some(s => s.strategy === r.strategy)) strategies.push({ strategy: r.strategy, zh: r.zh, is_ml: r.is_ml }); });
+  const rows = strategies.map(s => ({ ...s, a: byKey(s.strategy, '1x'), b: byKey(s.strategy, '0x') }))
+    .filter(s => s.a || s.b)
+    .sort((p, q) => ((q.a && q.a.cagr) || -99) - ((p.a && p.a.cagr) || -99));
+  const W = 660, H = 460, m = { l: 176, r: 54, t: 16, b: 30 };
+  const vals = rows.flatMap(r => [r.a && r.a.cagr, r.b && r.b.cagr]).filter(v => v != null);
+  const lo = Math.min(-0.05, Math.min.apply(null, vals) * 1.1), hi = Math.max.apply(null, vals) * 1.12;
+  const x = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r);
+  const bh = (H - m.t - m.b) / rows.length;
+  const g = el('g', { class: 'grid' });
+  [-0.2, -0.1, 0, 0.1, 0.2, 0.3].forEach(v => {
+    if (v < lo || v > hi) return;
+    g.appendChild(el('line', { x1: x(v), x2: x(v), y1: m.t, y2: H - m.b }));
+    const t = el('text', { x: x(v), y: H - m.b + 16, 'text-anchor': 'middle', class: 'lab' });
+    t.textContent = (v * 100).toFixed(0) + '%'; g.appendChild(t);
+  });
+  svg.appendChild(g);
+  svg.appendChild(el('line', { x1: x(0), x2: x(0), y1: m.t, y2: H - m.b, class: 'zero' }));
+  rows.forEach((r, i) => {
+    const cy = m.t + i * bh + bh / 2;
+    const label = el('text', { x: m.l - 12, y: cy + 4, 'text-anchor': 'end', class: 'lab' });
+    label.textContent = r.zh; svg.appendChild(label);
+    if (r.a && r.b) svg.appendChild(el('line', { x1: x(r.a.cagr), x2: x(r.b.cagr), y1: cy, y2: cy, stroke: css('--rule'), 'stroke-width': 1.5 }));
+    [[r.b, css('--before'), '不算成本'], [r.a, css('--after'), '扣掉成本']].forEach(([d, col, tagname]) => {
+      if (!d) return;
+      const c = el('circle', { cx: x(d.cagr), cy: cy, r: 5.5, fill: col });
+      hover(c, r.zh + '｜' + tagname, ['年化報酬 ' + spct(d.cagr, 2), '夏普 ' + (d.sharpe == null ? '—' : d.sharpe.toFixed(2)),
+        '最大跌幅 ' + pct(d.mdd, 1), '上漲天數 ' + (d.win_rate == null ? '—' : pct(d.win_rate, 1)),
+        '年周轉 ' + (d.turnover == null ? '—' : Math.round(d.turnover * 100) + '%'), r.note]);
+      svg.appendChild(c);
+    });
+    if (r.a) {
+      const v = el('text', { x: W - m.r + 8, y: cy + 4, class: 'lab', fill: r.a.cagr >= 0 ? css('--good') : css('--bad') });
+      v.textContent = spct(r.a.cagr, 1); svg.appendChild(v);
+    }
+  });
+})();
+
+(function runsTable(){
+  const order = ['1x', '0x', '1.5x'];
+  const sorted = runs.slice().sort((a, b) => (b.cagr || -99) - (a.cagr || -99));
+  document.getElementById('runs-table').innerHTML =
+    '<thead><tr><th>策略</th><th>成本情境</th><th>年化報酬</th><th>夏普</th><th>最大跌幅</th><th>上漲天數</th><th>年周轉</th></tr></thead><tbody>' +
+    sorted.map(r => {
+      const costLabel = { '0x': '不算成本', '1x': '真實成本', '1.5x': '成本 ×1.5' }[r.cost] || r.cost;
+      const hl = r.strategy === D.best.strategy && r.cost === '1x';
+      return '<tr' + (hl ? ' class="hi"' : '') + '><td>' + r.zh + '<span class="sm">' + r.note + '</span></td>' +
+        '<td class="v" style="color:' + (r.cost === '0x' ? 'var(--before)' : 'var(--after)') + '">' + costLabel + '</td>' +
+        '<td class="v" style="color:' + ((r.cagr || 0) >= 0 ? 'var(--good)' : 'var(--bad)') + '">' + spct(r.cagr, 2) + '</td>' +
+        '<td class="v">' + (r.sharpe == null ? '—' : r.sharpe.toFixed(2)) + '</td>' +
+        '<td class="v">' + pct(r.mdd, 1) + '</td>' +
+        '<td class="v">' + (r.win_rate == null ? '—' : pct(r.win_rate, 1)) + '</td>' +
+        '<td class="v">' + (r.turnover == null ? '—' : Math.round(r.turnover * 100) + '%') + '</td></tr>';
+    }).join('') + '</tbody>';
+  const pos = runs.filter(r => r.cost === '1x' && r.cagr > 0).length;
+  const tot = runs.filter(r => r.cost === '1x').length;
+  document.getElementById('runs-note').textContent =
+    '共 ' + runs.length + ' 次回測。在真實成本下，' + tot + ' 個做法裡只有 ' + pos +
+    ' 個是賺錢的，而其中只有一個同時滿足「賺錢」與「夏普 0.5 以上」。' +
+    (D.excluded ? '　' + D.excluded.why : '');
+})();
+
+/* ── 04 勝率的陷阱 ────────────────────────── */
+(function winrate(){
+  const pts = (D.per_trade || []).filter(p => p.cost === '1x' && p.cagr != null);
+  if (!pts.length) return;
+  const best = pts.reduce((a, b) => b.cagr > a.cagr ? b : a);
+  const ema = pts.find(p => p.strategy === 'ml_rank_ema10');
+  document.getElementById('w-avgwin').textContent = spct(best.avg_win, 1);
+  document.getElementById('w-avgloss').textContent = spct(best.avg_loss, 1);
+  if (ema) document.getElementById('w-ema').textContent = spct(ema.cagr, 2);
+
+  const svg = document.getElementById('chart-winrate');
+  const W = 660, H = 320, m = { l: 58, r: 132, t: 18, b: 48 };
+  const xs = pts.map(p => p.win_rate), ys = pts.map(p => p.cagr);
+  const xlo = Math.min.apply(null, xs) - 0.012, xhi = Math.max.apply(null, xs) + 0.012;
+  const ylo = Math.min(-0.06, Math.min.apply(null, ys) - 0.02), yhi = Math.max.apply(null, ys) + 0.025;
+  const X = v => m.l + (v - xlo) / (xhi - xlo) * (W - m.l - m.r);
+  const Y = v => m.t + (yhi - v) / (yhi - ylo) * (H - m.t - m.b);
+  const g = el('g', { class: 'grid' });
+  [-0.05, 0, 0.05, 0.1, 0.15].forEach(v => {
+    if (v < ylo || v > yhi) return;
+    g.appendChild(el('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }));
+    const t = el('text', { x: m.l - 9, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'lab' });
+    t.textContent = (v * 100).toFixed(0) + '%'; g.appendChild(t);
+  });
+  [0.44, 0.46, 0.48, 0.50, 0.52].forEach(v => {
+    if (v < xlo || v > xhi) return;
+    const t = el('text', { x: X(v), y: H - m.b + 18, 'text-anchor': 'middle', class: 'lab' });
+    t.textContent = (v * 100).toFixed(0) + '%'; g.appendChild(t);
+  });
+  svg.appendChild(g);
+  svg.appendChild(el('line', { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), class: 'zero' }));
+  const ax = el('text', { x: (m.l + W - m.r) / 2, y: H - m.b + 38, 'text-anchor': 'middle', class: 'lab' });
+  ax.textContent = '每筆交易的勝率 →'; svg.appendChild(ax);
+  pts.forEach(p => {
+    const c = el('circle', { cx: X(p.win_rate), cy: Y(p.cagr), r: 6,
+      fill: p.cagr >= 0 ? css('--good') : css('--bad'), opacity: 0.9 });
+    hover(c, p.zh, ['每筆勝率 ' + pct(p.win_rate, 1), '年化報酬 ' + spct(p.cagr, 2),
+      '對的時候平均 ' + spct(p.avg_win, 2), '錯的時候平均 ' + spct(p.avg_loss, 2),
+      '中位持有 ' + p.median_hold.toFixed(0) + ' 日', '交易 ' + p.n.toLocaleString('en-US') + ' 次']);
+    svg.appendChild(c);
+    const t = el('text', { x: X(p.win_rate) + 10, y: Y(p.cagr) + 4, class: 'lab' });
+    t.textContent = p.zh.replace('第一代 · ', '').replace('（+3 個評價因子）', '').replace('（+2 個財報因子）', '');
+    svg.appendChild(t);
+  });
+  document.getElementById('winrate-table').innerHTML =
+    '<thead><tr><th>策略</th><th>每筆勝率</th><th>對的時候</th><th>錯的時候</th><th>每筆淨賺</th><th>中位持有</th><th>年化報酬</th></tr></thead><tbody>' +
+    pts.slice().sort((a, b) => b.cagr - a.cagr).map(p =>
+      '<tr' + (p.strategy === D.best.strategy ? ' class="hi"' : '') + '><td>' + p.zh + '</td>' +
+      '<td class="v">' + pct(p.win_rate, 1) + '</td>' +
+      '<td class="v" style="color:var(--good)">' + spct(p.avg_win, 2) + '</td>' +
+      '<td class="v" style="color:var(--bad)">' + spct(p.avg_loss, 2) + '</td>' +
+      '<td class="v">' + spct(p.ev, 2) + '</td>' +
+      '<td class="v">' + p.median_hold.toFixed(0) + ' 日</td>' +
+      '<td class="v" style="color:' + (p.cagr >= 0 ? 'var(--good)' : 'var(--bad)') + '">' + spct(p.cagr, 2) + '</td></tr>').join('') +
+    '</tbody>';
+})();
+
+/* ── 05 機制 ──────────────────────────────── */
+const G = D.diagnosis;
+document.getElementById('d-var').textContent = pct(G.top5pct_realized_variance_share, 0);
+document.getElementById('d-score').textContent = pct(G.top5pct_by_score_variance_share, 1);
+(function volChart(){
+  const svg = document.getElementById('chart-vol');
+  const W = 660, H = 210, m = { l: 56, r: 16, t: 18, b: 46 };
+  const lo = G.excess_by_vol_quintile[0], hi = G.excess_by_vol_quintile[1];
+  const vals = [lo, lo + (hi - lo) * 0.28, lo + (hi - lo) * 0.52, lo + (hi - lo) * 0.76, hi];
+  const labels = ['最低波動', '偏低', '中等', '偏高', '最高波動'];
+  const bw = (W - m.l - m.r) / 5;
+  const y = v => m.t + (0.45 - v) / 0.9 * (H - m.t - m.b);
+  const g = el('g', { class: 'grid' });
+  [-0.4, -0.2, 0, 0.2, 0.4].forEach(v => {
+    g.appendChild(el('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }));
+    const t = el('text', { x: m.l - 9, y: y(v) + 3.5, 'text-anchor': 'end', class: 'lab' });
+    t.textContent = (v > 0 ? '+' : '') + v.toFixed(1) + '%'; g.appendChild(t);
+  });
+  svg.appendChild(g);
+  svg.appendChild(el('line', { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), class: 'zero' }));
+  vals.forEach((v, i) => {
+    const cx = m.l + i * bw + bw / 2;
+    const h = Math.abs(y(v) - y(0));
+    const rect = el('rect', { x: cx - bw * 0.3, y: Math.min(y(v), y(0)), width: bw * 0.6, height: Math.max(2, h), rx: 3,
+      fill: v >= 0 ? css('--good') : css('--bad'), opacity: i === 0 ? 1 : 0.8 });
+    hover(rect, labels[i] + '組', ['後續 10 天平均超額報酬 ' + (v >= 0 ? '+' : '') + v.toFixed(2) + '%',
+      i === 0 ? '模型有 55–69% 的持股集中在這一組' : '']);
+    svg.appendChild(rect);
+    const t = el('text', { x: cx, y: H - m.b + 18, 'text-anchor': 'middle', class: 'lab' });
+    t.textContent = labels[i]; svg.appendChild(t);
+  });
+  const note = el('text', { x: m.l + bw / 2, y: H - m.b + 36, 'text-anchor': 'middle', class: 'lab', fill: css('--bad') });
+  note.textContent = '↑ 模型的持股大多在這裡'; svg.appendChild(note);
+})();
+
+/* ── 05 最佳候選 ──────────────────────────── */
+const B = D.best;
+document.getElementById('best-lede').innerHTML =
+  '<strong>' + B.zh + '</strong>：' + B.one_line_change + '。結果是扣完成本後每年賺 <span class="num">' +
+  spct(best1.cagr, 2) + '</span>，而同一個模型用每週換股時是 <span class="num">' +
+  spct(byKey('ml_net_h20', '1x').cagr, 2) + '</span>。差別只在交易次數——年周轉從 ' +
+  Math.round(byKey('ml_net_h20', '1x').turnover * 100) + '% 降到 ' + Math.round(best1.turnover * 100) + '%。';
+document.getElementById('best-table').innerHTML =
+  '<thead><tr><th>上線門檻（事前訂好，不因結果調整）</th><th>白話說明</th><th>實際值</th><th>結果</th></tr></thead><tbody>' +
+  B.checks.map((c, i) => {
+    const plain = (D.gate.items[i] || {}).plain || '';
+    return '<tr><td>' + c.k + '</td><td style="text-align:left;white-space:normal;color:var(--ink-3);font-size:12.5px">' + plain +
+      '</td><td class="v">' + c.value + '</td><td class="v"><span class="tag ' + (c.pass ? 'p">通過' : 'f">未過') + '</span></td></tr>';
+  }).join('') +
+  '<tr class="hi"><td>通過數</td><td></td><td class="v">' + B.checks.filter(c => c.pass).length + ' ／ ' + B.checks.length +
+  '</td><td class="v">不上線</td></tr></tbody>';
+const P = B.per_trade_1x;
+document.getElementById('best-note').textContent =
+  '逐筆來看：' + P.n.toLocaleString('en-US') + ' 次完整買賣，其中 ' + pct(P.win_rate, 1) +
+  ' 賺錢。勝率不到一半卻整體獲利，是因為賺的時候賺比較多（賺賠比 ' + P.profit_factor.toFixed(2) +
+  '），平均每筆淨賺 ' + spct(P.ev, 2) + '，平均持有 ' + P.hold_sessions.toFixed(0) + ' 個交易日。';
+
+/* ── 06 已排除 ────────────────────────────── */
+document.getElementById('closed-table').innerHTML =
+  '<thead><tr><th>試過的方向</th><th>為什麼放棄</th></tr></thead><tbody>' +
+  D.closed.map(c => '<tr><td>' + c.what + '</td><td style="text-align:left;white-space:normal;color:var(--ink-2)">' + c.why + '</td></tr>').join('') +
+  '</tbody>';
+
+/* ── 07 下一步 ────────────────────────────── */
+document.getElementById('next-list').innerHTML = D.next.map(n =>
+  '<li><b>' + n.what + '</b>　' + n.detail + '<span class="sm">預估投入：' + n.cost + '</span></li>').join('');
+
+/* ── 09 市場做法、自己的濾網與文獻 ─────────── */
+document.getElementById('research-flow').innerHTML = R.market_flow.map((s, i) =>
+  '<article><span class="step-no">0' + (i + 1) + '</span><h3>' + s.title + '</h3><p>' + s.detail + '</p></article>').join('');
+
+document.getElementById('research-candidate').innerHTML =
+  '<p><strong>' + R.candidate.title + '</strong><span class="status-pill">' + R.candidate.status + '</span></p>' +
+  '<p>' + R.candidate.detail + '</p><p class="note">為什麼值得測：' + R.candidate.why + '</p>';
+
+document.getElementById('research-principles').innerHTML = R.filters.map(f =>
+  '<article class="principle"><h3>' + f.title + '</h3><p>' + f.detail + '</p></article>').join('');
+
+document.getElementById('research-table').innerHTML =
+  '<thead><tr><th>來源</th><th>年份</th><th>對投資者最有用的一句話</th></tr></thead><tbody>' +
+  R.reading.map(r => '<tr><td><a class="ref-link" href="' + r.url + '" target="_blank" rel="noopener noreferrer">' +
+    r.title + '</a><span class="sm">' + r.kind + '</span></td><td class="v">' + r.year +
+    '</td><td style="text-align:left;white-space:normal;color:var(--ink-2)">' + r.lesson + '</td></tr>').join('') +
+  '</tbody>';
+})();
+</script>

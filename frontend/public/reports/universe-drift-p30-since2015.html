@@ -1,0 +1,167 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>T-120 AC-1：宇宙門檻在長歷史上的漂移</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>T-120 AC-1：宇宙門檻在長歷史上的漂移</h1>
+<p>資料：<code>staging/finmind_hist_price</code>（T-116 回補，2,514 檔四碼普通股，2015-06-01 ~ 2026-09-04）。<strong>每月</strong>取月底交易日為快照、再按年平均——單日快照太吵，實測相鄰兩年的 ADV 中位數可差 3 倍，那是取樣日的噪音而非體制轉換。</p>
+<p>絕對門檻＝現行 <code>UniverseConfig</code> 預設：<code>min_adv_twd=30,000,000</code>、<code>min_price=10.0</code>；ADV 為 20 日成交金額中位數。
+相對門檻＝保留 ADV 前 30%（切在第 70% 百分位）（同樣套 <code>min_price</code>，以隔離是哪一道在漂）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>年</th>
+<th>月數</th>
+<th>有 ADV 檔數</th>
+<th>絕對門檻留下</th>
+<th>留存率</th>
+<th>ADV 中位數</th>
+<th>相對門檻留下</th>
+<th>留存率</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="num">2015</td>
+<td class="num">7</td>
+<td class="num">1,751</td>
+<td class="num">367</td>
+<td class="num">21.0%</td>
+<td>14.7M</td>
+<td class="num">502</td>
+<td class="num">28.7%</td>
+</tr>
+<tr>
+<td class="num">2016</td>
+<td class="num">12</td>
+<td class="num">1,787</td>
+<td class="num">344</td>
+<td class="num">19.2%</td>
+<td>13.4M</td>
+<td class="num">513</td>
+<td class="num">28.7%</td>
+</tr>
+<tr>
+<td class="num">2017</td>
+<td class="num">12</td>
+<td class="num">1,831</td>
+<td class="num">424</td>
+<td class="num">23.1%</td>
+<td>18.5M</td>
+<td class="num">535</td>
+<td class="num">29.2%</td>
+</tr>
+<tr>
+<td class="num">2018</td>
+<td class="num">12</td>
+<td class="num">1,866</td>
+<td class="num">397</td>
+<td class="num">21.3%</td>
+<td>14.9M</td>
+<td class="num">547</td>
+<td class="num">29.3%</td>
+</tr>
+<tr>
+<td class="num">2019</td>
+<td class="num">12</td>
+<td class="num">1,897</td>
+<td class="num">383</td>
+<td class="num">20.2%</td>
+<td>13.0M</td>
+<td class="num">553</td>
+<td class="num">29.2%</td>
+</tr>
+<tr>
+<td class="num">2020</td>
+<td class="num">12</td>
+<td class="num">1,932</td>
+<td class="num">512</td>
+<td class="num">26.5%</td>
+<td>24.8M</td>
+<td class="num">561</td>
+<td class="num">29.0%</td>
+</tr>
+<tr>
+<td class="num">2021</td>
+<td class="num">12</td>
+<td class="num">1,975</td>
+<td class="num">661</td>
+<td class="num">33.5%</td>
+<td>42.8M</td>
+<td class="num">587</td>
+<td class="num">29.7%</td>
+</tr>
+<tr>
+<td class="num">2022</td>
+<td class="num">12</td>
+<td class="num">2,033</td>
+<td class="num">539</td>
+<td class="num">26.5%</td>
+<td>22.7M</td>
+<td class="num">605</td>
+<td class="num">29.7%</td>
+</tr>
+<tr>
+<td class="num">2023</td>
+<td class="num">12</td>
+<td class="num">2,087</td>
+<td class="num">624</td>
+<td class="num">29.9%</td>
+<td>31.3M</td>
+<td class="num">623</td>
+<td class="num">29.9%</td>
+</tr>
+<tr>
+<td class="num">2024</td>
+<td class="num">12</td>
+<td class="num">2,166</td>
+<td class="num">722</td>
+<td class="num">33.4%</td>
+<td>40.8M</td>
+<td class="num">646</td>
+<td class="num">29.8%</td>
+</tr>
+<tr>
+<td class="num">2025</td>
+<td class="num">12</td>
+<td class="num">2,248</td>
+<td class="num">635</td>
+<td class="num">28.3%</td>
+<td>26.8M</td>
+<td class="num">670</td>
+<td class="num">29.8%</td>
+</tr>
+<tr>
+<td class="num">2026</td>
+<td class="num">9</td>
+<td class="num">2,312</td>
+<td class="num">794</td>
+<td class="num">34.4%</td>
+<td>47.5M</td>
+<td class="num">689</td>
+<td class="num">29.8%</td>
+</tr>
+</tbody>
+</table></div>
+</article><div class='foot'>來源 <code>docs/reports/universe-drift-p30-since2015.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

@@ -1,0 +1,391 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>T-127 控制組階梯結果（SPEC-013 §3.7）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>T-127 控制組階梯結果（SPEC-013 §3.7）</h1>
+<p>產出時間：2026-09-05　區間 2022-07-01 ~ 2026-02-28（保險庫邊界）</p>
+<p><strong>本表只填量，不下結論。</strong> SPEC-013 §3.7 明列三種<strong>不成立</strong>的推論，任何引用本表的文字都不得出現它們：</p>
+<ul>
+<li>「X1 也輸基準 → 問題不在 ML」。反例：基準 +10%、ML −10%、四因子 +5%——兩者都輸基準，但 ML 仍比四因子差 15pp。</li>
+<li>「零成本仍輸 → 成本不是元凶」。正確說法只到「移除成本仍不足以解釋全部落後」。</li>
+<li>「B 軌贏了 → 架構貢獻大於訊號貢獻」。B1／B2 同時換了四樣東西，無法歸因。</li>
+</ul>
+<p><strong>兩種勝率不是同一件事</strong>（D-061 明列不得混用）：日勝率＝報酬為正的交易日比例；逐筆勝率＝已平倉 round trip 中獲利的比例。右尾型策略常見「賠得多次、賺得大筆」，兩者可差十個百分點以上。賺賠比＝總獲利 ÷ 總虧損（絕對值），無虧損時為「—」。</p>
+<p>不確定性一律用<strong>月度區塊</strong>標準誤（持股期 20 個交易日、日報酬高度自相關，日頻 t 值會嚴重高估顯著性）。<code>|t| &lt; 2</code> 一律標為<strong>未能區分</strong>——那是合法結果。</p>
+<p>資料一致性：6 階的 1×／0× 指紋皆相同，零成本對照成立。（<strong>跨階不比指紋</strong>——不同策略讀不同的表，指紋必然不同，比了是假警報。）</p>
+<h2>1× 全成本</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>階</th>
+<th>變更</th>
+<th>CAGR</th>
+<th>Sharpe</th>
+<th>MDD</th>
+<th>年化周轉</th>
+<th>日勝率</th>
+<th>逐筆勝率</th>
+<th>賺賠比</th>
+<th>平倉/未平</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0</strong></td>
+<td>現況基準（既有候選，scope 為 bt:ml_net_h20_turnover）</td>
+<td class="num pos">+10.00%</td>
+<td class="num pos">+0.499</td>
+<td class="num neg">-40.34%</td>
+<td class="num">921%</td>
+<td class="num">52.8%</td>
+<td class="num">40.9%</td>
+<td class="num">1.10</td>
+<td>677/18</td>
+</tr>
+<tr>
+<td><strong>L1</strong></td>
+<td>= L0，唯一變更 top_n 20 → 40</td>
+<td class="num pos">+4.20%</td>
+<td class="num pos">+0.304</td>
+<td class="num neg">-38.78%</td>
+<td class="num">783%</td>
+<td class="num">52.0%</td>
+<td class="num">39.7%</td>
+<td class="num">1.04</td>
+<td>1225/28</td>
+</tr>
+<tr>
+<td><strong>L2</strong></td>
+<td>= L1，唯一變更宇宙加營收篩</td>
+<td class="num pos">+7.89%</td>
+<td class="num pos">+0.518</td>
+<td class="num neg">-36.67%</td>
+<td class="num">709%</td>
+<td class="num">54.4%</td>
+<td class="num">41.9%</td>
+<td class="num">1.14</td>
+<td>1130/27</td>
+</tr>
+<tr>
+<td><strong>L3</strong></td>
+<td>= L2，唯一變更訊號 ML → 四因子</td>
+<td class="num pos">+9.50%</td>
+<td class="num pos">+0.756</td>
+<td class="num neg">-22.71%</td>
+<td class="num">453%</td>
+<td class="num">56.9%</td>
+<td class="num">44.9%</td>
+<td class="num">1.31</td>
+<td>740/18</td>
+</tr>
+<tr>
+<td><strong>L4</strong></td>
+<td>= L3，唯一變更等權 → 分數加權 p=2</td>
+<td class="num pos">+9.40%</td>
+<td class="num pos">+0.755</td>
+<td class="num neg">-21.97%</td>
+<td class="num">451%</td>
+<td class="num">55.8%</td>
+<td class="num">44.5%</td>
+<td class="num">1.35</td>
+<td>735/17</td>
+</tr>
+<tr>
+<td><strong>X1</strong></td>
+<td>= L0，<strong>只</strong>換訊號為四因子（隔離格）</td>
+<td class="num pos">+7.09%</td>
+<td class="num pos">+0.519</td>
+<td class="num neg">-31.55%</td>
+<td class="num">594%</td>
+<td class="num">53.6%</td>
+<td class="num">42.2%</td>
+<td class="num">1.13</td>
+<td>460/14</td>
+</tr>
+</tbody>
+</table></div>
+<h3>1× 全成本：配對比較（每階 vs 前一階）</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>比較</th>
+<th>ΔCAGR</th>
+<th>ΔMDD</th>
+<th>Δ日報酬（日均）</th>
+<th>區塊 SE</th>
+<th>t</th>
+<th>判定</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1 − L0</td>
+<td class="num neg">-5.54%</td>
+<td class="num pos">+1.56%</td>
+<td class="num neg">-0.0264pp</td>
+<td class="num">0.0211pp</td>
+<td class="num neg">-1.25</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>L2 − L1</td>
+<td class="num pos">+3.53%</td>
+<td class="num pos">+2.11%</td>
+<td class="num pos">+0.0117pp</td>
+<td class="num">0.0164pp</td>
+<td class="num pos">+0.72</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>L3 − L2</td>
+<td class="num pos">+1.54%</td>
+<td class="num pos">+13.95%</td>
+<td class="num pos">+0.0031pp</td>
+<td class="num">0.0186pp</td>
+<td class="num pos">+0.16</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>L4 − L3</td>
+<td class="num neg">-0.09%</td>
+<td class="num pos">+0.74%</td>
+<td class="num neg">-0.0004pp</td>
+<td class="num">0.0050pp</td>
+<td class="num neg">-0.08</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>X1 − L0</td>
+<td class="num neg">-2.78%</td>
+<td class="num pos">+8.79%</td>
+<td class="num neg">-0.0191pp</td>
+<td class="num">0.0433pp</td>
+<td class="num neg">-0.44</td>
+<td><strong>未能區分</strong></td>
+</tr>
+</tbody>
+</table></div>
+<h2>0× 零成本反事實</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>階</th>
+<th>變更</th>
+<th>CAGR</th>
+<th>Sharpe</th>
+<th>MDD</th>
+<th>年化周轉</th>
+<th>日勝率</th>
+<th>逐筆勝率</th>
+<th>賺賠比</th>
+<th>平倉/未平</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0</strong></td>
+<td>現況基準（既有候選，scope 為 bt:ml_net_h20_turnover）</td>
+<td class="num pos">+18.69%</td>
+<td class="num pos">+0.788</td>
+<td class="num neg">-39.14%</td>
+<td class="num">928%</td>
+<td class="num">54.1%</td>
+<td class="num">43.8%</td>
+<td class="num">1.23</td>
+<td>687/19</td>
+</tr>
+<tr>
+<td><strong>L1</strong></td>
+<td>= L0，唯一變更 top_n 20 → 40</td>
+<td class="num pos">+8.61%</td>
+<td class="num pos">+0.506</td>
+<td class="num neg">-36.85%</td>
+<td class="num">791%</td>
+<td class="num">53.1%</td>
+<td class="num">42.0%</td>
+<td class="num">1.11</td>
+<td>1244/29</td>
+</tr>
+<tr>
+<td><strong>L2</strong></td>
+<td>= L1，唯一變更宇宙加營收篩</td>
+<td class="num pos">+13.54%</td>
+<td class="num pos">+0.801</td>
+<td class="num neg">-35.67%</td>
+<td class="num">722%</td>
+<td class="num">56.8%</td>
+<td class="num">43.4%</td>
+<td class="num">1.29</td>
+<td>1151/28</td>
+</tr>
+<tr>
+<td><strong>L3</strong></td>
+<td>= L2，唯一變更訊號 ML → 四因子</td>
+<td class="num pos">+14.23%</td>
+<td class="num pos">+1.068</td>
+<td class="num neg">-21.04%</td>
+<td class="num">461%</td>
+<td class="num">58.9%</td>
+<td class="num">46.5%</td>
+<td class="num">1.50</td>
+<td>747/19</td>
+</tr>
+<tr>
+<td><strong>L4</strong></td>
+<td>= L3，唯一變更等權 → 分數加權 p=2</td>
+<td class="num pos">+13.70%</td>
+<td class="num pos">+1.045</td>
+<td class="num neg">-20.81%</td>
+<td class="num">449%</td>
+<td class="num">56.7%</td>
+<td class="num">46.0%</td>
+<td class="num">1.52</td>
+<td>742/18</td>
+</tr>
+<tr>
+<td><strong>X1</strong></td>
+<td>= L0，<strong>只</strong>換訊號為四因子（隔離格）</td>
+<td class="num pos">+11.16%</td>
+<td class="num pos">+0.760</td>
+<td class="num neg">-30.24%</td>
+<td class="num">594%</td>
+<td class="num">54.5%</td>
+<td class="num">44.4%</td>
+<td class="num">1.27</td>
+<td>462/15</td>
+</tr>
+</tbody>
+</table></div>
+<h3>0× 零成本反事實：配對比較（每階 vs 前一階）</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>比較</th>
+<th>ΔCAGR</th>
+<th>ΔMDD</th>
+<th>Δ日報酬（日均）</th>
+<th>區塊 SE</th>
+<th>t</th>
+<th>判定</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1 − L0</td>
+<td class="num neg">-9.63%</td>
+<td class="num pos">+2.29%</td>
+<td class="num neg">-0.0405pp</td>
+<td class="num">0.0214pp</td>
+<td class="num neg">-1.89</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>L2 − L1</td>
+<td class="num pos">+4.72%</td>
+<td class="num pos">+1.18%</td>
+<td class="num pos">+0.0157pp</td>
+<td class="num">0.0175pp</td>
+<td class="num pos">+0.89</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>L3 − L2</td>
+<td class="num pos">+0.66%</td>
+<td class="num pos">+14.63%</td>
+<td class="num neg">-0.0004pp</td>
+<td class="num">0.0186pp</td>
+<td class="num neg">-0.02</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>L4 − L3</td>
+<td class="num neg">-0.51%</td>
+<td class="num pos">+0.23%</td>
+<td class="num neg">-0.0020pp</td>
+<td class="num">0.0051pp</td>
+<td class="num neg">-0.38</td>
+<td><strong>未能區分</strong></td>
+</tr>
+<tr>
+<td>X1 − L0</td>
+<td class="num neg">-7.19%</td>
+<td class="num pos">+8.90%</td>
+<td class="num neg">-0.0348pp</td>
+<td class="num">0.0438pp</td>
+<td class="num neg">-0.79</td>
+<td><strong>未能區分</strong></td>
+</tr>
+</tbody>
+</table></div>
+<h2>子區間符號一致性（由既有曲線切出，<strong>未重跑</strong>）</h2>
+<p>某階的結論若在兩段<strong>符號相反</strong>，即標記「窗口相依，不可外推」——這是本專案目前最大的未知，不得用單一數字掩蓋（SPEC-013 §3.6）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>比較</th>
+<th>前段 2022-07~2023-12&lt;br&gt;廣度正常期</th>
+<th>後段 2024-01~2026-02&lt;br&gt;權值股集中期</th>
+<th>一致性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1 − L0</td>
+<td class="num neg">-3.58%</td>
+<td class="num neg">-6.27%</td>
+<td>一致</td>
+</tr>
+<tr>
+<td>L2 − L1</td>
+<td class="num neg">-5.21%</td>
+<td class="num pos">+8.94%</td>
+<td><strong>窗口相依，不可外推</strong></td>
+</tr>
+<tr>
+<td>L3 − L2</td>
+<td class="num neg">-1.38%</td>
+<td class="num pos">+3.69%</td>
+<td><strong>窗口相依，不可外推</strong></td>
+</tr>
+<tr>
+<td>L4 − L3</td>
+<td class="num neg">-2.05%</td>
+<td class="num pos">+1.38%</td>
+<td><strong>窗口相依，不可外推</strong></td>
+</tr>
+<tr>
+<td>X1 − L0</td>
+<td class="num neg">-10.39%</td>
+<td class="num pos">+2.46%</td>
+<td><strong>窗口相依，不可外推</strong></td>
+</tr>
+</tbody>
+</table></div>
+<h2>登記備註</h2>
+<ul>
+<li><code>trial_scope</code> 為 <code>bt:ladder_diag</code>（YAML 寫 <code>ladder_diag</code>，前綴由框架加）。L0 不在此 scope——它不改配置，仍屬 <code>bt:ml_net_h20_turnover</code>，是對照基準而非新候選。</li>
+<li><strong>多一筆未登記的 trial</strong>：2026-09-05 曾以 <code>ladder_x1_simple20</code> 在 2025-01-01~2025-03-31 跑過一次管線煙霧測試，區間不同故產生一個額外的 distinct <code>params_hash</code>。D-060 登記 10 個，實際 11 個。據實記錄，不隱藏。</li>
+</ul>
+</article><div class='foot'>來源 <code>docs/reports/ladder-results.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

@@ -1,0 +1,205 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>D-087 判讀：四格長窗口回測</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>D-087 判讀：四格長窗口回測</h1>
+<p>視窗 2017-01-03 ~ 2026-02-28、<strong>2227 個交易日</strong>（現行 886 日的 2.5 倍）。
+報酬口徑：<strong>價格報酬（--no-dividends）</strong>　※ 混合則為 {False}</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>格</th>
+<th>內容</th>
+<th>成本</th>
+<th style="text-align:right">CAGR</th>
+<th style="text-align:right">MDD</th>
+<th style="text-align:right">Sharpe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LW-C1</td>
+<td>C1 換相對門檻</td>
+<td>0x</td>
+<td style="text-align:right">+16.21%</td>
+<td style="text-align:right">-49.65%</td>
+<td style="text-align:right">+0.67</td>
+</tr>
+<tr>
+<td>LW-C1</td>
+<td></td>
+<td>1x</td>
+<td style="text-align:right">+9.20%</td>
+<td style="text-align:right">-57.97%</td>
+<td style="text-align:right">+0.45</td>
+</tr>
+<tr>
+<td>LW-C1</td>
+<td></td>
+<td>1.5x</td>
+<td style="text-align:right">+4.93%</td>
+<td style="text-align:right">-61.80%</td>
+<td style="text-align:right">+0.31</td>
+</tr>
+<tr>
+<td>LW-B2</td>
+<td>B2 換相對門檻</td>
+<td>0x</td>
+<td style="text-align:right">+17.23%</td>
+<td style="text-align:right">-49.38%</td>
+<td style="text-align:right">+0.92</td>
+</tr>
+<tr>
+<td>LW-B2</td>
+<td></td>
+<td>1x</td>
+<td style="text-align:right">+12.52%</td>
+<td style="text-align:right">-51.49%</td>
+<td style="text-align:right">+0.71</td>
+</tr>
+<tr>
+<td>LW-B2</td>
+<td></td>
+<td>1.5x</td>
+<td style="text-align:right">+10.63%</td>
+<td style="text-align:right">-52.56%</td>
+<td style="text-align:right">+0.63</td>
+</tr>
+<tr>
+<td>LW-X1</td>
+<td>四公開因子換相對門檻</td>
+<td>0x</td>
+<td style="text-align:right">+13.39%</td>
+<td style="text-align:right">-45.50%</td>
+<td style="text-align:right">+0.77</td>
+</tr>
+<tr>
+<td>LW-X1</td>
+<td></td>
+<td>1x</td>
+<td style="text-align:right">+9.05%</td>
+<td style="text-align:right">-47.86%</td>
+<td style="text-align:right">+0.56</td>
+</tr>
+<tr>
+<td>LW-X1</td>
+<td></td>
+<td>1.5x</td>
+<td style="text-align:right">+6.58%</td>
+<td style="text-align:right">-49.43%</td>
+<td style="text-align:right">+0.43</td>
+</tr>
+<tr>
+<td>LW-C1abs</td>
+<td>與 LW-C1 逐字相同，只保留絕對門檻（D-062 的驗證格）</td>
+<td>0x</td>
+<td style="text-align:right">+13.70%</td>
+<td style="text-align:right">-52.34%</td>
+<td style="text-align:right">+0.58</td>
+</tr>
+<tr>
+<td>LW-C1abs</td>
+<td></td>
+<td>1x</td>
+<td style="text-align:right">+6.56%</td>
+<td style="text-align:right">-59.98%</td>
+<td style="text-align:right">+0.36</td>
+</tr>
+<tr>
+<td>LW-C1abs</td>
+<td></td>
+<td>1.5x</td>
+<td style="text-align:right">+2.23%</td>
+<td style="text-align:right">-64.53%</td>
+<td style="text-align:right">+0.23</td>
+</tr>
+</tbody>
+</table></div>
+<h2>主判定</h2>
+<ul>
+<li>最淺的一次回撤：<strong>LW-X1 0x　MDD −45.50%</strong></li>
+<li>12 次回測的 MDD 全距 −45.50% ~ −64.53%</li>
+<li><strong>判定：丙層</strong></li>
+</ul>
+<blockquote>
+<p>丙層（D-087 原文）：「這個架構在多體制下不可行。<strong>不訓練長窗口模型</strong>，改依 D-052 建議(丙)另立架構（多空、或低頻事件驅動）。」</p>
+</blockquote>
+<p>沒有一格接近 40% 的界——最好的一格還差 5.50pp，且是 0× 成本的幻想值。<strong>不是邊緣判定。</strong></p>
+<h2>次要判定一：相對門檻在真實報酬上值多少（D-062 的事後驗證）</h2>
+<p>LW-C1 與 LW-C1abs <strong>逐字相同，只差流動性門檻</strong>（相對前 30% vs 絕對 3,000 萬）。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>成本</th>
+<th style="text-align:right">CAGR 相對</th>
+<th style="text-align:right">CAGR 絕對</th>
+<th style="text-align:right">Δ</th>
+<th style="text-align:right">MDD 相對</th>
+<th style="text-align:right">MDD 絕對</th>
+<th style="text-align:right">Δ</th>
+<th style="text-align:right">Sharpe Δ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0x</td>
+<td style="text-align:right">+16.21%</td>
+<td style="text-align:right">+13.70%</td>
+<td style="text-align:right"><strong>+2.51pp</strong></td>
+<td style="text-align:right">-49.65%</td>
+<td style="text-align:right">-52.34%</td>
+<td style="text-align:right"><strong>+2.69pp</strong></td>
+<td style="text-align:right">+0.09</td>
+</tr>
+<tr>
+<td>1x</td>
+<td style="text-align:right">+9.20%</td>
+<td style="text-align:right">+6.56%</td>
+<td style="text-align:right"><strong>+2.64pp</strong></td>
+<td style="text-align:right">-57.97%</td>
+<td style="text-align:right">-59.98%</td>
+<td style="text-align:right"><strong>+2.01pp</strong></td>
+<td style="text-align:right">+0.08</td>
+</tr>
+<tr>
+<td>1.5x</td>
+<td style="text-align:right">+4.93%</td>
+<td style="text-align:right">+2.23%</td>
+<td style="text-align:right"><strong>+2.70pp</strong></td>
+<td style="text-align:right">-61.80%</td>
+<td style="text-align:right">-64.53%</td>
+<td style="text-align:right"><strong>+2.73pp</strong></td>
+<td style="text-align:right">+0.08</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>相對門檻在<strong>三個成本情境下全面較好</strong>，CAGR 中位 <strong>+2.64pp</strong>，且回撤更淺、Sharpe 更高。D-062 當初只量了留存率的穩定度（標準差 5.29pp → 0.42pp），這裡補上真實報酬那一半：<strong>正面，且方向一致。</strong></li>
+<li>但這<strong>不改變主判定</strong>：兩者都在丙層。相對門檻讓一個站不住的架構站得<strong>比較不那麼不住</strong>，不等於站得住。</li>
+</ul>
+<h2>次要判定二：對含息基準的比較——<strong>本批做不了</strong></h2>
+<p>D-087 原文要求「各格對 0051 含息（+31.57%）的 CAGR 與 Sharpe 差」。但本批 12 次是 <code>--no-dividends</code> 跑的（價格報酬），<strong>拿它去比含息基準正是 D-085 指出的那個不對稱</strong>——不做。</p>
+<p>主判定不受影響：實測 40 組含息 vs 價格報酬的重跑，ΔMDD 中位僅 <strong>+0.98pp</strong>、最大 <strong>+5.01pp</strong>；即使最好的一格 −45.50% 拿到最樂觀的 +5.01pp，也只到 −40.49%，<strong>仍在丙層</strong>。</p>
+</article><div class='foot'>來源 <code>docs/reports/d087-long-window-verdict.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

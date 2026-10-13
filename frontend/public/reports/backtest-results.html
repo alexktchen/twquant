@@ -1,0 +1,805 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>回測總覽</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>回測總覽</h1>
+<p>窗口 2022-07-01 ~ 2026-02-28　資金 80,000,000（D-068）　成本 1×／0×／1.5×
+完成 113 筆；尚缺 13 筆。</p>
+<blockquote>
+<p><strong>這不是排行榜。</strong> 試驗數已達數十個，「最好的那格」有很大一部分是選擇偏誤
+（DSR 的定義）。正確讀法是下方的歸因邊——每條只換一件事。
+任一格要晉升須另立事前登記、獨立重跑，並承擔已消耗的試驗計數。</p>
+</blockquote>
+<h2>基準</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>基準</th>
+<th>代表什麼</th>
+<th style="text-align:right">CAGR</th>
+<th style="text-align:right">MDD</th>
+<th style="text-align:right">Sharpe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0050 元大台灣50（含息）</td>
+<td>市值型大盤代理——最誠實的對照</td>
+<td style="text-align:right">+40.08%</td>
+<td style="text-align:right">-27.5%</td>
+<td style="text-align:right">1.63</td>
+</tr>
+<tr>
+<td>0050（不含息，分割已還原）</td>
+<td>與含息對照，量出股利貢獻</td>
+<td style="text-align:right">+35.55%</td>
+<td style="text-align:right">-28.5%</td>
+<td style="text-align:right">1.48</td>
+</tr>
+<tr>
+<td>0056 高股息（含息）</td>
+<td>高股息型對照</td>
+<td style="text-align:right">+25.00%</td>
+<td style="text-align:right">-26.9%</td>
+<td style="text-align:right">1.46</td>
+</tr>
+<tr>
+<td>0051 元大中型100（含息）</td>
+<td><strong>結構上不含台積電</strong>（市值 51~150 名）——小型／中型策略的公平對照</td>
+<td style="text-align:right">+31.57%</td>
+<td style="text-align:right">-31.2%</td>
+<td style="text-align:right">1.54</td>
+</tr>
+<tr>
+<td>006201 富邦櫃買（價格）</td>
+<td>純上櫃小型股的市場報酬。事件表無其股利，故<strong>只能算價格報酬</strong>，真實含息更高</td>
+<td style="text-align:right">+22.84%</td>
+<td style="text-align:right">-39.1%</td>
+<td style="text-align:right">0.96</td>
+</tr>
+<tr>
+<td>加權指數（價格指數，不含息）</td>
+<td>不含息故系統性低於含息基準</td>
+<td style="text-align:right">+29.35%</td>
+<td style="text-align:right">-28.7%</td>
+<td style="text-align:right">1.39</td>
+</tr>
+</tbody>
+</table></div>
+<h2>全部策略（1× 成本，組內按 Sharpe）</h2>
+<p>「持股」是<strong>實際</strong>持股中位數，不是設定的 top_n——80M 下賣單被參與率上限擋住、
+部位殘留；10M 下買不起一張。兩個方向的扭曲都讓「檔數」的比較失真。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>策略</th>
+<th>內容</th>
+<th style="text-align:right">CAGR</th>
+<th style="text-align:right">MDD</th>
+<th style="text-align:right">Sharpe</th>
+<th style="text-align:right">周轉</th>
+<th style="text-align:right">曝險</th>
+<th style="text-align:right">持股</th>
+<th style="text-align:right">有部位時年化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>階梯</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>L3</td>
+<td>四因子（營收/動能/ROE/低波）、40 檔＋營收濾網</td>
+<td style="text-align:right">+27.03%</td>
+<td style="text-align:right">-33.3%</td>
+<td style="text-align:right">1.24</td>
+<td style="text-align:right">618%</td>
+<td style="text-align:right">96%</td>
+<td style="text-align:right">45</td>
+<td style="text-align:right">+30.2%</td>
+</tr>
+<tr>
+<td>L4</td>
+<td>同 L3，改分數加權</td>
+<td style="text-align:right">+25.86%</td>
+<td style="text-align:right">-33.6%</td>
+<td style="text-align:right">1.19</td>
+<td style="text-align:right">610%</td>
+<td style="text-align:right">95%</td>
+<td style="text-align:right">44</td>
+<td style="text-align:right">+29.0%</td>
+</tr>
+<tr>
+<td>X1</td>
+<td>隔離格：只把訊號換成四因子，其餘同 L0</td>
+<td style="text-align:right">+12.36%</td>
+<td style="text-align:right">-33.8%</td>
+<td style="text-align:right">0.72</td>
+<td style="text-align:right">618%</td>
+<td style="text-align:right">94%</td>
+<td style="text-align:right">27</td>
+<td style="text-align:right">+14.4%</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>ML 訊號、40 檔＋營收濾網</td>
+<td style="text-align:right">+14.81%</td>
+<td style="text-align:right">-47.3%</td>
+<td style="text-align:right">0.68</td>
+<td style="text-align:right">923%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">48</td>
+<td style="text-align:right">+18.9%</td>
+</tr>
+<tr>
+<td>L0-new</td>
+<td>ML 訊號、乾淨重訓模型（T-145）</td>
+<td style="text-align:right">+13.65%</td>
+<td style="text-align:right">-46.1%</td>
+<td style="text-align:right">0.58</td>
+<td style="text-align:right">949%</td>
+<td style="text-align:right">98%</td>
+<td style="text-align:right">32</td>
+<td style="text-align:right">+18.5%</td>
+</tr>
+<tr>
+<td>L0</td>
+<td>現況：ML 訊號、20 檔等權（舊凍結模型）</td>
+<td style="text-align:right">+10.85%</td>
+<td style="text-align:right">-47.6%</td>
+<td style="text-align:right">0.50</td>
+<td style="text-align:right">912%</td>
+<td style="text-align:right">98%</td>
+<td style="text-align:right">32</td>
+<td style="text-align:right">+15.8%</td>
+</tr>
+<tr>
+<td>L1</td>
+<td>ML 訊號、40 檔</td>
+<td style="text-align:right">+7.42%</td>
+<td style="text-align:right">-48.9%</td>
+<td style="text-align:right">0.40</td>
+<td style="text-align:right">959%</td>
+<td style="text-align:right">99%</td>
+<td style="text-align:right">51</td>
+<td style="text-align:right">+11.6%</td>
+</tr>
+<tr>
+<td><strong>雙軌</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>B2</td>
+<td>廣泛市值加權</td>
+<td style="text-align:right">+27.79%</td>
+<td style="text-align:right">-30.9%</td>
+<td style="text-align:right">1.35</td>
+<td style="text-align:right">523%</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">43</td>
+<td style="text-align:right">+30.5%</td>
+</tr>
+<tr>
+<td>B1</td>
+<td>大型增強：市值前 100 大、30 檔市值加權</td>
+<td style="text-align:right">+23.68%</td>
+<td style="text-align:right">-24.0%</td>
+<td style="text-align:right">1.28</td>
+<td style="text-align:right">333%</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">27</td>
+<td style="text-align:right">+25.8%</td>
+</tr>
+<tr>
+<td>B1-ML</td>
+<td>同 B1，只把訊號換成 ML（D-067 的第四格）</td>
+<td style="text-align:right">+17.05%</td>
+<td style="text-align:right">-30.6%</td>
+<td style="text-align:right">0.89</td>
+<td style="text-align:right">580%</td>
+<td style="text-align:right">92%</td>
+<td style="text-align:right">28</td>
+<td style="text-align:right">+19.5%</td>
+</tr>
+<tr>
+<td>A</td>
+<td>小型飆股：排除市值前 100 大＋營收成長</td>
+<td style="text-align:right">+15.90%</td>
+<td style="text-align:right">-38.5%</td>
+<td style="text-align:right">0.68</td>
+<td style="text-align:right">936%</td>
+<td style="text-align:right">94%</td>
+<td style="text-align:right">20</td>
+<td style="text-align:right">+20.3%</td>
+</tr>
+<tr>
+<td><strong>C 軌</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>C3</td>
+<td>投信/外資/融資/券資比＋52 週高點與量能</td>
+<td style="text-align:right">+21.58%</td>
+<td style="text-align:right">-29.7%</td>
+<td style="text-align:right">1.00</td>
+<td style="text-align:right">1015%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">21</td>
+<td style="text-align:right">+24.6%</td>
+</tr>
+<tr>
+<td>C1</td>
+<td>52 週高點×動能×量能×相對強弱（不排大型股、無獲利門檻）</td>
+<td style="text-align:right">+26.74%</td>
+<td style="text-align:right">-36.7%</td>
+<td style="text-align:right">0.93</td>
+<td style="text-align:right">1035%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+32.7%</td>
+</tr>
+<tr>
+<td>C4</td>
+<td>同 C1，加波動率縮放 overlay（Barroso–Santa-Clara）</td>
+<td style="text-align:right">+18.47%</td>
+<td style="text-align:right">-34.1%</td>
+<td style="text-align:right">0.83</td>
+<td style="text-align:right">813%</td>
+<td style="text-align:right">74%</td>
+<td style="text-align:right">22</td>
+<td style="text-align:right">+21.7%</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>W 底事件閘門＋固定格位</td>
+<td style="text-align:right">+10.15%</td>
+<td style="text-align:right">-48.7%</td>
+<td style="text-align:right">0.51</td>
+<td style="text-align:right">1090%</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">23</td>
+<td style="text-align:right">+13.8%</td>
+</tr>
+<tr>
+<td>C2b</td>
+<td>箱型突破事件＋固定格位（多數日子低曝險）</td>
+<td style="text-align:right">+0.33%</td>
+<td style="text-align:right">-5.5%</td>
+<td style="text-align:right">0.11</td>
+<td style="text-align:right">197%</td>
+<td style="text-align:right">17%</td>
+<td style="text-align:right">5</td>
+<td style="text-align:right">+1.0%</td>
+</tr>
+<tr>
+<td>C2c</td>
+<td>旗形有撐事件＋固定格位（多數日子空手）</td>
+<td style="text-align:right">-0.19%</td>
+<td style="text-align:right">-6.1%</td>
+<td style="text-align:right">-0.03</td>
+<td style="text-align:right">66%</td>
+<td style="text-align:right">7%</td>
+<td style="text-align:right">2</td>
+<td style="text-align:right">+0.2%</td>
+</tr>
+<tr>
+<td><strong>M 系列</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>M4</td>
+<td>ML 池 × C3 籌碼排序</td>
+<td style="text-align:right">+21.28%</td>
+<td style="text-align:right">-36.1%</td>
+<td style="text-align:right">0.97</td>
+<td style="text-align:right">997%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">22</td>
+<td style="text-align:right">+24.6%</td>
+</tr>
+<tr>
+<td>M6</td>
+<td>M1 ＋ 波動率縮放</td>
+<td style="text-align:right">+22.27%</td>
+<td style="text-align:right">-36.8%</td>
+<td style="text-align:right">0.96</td>
+<td style="text-align:right">854%</td>
+<td style="text-align:right">79%</td>
+<td style="text-align:right">23</td>
+<td style="text-align:right">+25.8%</td>
+</tr>
+<tr>
+<td>M1</td>
+<td>ML 前 30% 當池子 × C1 技術排序</td>
+<td style="text-align:right">+24.81%</td>
+<td style="text-align:right">-41.6%</td>
+<td style="text-align:right">0.93</td>
+<td style="text-align:right">1027%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+30.0%</td>
+</tr>
+<tr>
+<td>M5</td>
+<td>ML 池 × B1 大型股市值加權</td>
+<td style="text-align:right">+15.83%</td>
+<td style="text-align:right">-31.0%</td>
+<td style="text-align:right">0.84</td>
+<td style="text-align:right">579%</td>
+<td style="text-align:right">93%</td>
+<td style="text-align:right">27</td>
+<td style="text-align:right">+18.3%</td>
+</tr>
+<tr>
+<td>M2</td>
+<td>ML 池 × 回踩有撐才進場（固定格位）</td>
+<td style="text-align:right">+0.20%</td>
+<td style="text-align:right">-4.9%</td>
+<td style="text-align:right">0.10</td>
+<td style="text-align:right">29%</td>
+<td style="text-align:right">3%</td>
+<td style="text-align:right">1</td>
+<td style="text-align:right">+5.4%</td>
+</tr>
+<tr>
+<td>M3</td>
+<td><strong>隔離格</strong>：同 M2 但池子改用動能</td>
+<td style="text-align:right">-0.33%</td>
+<td style="text-align:right">-6.0%</td>
+<td style="text-align:right">-0.09</td>
+<td style="text-align:right">35%</td>
+<td style="text-align:right">3%</td>
+<td style="text-align:right">1</td>
+<td style="text-align:right">+1.4%</td>
+</tr>
+<tr>
+<td><strong>G 濾網矩陣</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>G5</td>
+<td>ML ＋ 大型股宇宙</td>
+<td style="text-align:right">+18.44%</td>
+<td style="text-align:right">-33.5%</td>
+<td style="text-align:right">0.91</td>
+<td style="text-align:right">794%</td>
+<td style="text-align:right">95%</td>
+<td style="text-align:right">20</td>
+<td style="text-align:right">+21.2%</td>
+</tr>
+<tr>
+<td>G3</td>
+<td>ML ＋ 波動率縮放</td>
+<td style="text-align:right">+12.31%</td>
+<td style="text-align:right">-38.1%</td>
+<td style="text-align:right">0.62</td>
+<td style="text-align:right">760%</td>
+<td style="text-align:right">74%</td>
+<td style="text-align:right">29</td>
+<td style="text-align:right">+15.1%</td>
+</tr>
+<tr>
+<td>G4</td>
+<td>ML ＋ 分數 EMA 平滑</td>
+<td style="text-align:right">+13.14%</td>
+<td style="text-align:right">-36.2%</td>
+<td style="text-align:right">0.61</td>
+<td style="text-align:right">946%</td>
+<td style="text-align:right">96%</td>
+<td style="text-align:right">29</td>
+<td style="text-align:right">+16.9%</td>
+</tr>
+<tr>
+<td>G1</td>
+<td>ML ＋ 營收成長濾網</td>
+<td style="text-align:right">+12.60%</td>
+<td style="text-align:right">-47.1%</td>
+<td style="text-align:right">0.57</td>
+<td style="text-align:right">957%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">28</td>
+<td style="text-align:right">+17.2%</td>
+</tr>
+<tr>
+<td>G2</td>
+<td>ML ＋ 低波動池</td>
+<td style="text-align:right">+8.32%</td>
+<td style="text-align:right">-28.1%</td>
+<td style="text-align:right">0.57</td>
+<td style="text-align:right">935%</td>
+<td style="text-align:right">91%</td>
+<td style="text-align:right">26</td>
+<td style="text-align:right">+9.9%</td>
+</tr>
+<tr>
+<td>G6</td>
+<td>ML ＋ 型態進場閘門</td>
+<td style="text-align:right">+0.26%</td>
+<td style="text-align:right">-6.4%</td>
+<td style="text-align:right">0.08</td>
+<td style="text-align:right">80%</td>
+<td style="text-align:right">8%</td>
+<td style="text-align:right">3</td>
+<td style="text-align:right">+1.3%</td>
+</tr>
+<tr>
+<td>GALL</td>
+<td>六個濾網全上</td>
+<td style="text-align:right">+0.00%</td>
+<td style="text-align:right">0.0%</td>
+<td style="text-align:right">0.00</td>
+<td style="text-align:right">0%</td>
+<td style="text-align:right">0%</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">—</td>
+</tr>
+<tr>
+<td><strong>MG 系列</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>MG5</td>
+<td>M 結構 ＋ 大型股宇宙</td>
+<td style="text-align:right">+20.97%</td>
+<td style="text-align:right">-35.8%</td>
+<td style="text-align:right">1.03</td>
+<td style="text-align:right">720%</td>
+<td style="text-align:right">95%</td>
+<td style="text-align:right">20</td>
+<td style="text-align:right">+23.7%</td>
+</tr>
+<tr>
+<td>MG3</td>
+<td>M 結構 ＋ 波動率縮放</td>
+<td style="text-align:right">+22.27%</td>
+<td style="text-align:right">-36.8%</td>
+<td style="text-align:right">0.96</td>
+<td style="text-align:right">854%</td>
+<td style="text-align:right">79%</td>
+<td style="text-align:right">23</td>
+<td style="text-align:right">+25.8%</td>
+</tr>
+<tr>
+<td>MG4</td>
+<td>M 結構 ＋ 分數 EMA 平滑</td>
+<td style="text-align:right">+23.73%</td>
+<td style="text-align:right">-43.3%</td>
+<td style="text-align:right">0.91</td>
+<td style="text-align:right">1006%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+28.4%</td>
+</tr>
+<tr>
+<td>MG1</td>
+<td>M 結構 ＋ 營收成長濾網</td>
+<td style="text-align:right">+18.35%</td>
+<td style="text-align:right">-41.8%</td>
+<td style="text-align:right">0.77</td>
+<td style="text-align:right">972%</td>
+<td style="text-align:right">98%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+22.9%</td>
+</tr>
+<tr>
+<td>MG2</td>
+<td>M 結構 ＋ 低波動第二層池</td>
+<td style="text-align:right">+13.35%</td>
+<td style="text-align:right">-41.0%</td>
+<td style="text-align:right">0.73</td>
+<td style="text-align:right">949%</td>
+<td style="text-align:right">96%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+15.8%</td>
+</tr>
+<tr>
+<td><strong>F／R 系列</strong></td>
+<td></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>F1</td>
+<td>營收驚奇分數當池子（前 30%）× C1 技術排序</td>
+<td style="text-align:right">+39.34%</td>
+<td style="text-align:right">-41.7%</td>
+<td style="text-align:right">1.24</td>
+<td style="text-align:right">983%</td>
+<td style="text-align:right">95%</td>
+<td style="text-align:right">25</td>
+<td style="text-align:right">+46.1%</td>
+</tr>
+<tr>
+<td>F3</td>
+<td><strong>更嚴對照</strong>：同 F1 但池子改用 <code>high_52w</code>（單因子 IC 就贏過模型）</td>
+<td style="text-align:right">+32.55%</td>
+<td style="text-align:right">-35.2%</td>
+<td style="text-align:right">1.08</td>
+<td style="text-align:right">1005%</td>
+<td style="text-align:right">96%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+38.9%</td>
+</tr>
+<tr>
+<td>R1</td>
+<td>C1 ＋ 剔除預測未來 60 日回撤最深的 10%</td>
+<td style="text-align:right">+29.49%</td>
+<td style="text-align:right">-33.5%</td>
+<td style="text-align:right">1.07</td>
+<td style="text-align:right">1009%</td>
+<td style="text-align:right">95%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+34.6%</td>
+</tr>
+<tr>
+<td>F2</td>
+<td><strong>隔離格</strong>：同 F1 但池子改用 <code>mom_60d</code>（D-081 的判定依據）</td>
+<td style="text-align:right">+30.64%</td>
+<td style="text-align:right">-40.2%</td>
+<td style="text-align:right">0.99</td>
+<td style="text-align:right">991%</td>
+<td style="text-align:right">97%</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">+37.7%</td>
+</tr>
+<tr>
+<td>R2</td>
+<td><strong>隔離格</strong>：同 R1 但閘門改用 <code>vol_20d</code>（D-080 的判定依據）</td>
+<td style="text-align:right">+22.34%</td>
+<td style="text-align:right">-29.9%</td>
+<td style="text-align:right">0.90</td>
+<td style="text-align:right">1035%</td>
+<td style="text-align:right">96%</td>
+<td style="text-align:right">23</td>
+<td style="text-align:right">+26.8%</td>
+</tr>
+</tbody>
+</table></div>
+<h2>歸因邊（月度區塊標準誤）</h2>
+<p>每條<strong>只換一件事</strong>，其餘逐字相同。日報酬高度自相關（持股期 20 個交易日），
+把每日配對差當獨立樣本會把顯著性高估約 4.5 倍，故一律用月度區塊 SE。</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>邊</th>
+<th>只換了什麼</th>
+<th style="text-align:right">ΔCAGR</th>
+<th style="text-align:right">ΔMDD</th>
+<th style="text-align:right">ΔSharpe</th>
+<th style="text-align:right">t</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>訊號（小型等權）= X1 − L0-new</td>
+<td>只換訊號，其餘逐字同</td>
+<td style="text-align:right">-1.29%</td>
+<td style="text-align:right">+12.35%</td>
+<td style="text-align:right">+0.14</td>
+<td style="text-align:right">-0.33</td>
+</tr>
+<tr>
+<td>架構 = B1-ML − L0-new</td>
+<td>訊號固定為 ML，只換宇宙與加權</td>
+<td style="text-align:right">+3.40%</td>
+<td style="text-align:right">+15.54%</td>
+<td style="text-align:right">+0.31</td>
+<td style="text-align:right">+0.04</td>
+</tr>
+<tr>
+<td>訊號（大型加權）= B1 − B1-ML</td>
+<td>架構固定，只換訊號</td>
+<td style="text-align:right">+6.63%</td>
+<td style="text-align:right">+6.62%</td>
+<td style="text-align:right">+0.38</td>
+<td style="text-align:right">+1.80</td>
+</tr>
+<tr>
+<td>因子選擇 = C1 − X1</td>
+<td>都是四因子，但選的因子完全不同</td>
+<td style="text-align:right">+14.37%</td>
+<td style="text-align:right">-2.88%</td>
+<td style="text-align:right">+0.20</td>
+<td style="text-align:right">+1.21</td>
+</tr>
+<tr>
+<td>風險管理 = C4 − C1</td>
+<td>逐字相同，只多波動率縮放 overlay</td>
+<td style="text-align:right">-8.27%</td>
+<td style="text-align:right">+2.54%</td>
+<td style="text-align:right">-0.10</td>
+<td style="text-align:right">-1.84</td>
+</tr>
+<tr>
+<td>ML 當池子 = M2 − M3</td>
+<td>逐字相同，只把閘門從 ML 換成動能</td>
+<td style="text-align:right">+0.53%</td>
+<td style="text-align:right">+1.12%</td>
+<td style="text-align:right">+0.19</td>
+<td style="text-align:right">+0.29</td>
+</tr>
+<tr>
+<td>濾網 G1 營收 = G1 − L0-new</td>
+<td>只加營收成長濾網</td>
+<td style="text-align:right">-1.05%</td>
+<td style="text-align:right">-0.93%</td>
+<td style="text-align:right">-0.01</td>
+<td style="text-align:right">-0.23</td>
+</tr>
+<tr>
+<td>濾網 G2 低波動 = G2 − L0-new</td>
+<td>只加低波動池</td>
+<td style="text-align:right">-5.32%</td>
+<td style="text-align:right">+18.03%</td>
+<td style="text-align:right">-0.01</td>
+<td style="text-align:right">-0.64</td>
+</tr>
+<tr>
+<td>濾網 G3 波動縮放 = G3 − L0-new</td>
+<td>只加波動率縮放 overlay</td>
+<td style="text-align:right">-1.34%</td>
+<td style="text-align:right">+8.00%</td>
+<td style="text-align:right">+0.04</td>
+<td style="text-align:right">-0.61</td>
+</tr>
+<tr>
+<td>濾網 G4 EMA = G4 − L0-new</td>
+<td>只加分數 EMA 平滑</td>
+<td style="text-align:right">-0.51%</td>
+<td style="text-align:right">+9.88%</td>
+<td style="text-align:right">+0.03</td>
+<td style="text-align:right">-0.24</td>
+</tr>
+<tr>
+<td>濾網 G5 大型股 = G5 − L0-new</td>
+<td>只換成大型股宇宙</td>
+<td style="text-align:right">+4.79%</td>
+<td style="text-align:right">+12.66%</td>
+<td style="text-align:right">+0.33</td>
+<td style="text-align:right">+0.16</td>
+</tr>
+<tr>
+<td>濾網 G6 型態閘門 = G6 − L0-new</td>
+<td>只加型態進場閘門＋固定格位</td>
+<td style="text-align:right">-13.39%</td>
+<td style="text-align:right">+39.70%</td>
+<td style="text-align:right">-0.50</td>
+<td style="text-align:right">-1.09</td>
+</tr>
+<tr>
+<td>全部一起 = GALL − L0-new</td>
+<td>六個濾網全上（<strong>非各邊際效果之和</strong>）</td>
+<td style="text-align:right">-13.65%</td>
+<td style="text-align:right">+46.12%</td>
+<td style="text-align:right">-0.58</td>
+<td style="text-align:right">-1.10</td>
+</tr>
+<tr>
+<td>營收驚奇當池子 = F1 − F2</td>
+<td>逐字相同，只把池子從營收驚奇分數換成動能</td>
+<td style="text-align:right">+8.70%</td>
+<td style="text-align:right">-1.44%</td>
+<td style="text-align:right">+0.25</td>
+<td style="text-align:right">+0.95</td>
+</tr>
+<tr>
+<td>同上，更嚴對照 = F1 − F3</td>
+<td>池子改用 <code>high_52w</code>——它單因子就贏過模型</td>
+<td style="text-align:right">+6.80%</td>
+<td style="text-align:right">-6.46%</td>
+<td style="text-align:right">+0.16</td>
+<td style="text-align:right">+0.91</td>
+</tr>
+<tr>
+<td>換預測標的 = F1 − M1</td>
+<td><strong>同時換兩件事</strong>（預測什麼＋模型好不好），僅供參考</td>
+<td style="text-align:right">+14.54%</td>
+<td style="text-align:right">-0.08%</td>
+<td style="text-align:right">+0.32</td>
+<td style="text-align:right">+1.57</td>
+</tr>
+<tr>
+<td>回撤閘門 = R1 − R2</td>
+<td>逐字相同，只把閘門從回撤分數換成 <code>vol_20d</code></td>
+<td style="text-align:right">+7.15%</td>
+<td style="text-align:right">-3.55%</td>
+<td style="text-align:right">+0.18</td>
+<td style="text-align:right">+1.29</td>
+</tr>
+<tr>
+<td>回撤閘門 vs 無閘門 = R1 − C1</td>
+<td>只多一道閘門；但看不出它比低波動好在哪</td>
+<td style="text-align:right">+2.75%</td>
+<td style="text-align:right">+3.20%</td>
+<td style="text-align:right">+0.15</td>
+<td style="text-align:right">+0.21</td>
+</tr>
+<tr>
+<td>低波動閘門 vs 無閘門 = R2 − C1</td>
+<td>同上，閘門是最平凡的替代品</td>
+<td style="text-align:right">-4.40%</td>
+<td style="text-align:right">+6.75%</td>
+<td style="text-align:right">-0.03</td>
+<td style="text-align:right">-0.70</td>
+</tr>
+</tbody>
+</table></div>
+<h2>已知限制</h2>
+<ul>
+<li><strong>沒有任何資金水位是在測「持有恰好 N 檔」</strong>：80M 下賣單被參與率上限擋住 379~741 次、實際持股高於設定（設 20 檔、實際中位 32 檔）；10M 下因整張捨去而持有不足、曝險僅 61~87%。</li>
+<li><strong>低曝險策略不能只看 CAGR</strong>：事件型策略在無訊號的月份空手，CAGR 天然偏低，那是設計不是缺陷。要看「有部位時年化」與「曝險」。</li>
+<li><strong>M2／M3 與 GALL 的曝險接近 0，判定無效</strong>（D-076）：稀疏事件閘門與其他閘門相乘時可用樣本以乘法衰減。結果保留為該教訓的證據。</li>
+</ul>
+<p>本輪修掉的資料缺陷：0050 的 1:4 分割未還原（單日 −74.8% → +0.87%）；分割與股利混成單一因子（0050 不含息 −8.66% → +35.55%）；<code>corporate_events</code> 對 380 檔 ETF 只涵蓋 16 檔，「含息」靜默退化成不含息；2023-02~06 價格缺腿與因子宇宙砍半。</p>
+<p>研究用途，非投資建議。尚無任何策略通過晉升判定，也未部署於實盤。</p>
+</article><div class='foot'>來源 <code>docs/reports/backtest-results.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

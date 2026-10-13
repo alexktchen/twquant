@@ -1,0 +1,187 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>事件窗「知情者痕跡」資料盤點（2026-09-28）</title><style>
+:root{--ink:#1f2328;--muted:#656d76;--line:#d0d7de;--bg:#ffffff;--soft:#f6f8fa;--up:#c62828;--down:#2e7d32;--accent:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--soft);color:var(--ink);font:16px/1.7 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+article{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:28px 32px}
+h1{font-size:1.65rem;line-height:1.35;margin:0 0 .6em}
+h2{font-size:1.25rem;margin:1.8em 0 .6em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+h3,h4{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{color:var(--ink)}
+blockquote{margin:1em 0;padding:.6em 1em;background:#fff8e6;border-left:4px solid var(--accent);color:#5b3a00}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--soft);padding:.1em .35em;border-radius:4px}
+.scroll{overflow-x:auto;margin:1em 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{border:1px solid var(--line);padding:.42em .6em;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.pos{color:var(--up)} td.neg{color:var(--down)}
+tr:hover td{background:#fbfbfb}
+nav.top{margin-bottom:14px;font-size:.92rem}
+nav.top a{color:var(--muted);text-decoration:none}
+.foot{margin-top:18px;color:var(--muted);font-size:.85rem}
+ul.index{list-style:none;padding:0}
+ul.index li{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:10px 0}
+ul.index a{font-weight:600;color:var(--ink);text-decoration:none}
+ul.index p{margin:.3em 0 0;color:var(--muted);font-size:.9rem}
+</style></head><body><div class='wrap'><nav class='top'><a href='index.html'>← 報告目錄</a></nav><article><h1>事件窗「知情者痕跡」資料盤點（2026-09-28）</h1>
+<p>目的：判斷「事件前知情者痕跡」研究線能否用 2020 年起的歷史資料做。
+只盤點，沒有算任何 IC 或報酬。探測腳本：<code>scripts/probe/probe_event_sources.py</code>。</p>
+<h2>一、已經在研究庫（PG <code>serving.*</code>），不用建管線</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>資料</th>
+<th>表</th>
+<th>起訖</th>
+<th>檔數</th>
+<th>備註</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>注意股</td>
+<td><code>attention_stocks</code></td>
+<td>2014-01-02 ~ 2026-09-24</td>
+<td class="num">3,578</td>
+<td>含觸發條款 <code>clauses</code></td>
+</tr>
+<tr>
+<td>處置股</td>
+<td><code>disposition_stocks</code></td>
+<td>2013-12-16 ~ 2026-09-24</td>
+<td class="num">1,831</td>
+<td>含起訖、等級、分盤分鐘</td>
+</tr>
+<tr>
+<td>當沖</td>
+<td><code>daytrade_daily</code></td>
+<td>2014-01-06 ~ 2026-09-24</td>
+<td class="num">1,961</td>
+<td>當沖股數與金額，可算當沖比</td>
+</tr>
+<tr>
+<td>借券賣出<strong>流量</strong></td>
+<td><code>sbl_short_daily</code></td>
+<td>2014-01-02 ~ 2026-09-24</td>
+<td class="num">1,998</td>
+<td><code>sbl_sell</code> 是每日流量，文獻用的就是這個；現有因子只用餘額</td>
+</tr>
+<tr>
+<td>融資融券</td>
+<td><code>margin_daily</code></td>
+<td>2005-01-03 ~ 2026-09-23</td>
+<td class="num">2,379</td>
+<td>已有 <code>chip.margin_velocity_5d</code>、<code>chip.short_margin_ratio</code></td>
+</tr>
+<tr>
+<td>券商分點</td>
+<td><code>broker_trades</code></td>
+<td>2022-01-03 ~ 2026-09-24</td>
+<td class="num">1,983</td>
+<td>三支分點因子已驗證輸給 <code>trust_streak</code></td>
+</tr>
+<tr>
+<td>月營收</td>
+<td><code>monthly_revenue</code></td>
+<td>2015-06 ~ 2026-08</td>
+<td class="num">1,857</td>
+<td><strong>公告時間全部是估計值</strong>（<code>available_at_estimated</code> 全為 true），見三</td>
+</tr>
+</tbody>
+</table></div>
+<h2>二、可以免費回補到 2020，需要新建管線</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>資料</th>
+<th>來源</th>
+<th>2020 驗證</th>
+<th>內容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>重大訊息</strong></td>
+<td>MOPS 舊站 <code>ajax_t05st02</code>（<code>step=0, firstin=true, TYPEK=all</code>，逐日）</td>
+<td>2020-03-05：311 則</td>
+<td>發言日期、<strong>時間到秒</strong>、代號、主旨。全文需逐則再抓</td>
+</tr>
+<tr>
+<td><strong>法說會</strong></td>
+<td>MOPS 舊站 <code>ajax_t100sb02_1</code>（逐月、上市/上櫃）</td>
+<td>2020-03：125 場</td>
+<td>召開日期、時間、地點、摘要。<strong>只有召開日，沒有公告日</strong>，公告時點要從重大訊息主旨對</td>
+</tr>
+<tr>
+<td><strong>權證日行情</strong>（上市）</td>
+<td>TWSE <code>MI_INDEX?type=0999</code></td>
+<td>2020-03-05：12,341 檔</td>
+<td>成交量值、收盤、最後買賣價、標的代號、標的收盤</td>
+</tr>
+<tr>
+<td><strong>權證日行情</strong>（上櫃）</td>
+<td>TPEx <code>stk_wn1430_result.php</code></td>
+<td>2020-03-05：4,952 檔</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>借券成交明細</td>
+<td>FinMind <code>TaiwanStockSecuritiesLending</code>（免費層可用）</td>
+<td>2330 在 2020-03 有 67 筆</td>
+<td>費率、期限；補強 <code>sbl_short_daily</code> 用，非必要</td>
+</tr>
+</tbody>
+</table></div>
+<p>權證行情可以直接算<strong>認購/認售成交值比</strong>（認售權證代號以 P 結尾），不需要履約價。</p>
+<h2>三、拿不到或只有部分</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>資料</th>
+<th>狀況</th>
+<th>影響</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>權證條款歷史</strong>（履約價、行使比例、到期日）</td>
+<td>TWSE <code>t187ap37_L</code>／TPEx <code>t187ap37_O</code> 只給<strong>目前存續中</strong>的 41,636 檔；已到期權證的條款找不到免費歷史來源</td>
+<td>論文用的 <strong>IV 偏斜算不出來</strong>。替代方案：認購/認售成交值比、權證成交值相對標的成交值，或從今天起每日存條款、往後累積</td>
+</tr>
+<tr>
+<td><strong>集保股權分散表歷史</strong>（千張大戶）</td>
+<td>TDCC 互動查詢站只給近 <strong>51 週</strong>（2025-10-03 起）；FinMind <code>TaiwanStockHoldingSharesPer</code> 要付費會員；研究庫只有 4 週</td>
+<td>2020 起的千張大戶<strong>免費拿不到</strong>。要嘛付費 FinMind，要嘛從現在起每週累積</td>
+</tr>
+<tr>
+<td><strong>內部人持股轉讓事前申報歷史</strong></td>
+<td>OpenAPI <code>t187ap12_L</code>／<code>t187ap12_O</code> 只有當日；MOPS 舊站 <code>t56sb12</code> 已停用；新站未解出查詢方式</td>
+<td>歷史<strong>未確認</strong>。重大訊息裡有部分內部人相關公告可替代，但不完整</td>
+</tr>
+<tr>
+<td><strong>月營收實際公告時間</strong></td>
+<td>MOPS <code>t05st10_ifrs</code> 沒有時間戳；FinMind <code>create_time</code> 為空</td>
+<td>「公告越早越是好消息」這個特徵做不出來；事件窗只能用法定期限（每月 10 日）近似</td>
+</tr>
+<tr>
+<td>新聞</td>
+<td>FinMind <code>TaiwanStockNews</code> 要逐日逐檔抓，量太大</td>
+<td>本輪不用</td>
+</tr>
+</tbody>
+</table></div>
+<h2>四、對研究設計的意義</h2>
+<ol>
+<li><strong>可以直接開始、不用新管線的</strong>：注意股、處置股、當沖比、借券賣出流量。四種都已經有 2014 年起的資料，研究線的第一步可以先用它們做。</li>
+<li><strong>事件行事曆可以建</strong>：重大訊息（時間到秒）＋ 法說會 ＋ 月營收法定期限 ＋ 已有的除權息（<code>corporate_events</code>）。「只在事件前打分」的前提成立。</li>
+<li><strong>論文裡最乾淨的兩個訊號，免費資料不夠用</strong>：
+<ul>
+<li>權證 IV 偏斜：沒有條款歷史，只能用成交比例當粗略替代，效果不保證接近論文。</li>
+<li>千張大戶：歷史只有 51 週。
+付費 FinMind 可以補千張大戶，權證條款的歷史則還沒找到任何來源。</li>
+</ul>
+</li>
+<li>重大訊息約每天 300 則、2020 起約 1,600 個交易日，總共約 50 萬則主旨。只抓主旨、不抓全文的話，回補的量是可以接受的；抓全文要再估一次 MOPS 的頻率限制。</li>
+</ol>
+</article><div class='foot'>來源 <code>docs/reports/event-signal-data-inventory-2026-09-28.md</code>（版控的 markdown 原文）；轉檔於 2026-10-13 21:35。</div></div></body></html>

@@ -29,6 +29,7 @@ test('公開的研究報告（/reports/）：每頁都不給搜尋引擎收錄�
     const html = readFileSync(new URL(f, dir), 'utf8')
     assert.ok(html.includes('<meta name="robots" content="noindex,nofollow">'), `${f} 要有 noindex`)
     assert.ok(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(html), `${f} 不能有 email`)
-    assert.ok(!html.includes('/api/'), `${f} 不能連到要登入的 /api`)
+    // 只擋連到本站要登入的 /api（報告裡提到別人網站的 …/api/… 網址不算）
+    assert.ok(!/["'(]\/api\/|twquant\.pages\.dev\/api/.test(html), `${f} 不能連到要登入的 /api`)
   }
 })
