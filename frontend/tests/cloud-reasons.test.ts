@@ -14,10 +14,10 @@ test('T-360：名單那一行只放加分的、最多兩個；沒有加分的就
   assert.equal(whyLine(undefined), null)
 })
 
-test('T-360：個股頁的標記——加分＋、扣分－、前提・', () => {
-  assert.deepEqual(mark(1), { sym: '＋', label: '加分', tone: 'plus' })
-  assert.deepEqual(mark(-1), { sym: '－', label: '扣分', tone: 'minus' })
-  assert.deepEqual(mark(0), { sym: '・', label: '前提', tone: 'base' })
+test('T-360：個股頁的標記——正向＋、負向－、篩選門檻・', () => {
+  assert.deepEqual(mark(1), { sym: '＋', label: '正向因子', tone: 'plus' })
+  assert.deepEqual(mark(-1), { sym: '－', label: '負向因子', tone: 'minus' })
+  assert.deepEqual(mark(0), { sym: '・', label: '篩選門檻', tone: 'base' })
 })
 
 function fakeDb(results: (() => Promise<unknown[]>)[], calls: string[]) {

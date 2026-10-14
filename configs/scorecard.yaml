@@ -11,6 +11,7 @@ lot_size: 1
 max_participation: 0.05
 warmup_days: 60 # 開戶日前多讀的行情（日曆日）：前收與 20 日成交額中位數要用
 benchmark: "0050" # 同期買進 0050 抱著（含息）；網站顯示（D-176 修訂三）。雲端缺的行情、除權息由 twquant benchmark-fill 補
+extra_benchmarks: ["00981A"] # D-176 修訂四（使用者：「績效可以加一條00981A嗎」）：主動式 ETF 對照，同樣買進抱著、含息；只多比較對象、不改規則
 live_cutoff: "09:00" # 名單在下一個交易日開盤前寫進資料庫＝即時公布；之後才寫的＝事後補
 hold_sessions: 20
 big_loss: -0.15 # 逐筆「虧超過 15%」的比例

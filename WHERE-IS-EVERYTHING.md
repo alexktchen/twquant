@@ -26,7 +26,7 @@
   重跑某天得到一樣的名單時 `daily_picks.created_at` 不會被改寫（那是「即時公布」的證據）。規則寫死在 `configs/scorecard.yaml`（**事前登記，不得改**）。
   「即時」＝名單在下一交易日 09:00 前寫入（看 `daily_picks.created_at`），之前回頭補的標「事後補」。
   逐筆統計同一檔同時只有一筆（還抱著又進名單不重複算，D-176 修訂二，`drop_repeats`）。網站 API `/api/scorecard?line=`、`/api/scorecard/trades?line=`。
-  **0050 對照放回網站**（D-176 修訂三／T-357，2026-10-14）：帳戶摘要下「同期買 0050 抱著（含息）」＋淨值圖灰線。雲端缺的 0050 行情與除權息由
+  **0050 對照放回網站**（D-176 修訂三／T-357，2026-10-14）：帳戶摘要下「同期買 0050 抱著（含息）」＋淨值圖灰線；**另有 00981A**（D-176 修訂四／T-361，`extra_benchmarks`，青色線）。雲端缺的 0050 行情與除權息由
   **`benchmark-fill`** 從 FinMind 補（只補缺的、已有的比對不一致就停、只補到全市場最新行情日）：每日 pipeline「對照行情」步驟（名單績效之前）、
   `scorecard` 工作流程也先跑它；手動 `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant benchmark-fill`。補不起來時頁面寫「0050 對照算不出來：原因」。
   已知：`corporate_events` 其他股票仍沒每日更新（T-333），09-07 後的除息會被算成下跌（0050 自己的由 benchmark-fill 補）。

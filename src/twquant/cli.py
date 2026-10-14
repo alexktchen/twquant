@@ -3327,7 +3327,8 @@ def _group_flow_check() -> str:
 
 
 def _benchmark_fill(day: dt.date) -> str:
-    """名單績效對照（scorecard.yaml 的 benchmark）從開戶日前 warmup_days 起到 `day`：FinMind 行情＋除權息，缺的才補。"""
+    """名單績效對照（scorecard.yaml 的 benchmark 與 extra_benchmarks）從開戶日前 warmup_days 起到 `day`：
+    FinMind 行情＋除權息，缺的才補。一檔補不起來不擋其他檔，最後照實 raise。"""
     import json
     import os
 
@@ -3345,12 +3346,12 @@ def _benchmark_fill(day: dt.date) -> str:
     from twquant.reporting.scorecard import ScorecardConfig
 
     cfg = load_config(_CONFIG_DIR / "scorecard.yaml", ScorecardConfig)
-    code = cfg.benchmark
+    codes = [cfg.benchmark, *cfg.extra_benchmarks]
     lo = cfg.start - dt.timedelta(days=cfg.warmup_days)
     client = HttpClient(source="finmind", rate=_load_system().source_rates["finmind"], timeout=60.0)
     token = os.environ.get("FINMIND_TOKEN", "")
 
-    def rows(dataset: str) -> list[dict[str, Any]]:
+    def rows(dataset: str, code: str) -> list[dict[str, Any]]:
         params = {
             "dataset": dataset,
             "data_id": code,
@@ -3370,21 +3371,37 @@ def _benchmark_fill(day: dt.date) -> str:
 
     scfg = _load_serving()
     conn = store.connect(scfg)
+    done: list[str] = []
+    failed: list[str] = []
     try:
-        latest = market_latest(conn, scfg.pg_schema, code)
-        if latest is None:
-            raise DataError("prices_daily", None, "PG 沒有任何行情，不補對照")
-        upto = min(day, latest)  # 全市場還沒有的日子不補，見 benchmark_fill 模組說明
-        fm_prices, fm_dividends = rows("TaiwanStockPrice"), rows(DIVIDEND_RESULT_DATASET)
-        pg_prices, pg_events = read_existing(conn, scfg.pg_schema, code, lo, upto)
-        plan = plan_fill(code, upto, fm_prices, fm_dividends, pg_prices, pg_events)
-        write_fill(conn, scfg.pg_schema, plan)
+        for code in codes:
+            try:
+                latest = market_latest(conn, scfg.pg_schema, code)
+                if latest is None:
+                    raise DataError("prices_daily", None, "PG 沒有任何行情，不補對照")
+                upto = min(day, latest)  # 全市場還沒有的日子不補，見 benchmark_fill 模組說明
+                fm_prices = rows("TaiwanStockPrice", code)
+                fm_dividends = rows(DIVIDEND_RESULT_DATASET, code)
+                pg_prices, pg_events = read_existing(conn, scfg.pg_schema, code, lo, upto)
+                plan = plan_fill(code, upto, fm_prices, fm_dividends, pg_prices, pg_events)
+                write_fill(conn, scfg.pg_schema, plan)
+            except DataError as exc:
+                conn.rollback()
+                failed.append(f"{code}：{exc}")
+                continue
+            done.append(
+                f"{code} {lo}～{upto}：補行情 {plan.prices.height} 天、除權息 {plan.events.height} 筆"
+                f"（已有 {plan.prices_checked} 天、{plan.events_checked} 筆，比對一致）"
+            )
     finally:
         conn.close()
-    return (
-        f"{code} {lo}～{upto}：補行情 {plan.prices.height} 天、除權息 {plan.events.height} 筆"
-        f"（已有 {plan.prices_checked} 天、{plan.events_checked} 筆，比對一致）"
-    )
+    if failed:
+        raise DataError(
+            "benchmark_fill",
+            day,
+            "；".join(failed) + ("；完成：" + "；".join(done) if done else ""),
+        )
+    return "；".join(done)
 
 
 def _pg_price_days(start: dt.date, end: dt.date) -> list[dt.date]:

@@ -833,12 +833,12 @@ function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked
   )
 }
 
-/** 為什麼選它（D-180）：模型最看重的理由（加分）、扣分最多的一項；大盤精選另列排序模型門檻（前提）。 */
+/** 選股依據（D-180）：模型貢獻度最高的因子（正向）、拖累最大的一項（負向）；大盤精選另列排序模型門檻。 */
 function Why({ reasons }: { reasons: Reason[] }) {
   return (
     <div className="cq-why-box">
       <h3>
-        為什麼選它<small>模型的判斷依據，不是買賣建議</small>
+        選股依據<small>依模型貢獻度排序・僅供參考，非投資建議</small>
       </h3>
       <ul>
         {reasons.map((r) => {

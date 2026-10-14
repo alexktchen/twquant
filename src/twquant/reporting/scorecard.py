@@ -42,6 +42,8 @@ class ScorecardConfig(BaseConfig):
     max_participation: float = Field(gt=0.0, le=1.0)
     warmup_days: int = Field(ge=1)  # 開戶日前多讀幾個日曆日的行情（前收、20 日成交額中位數）
     benchmark: str = Field(min_length=1)  # 對照：同期買進抱著（含息）
+    # D-176 修訂四：另外幾個對照（同樣買進抱著、含息），只多比較對象、不改規則；網站各畫一條線
+    extra_benchmarks: list[str] = Field(default_factory=list)
     live_cutoff: dt.time  # 名單在下一個交易日這個時刻之前寫好＝即時公布
     hold_sessions: int = Field(ge=1)  # 逐筆：買進後抱幾個交易日
     big_loss: float = Field(lt=0.0)  # 逐筆：虧超過這個比例算「大虧」
@@ -281,8 +283,12 @@ def line_payload(
     ledger: Sequence[Trade] = (),
     splits: Sequence[SplitAdjustment] = (),
     repeats: int = 0,
+    extras: Sequence[tuple[str, Sequence[float] | None, str | None]] = (),
 ) -> dict[str, Any]:
-    """一條線的名單績效 JSON（網站 `/api/scorecard?line=` 原樣回傳）。"""
+    """一條線的名單績效 JSON（網站 `/api/scorecard?line=` 原樣回傳）。
+
+    extras：另外的對照 (代號, 每天的價值, 算不出來的原因)，各自算整段與即時段的報酬、回撤。
+    """
     if not equity:
         raise ValueError(f"{code}：沒有淨值")
     values = [p.equity for p in equity]
@@ -295,6 +301,27 @@ def line_payload(
         live_part = nav_summary(values[i:], bench[i:] if bench is not None else None)
         live_part["start"] = equity[i].date.isoformat()
     whole = nav_summary(values, bench) | {"start": equity[0].date.isoformat()}
+    extra_out: list[dict[str, Any]] = []
+    for ecode, ev, eerr in extras:
+        if ev is not None and len(ev) != len(values):
+            raise ValueError(f"{code}：對照 {ecode} {len(ev)} 天、淨值 {len(values)} 天，沒對齊")
+        e_all = e_live = None
+        if ev is not None:
+            w = nav_summary(values, ev)
+            e_all = {"ret": w["bench_ret"], "mdd": w["bench_mdd"]}
+            if since is not None:
+                i = next(k for k, p in enumerate(equity) if p.date >= since)
+                lv = nav_summary(values[i:], ev[i:])
+                e_live = {"ret": lv["bench_ret"], "mdd": lv["bench_mdd"]}
+        extra_out.append(
+            {
+                "code": ecode,
+                "error": eerr,
+                "all": e_all,
+                "live": e_live,
+                "values": None if ev is None else [round(x, 2) for x in ev],
+            }
+        )
     last = equity[-1]
     return {
         "code": code,
@@ -308,6 +335,7 @@ def line_payload(
         "initial_capital": cfg.initial_capital,
         "live_since": _iso(since),
         "benchmark": {"code": cfg.benchmark, "error": bench_error},
+        "extra_benchmarks": extra_out,
         "nav": [
             {
                 "d": p.date.isoformat(),
@@ -419,6 +447,10 @@ def build_scorecards(
     divs = dividends_by_date(source, cfg.start, as_of)
     splits = splits_by_date(source, cfg.start, as_of)
     bench, bench_error = benchmark_values(source, cfg.benchmark, sessions, cfg.initial_capital)
+    extras = [
+        (code, *benchmark_values(source, code, sessions, cfg.initial_capital))
+        for code in cfg.extra_benchmarks
+    ]
     costs = {
         "commission": cost.commission_rate * cost.commission_discount,
         "tax": cost.tax_rate_sell,
@@ -478,6 +510,7 @@ def build_scorecards(
                 equity=res.equity,
                 bench=bench,
                 bench_error=bench_error,
+                extras=extras,
                 flags=flags,
                 gaps=[d for d in sessions if d not in flags],
                 holdings=res.final_holdings,

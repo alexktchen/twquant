@@ -52,6 +52,15 @@ export type AccountTrade = {
   ret: number | null
 }
 
+/** 另外的對照：同樣起始資金買進抱著（含息）每天的價值（對齊 nav）、整段與即時段的報酬回撤；算不出來 values／all 為 null、error 寫原因。 */
+export type ExtraBench = {
+  code: string
+  error: string | null
+  all: { ret: number; mdd: number } | null
+  live: { ret: number; mdd: number } | null
+  values: (number | null)[] | null
+}
+
 /** 淨值一天：d 日期、v 帳戶淨值、b 同期 0050（同樣起始資金）、x 持股比例。 */
 export type NavPoint = { d: string; v: number; b: number | null; x: number | null }
 
@@ -67,6 +76,8 @@ export type Scorecard = {
   initial_capital: number
   live_since: string | null
   benchmark: { code: string; error: string | null }
+  /** 另外的對照（D-176 修訂四，例：00981A）；舊資料沒有這欄 */
+  extra_benchmarks?: ExtraBench[]
   nav: NavPoint[]
   account: {
     all: NavSummary
@@ -115,6 +126,25 @@ export function navLines(nav: NavPoint[], liveSince: string | null): { backfill:
     if (b0 && p.b !== null) out.bench.push({ time: p.d, value: (p.b / b0 - 1) * 100 })
   }
   return out
+}
+
+/** 另外的對照畫成累積報酬 %：從帳戶第一天起算；第一天沒有值（雲端還沒補行情）→ 不畫，中間缺的日子跳過。 */
+export function extraLine(nav: NavPoint[], values: (number | null)[] | null): Pt[] {
+  const e0 = values?.[0]
+  if (!values || !e0 || values.length !== nav.length) return []
+  const out: Pt[] = []
+  nav.forEach((p, i) => {
+    const v = values[i]
+    if (v !== null) out.push({ time: p.d, value: (v / e0 - 1) * 100 })
+  })
+  return out
+}
+
+/** 某一天另外對照的累積報酬（小數）；算不出來 null。 */
+export function extraAt(values: (number | null)[] | null, i: number): number | null {
+  const e0 = values?.[0]
+  const v = values?.[i]
+  return values && e0 && v !== null && v !== undefined ? v / e0 - 1 : null
 }
 
 /** 明細那一列的大字：中文股名；資料庫查不到名字才退回代號（代號另外以小字列在下面）。 */
