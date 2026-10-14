@@ -1,0 +1,39 @@
+# D-178：族群資金流入有沒有用（事前登記的檢定）。手動按：Actions → group-flow-check → Run workflow。
+# 只讀雲端資料庫（名單績效逐筆、族群表、行情），不寫任何表。結果印在這次執行的頁面（Summary）與紀錄裡，
+# 另存成 artifact；判讀門檻在 configs/group_flow_check.yaml（登記後不得修改）。
+name: group-flow-check
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: daily-pipeline # 與每日 pipeline 共用：排程寫到一半時不讀
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TWQUANT_PG_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+      TWQUANT_SUPABASE_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync deps
+        run: uv sync --dev --all-groups
+
+      - name: 族群資金流入有沒有用（D-178）
+        run: |
+          uv run python -m twquant group-flow-check --out "$RUNNER_TEMP/group_flow_check.md"
+          cat "$RUNNER_TEMP/group_flow_check.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: group-flow-check
+          path: ${{ runner.temp }}/group_flow_check.md

@@ -25,6 +25,7 @@ import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
 import { GroupsPage } from './GroupsPage'
+import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
@@ -32,7 +33,6 @@ import { LIVE_POLL_MS, limitPrices, limitState, liveBar, liveLabel, pickPrice, q
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
-type Tab = 'picks' | 'group' | 'score' | 'watch'
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
 const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
@@ -41,7 +41,20 @@ const REFRESH_MIN_MS = 30_000
 const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e.message)
 
 export default function CloudApp() {
-  const [tab, setTab] = useState<Tab>('picks')
+  // 推播通知點開帶 ?tab=group（族群資金通知）就直接開那個分頁
+  const [tab, setTab] = useState<Tab>(() => tabFromUrl(window.location.href) ?? 'picks')
+  useEffect(() => {
+    if (tabFromUrl(window.location.href)) window.history.replaceState(null, '', withoutTab(window.location.href))
+    // 網站已開著時點通知：背景程式（sw.js）傳來要開的網址
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as { type?: string; url?: string } | null
+      if (data?.type !== 'open' || typeof data.url !== 'string') return
+      const t = tabFromUrl(new URL(data.url, window.location.href).href)
+      if (t) setTab(t)
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
+  }, [])
   const [dates, setDates] = useState<string[]>([])
   // 日期選單旁的檔數（只有登入後的 /api 才給；公開日期清單沒有）
   const [dateCounts, setDateCounts] = useState<DateCounts | null>(null)

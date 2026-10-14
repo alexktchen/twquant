@@ -1,4 +1,5 @@
-"""網頁推播（T-348）：雲端排程寫好當天名單後，發「今日名單已更新」給開了通知的裝置。
+"""網頁推播（T-348）：雲端排程寫好當天名單後，發「今日名單已更新」給開了通知的裝置；
+名單上同族群兩檔以上、而且那個族群當天資金流入時，另發一則族群資金通知（T-354）。
 
 上半部是純函數（組訊息、檢查推播網址、統計發送結果）；下半部連資料庫。實際發送的函式由呼叫端注入，
 測試不連網。訂閱存在雲端的 web.push_subscriptions（網站 /api/push 寫入，見 frontend/functions/_lib/push.ts）。
@@ -8,7 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -90,6 +91,68 @@ def compose(day: dt.date, lines: Sequence[LineCount], site_url: str) -> dict[str
     }
 
 
+@dataclass(frozen=True)
+class HotGroup:
+    """名單上有好幾檔、而且當天資金流入的族群。picks＝名單上這個族群的股票（股名，查不到用代號）。"""
+
+    group: str
+    ratio: float
+    n: int
+    up: int
+    picks: tuple[str, ...]
+
+
+def hot_groups(
+    picks: Sequence[tuple[str, str | None]],
+    groups: Mapping[str, str],
+    flows: Mapping[str, tuple[float | None, int, int, bool]],
+    min_picks: int,
+) -> list[HotGroup]:
+    """名單（代號、股名，照線別與名次排、可能重複）→ 同族群至少 min_picks 檔且資金流入的族群。
+
+    flows：族群 → (資金倍數, 有成交檔數, 上漲檔數, 資金流入)。名單上的檔數多的在前，一樣多看資金倍數。
+    """
+    seen: set[str] = set()
+    by_group: dict[str, list[str]] = {}
+    for sid, name in picks:
+        group = groups.get(sid)
+        if sid in seen or group is None:
+            continue
+        seen.add(sid)
+        by_group.setdefault(group, []).append(name or sid)
+    out: list[HotGroup] = []
+    for group, names in by_group.items():
+        flow = flows.get(group)
+        if flow is None or len(names) < min_picks:
+            continue
+        ratio, n, up, hot = flow
+        if hot and ratio is not None:
+            out.append(HotGroup(group, ratio, n, up, tuple(names)))
+    out.sort(key=lambda h: (-len(h.picks), -h.ratio, h.group))
+    return out
+
+
+def compose_groups(
+    day: dt.date, hot: Sequence[HotGroup], site_url: str, max_listed: int
+) -> dict[str, str]:
+    """族群資金通知：標題寫族群與倍數，內文一個族群一行（倍數、漲跌家數、名單上的股票）；點開到「族群」分頁。"""
+    if not hot:
+        raise ValueError("沒有資金流入的族群，不該組通知")
+    shown = hot[:max_listed]
+    head = "、".join(f"{h.group} {h.ratio:.1f} 倍" for h in shown)
+    more = f" 等 {len(hot)} 個" if len(hot) > max_listed else ""
+    body = "\n".join(
+        f"{h.group}：資金 {h.ratio:.1f} 倍、{h.n} 檔 {h.up} 漲｜名單 {len(h.picks)} 檔：{'、'.join(h.picks)}"
+        for h in shown
+    )
+    return {
+        "title": f"{day.month}/{day.day} 資金流入：{head}{more}",
+        "body": body,
+        "url": f"{site_url}?tab=group",
+        "tag": f"groups-{day.isoformat()}",
+    }
+
+
 def send_all(
     subs: Sequence[Subscription],
     payload: dict[str, str],
@@ -144,6 +207,40 @@ def load_line_counts(
             if prev:
                 previous[code] = prev
     return line_counts(today, previous, lines)
+
+
+def load_hot_groups(conn: Any, schema: str, day: dt.date, min_picks: int) -> list[HotGroup] | None:
+    """當天名單上同族群至少 min_picks 檔、而且資金流入的族群。
+
+    當天還沒有名單或族群資金還沒算 → None（還沒好，不發也不記錄，晚上那班再看）。族群照網站：
+    族群表上有就用表上的，沒有（重抓之間新上市）用官方產業別。
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"{schema}.group_flow_daily",))
+        row = cur.fetchone()
+        if not (row and row[0]):
+            return None
+        cur.execute(
+            f'SELECT grp, ratio, n, up, hot FROM "{schema}"."group_flow_daily" WHERE date = %s',
+            (day,),
+        )
+        flows = {str(g): (r, int(n), int(u), bool(h)) for g, r, n, u, h in cur.fetchall()}
+        if not flows:
+            return None
+        cur.execute(
+            f"SELECT p.stock_id, m.name, coalesce(g.grp, m.industry) "
+            f'FROM "{schema}"."daily_picks" p '
+            f'LEFT JOIN "{schema}"."stock_meta" m ON m.stock_id = p.stock_id '
+            f'LEFT JOIN "{schema}"."stock_group" g ON g.stock_id = p.stock_id '
+            "WHERE p.date = %s ORDER BY p.line, p.rank",
+            (day,),
+        )
+        rows = cur.fetchall()
+    if not rows:
+        return None
+    picks = [(str(sid), str(name) if name else None) for sid, name, _ in rows]
+    groups = {str(sid): str(grp) for sid, _, grp in rows if grp}
+    return hot_groups(picks, groups, flows, min_picks)
 
 
 def already_sent(conn: Any, day: dt.date, kind: str) -> bool:

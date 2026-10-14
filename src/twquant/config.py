@@ -36,6 +36,9 @@ class PushConfig(BaseConfig):
     request_timeout_seconds: float = Field(gt=0)
     ttl_seconds: int = Field(ge=60)
     allowed_hosts: tuple[str, ...] = Field(min_length=1)
+    # 族群資金推播（T-354）：名單上（三條線合起來、不重複）同族群至少幾檔、而且族群當天資金流入才發
+    group_min_picks: int = Field(ge=2)
+    group_max_listed: int = Field(ge=1)  # 一則通知最多寫幾個族群（其餘寫「等 N 個」）
 
 
 class SourceRate(BaseConfig):
