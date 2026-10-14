@@ -5,6 +5,7 @@ import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
 import type { Quote } from './live'
+import type { RankRow } from './group'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -89,6 +90,9 @@ export const deletePushSubscription = (endpoint: string) => get<{ ok: boolean }>
 
 /** 名單績效（D-176）：這條線的模擬帳戶與逐筆統計（不含明細）。 */
 export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?line=${encodeURIComponent(line)}`)
+
+/** 族群排行（D-177 修訂）：最近一天每個族群的資金倍數、漲跌家數與成交金額最大的幾檔。 */
+export const fetchGroups = () => get<{ date: string; rows: RankRow[] }>('/api/groups')
 
 /** 名單績效的逐筆明細（新到舊）。 */
 export const fetchScorecardTrades = (line: string) =>

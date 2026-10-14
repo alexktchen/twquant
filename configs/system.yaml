@@ -22,6 +22,9 @@ source_rates:
   finmind:
     max_requests: 6
     per_seconds: 1.0
+  tpex_ic:  # 櫃買中心產業價值鏈平台（族群標籤 D-177）：每週一次、47 頁
+    max_requests: 1
+    per_seconds: 1.0
   fubon:  # 富邦DJ 分點頁（免費公開站；全市場一天 ~1800 檔）
     # D-022：平行回補——限流即並行度上限，backfill-fubon-chip --workers 預設取此值。
     # 6 req/2s（3 req/s）為使用者授權的積極設定，換取全市場單日 ~10 分；被封風險自負。

@@ -66,6 +66,7 @@ cloud:
     sbl_short_daily: 5
     attention_stocks: 5
     disposition_stocks: 5
+    group_flow_daily: 60           # 族群資金（D-177 修訂）：網站只看最新一天，留三個月左右
   exclude_factors:                 # 雲端不算（見 CloudConfig 註解）
     - chip.broker_concentration_20d  # T-016：需 broker_trades 全歷史（隔日沖分點 expanding 比率）＋20 日窗 > 雲端 10 日
     - chip.broker_count_diff_5d

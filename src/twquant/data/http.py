@@ -128,6 +128,8 @@ class HttpClient:
     base_delay: float = 1.0
     timeout: float = 20.0
     limiter: SlidingWindowLimiter | None = None
+    # 觸發重試的狀態碼；站台在 Cloudflare 後面時另加 52x（源站暫時連不上，實測重抓即好）
+    retry_status: frozenset[int] = _RETRYABLE_STATUS
 
     def __post_init__(self) -> None:
         self._limiter = (
@@ -171,7 +173,7 @@ class HttpClient:
             except Exception as exc:  # noqa: BLE001  # 重試邊界：任何連線層錯誤都記錄後重試，非靜默（耗盡才 raise DataError）
                 last_detail = f"transport error: {exc}"
             else:
-                if resp.status_code not in _RETRYABLE_STATUS:
+                if resp.status_code not in self.retry_status:
                     return resp
                 last_detail = f"HTTP {resp.status_code}"
             if attempt < self.max_retries:

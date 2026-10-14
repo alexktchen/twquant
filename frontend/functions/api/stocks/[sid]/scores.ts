@@ -1,5 +1,6 @@
-// GET /api/stocks/:sid/scores：三個模型最近幾個打分日的分數與名次，加上最新一天在哪條線的名單上。
+// GET /api/stocks/:sid/scores：三個模型最近幾個打分日的分數與名次，加上最新一天在哪條線的名單上、族群。
 import { fail, guarded, json, type Env } from '../../../_lib/db'
+import { groupsFor } from '../../../_lib/groups'
 import { LINES, SID_RE } from '../../../_lib/picks'
 import { modelScores } from '../../../_lib/scores'
 import { loadScores } from '../../../_lib/scores-db'
@@ -13,6 +14,7 @@ const handle: PagesFunction<Env, 'sid'> = async ({ params, env }) => {
       SELECT name, industry FROM serving.stock_meta WHERE stock_id = ${sid}`
     if (meta.length === 0) return fail(404, `查無股票 ${sid}`)
     const { rows, days } = await loadScores(db, [sid])
+    const groups = await groupsFor(db, null, [{ stock_id: sid, industry: meta[0].industry }])
     const lists = await db<{ date: string; line: string; rank: number }[]>`
       SELECT date::text AS date, line, rank FROM serving.daily_picks
       WHERE stock_id = ${sid} AND date = (SELECT max(date) FROM serving.daily_picks) ORDER BY line`
@@ -20,6 +22,7 @@ const handle: PagesFunction<Env, 'sid'> = async ({ params, env }) => {
       sid,
       name: meta[0].name,
       industry: meta[0].industry,
+      group: groups.get(sid) ?? null,
       models: modelScores(sid, rows, days),
       lists: lists.map((l) => ({ ...l, name: LINES.find((x) => x.code === l.line)?.name ?? l.line })),
     })

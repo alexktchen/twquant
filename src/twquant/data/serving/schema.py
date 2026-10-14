@@ -443,6 +443,47 @@ SCORECARD_SPEC = TableSpec(
     snapshot=True,  # 沒有 date 分區：每次整份重算
 )
 
+# 族群（D-177）：每檔一個族群（stock_groups.py），網站每日名單旁邊顯示、族群資金照它分組。
+# 整份重抓重算（每 refresh_days 天），可隨時重建；sync/rebuild/prune 都不碰。
+# 表上沒有的股票（重抓之間新上市的）網站顯示官方產業別、族群資金不算它。
+STOCK_GROUP_SPEC = TableSpec(
+    "stock_group",
+    (
+        ("stock_id", "text"),
+        ("grp", "text"),  # 族群：拆段後的段（散熱）、產業鏈（被動元件）或官方產業別（玻璃陶瓷）
+        ("chain", "text"),  # 挑中的產業鏈；用官方產業別時 NULL
+        ("segments", "text[]"),  # 這檔在這條鏈上掛的段，例：{電阻器}
+        ("also", "text[]"),  # 還掛了哪些別的鏈
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("stock_id",),
+    snapshot=True,
+    indexes=(("grp",),),
+)
+
+# 族群資金（D-177 修訂）：每天每個族群的成交比重、資金倍數、漲跌家數（reporting/group_flow.py）。
+# 每天由行情＋族群表算出、整天覆蓋；members 是族群排行列出的成員（jsonb）。sync/rebuild 不碰，雲端照 windows 修剪。
+GROUP_FLOW_SPEC = TableSpec(
+    "group_flow_daily",
+    (
+        ("date", "date"),
+        ("grp", "text"),
+        ("n", "bigint"),  # 當天有成交的成員
+        ("up", "bigint"),
+        ("down", "bigint"),
+        ("ret", "double precision"),  # 成員當天漲跌的等權平均
+        ("amount", "double precision"),  # TWD
+        ("share", "double precision"),  # 佔全市場成交金額
+        ("share_avg", "double precision"),  # 前 avg_sessions 日平均比重
+        ("ratio", "double precision"),  # 資金倍數＝share／share_avg
+        ("hot", "boolean"),  # 資金流入（門檻見 configs/stock_groups.yaml flow）
+        ("members", "jsonb"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "grp"),
+    indexes=(("grp", "date"),),
+)
+
 # 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
 # （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
 # 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
@@ -519,6 +560,8 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     DAYTRADE_FIRST_PUB_SPEC,
     DAILY_PICKS_SPEC,
     SCORECARD_SPEC,
+    STOCK_GROUP_SPEC,
+    GROUP_FLOW_SPEC,
     *FUND_FLOW_SPECS,
 )
 

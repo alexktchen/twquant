@@ -1,5 +1,6 @@
 // 追蹤股與個股的模型評分：型別與白話顯示文字（純函式，供 node 單元測試）。
 // 後端資料形狀見 functions/_lib/scores.ts、watchlist.ts。
+import type { Group } from './group'
 
 export type ModelCode = 'rank' | 'quiet' | 'risk'
 export type ModelScore = {
@@ -16,6 +17,8 @@ export type StockScores = {
   sid: string
   name: string | null
   industry: string | null
+  /** 族群（D-177）；舊後端沒有這欄 */
+  group?: Group | null
   models: ModelScore[]
   /** 最新一天的名單上有這檔：哪條線第幾名 */
   lists: { date: string; line: string; name: string; rank: number }[]

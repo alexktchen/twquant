@@ -1,9 +1,12 @@
 // 雲端版（T-332）的純函數：漲跌格式、均線、K 線標記。不碰 DOM，供 node 單元測試。
+import type { Group } from './group'
 
 export type Pick = {
   rank: number
   sid: string
   name: string | null
+  /** 族群（D-177）：產業價值鏈挑出的一條，查不到用官方產業別；舊後端沒有這欄 */
+  group?: Group | null
   score: number | null
   close: number | null
   /** 名單那天的前一個交易日收盤（推漲跌停價用）；舊後端沒有這欄 */
