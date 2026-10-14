@@ -89,3 +89,93 @@ export function parseMis(body: unknown): Quote[] {
   }
   return out
 }
+
+// ── 限流與快取（2026-10-14：證交所防火牆擋下，「因為安全性考量…」）────────────────────────
+// 證交所對同一個 IP 的請求有頻率限制（坊間常見說法：5 秒 3 次），超過就整個 IP 擋一段時間，
+// 而且被擋時繼續打只會一直被擋。所以：
+//   ① 以「每一檔」為單位快取：名單、個股頁、追蹤清單問到同一檔時共用，不再各問一次；
+//   ② 同一個執行個體兩次請求證交所至少隔 MIN_GAP_MS，太密就先給快取（可能舊一點）；
+//   ③ 被擋（HTTP 錯誤、回 HTML、連線被斷）就暫停 COOLDOWN_MS，連續被擋加倍到 MAX_COOLDOWN_MS，期間只給快取。
+
+export const FRESH_MS = 8_000
+export const MIN_GAP_MS = 2_000
+export const STALE_MAX_MS = 15 * 60_000
+export const COOLDOWN_MS = 60_000
+export const MAX_COOLDOWN_MS = 10 * 60_000
+
+/** 回給網站的結果：stale＝有的報價是舊的（證交所暫停或請求太密）；retryAfter＝暫停還有幾秒（沒暫停 null）。 */
+export type HubResult = { quotes: Quote[]; stale: boolean; retryAfter: number | null }
+
+export class QuoteHub {
+  private cache = new Map<string, { at: number; quote: Quote | null }>()
+  private lastFetch = -Infinity
+  private blockedUntil = -Infinity
+  private cooldown = COOLDOWN_MS
+  private readonly fetchMis: (sids: string[]) => Promise<Quote[]>
+  private readonly now: () => number
+
+  constructor(fetchMis: (sids: string[]) => Promise<Quote[]>, now: () => number = Date.now) {
+    this.fetchMis = fetchMis
+    this.now = now
+  }
+
+  /** 這幾檔的報價：新鮮的直接給；其餘在沒暫停、沒太密時問證交所，否則給還不太舊的快取。全都給不出來才丟錯。 */
+  async get(sids: string[]): Promise<HubResult> {
+    const t = this.now()
+    const need = sids.filter((s) => {
+      const hit = this.cache.get(s)
+      return !hit || t - hit.at >= FRESH_MS
+    })
+    let error: Error | null = null
+    if (need.length > 0 && t >= this.blockedUntil && t - this.lastFetch >= MIN_GAP_MS) {
+      this.lastFetch = t
+      try {
+        const got = await this.fetchMis(need)
+        const by = new Map(got.map((q) => [q.sid, q]))
+        // 問了但證交所沒回的（例：興櫃、代號錯）也記下來，免得每次都再問
+        for (const s of need) this.cache.set(s, { at: t, quote: by.get(s) ?? null })
+        this.cooldown = COOLDOWN_MS
+        this.prune(t)
+      } catch (e) {
+        error = e instanceof Error ? e : new Error(String(e))
+        this.blockedUntil = t + this.cooldown
+        this.cooldown = Math.min(this.cooldown * 2, MAX_COOLDOWN_MS)
+      }
+    }
+    const quotes: Quote[] = []
+    let stale = false
+    let missing = 0
+    for (const s of sids) {
+      const hit = this.cache.get(s)
+      if (!hit || t - hit.at >= STALE_MAX_MS) {
+        missing += 1
+        continue
+      }
+      if (t - hit.at >= FRESH_MS) stale = true
+      if (hit.quote) quotes.push(hit.quote)
+    }
+    const retryAfter = t < this.blockedUntil ? Math.ceil((this.blockedUntil - t) / 1000) : null
+    if (missing === sids.length && sids.length > 0) {
+      const why = error?.message ?? (retryAfter !== null ? '證交所暫時擋下即時報價' : '請求太密，稍後再試')
+      throw Object.assign(new Error(why), { retryAfter })
+    }
+    return { quotes, stale: stale || missing > 0, retryAfter }
+  }
+
+  private prune(t: number): void {
+    for (const [k, v] of this.cache) if (t - v.at >= STALE_MAX_MS) this.cache.delete(k)
+  }
+}
+
+/** 證交所回的不是 JSON（被防火牆擋下時回一頁 HTML「因為安全性考量…」）→ 丟錯，讓 QuoteHub 暫停。 */
+export async function readMis(res: { ok: boolean; status: number; text: () => Promise<string> }): Promise<Quote[]> {
+  if (!res.ok) throw new Error(`證交所即時報價 HTTP ${res.status}`)
+  const body = await res.text()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    throw new Error(body.includes('安全性') ? '證交所防火牆暫時擋下即時報價' : '證交所即時報價回應不是 JSON')
+  }
+  return parseMis(parsed)
+}
