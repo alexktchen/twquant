@@ -399,7 +399,7 @@ function Trades({ c }: { c: Scorecard }) {
       </div>
       <p className="cq-score-p">
         每一檔「新進名單」（前一份名單沒有的）都算一筆：隔天開盤買，抱滿 {t.hold_sessions} 個交易日後隔天開盤賣；每筆約 {wan(t.notional)}
-        、扣成本、含股利，不受帳戶位子限制。
+        、扣成本、含股利，不受帳戶位子限制。同一檔還抱著時又進名單，不重複買、也不另算一筆（同坊間回測：同一檔同時只有一個部位）。
       </p>
       <table className="cq-score-stats">
         <thead>
@@ -425,6 +425,7 @@ function Trades({ c }: { c: Scorecard }) {
       </table>
       <p className="cq-score-p">
         還抱著 {t.stats.open} 筆、明天開盤買 {t.stats.pending} 筆、買不到 {t.stats.unfilled} 筆（開盤漲停、停牌等），都不算進上面的統計。
+        {t.stats.repeat !== undefined && t.stats.repeat > 0 && `還抱著又進名單 ${t.stats.repeat} 次，沒有重複算。`}
         {t.stats.all.n < FEW && <span className="cq-score-warn"> 已結算不到 {FEW} 筆，數字很不穩定，看看就好。</span>}
         {t.stats.live.n === 0 && <span> 即時公布的名單還沒有抱滿 {t.hold_sessions} 天的，所以即時欄還是空的。</span>}
       </p>

@@ -151,6 +151,7 @@ def ledger_rows(
 ) -> list[dict[str, Any]]:
     """模擬帳戶自己的每一筆買賣（日子新到舊、同一天照成交順序：先賣後買）。
 
+    `move`：open＝新買進、add＝已持有再買（換股日調回等權）、trim＝賣一部分（調回等權）、close＝出清。
     賣出附 `ret`＝賣價 ÷ 這一輪的平均買價 − 1：只是價差，**不含手續費、證交稅與股利**（同看板 D-165 的個股漲跌）；
     帳戶淨值才是扣完成本、含股利的真實結果。分割當天先調股數（同引擎），成本總額不變、均價跟著變。
     """
@@ -169,6 +170,8 @@ def ledger_rows(
         sid = ev.stock_id
         ret: float | None = None
         if ev.side == "buy":
+            # 已持有又買＝換股日把部位調回等權（加碼），不是重複進場
+            move = "add" if shares.get(sid, 0) > 0 else "open"
             shares[sid] = shares.get(sid, 0) + ev.shares
             cost[sid] = cost.get(sid, 0.0) + ev.price * ev.shares
         else:
@@ -178,6 +181,7 @@ def ledger_rows(
             avg = cost[sid] / held
             ret = ev.price / avg - 1.0
             left = held - ev.shares
+            move = "close" if left <= 0 else "trim"  # 沒賣光＝調回等權（減碼）
             if left <= 0:
                 shares.pop(sid)
                 cost.pop(sid)
@@ -193,6 +197,7 @@ def ledger_rows(
                 "shares": ev.shares,
                 "price": round(ev.price, 4),
                 "reason": ev.reason,
+                "move": move,  # open 新買進／add 加碼／trim 減碼／close 出清
                 "ret": _r(ret, 6),
             }
         )
@@ -226,9 +231,14 @@ def trade_rows(
 
 
 def trade_summary(
-    trades: Sequence[EntryTrade], flags: Mapping[dt.date, bool], *, big_loss: float
+    trades: Sequence[EntryTrade],
+    flags: Mapping[dt.date, bool],
+    *,
+    big_loss: float,
+    repeats: int = 0,
 ) -> dict[str, Any]:
-    """逐筆統計：全部、事後補、即時三段（只算已賣出），加上還抱著／買不到／明天才買的筆數。"""
+    """逐筆統計：全部、事後補、即時三段（只算已賣出），加上還抱著／買不到／明天才買的筆數，
+    以及還抱著時又進名單、不重複算的次數（`drop_repeats`）。"""
     closed = [
         (bool(flags.get(t.signal_date, False)), t.ret)
         for t in trades
@@ -245,6 +255,7 @@ def trade_summary(
         "open": sum(1 for t in trades if t.status == "open"),
         "unfilled": sum(1 for t in trades if t.status == "unfilled"),
         "pending": sum(1 for t in trades if t.status == "pending"),
+        "repeat": repeats,
     }
 
 
@@ -269,6 +280,7 @@ def line_payload(
     costs: Mapping[str, float],
     ledger: Sequence[Trade] = (),
     splits: Sequence[SplitAdjustment] = (),
+    repeats: int = 0,
 ) -> dict[str, Any]:
     """一條線的名單績效 JSON（網站 `/api/scorecard?line=` 原樣回傳）。"""
     if not equity:
@@ -329,7 +341,7 @@ def line_payload(
             "big_loss": cfg.big_loss,
             "notional": cfg.initial_capital / slots,
             "costs": dict(costs),
-            "stats": trade_summary(trades, flags, big_loss=cfg.big_loss),
+            "stats": trade_summary(trades, flags, big_loss=cfg.big_loss, repeats=repeats),
             "rows": trade_rows(trades, flags, names),
         },
     }
@@ -393,7 +405,7 @@ def build_scorecards(
         run_backtest,
         splits_by_date,
     )
-    from twquant.backtest.list_trades import new_entries, simulate_entries
+    from twquant.backtest.list_trades import drop_repeats, new_entries, simulate_entries
     from twquant.data import calendar as cal
     from twquant.errors import DataError
 
@@ -438,17 +450,20 @@ def build_scorecards(
             lot_size=cfg.lot_size,
             picks=lists,
         )
-        trades = simulate_entries(
-            new_entries(lists, sessions),
-            sessions,
-            panel,
-            divs,
-            splits,
-            cost,
-            hold_sessions=cfg.hold_sessions,
-            notional=cfg.initial_capital / slots,
-            max_participation=cfg.max_participation,
-            lot=cfg.lot_size,
+        # 同一檔還抱著時又進名單：不重複買、不另算一筆（坊間回測的預設；D-176 修訂二）
+        trades, repeats = drop_repeats(
+            simulate_entries(
+                new_entries(lists, sessions),
+                sessions,
+                panel,
+                divs,
+                splits,
+                cost,
+                hold_sessions=cfg.hold_sessions,
+                notional=cfg.initial_capital / slots,
+                max_participation=cfg.max_participation,
+                lot=cfg.lot_size,
+            )
         )
         out.append(
             line_payload(
@@ -471,6 +486,7 @@ def build_scorecards(
                 costs=costs,
                 ledger=res.ledger,
                 splits=res.splits,
+                repeats=repeats,
             )
         )
     return out

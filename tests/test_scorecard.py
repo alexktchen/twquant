@@ -133,6 +133,8 @@ def test_ac11_account_trades_show_sells_with_price_change() -> None:
     assert rows[1]["ret"] is None and rows[3]["ret"] is None  # 買進沒有價差
     assert rows[0]["name"] == "台積電" and rows[1]["name"] is None
     assert rows[0]["reason"] == "time_stop"
+    # 已持有又買＝加碼；沒賣光＝減碼；賣光＝出清
+    assert [r["move"] for r in rows] == ["close", "open", "trim", "add", "open"]
 
 
 def test_ac11_split_changes_shares_not_cost() -> None:
@@ -345,7 +347,18 @@ def test_ac5_gap_day_is_listed_and_does_not_make_everything_new(tmp_path: Path) 
     for p in published:
         if p.line == "SLOT":
             lists.setdefault(p.date, []).append(p.stock_id)
-    assert len(slot["trades"]["rows"]) == len(new_entries(lists, sessions))
+    # 每一筆新進名單不是成為一筆，就是因為還抱著同一檔而略過（D-176 修訂二）
+    stats = slot["trades"]["stats"]
+    assert len(slot["trades"]["rows"]) + stats["repeat"] == len(new_entries(lists, sessions))
+    held: dict[str, str | None] = {}
+    for r in sorted(slot["trades"]["rows"], key=lambda r: r["signal"]):
+        assert held.get(r["sid"], "") is not None and str(held.get(r["sid"], "")) <= r["signal"], (
+            f"{r['sid']} {r['signal']}：上一筆還沒賣就又買"
+        )
+        if r["status"] == "closed":
+            held[r["sid"]] = r["exit_date"]
+        elif r["status"] in ("open", "pending"):
+            held[r["sid"]] = None
     after_gap = [r for r in slot["trades"]["rows"] if r["signal"] == sessions[11].isoformat()]
     assert len(after_gap) < len(lists[sessions[11]]) or not lists[sessions[11]]
 

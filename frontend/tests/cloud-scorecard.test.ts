@@ -125,10 +125,13 @@ test('逐筆明細預設只列已賣出、依賣出日新到舊；還沒賣的�
   assert.deepEqual(statusCounts(rows), { closed: 2, open: 2, all: 5 })
 })
 
-test('帳戶買賣的原因：補位線的 rebalance 只會是價格異常出場', () => {
-  assert.equal(tradeReason({ side: 'buy', reason: 'entry' }, 'slots'), '空位補進')
-  assert.equal(tradeReason({ side: 'buy', reason: 'rebalance' }, 'rebalance'), '換股買進')
-  assert.equal(tradeReason({ side: 'sell', reason: 'time_stop' }, 'slots'), '抱滿到期')
-  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance' }, 'rebalance'), '換股賣出')
-  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance' }, 'slots'), '價格異常出場')
+test('帳戶買賣的原因：補位線的 rebalance 只會是價格異常出場；換股日已持有的是加碼／減碼', () => {
+  assert.equal(tradeReason({ side: 'buy', reason: 'entry', move: 'open' }, 'slots'), '空位補進')
+  assert.equal(tradeReason({ side: 'buy', reason: 'rebalance', move: 'open' }, 'rebalance'), '換股買進')
+  assert.equal(tradeReason({ side: 'sell', reason: 'time_stop', move: 'close' }, 'slots'), '抱滿到期')
+  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance', move: 'close' }, 'rebalance'), '換股賣出')
+  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance', move: 'close' }, 'slots'), '價格異常出場')
+  // 換股日：已持有的股票只是調回平均，不是又買一次
+  assert.equal(tradeReason({ side: 'buy', reason: 'rebalance', move: 'add' }, 'rebalance'), '加碼（調回平均）')
+  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance', move: 'trim' }, 'rebalance'), '減碼（調回平均）')
 })

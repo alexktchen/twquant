@@ -47,6 +47,8 @@ export type AccountTrade = {
   shares: number
   price: number
   reason: string
+  /** open 新買進／add 已持有再買（換股日調回等權）／trim 賣一部分（調回等權）／close 出清 */
+  move: 'open' | 'add' | 'trim' | 'close'
   ret: number | null
 }
 
@@ -81,7 +83,16 @@ export type Scorecard = {
     big_loss: number
     notional: number
     costs: { commission: number; tax: number }
-    stats: { all: TradeStats; backfill: TradeStats; live: TradeStats; open: number; unfilled: number; pending: number }
+    stats: {
+      all: TradeStats
+      backfill: TradeStats
+      live: TradeStats
+      open: number
+      unfilled: number
+      pending: number
+      /** 還抱著同一檔時又進名單、不重複算的次數（舊資料沒有這欄） */
+      repeat?: number
+    }
   }
 }
 
@@ -158,7 +169,10 @@ export function statusCounts(rows: TradeRow[]): Record<StatusFilter, number> {
 }
 
 /** 帳戶買賣的原因（白話）。kind：這條線是每月換股還是補位。 */
-export function tradeReason(t: Pick<AccountTrade, 'side' | 'reason'>, kind: Scorecard['kind']): string {
+export function tradeReason(t: Pick<AccountTrade, 'side' | 'reason' | 'move'>, kind: Scorecard['kind']): string {
+  // 換股日已持有的股票只是把權重調回平均（加碼或減碼），不是又買一次或賣掉
+  if (t.move === 'add') return '加碼（調回平均）'
+  if (t.move === 'trim') return '減碼（調回平均）'
   if (t.side === 'buy') return t.reason === 'entry' ? '空位補進' : '換股買進'
   if (t.reason.startsWith('time_stop')) return '抱滿到期'
   // 補位型不會換股：它的 rebalance 只可能是收盤價異常跳動（減資、停牌復牌）被強制出場
