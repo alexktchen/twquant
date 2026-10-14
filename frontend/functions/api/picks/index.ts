@@ -1,8 +1,6 @@
-// GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群；
-// 每條線另附歷史同區間參考（D-179，serving.score_reference），網站每檔依分數對到區間。
+// GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
-import { readReference } from '../../_lib/reference'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 import { cached, cacheKey } from '../../_lib/cache'
 
@@ -29,7 +27,6 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const meta = await db<{ stock_id: string; name: string | null; industry: string | null }[]>`
       SELECT stock_id, name, industry FROM serving.stock_meta WHERE stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
     const groups = await groupsFor(db, target, meta)
-    const reference = await readReference(db)
     const close = new Map(px.map((r) => [r.stock_id, r]))
     const window = dates.slice(0, RECENT_WINDOW)
     const startClose = new Map<string, number | null>()
@@ -55,7 +52,6 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
         code,
         name: LINES.find((l) => l.code === code)?.name ?? code,
         note: LINES.find((l) => l.code === code)?.note ?? null,
-        ref: reference.get(code) ?? [],
         picks: today.map((r) => {
           const p = close.get(r.stock_id)
           const c = p?.close ?? null
