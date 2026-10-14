@@ -82,6 +82,32 @@
 /* 族群（D-177）：名字後面的小框；官方產業別（平台查不到更細的）用虛線框 */
 .cq-grp { font-style: normal; font-weight: 400; font-size: 12px; color: #a9adb8; border: 1px solid #3a3d46; border-radius: 4px; padding: 0 5px; margin-left: 7px; vertical-align: 2px; white-space: nowrap; }
 .cq-grp.official { border-style: dashed; color: var(--mute); }
+/* 資金流入的族群（D-177 修訂）：橘框橘字 */
+.cq-grp.hot { border-color: var(--accent); color: var(--accent); background: rgba(255, 122, 0, .12); font-weight: 600; }
+.cq-same { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--mute); }
+.cq-same b { font-weight: 500; color: #c9ccd4; background: #262830; border-radius: 4px; padding: 1px 6px; }
+.cq-same b.hot { color: var(--accent); background: rgba(255, 122, 0, .14); }
+.cq-same b em { font-style: normal; font-weight: 400; margin-left: 4px; font-size: 12px; }
+.cq-group-flow { align-items: center; }
+.cq-group-flow.hot span { color: #e8c49a; }
+/* 族群分頁 */
+.cq-groups-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 14px 6px; color: var(--mute); font-size: 13.5px; }
+.cq-groups-head b { color: var(--text); font-weight: 500; }
+.cq-groups-head em { font-style: normal; margin-left: 3px; }
+.cq-ratio { text-align: right; font-variant-numeric: tabular-nums; font-size: 16px; color: var(--text); }
+.cq-ratio.hot { color: var(--accent); font-weight: 700; }
+.cq-groups .cq-name b .cq-tag { margin-left: 6px; font-weight: 400; vertical-align: 2px; }
+.cq-quote h1 .cq-tag { font-size: 13px; }
+.cq-sub { font-size: 15px; font-weight: 600; margin: 14px 0 6px; }
+.cq-members { list-style: none; margin: 0; padding: 0; }
+.cq-members li { display: grid; grid-template-columns: 1fr 90px 84px; align-items: center; min-height: 48px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cq-members li:hover { background: #1b1d24; }
+.cq-amt { text-align: right; color: var(--mute); font-variant-numeric: tabular-nums; font-size: 14px; padding-right: 10px; }
+.cq-members .cq-tag, .cq-groups .cq-tag, .cq-same b { white-space: nowrap; }
+@media (max-width: 400px) {
+  .cq-members li { grid-template-columns: 1fr 64px 74px; }
+  .cq-amt { font-size: 13px; padding-right: 6px; }
+}
 .cq-group { margin: 3px 0 0; font-size: 13.5px; color: var(--mute); display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .cq-group b { font-weight: 500; color: #c9ccd4; }
 .cq-group b.official { font-weight: 400; color: var(--mute); }

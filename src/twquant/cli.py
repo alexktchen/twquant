@@ -1637,6 +1637,17 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _stock_groups_refresh(force=False)
 
+    def _group_flow_step() -> str:
+        # D-177 修訂 族群資金：排在族群標籤之後（要讀族群表）。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
+        return _group_flow_for_day(day)
+
     def _paper_trading_step() -> str:
         # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
         # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
@@ -1735,6 +1746,7 @@ def _run_daily_pipeline(
         PipelineStep("每日名單", _daily_picks_step),
         PipelineStep("名單績效", _scorecard_step),
         PipelineStep("族群標籤", _stock_groups_step),
+        PipelineStep("族群資金", _group_flow_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -1868,6 +1880,23 @@ def stock_groups(
 ) -> None:
     """族群標籤（D-177）：抓櫃買中心產業價值鏈、每檔挑一條當族群，寫進 PG `stock_group`（網站讀）。"""
     typer.secho(f"[OK] {_stock_groups_refresh(force)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="group-flow")
+def group_flow_cmd(
+    date: str = typer.Option("", help="算哪個交易日 YYYY-MM-DD；空＝PG 最新行情日"),
+    start: str = typer.Option("", "--from", help="回補起日 YYYY-MM-DD（與 --to 一起用）"),
+    end: str = typer.Option("", "--to", help="回補迄日 YYYY-MM-DD"),
+) -> None:
+    """族群資金（D-177 修訂）：每個族群的成交比重、資金倍數、漲跌家數，寫進 PG `group_flow_daily`（網站讀）。"""
+    if start or end:
+        if not (start and end) or date:
+            raise typer.BadParameter("回補要同時給 --from 與 --to，且不能再給 --date")
+        days = _pg_price_days(dt.date.fromisoformat(start), dt.date.fromisoformat(end))
+    else:
+        days = [dt.date.fromisoformat(date) if date else _pg_latest_price_day()]
+    for day in days:
+        typer.secho(f"[OK] {day}：{_group_flow_for_day(day)}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -2869,11 +2898,69 @@ def _stock_groups_refresh(force: bool) -> str:
             retry_status=RETRY_STATUS,
         )
         chains, members = ChainSource(client, cfg.base_url, cfg.first_chain).fetch()
-        groups = primary_groups(members, read_industries(conn, scfg.pg_schema), cfg.refine, chains)
+        groups = primary_groups(
+            members,
+            read_industries(conn, scfg.pg_schema),
+            cfg.refine,
+            chains,
+            cfg.split,
+            cfg.split_min_members,
+        )
         replace_groups(conn, scfg.pg_schema, groups, now)
     finally:
         conn.close()
-    return f"{len(groups)} 檔有族群（{len(chains)} 條產業鏈）"
+    named = sum(1 for g in groups if g.chain is not None)
+    return (
+        f"{len(groups)} 檔、{len({g.group for g in groups})} 個族群"
+        f"（{named} 檔對上產業鏈，{len(chains)} 條鏈）"
+    )
+
+
+def _group_flow_for_day(day: dt.date) -> str:
+    """族群資金（D-177 修訂）：`day` 與之前 avg_sessions 個交易日的行情 ＋ 族群表 → `group_flow_daily`。"""
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.group_flow_store import read_price_window, write_group_flow
+    from twquant.data.serving.groups_store import read_group_map
+    from twquant.data.stock_groups import StockGroupsConfig
+    from twquant.reporting.group_flow import group_flow
+
+    cfg = load_config(_CONFIG_DIR / "stock_groups.yaml", StockGroupsConfig).flow
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        groups = read_group_map(conn, scfg.pg_schema)
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT stock_id, name FROM "{scfg.pg_schema}"."stock_meta"')
+            names = {str(sid): str(nm) for sid, nm in cur.fetchall() if nm}
+        prices = read_price_window(conn, scfg.pg_schema, day, cfg.avg_sessions + 1)
+        flows = group_flow(prices, groups, names, day, cfg, scfg.cloud.stock_pattern)
+        write_group_flow(conn, scfg.pg_schema, day, flows, now_tw())
+    finally:
+        conn.close()
+    hot = [f.group for f in sorted(flows, key=lambda f: -(f.ratio or 0.0)) if f.hot]
+    return f"{len(flows)} 個族群，資金流入 {len(hot)} 個" + (
+        f"：{'、'.join(hot[:5])}" if hot else ""
+    )
+
+
+def _pg_price_days(start: dt.date, end: dt.date) -> list[dt.date]:
+    """PG 在 [start, end] 有行情的交易日。"""
+    from twquant.data.serving import store
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT DISTINCT date FROM "{scfg.pg_schema}"."prices_daily" '
+                "WHERE date BETWEEN %s AND %s ORDER BY date",
+                (start, end),
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def _pg_has_prices(day: dt.date) -> bool:
@@ -3725,10 +3812,14 @@ def serving_prune(
     """依 configs/serving.yaml cloud.windows 修剪滾動窗口（D-030，冪等）。"""
     from twquant.data.serving import store
     from twquant.data.serving.cloud import prune
+    from twquant.data.serving.schema import GROUP_FLOW_SPEC, ensure_tables
 
     cfg = _load_serving()
     conn = store.connect_cloud(cfg) if cloud else store.connect(cfg)
     try:
+        # 族群資金表由每日「族群資金」步驟建；那一步還沒成功過（例如上線當天族群標籤抓不到）時，
+        # 修剪不能因為表不存在就整步失敗——先建空表（冪等）
+        ensure_tables(conn, (GROUP_FLOW_SPEC,), cfg.pg_schema)
         results = prune(
             conn,
             cfg.pg_schema,

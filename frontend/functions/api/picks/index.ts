@@ -1,6 +1,6 @@
 // GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群。
 import { fail, guarded, json, type Env } from '../../_lib/db'
-import { groupOf, readGroups } from '../../_lib/groups'
+import { groupsFor } from '../../_lib/groups'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 import { cached, cacheKey } from '../../_lib/cache'
 
@@ -26,7 +26,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
       FROM serving.prices_daily p WHERE p.date = ${target}::date AND p.stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
     const meta = await db<{ stock_id: string; name: string | null; industry: string | null }[]>`
       SELECT stock_id, name, industry FROM serving.stock_meta WHERE stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
-    const groups = await readGroups(db, sids)
+    const groups = await groupsFor(db, target, meta)
     const close = new Map(px.map((r) => [r.stock_id, r]))
     const window = dates.slice(0, RECENT_WINDOW)
     const startClose = new Map<string, number | null>()
@@ -37,7 +37,6 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
       for (const r of start) startClose.set(r.stock_id, r.close)
     }
     const names = new Map(meta.map((r) => [r.stock_id, r.name]))
-    const industries = new Map(meta.map((r) => [r.stock_id, r.industry]))
     const byDay = (d: string, line: string) => rows.filter((r) => r.date === d && r.line === line)
     const lines = linesForDay(todayRows.map((r) => r.line)).map((code) => {
       const today = byDay(target, code)
@@ -61,7 +60,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             rank: r.rank,
             sid: r.stock_id,
             name: names.get(r.stock_id) ?? null,
-            group: groupOf(groups.get(r.stock_id), industries.get(r.stock_id) ?? null),
+            group: groups.get(r.stock_id) ?? null,
             score: r.score,
             close: c,
             prev: p?.prev ?? null,

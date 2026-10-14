@@ -23,7 +23,8 @@ import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { groupLine, groupTitle, type Group } from './group'
+import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
+import { GroupsPage } from './GroupsPage'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
@@ -31,7 +32,7 @@ import { LIVE_POLL_MS, limitPrices, limitState, liveBar, liveLabel, pickPrice, q
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
-type Tab = 'picks' | 'score' | 'watch'
+type Tab = 'picks' | 'group' | 'score' | 'watch'
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
 const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
@@ -238,6 +239,14 @@ export default function CloudApp() {
   const listSids = useMemo(() => [...new Set((day?.lines ?? []).flatMap((l) => l.picks.map((p) => p.sid)))], [day])
   const listLive = useLiveQuotes(listSids, tab === 'picks' && !guest && !nav.past)
   const rowPx = (p: Pick) => pickPrice(p, view?.date, listLive.quotes[p.sid], today, nav.past)
+  const same = useMemo(() => sameGroups(current?.picks ?? []), [current])
+  // 族群分頁標出「在名單上」：名單那天每個族群有哪些股票（三條線合起來）
+  const listedGroups = useMemo(() => {
+    if (!view) return null
+    const sids = new Map<string, string[]>()
+    for (const l of view.lines) for (const p of l.picks) if (p.group) sids.set(p.group.name, [...(sids.get(p.group.name) ?? []), p.sid])
+    return { date: view.date, sids }
+  }, [view])
   const anyLive = !guest && !nav.past && (current?.picks ?? []).some((p) => rowPx(p).rec !== null)
   const detailRef = useRef<HTMLElement>(null)
 
@@ -251,6 +260,9 @@ export default function CloudApp() {
         <nav className="cq-tabs">
           <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
             每日名單
+          </button>
+          <button className={tab === 'group' ? 'on' : ''} onClick={() => setTab('group')}>
+            族群
           </button>
           <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
             績效
@@ -288,7 +300,27 @@ export default function CloudApp() {
         </div>
       )}
 
-      {tab === 'score' ? (
+      {tab === 'group' ? (
+        guest ? (
+          <main className="cq-body">
+            <aside className="cq-list cq-list-guest">
+              <div className="cq-rows">
+                <Gate title="登入後看族群資金" text="每個族群今天拿到多少資金：成交比重對自己前 20 日平均的倍數、幾檔漲幾檔跌，看資金是不是往同一個族群去。" />
+              </div>
+            </aside>
+            <section className="cq-detail" />
+          </main>
+        ) : (
+          <GroupsPage
+            refresh={refresh}
+            listed={listedGroups}
+            onStock={(sid, name) => {
+              setWatchSel({ sid, name })
+              setTab('watch')
+            }}
+          />
+        )
+      ) : tab === 'score' ? (
         guest ? (
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
@@ -403,6 +435,17 @@ export default function CloudApp() {
                   </button>
                 ))}
               </div>
+              {same.length > 0 && (
+                <div className="cq-same" title="今天這條線的名單裡，同一個族群有兩檔以上">
+                  <span>同族群</span>
+                  {same.map((g) => (
+                    <b key={g.name} className={g.flow?.hot ? 'hot' : undefined} title={g.flow ? flowText(g.flow) : undefined}>
+                      {g.name} ×{g.count}
+                      {g.flow?.hot && g.flow.ratio !== null && <em>資金 {g.flow.ratio.toFixed(1)} 倍</em>}
+                    </b>
+                  ))}
+                </div>
+              )}
               <div className="cq-head">
                 <span>代號／名稱／近 6 日上榜</span>
                 <span>{anyLive ? '現價／推薦價' : '收盤／6日'}</span>
@@ -518,8 +561,8 @@ function Row({
           <em>{p.sid}</em>
           {p.name ?? ''}
           {p.group && (
-            <i className={`cq-grp${p.group.official ? ' official' : ''}`} title={groupTitle(p.group)}>
-              {p.group.name}
+            <i className={`cq-grp${p.group.official ? ' official' : ''}${p.group.flow?.hot ? ' hot' : ''}`} title={groupTitle(p.group)}>
+              {tagText(p.group)}
             </i>
           )}
         </b>
@@ -863,6 +906,14 @@ function Detail({
             <p className="cq-group" title={groupTitle(grp)}>
               <b className={grp.official ? 'official' : undefined}>{gl.main}</b>
               {gl.also && <span>{gl.also}</span>}
+            </p>
+          )}
+          {grp?.flow && (
+            <p className={`cq-group cq-group-flow${grp.flow.hot ? ' hot' : ''}`}>
+              {grp.flow.hot && <i className="cq-tag hot">資金流入</i>}
+              <span>
+                {grp.name}・{grp.flow.date}：{flowText(grp.flow)}
+              </span>
             </p>
           )}
           <div className={`cq-big ${t}`}>
