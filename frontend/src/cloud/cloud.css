@@ -368,3 +368,13 @@
   .cq-trade-px { font-size: 13.5px; }
   .cq-score-stats th, .cq-score-stats td { padding: 6px 4px; font-size: 13.5px; }
 }
+
+/* 漲停紅框、跌停綠框（台股看盤軟體的慣例）：名單、追蹤清單的價格與個股頁的大字價格 */
+.cq-px.limit-up, .cq-px.limit-down { padding: 0 5px; border-radius: 4px; }
+.cq-px.limit-up { box-shadow: inset 0 0 0 1.5px var(--up); }
+.cq-px.limit-down { box-shadow: inset 0 0 0 1.5px var(--down); }
+.cq-big b.cq-limit { font-weight: inherit; padding: 0 8px; border-radius: 8px; }
+.cq-big b.cq-limit.up { box-shadow: inset 0 0 0 2px var(--up); }
+.cq-big b.cq-limit.down { box-shadow: inset 0 0 0 2px var(--down); }
+/* 盤中名單價格下的「推 361.0」：推薦當天的收盤 */
+.cq-pxcol small.cq-rec { color: var(--mute); }

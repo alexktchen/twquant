@@ -60,6 +60,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             name: names.get(r.stock_id) ?? null,
             score: r.score,
             close: c,
+            prev: p?.prev ?? null,
             chg: change(c, p?.prev ?? null),
             streak,
             new: isNew,
