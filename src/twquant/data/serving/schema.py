@@ -484,6 +484,33 @@ GROUP_FLOW_SPEC = TableSpec(
     indexes=(("grp", "date"),),
 )
 
+# 族群法人（D-177 修訂三／T-358）：每天每個族群的三大法人買賣超（金額，上市＋上櫃）與象限圖的 x、y、軌跡。
+# 上櫃法人只在這裡以族群合計出現，不寫進 institutional_daily（模型讀那張，見 sources/tpex.py）。
+GROUP_INST_SPEC = TableSpec(
+    "group_inst_daily",
+    (
+        ("date", "date"),
+        ("grp", "text"),
+        ("members", "bigint"),  # 當天有收盤的成員
+        ("net", "double precision"),  # 當天三大法人買賣超，TWD
+        (
+            "foreign_amt",
+            "double precision",
+        ),  # 外資（含外資自營商）買賣超，TWD；foreign 是 SQL 保留字
+        ("trust_amt", "double precision"),
+        ("dealer_amt", "double precision"),
+        ("net5", "double precision"),  # x：近 window 日合計（前面沒算到為 NULL）
+        ("accel", "double precision"),  # y：（近 window 日 − 再前 window 日）÷ window，每天
+        ("foreign5", "double precision"),
+        ("trust5", "double precision"),
+        ("dealer5", "double precision"),
+        ("trail", "jsonb"),  # 最近 trail 天的 [{d, x, y}]，舊到新
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "grp"),
+    indexes=(("grp", "date"),),
+)
+
 # 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
 # （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
 # 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
@@ -562,6 +589,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     SCORECARD_SPEC,
     STOCK_GROUP_SPEC,
     GROUP_FLOW_SPEC,
+    GROUP_INST_SPEC,
     *FUND_FLOW_SPECS,
 )
 

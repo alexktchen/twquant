@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupOf, groupsFor, readFlows, readGroups, readRanking, type Flow, type GroupRow } from '../functions/_lib/groups.ts'
+import { groupOf, groupsFor, readFlows, readGroups, readInst, readRanking, type Flow, type GroupRow } from '../functions/_lib/groups.ts'
 import { flowText, groupLine, groupTitle, rankRows, ratioText, sameGroups, segName, tagText, yi, type Group, type RankRow } from '../src/cloud/group.ts'
 
 const dayi: GroupRow = { stock_id: '2478', grp: '被動元件', chain: '被動元件', segments: '["電阻器"]', also: '["通信網路","電腦及週邊設備","平面顯示器"]' }
@@ -65,6 +65,16 @@ test('D-177 修訂：名單上每一檔的族群連同那天的族群資金；�
   assert.ok(calls[1].includes('被動元件\\u001f玻璃陶瓷') && calls[1].includes('"2026-10-13"'))
   await readFlows(fakeDb([], calls), null, ['被動元件'])
   assert.ok(calls[2].includes('coalesce(') && calls[2].includes('[null,'))
+})
+
+test('T-358：族群法人（象限圖）只讀同一天、x 與 y 都算得出來的；表還沒建或那天還沒算回 null', async () => {
+  const calls: string[] = []
+  assert.equal(await readInst(fakeDb([missing], calls), '2026-10-14'), null)
+  assert.equal(await readInst(fakeDb([() => Promise.resolve([{ body: null }])], calls), '2026-10-14'), null)
+  const body = '{"IC代工":{"x":84010000000,"y":1230000000}}'
+  assert.equal(await readInst(fakeDb([() => Promise.resolve([{ body }])], calls), '2026-10-14'), body)
+  assert.ok(calls[2].includes('group_inst_daily') && calls[2].includes('net5 IS NOT NULL AND accel IS NOT NULL'))
+  assert.ok(calls[2].includes('"2026-10-14"'))
 })
 
 test('D-177：段名去掉括號裡的舉例', () => {

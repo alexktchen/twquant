@@ -40,6 +40,15 @@ class GroupFlowConfig(BaseConfig):
     max_members: int = Field(ge=1)  # 族群排行每個族群列出成交金額最大的前幾檔
 
 
+class GroupInstConfig(BaseConfig):
+    """族群法人（D-177 修訂三）：象限圖的 x（近 window 日法人買賣超）、y（加速）與軌跡長度。"""
+
+    window: int = Field(
+        ge=1
+    )  # x＝近 window 個交易日合計；y＝（近 window 日 − 再前 window 日）÷ window
+    trail: int = Field(ge=1)  # 選中的族群畫最近幾個交易日的位置
+
+
 class StockGroupsConfig(BaseConfig):
     """configs/stock_groups.yaml（D-177）。"""
 
@@ -53,6 +62,7 @@ class StockGroupsConfig(BaseConfig):
         str, dict[str, str]
     ]  # 拆到段的大鏈 → {段名: 顯示名}；不同段可給同一個顯示名（合成一個族群）
     flow: GroupFlowConfig
+    inst: GroupInstConfig
 
 
 @dataclass(frozen=True)

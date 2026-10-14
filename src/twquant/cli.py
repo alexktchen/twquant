@@ -1657,6 +1657,17 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），略過"
         return _group_flow_for_day(day)
 
+    def _group_inst_step() -> str:
+        # D-177 修訂三 族群法人（象限圖）：排在族群資金之後（同樣讀族群表）。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
+        return _group_inst_for_day(day)
+
     def _paper_trading_step() -> str:
         # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
         # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
@@ -1757,6 +1768,7 @@ def _run_daily_pipeline(
         PipelineStep("名單績效", _scorecard_step),
         PipelineStep("族群標籤", _stock_groups_step),
         PipelineStep("族群資金", _group_flow_step),
+        PipelineStep("族群法人", _group_inst_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -1961,6 +1973,18 @@ def group_flow_cmd(
         days = [dt.date.fromisoformat(date) if date else _pg_latest_price_day()]
     for day in days:
         typer.secho(f"[OK] {day}：{_group_flow_for_day(day)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="group-inst")
+def group_inst_cmd(
+    date: str = typer.Option("", help="算哪個交易日 YYYY-MM-DD；空＝PG 最新行情日"),
+) -> None:
+    """族群法人（D-177 修訂三）：每個族群的三大法人買賣超、近 5 日合計與加速，寫進 PG `group_inst_daily`（網站象限圖讀）。
+
+    最近 2×window＋trail−1 個交易日裡還沒算過的會一起補（上櫃法人從櫃買中心抓）。
+    """
+    day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
+    typer.secho(f"[OK] {day}：{_group_inst_for_day(day)}", fg=typer.colors.GREEN)
 
 
 @app.command(name="group-flow-check")
@@ -3032,6 +3056,74 @@ def _group_flow_for_day(day: dt.date) -> str:
     )
 
 
+def _group_inst_for_day(day: dt.date) -> str:
+    """族群法人（D-177 修訂三）：最近 2×window＋trail−1 個交易日裡還沒算過的（與 `day` 本身）重算——
+    上市法人讀 PG、上櫃法人抓櫃買中心——再算 x、y、軌跡，整段覆蓋寫回 `group_inst_daily`。"""
+    import polars as pl
+
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.group_inst_store import (
+        read_closes,
+        read_inst_days,
+        read_sessions,
+        read_twse_inst,
+        write_inst,
+    )
+    from twquant.data.serving.groups_store import read_group_map
+    from twquant.data.sources.tpex import browser_client, fetch_institutional, parse_institutional
+    from twquant.data.stock_groups import StockGroupsConfig
+    from twquant.errors import DataError
+    from twquant.reporting.group_inst import group_inst_day, inst_series
+
+    cfg = load_config(_CONFIG_DIR / "stock_groups.yaml", StockGroupsConfig).inst
+    scfg = _load_serving()
+    client = browser_client(_load_system().source_rates["tpex"])
+    conn = store.connect(scfg)
+    try:
+        sessions = read_sessions(conn, scfg.pg_schema, day, 2 * cfg.window + cfg.trail - 1)
+        if not sessions or sessions[-1] != day:
+            raise DataError("group_inst_daily", day, f"{day} 沒有行情")
+        groups = read_group_map(conn, scfg.pg_schema)
+        days = [d for d in read_inst_days(conn, scfg.pg_schema, sessions) if d.date != day]
+        done = {d.date for d in days}
+        added: list[dt.date] = []
+        missing: list[str] = []
+        for s in sessions:
+            if s in done:
+                continue
+            try:
+                twse = read_twse_inst(conn, scfg.pg_schema, s)
+                if twse.is_empty():
+                    raise DataError("institutional_daily", s, "上市法人還沒擷取")
+                tpex = parse_institutional(fetch_institutional(client, s), s).drop("date")
+                closes = read_closes(conn, scfg.pg_schema, s)
+                inst = pl.concat([twse, tpex])
+                days += group_inst_day(inst, closes, groups, s, scfg.cloud.stock_pattern)
+                added.append(s)
+            except DataError as exc:
+                if s == day:
+                    raise
+                # 以前的某天補不到：涵蓋它的 x、y 留空（網站寫算不出來），照實回報，不中斷當天
+                missing.append(f"{s}（{exc}）")
+        points = inst_series(days, sessions, cfg)
+        write_inst(conn, scfg.pg_schema, points, now_tw())
+    finally:
+        conn.close()
+    today = sorted(
+        ((p.day.group, p.net5) for p in points if p.day.date == day and p.net5 is not None),
+        key=lambda gx: -gx[1],
+    )
+    top = "、".join(f"{g} {x / 1e8:+.1f} 億" for g, x in today[:3])
+    note = f"；補不到 {len(missing)} 天：{'；'.join(missing)}" if missing else ""
+    return (
+        f"{len(today)} 個族群有近 {cfg.window} 日法人買賣超"
+        + (f"，買超最多：{top}" if top else "")
+        + f"；這次算了 {len(added)} 天{note}"
+    )
+
+
 def _group_flow_check() -> str:
     """D-178：讀名單績效逐筆、族群、行情，重算每個進名單日子的族群資金，照登記的門檻判讀，回 markdown。"""
     import json
@@ -4065,7 +4157,7 @@ def serving_prune(
     """依 configs/serving.yaml cloud.windows 修剪滾動窗口（D-030，冪等）。"""
     from twquant.data.serving import store
     from twquant.data.serving.cloud import prune
-    from twquant.data.serving.schema import GROUP_FLOW_SPEC, ensure_tables
+    from twquant.data.serving.schema import GROUP_FLOW_SPEC, GROUP_INST_SPEC, ensure_tables
 
     cfg = _load_serving()
     conn = store.connect_cloud(cfg) if cloud else store.connect(cfg)
@@ -4073,6 +4165,7 @@ def serving_prune(
         # 族群資金表由每日「族群資金」步驟建；那一步還沒成功過（例如上線當天族群標籤抓不到）時，
         # 修剪不能因為表不存在就整步失敗——先建空表（冪等）
         ensure_tables(conn, (GROUP_FLOW_SPEC,), cfg.pg_schema)
+        ensure_tables(conn, (GROUP_INST_SPEC,), cfg.pg_schema)
         results = prune(
             conn,
             cfg.pg_schema,
