@@ -15,7 +15,7 @@ import twquant.factors.builtins  # noqa: F401
 from tests.conftest import write_stock_meta
 from tests.test_backtest_slots import BASE, N_DAYS, START, _cfg, _close
 from twquant.backtest import costs as ct
-from twquant.backtest.engine import run_backtest
+from twquant.backtest.engine import SplitAdjustment, Trade, run_backtest
 from twquant.backtest.list_trades import new_entries
 from twquant.config import load_config
 from twquant.conventions import TZ
@@ -27,6 +27,7 @@ from twquant.reporting.pick_board import BoardStrategy
 from twquant.reporting.scorecard import (
     ScorecardConfig,
     build_scorecards,
+    ledger_rows,
     live_since,
     nav_summary,
     publication_flags,
@@ -104,6 +105,48 @@ def test_ac8_nav_summary_with_benchmark() -> None:
     assert nav_summary([100.0, 110.0], None)["bench_ret"] is None
     with pytest.raises(ValueError, match="長度"):
         nav_summary([100.0, 110.0], [100.0])
+
+
+# ── 帳戶自己的買賣紀錄 ──────────────────────────────────────────────────────
+def _t(day: int, sid: str, side: str, shares: int, price: float, reason: str) -> Trade:
+    return Trade(_D[day], sid, side, shares, price, 0.0, 0.0, 0.0, reason)
+
+
+def test_ac11_account_trades_show_sells_with_price_change() -> None:
+    ledger = [
+        _t(0, "2330", "buy", 1000, 100.0, "entry"),
+        _t(1, "2330", "buy", 1000, 110.0, "entry"),  # 加碼：均價 105
+        _t(2, "2330", "sell", 500, 126.0, "time_stop"),  # 部分賣出：均價不變
+        _t(3, "2330", "sell", 1500, 94.5, "time_stop"),
+        _t(3, "1101", "buy", 2000, 40.0, "entry"),
+    ]
+    rows = ledger_rows(ledger, [], {"2330": "台積電"})
+    assert [(r["date"], r["sid"], r["side"]) for r in rows] == [
+        (_D[3].isoformat(), "2330", "sell"),  # 日子新到舊；同一天照實際順序：先賣後買
+        (_D[3].isoformat(), "1101", "buy"),
+        (_D[2].isoformat(), "2330", "sell"),
+        (_D[1].isoformat(), "2330", "buy"),
+        (_D[0].isoformat(), "2330", "buy"),
+    ]
+    assert rows[2]["ret"] == pytest.approx(126.0 / 105.0 - 1.0)
+    assert rows[0]["ret"] == pytest.approx(94.5 / 105.0 - 1.0)
+    assert rows[1]["ret"] is None and rows[3]["ret"] is None  # 買進沒有價差
+    assert rows[0]["name"] == "台積電" and rows[1]["name"] is None
+    assert rows[0]["reason"] == "time_stop"
+    # 已持有又買＝加碼；沒賣光＝減碼；賣光＝出清
+    assert [r["move"] for r in rows] == ["close", "open", "trim", "add", "open"]
+
+
+def test_ac11_split_changes_shares_not_cost() -> None:
+    ledger = [
+        _t(0, "6669", "buy", 1000, 100.0, "entry"),
+        _t(2, "6669", "sell", 2000, 55.0, "time_stop"),
+    ]
+    splits = [SplitAdjustment(_D[1], "6669", 0.5, 1000, 2000)]  # 1 拆 2：均價 100 → 50
+    rows = ledger_rows(ledger, splits, {})
+    assert rows[0]["ret"] == pytest.approx(55.0 / 50.0 - 1.0)
+    with pytest.raises(ValueError, match="先賣後買"):
+        ledger_rows([_t(0, "2330", "sell", 1000, 100.0, "time_stop")], [], {})
 
 
 # ── 整條線：照名單重播＋逐筆＋對照 ──────────────────────────────────────────
@@ -266,6 +309,12 @@ def test_ac8_account_is_the_engine_replay_of_the_published_lists(tmp_path: Path)
     assert slot["account"]["all"]["ret"] == pytest.approx(res.final_equity / 10_000_000.0 - 1.0)
     assert slot["account"]["equity"] == pytest.approx(res.final_equity)
     assert any(r["x"] and r["x"] > 0.5 for r in slot["nav"]), "前提：帳戶真的有買股票"
+    acct = slot["account"]["trades"]
+    assert len(acct) == len(res.ledger)
+    assert {r["side"] for r in acct} == {"buy"}  # 這個夾具的補位線沒有出場規則：只買不賣
+    rb = payloads[1]["account"]["trades"]
+    assert {r["side"] for r in rb} == {"buy", "sell"}  # 換股線每週換股：帳本裡有賣
+    assert all(r["ret"] is not None for r in rb if r["side"] == "sell")
     json.dumps(payloads, allow_nan=False)  # 網站讀得出來（沒有 NaN）
 
 
@@ -298,7 +347,18 @@ def test_ac5_gap_day_is_listed_and_does_not_make_everything_new(tmp_path: Path) 
     for p in published:
         if p.line == "SLOT":
             lists.setdefault(p.date, []).append(p.stock_id)
-    assert len(slot["trades"]["rows"]) == len(new_entries(lists, sessions))
+    # 每一筆新進名單不是成為一筆，就是因為還抱著同一檔而略過（D-176 修訂二）
+    stats = slot["trades"]["stats"]
+    assert len(slot["trades"]["rows"]) + stats["repeat"] == len(new_entries(lists, sessions))
+    held: dict[str, str | None] = {}
+    for r in sorted(slot["trades"]["rows"], key=lambda r: r["signal"]):
+        assert held.get(r["sid"], "") is not None and str(held.get(r["sid"], "")) <= r["signal"], (
+            f"{r['sid']} {r['signal']}：上一筆還沒賣就又買"
+        )
+        if r["status"] == "closed":
+            held[r["sid"]] = r["exit_date"]
+        elif r["status"] in ("open", "pending"):
+            held[r["sid"]] = None
     after_gap = [r for r in slot["trades"]["rows"] if r["signal"] == sessions[11].isoformat()]
     assert len(after_gap) < len(lists[sessions[11]]) or not lists[sessions[11]]
 

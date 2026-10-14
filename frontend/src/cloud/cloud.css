@@ -340,6 +340,10 @@
 .cq-score-stats tbody th { text-align: left; color: var(--mute); font-weight: 400; }
 .cq-seg.cq-seg-small { padding: 0; }
 .cq-seg-small button { flex: none; padding: 5px 12px; font-size: 13.5px; }
+.cq-score-head .cq-seg-small + .cq-seg-small { margin-left: auto; }
+/* 帳戶買賣紀錄的「買／賣」：用藍／灰框，不用紅綠（D-165：綠框會被讀成下跌） */
+.cq .cq-tag.cq-tag-buy { background: rgba(61, 155, 255, .15); color: #6fb3ff; font-size: 13px; padding: 1px 8px; }
+.cq .cq-tag.cq-tag-sell { background: #262830; color: var(--text); font-size: 13px; padding: 1px 8px; box-shadow: inset 0 0 0 1px #3a3d46; }
 .cq-score-trades { border-top: 1px solid var(--line); }
 .cq-trade {
   display: grid; grid-template-columns: minmax(0, 1fr) 86px 86px 112px; align-items: center; gap: 8px;

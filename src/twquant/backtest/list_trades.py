@@ -60,6 +60,32 @@ def new_entries(
     return out
 
 
+def drop_repeats(trades: Sequence[EntryTrade]) -> tuple[list[EntryTrade], int]:
+    """同一檔上一筆還沒賣、又出現在名單上 → 不重複買、也不另算一筆。回傳（留下的, 略過幾筆）。
+
+    坊間回測的預設就是這樣：同一檔同時只有一個部位，持有中的重複買進訊號直接略過
+    （AmiBroker 預設拿掉多餘的進場訊號、TradingView 預設不加碼）；模擬帳戶（引擎）也是已持有就不買。
+    「還沒賣」＝上一筆留下來的交易在這次名單公布那天收盤後仍持有：還抱著、明天才買，或賣出日晚於公布日。
+    同一天開盤賣掉、當晚又進名單的，算新的一筆（同引擎：晚上才決定補誰）。買不到的不算持有，不擋後面的。
+    輸入要照公布日排序（`new_entries` 的順序）。
+    """
+    holding_until: dict[str, dt.date | None] = {}  # 代號 → 留下的那一筆的賣出日；None＝還沒賣
+    kept: list[EntryTrade] = []
+    skipped = 0
+    for t in trades:
+        if t.stock_id in holding_until:
+            until = holding_until[t.stock_id]
+            if until is None or until > t.signal_date:
+                skipped += 1
+                continue
+        kept.append(t)
+        if t.status == "closed":
+            holding_until[t.stock_id] = t.exit_date
+        elif t.status in ("open", "pending"):
+            holding_until[t.stock_id] = None
+    return kept, skipped
+
+
 def simulate_entries(
     entries: Sequence[tuple[dt.date, str]],
     sessions: Sequence[dt.date],

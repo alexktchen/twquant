@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from twquant.backtest.engine import EquityPoint, Holding
+from twquant.backtest.engine import EquityPoint, Holding, SplitAdjustment, Trade
 from twquant.backtest.list_trades import EntryTrade
 from twquant.backtest.metrics import compute_metrics
 from twquant.config import BaseConfig
@@ -146,6 +146,66 @@ def _r(x: float | None, digits: int) -> float | None:
     return None if x is None else round(x, digits)
 
 
+def ledger_rows(
+    ledger: Sequence[Trade], splits: Sequence[SplitAdjustment], names: Mapping[str, str]
+) -> list[dict[str, Any]]:
+    """模擬帳戶自己的每一筆買賣（日子新到舊、同一天照成交順序：先賣後買）。
+
+    `move`：open＝新買進、add＝已持有再買（換股日調回等權）、trim＝賣一部分（調回等權）、close＝出清。
+    賣出附 `ret`＝賣價 ÷ 這一輪的平均買價 − 1：只是價差，**不含手續費、證交稅與股利**（同看板 D-165 的個股漲跌）；
+    帳戶淨值才是扣完成本、含股利的真實結果。分割當天先調股數（同引擎），成本總額不變、均價跟著變。
+    """
+    events: list[tuple[dt.date, int, int, Trade | SplitAdjustment]] = [
+        (sp.date, 0, i, sp) for i, sp in enumerate(splits)
+    ]
+    events += [(t.date, 1, i, t) for i, t in enumerate(ledger)]  # 同一天：分割先、成交照引擎的順序
+    shares: dict[str, int] = {}
+    cost: dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    for *_, ev in sorted(events, key=lambda e: (e[0], e[1], e[2])):
+        if isinstance(ev, SplitAdjustment):
+            if ev.stock_id in shares:
+                shares[ev.stock_id] = ev.shares_after
+            continue
+        sid = ev.stock_id
+        ret: float | None = None
+        if ev.side == "buy":
+            # 已持有又買＝換股日把部位調回等權（加碼），不是重複進場
+            move = "add" if shares.get(sid, 0) > 0 else "open"
+            shares[sid] = shares.get(sid, 0) + ev.shares
+            cost[sid] = cost.get(sid, 0.0) + ev.price * ev.shares
+        else:
+            held = shares.get(sid, 0)
+            if held <= 0:
+                raise ValueError(f"{ev.date} {sid}：帳本先賣後買（持有 0 股卻賣 {ev.shares} 股）")
+            avg = cost[sid] / held
+            ret = ev.price / avg - 1.0
+            left = held - ev.shares
+            move = "close" if left <= 0 else "trim"  # 沒賣光＝調回等權（減碼）
+            if left <= 0:
+                shares.pop(sid)
+                cost.pop(sid)
+            else:
+                shares[sid] = left
+                cost[sid] -= avg * ev.shares
+        rows.append(
+            {
+                "date": ev.date.isoformat(),
+                "sid": sid,
+                "name": names.get(sid),
+                "side": ev.side,
+                "shares": ev.shares,
+                "price": round(ev.price, 4),
+                "reason": ev.reason,
+                "move": move,  # open 新買進／add 加碼／trim 減碼／close 出清
+                "ret": _r(ret, 6),
+            }
+        )
+    # 新的日子在前；同一天照實際順序（先賣後買），不整份倒過來——否則換股那天十幾筆買進會排在賣出前面
+    rows.sort(key=lambda r: str(r["date"]), reverse=True)
+    return rows
+
+
 def trade_rows(
     trades: Sequence[EntryTrade], flags: Mapping[dt.date, bool], names: Mapping[str, str]
 ) -> list[dict[str, Any]]:
@@ -171,9 +231,14 @@ def trade_rows(
 
 
 def trade_summary(
-    trades: Sequence[EntryTrade], flags: Mapping[dt.date, bool], *, big_loss: float
+    trades: Sequence[EntryTrade],
+    flags: Mapping[dt.date, bool],
+    *,
+    big_loss: float,
+    repeats: int = 0,
 ) -> dict[str, Any]:
-    """逐筆統計：全部、事後補、即時三段（只算已賣出），加上還抱著／買不到／明天才買的筆數。"""
+    """逐筆統計：全部、事後補、即時三段（只算已賣出），加上還抱著／買不到／明天才買的筆數，
+    以及還抱著時又進名單、不重複算的次數（`drop_repeats`）。"""
     closed = [
         (bool(flags.get(t.signal_date, False)), t.ret)
         for t in trades
@@ -190,6 +255,7 @@ def trade_summary(
         "open": sum(1 for t in trades if t.status == "open"),
         "unfilled": sum(1 for t in trades if t.status == "unfilled"),
         "pending": sum(1 for t in trades if t.status == "pending"),
+        "repeat": repeats,
     }
 
 
@@ -212,6 +278,9 @@ def line_payload(
     trades: Sequence[EntryTrade],
     names: Mapping[str, str],
     costs: Mapping[str, float],
+    ledger: Sequence[Trade] = (),
+    splits: Sequence[SplitAdjustment] = (),
+    repeats: int = 0,
 ) -> dict[str, Any]:
     """一條線的名單績效 JSON（網站 `/api/scorecard?line=` 原樣回傳）。"""
     if not equity:
@@ -253,6 +322,8 @@ def line_payload(
             "live": live_part,
             "equity": last.equity,
             "cash": last.cash,
+            # 帳戶自己的買賣（新到舊）：逐筆統計是「每一檔新進名單」，這裡才是帳戶真的買了賣了什麼
+            "trades": ledger_rows(ledger, splits, names),
             "holdings": [
                 {
                     "sid": h.stock_id,
@@ -270,7 +341,7 @@ def line_payload(
             "big_loss": cfg.big_loss,
             "notional": cfg.initial_capital / slots,
             "costs": dict(costs),
-            "stats": trade_summary(trades, flags, big_loss=cfg.big_loss),
+            "stats": trade_summary(trades, flags, big_loss=cfg.big_loss, repeats=repeats),
             "rows": trade_rows(trades, flags, names),
         },
     }
@@ -334,7 +405,7 @@ def build_scorecards(
         run_backtest,
         splits_by_date,
     )
-    from twquant.backtest.list_trades import new_entries, simulate_entries
+    from twquant.backtest.list_trades import drop_repeats, new_entries, simulate_entries
     from twquant.data import calendar as cal
     from twquant.errors import DataError
 
@@ -379,17 +450,20 @@ def build_scorecards(
             lot_size=cfg.lot_size,
             picks=lists,
         )
-        trades = simulate_entries(
-            new_entries(lists, sessions),
-            sessions,
-            panel,
-            divs,
-            splits,
-            cost,
-            hold_sessions=cfg.hold_sessions,
-            notional=cfg.initial_capital / slots,
-            max_participation=cfg.max_participation,
-            lot=cfg.lot_size,
+        # 同一檔還抱著時又進名單：不重複買、不另算一筆（坊間回測的預設；D-176 修訂二）
+        trades, repeats = drop_repeats(
+            simulate_entries(
+                new_entries(lists, sessions),
+                sessions,
+                panel,
+                divs,
+                splits,
+                cost,
+                hold_sessions=cfg.hold_sessions,
+                notional=cfg.initial_capital / slots,
+                max_participation=cfg.max_participation,
+                lot=cfg.lot_size,
+            )
         )
         out.append(
             line_payload(
@@ -410,6 +484,9 @@ def build_scorecards(
                 trades=trades,
                 names=names,
                 costs=costs,
+                ledger=res.ledger,
+                splits=res.splits,
+                repeats=repeats,
             )
         )
     return out

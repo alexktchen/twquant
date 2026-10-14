@@ -38,6 +38,20 @@ export type TradeRow = {
   live: boolean
 }
 
+/** 模擬帳戶自己的一筆買賣（新到舊）。賣出的 ret＝賣價對這一輪平均買價的價差（不含費用與股利）；買進是 null。 */
+export type AccountTrade = {
+  date: string
+  sid: string
+  name: string | null
+  side: 'buy' | 'sell'
+  shares: number
+  price: number
+  reason: string
+  /** open 新買進／add 已持有再買（換股日調回等權）／trim 賣一部分（調回等權）／close 出清 */
+  move: 'open' | 'add' | 'trim' | 'close'
+  ret: number | null
+}
+
 /** 淨值一天：d 日期、v 帳戶淨值、b 同期 0050（同樣起始資金）、x 持股比例。 */
 export type NavPoint = { d: string; v: number; b: number | null; x: number | null }
 
@@ -60,6 +74,8 @@ export type Scorecard = {
     equity: number
     cash: number
     holdings: { sid: string; name: string | null; entry_date: string | null; weight: number; ret: number }[]
+    /** 帳戶買賣紀錄；這欄加上之前算的資料沒有它（下一次排程後就有） */
+    trades?: AccountTrade[]
   }
   gaps: string[]
   trades: {
@@ -67,7 +83,16 @@ export type Scorecard = {
     big_loss: number
     notional: number
     costs: { commission: number; tax: number }
-    stats: { all: TradeStats; backfill: TradeStats; live: TradeStats; open: number; unfilled: number; pending: number }
+    stats: {
+      all: TradeStats
+      backfill: TradeStats
+      live: TradeStats
+      open: number
+      unfilled: number
+      pending: number
+      /** 還抱著同一檔時又進名單、不重複算的次數（舊資料沒有這欄） */
+      repeat?: number
+    }
   }
 }
 
@@ -118,6 +143,41 @@ export type RowFilter = 'all' | 'live' | 'backfill'
 export function filterRows(rows: TradeRow[], f: RowFilter): TradeRow[] {
   if (f === 'all') return rows
   return rows.filter((r) => r.live === (f === 'live'))
+}
+
+/** 明細看哪一種：已賣出（預設，看得到賺賠）、還沒賣（持有中＋明天才買）、全部。 */
+export type StatusFilter = 'closed' | 'open' | 'all'
+
+const isOpen = (r: TradeRow) => r.status === 'open' || r.status === 'pending'
+
+/**
+ * 明細要列的筆數與順序。已賣出依賣出日新到舊（最近賣掉的在最上面）；其他照公布日新到舊（資料原本的順序）。
+ * 以前一律照公布日排，最上面幾十筆全是最近才進名單、還沒抱滿的——看起來像「只有買、沒有賣」。
+ */
+export function viewRows(rows: TradeRow[], status: StatusFilter, live: RowFilter): TradeRow[] {
+  const base = filterRows(rows, live)
+  if (status === 'open') return base.filter(isOpen)
+  if (status === 'all') return base
+  return base
+    .filter((r) => r.status === 'closed')
+    .sort((a, b) => (b.exit_date ?? '').localeCompare(a.exit_date ?? '') || b.signal.localeCompare(a.signal) || a.sid.localeCompare(b.sid))
+}
+
+/** 篩選鈕上的筆數。 */
+export function statusCounts(rows: TradeRow[]): Record<StatusFilter, number> {
+  return { closed: rows.filter((r) => r.status === 'closed').length, open: rows.filter(isOpen).length, all: rows.length }
+}
+
+/** 帳戶買賣的原因（白話）。kind：這條線是每月換股還是補位。 */
+export function tradeReason(t: Pick<AccountTrade, 'side' | 'reason' | 'move'>, kind: Scorecard['kind']): string {
+  // 換股日已持有的股票只是把權重調回平均（加碼或減碼），不是又買一次或賣掉
+  if (t.move === 'add') return '加碼（調回平均）'
+  if (t.move === 'trim') return '減碼（調回平均）'
+  if (t.side === 'buy') return t.reason === 'entry' ? '空位補進' : '換股買進'
+  if (t.reason.startsWith('time_stop')) return '抱滿到期'
+  // 補位型不會換股：它的 rebalance 只可能是收盤價異常跳動（減資、停牌復牌）被強制出場
+  if (t.reason === 'rebalance') return kind === 'rebalance' ? '換股賣出' : '價格異常出場'
+  return t.reason
 }
 
 /** 「2026-05-04」→「5/4」。 */

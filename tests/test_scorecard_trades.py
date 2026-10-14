@@ -12,7 +12,7 @@ import twquant.factors.builtins  # noqa: F401
 from tests.test_backtest_slots import BASE, N_DAYS, START, _cfg, _wh
 from twquant.backtest import costs as ct
 from twquant.backtest.engine import price_panel, run_backtest
-from twquant.backtest.list_trades import EntryTrade, new_entries, simulate_entries
+from twquant.backtest.list_trades import EntryTrade, drop_repeats, new_entries, simulate_entries
 from twquant.data import calendar as cal
 
 _CC = ct.CostConfig()
@@ -172,3 +172,30 @@ def test_ac4_matches_the_engine_round_trip(tmp_path: Path) -> None:
     assert t.ret == pytest.approx(
         engine_ret, abs=1e-5
     )  # 引擎受帳戶現金限制少買幾股，報酬率幾乎一樣
+
+
+def test_d176_rev2_no_second_buy_while_still_holding_the_same_stock() -> None:
+    """使用者 2026-10-14：「10/02 買天二科技 10/08 又買」——還抱著時又進名單，不重複買、不另算一筆。"""
+
+    def t(signal: int, status: str, exit_day: int | None = None, sid: str = "6834") -> EntryTrade:
+        return EntryTrade(
+            _D[signal], sid, status, exit_date=_D[exit_day] if exit_day is not None else None
+        )
+
+    trades = [
+        t(0, "closed", exit_day=22),  # 10/01 公布、抱 20 天
+        t(5, "closed", exit_day=27),  # 還抱著時又進名單 → 略過
+        t(22, "closed", exit_day=35),  # 第一筆當天開盤賣掉、晚上又進名單 → 算新的一筆（同引擎）
+        t(30, "open"),  # 還抱著（第三筆 35 才賣）→ 略過
+        t(3, "unfilled", sid="2330"),  # 買不到：不算持有
+        t(4, "open", sid="2330"),  # 所以這筆照算
+        t(6, "pending", sid="2330"),  # 上一筆還抱著 → 略過
+    ]
+    kept, skipped = drop_repeats(sorted(trades, key=lambda x: x.signal_date))
+    assert [(k.stock_id, k.signal_date) for k in kept] == [
+        ("6834", _D[0]),
+        ("2330", _D[3]),
+        ("2330", _D[4]),
+        ("6834", _D[22]),
+    ]
+    assert skipped == 3
