@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from twquant.backtest.engine import EquityPoint, Holding
+from twquant.backtest.engine import EquityPoint, Holding, SplitAdjustment, Trade
 from twquant.backtest.list_trades import EntryTrade
 from twquant.backtest.metrics import compute_metrics
 from twquant.config import BaseConfig
@@ -146,6 +146,61 @@ def _r(x: float | None, digits: int) -> float | None:
     return None if x is None else round(x, digits)
 
 
+def ledger_rows(
+    ledger: Sequence[Trade], splits: Sequence[SplitAdjustment], names: Mapping[str, str]
+) -> list[dict[str, Any]]:
+    """模擬帳戶自己的每一筆買賣（日子新到舊、同一天照成交順序：先賣後買）。
+
+    賣出附 `ret`＝賣價 ÷ 這一輪的平均買價 − 1：只是價差，**不含手續費、證交稅與股利**（同看板 D-165 的個股漲跌）；
+    帳戶淨值才是扣完成本、含股利的真實結果。分割當天先調股數（同引擎），成本總額不變、均價跟著變。
+    """
+    events: list[tuple[dt.date, int, int, Trade | SplitAdjustment]] = [
+        (sp.date, 0, i, sp) for i, sp in enumerate(splits)
+    ]
+    events += [(t.date, 1, i, t) for i, t in enumerate(ledger)]  # 同一天：分割先、成交照引擎的順序
+    shares: dict[str, int] = {}
+    cost: dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    for *_, ev in sorted(events, key=lambda e: (e[0], e[1], e[2])):
+        if isinstance(ev, SplitAdjustment):
+            if ev.stock_id in shares:
+                shares[ev.stock_id] = ev.shares_after
+            continue
+        sid = ev.stock_id
+        ret: float | None = None
+        if ev.side == "buy":
+            shares[sid] = shares.get(sid, 0) + ev.shares
+            cost[sid] = cost.get(sid, 0.0) + ev.price * ev.shares
+        else:
+            held = shares.get(sid, 0)
+            if held <= 0:
+                raise ValueError(f"{ev.date} {sid}：帳本先賣後買（持有 0 股卻賣 {ev.shares} 股）")
+            avg = cost[sid] / held
+            ret = ev.price / avg - 1.0
+            left = held - ev.shares
+            if left <= 0:
+                shares.pop(sid)
+                cost.pop(sid)
+            else:
+                shares[sid] = left
+                cost[sid] -= avg * ev.shares
+        rows.append(
+            {
+                "date": ev.date.isoformat(),
+                "sid": sid,
+                "name": names.get(sid),
+                "side": ev.side,
+                "shares": ev.shares,
+                "price": round(ev.price, 4),
+                "reason": ev.reason,
+                "ret": _r(ret, 6),
+            }
+        )
+    # 新的日子在前；同一天照實際順序（先賣後買），不整份倒過來——否則換股那天十幾筆買進會排在賣出前面
+    rows.sort(key=lambda r: str(r["date"]), reverse=True)
+    return rows
+
+
 def trade_rows(
     trades: Sequence[EntryTrade], flags: Mapping[dt.date, bool], names: Mapping[str, str]
 ) -> list[dict[str, Any]]:
@@ -212,6 +267,8 @@ def line_payload(
     trades: Sequence[EntryTrade],
     names: Mapping[str, str],
     costs: Mapping[str, float],
+    ledger: Sequence[Trade] = (),
+    splits: Sequence[SplitAdjustment] = (),
 ) -> dict[str, Any]:
     """一條線的名單績效 JSON（網站 `/api/scorecard?line=` 原樣回傳）。"""
     if not equity:
@@ -253,6 +310,8 @@ def line_payload(
             "live": live_part,
             "equity": last.equity,
             "cash": last.cash,
+            # 帳戶自己的買賣（新到舊）：逐筆統計是「每一檔新進名單」，這裡才是帳戶真的買了賣了什麼
+            "trades": ledger_rows(ledger, splits, names),
             "holdings": [
                 {
                     "sid": h.stock_id,
@@ -410,6 +469,8 @@ def build_scorecards(
                 trades=trades,
                 names=names,
                 costs=costs,
+                ledger=res.ledger,
+                splits=res.splits,
             )
         )
     return out

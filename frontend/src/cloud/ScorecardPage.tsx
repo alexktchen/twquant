@@ -7,15 +7,18 @@ import { fetchScorecard, fetchScorecardTrades } from './api'
 import { GUEST_LINES } from './auth'
 import { pct, price, trend } from './format'
 import {
-  filterRows,
   md,
   navLines,
   ratio,
+  statusCounts,
   statusText,
   stockTitle,
+  tradeReason,
+  viewRows,
   wan,
   type RowFilter,
   type Scorecard,
+  type StatusFilter,
   type TradeRow,
   type TradeStats,
 } from './scorecard'
@@ -23,6 +26,8 @@ import {
 const ACCOUNT = '#FF7A00'
 /** 明細一次顯示幾筆（「再顯示」每按一次多這麼多）。 */
 const PAGE = 50
+/** 帳戶買賣紀錄一次顯示幾筆。 */
+const LEDGER_PAGE = 20
 /** 已結算筆數少於這個數，統計很不穩定，要提醒。 */
 const FEW = 30
 
@@ -32,6 +37,8 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
   const [err, setErr] = useState('')
   const [rowsErr, setRowsErr] = useState('')
   const [filter, setFilter] = useState<RowFilter>('all')
+  // 預設只列已賣出：看得到賺賠；還沒賣的（持有中、明天才買）另外一顆鈕
+  const [status, setStatus] = useState<StatusFilter>('closed')
   const [shown, setShown] = useState(PAGE)
   useEffect(() => {
     // stale：快速切換線別時，晚到的上一條線回應不能蓋到這一條
@@ -51,10 +58,12 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
   useEffect(() => {
     setShown(PAGE)
     setFilter('all')
+    setStatus('closed')
   }, [line])
   // 換線後新資料回來前，不拿上一條線的數字
   const c = card?.code === line ? card : null
-  const list = useMemo(() => filterRows(rows ?? [], filter), [rows, filter])
+  const list = useMemo(() => viewRows(rows ?? [], status, filter), [rows, status, filter])
+  const counts = useMemo(() => statusCounts(rows ?? []), [rows])
   return (
     <main className="cq-body cq-score">
       <aside className="cq-list cq-score-side">
@@ -73,10 +82,32 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
         {c && (
           <>
             <NavChart c={c} />
+            <AccountTrades c={c} />
             <Trades c={c} />
             <div className="cq-score-block">
               <div className="cq-score-head">
                 <h2>逐筆明細</h2>
+                <div className="cq-seg cq-seg-small">
+                  {(
+                    [
+                      ['closed', '已賣出'],
+                      ['open', '還沒賣'],
+                      ['all', '全部'],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      className={status === k ? 'on' : ''}
+                      onClick={() => {
+                        setStatus(k)
+                        setShown(PAGE)
+                      }}
+                    >
+                      {label}
+                      {rows !== null && <em>{counts[k]}</em>}
+                    </button>
+                  ))}
+                </div>
                 <div className="cq-seg cq-seg-small">
                   {(
                     [
@@ -85,7 +116,14 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
                       ['backfill', '事後補'],
                     ] as const
                   ).map(([k, label]) => (
-                    <button key={k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
+                    <button
+                      key={k}
+                      className={filter === k ? 'on' : ''}
+                      onClick={() => {
+                        setFilter(k)
+                        setShown(PAGE)
+                      }}
+                    >
                       {label}
                     </button>
                   ))}
@@ -248,6 +286,90 @@ function NavChart({ c }: { c: Scorecard }) {
         </span>
       </div>
       <div className="cq-score-chart" ref={el} />
+    </div>
+  )
+}
+
+/** 模擬帳戶自己的買賣（新到舊）：照名單真的下了哪些單、什麼時候賣、為什麼賣。 */
+function AccountTrades({ c }: { c: Scorecard }) {
+  const [shown, setShown] = useState(LEDGER_PAGE)
+  const [onlySells, setOnlySells] = useState(false)
+  useEffect(() => {
+    setShown(LEDGER_PAGE)
+    setOnlySells(false)
+  }, [c.code])
+  const all = c.account.trades
+  const sells = all?.filter((t) => t.side === 'sell').length ?? 0
+  const list = all && onlySells ? all.filter((t) => t.side === 'sell') : all
+  return (
+    <div className="cq-score-block">
+      <div className="cq-score-head">
+        <h2>帳戶買賣紀錄</h2>
+        {all && (
+          <div className="cq-seg cq-seg-small">
+            <button
+              className={onlySells ? '' : 'on'}
+              onClick={() => {
+                setOnlySells(false)
+                setShown(LEDGER_PAGE)
+              }}
+            >
+              買賣都看<em>{all.length}</em>
+            </button>
+            <button
+              className={onlySells ? 'on' : ''}
+              onClick={() => {
+                setOnlySells(true)
+                setShown(LEDGER_PAGE)
+              }}
+            >
+              只看賣出<em>{sells}</em>
+            </button>
+          </div>
+        )}
+      </div>
+      <p className="cq-score-p">
+        模擬帳戶照名單實際下的單，都是隔天開盤成交；同一天先賣後買。賣出的「價差」是賣價對這一輪平均買價，不含手續費、證交稅與股利；帳戶淨值才是扣完成本、含股利的結果。
+      </p>
+      {!list && <p className="cq-empty">下一次排程算完後會出現。</p>}
+      {list && list.length === 0 && <p className="cq-empty">還沒有任何買賣。</p>}
+      {list && list.length > 0 && (
+        <div className="cq-score-trades">
+          <div className="cq-trade cq-trade-head">
+            <span>股票／成交日</span>
+            <span>動作</span>
+            <span>成交價</span>
+            <span>價差</span>
+          </div>
+          {list.slice(0, shown).map((t, i) => (
+            <div key={`${t.date}-${t.sid}-${t.side}-${i}`} className="cq-trade">
+              <span className="cq-trade-name">
+                <b>{stockTitle(t)}</b>
+                <small>
+                  {t.name && <em>{t.sid}</em>}
+                  {md(t.date)}
+                </small>
+              </span>
+              <span className="cq-trade-px">
+                <i className={t.side === 'buy' ? 'cq-tag cq-tag-buy' : 'cq-tag cq-tag-sell'}>{t.side === 'buy' ? '買' : '賣'}</i>
+                <small>{tradeReason(t, c.kind)}</small>
+              </span>
+              <span className="cq-trade-px">
+                {price(t.price)}
+                <small>{t.shares.toLocaleString('zh-TW')} 股</small>
+              </span>
+              <span className="cq-trade-ret">
+                {t.ret === null ? <small>—</small> : <b className={trend(t.ret)}>{pct(t.ret, 1)}</b>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {list && list.length > shown && (
+        <button className="cq-more" onClick={() => setShown(shown + LEDGER_PAGE)}>
+          再顯示 {Math.min(LEDGER_PAGE, list.length - shown)} 筆（共 {list.length} 筆）
+        </button>
+      )}
     </div>
   )
 }

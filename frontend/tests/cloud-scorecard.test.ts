@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { NOT_READY, lineOk, missingTable, rawJson, readRows } from '../functions/_lib/scorecard.ts'
-import { filterRows, md, navLines, ratio, statusText, stockTitle, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
+import { filterRows, md, navLines, ratio, statusCounts, statusText, stockTitle, tradeReason, viewRows, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
 
 const nav: NavPoint[] = [
   { d: '2026-10-06', v: 100, b: 200, x: 0 },
@@ -99,4 +99,36 @@ test('新功能上線、第一次排程還沒跑：表不存在當成「還沒�
   // 其他錯誤（連不上、密碼錯）照樣丟出去，由 guarded 回 503
   await assert.rejects(readRows(() => Promise.reject(Object.assign(new Error('x'), { code: '28P01' }))))
   assert.ok(NOT_READY.includes('還沒算出來') && !NOT_READY.includes('relation'))
+})
+
+test('逐筆明細預設只列已賣出、依賣出日新到舊；還沒賣的另外看（以前照公布日排，最上面全是還沒賣的）', () => {
+  const rows = [
+    row({ sid: 'P', signal: '2026-10-13', status: 'pending', exit_date: null, ret: null }),
+    row({ sid: 'O', signal: '2026-10-08', status: 'open', exit_date: null }),
+    row({ sid: 'A', signal: '2026-09-01', exit_date: '2026-09-30', live: false }),
+    row({ sid: 'B', signal: '2026-09-05', exit_date: '2026-10-06', live: false }),
+    row({ sid: 'U', signal: '2026-09-03', status: 'unfilled', exit_date: null, ret: null, live: false }),
+  ]
+  assert.deepEqual(
+    viewRows(rows, 'closed', 'all').map((r) => r.sid),
+    ['B', 'A'],
+  )
+  assert.deepEqual(
+    viewRows(rows, 'open', 'all').map((r) => r.sid),
+    ['P', 'O'],
+  )
+  assert.equal(viewRows(rows, 'all', 'all').length, 5)
+  assert.deepEqual(
+    viewRows(rows, 'closed', 'live').map((r) => r.sid),
+    [],
+  )
+  assert.deepEqual(statusCounts(rows), { closed: 2, open: 2, all: 5 })
+})
+
+test('帳戶買賣的原因：補位線的 rebalance 只會是價格異常出場', () => {
+  assert.equal(tradeReason({ side: 'buy', reason: 'entry' }, 'slots'), '空位補進')
+  assert.equal(tradeReason({ side: 'buy', reason: 'rebalance' }, 'rebalance'), '換股買進')
+  assert.equal(tradeReason({ side: 'sell', reason: 'time_stop' }, 'slots'), '抱滿到期')
+  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance' }, 'rebalance'), '換股賣出')
+  assert.equal(tradeReason({ side: 'sell', reason: 'rebalance' }, 'slots'), '價格異常出場')
 })
