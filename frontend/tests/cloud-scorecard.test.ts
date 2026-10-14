@@ -10,7 +10,7 @@ const nav: NavPoint[] = [
   { d: '2026-10-09', v: 121, b: null, x: 1 },
 ]
 
-test('D-176 AC10: 淨值曲線換成累積報酬 %，事後補與即時在即時第一天接起來；頁面不畫 0050', () => {
+test('D-176 AC10: 淨值曲線換成累積報酬 %，事後補與即時在即時第一天接起來；0050 從第一天起算（D-176 修訂三）', () => {
   const l = navLines(nav, '2026-10-08')
   assert.deepEqual(
     l.backfill.map((p) => p.time),
@@ -22,12 +22,22 @@ test('D-176 AC10: 淨值曲線換成累積報酬 %，事後補與即時在即時
   )
   assert.ok(Math.abs(l.live[1].value - 21) < 1e-9) // 121 / 100 − 1
   assert.ok(Math.abs(l.backfill[2].value - -1) < 1e-9)
-  assert.deepEqual(Object.keys(l).sort(), ['backfill', 'live']) // D-176 修訂：不放 0050
+  // 0050：200 → 210 → 220，第四天沒有值就跳過
+  assert.deepEqual(
+    l.bench.map((p) => [p.time, Math.round(p.value * 100) / 100]),
+    [
+      ['2026-10-06', 0],
+      ['2026-10-07', 5],
+      ['2026-10-08', 10],
+    ],
+  )
   // 沒有即時段：全部是事後補
   const all = navLines(nav, null)
   assert.equal(all.backfill.length, 4)
   assert.equal(all.live.length, 0)
-  assert.deepEqual(navLines([], null), { backfill: [], live: [] })
+  assert.deepEqual(navLines([], null), { backfill: [], live: [], bench: [] })
+  // 第一天就沒有 0050（雲端還沒補行情）→ 不畫
+  assert.deepEqual(navLines(nav.map((p) => ({ ...p, b: null })), null).bench, [])
 })
 
 const row = (over: Partial<TradeRow>): TradeRow => ({
