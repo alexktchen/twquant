@@ -1953,6 +1953,18 @@ def group_flow_cmd(
         typer.secho(f"[OK] {day}：{_group_flow_for_day(day)}", fg=typer.colors.GREEN)
 
 
+@app.command(name="group-flow-check")
+def group_flow_check_cmd(
+    out: str = typer.Option("", "--out", help="另存結果 markdown 的路徑（絕對路徑；空＝只印出來）"),
+) -> None:
+    """族群資金流入有沒有用（D-178 事前登記）：名單逐筆依進名單那天族群是否資金流入分兩組比報酬，照登記的門檻下結論。"""
+    text = _group_flow_check()
+    typer.echo(text, nl=False)
+    if out:
+        Path(out).write_text(text, encoding="utf-8")
+        typer.secho(f"[OK] 已存 {out}", fg=typer.colors.GREEN)
+
+
 @app.command()
 def watchdog(date: str = typer.Option("today", help="預期交易日 YYYY-MM-DD 或 today")) -> None:
     """dead-man switch：檢查 heartbeat 是否為預期交易日；缺失/過期 → 非零退出。"""
@@ -2997,6 +3009,111 @@ def _group_flow_for_day(day: dt.date) -> str:
     return f"{len(flows)} 個族群，資金流入 {len(hot)} 個" + (
         f"：{'、'.join(hot[:5])}" if hot else ""
     )
+
+
+def _group_flow_check() -> str:
+    """D-178：讀名單績效逐筆、族群、行情，重算每個進名單日子的族群資金，照登記的門檻判讀，回 markdown。"""
+    import json
+
+    import polars as pl
+
+    from twquant.config import load_config
+    from twquant.data.serving import store
+    from twquant.data.serving.groups_store import read_group_map, read_industries
+    from twquant.data.stock_groups import StockGroupsConfig
+    from twquant.errors import DataError
+    from twquant.reporting.group_flow import group_flow
+    from twquant.reporting.group_flow_check import (
+        GroupFlowCheckConfig,
+        evaluate,
+        label_trades,
+        market_lift,
+        render,
+    )
+    from twquant.reporting.holdout import config_fingerprint
+
+    cfg = load_config(_CONFIG_DIR / "group_flow_check.yaml", GroupFlowCheckConfig)
+    flow_cfg = load_config(_CONFIG_DIR / "stock_groups.yaml", StockGroupsConfig).flow
+    if config_fingerprint(flow_cfg) != cfg.flow_fingerprint:
+        raise DataError(
+            "group_flow_check",
+            None,
+            "「資金流入」的定義（stock_groups.yaml flow）在 D-178 登記之後被改了——這份檢定不算數，要另開登記",
+        )
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        schema = scfg.pg_schema
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT line, (payload->'trades'->'rows')::text FROM \"{schema}\".\"scorecard\" ORDER BY line"
+            )
+            trade_rows = {str(line): json.loads(body) for line, body in cur.fetchall()}
+            cur.execute(
+                f'SELECT date, stock_id, close, amount FROM "{schema}"."prices_daily" WHERE date >= %s',
+                (cfg.start - dt.timedelta(days=120),),
+            )
+            prices = pl.DataFrame(
+                cur.fetchall(),
+                schema={
+                    "date": pl.Date,
+                    "stock_id": pl.String,
+                    "close": pl.Float64,
+                    "amount": pl.Float64,
+                },
+                orient="row",
+            )
+        groups = {sid: ind for sid, ind in read_industries(conn, schema).items() if ind}
+        groups.update(read_group_map(conn, schema))  # 族群表優先，沒有的用官方產業別（同網站）
+    finally:
+        conn.close()
+    if not trade_rows:
+        raise DataError("scorecard", None, "雲端還沒有名單績效（serving.scorecard 是空的）")
+    sessions = sorted(prices.get_column("date").unique().to_list())
+    by_day = {d[0]: f for d, f in prices.partition_by("date", as_dict=True).items()}
+    hot_cache: dict[dt.date, frozenset[str] | None] = {}
+
+    def hot_groups(day: dt.date) -> frozenset[str] | None:
+        """那天資金流入的族群；前面不足 avg_sessions 天（算不出倍數）→ None。"""
+        if day not in hot_cache:
+            i = sessions.index(day) if day in by_day else -1
+            if i < flow_cfg.avg_sessions:
+                hot_cache[day] = None
+            else:
+                window = pl.concat([by_day[d] for d in sessions[i - flow_cfg.avg_sessions : i + 1]])
+                flows = group_flow(window, groups, {}, day, flow_cfg, scfg.cloud.stock_pattern)
+                hot_cache[day] = frozenset(f.group for f in flows if f.hot)
+        return hot_cache[day]
+
+    signals = sorted(
+        {
+            dt.date.fromisoformat(str(r["signal"]))
+            for rows in trade_rows.values()
+            for r in rows
+            if r.get("status") == "closed" and str(r["signal"]) >= cfg.start.isoformat()
+        }
+    )
+    hot_by_date: dict[dt.date, frozenset[str]] = {}
+    for d in signals:
+        got = hot_groups(d)
+        if got is None:
+            raise DataError("group_flow_check", d, "這天前面的行情不到 20 個交易日，算不出資金倍數")
+        hot_by_date[d] = got
+    obs = [
+        o
+        for line, rows in trade_rows.items()
+        for o in label_trades(rows, line, groups, hot_by_date, cfg.start)
+    ]
+    result = evaluate(obs, cfg)
+
+    def hot_members(day: dt.date) -> frozenset[str] | None:
+        hot = hot_groups(day)
+        return None if hot is None else frozenset(sid for sid, g in groups.items() if g in hot)
+
+    market = market_lift(
+        prices, hot_members, sessions, scfg.cloud.stock_pattern, cfg.market_horizon, cfg.market_step
+    )
+    return render(result, market, cfg, max(signals) if signals else cfg.start)
 
 
 def _pg_price_days(start: dt.date, end: dt.date) -> list[dt.date]:
