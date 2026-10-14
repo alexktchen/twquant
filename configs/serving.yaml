@@ -45,6 +45,8 @@ cloud:
   pattern_tables: [prices_daily, broker_trades]
   # 特別股不是四碼卻有產業別、會進產業平均；修剪時留下，否則產業相對因子和地端不同（2026-10-09 實測）
   industry_member_tables: [prices_daily]
+  # 名單績效（D-176）的對照「同期買 0050 抱著」要它的行情；0050 不是四碼普通股，修剪時明確留下
+  keep_stocks: ["0050"]
   # 2026-10-09 使用者裁決：Free 不升級；雲端只放「每天算因子 → 模型推薦 → 記錄每日名單」需要的，
   # 空間允許再放 K 線。網站不再有回測、選股池、分點面板。初始切片見 configs/cloud_seed.yaml。
   windows:                         # 滾動窗（交易日數）；未列出的表全史保留（小表）

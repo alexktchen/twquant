@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEFAULT_VISIBLE_BARS, dateOption, dayCount, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
+import { DEFAULT_VISIBLE_BARS, chooseDay, dateOption, dayCount, dayNav, latestRange, parseKeptBars, pct, pickMarkers, price, quoteBar, signedPrice, sma, trend, type Bar } from '../src/cloud/format.ts'
 
 const bar = (date: string, close: number): Bar => ({ date, open: close, high: close, low: close, close, volume: 1 })
 
@@ -85,6 +85,18 @@ test('日期選單檔數：有記錄的日子寫幾檔（沒股票寫 0 檔）�
   assert.equal(dateOption('2026-10-08', 2), '2026-10-08　2 檔')
   assert.equal(dateOption('2026-10-08', 0), '2026-10-08　0 檔')
   assert.equal(dateOption('2026-10-06', null), '2026-10-06')
+  assert.equal(dateOption('2026-10-13', 15, true), '2026-10-13　15 檔・最新')
+})
+
+test('每日名單（今日推薦與歷史名單合併）：沒選日期＝最新一天，選到最新那天就跟著新的一天走', () => {
+  const dates = ['2026-10-13', '2026-10-08', '2026-10-07'] // 新到舊
+  assert.deepEqual(dayNav(dates, undefined), { shown: '2026-10-13', older: '2026-10-08', newer: null, past: false })
+  assert.deepEqual(dayNav(dates, '2026-10-08'), { shown: '2026-10-08', older: '2026-10-07', newer: '2026-10-13', past: true })
+  assert.deepEqual(dayNav(dates, '2026-10-07'), { shown: '2026-10-07', older: null, newer: '2026-10-08', past: true })
+  assert.equal(dayNav(dates, '2026-10-13').past, false) // 明確選最新那天也不算看過去
+  assert.deepEqual(dayNav([], undefined), { shown: undefined, older: null, newer: null, past: false }) // 日期清單還沒到
+  assert.equal(chooseDay(dates, '2026-10-13'), undefined)
+  assert.equal(chooseDay(dates, '2026-10-08'), '2026-10-08')
 })
 
 test('重抓回來的 K 線沒變就不重畫：根數與最後一根的日期、量價都一樣才算相同', async () => {
