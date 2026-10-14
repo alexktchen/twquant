@@ -20,6 +20,11 @@ export type Quote = {
 
 /** 盤中幾毫秒更新一次（使用者選的 10 秒；證交所本身約 5 秒一筆）。 */
 export const LIVE_POLL_MS = 10_000
+/** 取不到即時報價時，下一次要等多久（毫秒）：30 秒起、每失敗一次加倍、最多 5 分鐘；證交所說要等更久就照它。 */
+export function liveBackoff(failures: number, retryAfterSec: number | null | undefined): number {
+  const base = Math.min(30_000 * 2 ** Math.max(failures - 1, 0), 300_000)
+  return Math.max(base, (retryAfterSec ?? 0) * 1000)
+}
 // 盤中時段（台北）：9:00 開盤、13:30 收盤；收盤後多抓幾分鐘拿到最後收盤價
 const OPEN = '09:00:00'
 const CLOSE_AUCTION = '13:25:00'

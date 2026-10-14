@@ -29,7 +29,7 @@ import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
-import { LIVE_POLL_MS, limitPrices, limitState, liveBar, liveLabel, pickPrice, quoteLimit, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
+import { LIVE_POLL_MS, limitPrices, liveBackoff, limitState, liveBar, liveLabel, pickPrice, quoteLimit, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
@@ -490,6 +490,7 @@ export default function CloudApp() {
                 <Detail
                   sid={watchCurrent.sid}
                   name={watchCurrent.name}
+                  shared={watchSids.includes(watchCurrent.sid) && tab === 'watch' && !guest && !editMode ? watchLive : null}
                   lineNames={lineNames}
                   tracked={tracked.has(watchCurrent.sid)}
                   onTrack={watch ? toggleTrack : undefined}
@@ -503,6 +504,7 @@ export default function CloudApp() {
                 sid={selected.sid}
                 name={selected.name}
                 group={selected.group}
+                shared={listSids.includes(selected.sid) && tab === 'picks' && !guest && !nav.past ? listLive : null}
                 close={selected.close}
                 chg={selected.chg}
                 asOf={nav.past ? view?.date : undefined}
@@ -831,6 +833,7 @@ function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked
 function Detail({
   sid,
   name,
+  shared = null,
   group,
   close,
   chg,
@@ -842,6 +845,8 @@ function Detail({
 }: {
   sid: string
   name: string | null
+  /** 清單（名單或追蹤股）已經在輪詢這一檔的即時報價：直接用，不另外再問一次（證交所會擋太密的請求） */
+  shared?: LiveState | null
   /** 名單上帶來的族群（先頂著）；沒有就用評分 API 回來的 */
   group?: Group | null
   /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
@@ -888,7 +893,8 @@ function Detail({
   const sc = scores?.sid === sid ? scores : null
   // 盤中：今天到目前為止的那根接在 K 線最後（資料庫傍晚才有今天）
   const today = taipeiNow().date
-  const live = useLiveQuotes([sid], true)
+  const own = useLiveQuotes([sid], shared === null)
+  const live = shared ?? own
   const quote = live.quotes[sid]
   const todayBar = liveBar(bars, quote, today)
   const all = todayBar ? [...bars, todayBar] : bars
@@ -939,7 +945,11 @@ function Detail({
                 {label}
               </em>
             )}
-            {!asOf && live.error && shouldPoll(taipeiNow(), []) && <em className="cq-live off">即時報價暫時取不到</em>}
+            {!asOf && (live.error || live.stale) && shouldPoll(taipeiNow(), []) && (
+              <em className="cq-live off" title={live.error || undefined}>
+                {quote ? '即時報價暫停更新（證交所限流）' : '即時報價暫時取不到'}
+              </em>
+            )}
           </div>
         </div>
         {q && (
@@ -982,25 +992,37 @@ function Detail({
 }
 
 /** 盤中每 10 秒抓一次即時量價（畫面在背景、或不在盤中時不抓；打開時先抓一次）。代號換了就重抓。 */
-function useLiveQuotes(sids: string[], enabled: boolean): { quotes: Record<string, Quote>; error: string } {
+type LiveState = { quotes: Record<string, Quote>; error: string; stale: boolean }
+
+function useLiveQuotes(sids: string[], enabled: boolean): LiveState {
   // 排序後當鍵：追蹤清單只是換順序時不用重抓
   const key = enabled ? [...sids].sort().join(',') : ''
-  const [state, setState] = useState<{ key: string; quotes: Record<string, Quote>; error: string }>({ key: '', quotes: {}, error: '' })
+  const [state, setState] = useState<LiveState & { key: string }>({ key: '', quotes: {}, error: '', stale: false })
   useEffect(() => {
     if (!key) return
     let stale = false
     let dates: string[] = []
+    // 證交所會擋太密的請求：失敗後先停一陣子（30 秒起加倍、最多 5 分鐘），不要每 10 秒一直打
+    let failures = 0
+    let pauseUntil = 0
     const load = () =>
       fetchQuotes(key.split(','))
-        .then((qs) => {
+        .then((r) => {
           if (stale) return
-          dates = qs.map((x) => x.date)
-          setState({ key, quotes: Object.fromEntries(qs.map((x) => [x.sid, x])), error: '' })
+          dates = r.quotes.map((x) => x.date)
+          failures = 0
+          pauseUntil = r.retry_after ? Date.now() + r.retry_after * 1000 : 0
+          setState({ key, quotes: Object.fromEntries(r.quotes.map((x) => [x.sid, x])), error: '', stale: Boolean(r.stale) })
         })
-        // 抓不到就沿用資料庫的收盤價，畫面標「即時報價暫時取不到」，下一輪再試
-        .catch((e: Error) => !stale && setState((s) => ({ key, quotes: s.key === key ? s.quotes : {}, error: e.message })))
+        // 抓不到就沿用資料庫的收盤價，畫面標「即時報價暫時取不到」，等一陣子再試
+        .catch((e: Error) => {
+          if (stale) return
+          failures += 1
+          pauseUntil = Date.now() + liveBackoff(failures, null)
+          setState((s) => ({ key, quotes: s.key === key ? s.quotes : {}, error: e.message, stale: s.key === key && Object.keys(s.quotes).length > 0 }))
+        })
     const tick = () => {
-      if (document.visibilityState === 'visible' && shouldPoll(taipeiNow(), dates)) load()
+      if (document.visibilityState === 'visible' && Date.now() >= pauseUntil && shouldPoll(taipeiNow(), dates)) load()
     }
     load()
     const timer = setInterval(tick, LIVE_POLL_MS)
@@ -1014,7 +1036,7 @@ function useLiveQuotes(sids: string[], enabled: boolean): { quotes: Record<strin
       document.removeEventListener('visibilitychange', onShow)
     }
   }, [key])
-  return state.key === key ? state : { quotes: {}, error: '' }
+  return state.key === key ? state : { quotes: {}, error: '', stale: false }
 }
 
 /** 加入／移除追蹤股。送出中停用，失敗把原因寫在按鈕旁。 */
