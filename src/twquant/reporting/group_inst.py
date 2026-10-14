@@ -3,6 +3,8 @@
 - 每天：族群成員（全市場四碼普通股、在族群表上）當天的三大法人買賣超股數 × 當天收盤，加總成金額；
   外資、投信、自營商分開記。上市與上櫃的法人資料由呼叫端合併後傳進來。
   法人資料沒有列出的成員＝那天法人沒有買賣，記 0（證交所與櫃買都只列有法人交易的股票）。
+  法人只買賣零股或鉅額、當天沒有一般交易（行情表沒有收盤）的股票，用最近一個收盤換算（2026-10-14 實測：
+  5906、1423、3085 各幾十到一千股）；成員數只算當天有收盤的。
 - x＝近 window 個交易日的合計；y（加速）＝（近 window 日合計 − 再前 window 日合計）÷ window，
   單位是「每天」：正的＝這一段平均每天比前一段多買（或少賣）。涵蓋的日子有一天沒算到 → 那個值是 None，不當成 0。
 - 象限（網站畫）：x>0、y>0 持續加碼；x>0、y<0 買氣降溫；x<0、y>0 賣壓收斂；x<0、y<0 持續減碼。
@@ -66,11 +68,14 @@ def group_inst_day(
 ) -> list[InstDay]:
     """`day` 這天每個族群的法人買賣超（金額），依族群名排序。
 
-    inst：stock_id、foreign_net、trust_net、dealer_net（股，上市＋上櫃）；closes：stock_id、close（當天）。
-    沒有收盤、同一檔出現兩次、或有法人買賣卻沒有收盤（換不成金額）即 raise。
+    inst：stock_id、foreign_net、trust_net、dealer_net（股，上市＋上櫃）；
+    closes：stock_id、close、date（每檔 `day` 當天或之前最近一個收盤與它的日期，呼叫端限定往前找多久）。
+    當天一檔收盤都沒有、同一檔出現兩次、或有法人買賣卻找不到任何收盤（換不成金額）即 raise。
     """
-    if closes.is_empty():
+    if closes.filter(pl.col("date") == day).is_empty():
         raise DataError(_TABLE, day, f"{day} 沒有收盤價")
+    if closes.filter(pl.col("date") > day).height:
+        raise DataError(_TABLE, day, f"收盤價有 {day} 之後的日期（前視）")
     dup = inst.filter(pl.col("stock_id").is_duplicated())
     if dup.height:
         raise DataError(
@@ -80,7 +85,7 @@ def group_inst_day(
         {"stock_id": list(groups), "group": list(groups.values())},
         schema={"stock_id": pl.String, "group": pl.String},
     ).filter(pl.col("stock_id").str.contains(universe))
-    px = closes.select("stock_id", "close").join(member_map, on="stock_id", how="inner")
+    px = closes.select("stock_id", "close", "date").join(member_map, on="stock_id", how="inner")
     bad_px = px.filter(pl.col("close").is_null() | (pl.col("close") <= 0))
     if bad_px.height:
         raise DataError(_TABLE, day, f"收盤是空的或不是正數：{bad_px.head(3).to_dicts()}")
@@ -97,8 +102,15 @@ def group_inst_day(
         .group_by("group")
         .agg(*(pl.col(c).mul(pl.col("close")).sum().alias(c) for c in _NETS))
     )
-    counts = px.group_by("group").agg(pl.len().alias("members"))
-    table = counts.join(amounts, on="group", how="left").sort("group")
+    counts = px.group_by("group").agg((pl.col("date") == day).sum().alias("members"))
+    table = (
+        counts.join(amounts, on="group", how="left")
+        .filter(
+            (pl.col("members") > 0)
+            | pl.any_horizontal(*(pl.col(c).fill_null(0.0) != 0 for c in _NETS))
+        )
+        .sort("group")
+    )
     return [
         InstDay(
             date=day,

@@ -47,6 +47,7 @@ class GroupInstConfig(BaseConfig):
         ge=1
     )  # x＝近 window 個交易日合計；y＝（近 window 日 − 再前 window 日）÷ window
     trail: int = Field(ge=1)  # 選中的族群畫最近幾個交易日的位置
+    close_lookback_days: int = Field(ge=1)  # 當天沒有收盤時，往前找最近收盤的日曆天數
 
 
 class StockGroupsConfig(BaseConfig):

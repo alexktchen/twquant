@@ -93,9 +93,11 @@ def _inst(*rows: tuple[str, int, int, int]) -> pl.DataFrame:
     )
 
 
-def _closes(*rows: tuple[str, float]) -> pl.DataFrame:
+def _closes(*rows: tuple[str, float] | tuple[str, float, dt.date]) -> pl.DataFrame:
+    """每檔最近一個收盤；沒給日期＝當天有收盤。"""
+    full = [(r[0], r[1], r[2] if len(r) == 3 else _DAY) for r in rows]
     return pl.DataFrame(
-        list(rows), schema={"stock_id": pl.String, "close": pl.Float64}, orient="row"
+        full, schema={"stock_id": pl.String, "close": pl.Float64, "date": pl.Date}, orient="row"
     )
 
 
@@ -137,9 +139,35 @@ def test_t358_ac5_group_amount_refuses_bad_inputs() -> None:
     assert group_inst_day(_inst(("1102", 0, 0, 0)), closes, _GROUPS, _DAY, _UNIVERSE)[0].net == 0.0
 
 
+def test_t358_ac5b_odd_lot_only_trades_use_the_last_close() -> None:
+    """2026-10-14 實測：5906、1423、3085 法人只買賣零股／鉅額、當天沒有收盤 → 用最近一個收盤換算，不算當天成員。"""
+    before = _DAY - dt.timedelta(days=1)
+    inst = _inst(("1101", 100, 0, 0), ("1102", 56, 0, 0))
+    closes = _closes(("1101", 50.0), ("1102", 20.0, before))
+    a = group_inst_day(inst, closes, _GROUPS, _DAY, _UNIVERSE)[0]
+    assert (a.group, a.members, a.foreign) == ("A", 1, 100 * 50 + 56 * 20)
+    # 整個族群當天都沒有一般交易、但法人有買賣：照樣有一列，成員 0
+    only = group_inst_day(
+        _inst(("2201", 10, 0, 0)),
+        _closes(("1101", 50.0), ("2201", 8.0, before)),
+        _GROUPS,
+        _DAY,
+        _UNIVERSE,
+    )
+    assert [(d.group, d.members, d.net) for d in only] == [("A", 1, 0.0), ("B", 0, 80.0)]
+    with pytest.raises(DataError, match="前視"):
+        group_inst_day(
+            inst,
+            _closes(("1101", 50.0), ("1102", 20.0, _DAY + dt.timedelta(days=1))),
+            _GROUPS,
+            _DAY,
+            _UNIVERSE,
+        )
+
+
 # ── x、y、軌跡 ─────────────────────────────────────────────────────────────
 
-_CFG = GroupInstConfig(window=2, trail=3)
+_CFG = GroupInstConfig(window=2, trail=3, close_lookback_days=30)
 _S = [dt.date(2026, 10, 1) + dt.timedelta(days=i) for i in range(6)]
 
 
@@ -193,7 +221,7 @@ def test_t358_ac8_registered_window_and_pipeline_wiring() -> None:
     from twquant.data.stock_groups import StockGroupsConfig
 
     cfg = load_config(_ROOT / "configs" / "stock_groups.yaml", StockGroupsConfig).inst
-    assert (cfg.window, cfg.trail) == (5, 5)
+    assert (cfg.window, cfg.trail, cfg.close_lookback_days) == (5, 5, 30)
     source = (_ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
     assert source.index('PipelineStep("族群資金"') < source.index('PipelineStep("族群法人"')
     scfg = load_config(_ROOT / "configs" / "serving.yaml", ServingConfig)
@@ -255,7 +283,15 @@ def test_t358_ac9_pg_reads_and_whole_day_overwrite() -> None:
     conn = _connect_or_skip()
     try:
         assert read_sessions(conn, _SCHEMA, _S[2], 2) == _S[1:3]
-        assert read_closes(conn, _SCHEMA, _S[2]).to_dicts() == [{"stock_id": "1101", "close": 52.0}]
+        assert read_closes(conn, _SCHEMA, _S[2], 30).to_dicts() == [
+            {"stock_id": "1101", "close": 52.0, "date": _S[2]}
+        ]
+        assert read_closes(conn, _SCHEMA, _S[5], 30).row(0) == (
+            "1101",
+            52.0,
+            _S[2],
+        )  # 之後沒交易：最近一個
+        assert read_closes(conn, _SCHEMA, _S[5], 2).is_empty()  # 超過往前找的天數
         assert read_twse_inst(conn, _SCHEMA, _S[2]).row(0) == ("1101", 1000, -5, 0)
         assert read_inst_days(conn, _SCHEMA, _S) == []  # 表還沒建：建好、回空
         days = [_day(i, g, 10.0 * (i + 1)) for i in range(4) for g in ("A", "B")]

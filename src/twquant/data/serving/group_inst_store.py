@@ -29,14 +29,18 @@ def read_sessions(conn: Any, schema: str, day: dt.date, n: int) -> list[dt.date]
         return sorted(r[0] for r in cur.fetchall())
 
 
-def read_closes(conn: Any, schema: str, day: dt.date) -> pl.DataFrame:
-    """這天每檔的收盤。"""
+def read_closes(conn: Any, schema: str, day: dt.date, lookback_days: int) -> pl.DataFrame:
+    """每檔 `day` 當天或之前 `lookback_days` 個日曆天內最近一個收盤與它的日期。"""
     with conn.cursor() as cur:
         cur.execute(
-            f'SELECT stock_id, close FROM "{schema}"."prices_daily" WHERE date = %s', (day,)
+            f'SELECT DISTINCT ON (stock_id) stock_id, close, date FROM "{schema}"."prices_daily" '
+            "WHERE date <= %s AND date > %s ORDER BY stock_id, date DESC",
+            (day, day - dt.timedelta(days=lookback_days)),
         )
         rows = cur.fetchall()
-    return pl.DataFrame(rows, schema={"stock_id": pl.String, "close": pl.Float64}, orient="row")
+    return pl.DataFrame(
+        rows, schema={"stock_id": pl.String, "close": pl.Float64, "date": pl.Date}, orient="row"
+    )
 
 
 def read_twse_inst(conn: Any, schema: str, day: dt.date) -> pl.DataFrame:

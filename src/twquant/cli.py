@@ -3098,7 +3098,7 @@ def _group_inst_for_day(day: dt.date) -> str:
                 if twse.is_empty():
                     raise DataError("institutional_daily", s, "上市法人還沒擷取")
                 tpex = parse_institutional(fetch_institutional(client, s), s).drop("date")
-                closes = read_closes(conn, scfg.pg_schema, s)
+                closes = read_closes(conn, scfg.pg_schema, s, cfg.close_lookback_days)
                 inst = pl.concat([twse, tpex])
                 days += group_inst_day(inst, closes, groups, s, scfg.cloud.stock_pattern)
                 added.append(s)
