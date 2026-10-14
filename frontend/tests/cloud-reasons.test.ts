@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readReasons } from '../functions/_lib/reasons.ts'
-import { mark, whyLine, type Reason } from '../src/cloud/reasons.ts'
+import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from '../src/cloud/reasons.ts'
 
 const R = (t: string, s: number, f = t): Reason => ({ f, t, s })
 
@@ -18,6 +18,28 @@ test('T-360：個股頁的標記——正向＋、負向－、篩選門檻・', 
   assert.deepEqual(mark(1), { sym: '＋', label: '正向因子', tone: 'plus' })
   assert.deepEqual(mark(-1), { sym: '－', label: '負向因子', tone: 'minus' })
   assert.deepEqual(mark(0), { sym: '・', label: '篩選門檻', tone: 'base' })
+})
+
+test('T-360：選股依據掛在選中它的那張模型卡——大盤精選＝漲幅排名、潛伏飆股／高分爆量＝飆漲機率；沒有理由維持三卡並列', () => {
+  const rs = [R('近 60 日漲幅 42%，全市場前 3%', 1), R('排序模型分數在全市場前 7%', 0)]
+  assert.equal(primaryModel('CORE', rs), 'rank')
+  assert.equal(primaryModel('QUIET', rs), 'quiet')
+  assert.equal(primaryModel('QUIETV', rs), 'quiet')
+  assert.equal(primaryModel('QUIET', []), null)
+  assert.equal(primaryModel('QUIET', null), null)
+  assert.equal(primaryModel(null, rs), null)
+  assert.equal(primaryModel('OTHER', rs), null)
+})
+
+test('T-360：掛在漲幅排名卡時不重列「排序模型分數」那條門檻（卡片上已有名次）；飆漲機率卡全列', () => {
+  const rs = [R('近 60 日漲幅 42%，全市場前 3%', 1), R('排序模型分數在全市場前 7%', 0), R('每日真實波幅約 3.2%', -1)]
+  assert.deepEqual(cardReasons(rs, 'rank'), [rs[0], rs[2]])
+  assert.deepEqual(cardReasons(rs, 'quiet'), rs)
+})
+
+test('T-360：排序說明照實寫——大盤精選是規則權重，潛伏飆股／高分爆量是模型貢獻度', () => {
+  assert.equal(factorsNote('rank'), '依規則權重與全市場排名排序')
+  assert.equal(factorsNote('quiet'), '依模型貢獻度排序')
 })
 
 function fakeDb(results: (() => Promise<unknown[]>)[], calls: string[]) {

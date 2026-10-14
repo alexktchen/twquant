@@ -477,16 +477,24 @@
   .cq-quad { flex: none; height: 58vh; min-height: 300px; }
 }
 
-/* 為什麼選它（D-180） */
+/* 選股依據（D-180）：掛在選出這檔的模型卡片裡 */
 .cq-list .cq-name { min-width: 0; } /* 1fr 的預設最小寬是內容寬：理由那行不換行時會把整列撐出畫面 */
 .cq-why { display: block; margin-top: 2px; font-size: 12px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.cq-why-box { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
-.cq-why-box h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--text); }
-.cq-why-box h3 small { font-weight: 400; color: var(--mute); margin-left: 6px; }
-.cq-why-box ul { margin: 0; padding: 0; list-style: none; }
-.cq-why-box li { display: flex; gap: 6px; padding: 2px 0; color: #c9ccd4; }
-.cq-why-box li i { font-style: normal; width: 1em; flex: none; text-align: center; font-weight: 700; }
-.cq-why-box li.plus i { color: var(--up); }
-.cq-why-box li.minus { color: var(--mute); }
-.cq-why-box li.minus i { color: var(--down); }
-.cq-why-box li.base { color: var(--mute); }
+.cq-card-primary { border-color: rgba(255, 122, 0, .45); margin-bottom: 8px; }
+.cq-cards-rest { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cq-factors { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cq-factors-head { font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.cq-factors-head small { font-weight: 400; color: var(--mute); margin-left: 6px; }
+.cq-factors ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; }
+.cq-factors li { display: flex; gap: 6px; padding: 1px 0; font-size: 13px; color: #c9ccd4; min-width: 0; }
+.cq-factors li i { font-style: normal; width: 1em; flex: none; text-align: center; font-weight: 700; }
+.cq-factors li.plus i { color: var(--up); }
+.cq-factors li.minus { color: var(--mute); }
+.cq-factors li.minus i { color: var(--down); }
+.cq-factors li.base { color: var(--mute); }
+@media (max-width: 820px) {
+  .cq-cards.cq-cards-rest { grid-template-columns: 1fr; } /* 手機沿用一張一列的橫式卡片，兩欄會把字擠成直的 */
+  .cq-card-primary .cq-factors { grid-column: 1 / -1; } /* 手機卡片是兩欄 grid，選股依據要橫跨整張 */
+  .cq-factors-head small { display: block; margin: 1px 0 0; }
+  .cq-factors ul { grid-template-columns: 1fr; }
+}

@@ -17,3 +17,24 @@ export function mark(s: number): { sym: string; label: string; tone: 'plus' | 'm
   if (s < 0) return { sym: '－', label: '負向因子', tone: 'minus' }
   return { sym: '・', label: '篩選門檻', tone: 'base' }
 }
+
+/**
+ * 選股依據掛在哪張模型卡片下：名單是哪個模型選出來的就掛在那張（潛伏飆股、高分爆量＝飆漲機率；大盤精選＝漲幅排名）。
+ * 沒有理由（不在名單上、追蹤分頁、那天沒算）→ null，維持三張卡片並列。
+ */
+export function primaryModel(line: string | null | undefined, reasons: Reason[] | null | undefined): 'rank' | 'quiet' | null {
+  if (!line || !reasons?.length) return null
+  if (line === 'CORE') return 'rank'
+  if (line === 'QUIET' || line === 'QUIETV') return 'quiet'
+  return null
+}
+
+/** 卡片裡要列的理由：掛在漲幅排名卡時，「排序模型分數在全市場前 X%」（篩選門檻）卡片上已經有，不重複列。 */
+export function cardReasons(reasons: Reason[], primary: 'rank' | 'quiet'): Reason[] {
+  return primary === 'rank' ? reasons.filter((r) => r.s !== 0) : reasons
+}
+
+/** 選股依據標題旁的排序說明：潛伏飆股／高分爆量是模型的特徵貢獻，大盤精選是規則因子（權重 × 全市場排名）。 */
+export function factorsNote(primary: 'rank' | 'quiet'): string {
+  return primary === 'rank' ? '依規則權重與全市場排名排序' : '依模型貢獻度排序'
+}
