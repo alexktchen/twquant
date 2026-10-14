@@ -476,3 +476,17 @@
   .cq-quad-wrap { flex: none; margin: 4px 12px 0; }
   .cq-quad { flex: none; height: 58vh; min-height: 300px; }
 }
+
+/* 為什麼選它（D-180） */
+.cq-list .cq-name { min-width: 0; } /* 1fr 的預設最小寬是內容寬：理由那行不換行時會把整列撐出畫面 */
+.cq-why { display: block; margin-top: 2px; font-size: 12px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cq-why-box { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.cq-why-box h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.cq-why-box h3 small { font-weight: 400; color: var(--mute); margin-left: 6px; }
+.cq-why-box ul { margin: 0; padding: 0; list-style: none; }
+.cq-why-box li { display: flex; gap: 6px; padding: 2px 0; color: #c9ccd4; }
+.cq-why-box li i { font-style: normal; width: 1em; flex: none; text-align: center; font-weight: 700; }
+.cq-why-box li.plus i { color: var(--up); }
+.cq-why-box li.minus { color: var(--mute); }
+.cq-why-box li.minus i { color: var(--down); }
+.cq-why-box li.base { color: var(--mute); }

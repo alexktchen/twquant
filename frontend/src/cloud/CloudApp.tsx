@@ -24,6 +24,7 @@ import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
+import { mark, whyLine, type Reason } from './reasons'
 import { GroupsPage } from './GroupsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
@@ -504,6 +505,7 @@ export default function CloudApp() {
                 sid={selected.sid}
                 name={selected.name}
                 group={selected.group}
+                reasons={selected.reasons ?? null}
                 shared={listSids.includes(selected.sid) && tab === 'picks' && !guest && !nav.past ? listLive : null}
                 close={selected.close}
                 chg={selected.chg}
@@ -594,6 +596,7 @@ function Row({
           {p.streak > (p.recent?.length ?? 0) && <i className="cq-tag">連{p.streak}天</i>}
           {p.score !== null && <i className="cq-tag prob">{Math.round(p.score * 100)}%</i>}
         </small>
+        {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -830,11 +833,34 @@ function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked
   )
 }
 
+/** 為什麼選它（D-180）：模型最看重的理由（加分）、扣分最多的一項；大盤精選另列排序模型門檻（前提）。 */
+function Why({ reasons }: { reasons: Reason[] }) {
+  return (
+    <div className="cq-why-box">
+      <h3>
+        為什麼選它<small>模型的判斷依據，不是買賣建議</small>
+      </h3>
+      <ul>
+        {reasons.map((r) => {
+          const m = mark(r.s)
+          return (
+            <li key={r.f} className={m.tone} title={m.label}>
+              <i>{m.sym}</i>
+              {r.t}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function Detail({
   sid,
   name,
   shared = null,
   group,
+  reasons = null,
   close,
   chg,
   asOf,
@@ -849,6 +875,8 @@ function Detail({
   shared?: LiveState | null
   /** 名單上帶來的族群（先頂著）；沒有就用評分 API 回來的 */
   group?: Group | null
+  /** 為什麼選它（D-180）：名單上這一檔的白話理由；不是從名單點進來（追蹤分頁）就沒有 */
+  reasons?: Reason[] | null
   /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
@@ -935,6 +963,7 @@ function Detail({
               </span>
             </p>
           )}
+          {reasons && reasons.length > 0 && <Why reasons={reasons} />}
           <div className={`cq-big ${t}`}>
             <b className={bigLimit ? `cq-limit ${bigLimit}` : undefined} title={bigLimit === 'up' ? '漲停' : bigLimit === 'down' ? '跌停' : undefined}>
               {price(bigClose)}

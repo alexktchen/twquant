@@ -1,6 +1,8 @@
-// GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群。
+// GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群，
+// 與「為什麼選它」的理由（D-180，serving.pick_reasons；那天沒算就是 null）。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
+import { readReasons } from '../../_lib/reasons'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 import { cached, cacheKey } from '../../_lib/cache'
 
@@ -27,6 +29,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const meta = await db<{ stock_id: string; name: string | null; industry: string | null }[]>`
       SELECT stock_id, name, industry FROM serving.stock_meta WHERE stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
     const groups = await groupsFor(db, target, meta)
+    const reasons = await readReasons(db, target)
     const close = new Map(px.map((r) => [r.stock_id, r]))
     const window = dates.slice(0, RECENT_WINDOW)
     const startClose = new Map<string, number | null>()
@@ -61,6 +64,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             sid: r.stock_id,
             name: names.get(r.stock_id) ?? null,
             group: groups.get(r.stock_id) ?? null,
+            reasons: reasons.get(`${code}|${r.stock_id}`) ?? null,
             score: r.score,
             close: c,
             prev: p?.prev ?? null,
