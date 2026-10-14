@@ -116,10 +116,11 @@
 .cq-tag.new { background: rgba(255, 122, 0, .18); color: var(--accent); }
 .cq-tag.prob { background: rgba(61, 155, 255, .15); color: #6fb3ff; }
 .cq-px { text-align: right; font-variant-numeric: tabular-nums; font-size: 16px; }
-.cq-chg { justify-self: end; min-width: 74px; text-align: center; padding: 4px 0; border-radius: 4px; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; color: #fff !important; }
-.cq-chg.up { background: var(--up); }
-.cq-chg.down { background: var(--down); }
-.cq-chg.flat { background: #3a3d46; }
+/* 漲跌幅只用數字與顏色（顏色來自 .cq .up／.down／.flat）；漲停、跌停才整格填色 */
+.cq-chg { justify-self: end; min-width: 74px; text-align: right; padding: 4px 6px; box-sizing: border-box; border-radius: 4px; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; }
+.cq .cq-chg.limit-up, .cq .cq-chg.limit-down { color: #fff; text-align: center; }
+.cq-chg.limit-up { background: var(--up); }
+.cq-chg.limit-down { background: var(--down); }
 .cq-note { color: var(--mute); font-size: 12.5px; padding: 10px 14px; margin: 0; }
 .cq-line-note { color: var(--text); border-top: 1px solid var(--line); }
 .cq-empty { color: var(--mute); font-size: 14px; padding: 18px 14px; margin: 0; text-align: center; }

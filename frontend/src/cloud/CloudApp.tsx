@@ -462,7 +462,7 @@ export default function CloudApp() {
               </div>
               {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
               <p className="cq-note">
-                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。盤中價格每 10 秒更新，小字是推薦當天的收盤；漲停、跌停的價格加框。模型每日收盤後產生，非投資建議。
+                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。盤中價格每 10 秒更新，小字是推薦當天的收盤；漲停、跌停的價格加框、漲跌幅整格填色。模型每日收盤後產生，非投資建議。
               </p>
             </aside>
           )}
@@ -592,7 +592,7 @@ function Row({
           <small className={trend(p.chg6)}>{pct(p.chg6, 1)}</small>
         )}
       </span>
-      <span className={`cq-chg ${t}`}>{pct(px.chg)}</span>
+      <span className={`cq-chg ${t}${px.limit ? ` limit-${px.limit}` : ''}`}>{pct(px.chg)}</span>
     </li>
   )
 }
@@ -633,7 +633,7 @@ function WatchRow({
         <span className={`cq-px ${t}${limit ? ` limit-${limit}` : ''}`}>{price(live.close)}</span>
         {live.tag && <small className="cq-live-tag">{live.tag}</small>}
       </span>
-      <span className={`cq-chg ${t}`}>{pct(live.chg)}</span>
+      <span className={`cq-chg ${t}${limit ? ` limit-${limit}` : ''}`}>{pct(live.chg)}</span>
     </li>
   )
 }
