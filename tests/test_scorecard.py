@@ -270,12 +270,12 @@ def _publish(
 
 
 def _build(
-    tmp_path: Path, *, with_bench: bool = True
+    tmp_path: Path, *, with_bench: bool = True, extra: list[str] | None = None
 ) -> tuple[list[dict[str, Any]], Warehouse, list[PublishedPick]]:
     wh = _wh(tmp_path, with_bench=with_bench)
     sessions = cal.load(wh).between(_START, _END)
     published = _publish(wh, sessions, live_from=sessions[18], skip=sessions[10])
-    cfg = _cfg_sc()
+    cfg = _cfg_sc(extra_benchmarks=extra or [])
     lines = [
         (_line("SLOT"), _cfg(n=2)),
         (_line("RB"), _rebalance()),
@@ -398,6 +398,21 @@ def test_ac8_missing_benchmark_is_reported_not_zero(tmp_path: Path) -> None:
     assert p["account"]["all"]["bench_ret"] is None
 
 
+def test_d176r4_extra_benchmarks_get_their_own_series_and_errors(tmp_path: Path) -> None:
+    """D-176 修訂四：另外的對照各自一條序列、整段與即時段的報酬回撤；算不出來的寫原因、不給 0。"""
+    payloads, _, _ = _build(tmp_path, extra=["0050", "9999"])
+    p = payloads[0]
+    ok, missing = p["extra_benchmarks"]
+    assert ok["code"] == "0050" and ok["error"] is None
+    assert ok["values"] == [r["b"] for r in p["nav"]]  # 同一檔＝跟主對照一模一樣
+    assert ok["all"]["ret"] == pytest.approx(p["account"]["all"]["bench_ret"])
+    assert ok["all"]["mdd"] == pytest.approx(p["account"]["all"]["bench_mdd"])
+    assert ok["live"]["ret"] == pytest.approx(p["account"]["live"]["bench_ret"])
+    assert missing["code"] == "9999" and missing["error"]
+    assert (missing["values"], missing["all"], missing["live"]) == (None, None, None)
+    assert p["benchmark"] == {"code": "0050", "error": None}  # 主對照不受影響
+
+
 def test_ac8_config_is_registered() -> None:
     cfg = load_config(Path("configs/scorecard.yaml"), ScorecardConfig)
     assert (cfg.start, cfg.hold_sessions, cfg.big_loss, cfg.benchmark) == (
@@ -407,6 +422,7 @@ def test_ac8_config_is_registered() -> None:
         "0050",
     )
     assert cfg.live_cutoff == dt.time(9, 0)
+    assert cfg.extra_benchmarks == ["00981A"]  # D-176 修訂四
 
 
 # ── PG 讀寫（無 DSN 則 skip）──────────────────────────────────────────────

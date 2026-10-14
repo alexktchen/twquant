@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { NOT_READY, lineOk, missingTable, rawJson, readRows } from '../functions/_lib/scorecard.ts'
-import { filterRows, md, navLines, ratio, statusCounts, statusText, stockTitle, tradeReason, viewRows, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
+import { extraAt, extraLine, filterRows, md, navLines, ratio, statusCounts, statusText, stockTitle, tradeReason, viewRows, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
 
 const nav: NavPoint[] = [
   { d: '2026-10-06', v: 100, b: 200, x: 0 },
@@ -144,4 +144,22 @@ test('帳戶買賣的原因：補位線的 rebalance 只會是價格異常出場
   // 換股日：已持有的股票只是調回平均，不是又買一次
   assert.equal(tradeReason({ side: 'buy', reason: 'rebalance', move: 'add' }, 'rebalance'), '加碼（調回平均）')
   assert.equal(tradeReason({ side: 'sell', reason: 'rebalance', move: 'trim' }, 'rebalance'), '減碼（調回平均）')
+})
+
+test('D-176 修訂四：另外的對照（00981A）從帳戶第一天起算累積報酬；第一天沒有值或長度對不上不畫，中間缺的跳過', () => {
+  const vals = [50, 55, null, 60]
+  assert.deepEqual(
+    extraLine(nav, vals).map((p) => [p.time, Math.round(p.value * 1e9) / 1e9]),
+    [
+      ['2026-10-06', 0],
+      ['2026-10-07', 10],
+      ['2026-10-09', 20],
+    ],
+  )
+  assert.deepEqual(extraLine(nav, [null, 55, 56, 57]), [])
+  assert.deepEqual(extraLine(nav, null), [])
+  assert.deepEqual(extraLine(nav, [50, 55]), [])
+  assert.ok(Math.abs((extraAt(vals, 3) ?? 0) - 0.2) < 1e-12)
+  assert.equal(extraAt(vals, 2), null)
+  assert.equal(extraAt(null, 1), null)
 })

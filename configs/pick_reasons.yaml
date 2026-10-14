@@ -1,0 +1,61 @@
+# 「為什麼選它」（D-180）：名單上每一檔，模型最看重的理由翻成白話。只供顯示，不影響名單。
+#
+# 潛伏飆股／高分爆量：A20 模型對這一檔的特徵貢獻（LightGBM pred_contrib，對數勝算），取加分最多的 top_n 個，
+# 再附扣分最多的一個。大盤精選：名單由四個規則因子排名產生（configs/strategies/lw_e0_ctrl.yaml），理由就是那四個因子，
+# 依「權重 × 全市場百分位」排序，另附排序模型（串接閘門）的全市場百分位。
+#
+# 每個因子一句話。kind 決定數字怎麼寫（v）：
+#   pct／pct1  ＝|值|×100 的百分比（0／1 位小數）      pp   ＝|值|×100 的百分點
+#   lnpct      ＝|e^值 − 1| 的百分比（對數報酬累計）  times＝值（1 位小數，倍）
+#   sd         ＝|值|（1 位小數，標準差）              int  ＝四捨五入整數
+#   count      ＝值 × scale 四捨五入（比例換成天數）   inv  ＝1 ÷ 值（1 位小數，本益比）
+#   exp_yi     ＝e^值 ÷ 1 億（市值，億元）            exp_abs_times＝e^|值|（1 位小數，倍）
+#   gap        ＝(1 − 值)×100 的百分比                 rank ＝全市場百分位（前／後 X%）
+#   none       ＝不寫數字
+# 值 > at（預設 0）用 pos，< at 用 neg，＝ at 用 zero（沒給就用 neg）。
+top_n: 3
+model_line_exclude_prefix: "ctx." # 大盤狀態特徵：同一天每檔都一樣，不是「這一檔」的理由
+core_signals: # 大盤精選的規則因子與權重（同 lw_e0_ctrl.yaml 的 signals，測試守著一致）
+  price.high_52w: 0.35
+  price.mom_60d: 0.25
+  volume.turnover_z_20d: 0.25
+  price.rs_market_20d: 0.15
+
+factors:
+  fundamental.revenue_accel: { kind: pp, pos: "營收成長加速（年增率比上月多 {v} 個百分點）", neg: "營收成長放慢（年增率比上月少 {v} 個百分點）" }
+  fundamental.revenue_yoy: { kind: pct, pos: "月營收年增 {v}", neg: "月營收年減 {v}" }
+  price.intraday_ret_20d: { kind: lnpct, pos: "近 20 日盤中（開盤到收盤）累計漲 {v}", neg: "近 20 日盤中（開盤到收盤）累計跌 {v}" }
+  price.mom_20d: { kind: pct, pos: "近 20 日漲 {v}", neg: "近 20 日跌 {v}" }
+  price.mom_60d: { kind: pct, pos: "近 60 日漲 {v}", neg: "近 60 日跌 {v}" }
+  price.overnight_ret_20d: { kind: lnpct, pos: "近 20 日隔夜（前收到開盤）累計漲 {v}", neg: "近 20 日隔夜（前收到開盤）累計跌 {v}" }
+  price.residual_reversal_5d: { kind: pp, pos: "近 5 日比同產業多漲 {v} 個百分點", neg: "近 5 日比同產業少漲 {v} 個百分點" }
+  price.reversal_5d: { kind: pct, pos: "近 5 日漲 {v}", neg: "近 5 日跌 {v}" }
+  price.rs_market_20d: { kind: pp, pos: "近 20 日比大盤多漲 {v} 個百分點", neg: "近 20 日比大盤少漲 {v} 個百分點" }
+  price.vol_20d: { kind: rank, pos: "近 20 日波動在全市場{v}" }
+  volume.turnover_z_20d: { kind: sd, pos: "成交量高於 20 日平均（{v} 個標準差）", neg: "成交量低於 20 日平均（{v} 個標準差）" }
+  volume.vol_ratio_5d: { kind: times, pos: "成交量是前 5 日平均的 {v} 倍" }
+  price.atr_14: { kind: pct1, pos: "每日真實波幅約 {v}" }
+  price.parkinson_20: { kind: rank, pos: "高低價振幅在全市場{v}" }
+  price.garman_klass_20: { kind: rank, pos: "日內波動在全市場{v}" }
+  price.upside_vol_20: { kind: rank, pos: "上漲日的振幅在全市場{v}" }
+  price.downside_vol_20: { kind: rank, pos: "下跌日的振幅在全市場{v}" }
+  price.vol_asym_20: { kind: exp_abs_times, pos: "上漲日振幅是下跌日的 {v} 倍", neg: "下跌日振幅是上漲日的 {v} 倍" }
+  price.ret_skew_60: { kind: none, pos: "近 60 日報酬右偏（偶有大漲）", neg: "近 60 日報酬左偏（偶有大跌）", zero: "近 60 日報酬分布對稱" }
+  price.jump_count_60: { kind: count, scale: 60, pos: "近 60 日有 {v} 天大幅跳動", zero: "近 60 日沒有大幅跳動" }
+  chip.foreign_net_10d: { kind: pct1, pos: "外資近 10 日買超（佔成交量 {v}）", neg: "外資近 10 日賣超（佔成交量 {v}）", zero: "外資近 10 日沒有買賣超" }
+  chip.foreign_streak: { kind: int, pos: "外資連買 {v} 天", zero: "外資今天沒有買超" }
+  chip.inst_net_10d: { kind: pct1, pos: "三大法人近 10 日買超（佔成交量 {v}）", neg: "三大法人近 10 日賣超（佔成交量 {v}）", zero: "三大法人近 10 日沒有買賣超" }
+  chip.trust_net_10d: { kind: pct1, pos: "投信近 10 日買超（佔成交量 {v}）", neg: "投信近 10 日賣超（佔成交量 {v}）", zero: "投信近 10 日沒有買賣超" }
+  chip.trust_streak: { kind: int, pos: "投信連買 {v} 天", zero: "投信今天沒有買超" }
+  chip.margin_velocity_5d: { kind: pct1, pos: "融資近 5 日增加（佔成交量 {v}）", neg: "融資近 5 日減少（佔成交量 {v}）", zero: "融資近 5 日沒有變化" }
+  chip.short_margin_ratio: { kind: pct, pos: "券資比 {v}", zero: "沒有融券" }
+  fundamental.earnings_yield: { kind: inv, pos: "本益比 {v} 倍" }
+  fundamental.log_market_cap: { kind: exp_yi, pos: "市值約 {v} 億" }
+  price.industry_rs_20d: { kind: pp, pos: "所屬產業近 20 日比大盤多漲 {v} 個百分點", neg: "所屬產業近 20 日比大盤少漲 {v} 個百分點" }
+  price.industry_mom_6m: { kind: pct, pos: "所屬產業近半年漲 {v}", neg: "所屬產業近半年跌 {v}" }
+  price.high_52w: { kind: gap, at: 0.995, pos: "在 52 週高點附近", neg: "離 52 週高點還差 {v}" }
+  price.bb_squeeze_120: { kind: rank_self, at: 0.5, pos: "布林通道張開（比近 120 日 {v} 的日子寬）", neg: "布林通道收窄（近 120 日最窄的 {v}）" }
+  price.ma_tangle: { kind: pct1, pos: "均線糾結（各均線相差 {v}）" }
+  price.vp_poc_dist_60: { kind: pct, pos: "股價在近 60 日大量成交區之上 {v}", neg: "股價在近 60 日大量成交區之下 {v}", zero: "股價就在近 60 日大量成交區" }
+  price.vp_support_hold_20: { kind: int, pos: "近 20 日有 {v} 天回測大量區後守住", zero: "近 20 日沒有回測大量區" }
+  price.vp_near_share_60: { kind: pct, pos: "近 60 日 {v} 的成交量落在現價附近" }

@@ -1,7 +1,7 @@
 // 名單績效（D-176，網站分頁「績效」）：每條線照公布的名單自動操作的模擬帳戶淨值曲線，以及每一檔新進名單的逐筆結果。
 // 名單出來就照固定規則全部當成買了、事後結算，使用者不能挑——這是名單本身的紀錄，不是個人損益。
 // 0050 對照：2026-10-13 拿掉（D-176 修訂），2026-10-14 使用者「績效把0050也放上去試試」放回來（D-176 修訂三）。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ColorType, CrosshairMode, LineSeries, LineStyle, createChart, createSeriesMarkers } from 'lightweight-charts'
 import { fetchScorecard, fetchScorecardTrades } from './api'
 import { GUEST_LINES } from './auth'
@@ -9,6 +9,8 @@ import { pct, price, trend } from './format'
 import {
   md,
   navLines,
+  extraLine,
+  extraAt,
   ratio,
   statusCounts,
   statusText,
@@ -26,6 +28,8 @@ import {
 const ACCOUNT = '#FF7A00'
 /** 0050 對照線：中性的淺灰，不搶帳戶的顏色 */
 const BENCH = '#9AA0AC'
+/** 另外的對照（D-176 修訂四）依序用的顏色 */
+const EXTRA = ['#4FB3BF', '#B58CF0']
 /** 明細一次顯示幾筆（「再顯示」每按一次多這麼多）。 */
 const PAGE = 50
 /** 帳戶買賣紀錄一次顯示幾筆。 */
@@ -173,6 +177,9 @@ function Account({ c }: { c: Scorecard }) {
         </dd>
       </dl>
       <Bench label={`同期買 ${c.benchmark.code} 抱著（含息）`} ret={all.bench_ret} mdd={all.bench_mdd} acct={all.ret} error={c.benchmark.error} code={c.benchmark.code} />
+      {(c.extra_benchmarks ?? []).map((e) => (
+        <Bench key={e.code} label={`同期買 ${e.code} 抱著（含息）`} ret={e.all?.ret ?? null} mdd={e.all?.mdd ?? null} acct={all.ret} error={e.error} code={e.code} />
+      ))}
       <div className="cq-score-live">
         <b>即時公布以來</b>
         {live ? (
@@ -190,6 +197,15 @@ function Account({ c }: { c: Scorecard }) {
                   <dt>同期 {c.benchmark.code}</dt>
                   <dd className={trend(live.bench_ret)}>{pct(live.bench_ret, 1)}</dd>
                 </>
+              )}
+              {(c.extra_benchmarks ?? []).map(
+                (e) =>
+                  e.live && (
+                    <Fragment key={e.code}>
+                      <dt>同期 {e.code}</dt>
+                      <dd className={trend(e.live.ret)}>{pct(e.live.ret, 1)}</dd>
+                    </Fragment>
+                  ),
               )}
             </dl>
           </>
@@ -238,7 +254,8 @@ function NavChart({ c }: { c: Scorecard }) {
     const p0 = c.nav[0]
     if (i < 0 || !p0) return null
     const b = c.nav[i].b
-    return { d: c.nav[i].d, v: c.nav[i].v / p0.v - 1, b: p0.b && b !== null ? b / p0.b - 1 : null }
+    const extras = (c.extra_benchmarks ?? []).map((e) => ({ code: e.code, r: extraAt(e.values, i) }))
+    return { d: c.nav[i].d, v: c.nav[i].v / p0.v - 1, b: p0.b && b !== null ? b / p0.b - 1 : null, extras }
   }, [hover, c])
   useEffect(() => {
     const box = el.current
@@ -256,9 +273,13 @@ function NavChart({ c }: { c: Scorecard }) {
     })
     const common = { priceLineVisible: false, lastValueVisible: false }
     if (lines.bench.length > 0) {
-      // 先畫 0050，帳戶的線疊在上面
+      // 先畫對照，帳戶的線疊在上面
       chart.addSeries(LineSeries, { ...common, color: BENCH, lineWidth: 2 }).setData(lines.bench)
     }
+    ;(c.extra_benchmarks ?? []).forEach((e, k) => {
+      const pts = extraLine(c.nav, e.values)
+      if (pts.length > 0) chart.addSeries(LineSeries, { ...common, color: EXTRA[k % EXTRA.length], lineWidth: 2 }).setData(pts)
+    })
     const past = chart.addSeries(LineSeries, { ...common, color: ACCOUNT, lineWidth: 2, lineStyle: LineStyle.Dashed })
     past.setData(lines.backfill)
     past.createPriceLine({ price: 0, color: '#3A3D46', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
@@ -287,6 +308,14 @@ function NavChart({ c }: { c: Scorecard }) {
           <span className="cq-score-at">
             {md(at.d)}　<b style={{ color: ACCOUNT }}>帳戶 {pct(at.v, 1)}</b>
             {at.b !== null && <b style={{ color: BENCH }}>　{c.benchmark.code} {pct(at.b, 1)}</b>}
+            {at.extras.map(
+              (e, k) =>
+                e.r !== null && (
+                  <b key={e.code} style={{ color: EXTRA[k % EXTRA.length] }}>
+                    　{e.code} {pct(e.r, 1)}
+                  </b>
+                ),
+            )}
           </span>
         )}
       </div>
@@ -304,6 +333,15 @@ function NavChart({ c }: { c: Scorecard }) {
             <i style={{ background: BENCH }} />
             同期 {c.benchmark.code}（含息）
           </span>
+        )}
+        {(c.extra_benchmarks ?? []).map(
+          (e, k) =>
+            extraLine(c.nav, e.values).length > 0 && (
+              <span key={e.code}>
+                <i style={{ background: EXTRA[k % EXTRA.length] }} />
+                同期 {e.code}（含息）
+              </span>
+            ),
         )}
       </div>
       <div className="cq-score-chart" ref={el} />

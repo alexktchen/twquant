@@ -109,6 +109,34 @@ def quiet_scores(
     lookback_days: int,
 ) -> pl.DataFrame:
     """讀 PG、對 [start, end] 每個交易日打分，回傳 `ml_scores` 格式的列（不寫入）。"""
+    frame, booster, features, model_id = load_inference(
+        conn,
+        schema,
+        cfg=cfg,
+        model_dir=model_dir,
+        stock_pattern=stock_pattern,
+        start=start,
+        end=end,
+        lookback_days=lookback_days,
+    )
+    return score_rows(frame, booster, features, model_id)
+
+
+def load_inference(
+    conn: Any,
+    schema: str,
+    *,
+    cfg: MlConfig,
+    model_dir: Path,
+    stock_pattern: str,
+    start: dt.date,
+    end: dt.date,
+    lookback_days: int,
+) -> tuple[pl.DataFrame, lgb.Booster, list[str], str]:
+    """讀 PG、組 [start, end] 的推論列並載入模型 → (推論列, booster, 特徵, model_id)。
+
+    打分（`quiet_scores`）與「為什麼選它」（D-180）共用：理由要用與打分完全相同的輸入算貢獻。
+    """
     from twquant.data.serving.ml_store import (
         read_corporate_events,
         read_factor_frames,
@@ -128,4 +156,4 @@ def quiet_scores(
     index_close = read_index_close(conn, schema, _CONTEXT_INDEX_ID, lo, end)
     frame = inference_frame(px, feats, index_close, cfg, features, start, end)
     booster = lgb.Booster(model_file=str(model_dir / "model.txt"))
-    return score_rows(frame, booster, features, model_id)
+    return frame, booster, features, model_id

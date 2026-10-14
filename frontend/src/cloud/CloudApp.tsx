@@ -24,6 +24,7 @@ import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
+import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
 import { GroupsPage } from './GroupsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
@@ -504,6 +505,8 @@ export default function CloudApp() {
                 sid={selected.sid}
                 name={selected.name}
                 group={selected.group}
+                reasons={selected.reasons ?? null}
+                line={current?.code ?? null}
                 shared={listSids.includes(selected.sid) && tab === 'picks' && !guest && !nav.past ? listLive : null}
                 close={selected.close}
                 chg={selected.chg}
@@ -594,6 +597,7 @@ function Row({
           {p.streak > (p.recent?.length ?? 0) && <i className="cq-tag">連{p.streak}天</i>}
           {p.score !== null && <i className="cq-tag prob">{Math.round(p.score * 100)}%</i>}
         </small>
+        {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -830,11 +834,35 @@ function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked
   )
 }
 
+/** 選股依據（D-180）：掛在選出這檔的模型卡片裡——貢獻度最高的因子（正向）、拖累最大的一項（負向）、篩選門檻。 */
+function Factors({ reasons, note }: { reasons: Reason[]; note: string }) {
+  return (
+    <div className="cq-factors">
+      <div className="cq-factors-head">
+        選股依據<small>{note}・僅供參考，非投資建議</small>
+      </div>
+      <ul>
+        {reasons.map((r) => {
+          const m = mark(r.s)
+          return (
+            <li key={r.f} className={m.tone} title={m.label}>
+              <i>{m.sym}</i>
+              {r.t}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function Detail({
   sid,
   name,
   shared = null,
   group,
+  reasons = null,
+  line = null,
   close,
   chg,
   asOf,
@@ -849,6 +877,9 @@ function Detail({
   shared?: LiveState | null
   /** 名單上帶來的族群（先頂著）；沒有就用評分 API 回來的 */
   group?: Group | null
+  /** 選股依據（D-180）：名單上這一檔的白話理由與它在哪條線；不是從名單點進來（追蹤分頁）就沒有 */
+  reasons?: Reason[] | null
+  line?: string | null
   /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
@@ -970,7 +1001,7 @@ function Detail({
           </dl>
         )}
       </div>
-      <ModelPanel scores={sc} err={scoreErr} />
+      <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (
           <span key={m.n} style={{ color: m.color }}>
@@ -1064,12 +1095,43 @@ function TrackButton({ sid, on, onTrack }: { sid: string; on: boolean; onTrack: 
 }
 
 /** 三個模型的評分卡：大字＋一行說明＋近幾日走勢；「這些分數是什麼」展開說明。 */
-function ModelPanel({ scores, err }: { scores: StockScores | null; err: string }) {
+function ModelPanel({
+  scores,
+  err,
+  reasons = null,
+  line = null,
+}: {
+  scores: StockScores | null
+  err: string
+  /** 選股依據（D-180）：有的話掛在選出這檔的模型卡片裡，那張卡片放大、排第一 */
+  reasons?: Reason[] | null
+  line?: string | null
+}) {
   const [help, setHelp] = useState(false)
   if (err) return <div className="cq-models cq-models-msg">模型評分：{err}</div>
   if (!scores) return <div className="cq-models cq-models-msg">模型評分計算中…</div>
   const views = scores.models.map((m) => ({ m, v: modelView(m) }))
   const date = scores.models.map((m) => m.date).find((d) => d !== null) ?? null
+  const primaryCode = primaryModel(line, reasons)
+  const primary = views.find(({ m }) => m.code === primaryCode) ?? null
+  const rest = primary ? views.filter((x) => x !== primary) : views
+  const card = ({ m, v }: (typeof views)[number], extra?: React.ReactNode) => (
+    <div key={m.code} className={`cq-card${extra ? ' cq-card-primary' : ''}`} title={v.what}>
+      <div className="cq-card-top">
+        <b>{v.title}</b>
+        <small>{v.who}</small>
+      </div>
+      <div className="cq-card-mid">
+        <span className={`cq-card-big ${v.tone}`}>{v.big}</span>
+        <Spark points={sparkPoints(m)} />
+      </div>
+      <div className="cq-card-sub">
+        {v.sub}
+        {m.date !== null && date !== null && m.date !== date && `（${m.date}）`}
+      </div>
+      {extra}
+    </div>
+  )
   return (
     <div className="cq-models">
       <div className="cq-models-head">
@@ -1084,24 +1146,8 @@ function ModelPanel({ scores, err }: { scores: StockScores | null; err: string }
           {help ? '收起說明' : '這些分數是什麼？'}
         </button>
       </div>
-      <div className="cq-cards">
-        {views.map(({ m, v }) => (
-          <div key={m.code} className="cq-card" title={v.what}>
-            <div className="cq-card-top">
-              <b>{v.title}</b>
-              <small>{v.who}</small>
-            </div>
-            <div className="cq-card-mid">
-              <span className={`cq-card-big ${v.tone}`}>{v.big}</span>
-              <Spark points={sparkPoints(m)} />
-            </div>
-            <div className="cq-card-sub">
-              {v.sub}
-              {m.date !== null && date !== null && m.date !== date && `（${m.date}）`}
-            </div>
-          </div>
-        ))}
-      </div>
+      {primary && primaryCode && reasons && card(primary, <Factors reasons={cardReasons(reasons, primaryCode)} note={factorsNote(primaryCode)} />)}
+      <div className={`cq-cards${primary ? ' cq-cards-rest' : ''}`}>{rest.map((x) => card(x))}</div>
       {help && (
         <ul className="cq-models-help">
           {views.map(({ m, v }) => (

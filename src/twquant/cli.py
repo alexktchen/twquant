@@ -1617,6 +1617,18 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），不寫名單"
         return _daily_picks_for_day(day)
 
+    def _pick_reasons_step() -> str:
+        # D-180「為什麼選它」：名單上每一檔的白話理由。排在每日名單之後（要讀當天剛寫的名單），
+        # 當天就要算——雲端因子只留 2 天，過了就算不回來。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
+        return _pick_reasons_for_day(day)
+
     def _benchmark_fill_step() -> str:
         # D-176 修訂三：名單績效對照（0050）缺行情、缺除權息就從 FinMind 補；排在名單績效之前。best-effort。
         from twquant.data.serving import store
@@ -1753,6 +1765,7 @@ def _run_daily_pipeline(
         PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
+        PipelineStep("名單理由", _pick_reasons_step),
         PipelineStep("對照行情", _benchmark_fill_step),
         PipelineStep("名單績效", _scorecard_step),
         PipelineStep("族群標籤", _stock_groups_step),
@@ -1961,6 +1974,18 @@ def group_flow_cmd(
         days = [dt.date.fromisoformat(date) if date else _pg_latest_price_day()]
     for day in days:
         typer.secho(f"[OK] {day}：{_group_flow_for_day(day)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="pick-reasons")
+def pick_reasons_cmd(
+    date: str = typer.Option("", help="算哪一天的名單 YYYY-MM-DD；空＝PG 最新行情日"),
+) -> None:
+    """「為什麼選它」（D-180）：名單上每一檔的白話理由，寫進 PG `pick_reasons`（網站讀）。
+
+    要那天的因子值還在資料庫（雲端只留 2 天）。
+    """
+    day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
+    typer.secho(f"[OK] {day}：{_pick_reasons_for_day(day)}", fg=typer.colors.GREEN)
 
 
 @app.command(name="group-flow-check")
@@ -3032,6 +3057,78 @@ def _group_flow_for_day(day: dt.date) -> str:
     )
 
 
+def _pick_reasons_for_day(day: dt.date) -> str:
+    """「為什麼選它」（D-180）：`day` 每條線名單上每一檔的理由 → `pick_reasons`（整天覆蓋）。
+
+    潛伏模型的線：用與打分相同的輸入（`quiet_live.load_inference`）算特徵貢獻；重算的分數要等於名單上的分數，
+    對不上就 raise（輸入變了，理由不能用）。規則線（大盤精選）：規則因子的原始值與全市場百分位，加排序模型的百分位。
+    """
+    from twquant.config import MlConfig, load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.pick_reasons_store import (
+        read_day_picks,
+        read_factor_raw,
+        read_rank_pct,
+        write_reasons,
+    )
+    from twquant.errors import DataError
+    from twquant.ml.explain import contributions
+    from twquant.ml.quiet_live import load_inference
+    from twquant.reporting.pick_reasons import PickReasonsConfig, Row, model_rows, rule_rows
+
+    cfg = load_config(_CONFIG_DIR / "pick_reasons.yaml", PickReasonsConfig)
+    ml_cfg = _load_ml()
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    rows: list[Row] = []
+    try:
+        picks = read_day_picks(conn, scfg.pg_schema, day)
+        if not picks:
+            return f"{day} 沒有名單，略過"
+        quiet = [p for p in picks if p.model_id and p.model_id == ml_cfg.quiet_live_model]
+        rule = [p for p in picks if p not in quiet]
+        if quiet:
+            if not ml_cfg.quiet_live_config:
+                raise DataError(
+                    "pick_reasons", day, "quiet_live_model 有綁定但 quiet_live_config 是空的"
+                )
+            model_cfg = load_config(_CONFIG_DIR / ml_cfg.quiet_live_config, MlConfig)
+            model_dir = Path(_load_system().data_dir) / "models" / str(ml_cfg.quiet_live_model)
+            frame, booster, features, model_id = load_inference(
+                conn,
+                scfg.pg_schema,
+                cfg=model_cfg,
+                model_dir=model_dir,
+                stock_pattern=scfg.cloud.stock_pattern,
+                start=day,
+                end=day,
+                lookback_days=ml_cfg.quiet_price_lookback_days,
+            )
+            sids = sorted({p.stock_id for p in quiet})
+            mine = frame.filter(frame["stock_id"].is_in(sids))
+            got = {c.stock_id: c for c in contributions(booster, mine, features)}
+            raw = read_factor_raw(
+                conn, scfg.pg_schema, day, [f for f in features if f in cfg.factors], sids
+            )
+            rows += model_rows(day, quiet, got, raw, model_id, cfg, tol=1e-6)
+        if rule:
+            sids = sorted({p.stock_id for p in rule})
+            raw = read_factor_raw(conn, scfg.pg_schema, day, list(cfg.core_signals), sids)
+            gates = {
+                m: read_rank_pct(conn, scfg.pg_schema, day, m, sids)
+                for m in sorted({p.model_id for p in rule if p.model_id})
+            }
+            rows += rule_rows(rule, raw, gates, cfg)
+        write_reasons(conn, scfg.pg_schema, day, rows, now_tw())
+    finally:
+        conn.close()
+    lines: dict[str, int] = {}
+    for line, *_ in rows:
+        lines[line] = lines.get(line, 0) + 1
+    return "、".join(f"{k} {v} 檔" for k, v in sorted(lines.items())) + " 的理由已寫入"
+
+
 def _group_flow_check() -> str:
     """D-178：讀名單績效逐筆、族群、行情，重算每個進名單日子的族群資金，照登記的門檻判讀，回 markdown。"""
     import json
@@ -3138,7 +3235,8 @@ def _group_flow_check() -> str:
 
 
 def _benchmark_fill(day: dt.date) -> str:
-    """名單績效對照（scorecard.yaml 的 benchmark）從開戶日前 warmup_days 起到 `day`：FinMind 行情＋除權息，缺的才補。"""
+    """名單績效對照（scorecard.yaml 的 benchmark 與 extra_benchmarks）從開戶日前 warmup_days 起到 `day`：
+    FinMind 行情＋除權息，缺的才補。一檔補不起來不擋其他檔，最後照實 raise。"""
     import json
     import os
 
@@ -3156,12 +3254,12 @@ def _benchmark_fill(day: dt.date) -> str:
     from twquant.reporting.scorecard import ScorecardConfig
 
     cfg = load_config(_CONFIG_DIR / "scorecard.yaml", ScorecardConfig)
-    code = cfg.benchmark
+    codes = [cfg.benchmark, *cfg.extra_benchmarks]
     lo = cfg.start - dt.timedelta(days=cfg.warmup_days)
     client = HttpClient(source="finmind", rate=_load_system().source_rates["finmind"], timeout=60.0)
     token = os.environ.get("FINMIND_TOKEN", "")
 
-    def rows(dataset: str) -> list[dict[str, Any]]:
+    def rows(dataset: str, code: str) -> list[dict[str, Any]]:
         params = {
             "dataset": dataset,
             "data_id": code,
@@ -3181,21 +3279,37 @@ def _benchmark_fill(day: dt.date) -> str:
 
     scfg = _load_serving()
     conn = store.connect(scfg)
+    done: list[str] = []
+    failed: list[str] = []
     try:
-        latest = market_latest(conn, scfg.pg_schema, code)
-        if latest is None:
-            raise DataError("prices_daily", None, "PG 沒有任何行情，不補對照")
-        upto = min(day, latest)  # 全市場還沒有的日子不補，見 benchmark_fill 模組說明
-        fm_prices, fm_dividends = rows("TaiwanStockPrice"), rows(DIVIDEND_RESULT_DATASET)
-        pg_prices, pg_events = read_existing(conn, scfg.pg_schema, code, lo, upto)
-        plan = plan_fill(code, upto, fm_prices, fm_dividends, pg_prices, pg_events)
-        write_fill(conn, scfg.pg_schema, plan)
+        for code in codes:
+            try:
+                latest = market_latest(conn, scfg.pg_schema, code)
+                if latest is None:
+                    raise DataError("prices_daily", None, "PG 沒有任何行情，不補對照")
+                upto = min(day, latest)  # 全市場還沒有的日子不補，見 benchmark_fill 模組說明
+                fm_prices = rows("TaiwanStockPrice", code)
+                fm_dividends = rows(DIVIDEND_RESULT_DATASET, code)
+                pg_prices, pg_events = read_existing(conn, scfg.pg_schema, code, lo, upto)
+                plan = plan_fill(code, upto, fm_prices, fm_dividends, pg_prices, pg_events)
+                write_fill(conn, scfg.pg_schema, plan)
+            except DataError as exc:
+                conn.rollback()
+                failed.append(f"{code}：{exc}")
+                continue
+            done.append(
+                f"{code} {lo}～{upto}：補行情 {plan.prices.height} 天、除權息 {plan.events.height} 筆"
+                f"（已有 {plan.prices_checked} 天、{plan.events_checked} 筆，比對一致）"
+            )
     finally:
         conn.close()
-    return (
-        f"{code} {lo}～{upto}：補行情 {plan.prices.height} 天、除權息 {plan.events.height} 筆"
-        f"（已有 {plan.prices_checked} 天、{plan.events_checked} 筆，比對一致）"
-    )
+    if failed:
+        raise DataError(
+            "benchmark_fill",
+            day,
+            "；".join(failed) + ("；完成：" + "；".join(done) if done else ""),
+        )
+    return "；".join(done)
 
 
 def _pg_price_days(start: dt.date, end: dt.date) -> list[dt.date]:

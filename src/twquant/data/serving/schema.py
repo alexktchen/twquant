@@ -484,6 +484,21 @@ GROUP_FLOW_SPEC = TableSpec(
     indexes=(("grp", "date"),),
 )
 
+# 「為什麼選它」（D-180／T-360）：名單上每一檔的白話理由（每日「名單理由」步驟算、整天覆蓋）。
+# 一天幾十列、全史保留（不進 windows）——雲端因子只留 2 天，過了就算不回來，所以要存下來。
+PICK_REASONS_SPEC = TableSpec(
+    "pick_reasons",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("stock_id", "text"),
+        ("model_id", "text"),
+        ("reasons", "jsonb"),  # [{f: 因子, t: 白話, s: +1 加分／−1 扣分／0 前提}]
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 # 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
 # （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
 # 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
@@ -562,6 +577,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     SCORECARD_SPEC,
     STOCK_GROUP_SPEC,
     GROUP_FLOW_SPEC,
+    PICK_REASONS_SPEC,
     *FUND_FLOW_SPECS,
 )
 

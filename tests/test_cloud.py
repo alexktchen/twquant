@@ -238,9 +238,12 @@ def test_t349_ac9_benchmark_is_kept_and_seeded() -> None:
     from twquant.config import ServingConfig, load_config
     from twquant.reporting.scorecard import ScorecardConfig
 
-    bench = load_config(Path("configs/scorecard.yaml"), ScorecardConfig).benchmark
+    sc = load_config(Path("configs/scorecard.yaml"), ScorecardConfig)
+    bench = sc.benchmark
     cfg = load_config(Path("configs/serving.yaml"), ServingConfig)
     assert bench in cfg.cloud.keep_stocks
+    # D-176 修訂四：另外的對照也要留（歷史由 benchmark-fill 從 FinMind 補，不靠初始切片）
+    assert all(code in cfg.cloud.keep_stocks for code in sc.extra_benchmarks)
     seed = yaml.safe_load(Path("configs/cloud_seed.yaml").read_text(encoding="utf-8"))["tables"]
     assert any(bench in (p.get("in") or {}).get("stock_id", []) for p in seed["prices_daily"])
 
