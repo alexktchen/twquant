@@ -6,6 +6,8 @@ export type Pick = {
   name: string | null
   score: number | null
   close: number | null
+  /** 名單那天的前一個交易日收盤（推漲跌停價用）；舊後端沒有這欄 */
+  prev?: number | null
   chg: number | null
   streak: number
   new: boolean

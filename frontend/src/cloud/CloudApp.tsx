@@ -26,7 +26,7 @@ import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
-import { LIVE_POLL_MS, liveBar, liveLabel, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
+import { LIVE_POLL_MS, limitPrices, limitState, liveBar, liveLabel, pickPrice, quoteLimit, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 
@@ -233,6 +233,11 @@ export default function CloudApp() {
   const watchSids = useMemo(() => (watch?.items ?? []).map((w) => w.sid), [watch])
   const watchLive = useLiveQuotes(watchSids, tab === 'watch' && !guest && !editMode)
   const today = taipeiNow().date
+  // 每日名單在盤中也跟著即時價（三條線的股票一起抓，切線不用等）；看過去某天的名單不抓
+  const listSids = useMemo(() => [...new Set((day?.lines ?? []).flatMap((l) => l.picks.map((p) => p.sid)))], [day])
+  const listLive = useLiveQuotes(listSids, tab === 'picks' && !guest && !nav.past)
+  const rowPx = (p: Pick) => pickPrice(p, view?.date, listLive.quotes[p.sid], today, nav.past)
+  const anyLive = !guest && !nav.past && (current?.picks ?? []).some((p) => rowPx(p).rec !== null)
   const detailRef = useRef<HTMLElement>(null)
 
   return (
@@ -342,6 +347,7 @@ export default function CloudApp() {
                             key={w.sid}
                             w={w}
                             live={rowPrice(w, watchLive.quotes[w.sid], today)}
+                            limit={quoteLimit(watchLive.quotes[w.sid], today)}
                             on={w.sid === watchCurrent?.sid}
                             onClick={() => setWatchSel(w)}
                           />
@@ -398,13 +404,13 @@ export default function CloudApp() {
               </div>
               <div className="cq-head">
                 <span>代號／名稱／近 6 日上榜</span>
-                <span>收盤／6日</span>
+                <span>{anyLive ? '現價／推薦價' : '收盤／6日'}</span>
                 <span>漲跌幅</span>
               </div>
               <div className="cq-rows">
                 <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
                   {current?.picks.map((p) => (
-                    <Row key={p.sid} p={p} on={p.sid === sid} onClick={() => setSid(p.sid)} />
+                    <Row key={p.sid} p={p} px={rowPx(p)} on={p.sid === sid} onClick={() => setSid(p.sid)} />
                   ))}
                 </ul>
                 {current && current.picks.length === 0 && <p className="cq-empty">今天沒有符合條件的股票。</p>}
@@ -412,7 +418,7 @@ export default function CloudApp() {
               </div>
               {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
               <p className="cq-note">
-                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。模型每日收盤後產生，非投資建議。
+                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。盤中價格每 10 秒更新，小字是推薦當天的收盤；漲停、跌停的價格加框。模型每日收盤後產生，非投資建議。
               </p>
             </aside>
           )}
@@ -488,8 +494,20 @@ function User({ email, push, onBell }: { email: string | null; push: PushState |
   )
 }
 
-function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) {
-  const t = trend(p.chg)
+function Row({
+  p,
+  px,
+  on,
+  onClick,
+}: {
+  p: Pick
+  /** 要顯示的價格（pickPrice）：盤中是即時價、rec＝推薦當天的收盤；沒給（沒登入的假資料）就是名單那天的收盤 */
+  px?: ReturnType<typeof pickPrice>
+  on: boolean
+  onClick: () => void
+}) {
+  px ??= pickPrice(p, undefined, undefined, '', true)
+  const t = trend(px.chg)
   const h = hits(p.recent ?? [])
   return (
     <li className={on ? 'on' : ''} onClick={onClick}>
@@ -513,10 +531,18 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
         </small>
       </div>
       <span className="cq-pxcol">
-        <span className={`cq-px ${t}`}>{price(p.close)}</span>
-        <small className={trend(p.chg6)}>{pct(p.chg6, 1)}</small>
+        <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
+          {price(px.price)}
+        </span>
+        {px.rec !== null ? (
+          <small className="cq-rec" title="推薦當天的收盤">
+            推 {price(px.rec)}
+          </small>
+        ) : (
+          <small className={trend(p.chg6)}>{pct(p.chg6, 1)}</small>
+        )}
       </span>
-      <span className={`cq-chg ${t}`}>{pct(p.chg)}</span>
+      <span className={`cq-chg ${t}`}>{pct(px.chg)}</span>
     </li>
   )
 }
@@ -525,12 +551,15 @@ function Row({ p, on, onClick }: { p: Pick; on: boolean; onClick: () => void }) 
 function WatchRow({
   w,
   live,
+  limit = null,
   on,
   onClick,
 }: {
   w: WatchItem
   /** 要顯示的價格：盤中是即時價（tag＝盤中／今日收盤），否則是資料庫的收盤 */
   live: { close: number | null; chg: number | null; tag: string | null }
+  /** 盤中漲停／跌停（即時報價才判斷；收盤後的清單沒有前收，不判斷） */
+  limit?: 'up' | 'down' | null
   on: boolean
   onClick: () => void
 }) {
@@ -551,7 +580,7 @@ function WatchRow({
         </small>
       </div>
       <span className="cq-pxcol">
-        <span className={`cq-px ${t}`}>{price(live.close)}</span>
+        <span className={`cq-px ${t}${limit ? ` limit-${limit}` : ''}`}>{price(live.close)}</span>
         {live.tag && <small className="cq-live-tag">{live.tag}</small>}
       </span>
       <span className={`cq-chg ${t}`}>{pct(live.chg)}</span>
@@ -803,6 +832,13 @@ function Detail({
   const bigChg = asOf ? (chg ?? q?.chg ?? null) : (q?.chg ?? chg ?? null)
   const label = asOf ? null : todayBar ? liveLabel(quote, today) : quote?.date === today && quote.last === null ? '尚未成交' : null
   const t = trend(bigChg)
+  // 漲停／跌停加框：盤中用證交所給的漲跌停價，其他時候由那根 K 棒的前一天收盤推
+  const prevClose = !asOf && todayBar ? (quote?.prev ?? null) : q && q.diff !== null ? q.bar.close - q.diff : null
+  const lim = limitPrices(prevClose)
+  const bigLimit =
+    !asOf && todayBar && quote
+      ? limitState(bigClose, quote.limit_up ?? lim.up, quote.limit_down ?? lim.down)
+      : limitState(bigClose, lim.up, lim.down)
   return (
     <>
       <div className="cq-quote">
@@ -812,7 +848,10 @@ function Detail({
             {onTrack && <TrackButton sid={sid} on={tracked} onTrack={onTrack} />}
           </h1>
           <div className={`cq-big ${t}`}>
-            {price(bigClose)} <span>{pct(bigChg)}</span>
+            <b className={bigLimit ? `cq-limit ${bigLimit}` : undefined} title={bigLimit === 'up' ? '漲停' : bigLimit === 'down' ? '跌停' : undefined}>
+              {price(bigClose)}
+            </b>{' '}
+            <span>{pct(bigChg)}</span>
             {label && (
               <em className="cq-live" title="證交所即時報價，約延遲 5 秒；盤中每 10 秒更新">
                 {label}

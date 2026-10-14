@@ -87,3 +87,67 @@ export function rowPrice(
   const chg = q.prev !== null ? q.last / q.prev - 1 : null
   return { close: q.last, chg, tag: liveLabel(q, today) === '今日收盤' ? '今日收盤' : '盤中' }
 }
+
+// 台股升降單位（同 backtest/costs.py 的 _TICKS）：價格區間 → 最小跳動
+const TICKS: [number, number][] = [
+  [10, 0.01],
+  [50, 0.05],
+  [100, 0.1],
+  [500, 0.5],
+  [1000, 1],
+]
+const tick = (p: number): number => TICKS.find(([upper]) => p < upper)?.[1] ?? 5
+// 浮點誤差：105.00000000001 這種要收掉，否則跟證交所給的漲停價比不相等
+const tidy = (v: number): number => Math.round(v * 10000) / 10000
+
+/** 由昨收推漲跌停價（±10% 再取到升降單位，同 costs.limit_up_proxy／limit_down_proxy）；沒有昨收 → null。 */
+export function limitPrices(prev: number | null): { up: number | null; down: number | null } {
+  if (prev === null || !Number.isFinite(prev) || prev <= 0) return { up: null, down: null }
+  const up = prev * 1.1
+  const down = prev * 0.9
+  return {
+    up: tidy(Math.floor(up / tick(up) + 1e-9) * tick(up)),
+    down: tidy(Math.ceil(down / tick(down) - 1e-9) * tick(down)),
+  }
+}
+
+/** 這個價格是不是漲停（'up'）或跌停（'down'）。漲跌停價缺 → 不判斷。 */
+export function limitState(px: number | null, up: number | null, down: number | null): 'up' | 'down' | null {
+  if (px === null) return null
+  if (up !== null && px >= up - 1e-6) return 'up'
+  if (down !== null && px <= down + 1e-6) return 'down'
+  return null
+}
+
+/**
+ * 每日名單一列要顯示的價格。最新一天的名單在盤中改用即時價（漲跌對昨收），並留著推薦當天的收盤（rec）；
+ * 看過去某天、或還沒有今天的即時價 → 名單那天的收盤與漲跌（rec＝null，小字照舊放近 6 日漲幅）。
+ * limit：漲停／跌停（即時價用證交所給的漲跌停價，收盤價用前一天收盤推）。
+ */
+export function pickPrice(
+  p: { close: number | null; chg: number | null; prev?: number | null },
+  listDate: string | undefined,
+  q: Quote | undefined,
+  today: string,
+  past: boolean,
+): { price: number | null; chg: number | null; rec: number | null; tag: string | null; limit: 'up' | 'down' | null } {
+  if (!past && q && q.date === today && q.last !== null && listDate !== undefined && listDate < q.date) {
+    const lim = limitPrices(q.prev)
+    return {
+      price: q.last,
+      chg: q.prev !== null ? q.last / q.prev - 1 : null,
+      rec: p.close,
+      tag: liveLabel(q, today) === '今日收盤' ? '今日收盤' : '盤中',
+      limit: limitState(q.last, q.limit_up ?? lim.up, q.limit_down ?? lim.down),
+    }
+  }
+  const lim = limitPrices(p.prev ?? null)
+  return { price: p.close, chg: p.chg, rec: null, tag: null, limit: limitState(p.close, lim.up, lim.down) }
+}
+
+/** 追蹤清單一列的漲跌停：只看今天的即時報價（清單沒有前收，收盤後不判斷）。 */
+export function quoteLimit(q: Quote | undefined, today: string): 'up' | 'down' | null {
+  if (!q || q.date !== today || q.last === null) return null
+  const lim = limitPrices(q.prev)
+  return limitState(q.last, q.limit_up ?? lim.up, q.limit_down ?? lim.down)
+}
