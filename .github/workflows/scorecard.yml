@@ -34,6 +34,9 @@ jobs:
       - name: Sync deps
         run: uv sync --dev --all-groups
 
+      - name: 對照行情（0050 缺的行情、除權息從 FinMind 補；D-176 修訂三）
+        run: uv run python -m twquant benchmark-fill
+
       - name: 名單績效
         env:
           DAY: ${{ inputs.date }} # 經環境變數傳入，不直接嵌進指令

@@ -1617,6 +1617,15 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），不寫名單"
         return _daily_picks_for_day(day)
 
+    def _benchmark_fill_step() -> str:
+        # D-176 修訂三：名單績效對照（0050）缺行情、缺除權息就從 FinMind 補；排在名單績效之前。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _benchmark_fill(day)
+
     def _scorecard_step() -> str:
         # D-176 名單績效：照公布的名單重播模擬帳戶＋逐筆。排在每日名單之後（要讀當天剛寫的名單）。
         from twquant.data.serving import store
@@ -1744,6 +1753,7 @@ def _run_daily_pipeline(
         PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
+        PipelineStep("對照行情", _benchmark_fill_step),
         PipelineStep("名單績效", _scorecard_step),
         PipelineStep("族群標籤", _stock_groups_step),
         PipelineStep("族群資金", _group_flow_step),
@@ -1963,6 +1973,17 @@ def group_flow_check_cmd(
     if out:
         Path(out).write_text(text, encoding="utf-8")
         typer.secho(f"[OK] 已存 {out}", fg=typer.colors.GREEN)
+
+
+@app.command(name="benchmark-fill")
+def benchmark_fill_cmd(
+    date: str = typer.Option("", help="補到哪一天 YYYY-MM-DD；空＝今天"),
+) -> None:
+    """名單績效的對照（0050）缺行情、缺除權息就從 FinMind 補（D-176 修訂三）；已有的列只比對、不覆蓋。"""
+    from twquant.conventions import now_tw
+
+    day = dt.date.fromisoformat(date) if date else now_tw().date()
+    typer.secho(f"[OK] {_benchmark_fill(day)}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -3114,6 +3135,67 @@ def _group_flow_check() -> str:
         prices, hot_members, sessions, scfg.cloud.stock_pattern, cfg.market_horizon, cfg.market_step
     )
     return render(result, market, cfg, max(signals) if signals else cfg.start)
+
+
+def _benchmark_fill(day: dt.date) -> str:
+    """名單績效對照（scorecard.yaml 的 benchmark）從開戶日前 warmup_days 起到 `day`：FinMind 行情＋除權息，缺的才補。"""
+    import json
+    import os
+
+    from twquant.config import load_config
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import store
+    from twquant.data.serving.benchmark_fill import (
+        market_latest,
+        plan_fill,
+        read_existing,
+        write_fill,
+    )
+    from twquant.data.sources.finmind import API, DIVIDEND_RESULT_DATASET
+    from twquant.errors import DataError
+    from twquant.reporting.scorecard import ScorecardConfig
+
+    cfg = load_config(_CONFIG_DIR / "scorecard.yaml", ScorecardConfig)
+    code = cfg.benchmark
+    lo = cfg.start - dt.timedelta(days=cfg.warmup_days)
+    client = HttpClient(source="finmind", rate=_load_system().source_rates["finmind"], timeout=60.0)
+    token = os.environ.get("FINMIND_TOKEN", "")
+
+    def rows(dataset: str) -> list[dict[str, Any]]:
+        params = {
+            "dataset": dataset,
+            "data_id": code,
+            "start_date": lo.isoformat(),
+            "end_date": day.isoformat(),
+        }
+        if token:  # 沒有 token 也能抓單一檔（免費匿名額度）；有就帶上
+            params["token"] = token
+        payload = json.loads(client.get(API, params=params).text)
+        if payload.get("status") != 200:
+            raise DataError(
+                "finmind",
+                day,
+                f"{dataset} {code}：status {payload.get('status')} {str(payload.get('msg'))[:120]}",
+            )
+        return list(payload.get("data") or [])
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        latest = market_latest(conn, scfg.pg_schema, code)
+        if latest is None:
+            raise DataError("prices_daily", None, "PG 沒有任何行情，不補對照")
+        upto = min(day, latest)  # 全市場還沒有的日子不補，見 benchmark_fill 模組說明
+        fm_prices, fm_dividends = rows("TaiwanStockPrice"), rows(DIVIDEND_RESULT_DATASET)
+        pg_prices, pg_events = read_existing(conn, scfg.pg_schema, code, lo, upto)
+        plan = plan_fill(code, upto, fm_prices, fm_dividends, pg_prices, pg_events)
+        write_fill(conn, scfg.pg_schema, plan)
+    finally:
+        conn.close()
+    return (
+        f"{code} {lo}～{upto}：補行情 {plan.prices.height} 天、除權息 {plan.events.height} 筆"
+        f"（已有 {plan.prices_checked} 天、{plan.events_checked} 筆，比對一致）"
+    )
 
 
 def _pg_price_days(start: dt.date, end: dt.date) -> list[dt.date]:

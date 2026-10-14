@@ -1,6 +1,6 @@
 // 名單績效（D-176，網站分頁「績效」）：每條線照公布的名單自動操作的模擬帳戶淨值曲線，以及每一檔新進名單的逐筆結果。
 // 名單出來就照固定規則全部當成買了、事後結算，使用者不能挑——這是名單本身的紀錄，不是個人損益。
-// 2026-10-13 使用者裁決：頁面不放 0050 對照（D-176 修訂）；資料裡仍算著，要放回來只改這頁。
+// 0050 對照：2026-10-13 拿掉（D-176 修訂），2026-10-14 使用者「績效把0050也放上去試試」放回來（D-176 修訂三）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ColorType, CrosshairMode, LineSeries, LineStyle, createChart, createSeriesMarkers } from 'lightweight-charts'
 import { fetchScorecard, fetchScorecardTrades } from './api'
@@ -24,6 +24,8 @@ import {
 } from './scorecard'
 
 const ACCOUNT = '#FF7A00'
+/** 0050 對照線：中性的淺灰，不搶帳戶的顏色 */
+const BENCH = '#9AA0AC'
 /** 明細一次顯示幾筆（「再顯示」每按一次多這麼多）。 */
 const PAGE = 50
 /** 帳戶買賣紀錄一次顯示幾筆。 */
@@ -170,6 +172,7 @@ function Account({ c }: { c: Scorecard }) {
           {c.account.holdings.length} 檔 · 現金 {ratio(cashPct)}
         </dd>
       </dl>
+      <Bench label={`同期買 ${c.benchmark.code} 抱著（含息）`} ret={all.bench_ret} mdd={all.bench_mdd} acct={all.ret} error={c.benchmark.error} code={c.benchmark.code} />
       <div className="cq-score-live">
         <b>即時公布以來</b>
         {live ? (
@@ -182,6 +185,12 @@ function Account({ c }: { c: Scorecard }) {
               <dd className={trend(live.ret)}>{pct(live.ret, 1)}</dd>
               <dt>最大回撤</dt>
               <dd className="down">{pct(live.mdd, 1)}</dd>
+              {live.bench_ret !== null && (
+                <>
+                  <dt>同期 {c.benchmark.code}</dt>
+                  <dd className={trend(live.bench_ret)}>{pct(live.bench_ret, 1)}</dd>
+                </>
+              )}
             </dl>
           </>
         ) : (
@@ -228,7 +237,8 @@ function NavChart({ c }: { c: Scorecard }) {
     const i = c.nav.findIndex((p) => p.d === d)
     const p0 = c.nav[0]
     if (i < 0 || !p0) return null
-    return { d: c.nav[i].d, v: c.nav[i].v / p0.v - 1 }
+    const b = c.nav[i].b
+    return { d: c.nav[i].d, v: c.nav[i].v / p0.v - 1, b: p0.b && b !== null ? b / p0.b - 1 : null }
   }, [hover, c])
   useEffect(() => {
     const box = el.current
@@ -245,6 +255,10 @@ function NavChart({ c }: { c: Scorecard }) {
       crosshair: { mode: CrosshairMode.Normal },
     })
     const common = { priceLineVisible: false, lastValueVisible: false }
+    if (lines.bench.length > 0) {
+      // 先畫 0050，帳戶的線疊在上面
+      chart.addSeries(LineSeries, { ...common, color: BENCH, lineWidth: 2 }).setData(lines.bench)
+    }
     const past = chart.addSeries(LineSeries, { ...common, color: ACCOUNT, lineWidth: 2, lineStyle: LineStyle.Dashed })
     past.setData(lines.backfill)
     past.createPriceLine({ price: 0, color: '#3A3D46', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
@@ -271,7 +285,8 @@ function NavChart({ c }: { c: Scorecard }) {
         <h2>{c.name} 模擬帳戶</h2>
         {at && (
           <span className="cq-score-at">
-            {md(at.d)}　<b style={{ color: ACCOUNT }}>累積 {pct(at.v, 1)}</b>
+            {md(at.d)}　<b style={{ color: ACCOUNT }}>帳戶 {pct(at.v, 1)}</b>
+            {at.b !== null && <b style={{ color: BENCH }}>　{c.benchmark.code} {pct(at.b, 1)}</b>}
           </span>
         )}
       </div>
@@ -284,8 +299,39 @@ function NavChart({ c }: { c: Scorecard }) {
           <i style={{ background: ACCOUNT }} />
           即時公布的名單
         </span>
+        {lines.bench.length > 0 && (
+          <span>
+            <i style={{ background: BENCH }} />
+            同期 {c.benchmark.code}（含息）
+          </span>
+        )}
       </div>
       <div className="cq-score-chart" ref={el} />
+    </div>
+  )
+}
+
+/** 對照：同期買 0050 抱著的報酬與回撤，以及帳戶贏／輸幾個百分點；算不出來就寫原因（不寫 0）。 */
+function Bench({ label, ret, mdd, acct, error, code }: { label: string; ret: number | null; mdd: number | null; acct: number | null; error: string | null; code: string }) {
+  if (ret === null) {
+    return <p className="cq-score-bench off">{code} 對照算不出來{error ? `：${error}` : ''}</p>
+  }
+  const diff = acct === null ? null : acct - ret
+  return (
+    <div className="cq-score-bench">
+      <b>{label}</b>
+      <dl className="cq-score-dl compact">
+        <dt>報酬</dt>
+        <dd className={trend(ret)}>{pct(ret, 1)}</dd>
+        <dt>最大回撤</dt>
+        <dd className="down">{pct(mdd, 1)}</dd>
+        {diff !== null && (
+          <>
+            <dt>帳戶{diff >= 0 ? '贏' : '輸'}</dt>
+            <dd className={trend(diff)}>{(Math.abs(diff) * 100).toFixed(1)} 個百分點</dd>
+          </>
+        )}
+      </dl>
     </div>
   )
 }

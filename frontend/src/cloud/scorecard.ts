@@ -1,6 +1,6 @@
 // 名單績效（D-176，網站分頁「績效」）的型別與純函數：淨值曲線換成累積報酬、即時／事後補分段、逐筆的白話標籤。不碰 DOM，供 node 單元測試。
 
-/** 一段淨值的數字（全部／即時公布以來）。bench_* 是同一段的 0050；算不出來是 null。 */
+/** 一段淨值的數字（全部／即時公布以來）。bench_* 是同一段的 0050（同期買進抱著、含息）；算不出來是 null。 */
 export type NavSummary = {
   start: string
   n_days: number
@@ -99,18 +99,20 @@ export type Scorecard = {
 type Pt = { time: string; value: number }
 
 /**
- * 圖上的兩段帳戶曲線（累積報酬 %，起點＝0）：事後補那段、即時公布以來那段。
- * 兩段在即時第一天接起來（那天兩條都有點），圖上才是連續的一條。沒有即時段＝全部是事後補。
- * 頁面不畫 0050（D-176 修訂）；資料裡的 b 欄不用。
+ * 圖上的曲線（累積報酬 %，起點＝0）：帳戶事後補那段、即時公布以來那段，以及同期 0050（D-176 修訂三）。
+ * 帳戶兩段在即時第一天接起來（那天兩條都有點），圖上才是連續的一條。沒有即時段＝全部是事後補。
+ * 0050 從帳戶第一天起算；第一天就沒有 0050 的值（雲端還沒補它的行情）→ 不畫，中間缺的日子跳過。
  */
-export function navLines(nav: NavPoint[], liveSince: string | null): { backfill: Pt[]; live: Pt[] } {
-  const out = { backfill: [] as Pt[], live: [] as Pt[] }
+export function navLines(nav: NavPoint[], liveSince: string | null): { backfill: Pt[]; live: Pt[]; bench: Pt[] } {
+  const out = { backfill: [] as Pt[], live: [] as Pt[], bench: [] as Pt[] }
   const v0 = nav[0]?.v
   if (!v0) return out
+  const b0 = nav[0].b
   for (const p of nav) {
     const pt = { time: p.d, value: (p.v / v0 - 1) * 100 }
     if (liveSince === null || p.d <= liveSince) out.backfill.push(pt)
     if (liveSince !== null && p.d >= liveSince) out.live.push(pt)
+    if (b0 && p.b !== null) out.bench.push({ time: p.d, value: (p.b / b0 - 1) * 100 })
   }
   return out
 }

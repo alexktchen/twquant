@@ -391,6 +391,9 @@
 .cq-score-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--mute); }
 .cq-score-legend i { display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
 .cq-score-legend i.dash { height: 0; border-top: 2px dashed; border-radius: 0; }
+.cq-score-bench { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cq-score-bench > b { font-size: 13.5px; font-weight: 500; color: #9aa0ac; }
+.cq-score-bench.off { font-size: 13px; color: var(--mute); margin: 10px 0 0; }
 .cq-score-chart { height: 340px; flex: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .cq-score-p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--mute); }
 .cq-score-stats { width: 100%; border-collapse: collapse; font-size: 14.5px; font-variant-numeric: tabular-nums; }
