@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { COOLDOWN_MS, FRESH_MS, MAX_COOLDOWN_MS, MIN_GAP_MS, QuoteHub, STALE_MAX_MS, readMis, type Quote } from '../functions/_lib/quote.ts'
+import { readFileSync } from 'node:fs'
+import {
+  COOLDOWN_MS,
+  FRESH_MS,
+  FUGLE_COOLDOWN_MS,
+  FUGLE_FRESH_MS,
+  FUGLE_PER_MIN,
+  FUGLE_PER_REQUEST,
+  MAX_COOLDOWN_MS,
+  MIN_GAP_MS,
+  QuoteHub,
+  STALE_MAX_MS,
+  parseFugle,
+  readFugle,
+  readMis,
+  type Quote,
+} from '../functions/_lib/quote.ts'
 import { liveBackoff } from '../src/cloud/live.ts'
 
 const q = (sid: string, last = 100): Quote => ({
@@ -131,4 +147,105 @@ test('網站端：取不到時 30 秒起加倍等、最多 5 分鐘；證交所�
   assert.equal(liveBackoff(4, null), 240_000)
   assert.equal(liveBackoff(9, null), 300_000)
   assert.equal(liveBackoff(1, 120), 120_000)
+})
+
+// ── 富果備援（2026-10-14）────────────────────────────────────────────────
+
+const fugleBody = JSON.parse(readFileSync(new URL('./fixtures/fugle-quote-5289.json', import.meta.url), 'utf8'))
+
+test('富果的回應（2026-10-14 13:10 實抓宜鼎）換成與證交所同形狀的報價：量從張換成股、時間換成台北', () => {
+  assert.deepEqual(parseFugle(fugleBody), {
+    sid: '5289',
+    date: '2026-10-14',
+    time: '13:10:35',
+    open: 1200,
+    high: 1200,
+    low: 1160,
+    last: 1175,
+    prev: 1190,
+    volume: 991_000,
+    limit_up: null, // 網站由昨收照升降單位推
+    limit_down: null,
+    auction: false,
+  })
+  assert.equal(parseFugle({ ...fugleBody, lastPrice: undefined }).last, 1175) // 沒有最新成交用收盤
+  assert.equal(parseFugle({ ...fugleBody, isTrial: true }).auction, true)
+  assert.throws(() => parseFugle({ ...fugleBody, date: '20261014' }), /異常/)
+  assert.throws(() => parseFugle(null), /異常/)
+})
+
+test('富果的錯誤：代號不存在回 null；額度用完（429）、金鑰不對（401）帶 status 丟出去', async () => {
+  const res = (status: number, body: unknown = fugleBody) => ({ ok: status === 200, status, json: async () => body })
+  assert.equal((await readFugle(res(200)))?.sid, '5289')
+  assert.equal(await readFugle(res(404)), null)
+  await assert.rejects(readFugle(res(429)), (e: Error & { status?: number }) => e.status === 429)
+  await assert.rejects(readFugle(res(401)), (e: Error & { status?: number }) => e.status === 401)
+})
+
+function fallbackSetup() {
+  const s = setup()
+  const asked: string[] = []
+  let status: number | null = null
+  const fallback = async (sid: string) => {
+    asked.push(sid)
+    if (status !== null) throw Object.assign(new Error(`HTTP ${status}`), { status })
+    return sid === '9999' ? null : q(sid, 200)
+  }
+  return { ...s, asked, fallback, failFugle: (st: number | null) => (status = st) }
+}
+
+test('證交所擋下時用富果補：補到的不算舊、網站不用停；證交所正常時完全不用富果', async () => {
+  const { hub, calls, asked, fallback, tick, failWith } = fallbackSetup()
+  await hub.get(['2330'], fallback)
+  assert.deepEqual(asked, []) // 證交所正常
+  tick(FRESH_MS)
+  failWith(new Error('證交所防火牆暫時擋下即時報價'))
+  const got = await hub.get(['2330', '3090', '9999'], fallback)
+  assert.deepEqual(asked, ['3090', '9999', '2330']) // 沒有的先補，再補最舊的
+  assert.deepEqual(got.quotes.map((x) => [x.sid, x.last]), [['2330', 200], ['3090', 200]])
+  assert.equal(got.stale, false)
+  assert.equal(got.retryAfter, null) // 富果補得上：網站照常輪詢
+  assert.equal(calls.length, 2)
+  // 富果補的 30 秒內不重問，也不再去敲證交所（還在暫停）
+  tick(FUGLE_FRESH_MS - 1)
+  await hub.get(['2330', '3090'], fallback)
+  assert.equal(asked.length, 3)
+  assert.equal(calls.length, 2)
+})
+
+test('富果額度：每次最多補 15 檔、每分鐘不超過 40 檔，其餘先給舊的', async () => {
+  const { hub, asked, fallback, tick, failWith } = fallbackSetup()
+  const many = Array.from({ length: 30 }, (_, i) => String(1101 + i))
+  failWith(new Error('擋'))
+  const first = await hub.get(many, fallback)
+  assert.equal(asked.length, FUGLE_PER_REQUEST)
+  assert.equal(first.quotes.length, FUGLE_PER_REQUEST)
+  assert.equal(first.stale, true) // 還有沒補到的
+  // 同一時刻再問（證交所暫停中，不受 2 秒間隔限制）：額度隨時間連續回補，這裡時間沒走、不回補
+  await hub.get(many, fallback)
+  assert.equal(asked.length, 2 * FUGLE_PER_REQUEST)
+  await hub.get(['2330', '2317', '2454', '2412', '2882', '2881', '1301', '1303', '2002', '2603', '2609', '2615'], fallback)
+  assert.equal(asked.length, FUGLE_PER_MIN) // 這分鐘的額度用完了（30 + 10）
+  tick(30_000) // 半分鐘回補一半額度
+  await hub.get(['3008', '3034', '3037', '3045', '3231', '3443', '3661', '3711', '4938', '5871', '6415', '6505', '6669', '1216', '2207', '2303', '2308', '2327', '2345', '2356', '2357', '2379', '2382', '2395', '2408'], fallback)
+  assert.equal(asked.length, FUGLE_PER_MIN + FUGLE_PER_REQUEST)
+})
+
+test('富果也擋（429）或金鑰不對：富果停 1 分鐘，期間跟以前一樣只給證交所的舊價格、叫網站晚點再來', async () => {
+  const { hub, asked, fallback, tick, failWith, failFugle } = fallbackSetup()
+  await hub.get(['2330'], fallback)
+  tick(FRESH_MS)
+  failWith(new Error('擋'))
+  failFugle(429)
+  const got = await hub.get(['2330'], fallback)
+  assert.equal(got.stale, true)
+  assert.ok(got.retryAfter !== null) // 兩個都不行 → 網站暫停
+  tick(MIN_GAP_MS)
+  await hub.get(['2330'], fallback)
+  assert.equal(asked.length, 1) // 富果停用中
+  failFugle(null)
+  tick(FUGLE_COOLDOWN_MS)
+  assert.equal((await hub.get(['2330'], fallback)).quotes[0].last, 200)
+  // 沒設金鑰（沒有 fallback）：照舊只用證交所
+  assert.ok((await hub.get(['2330'])).quotes.length === 1)
 })

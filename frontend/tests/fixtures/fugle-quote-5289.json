@@ -1,0 +1,50 @@
+{
+ "date": "2026-10-14",
+ "type": "EQUITY",
+ "exchange": "TPEx",
+ "market": "OTC",
+ "symbol": "5289",
+ "name": "宜鼎",
+ "referencePrice": 1190,
+ "previousClose": 1190,
+ "openPrice": 1200,
+ "highPrice": 1200,
+ "lowPrice": 1160,
+ "closePrice": 1175,
+ "avgPrice": 1177.12,
+ "change": -15,
+ "changePercent": -1.26,
+ "lastPrice": 1175,
+ "lastSize": 1,
+ "total": {
+  "tradeValue": 1166530000,
+  "tradeVolume": 991,
+  "tradeVolumeAtBid": 584,
+  "tradeVolumeAtAsk": 399,
+  "transaction": 555,
+  "time": 1791954635677436
+ },
+ "lastTrade": {
+  "bid": 1170,
+  "ask": 1175,
+  "price": 1175,
+  "size": 1,
+  "time": 1791954635677436,
+  "serial": 4003105
+ },
+ "isContinuous": true,
+ "serial": 4008019,
+ "lastUpdated": 1791954658728312,
+ "bids": [
+  {
+   "price": 1170,
+   "size": 58
+  }
+ ],
+ "asks": [
+  {
+   "price": 1175,
+   "size": 15
+  }
+ ]
+}
