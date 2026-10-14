@@ -23,6 +23,10 @@ def replace_line(
 ) -> int:
     """把 `day` 這條線的名單整份換成 `picks`（依序即名次）。重跑同日＝覆蓋，冪等。
 
+    重跑得到**一樣的名單**（代號與名次都相同）就不動那幾列：`created_at` 是名單何時公布的證據
+    （名單績效用它分「即時」與「事後補」，D-176），晚上補跑或隔天手動重跑不能把它改成重跑的時間。
+    分數跟著留在第一次公布的值。名單有任何不同才整份覆蓋、記新的寫入時間。
+
     `picks` 為空 raise：空名單代表上游沒算出來，寫進去會讓「那天沒推薦」與「那天壞了」無法分辨。
     """
     if not picks:
@@ -35,6 +39,13 @@ def replace_line(
     ensure_tables(conn, (DAILY_PICKS_SPEC,), schema)
     table = f'"{schema}"."{DAILY_PICKS_SPEC.name}"'
     with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT rank, stock_id FROM {table} WHERE date = %s AND line = %s ORDER BY rank",
+            (day, line),
+        )
+        if [(int(r[0]), str(r[1])) for r in cur.fetchall()] == list(enumerate(ids, start=1)):
+            conn.commit()
+            return len(picks)
         cur.execute(f"DELETE FROM {table} WHERE date = %s AND line = %s", (day, line))
         cur.executemany(
             f"INSERT INTO {table} (date, line, rank, stock_id, score, model_id, created_at) "

@@ -64,6 +64,41 @@ def test_t332_ac4_replace_line_is_idempotent_and_keeps_rank_order() -> None:
         _drop(conn)
 
 
+def test_d176_rerun_with_same_list_keeps_the_publish_time() -> None:
+    """名單績效用 created_at 分即時／事後補：重跑得到一樣的名單，不能把公布時間改成重跑的時間。"""
+    conn = _connect_or_skip()
+    from twquant.data.serving.picks_store import read_line, replace_line
+
+    def written() -> list[dt.datetime]:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT created_at FROM "{_SCHEMA}".daily_picks WHERE date = %s AND line = %s '
+                "ORDER BY rank",
+                (_DAY, "QUIET"),
+            )
+            return [r[0] for r in cur.fetchall()]
+
+    try:
+        picks = [("2330", 0.31), ("2317", 0.27)]
+        replace_line(conn, _SCHEMA, _DAY, "QUIET", picks, "m1", _AT)
+        later = _AT + dt.timedelta(days=1, hours=5)  # 隔天下午手動重跑
+        # 代號與名次相同（分數有一點點不同）：不動，公布時間與分數都留第一次的
+        assert (
+            replace_line(
+                conn, _SCHEMA, _DAY, "QUIET", [("2330", 0.32), ("2317", 0.26)], "m1", later
+            )
+            == 2
+        )
+        assert written() == [_AT, _AT]
+        assert read_line(conn, _SCHEMA, _DAY, "QUIET") == [(1, "2330", 0.31), (2, "2317", 0.27)]
+        # 名次換了＝名單不同：整份覆蓋，記新的寫入時間（那天之後就算事後補）
+        replace_line(conn, _SCHEMA, _DAY, "QUIET", [("2317", 0.3), ("2330", 0.2)], "m1", later)
+        assert written() == [later, later]
+        assert read_line(conn, _SCHEMA, _DAY, "QUIET") == [(1, "2317", 0.3), (2, "2330", 0.2)]
+    finally:
+        _drop(conn)
+
+
 def test_t332_ac4_rejects_empty_duplicate_and_naive_time() -> None:
     conn = _connect_or_skip()
     from twquant.data.serving.picks_store import replace_line

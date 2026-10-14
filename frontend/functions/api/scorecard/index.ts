@@ -1,15 +1,17 @@
 // GET /api/scorecard?line=CORE：這條線的名單績效——模擬帳戶的淨值曲線、與 0050 對照、逐筆統計（不含逐筆明細）。
 import { fail, guarded, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
-import { lineOk, rawJson } from '../../_lib/scorecard'
+import { NOT_READY, lineOk, rawJson, readRows } from '../../_lib/scorecard'
 
 const handle: PagesFunction<Env> = async ({ request, env }) => {
   const line = new URL(request.url).searchParams.get('line')
   if (!lineOk(line)) return fail(400, `沒有這條線：${line ?? '（未指定）'}`)
   return guarded(env, async (db) => {
-    const rows = await db<{ body: string }[]>`
-      SELECT (payload #- '{trades,rows}')::text AS body FROM serving.scorecard WHERE line = ${line}`
-    if (rows.length === 0) return fail(404, '這條線的名單績效還沒算出來')
+    const rows = await readRows(
+      () => db<{ body: string }[]>`
+        SELECT (payload #- '{trades,rows}')::text AS body FROM serving.scorecard WHERE line = ${line}`,
+    )
+    if (rows.length === 0) return fail(404, NOT_READY)
     return rawJson(rows[0].body)
   })
 }
