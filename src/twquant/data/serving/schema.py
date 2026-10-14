@@ -443,6 +443,21 @@ SCORECARD_SPEC = TableSpec(
     snapshot=True,  # 沒有 date 分區：每次整份重算
 )
 
+# 族群標籤（D-177）：每檔挑一條產業價值鏈當族群（stock_groups.py），網站每日名單旁邊顯示。
+# 整份重抓重算（每 refresh_days 天），可隨時重建；sync/rebuild/prune 都不碰。沒有列的股票網站顯示官方產業別。
+STOCK_GROUP_SPEC = TableSpec(
+    "stock_group",
+    (
+        ("stock_id", "text"),
+        ("chain", "text"),  # 挑中的產業鏈（族群），例：被動元件
+        ("segments", "text[]"),  # 這檔在這條鏈上掛的段，例：{電阻器}
+        ("also", "text[]"),  # 還掛了哪些別的鏈
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("stock_id",),
+    snapshot=True,
+)
+
 # 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
 # （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
 # 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
@@ -519,6 +534,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     DAYTRADE_FIRST_PUB_SPEC,
     DAILY_PICKS_SPEC,
     SCORECARD_SPEC,
+    STOCK_GROUP_SPEC,
     *FUND_FLOW_SPECS,
 )
 

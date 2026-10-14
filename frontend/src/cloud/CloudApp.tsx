@@ -23,6 +23,7 @@ import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
+import { groupLine, groupTitle, type Group } from './group'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
@@ -445,6 +446,7 @@ export default function CloudApp() {
               <Detail
                 sid={selected.sid}
                 name={selected.name}
+                group={selected.group}
                 close={selected.close}
                 chg={selected.chg}
                 asOf={nav.past ? view?.date : undefined}
@@ -515,6 +517,11 @@ function Row({
         <b>
           <em>{p.sid}</em>
           {p.name ?? ''}
+          {p.group && (
+            <i className={`cq-grp${p.group.official ? ' official' : ''}`} title={groupTitle(p.group)}>
+              {p.group.name}
+            </i>
+          )}
         </b>
         <small>
           <span className="cq-dots" title={`近 6 日上榜 ${h.on}/${h.of}`}>
@@ -768,6 +775,7 @@ function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked
 function Detail({
   sid,
   name,
+  group,
   close,
   chg,
   asOf,
@@ -778,6 +786,8 @@ function Detail({
 }: {
   sid: string
   name: string | null
+  /** 名單上帶來的族群（先頂著）；沒有就用評分 API 回來的 */
+  group?: Group | null
   /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
@@ -832,6 +842,8 @@ function Detail({
   const bigChg = asOf ? (chg ?? q?.chg ?? null) : (q?.chg ?? chg ?? null)
   const label = asOf ? null : todayBar ? liveLabel(quote, today) : quote?.date === today && quote.last === null ? '尚未成交' : null
   const t = trend(bigChg)
+  const grp = group ?? sc?.group ?? null
+  const gl = grp ? groupLine(grp) : null
   // 漲停／跌停加框：盤中用證交所給的漲跌停價，其他時候由那根 K 棒的前一天收盤推
   const prevClose = !asOf && todayBar ? (quote?.prev ?? null) : q && q.diff !== null ? q.bar.close - q.diff : null
   const lim = limitPrices(prevClose)
@@ -847,6 +859,12 @@ function Detail({
             <small>{sid}</small> {name ?? sc?.name ?? ''}
             {onTrack && <TrackButton sid={sid} on={tracked} onTrack={onTrack} />}
           </h1>
+          {grp && gl && (
+            <p className="cq-group" title={groupTitle(grp)}>
+              <b className={grp.official ? 'official' : undefined}>{gl.main}</b>
+              {gl.also && <span>{gl.also}</span>}
+            </p>
+          )}
           <div className={`cq-big ${t}`}>
             <b className={bigLimit ? `cq-limit ${bigLimit}` : undefined} title={bigLimit === 'up' ? '漲停' : bigLimit === 'down' ? '跌停' : undefined}>
               {price(bigClose)}

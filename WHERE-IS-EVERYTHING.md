@@ -29,6 +29,7 @@
   **0050 對照照算照存、網站不顯示**（D-176 修訂，使用者看過頁面後決定）；雲端要算得出它，得從地端補一次 0050 歷史（選做）：
   `uv run --all-groups python scripts/cloud_seed_needed.py --env-file D:/project/twquant/.env --tables prices_daily`（先 `--dry-run`）。
   已知：`corporate_events` 沒每日更新（T-333），09-07 後的除息會被算成下跌。
+- **族群標籤（D-177／T-352，2026-10-14）**：每日名單名字旁的小框（大毅 → 被動元件）。來源櫃買中心產業價值鏈平台 ic.tpex.org.tw（47 條鏈），挑法在 `configs/stock_groups.yaml`（官方產業別圈候選 → 掛最多段 → refine 順序）；存 PG **`serving.stock_group`**，pipeline 步驟「族群標籤」（雲端也跑）表比 7 天舊才抓（約 70 秒），手動 `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant stock-groups --force`。表不存在時網站顯示官方產業別；`cloud_seed_needed.py` 重灌會刪掉它，下一次 pipeline 自動補回。
 - **網站分頁只剩三個（T-351）**：「每日名單」（今日推薦與歷史名單合併：預設最新一天、名單上方選日期）／「績效」／「追蹤」。
 
 - **投信／ETF 資金流（SPEC-016／D-171，2026-10-11，分支 `claude/spec-016-fund-flow-traces`，PR #152）**：

@@ -1628,6 +1628,15 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），名單績效維持上一個交易日"
         return _scorecard_for_day(day)
 
+    def _stock_groups_step() -> str:
+        # D-177 族群標籤：網站名單旁邊的小字。每 refresh_days 天才真的去抓（47 頁）；best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _stock_groups_refresh(force=False)
+
     def _paper_trading_step() -> str:
         # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
         # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
@@ -1725,6 +1734,7 @@ def _run_daily_pipeline(
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
         PipelineStep("名單績效", _scorecard_step),
+        PipelineStep("族群標籤", _stock_groups_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -1850,6 +1860,14 @@ def scorecard(
     """名單績效（D-176）：每條線照公布的名單自動操作的模擬帳戶＋逐筆統計，寫進 PG `scorecard`（網站讀）。"""
     day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
     typer.secho(f"[OK] {day}：{_scorecard_for_day(day)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="stock-groups")
+def stock_groups(
+    force: bool = typer.Option(False, "--force", help="不管上次什麼時候抓的，現在就重抓"),
+) -> None:
+    """族群標籤（D-177）：抓櫃買中心產業價值鏈、每檔挑一條當族群，寫進 PG `stock_group`（網站讀）。"""
+    typer.secho(f"[OK] {_stock_groups_refresh(force)}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -2824,6 +2842,38 @@ def _closes_for(
         for d, sid, close in cur.fetchall():
             out.setdefault(d, {})[str(sid)] = float(close)
     return out
+
+
+def _stock_groups_refresh(force: bool) -> str:
+    """族群表比 `refresh_days` 舊（或還沒有）就整份重抓重算；`force` 不管新舊都重抓。"""
+    from twquant.config import load_config
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import store
+    from twquant.data.serving.groups_store import groups_updated_at, read_industries, replace_groups
+    from twquant.data.sources.tpex_chain import RETRY_STATUS, ChainSource
+    from twquant.data.stock_groups import StockGroupsConfig, primary_groups
+
+    cfg = load_config(_CONFIG_DIR / "stock_groups.yaml", StockGroupsConfig)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        now = now_tw()
+        last = groups_updated_at(conn, scfg.pg_schema)
+        if not force and last is not None and now - last < dt.timedelta(days=cfg.refresh_days):
+            return f"族群表 {last.astimezone(now.tzinfo):%Y-%m-%d} 更新過（每 {cfg.refresh_days} 天重抓），略過"
+        client = HttpClient(
+            source="tpex_ic",
+            rate=_load_system().source_rates["tpex_ic"],
+            timeout=cfg.timeout_seconds,
+            retry_status=RETRY_STATUS,
+        )
+        chains, members = ChainSource(client, cfg.base_url, cfg.first_chain).fetch()
+        groups = primary_groups(members, read_industries(conn, scfg.pg_schema), cfg.refine, chains)
+        replace_groups(conn, scfg.pg_schema, groups, now)
+    finally:
+        conn.close()
+    return f"{len(groups)} 檔有族群（{len(chains)} 條產業鏈）"
 
 
 def _pg_has_prices(day: dt.date) -> bool:
