@@ -14,3 +14,8 @@ allowed_hosts:
   - fcm.googleapis.com
   - updates.push.services.mozilla.com
   - notify.windows.com
+
+# 族群資金推播（T-354／D-177 修訂二；門檻寫於看到任何推播結果之前）：當天名單（三條線合起來、同一檔只算一次）裡，
+# 同一個族群至少 group_min_picks 檔，而且這個族群當天標了「資金流入」（門檻見 configs/stock_groups.yaml flow）→ 發一則。
+group_min_picks: 2
+group_max_listed: 3

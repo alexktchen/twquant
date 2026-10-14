@@ -30,7 +30,7 @@
   `uv run --all-groups python scripts/cloud_seed_needed.py --env-file D:/project/twquant/.env --tables prices_daily`（先 `--dry-run`）。
   已知：`corporate_events` 沒每日更新（T-333），09-07 後的除息會被算成下跌。
 - **族群標籤（D-177／T-352，2026-10-14）**：每日名單名字旁的小框（大毅 → 被動元件）。來源櫃買中心產業價值鏈平台 ic.tpex.org.tw（47 條鏈），挑法在 `configs/stock_groups.yaml`（官方產業別圈候選 → 掛最多段 → refine 順序）；存 PG **`serving.stock_group`**，pipeline 步驟「族群標籤」（雲端也跑）表比 7 天舊才抓（約 70 秒），手動 `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant stock-groups --force`。表不存在時網站顯示官方產業別；`cloud_seed_needed.py` 重灌會刪掉它，下一次 pipeline 自動補回。大鏈拆到段（`split`：奇鋐 → 散熱、緯穎 → 伺服器）；改了 `split`／`refine` 要 `stock-groups --force` 才會馬上生效（否則等 7 天）。
-- **族群資金（D-177 修訂／T-353，2026-10-14）**：網站分頁「族群」與名單上的橘色「資金流入」。PG **`serving.group_flow_daily`**（每天每族群一列：成交比重、資金倍數＝對前 20 日平均、漲跌家數、成交金額前 8 檔 jsonb；雲端留 60 日），pipeline 步驟「族群資金」（族群標籤之後、雲端也跑），回補 `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant group-flow --from <日> --to <日>`。門檻在 `configs/stock_groups.yaml` 的 `flow`（事前登記，觀察用、不進模型）。
+- **族群資金（D-177 修訂／T-353，2026-10-14）**：網站分頁「族群」與名單上的橘色「資金流入」。PG **`serving.group_flow_daily`**（每天每族群一列：成交比重、資金倍數＝對前 20 日平均、漲跌家數、成交金額前 8 檔 jsonb；雲端留 60 日），pipeline 步驟「族群資金」（族群標籤之後、雲端也跑），回補 `TWQUANT_PG_DSN=... uv run --all-groups python -m twquant group-flow --from <日> --to <日>`。門檻在 `configs/stock_groups.yaml` 的 `flow`（事前登記，觀察用、不進模型）。族群資金推播（T-354）：名單上同族群 ≥ 2 檔又資金流入才發，雲端排程 `notify-groups --date`（名單通知之後），門檻在 `configs/push.yaml` 的 `group_min_picks`；試發 `TWQUANT_SUPABASE_DSN=... TWQUANT_VAPID_PRIVATE_KEY=... uv run python -m twquant notify-groups --date <日> --test`。
 - **網站分頁只剩三個（T-351）**：「每日名單」（今日推薦與歷史名單合併：預設最新一天、名單上方選日期）／「績效」／「追蹤」。
 
 - **投信／ETF 資金流（SPEC-016／D-171，2026-10-11，分支 `claude/spec-016-fund-flow-traces`，PR #152）**：

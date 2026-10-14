@@ -88,6 +88,14 @@ jobs:
           TWQUANT_VAPID_PRIVATE_KEY: ${{ secrets.TWQUANT_VAPID_PRIVATE_KEY }}
         run: uv run python -m twquant notify-picks --date "$DAY"
 
+      - name: 族群資金推播（名單上同族群兩檔以上又資金流入才發；每個交易日最多一則，T-354）
+        # 排在名單通知之後；族群資金還沒算好、或沒有符合的族群，這步自己會略過
+        if: ${{ !cancelled() }}
+        continue-on-error: true # 通知失敗不影響名單
+        env:
+          TWQUANT_VAPID_PRIVATE_KEY: ${{ secrets.TWQUANT_VAPID_PRIVATE_KEY }}
+        run: uv run python -m twquant notify-groups --date "$DAY"
+
       - name: Install rclone（Drive 歸檔用；排在推薦之後，失敗不影響當天名單）
         if: ${{ !cancelled() }}
         continue-on-error: true

@@ -1815,6 +1815,60 @@ def notify_picks(
         raise typer.Exit(1)
 
 
+@app.command("notify-groups")
+def notify_groups(
+    date: str = typer.Option(..., "--date", help="交易日 YYYY-MM-DD"),
+    test: bool = typer.Option(False, "--test", help="試發：不管這天發過沒、不記錄、不刪失效訂閱"),
+) -> None:
+    """族群資金推播（T-354）：名單上同族群兩檔以上、而且族群當天資金流入時通知；每個交易日最多一則。"""
+    import os
+
+    from twquant.config import PushConfig, load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.errors import ConfigError
+    from twquant.monitoring import push_notify as pn
+
+    day = dt.date.fromisoformat(date)
+    cfg = load_config(_CONFIG_DIR / "push.yaml", PushConfig)
+    key = os.environ.get(cfg.vapid_private_key_env, "")
+    if not key:
+        raise ConfigError(
+            f"缺推播私密金鑰：環境變數 {cfg.vapid_private_key_env}（.env 或 GitHub secret）"
+        )
+    kind = "groups"
+    scfg = _load_serving()
+    conn = store.connect_cloud(scfg)
+    try:
+        if not test and pn.already_sent(conn, day, kind):
+            typer.echo(f"{day} 的族群資金通知已經發過，略過")
+            return
+        hot = pn.load_hot_groups(conn, scfg.pg_schema, day, cfg.group_min_picks)
+        if hot is None:
+            typer.echo(f"{day} 的名單或族群資金還沒算好，不發")
+            return
+        if not hot:
+            typer.echo(f"{day} 名單上沒有同族群 {cfg.group_min_picks} 檔以上又資金流入的族群，不發")
+            return
+        subs = [
+            s for s in pn.load_subscriptions(conn) if pn.host_allowed(s.endpoint, cfg.allowed_hosts)
+        ]
+        payload = pn.compose_groups(day, hot, cfg.site_url, cfg.group_max_listed)
+        send = pn.webpush_sender(
+            key, cfg.vapid_subject, cfg.ttl_seconds, cfg.request_timeout_seconds
+        )
+        result = pn.send_all(subs, payload, send)
+        if not test:
+            pn.record(conn, day, kind, result, now_tw())
+    finally:
+        conn.close()
+    typer.echo(f"{payload['title']}：{payload['body']}")
+    typer.echo(f"發出 {result.sent}、失效（已刪） {len(result.gone)}、失敗 {len(result.failed)}")
+    if result.failed:
+        typer.secho("[FAIL] " + "；".join(result.failed), fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
 def _echo_pipeline_result(res: PipelineResult) -> None:
     typer.secho(f"=== 每日 pipeline @ {res.day} ===", fg=typer.colors.CYAN, bold=True)
     for s in res.steps:

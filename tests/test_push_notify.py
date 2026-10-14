@@ -142,3 +142,156 @@ def test_ac5_public_key_and_hosts_match_the_website() -> None:
         .read_text(encoding="utf-8")
         .split("vapid_private_key_env")[0]
     )
+
+
+# ── 族群資金推播（T-354）───────────────────────────────────────────────────
+
+from twquant.monitoring.push_notify import HotGroup, compose_groups, hot_groups  # noqa: E402
+
+_GROUPS = {
+    "2478": "被動元件",
+    "3090": "被動元件",
+    "2327": "被動元件",
+    "3017": "散熱",
+    "3324": "散熱",
+    "2330": "晶圓製造",
+}
+_FLOWS = {
+    "被動元件": (2.1, 41, 33, True),
+    "散熱": (1.6, 11, 8, True),
+    "晶圓製造": (3.0, 18, 15, True),
+    "IC設計": (1.2, 80, 50, False),
+}
+
+
+def test_ac6_t354_hot_groups_need_two_picks_and_inflow() -> None:
+    """名單上同族群至少 2 檔、而且族群資金流入才算；同一檔在兩條線只算一次；名單檔數多的在前。"""
+    picks = [
+        ("2478", "大毅"),
+        ("2330", "台積電"),  # 晶圓製造倍數最高但名單上只有 1 檔 → 不算
+        ("3017", "奇鋐"),
+        ("3090", "日電貿"),
+        ("3324", None),  # 查不到股名 → 用代號
+        ("2478", "大毅"),  # 另一條線又有大毅：不重複算
+        ("2327", "國巨"),
+        ("9999", "沒族群"),
+    ]
+    got = hot_groups(picks, _GROUPS, _FLOWS, 2)
+    assert got == [
+        HotGroup("被動元件", 2.1, 41, 33, ("大毅", "日電貿", "國巨")),
+        HotGroup("散熱", 1.6, 11, 8, ("奇鋐", "3324")),
+    ]
+    # 沒有資金流入的族群，名單上再多檔也不算；門檻提高到 3 檔只剩被動元件
+    assert hot_groups([("1", "a"), ("2", "b")], {"1": "IC設計", "2": "IC設計"}, _FLOWS, 2) == []
+    assert [h.group for h in hot_groups(picks, _GROUPS, _FLOWS, 3)] == ["被動元件"]
+
+
+def test_ac6_t354_compose_groups_title_body_and_link_to_the_group_tab() -> None:
+    hot = [
+        HotGroup("被動元件", 2.1, 41, 33, ("大毅", "日電貿", "國巨")),
+        HotGroup("散熱", 1.64, 11, 8, ("奇鋐", "雙鴻")),
+    ]
+    p = compose_groups(dt.date(2026, 10, 13), hot, "https://twquant.pages.dev/", 3)
+    assert p["title"] == "10/13 資金流入：被動元件 2.1 倍、散熱 1.6 倍"
+    assert p["body"] == (
+        "被動元件：資金 2.1 倍、41 檔 33 漲｜名單 3 檔：大毅、日電貿、國巨\n"
+        "散熱：資金 1.6 倍、11 檔 8 漲｜名單 2 檔：奇鋐、雙鴻"
+    )
+    assert p["url"] == "https://twquant.pages.dev/?tab=group"
+    assert p["tag"] == "groups-2026-10-13"  # 跟名單通知（picks-…）分開，不互相蓋掉
+    one = compose_groups(dt.date(2026, 10, 13), hot, "https://twquant.pages.dev/", 1)
+    assert one["title"] == "10/13 資金流入：被動元件 2.1 倍 等 2 個"
+    assert "散熱" not in one["body"]
+    with pytest.raises(ValueError):
+        compose_groups(dt.date(2026, 10, 13), [], "https://x/", 3)
+
+
+def test_ac6_t354_config_and_cloud_step() -> None:
+    """門檻在 push.yaml；雲端排程在名單通知之後發、失敗不擋名單（靜態）。"""
+    cfg = load_config(ROOT / "configs" / "push.yaml", PushConfig)
+    assert (cfg.group_min_picks, cfg.group_max_listed) == (2, 3)
+    wf = (ROOT / ".github" / "workflows" / "daily-pipeline.yml").read_text(encoding="utf-8")
+    assert wf.index("notify-picks --date") < wf.index("notify-groups --date")
+    step = wf[wf.index("族群資金推播") : wf.index("notify-groups --date")]
+    assert "continue-on-error: true" in step and "TWQUANT_VAPID_PRIVATE_KEY" in step
+    sw = (ROOT / "frontend" / "public" / "sw.js").read_text(encoding="utf-8")
+    assert "postMessage({ type: 'open', url })" in sw  # 網站開著時點通知也會切到族群分頁
+
+
+_SCHEMA = "serving_test_push_groups"
+
+
+def _connect_or_skip() -> Any:
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("TWQUANT_PG_DSN")
+    if not dsn:
+        pytest.skip("TWQUANT_PG_DSN 未設，跳過 PG 整合測試")
+    try:
+        conn = psycopg.connect(dsn)
+    except psycopg.Error as exc:  # pragma: no cover - 依環境而定
+        pytest.skip(f"PG 不可達，跳過：{exc}")
+    with conn.cursor() as cur:
+        cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
+        cur.execute(f'CREATE SCHEMA "{_SCHEMA}"')
+        cur.execute(
+            f'CREATE TABLE "{_SCHEMA}".daily_picks (date date, line text, rank int, stock_id text)'
+        )
+        cur.execute(
+            f'CREATE TABLE "{_SCHEMA}".stock_meta (stock_id text, name text, industry text)'
+        )
+        cur.execute(f'CREATE TABLE "{_SCHEMA}".stock_group (stock_id text, grp text)')
+        cur.executemany(
+            f'INSERT INTO "{_SCHEMA}".daily_picks VALUES (%s, %s, %s, %s)',
+            [
+                (dt.date(2026, 10, 13), "CORE", 1, "2478"),
+                (dt.date(2026, 10, 13), "CORE", 2, "1802"),
+                (dt.date(2026, 10, 13), "QUIET", 1, "3090"),
+                (dt.date(2026, 10, 13), "QUIET", 2, "1809"),
+            ],
+        )
+        cur.executemany(
+            f'INSERT INTO "{_SCHEMA}".stock_meta VALUES (%s, %s, %s)',
+            [
+                ("2478", "大毅", "電子零組件業"),
+                ("3090", "日電貿", "電子零組件業"),
+                ("1802", "台玻", "玻璃陶瓷"),
+                ("1809", "中釉", "玻璃陶瓷"),  # 族群表上沒有（重抓之間新上市）→ 用官方產業別
+            ],
+        )
+        cur.executemany(
+            f'INSERT INTO "{_SCHEMA}".stock_group VALUES (%s, %s)',
+            [("2478", "被動元件"), ("3090", "被動元件"), ("1802", "玻璃陶瓷")],
+        )
+    conn.commit()
+    return conn
+
+
+def test_ac7_t354_pg_hot_groups_and_not_ready() -> None:
+    from twquant.data.serving.group_flow_store import write_group_flow
+    from twquant.monitoring.push_notify import load_hot_groups
+    from twquant.reporting.group_flow import GroupFlow
+
+    conn = _connect_or_skip()
+    day = dt.date(2026, 10, 13)
+    try:
+        assert load_hot_groups(conn, _SCHEMA, day, 2) is None  # 族群資金表還沒建 → 還沒好
+        at = dt.datetime(2026, 10, 13, 17, 40, tzinfo=dt.timezone(dt.timedelta(hours=8)))
+
+        def flow(group: str, ratio: float, hot: bool) -> GroupFlow:
+            return GroupFlow(day, group, 10, 7, 2, 0.02, 1e9, 0.02, 0.01, ratio, hot, ())
+
+        write_group_flow(
+            conn, _SCHEMA, day, [flow("被動元件", 2.1, True), flow("玻璃陶瓷", 1.8, True)], at
+        )
+        got = load_hot_groups(conn, _SCHEMA, day, 2)
+        assert got is not None
+        assert [(h.group, h.picks) for h in got] == [
+            ("被動元件", ("大毅", "日電貿")),
+            ("玻璃陶瓷", ("台玻", "中釉")),
+        ]
+        assert load_hot_groups(conn, _SCHEMA, dt.date(2026, 10, 14), 2) is None  # 那天還沒算
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
+        conn.commit()
+        conn.close()

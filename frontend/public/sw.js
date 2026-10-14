@@ -27,7 +27,11 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       for (const w of windows) {
-        if ('focus' in w) return w.focus()
+        if ('focus' in w) {
+          // 網站已開著：叫它切到通知要的分頁（族群資金通知帶 ?tab=group），再拉到前面
+          w.postMessage({ type: 'open', url })
+          return w.focus()
+        }
       }
       return self.clients.openWindow(url)
     }),
