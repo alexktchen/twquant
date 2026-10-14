@@ -14,3 +14,21 @@ const HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-cont
 export function rawJson(text: string, key?: string): Response {
   return new Response(key ? `{${JSON.stringify(key)}:${text}}` : text, { headers: HEADERS })
 }
+
+/** 還沒算出來時給使用者看的話：表還沒建（新功能上線後第一次排程跑完之前），或這條線還沒有那一列。 */
+export const NOT_READY = '績效還沒算出來：每個交易日收盤後的排程（約 17:40）跑完就會出現。'
+
+/** PostgreSQL「表不存在」（42P01）：第一次排程跑完之前就是這樣，不是壞掉。 */
+export function missingTable(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === '42P01'
+}
+
+/** 查成績那張表；表還沒建當成「還沒有資料」（回空），其他錯誤照樣丟出去（503）。 */
+export async function readRows<T>(query: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await query()
+  } catch (e) {
+    if (missingTable(e)) return []
+    throw e
+  }
+}

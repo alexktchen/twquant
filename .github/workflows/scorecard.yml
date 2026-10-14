@@ -1,0 +1,45 @@
+# D-176：只重算網站「績效」（名單績效），不跑整條每日 pipeline、不重寫任何名單。
+# 每天的排程本來就會算（daily-pipeline 的「名單績效」步驟），平常不用按；要立刻看到結果時手動按：
+# 新功能上線後第一次、或資料修好之後（例：0050 歷史補進雲端、T-333 除權息）。
+# 只讀 daily_picks／行情／除權息／股名，寫 serving.scorecard（每條線一列，整份覆蓋）。
+name: scorecard
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "算到哪個交易日 YYYY-MM-DD（留空＝雲端最新行情日）"
+        required: false
+        default: ""
+
+concurrency:
+  group: daily-pipeline # 與每日 pipeline 共用：同一時間只有一個在寫雲端資料庫
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TWQUANT_PG_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+      TWQUANT_SUPABASE_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync deps
+        run: uv sync --dev --all-groups
+
+      - name: 名單績效
+        env:
+          DAY: ${{ inputs.date }} # 經環境變數傳入，不直接嵌進指令
+        run: |
+          if [ -n "$DAY" ] && ! [[ "$DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "日期格式要是 YYYY-MM-DD：$DAY" >&2
+            exit 1
+          fi
+          uv run python -m twquant scorecard --date "$DAY"

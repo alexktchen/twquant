@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { lineOk, rawJson } from '../functions/_lib/scorecard.ts'
+import { NOT_READY, lineOk, missingTable, rawJson, readRows } from '../functions/_lib/scorecard.ts'
 import { filterRows, md, navLines, ratio, statusText, stockTitle, wan, type NavPoint, type TradeRow } from '../src/cloud/scorecard.ts'
 
 const nav: NavPoint[] = [
@@ -88,4 +88,15 @@ test('D-176 AC10: API 只收登記過的線別，回應直接用資料庫的 JSO
   assert.equal(a.headers.get('cache-control'), 'private, no-store')
   assert.deepEqual(await a.json(), { code: 'CORE' })
   assert.deepEqual(await rawJson('[{"sid":"2330"}]', 'rows').json(), { rows: [{ sid: '2330' }] })
+})
+
+test('新功能上線、第一次排程還沒跑：表不存在當成「還沒算出來」，不把資料庫錯誤丟給使用者', async () => {
+  const undefinedTable = Object.assign(new Error('relation "serving.scorecard" does not exist'), { code: '42P01' })
+  assert.ok(missingTable(undefinedTable))
+  assert.ok(!missingTable(new Error('timeout')) && !missingTable(null) && !missingTable({ code: '28P01' }))
+  assert.deepEqual(await readRows(() => Promise.reject(undefinedTable)), [])
+  assert.deepEqual(await readRows(() => Promise.resolve([{ body: '{}' }])), [{ body: '{}' }])
+  // 其他錯誤（連不上、密碼錯）照樣丟出去，由 guarded 回 503
+  await assert.rejects(readRows(() => Promise.reject(Object.assign(new Error('x'), { code: '28P01' }))))
+  assert.ok(NOT_READY.includes('還沒算出來') && !NOT_READY.includes('relation'))
 })

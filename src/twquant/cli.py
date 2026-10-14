@@ -2743,6 +2743,7 @@ def _scorecard_for_day(day: dt.date) -> str:
     from twquant.data.serving import store
     from twquant.data.serving.pg_view import PgTableSource
     from twquant.data.serving.scorecard_store import read_published, write_scorecard
+    from twquant.errors import DataError, TwquantError
     from twquant.reporting.pick_board import PickBoardConfig
     from twquant.reporting.scorecard import ScorecardConfig, build_scorecards
     from twquant.strategy.config import load_strategy
@@ -2769,19 +2770,28 @@ def _scorecard_for_day(day: dt.date) -> str:
         with conn.cursor() as cur:
             cur.execute(f'SELECT stock_id, name FROM "{scfg.pg_schema}"."stock_meta"')
             names = {str(sid): str(nm) for sid, nm in cur.fetchall() if nm}
-        payloads = build_scorecards(
-            source=source,
-            published=read_published(conn, scfg.pg_schema, cfg.start, day),
-            names=names,
-            lines=lines,
-            cfg=cfg,
-            cost=cost,
-            as_of=day,
-            generated_at=now_tw(),
-        )
-        now = now_tw()
-        for p in payloads:
-            write_scorecard(conn, scfg.pg_schema, str(p["code"]), day, p, now)
+        published = read_published(conn, scfg.pg_schema, cfg.start, day)
+        # 一條線一條線算、算好就寫：某條線壞了（例如換股日缺名單）不能讓其他線也沒有成績；
+        # 壞的那條最後一起 raise，步驟照樣亮紅燈（不靜默）
+        payloads: list[dict[str, Any]] = []
+        failures: list[str] = []
+        for line in lines:
+            try:
+                (payload,) = build_scorecards(
+                    source=source,
+                    published=published,
+                    names=names,
+                    lines=[line],
+                    cfg=cfg,
+                    cost=cost,
+                    as_of=day,
+                    generated_at=now_tw(),
+                )
+            except (TwquantError, ValueError) as exc:
+                failures.append(f"{line[0].name}：{exc}")
+                continue
+            write_scorecard(conn, scfg.pg_schema, str(payload["code"]), day, payload, now_tw())
+            payloads.append(payload)
     finally:
         conn.close()
     parts = []
@@ -2791,6 +2801,9 @@ def _scorecard_for_day(day: dt.date) -> str:
         parts.append(f"{p['name']} 帳戶 {acct['ret']:+.1%}、逐筆已結算 {stats['n']} 筆")
     bench_err = payloads[0]["benchmark"]["error"] if payloads else None
     tail = f"（⚠ {cfg.benchmark} 對照算不出來：{bench_err}）" if bench_err else ""
+    if failures:
+        done = "；".join(parts) or "沒有任何一條線"
+        raise DataError("scorecard", day, f"{'；'.join(failures)}（已寫入：{done}）")
     return "；".join(parts) + tail
 
 
