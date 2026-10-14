@@ -1,14 +1,11 @@
 // 「族群」分頁（D-177 修訂）：每個族群今天拿到多少資金——資金倍數（成交比重對自己前 20 日平均）、漲跌家數，
 // 點一個族群看成交金額最大的幾檔，以及其中哪些在今天的名單上。看資金是不是往同一個族群去。
-// 預設法人象限圖（D-177 修訂三／T-358）：法人近 5 日買賣超 × 加速，看法人的錢往哪個族群跑；
-// 也可切熱力圖（T-355：方塊大小＝成交金額，顏色＝平均漲跌或資金倍數）或列表。
+// 預設熱力圖（T-355）：方塊大小＝成交金額，顏色＝平均漲跌或資金倍數；也可切回列表。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { fetchGroups } from './api'
 import { pct, trend } from './format'
 import { flowText, rankRows, ratioText, yi, type RankRow } from './group'
 import { RATIO_HIGH, RATIO_LOW, RET_FULL, heatColor, squarify, tileLines, type HeatMode } from './heatmap'
-import { QuadChart } from './QuadChart'
-import { instText, type InstPoint } from './quadrant'
 
 /** 排行至少幾檔有成交才列（同 configs/stock_groups.yaml flow.hot_min_members）：兩三檔的族群一檔漲停就翻倍。 */
 const MIN_MEMBERS = 3
@@ -24,11 +21,11 @@ export function GroupsPage({
   /** 點成員：到「追蹤」分頁看那一檔的 K 線與評分 */
   onStock: (sid: string, name: string | null) => void
 }) {
-  const [data, setData] = useState<{ date: string; rows: RankRow[]; inst: Record<string, InstPoint> | null } | null>(null)
+  const [data, setData] = useState<{ date: string; rows: RankRow[] } | null>(null)
   const [err, setErr] = useState('')
   const [hotOnly, setHotOnly] = useState(false)
   const [sel, setSel] = useState('')
-  const [view, setView] = useState<'quad' | 'heat' | 'list'>('quad')
+  const [view, setView] = useState<'heat' | 'list'>('heat')
   const [mode, setMode] = useState<HeatMode>('ret')
   const detailRef = useRef<HTMLElement>(null)
   // 手機上族群在上、成員在下：點了方塊捲到成員
@@ -48,14 +45,10 @@ export function GroupsPage({
   }, [refresh])
   const rows = useMemo(() => rankRows(data?.rows ?? [], hotOnly, MIN_MEMBERS), [data, hotOnly])
   const onList = listed && data && listed.date === data.date ? listed.sids : null
-  const inst = data?.inst ?? null
-  // 象限圖預設選法人買超最多的族群（同 CMoney 那張圖）；其他檢視預設排行第一
-  const topInst = inst ? rows.filter((r) => inst[r.grp]).sort((a, b) => inst[b.grp].x - inst[a.grp].x)[0] : undefined
-  const current = rows.find((r) => r.grp === sel) ?? (view === 'quad' ? topInst : undefined) ?? rows[0] ?? null
-  const currentInst = current && inst ? (inst[current.grp] ?? null) : null
+  const current = rows.find((r) => r.grp === sel) ?? rows[0] ?? null
   const hotCount = (data?.rows ?? []).filter((r) => r.hot && r.n >= MIN_MEMBERS).length
   return (
-    <main className={`cq-body cq-groups${view !== 'list' ? ' cq-groups-heat' : ''}`}>
+    <main className={`cq-body cq-groups${view === 'heat' ? ' cq-groups-heat' : ''}`}>
       <aside className="cq-list">
         <div className="cq-groups-head">
           <span>
@@ -72,9 +65,6 @@ export function GroupsPage({
         </div>
         <div className="cq-groups-head cq-groups-view">
           <div className="cq-seg cq-seg-small">
-            <button className={view === 'quad' ? 'on' : ''} onClick={() => setView('quad')}>
-              法人象限
-            </button>
             <button className={view === 'heat' ? 'on' : ''} onClick={() => setView('heat')}>
               熱力圖
             </button>
@@ -97,8 +87,6 @@ export function GroupsPage({
         {err && <p className="cq-empty">{err}</p>}
         {!err && !data && <p className="cq-empty">讀取中…</p>}
         {data && rows.length === 0 && <p className="cq-empty">{hotOnly ? '今天沒有資金流入的族群。' : '沒有族群資料。'}</p>}
-        {view === 'quad' && rows.length > 0 && !inst && <p className="cq-empty">法人資料還沒算出來：每個交易日收盤後的排程跑完就會出現。</p>}
-        {view === 'quad' && rows.length > 0 && inst && <QuadChart rows={rows} inst={inst} current={current?.grp ?? ''} onPick={pick} />}
         {view === 'heat' && rows.length > 0 && <Heatmap rows={rows} mode={mode} current={current?.grp ?? ''} onList={onList} onPick={pick} />}
         {view === 'heat' && rows.length > 0 && <Legend mode={mode} />}
         {view === 'list' && (
@@ -134,8 +122,6 @@ export function GroupsPage({
           </div>
         )}
         <p className="cq-note">
-          {view === 'quad' &&
-            '橫軸＝法人（外資、投信、自營商）近 5 個交易日買賣超合計；縱軸＝加速＝近 5 日比再前 5 日，平均每天多買多少。泡泡大小＝族群今天的成交金額，點一下看它這幾天怎麼走過來。右上持續加碼、右下買氣降溫、左上賣壓收斂、左下持續減碼。金額＝每天買賣超股數 × 當天收盤（估算）。'}
           {view === 'heat' && '方塊大小＝族群今天的成交金額，顏色＝平均漲跌（紅漲綠跌）或資金倍數（橘＝比平常多、藍＝比平常少），橘框＝資金流入。'}
           資金倍數＝族群今天的成交金額佔全市場（上市櫃普通股）的比重，除以前 20 個交易日的平均比重；大於 1 是今天資金比平常多。 倍數 ≥ 1.5
           而且六成以上的股票上漲，標「資金流入」。族群來自櫃買中心產業價值鏈資訊平台，少於 {MIN_MEMBERS} 檔有成交的族群不列。觀察用，非投資建議。
@@ -151,7 +137,6 @@ export function GroupsPage({
                   {current.hot && <i className="cq-tag hot">資金流入</i>}
                 </h1>
                 <p className="cq-group">{flowText({ ...current, date: data?.date ?? '' })}</p>
-                {currentInst && <p className="cq-group">{instText(currentInst)}</p>}
               </div>
             </div>
             <h2 className="cq-sub">成交金額最大的 {current.members.length} 檔</h2>

@@ -1,7 +1,6 @@
 // 族群（D-177）：每檔股票的族群與族群資金。排程每週從櫃買中心「產業價值鏈資訊平台」抓、挑好存在
 // serving.stock_group（twquant stock-groups）；每天收盤後算每個族群的資金倍數、漲跌家數存在
-// serving.group_flow_daily（twquant group-flow）、三大法人買賣超與象限圖的 x、y、軌跡存在
-// serving.group_inst_daily（twquant group-inst，D-177 修訂三）。表上沒有的股票（重抓之間新上市）用官方產業別。
+// serving.group_flow_daily（twquant group-flow）。表上沒有的股票（重抓之間新上市）用官方產業別。
 import type { sql } from './db.ts'
 import { readRows } from './scorecard.ts'
 
@@ -91,17 +90,4 @@ export async function readRanking(db: Db, date: string | null): Promise<{ date: 
       FROM d JOIN serving.group_flow_daily g ON g.date = d.date GROUP BY d.date`,
   )
   return rows[0] ?? null
-}
-
-/** 族群法人（象限圖）：`date` 那天每個族群的近 5 日法人買賣超（x）、加速（y）、外資／投信／自營商近 5 日、軌跡。
- * 整份 JSON（{族群: {...}}）在資料庫組好；那天還沒算（或表還沒建）回 null，網站寫「還沒算出來」。 */
-export async function readInst(db: Db, date: string): Promise<string | null> {
-  const rows = await readRows(
-    () => db<{ body: string | null }[]>`
-      SELECT json_object_agg(grp, json_build_object(
-        'x', net5, 'y', accel, 'net', net, 'f5', foreign5, 't5', trust5, 'd5', dealer5, 'trail', trail
-      ))::text AS body
-      FROM serving.group_inst_daily WHERE date = ${date}::date AND net5 IS NOT NULL AND accel IS NOT NULL`,
-  )
-  return rows[0]?.body ?? null
 }
