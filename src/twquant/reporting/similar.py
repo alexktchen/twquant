@@ -578,3 +578,166 @@ def render_validation(
                 "",
             ]
     return "\n".join(lines)
+
+
+# ── 上雲：情境庫的壓縮格式與每日比對（D-182 §三）─────────────────────────────
+
+_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("day", "<u2"),
+    ("exit_day", "<u2"),
+    ("sid", "<u2"),  # 股票清單（meta.stocks）的位置
+    ("score", "<f4"),
+    ("ret", "<f4"),
+    ("surge", "u1"),
+    ("x", "<f4"),  # (n, 特徵) 攤平
+)
+LIBRARY_CHUNK = 100_000  # 每一份最多幾個情境（一份一列 bytea，單筆不要太大）
+
+
+def encode_library(lib: Library, features: Sequence[str], registration: str) -> dict[str, bytes]:
+    """情境庫 → {部位名: zlib 壓縮的位元組}。數字存 float32（雲端 500 MB 預算；精度遠高於排序需要）。"""
+    import json
+    import zlib
+
+    if len(features) != lib.x.shape[1]:
+        raise ValueError(f"特徵 {len(features)} 個，矩陣有 {lib.x.shape[1]} 欄")
+    if len(lib.sessions) > np.iinfo(np.uint16).max:
+        raise ValueError("交易日超過 uint16 能存的範圍")
+    stocks = sorted({str(s) for s in lib.sid})
+    pos = {s: i for i, s in enumerate(stocks)}
+    cols = {
+        "day": lib.day,
+        "exit_day": lib.exit_day,
+        "sid": np.array([pos[str(s)] for s in lib.sid]),
+        "score": lib.score,
+        "ret": lib.ret,
+        "surge": lib.surge,
+        "x": lib.x,
+    }
+    meta = {
+        "registration": registration,
+        "n": len(lib),
+        "features": list(features),
+        "sessions": [d.isoformat() for d in lib.sessions],
+        "stocks": stocks,
+        # JSON 沒有 NaN：缺的大盤狀態存 null，讀回來再變 NaN
+        "ctx": [[None if math.isnan(v) else float(v) for v in row] for row in lib.ctx],
+    }
+    out = {"meta": zlib.compress(json.dumps(meta).encode("utf-8"), 6)}
+    for name, dtype in _COLUMNS:
+        arr = np.ascontiguousarray(cols[name], dtype=np.dtype(dtype))
+        for k, lo in enumerate(range(0, max(len(lib), 1), LIBRARY_CHUNK)):
+            out[f"{name}.{k:03d}"] = zlib.compress(arr[lo : lo + LIBRARY_CHUNK].tobytes(), 6)
+    return out
+
+
+def decode_library(parts: Mapping[str, bytes]) -> tuple[Library, list[str], str]:
+    """`encode_library` 的反向 → (情境庫, 特徵, 登記編號)。少了哪一份、長度不對都 raise。"""
+    import json
+    import zlib
+
+    if "meta" not in parts:
+        raise ValueError("情境庫少了 meta")
+    meta = json.loads(zlib.decompress(parts["meta"]).decode("utf-8"))
+    n, nf = int(meta["n"]), len(meta["features"])
+    chunks = max(1, math.ceil(n / LIBRARY_CHUNK))
+    cols: dict[str, np.ndarray] = {}
+    for name, dtype in _COLUMNS:
+        keys = [f"{name}.{k:03d}" for k in range(chunks)]
+        missing = [k for k in keys if k not in parts]
+        if missing:
+            raise ValueError(f"情境庫少了 {missing[:3]}")
+        arr = np.concatenate(
+            [np.frombuffer(zlib.decompress(parts[k]), dtype=np.dtype(dtype)) for k in keys]
+        )
+        want = n * nf if name == "x" else n
+        if len(arr) != want:
+            raise ValueError(f"情境庫 {name} 有 {len(arr)} 個值，應該是 {want}")
+        cols[name] = arr
+    stocks = np.array(meta["stocks"])
+    ctx = np.array(
+        [[np.nan if v is None else v for v in row] for row in meta["ctx"]], dtype=np.float64
+    )
+    lib = Library(
+        sessions=tuple(dt.date.fromisoformat(d) for d in meta["sessions"]),
+        day=cols["day"].astype(np.int64),
+        exit_day=cols["exit_day"].astype(np.int64),
+        sid=stocks[cols["sid"].astype(np.int64)] if n else np.array([], dtype=str),
+        score=cols["score"].astype(np.float64),
+        x=cols["x"].astype(np.float64).reshape(n, nf),
+        surge=cols["surge"].astype(bool),
+        ret=cols["ret"].astype(np.float64),
+        ctx=ctx.reshape(len(meta["sessions"]), -1),
+    )
+    return lib, list(meta["features"]), str(meta["registration"])
+
+
+@dataclass(frozen=True)
+class SimilarRow:
+    """名單上一檔的相似情境：分布、最像的幾次（日期、代號、報酬）、鄰居的公布日範圍。"""
+
+    line: str
+    stock_id: str
+    stats: dict[str, Any]
+    examples: list[dict[str, Any]]
+    span: tuple[dt.date, dt.date] | None
+
+
+def pick_rows(
+    picks: Sequence[tuple[str, str]],
+    frame: pl.DataFrame,
+    lib: Library,
+    cfg: SimilarConfig,
+) -> list[SimilarRow]:
+    """當天名單（線, 代號）各自的相似情境。`frame` 是當天的推論列（`quiet_live.load_inference`）：
+    stock_id、個股特徵、大盤特徵。不在 cfg.lines 的線不算；名單上的股票不在推論列 → raise（母體對不上）。
+    """
+    from twquant.errors import DataError
+
+    mine = [(line, sid) for line, sid in picks if line in cfg.lines]
+    if not mine:
+        return []
+    if frame.get_column("date").n_unique() != 1:
+        raise ValueError("推論列要剛好一天")
+    day = frame.get_column("date")[0]
+    ctx_rows = frame.select(cfg.context_features).unique()
+    if ctx_rows.height != 1:
+        raise DataError("pick_similar", day, "同一天的大盤狀態不只一組")
+    ctx = ctx_rows.to_numpy()[0].astype(np.float64)
+    weights = np.array([cfg.feature_weights[f] for f in cfg.features])
+    scale = context_scale(lib)
+    by_sid = {
+        str(r[0]): np.array(r[1:], dtype=np.float64)
+        for r in frame.select("stock_id", *cfg.features).iter_rows()
+    }
+    out: list[SimilarRow] = []
+    for line in cfg.lines:
+        sids = [sid for ln, sid in mine if ln == line]
+        if not sids:
+            continue
+        missing = [s for s in sids if s not in by_sid]
+        if missing:
+            raise DataError("pick_similar", day, f"{line} 名單上的 {missing} 不在當天的推論列")
+        q = np.vstack([by_sid[s] for s in sids])
+        nbs = find(lib, ctx, q, weights, cfg, scale, surge_only=line in cfg.surge_lines)
+        for sid, nb in zip(sids, nbs, strict=True):
+            days = lib.day[nb.rows]
+            out.append(
+                SimilarRow(
+                    line=line,
+                    stock_id=sid,
+                    stats=nb.stats,
+                    examples=[
+                        {
+                            "d": lib.sessions[int(lib.day[i])].isoformat(),
+                            "sid": str(lib.sid[i]),
+                            "r": round(float(lib.ret[i]), 4),
+                        }
+                        for i in nb.rows[: cfg.examples]
+                    ],
+                    span=(lib.sessions[int(days.min())], lib.sessions[int(days.max())])
+                    if len(days)
+                    else None,
+                )
+            )
+    return out

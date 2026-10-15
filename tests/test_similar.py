@@ -18,10 +18,13 @@ from twquant.reporting.similar import (
     bucket_baseline,
     context_scale,
     day_scores,
+    decode_library,
+    encode_library,
     find,
     gain_weights,
     near_days,
     pick_neighbors,
+    pick_rows,
     reference,
     spearman,
     validate_line,
@@ -390,3 +393,197 @@ def test_ac7_reference_compares_brier_with_always_guessing_the_average() -> None
     )  # 簡化版每天一樣 → 沒有變異
     s = reference(lib, q, days, -0.15, surge_only=True)
     assert (s.base_rate, s.actual_rate) == (0.5, 1.0) and s.brier_base == pytest.approx(0.25)
+
+
+# ── AC8：情境庫上雲的壓縮格式 ────────────────────────────────────────────────
+def _ctx(n: int) -> np.ndarray:
+    ctx = np.zeros((n, 3))
+    ctx[:, 0] = np.arange(float(n))
+    ctx[:, 1] = np.arange(float(n)) % 2
+    ctx[:, 2] = np.arange(float(n)) % 3
+    return ctx
+
+
+def test_ac8_encode_decode_round_trip_keeps_missing_values() -> None:
+    ctx = _ctx(12)
+    ctx[11, 1] = np.nan  # 沒有情境的日子可以缺大盤狀態
+    lib = _lib(
+        [0, 1, 2, 3],
+        ["2330", "0050", "2330", "1101"],
+        [[0.5, np.nan], [1.25, -2.0], [np.nan, np.nan], [3.0, 4.0]],
+        [0.1, -0.2, 0.05, 0.3],
+        n_sessions=12,
+        ctx=ctx,
+        score=[0.1, 0.3, 0.45, 0.6],
+        surge=[True, False, True, False],
+    )
+    parts = encode_library(lib, ["a", "b"], "D-182")
+    back, feats, reg = decode_library(parts)
+    assert (feats, reg) == (["a", "b"], "D-182")
+    assert back.sessions == lib.sessions and list(back.sid) == list(lib.sid)
+    assert np.array_equal(back.day, lib.day) and np.array_equal(back.exit_day, lib.exit_day)
+    assert np.array_equal(back.surge, lib.surge)
+    assert np.allclose(back.x, lib.x, equal_nan=True) and np.isnan(back.x[2]).all()
+    assert np.allclose(back.ret, lib.ret, atol=1e-7) and np.allclose(
+        back.score, lib.score, atol=1e-7
+    )
+    assert np.isnan(back.ctx[11, 1]) and back.ctx[5, 0] == 5.0
+
+
+def test_ac8_decode_rejects_missing_parts() -> None:
+    lib = _lib([0], ["A"], [[0.0, 0.0]], [0.1], n_sessions=5)
+    parts = encode_library(lib, ["a", "b"], "D-182")
+    del parts["x.000"]
+    with pytest.raises(ValueError, match="少了"):
+        decode_library(parts)
+    with pytest.raises(ValueError, match="特徵"):
+        encode_library(lib, ["a"], "D-182")
+
+
+# ── AC9：當天名單的比對 ────────────────────────────────────────────────────
+def _today(sids: list[str], x: list[list[float]], ctx_row: np.ndarray) -> object:
+    import polars as pl
+
+    return pl.DataFrame(
+        {
+            "date": [dt.date(2026, 10, 15)] * len(sids),
+            "stock_id": sids,
+            "a": [r[0] for r in x],
+            "b": [r[1] for r in x],
+            "ctx.taiex_ma20_dev": [ctx_row[0]] * len(sids),
+            "ctx.taiex_vol20": [ctx_row[1]] * len(sids),
+            "ctx.breadth_ma20": [ctx_row[2]] * len(sids),
+        }
+    )
+
+
+def test_ac9_pick_rows_only_quiet_lines_with_examples_and_span() -> None:
+    cfg = _small_cfg(k=3, context_keep=1.0, examples=2)
+    ctx = _ctx(12)
+    lib = _lib(
+        [0, 1, 2, 3],
+        list("ABCD"),
+        [[0.0, 0.0], [0.1, 0.1], [5.0, 5.0], [6.0, 6.0]],
+        [0.01, 0.02, 0.03, 0.04],
+        n_sessions=12,
+        ctx=ctx,
+        surge=[False, False, True, True],
+    )
+    frame = _today(["X", "Y"], [[0.0, 0.0], [6.0, 6.0]], ctx[5])
+    rows = pick_rows([("CORE", "X"), ("QUIET", "X"), ("QUIETV", "Y")], frame, lib, cfg)  # type: ignore[arg-type]
+    assert [(r.line, r.stock_id) for r in rows] == [("QUIET", "X"), ("QUIETV", "Y")]
+    quiet, surge = rows
+    assert quiet.stats["n"] == 3 and [e["sid"] for e in quiet.examples] == ["A", "B"]
+    assert quiet.examples[0] == {"d": lib.sessions[0].isoformat(), "sid": "A", "r": 0.01}
+    assert quiet.span == (lib.sessions[0], lib.sessions[2])
+    assert [e["sid"] for e in surge.examples] == ["D", "C"]  # 爆量線只找爆量情境
+
+
+def test_ac9_pick_not_in_the_day_frame_raises() -> None:
+    from twquant.errors import DataError
+
+    cfg = _small_cfg(k=3, context_keep=1.0)
+    ctx = _ctx(12)
+    lib = _lib([0, 1], ["A", "B"], [[0.0, 0.0], [1.0, 1.0]], [0.1, 0.2], n_sessions=12, ctx=ctx)
+    frame = _today(["X"], [[0.0, 0.0]], ctx[5])
+    with pytest.raises(DataError, match="不在當天的推論列"):
+        pick_rows([("QUIET", "Z")], frame, lib, cfg)  # type: ignore[arg-type]
+    assert pick_rows([("CORE", "Z")], frame, lib, cfg) == []  # type: ignore[arg-type]
+
+
+# ── AC10：排程接線（靜態）──────────────────────────────────────────────────
+def test_ac10_step_runs_after_reasons_and_in_the_cloud() -> None:
+    from twquant.config import ServingConfig
+
+    source = (ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
+    assert source.index('PipelineStep("名單理由"') < source.index('PipelineStep("相似情境"')
+    scfg = load_config(ROOT / "configs" / "serving.yaml", ServingConfig)
+    assert "相似情境" not in scfg.cloud.skip_pipeline_steps
+    assert "pick_similar" not in scfg.cloud.windows  # 全史保留：雲端因子過兩天就算不回來
+    assert "similar_library" not in scfg.cloud.windows
+
+
+# ── AC11：PG 讀寫（無 DSN 則 skip）──────────────────────────────────────────
+_SCHEMA = "serving_test_similar"
+
+
+def _connect_or_skip() -> object:
+    import os
+
+    psycopg = pytest.importorskip("psycopg")
+    dsn = os.environ.get("TWQUANT_PG_DSN")
+    if not dsn:
+        pytest.skip("TWQUANT_PG_DSN 未設，跳過 PG 整合測試")
+    try:
+        conn = psycopg.connect(dsn)
+    except psycopg.Error as exc:  # pragma: no cover - 依環境而定
+        pytest.skip(f"PG 不可達，跳過：{exc}")
+    with conn.cursor() as cur:
+        cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
+        cur.execute(f'CREATE SCHEMA "{_SCHEMA}"')
+    conn.commit()
+    return conn
+
+
+def test_ac11_pg_library_and_whole_day_overwrite() -> None:
+    from twquant.conventions import now_tw
+    from twquant.data.serving.similar_store import read_library, write_library, write_similar
+    from twquant.errors import DataError
+    from twquant.reporting.similar import SimilarRow
+
+    conn = _connect_or_skip()
+    try:
+        assert read_library(conn, _SCHEMA) is None  # 還沒發布
+        lib = _lib([0, 1], ["A", "B"], [[0.0, 1.0], [np.nan, 2.0]], [0.1, -0.2], n_sessions=5)
+        parts = encode_library(lib, ["a", "b"], "D-182")
+        write_library(conn, _SCHEMA, parts, "D-182", now_tw())
+        write_library(conn, _SCHEMA, parts, "D-182", now_tw())  # 整表覆蓋，重跑冪等
+        got = read_library(conn, _SCHEMA)
+        assert got == parts
+        day = dt.date(2026, 10, 15)
+        stats = {
+            "n": 2,
+            "mean": 0.0,
+            "median": 0.0,
+            "win_rate": 0.5,
+            "big_loss_rate": 0.5,
+            "p10": -0.2,
+            "p90": 0.1,
+            "best": 0.1,
+            "worst": -0.2,
+        }
+        row = SimilarRow(
+            "QUIET",
+            "2330",
+            stats,
+            [{"d": "2020-01-06", "sid": "A", "r": 0.1}],
+            (dt.date(2020, 1, 6), dt.date(2020, 1, 7)),
+        )
+        write_similar(
+            conn,
+            _SCHEMA,
+            day,
+            [row, row.__class__("QUIETV", "2330", stats, [], None)],
+            "D-182",
+            now_tw(),
+        )
+        write_similar(conn, _SCHEMA, day, [row], "D-182", now_tw())  # 整天覆蓋
+        with conn.cursor() as cur:  # type: ignore[attr-defined]
+            cur.execute(f'SELECT line, n, examples::text, span_from FROM "{_SCHEMA}".pick_similar')
+            assert cur.fetchall() == [
+                ("QUIET", 2, '[{"d": "2020-01-06", "r": 0.1, "sid": "A"}]', dt.date(2020, 1, 6))
+            ]
+        with pytest.raises(DataError, match="找不到可比的情境"):
+            write_similar(
+                conn,
+                _SCHEMA,
+                day,
+                [SimilarRow("QUIET", "1101", {**stats, "n": 0}, [], None)],
+                "D-182",
+                now_tw(),
+            )
+    finally:
+        with conn.cursor() as cur:  # type: ignore[attr-defined]
+            cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
+        conn.commit()  # type: ignore[attr-defined]
+        conn.close()  # type: ignore[attr-defined]

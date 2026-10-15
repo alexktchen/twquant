@@ -31,12 +31,15 @@ from twquant.data import calendar as cal
 from twquant.data.serving import store
 from twquant.data.serving.ml_store import read_index_close, read_prices_barrier
 from twquant.data.serving.pg_view import PgTableSource
+from twquant.data.serving.similar_store import write_library
 from twquant.ml.context import market_state_features
 from twquant.reporting.pick_board import PickBoardConfig
 from twquant.reporting.score_reference import ScoreReferenceConfig, volume_surge
 from twquant.reporting.similar import (
     Library,
     SimilarConfig,
+    decode_library,
+    encode_library,
     gain_weights,
     reference,
     render_validation,
@@ -252,6 +255,40 @@ def check_inputs(conn: Any, cfg: SimilarConfig, lib: Library, data_dir: Path, da
     _say(f"輸入核對：{start}～{end} {both.height:,} 個情境的特徵與大盤狀態都跟每日打分相同")
 
 
+def publish(lib: Library, cfg: SimilarConfig, scfg: ServingConfig, *, cloud: bool) -> None:
+    """正式情境庫（賣出日 ≤ dev_end 的全部）壓縮後寫進本機 PG（可同時寫雲端）。寫之前先解回來核對。"""
+    parts = encode_library(lib, cfg.features, cfg.registration)
+    back, feats, reg = decode_library(parts)
+    same = (
+        feats == cfg.features
+        and reg == cfg.registration
+        and back.sessions == lib.sessions
+        and np.array_equal(back.day, lib.day)
+        and np.array_equal(back.sid, lib.sid)
+        and np.array_equal(back.surge, lib.surge)
+        and np.allclose(back.ret, lib.ret, rtol=0, atol=1e-6)
+        and np.allclose(back.x, lib.x, rtol=1e-6, atol=1e-6, equal_nan=True)
+    )
+    if not same:
+        raise SystemExit("情境庫壓縮後解不回原樣")
+    size = sum(len(b) for b in parts.values())
+    _say(f"情境庫壓縮後 {size / 1e6:.1f} MB、{len(parts)} 份")
+    at = now_tw()
+    conn = store.connect(scfg)
+    try:
+        write_library(conn, scfg.pg_schema, parts, cfg.registration, at)
+    finally:
+        conn.close()
+    _say("已寫本機 serving.similar_library")
+    if cloud:
+        remote = store.connect_cloud(scfg)
+        try:
+            write_library(remote, scfg.pg_schema, parts, cfg.registration, at)
+        finally:
+            remote.close()
+        _say("已寫雲端 serving.similar_library")
+
+
 def main() -> None:
     if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":  # Windows 主控台
         getattr(sys.stdout, "reconfigure")(encoding="utf-8")  # noqa: B009
@@ -259,9 +296,17 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--data-dir", required=True, help="data 目錄（絕對路徑，讀模型檔）")
-    ap.add_argument("--report", required=True, help="驗證報告輸出路徑（markdown）")
+    ap.add_argument("--report", help="驗證報告輸出路徑（markdown；--validate 才要）")
     ap.add_argument("--validate", action="store_true", help="跑上線前驗證（D-182 §二）")
+    ap.add_argument("--publish", action="store_true", help="把正式情境庫寫進本機 PG（D-182 §三）")
+    ap.add_argument(
+        "--cloud", action="store_true", help="--publish 時也寫進雲端（TWQUANT_SUPABASE_DSN）"
+    )
     args = ap.parse_args()
+    if args.validate and not args.report:
+        ap.error("--validate 要給 --report")
+    if args.cloud and not args.publish:
+        ap.error("--cloud 要跟 --publish 一起用")
 
     cfg = load_config(CONFIGS / "similar_situations.yaml", SimilarConfig)
     buckets = load_config(CONFIGS / "score_reference.yaml", ScoreReferenceConfig).buckets
@@ -275,6 +320,8 @@ def main() -> None:
     finally:
         conn.close()
     _say(f"情境庫 {len(lib):,} 個情境（其中爆量 {int(lib.surge.sum()):,}）")
+    if args.publish:
+        publish(lib, cfg, scfg, cloud=args.cloud)
     if not args.validate:
         return
 
@@ -303,7 +350,7 @@ def main() -> None:
             f"Brier 差 {r.d_brier:+.4f} {r.d_brier_ci}；{'通過' if r.passed else '不通過'}"
         )
     span = (lib.sessions[int(library.day.min())], lib.sessions[int(library.day.max())])
-    out = Path(args.report)
+    out = Path(str(args.report))
     out.write_text(
         render_validation(cfg, results, names, len(library), span, refs)
         + f"\n產生於 {now_tw():%Y-%m-%d %H:%M}（{cfg.registration}）\n",
