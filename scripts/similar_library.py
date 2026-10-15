@@ -213,7 +213,9 @@ def check_inputs(conn: Any, cfg: SimilarConfig, lib: Library, data_dir: Path, da
     scfg = load_config(CONFIGS / "serving.yaml", ServingConfig)
     ml_cfg = load_config(CONFIGS / "ml.yaml", MlConfig)
     model_cfg = load_config(CONFIGS / str(ml_cfg.quiet_live_config), MlConfig)
-    start, end = lib.sessions[-days], lib.sessions[-1]
+    # 庫裡最後幾個「有情境」的交易日（dev_end 前 20 天內公布的還沒賣，不在庫裡）
+    have = np.unique(lib.day)
+    start, end = lib.sessions[int(have[-days])], lib.sessions[int(have[-1])]
     frame, _, _, _ = load_inference(
         conn,
         scfg.pg_schema,
@@ -231,11 +233,11 @@ def check_inputs(conn: Any, cfg: SimilarConfig, lib: Library, data_dir: Path, da
             "stock_id": lib.sid.tolist(),
             **{f: lib.x[:, j] for j, f in enumerate(cfg.features)},
         }
-    ).filter(pl.col("date") >= start)
+    ).filter(pl.col("date").is_between(start, end))
     live = frame.select("date", "stock_id", *cfg.features)
     both = mine.join(live, on=["date", "stock_id"], suffix="_live")
     if both.height == 0 or both.height < 0.9 * mine.height:
-        raise SystemExit(f"最後 {days} 天只對到 {both.height}／{mine.height} 個情境——母體不一致")
+        raise SystemExit(f"{start}～{end} 只對到 {both.height}／{mine.height} 個情境——母體不一致")
     for f in cfg.features:
         a, b = both[f].to_numpy(), both[f"{f}_live"].to_numpy()
         same = (np.isnan(a) & np.isnan(b)) | (np.abs(a - b) <= 1e-9)
@@ -246,7 +248,7 @@ def check_inputs(conn: Any, cfg: SimilarConfig, lib: Library, data_dir: Path, da
         got = lib.ctx[pos[row[0]]]
         if not np.allclose(got, np.asarray(row[1:], dtype=np.float64), rtol=0, atol=1e-12):
             raise SystemExit(f"{row[0]} 的大盤狀態跟每日打分不同：{got} vs {row[1:]}")
-    _say(f"輸入核對：最後 {days} 天 {both.height:,} 個情境的特徵與大盤狀態都跟每日打分相同")
+    _say(f"輸入核對：{start}～{end} {both.height:,} 個情境的特徵與大盤狀態都跟每日打分相同")
 
 
 def main() -> None:
