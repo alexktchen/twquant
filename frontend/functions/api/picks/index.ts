@@ -1,9 +1,11 @@
 // GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群，
 // 與「為什麼選它」的理由（D-180，serving.pick_reasons；那天沒算就是 null）；
-// 破底標記（weak）與加權大跌那天的歷史對照（drop，沒大跌是 null）——D-183，只供看盤，不改名單。
+// 破底標記（weak）與加權大跌那天的歷史對照（drop，沒大跌是 null）——D-183，只供看盤，不改名單；
+// 每條線另附歷史同區間參考（D-179，serving.score_reference），網站每檔依分數對到區間。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
 import { readReasons } from '../../_lib/reasons'
+import { readReference } from '../../_lib/reference'
 import { readDrop, readWeak } from '../../_lib/weak'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 import { cached, cacheKey } from '../../_lib/cache'
@@ -34,6 +36,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const reasons = await readReasons(db, target)
     const weak = await readWeak(db, target, sids)
     const drop = await readDrop(db, target)
+    const reference = await readReference(db)
     const close = new Map(px.map((r) => [r.stock_id, r]))
     const window = dates.slice(0, RECENT_WINDOW)
     const startClose = new Map<string, number | null>()
@@ -59,6 +62,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
         code,
         name: LINES.find((l) => l.code === code)?.name ?? code,
         note: LINES.find((l) => l.code === code)?.note ?? null,
+        ref: reference.get(code) ?? [],
         picks: today.map((r) => {
           const p = close.get(r.stock_id)
           const c = p?.close ?? null
