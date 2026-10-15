@@ -38,6 +38,7 @@ from twquant.reporting.similar import (
     Library,
     SimilarConfig,
     gain_weights,
+    reference,
     render_validation,
     validate_line,
     verdict,
@@ -286,12 +287,16 @@ def main() -> None:
     _say(f"驗證庫 {len(library):,}、題目 {len(questions):,}")
     weights = np.array([cfg.feature_weights[f] for f in cfg.features])
     results = {}
+    refs = {}
     for line in cfg.lines:
         t0 = time.time()
         days = validate_line(
             library, questions, weights, cfg, buckets, surge_only=line in cfg.surge_lines
         )
         results[line] = verdict(days, v.bootstrap, v.seed, v.ci)
+        refs[line] = reference(
+            library, questions, days, cfg.big_loss, surge_only=line in cfg.surge_lines
+        )
         r = results[line]
         _say(
             f"{line}（{time.time() - t0:.0f} 秒）：RankIC 差 {r.d_ic:+.4f} {r.d_ic_ci}；"
@@ -300,7 +305,7 @@ def main() -> None:
     span = (lib.sessions[int(library.day.min())], lib.sessions[int(library.day.max())])
     out = Path(args.report)
     out.write_text(
-        render_validation(cfg, results, names, len(library), span)
+        render_validation(cfg, results, names, len(library), span, refs)
         + f"\n產生於 {now_tw():%Y-%m-%d %H:%M}（{cfg.registration}）\n",
         encoding="utf-8",
     )

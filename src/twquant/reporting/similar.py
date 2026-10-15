@@ -483,12 +483,56 @@ def validate_line(
     return out
 
 
+@dataclass(frozen=True)
+class Reference:
+    """驗證的參考數字（不影響通過與否）：一律猜情境庫整體大賠比例的 Brier、兩種預測 RankIC 的 t 值。"""
+
+    base_rate: float  # 情境庫整體「虧超過門檻」的比例＝不看任何條件時會給的機率
+    actual_rate: float  # 題目實際的比例
+    brier_base: float  # 每題都猜 base_rate 的 Brier
+    ic_full_t: float | None
+    ic_simple_t: float | None
+
+
+def _t(xs: Sequence[float]) -> float | None:
+    if len(xs) < 2:
+        return None
+    a = np.asarray(xs, dtype=np.float64)
+    sd = a.std(ddof=1)
+    return None if sd == 0.0 else float(a.mean() / (sd / math.sqrt(len(a))))
+
+
+def reference(
+    library: Library,
+    questions: Library,
+    days: Sequence[DayScore],
+    big_loss: float,
+    *,
+    surge_only: bool,
+) -> Reference:
+    """參考數字：Brier 要跟「不看條件、一律猜平均」比，才知道有沒有真的分辨能力。"""
+    lib_ret = library.ret[library.surge] if surge_only else library.ret
+    q_ret = questions.ret[questions.surge] if surge_only else questions.ret
+    if len(lib_ret) == 0 or len(q_ret) == 0:
+        raise ValueError("情境庫或題目是空的")
+    p0 = float((lib_ret <= big_loss).mean())
+    y = (q_ret <= big_loss).astype(np.float64)
+    return Reference(
+        base_rate=p0,
+        actual_rate=float(y.mean()),
+        brier_base=float(((p0 - y) ** 2).mean()),
+        ic_full_t=_t([d.ic_full for d in days if d.ic_full is not None]),
+        ic_simple_t=_t([d.ic_simple for d in days if d.ic_simple is not None]),
+    )
+
+
 def render_validation(
     cfg: SimilarConfig,
     results: Mapping[str, Verdict],
     names: Mapping[str, str],
     library_n: int,
     library_span: tuple[dt.date, dt.date],
+    refs: Mapping[str, Reference] | None = None,
 ) -> str:
     """markdown 報告：每條線一段，決策線標明。"""
     v = cfg.validation
@@ -520,4 +564,17 @@ def render_validation(
             f"**結論：{'通過' if r.passed else '不通過'}**",
             "",
         ]
+        ref = (refs or {}).get(line)
+        if ref is not None:
+
+            def t(x: float | None) -> str:
+                return "—" if x is None else f"{x:+.2f}"
+
+            lines += [
+                "參考數字（看到結果後才加，**不影響結論**）：",
+                f"- 不看任何條件、每題都猜情境庫整體的大賠比例（{ref.base_rate:.1%}）的 Brier："
+                f"{ref.brier_base:.4f}；題目實際大賠比例 {ref.actual_rate:.1%}。",
+                f"- 每日 RankIC 的 t 值：完整版 {t(ref.ic_full_t)}、簡化版 {t(ref.ic_simple_t)}。",
+                "",
+            ]
     return "\n".join(lines)

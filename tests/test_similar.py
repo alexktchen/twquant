@@ -22,6 +22,7 @@ from twquant.reporting.similar import (
     gain_weights,
     near_days,
     pick_neighbors,
+    reference,
     spearman,
     validate_line,
     verdict,
@@ -368,3 +369,24 @@ def test_ac7_questions_must_come_after_the_library() -> None:
 
 def test_ac7_bucket_type_is_shared_with_d179() -> None:
     assert isinstance(BUCKETS[0], Bucket) and BUCKETS[0].lo == 0.0
+
+
+def test_ac7_reference_compares_brier_with_always_guessing_the_average() -> None:
+    lib = _lib(
+        [0, 1, 2, 3],
+        list("ABCD"),
+        [[0, 0]] * 4,
+        [0.1, -0.2, 0.0, -0.3],
+        n_sessions=12,
+        surge=[True, True, False, False],
+    )
+    q = _lib([8, 9], ["E", "F"], [[0, 0]] * 2, [-0.5, 0.2], n_sessions=12, surge=[True, False])
+    days = _days(0.10, 0.02, 1.0, 1.0, n=5)
+    r = reference(lib, q, days, -0.15, surge_only=False)
+    assert (r.base_rate, r.actual_rate) == (0.5, 0.5)
+    assert r.brier_base == pytest.approx(0.25)
+    assert (
+        r.ic_full_t is not None and r.ic_full_t > 0 and r.ic_simple_t is None
+    )  # 簡化版每天一樣 → 沒有變異
+    s = reference(lib, q, days, -0.15, surge_only=True)
+    assert (s.base_rate, s.actual_rate) == (0.5, 1.0) and s.brier_base == pytest.approx(0.25)
