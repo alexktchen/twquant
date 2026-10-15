@@ -1,0 +1,25 @@
+# D-184（2026-10-15，事前登記）：潛伏飆股排除 20 日新低——與 quiet_s0 逐字相同，只多一條進場排除：
+# 訊號日收盤（還原除權息）是近 20 個有收盤的交易日最低（price.at_low_20 = 1）的股票不進場，空位由後面的候選補。
+# **RESEARCH ONLY**，在第二保留期（2027-03 開）與 quiet_s0 一起判讀；開啟前不得修改（configs/holdout2_weak_filters.yaml 守著）。
+name: quiet_nolow20
+description: D-184 quiet_nolow20：A20 機率前 15、排除收在 20 日新低的股票、抱滿 20 日
+trial_scope: tail:quiet_weak_filters
+universe:
+  markets: [TWSE, TPEX]
+  min_adv_twd: null
+  min_adv_pctl: 0.70 # D-143 §五：宇宙 ADV 前 30%，與 A20 的樣本門檻同一把尺（D-151 §十三）
+  min_price: 10.0
+signals:
+  - factor: ml.lgbm_tail_up_20d
+    weight: 1.0
+    params:
+      model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+slots:
+  n: 15
+  entry_threshold: 0.0
+  exclude: # D-184：收在近 20 日新低（還原除權息）當天不進場；不滿 20 天的新股沒有值，不排除
+    - factor: price.at_low_20
+      min_value: 1.0
+exit_rules:
+  - kind: time_stop
+    sessions: 20

@@ -11,7 +11,13 @@ import difflib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import (
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from twquant.config import BaseConfig, load_config
 from twquant.errors import ConfigError
@@ -355,6 +361,23 @@ class SlotsConfig(BaseConfig):
         return self
 
 
+class MarketGateConfig(BaseConfig):
+    """大盤緩跌閘門（D-184，規則沿用 D-124 §三 b1）：指數緩跌的日子不開新倉。
+
+    分類用 `ml.regime.market_regime`（一般／緩跌／恐慌），只用當天（含）以前的指數收盤：
+    指數收盤在 `ma_window` 日均線之下＝弱勢；弱勢且 `vol_window` 日報酬標準差落在自身過去
+    `vol_lookback` 日的第 `vol_pctl` 分位以上＝恐慌（照常可買）；弱勢但不恐慌＝緩跌（不開新倉）。
+    補位模式：緩跌那晚不排新進場，持股照出場規則走。排程換股：緩跌的換股日只賣不買
+    （新進與加碼都取消），錢留現金到下一個換股日。分類算不出來（暖機不足、缺當天收盤）一律 raise。
+    """
+
+    index_id: str = "TAIEX"
+    ma_window: int = Field(ge=2)
+    vol_window: int = Field(ge=2)
+    vol_lookback: int = Field(ge=2)
+    vol_pctl: float = Field(gt=0.0, lt=1.0)
+
+
 class StrategyConfig(BaseConfig):
     """完整策略配置（SPEC-003 §1）。同一份 YAML 供回測與生產。"""
 
@@ -396,7 +419,24 @@ class StrategyConfig(BaseConfig):
     entry_filters: list[ExitRuleConfig] = Field(default_factory=list)
     # 每日補位模式（T-247）。None＝既有的排程再平衡模式。
     slots: SlotsConfig | None = None
+    # D-184：大盤緩跌時不開新倉。None＝沒有閘門（既有行為）
+    market_gate: MarketGateConfig | None = None
     max_weight_per_stock: float = 0.05
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_gate(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, object]:
+        """D-184：沒設閘門時不輸出 `market_gate` 鍵。
+
+        研究登記簿的 params_hash、第二保留期的凍結指紋都從序列化結果算——多一個 `null` 鍵，
+        既有 175+ 個試驗的 hash 與三份登記的指紋就會一起改變（T-231、D-149 都踩過）。
+        設了閘門照樣輸出，那才是行為改變。
+        """
+        data: dict[str, object] = handler(self)
+        if data.get("market_gate", 0) is None:
+            del data["market_gate"]
+        return data
 
     @model_validator(mode="after")
     def _weights_sum_to_one(self) -> StrategyConfig:
