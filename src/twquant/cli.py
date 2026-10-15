@@ -1629,6 +1629,18 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），略過"
         return _pick_reasons_for_day(day)
 
+    def _similar_step() -> str:
+        # D-182 歷史相似情境：潛伏飆股／高分爆量名單上每一檔，在情境庫裡找最像的 k 次。排在「名單理由」之後；
+        # 跟理由一樣要當天的因子（雲端只留 2 天）。情境庫還沒發布就略過。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
+        return _similar_for_day(day)
+
     def _benchmark_fill_step() -> str:
         # D-176 修訂三：名單績效對照（0050）缺行情、缺除權息就從 FinMind 補；排在名單績效之前。best-effort。
         from twquant.data.serving import store
@@ -1766,6 +1778,7 @@ def _run_daily_pipeline(
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
         PipelineStep("名單理由", _pick_reasons_step),
+        PipelineStep("相似情境", _similar_step),
         PipelineStep("對照行情", _benchmark_fill_step),
         PipelineStep("名單績效", _scorecard_step),
         PipelineStep("族群標籤", _stock_groups_step),
@@ -1986,6 +1999,18 @@ def pick_reasons_cmd(
     """
     day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
     typer.secho(f"[OK] {day}：{_pick_reasons_for_day(day)}", fg=typer.colors.GREEN)
+
+
+@app.command(name="similar-picks")
+def similar_picks_cmd(
+    date: str = typer.Option("", help="算哪一天的名單 YYYY-MM-DD；空＝PG 最新行情日"),
+) -> None:
+    """歷史相似情境（D-182）：潛伏飆股／高分爆量名單上每一檔，寫進 PG `pick_similar`（網站讀）。
+
+    要那天的因子值還在資料庫（雲端只留 2 天），也要情境庫已發布（本機 scripts/similar_library.py --publish）。
+    """
+    day = dt.date.fromisoformat(date) if date else _pg_latest_price_day()
+    typer.secho(f"[OK] {day}：{_similar_for_day(day)}", fg=typer.colors.GREEN)
 
 
 @app.command(name="group-flow-check")
@@ -3127,6 +3152,66 @@ def _pick_reasons_for_day(day: dt.date) -> str:
     for line, *_ in rows:
         lines[line] = lines.get(line, 0) + 1
     return "、".join(f"{k} {v} 檔" for k, v in sorted(lines.items())) + " 的理由已寫入"
+
+
+def _similar_for_day(day: dt.date) -> str:
+    """歷史相似情境（D-182）：`day` 潛伏兩條線名單上每一檔 → `pick_similar`（整天覆蓋）。
+
+    個股特徵與大盤狀態用與打分相同的輸入（`quiet_live.load_inference`）；情境庫從 PG 讀（本機建、發布上去）。
+    情境庫的登記編號、模型、特徵要跟 configs/similar_situations.yaml 一致，不一致 raise（庫是別的定義建的）。
+    """
+    from twquant.config import MlConfig, load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.pick_reasons_store import read_day_picks
+    from twquant.data.serving.similar_store import read_library, write_similar
+    from twquant.errors import DataError
+    from twquant.ml.quiet_live import load_inference
+    from twquant.reporting.similar import SimilarConfig, decode_library, pick_rows
+
+    cfg = load_config(_CONFIG_DIR / "similar_situations.yaml", SimilarConfig)
+    ml_cfg = _load_ml()
+    scfg = _load_serving()
+    if str(ml_cfg.quiet_live_model) != cfg.model_id or not ml_cfg.quiet_live_config:
+        raise DataError(
+            "pick_similar",
+            day,
+            f"正式潛伏模型是 {ml_cfg.quiet_live_model}，登記的是 {cfg.model_id}",
+        )
+    conn = store.connect(scfg)
+    try:
+        picks = [
+            (p.line, p.stock_id)
+            for p in read_day_picks(conn, scfg.pg_schema, day)
+            if p.line in cfg.lines
+        ]
+        if not picks:
+            return f"{day} 潛伏兩條線沒有名單，略過"
+        parts = read_library(conn, scfg.pg_schema)
+        if parts is None:
+            return "情境庫還沒發布（本機跑 scripts/similar_library.py --publish），略過"
+        lib, features, registration = decode_library(parts)
+        if registration != cfg.registration or features != cfg.features:
+            raise DataError("pick_similar", day, f"情境庫是 {registration} 建的，特徵與登記不一致")
+        model_cfg = load_config(_CONFIG_DIR / ml_cfg.quiet_live_config, MlConfig)
+        frame, _, _, _ = load_inference(
+            conn,
+            scfg.pg_schema,
+            cfg=model_cfg,
+            model_dir=Path(_load_system().data_dir) / "models" / str(ml_cfg.quiet_live_model),
+            stock_pattern=scfg.cloud.stock_pattern,
+            start=day,
+            end=day,
+            lookback_days=ml_cfg.quiet_price_lookback_days,
+        )
+        rows = pick_rows(picks, frame, lib, cfg)
+        write_similar(conn, scfg.pg_schema, day, rows, cfg.registration, now_tw())
+    finally:
+        conn.close()
+    lines: dict[str, int] = {}
+    for r in rows:
+        lines[r.line] = lines.get(r.line, 0) + 1
+    return "、".join(f"{k} {v} 檔" for k, v in sorted(lines.items())) + " 的相似情境已寫入"
 
 
 def _group_flow_check() -> str:

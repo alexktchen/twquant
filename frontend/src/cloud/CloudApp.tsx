@@ -26,6 +26,8 @@ import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
 import { dropNote, weakSummary, weakTags } from './weak'
+import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
+import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { GroupsPage } from './GroupsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
@@ -521,6 +523,9 @@ export default function CloudApp() {
                 group={selected.group}
                 reasons={selected.reasons ?? null}
                 line={current?.code ?? null}
+                reference={current?.ref ?? null}
+                score={selected.score}
+                similar={selected.similar ?? null}
                 shared={listSids.includes(selected.sid) && tab === 'picks' && !guest && !nav.past ? listLive : null}
                 close={selected.close}
                 chg={selected.chg}
@@ -875,6 +880,69 @@ function Factors({ reasons, note }: { reasons: Reason[]; note: string }) {
   )
 }
 
+/** 歷史同區間參考（D-179）：這一檔對到的區間在開發期／模型沒看過的期間，抱 20 天的報酬分布。 */
+/** 歷史相似情境（D-182）：大盤狀態相近的日子裡，個股條件最像的 k 次，照名單規則買進抱 20 天的分布與最像的幾次。 */
+function SimilarBlock({ s }: { s: Similar }) {
+  const bar = similarBar(s)
+  const span = spanText(s)
+  return (
+    <div className="cq-ref">
+      <h3>
+        歷史相似情境：大盤相近、條件最像的 {s.n.toLocaleString()} 次，照名單規則買進抱 20 天<small>過去的分布，不是預測</small>
+      </h3>
+      <div className="cq-ref-row">
+        <span>{span}</span>
+        <p>{similarText(s)}</p>
+        {bar && (
+          <div className="cq-ref-bar" title="灰色＝最差一成到最好一成的範圍（−30%～+30% 橫軸）；白線＝中位數；細線＝0">
+            <i style={{ left: `${bar.p10}%`, width: `${Math.max(0, bar.p90 - bar.p10)}%` }} />
+            <em style={{ left: `${bar.zero}%` }} />
+            <b style={{ left: `${bar.median}%` }} />
+          </div>
+        )}
+      </div>
+      {s.examples.length > 0 && (
+        <ul className="cq-sim-ex">
+          {s.examples.map((e) => (
+            <li key={`${e.d}-${e.sid}`} className={e.r > 0 ? 'up' : e.r < 0 ? 'down' : undefined}>
+              {exampleText(e)}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="cq-ref-note">比的是模型看的條件（波動、市值、營收、籌碼……）和當時的大盤狀態，只用 2026 年 8 月以前的資料；相似不代表會走一樣的路。</p>
+    </div>
+  )
+}
+
+function Reference({ rows }: { rows: RefRow[] }) {
+  if (rows.length === 0) return null
+  return (
+    <div className="cq-ref">
+      <h3>
+        過去{bucketText(rows[0])}的股票，照名單規則買進抱 20 天<small>開發期參考，不保證未來</small>
+      </h3>
+      {rows.map((r) => {
+        const bar = refBar(r)
+        return (
+          <div className="cq-ref-row" key={r.period}>
+            <span>{r.label.replace(/（.*）/, '')}</span>
+            <p>{refText(r)}</p>
+            {bar && (
+              <div className="cq-ref-bar" title="灰色＝最差一成到最好一成的範圍（−30%～+30% 橫軸）；白線＝中位數；細線＝0">
+                <i style={{ left: `${bar.p10}%`, width: `${Math.max(0, bar.p90 - bar.p10)}%` }} />
+                <em style={{ left: `${bar.zero}%` }} />
+                <b style={{ left: `${bar.median}%` }} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <p className="cq-ref-note">分布來自同區間的所有股票，不是針對這一檔；開發期是規則在那段資料上試出來的，數字會偏好看。</p>
+    </div>
+  )
+}
+
 function Detail({
   sid,
   name,
@@ -882,6 +950,9 @@ function Detail({
   group,
   reasons = null,
   line = null,
+  reference = null,
+  score = null,
+  similar = null,
   close,
   chg,
   asOf,
@@ -899,6 +970,11 @@ function Detail({
   /** 選股依據（D-180）：名單上這一檔的白話理由與它在哪條線；不是從名單點進來（追蹤分頁）就沒有 */
   reasons?: Reason[] | null
   line?: string | null
+  /** 這條線的歷史同區間參考（D-179）與這一檔的分數：過去同區間的股票抱 20 天的報酬分布；沒算就不顯示 */
+  reference?: RefRow[] | null
+  score?: number | null
+  /** 歷史相似情境（D-182）：潛伏兩條線的這一檔，大盤相近、條件最像的情況之後 20 天；有它就不顯示同區間參考 */
+  similar?: Similar | null
   /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
@@ -1021,6 +1097,7 @@ function Detail({
         )}
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
+      {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (
           <span key={m.n} style={{ color: m.color }}>
