@@ -1,8 +1,10 @@
 // GET /api/picks?date=YYYY-MM-DD（空＝最新）：各條線的名單，附收盤、當日漲跌、連續上榜、新進、族群，
-// 與「為什麼選它」的理由（D-180，serving.pick_reasons；那天沒算就是 null）。
+// 與「為什麼選它」的理由（D-180，serving.pick_reasons；那天沒算就是 null）；
+// 破底標記（weak）與加權大跌那天的歷史對照（drop，沒大跌是 null）——D-183，只供看盤，不改名單。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
 import { readReasons } from '../../_lib/reasons'
+import { readDrop, readWeak } from '../../_lib/weak'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 import { cached, cacheKey } from '../../_lib/cache'
 
@@ -30,6 +32,8 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
       SELECT stock_id, name, industry FROM serving.stock_meta WHERE stock_id = ANY(string_to_array(${sids.join(',')}, ','))`
     const groups = await groupsFor(db, target, meta)
     const reasons = await readReasons(db, target)
+    const weak = await readWeak(db, target, sids)
+    const drop = await readDrop(db, target)
     const close = new Map(px.map((r) => [r.stock_id, r]))
     const window = dates.slice(0, RECENT_WINDOW)
     const startClose = new Map<string, number | null>()
@@ -73,11 +77,12 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             new: isNew,
             recent: recentFlags(r.stock_id, recentLists),
             chg6: change(c, startClose.get(r.stock_id) ?? null),
+            weak: weak.get(r.stock_id) ?? null,
           }
         }),
       }
     })
-    return json({ date: target, window: [...window].reverse(), lines })
+    return json({ date: target, window: [...window].reverse(), drop, lines })
   })
 }
 

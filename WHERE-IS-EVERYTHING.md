@@ -11,6 +11,8 @@
 
 > **Pages 預覽站（T-362，2026-10-15）**：`<分支>.twquant.pages.dev` 是 `wrangler pages deploy --branch <分支>` 直接上傳的預覽部署，**不受 Cloudflare Access 保護、任何人都讀得到**。`reports` 已撤下（研究報告目錄）；以後要撤用 Actions → `pages-delete-branch`（main 會被拒絕）。研究報告不要再用預覽分支上傳。
 
+> **破底標記與大跌提醒（T-365／D-183，2026-10-15）**：`/api/picks` 每檔多 `weak`（20 日新低、連跌天數，還原除權息）、整天多 `drop`（加權單日跌 2% 以上才有，歷史大跌後 20 日的統計）。邏輯與門檻在 `functions/_lib/weak.ts`。**只提醒，不改名單**——要當濾網得先事前登記、用第二保留期驗證（D-183 有候選與當天的證據）。
+
 > **市場氛圍（T-363／D-181，2026-10-15）**：「盤勢」分頁（原「族群」，網址參數仍是 `?tab=group`）最上面、族群熱力圖上方。盤中 `/api/mood/live`：證交所即時報價介面問加權 t00、櫃買 o00、28 個類股指數，跟個股報價共用 `functions/_lib/quote-live.ts` 的 QuoteHub（**別再另外 new 一個**，請求間隔與被擋暫停要算在一起）；指數沒有成交金額。收盤後 `/api/mood/close`：讀 `group_flow_daily` 最近一天＋`index_daily`。分類與門檻在 `functions/_lib/mood.ts`（`SECTORS`、`DEF_GROUPS`、`BIG_MOVE`／`TILT`／`SHIFT`）。只供看盤。
 > **2026-10-07 交接：[docs/HANDOFF-2026-10-07-data-catchup.md](docs/HANDOFF-2026-10-07-data-catchup.md)**——
 > 機器在 10-01 ~ 10-07 停擺；10-08 凌晨已照它的 §4 補齊九月尾巴與十月五天、重建看板、備份（完成紀錄見該文件 §7）。
