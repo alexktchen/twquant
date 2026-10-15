@@ -135,7 +135,7 @@ def hot_groups(
 def compose_groups(
     day: dt.date, hot: Sequence[HotGroup], site_url: str, max_listed: int
 ) -> dict[str, str]:
-    """族群資金通知：標題寫族群與倍數，內文一個族群一行（倍數、漲跌家數、名單上的股票）；點開到「族群」分頁。"""
+    """族群資金通知：標題寫族群與倍數，內文一個族群一行（倍數、漲跌家數、名單上的股票）；點開到「盤勢」分頁（原「族群」）。"""
     if not hot:
         raise ValueError("沒有資金流入的族群，不該組通知")
     shown = hot[:max_listed]

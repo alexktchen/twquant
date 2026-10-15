@@ -6,6 +6,7 @@ import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
 import type { Quote } from './live'
 import type { RankRow } from './group'
+import type { CloseMood, LiveMood } from './mood'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -89,6 +90,10 @@ export const savePushSubscription = (sub: PushSubscriptionJSON) => get<{ ok: boo
 export const deletePushSubscription = (endpoint: string) => get<{ ok: boolean }>('/api/push', 'DELETE', { endpoint })
 
 /** 名單績效（D-176）：這條線的模擬帳戶與逐筆統計（不含明細）。 */
+/** 市場氛圍（D-181）盤中版：類股指數強弱；開盤前 live 是 null。 */
+export const fetchMoodLive = () => get<{ live: LiveMood | null; stale: boolean; retry_after: number | null }>('/api/mood/live')
+/** 市場氛圍收盤版：最近一天的族群資金；還沒算過 close 是 null。 */
+export const fetchMoodClose = () => get<{ close: CloseMood | null }>('/api/mood/close').then((r) => r.close)
 export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?line=${encodeURIComponent(line)}`)
 
 /** 族群排行（D-177 修訂）：最近一天每個族群的資金倍數、漲跌家數與成交金額最大的幾檔。 */

@@ -276,7 +276,7 @@ export default function CloudApp() {
             每日名單
           </button>
           <button className={tab === 'group' ? 'on' : ''} onClick={() => setTab('group')}>
-            族群
+            盤勢
           </button>
           <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
             績效
@@ -319,7 +319,7 @@ export default function CloudApp() {
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
               <div className="cq-rows">
-                <Gate title="登入後看族群資金" text="每個族群今天拿到多少資金：成交比重對自己前 20 日平均的倍數、幾檔漲幾檔跌，看資金是不是往同一個族群去。" />
+                <Gate title="登入後看盤勢" text="盤中哪些類股抗跌、哪些領跌，收盤後資金往哪些族群跑：成交比重對自己前 20 日平均的倍數、幾檔漲幾檔跌。" />
               </div>
             </aside>
             <section className="cq-detail" />

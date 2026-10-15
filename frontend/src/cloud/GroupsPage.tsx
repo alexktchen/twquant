@@ -3,6 +3,7 @@
 // 預設熱力圖（T-355）：方塊大小＝成交金額，顏色＝平均漲跌或資金倍數；也可切回列表。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { fetchGroups } from './api'
+import { MoodCard } from './MoodCard'
 import { pct, trend } from './format'
 import { flowText, rankRows, ratioText, yi, type RankRow } from './group'
 import { RATIO_HIGH, RATIO_LOW, RET_FULL, heatColor, squarify, tileLines, type HeatMode } from './heatmap'
@@ -49,6 +50,7 @@ export function GroupsPage({
   const hotCount = (data?.rows ?? []).filter((r) => r.hot && r.n >= MIN_MEMBERS).length
   return (
     <main className={`cq-body cq-groups${view === 'heat' ? ' cq-groups-heat' : ''}`}>
+      <MoodCard enabled />
       <aside className="cq-list">
         <div className="cq-groups-head">
           <span>
