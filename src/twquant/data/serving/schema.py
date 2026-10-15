@@ -527,6 +527,42 @@ SCORE_REFERENCE_SPEC = TableSpec(
     pk=("line", "period", "bucket"),
 )
 
+# 歷史相似情境（D-182／T-364）：情境庫（本機 scripts/similar_library.py --publish 建，整表覆蓋）與每天名單的比對結果。
+# 情境庫是 zlib 壓縮的欄位切片（reporting/similar.encode_library），一列一份；比對結果全史保留、不進 windows。
+SIMILAR_LIBRARY_SPEC = TableSpec(
+    "similar_library",
+    (
+        ("part", "text"),  # meta｜<欄位>.<序號>
+        ("payload", "bytea"),
+        ("registration", "text"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("part",),
+)
+PICK_SIMILAR_SPEC = TableSpec(
+    "pick_similar",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("stock_id", "text"),
+        ("n", "integer"),
+        ("mean", "double precision"),
+        ("median", "double precision"),
+        ("win_rate", "double precision"),
+        ("big_loss_rate", "double precision"),
+        ("p10", "double precision"),
+        ("p90", "double precision"),
+        ("best", "double precision"),
+        ("worst", "double precision"),
+        ("span_from", "date"),  # 鄰居的公布日範圍
+        ("span_to", "date"),
+        ("examples", "jsonb"),  # [{d: 公布日, sid: 代號, r: 20 天報酬}]，最像的在前
+        ("registration", "text"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 # 投信／ETF 資金流（SPEC-016／T-335）：直寫 PG、資料湖沒有它們。刻意不放進 MIRROR_SPECS
 # （rebuild 會清空）也不放進 DIRECT_PG_SPECS（那是 T-309 第 1 批籌碼，每日「籌碼」步驟逐張有來源）。
 # 欄位與 data/schemas.py 同名同序（tests/test_fund_flow_units.py 守著）。
@@ -607,6 +643,8 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     GROUP_FLOW_SPEC,
     PICK_REASONS_SPEC,
     SCORE_REFERENCE_SPEC,
+    SIMILAR_LIBRARY_SPEC,
+    PICK_SIMILAR_SPEC,
     *FUND_FLOW_SPECS,
 )
 

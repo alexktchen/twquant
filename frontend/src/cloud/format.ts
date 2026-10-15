@@ -3,6 +3,7 @@ import type { Group } from './group'
 import type { Reason } from './reasons'
 import type { DropStats, Weak } from './weak'
 import type { RefRow } from './reference'
+import type { Similar } from './similar'
 
 export type Pick = {
   rank: number
@@ -12,6 +13,8 @@ export type Pick = {
   group?: Group | null
   /** 為什麼選它（D-180）：白話理由；那天沒算、舊後端沒有這欄 → null／undefined */
   reasons?: Reason[] | null
+  /** 歷史相似情境（D-182）：潛伏兩條線才有；那天沒算、舊後端沒有這欄 → null／undefined */
+  similar?: Similar | null
   score: number | null
   close: number | null
   /** 名單那天的前一個交易日收盤（推漲跌停價用）；舊後端沒有這欄 */
