@@ -25,6 +25,7 @@ import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
+import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { GroupsPage } from './GroupsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
@@ -507,6 +508,8 @@ export default function CloudApp() {
                 group={selected.group}
                 reasons={selected.reasons ?? null}
                 line={current?.code ?? null}
+                reference={current?.ref ?? null}
+                score={selected.score}
                 shared={listSids.includes(selected.sid) && tab === 'picks' && !guest && !nav.past ? listLive : null}
                 close={selected.close}
                 chg={selected.chg}
@@ -856,6 +859,35 @@ function Factors({ reasons, note }: { reasons: Reason[]; note: string }) {
   )
 }
 
+/** 歷史同區間參考（D-179）：這一檔對到的區間在開發期／模型沒看過的期間，抱 20 天的報酬分布。 */
+function Reference({ rows }: { rows: RefRow[] }) {
+  if (rows.length === 0) return null
+  return (
+    <div className="cq-ref">
+      <h3>
+        過去{bucketText(rows[0])}的股票，照名單規則買進抱 20 天<small>開發期參考，不保證未來</small>
+      </h3>
+      {rows.map((r) => {
+        const bar = refBar(r)
+        return (
+          <div className="cq-ref-row" key={r.period}>
+            <span>{r.label.replace(/（.*）/, '')}</span>
+            <p>{refText(r)}</p>
+            {bar && (
+              <div className="cq-ref-bar" title="灰色＝最差一成到最好一成的範圍（−30%～+30% 橫軸）；白線＝中位數；細線＝0">
+                <i style={{ left: `${bar.p10}%`, width: `${Math.max(0, bar.p90 - bar.p10)}%` }} />
+                <em style={{ left: `${bar.zero}%` }} />
+                <b style={{ left: `${bar.median}%` }} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <p className="cq-ref-note">分布來自同區間的所有股票，不是針對這一檔；開發期是規則在那段資料上試出來的，數字會偏好看。</p>
+    </div>
+  )
+}
+
 function Detail({
   sid,
   name,
@@ -863,6 +895,8 @@ function Detail({
   group,
   reasons = null,
   line = null,
+  reference = null,
+  score = null,
   close,
   chg,
   asOf,
@@ -880,6 +914,9 @@ function Detail({
   /** 選股依據（D-180）：名單上這一檔的白話理由與它在哪條線；不是從名單點進來（追蹤分頁）就沒有 */
   reasons?: Reason[] | null
   line?: string | null
+  /** 這條線的歷史同區間參考（D-179）與這一檔的分數：過去同區間的股票抱 20 天的報酬分布；沒算就不顯示 */
+  reference?: RefRow[] | null
+  score?: number | null
   /** 名單上的收盤與漲跌：看過去某天時顯示那天的；其他時候只在 K 線還沒到時先頂著 */
   close?: number | null
   chg?: number | null
@@ -1002,6 +1039,7 @@ function Detail({
         )}
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
+      <Reference rows={refFor(reference, score)} />
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (
           <span key={m.n} style={{ color: m.color }}>
