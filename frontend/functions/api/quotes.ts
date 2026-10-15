@@ -3,23 +3,10 @@
 // 以每一檔為單位共用快取、請求之間至少隔 2 秒、被擋就暫停並加倍（QuoteHub，_lib/quote.ts）。行情是公開資料，不分使用者。
 // 證交所擋下時，有富果金鑰（Pages 祕密 FUGLE_API_KEY）就用富果補，額度內一檔一檔問；沒設金鑰就只用證交所。
 import { fail, json } from '../_lib/db'
-import { FUGLE_URL, QuoteHub, misUrls, parseSids, readFugle, readMis, type Quote } from '../_lib/quote'
+import { FUGLE_URL, parseSids, readFugle } from '../_lib/quote'
+import { hub } from '../_lib/quote-live'
 
 type QuoteEnv = { FUGLE_API_KEY?: string }
-
-async function fetchQuotes(sids: string[]): Promise<Quote[]> {
-  const out: Quote[] = []
-  // 一批一批依序問（不同時打好幾個請求，免得被證交所當成太頻繁）
-  for (const url of misUrls(sids)) {
-    const res = await fetch(url, {
-      headers: { accept: 'application/json', 'user-agent': 'Mozilla/5.0', referer: 'https://mis.twse.com.tw/stock/index.jsp' },
-    })
-    out.push(...(await readMis(res)))
-  }
-  return out
-}
-
-const hub = new QuoteHub(fetchQuotes)
 
 /** 富果一檔一次（金鑰放在 header，不進網址、不進紀錄）。 */
 const fugle = (key: string) => async (sid: string) =>

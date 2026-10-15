@@ -24,6 +24,7 @@ import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
+import { MoodCard } from './MoodCard'
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
 import { GroupsPage } from './GroupsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
@@ -413,6 +414,7 @@ export default function CloudApp() {
             </aside>
           ) : (
             <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
+              {!guest && <MoodCard enabled={tab === 'picks'} />}
               <div className="cq-day">
                 <button aria-label="前一個交易日" disabled={nav.older === null} onClick={() => nav.older && setDate(chooseDay(dates, nav.older))}>
                   ‹
