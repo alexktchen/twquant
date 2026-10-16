@@ -434,8 +434,14 @@ def _execute(
     day_px: dict[str, _Row],
     cost_cfg: CostConfig,
     max_participation: float,
+    *,
+    allow_buys: bool = True,
 ) -> None:
-    """在 day 開盤把持倉調到 targets（先賣後買、買單受現金約束）。"""
+    """在 day 開盤把持倉調到 targets（先賣後買、買單受現金約束）。
+
+    `allow_buys=False`（D-184 大盤緩跌閘門）：只做賣出——掉出名單的全賣、超出目標的減碼，
+    新進與加碼都取消、也不記未成交（那是規則不買，不是買不到）。
+    """
     pv = _portfolio_value(state, day_px)
     names = sorted(set(state.holdings) | set(targets))  # set 順序不定 → 排序確保決定性
     deltas: dict[str, int] = {}
@@ -447,6 +453,8 @@ def _execute(
         w = targets.get(sid, 0.0)
         o = float(row["open"])
         desired = int((w * pv) // (o * state.lot)) * state.lot if (w > 0 and o > 0) else 0
+        if not allow_buys and desired >= cur:
+            continue
         if w > 0 and o > 0 and desired == 0:
             # T-135：目標金額不足一張 → 整張捨去歸零。先前**靜默**——不記未成交、不報錯，
             # 結果是「40 檔等權、10M 資金」實測曝險只有 61%，且檔數越多越嚴重，把跨檔數的
@@ -624,6 +632,7 @@ def run_backtest(
     """
     from twquant.data import calendar as cal
     from twquant.strategy.build import build_targets, list_weights, signal_dates
+    from twquant.strategy.market_gate import blocks_new_positions
     from twquant.strategy.slots import slot_candidates
 
     calendar = cal.load(warehouse)
@@ -662,6 +671,7 @@ def run_backtest(
     state = _State(cash=initial_capital, lot=lot_size)
     equity_curve: list[EquityPoint] = []
     pending: dict[str, float] | None = None
+    buys_blocked = False  # D-184：換股日當晚大盤緩跌 → 隔天只賣不買
     exits_pending: dict[str, str] = {}
     trims_pending: dict[str, int] = {}  # T-286：明早要減碼的股數
     entries_pending: list[str] = []
@@ -703,7 +713,15 @@ def run_backtest(
             state.last_close[sid] = new_c
 
         if pending is not None:
-            _execute(state, pending, day, day_px, cost_cfg, max_participation)
+            _execute(
+                state,
+                pending,
+                day,
+                day_px,
+                cost_cfg,
+                max_participation,
+                allow_buys=not buys_blocked,
+            )
             pending = None
             exits_pending = {}  # 再平衡日由選股全權決定，前一晚的出場旗標作廢
         elif exits_pending:
@@ -770,6 +788,8 @@ def run_backtest(
                 # SPEC-012：banding 需要「昨天在不在裡面」；狀態留在引擎，build_targets 保持純函數
                 tdf = build_targets(strategy_cfg, warehouse, day, held=frozenset(state.holdings))
                 pending = {r["stock_id"]: float(r["target_weight"]) for r in tdf.to_dicts()}
+            gate = strategy_cfg.market_gate
+            buys_blocked = gate is not None and blocks_new_positions(warehouse.view(day), day, gate)
 
         if exit_rules and state.holdings and pending is None:
             exits_pending = exit_reasons(exit_rules, _held(state), day_px, warehouse, day)
@@ -801,7 +821,11 @@ def run_backtest(
         if slot_cfg is not None:
             # 空位只算「現在真的空著的」：今晚才判定要賣的，明天賣不賣得掉還不知道（跌停）
             free = slot_cfg.n - len(state.holdings)
-            if free > 0:
+            # D-184：大盤緩跌的晚上不排新進場（持股照出場規則走）
+            gate = strategy_cfg.market_gate
+            if free > 0 and not (
+                gate is not None and blocks_new_positions(warehouse.view(day), day, gate)
+            ):
                 ranked = (
                     [(sid, 0.0) for sid in picks.get(day, ())]
                     if picks is not None

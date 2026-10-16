@@ -1,0 +1,44 @@
+# D-184（2026-10-15，使用者：「要」）：破底排除與大盤緩跌閘門，登記進第二保留期（D-109）。
+# 另立一份登記（holdout2.yaml、holdout2_quiet_threshold.yaml、holdout2_quiet_volume.yaml 開啟前都不得修改）；
+# 指紋由 tests/test_holdout2_weak_filters.py 守著。判讀規則寫在 D-184 §四，寫於任何保留期結果之前。
+# 對照組＝quiet_s0（潛伏飆股，與 D-172 同一支）與 lw_e0_ctrl（大盤精選）；資本與各自的既有登記／參考回測相同。
+registration: D-184
+holdout_start: 2026-09-09
+opens_on: 2027-03-01
+min_sessions: 120
+entries:
+  - code: QUIET-S0
+    strategy: quiet_s0
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: 5ef5b536132fd6003773b30bd9dbd64ed7d765864beedd0ae3fc345e91cd31fe
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-NOLOW20
+    strategy: quiet_nolow20
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: c8ade1f6dea5b627d7ed73df78f82c26aa3d219fabfb93a7cfa0f90f2aa97d08
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: QUIET-GATE
+    strategy: quiet_grind_gate
+    model_id: lgbm_quietA20_tu_h20_20260430_655df6d7
+    model_sha256: 88fbcae7eadc0891bfdff25fc07277d4ce07683895c3691fd76e3308fc35d1cb
+    strategy_fingerprint: ad2064670651d1f79e013dcd459c847f6d4cf01ac1b573728bea99fff72bf4af
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000
+  - code: E0-CTRL
+    strategy: lw_e0_ctrl
+    model_id: lgbm_lw_net_h20_20260225_83890036
+    model_sha256: 446e17681cefbb35ddf4abf1c25fadae36904eaea279d7d108e1b9a5e7661d89
+    strategy_fingerprint: e407d8d8581ecd7b0c415f610a44440dda93b67dc49446b0ba6a1a03676f0c6b
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 80000000
+  - code: E0-GATE
+    strategy: lw_e0_grind_gate
+    model_id: lgbm_lw_net_h20_20260225_83890036
+    model_sha256: 446e17681cefbb35ddf4abf1c25fadae36904eaea279d7d108e1b9a5e7661d89
+    strategy_fingerprint: 16bdb0ad51f0b9d7cd6f391ec48d4f8dc4a405fa9daf152f7ddb0a69a5cc3ea4
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 80000000

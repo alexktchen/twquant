@@ -350,3 +350,51 @@ def mom_1d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="price.at_low_20",
+    category="price",
+    direction=-1,
+    tables=["prices_daily", "corporate_events"],
+    lookback_days=25,
+    params={"window": 20},
+    anchor_invariant=True,
+)
+def at_low_20(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """收盤是不是近 window 個有收盤的交易日最低（還原除權息、同價也算）：是 1.0、否 0.0（D-184）。
+
+    有收盤的日子不滿 window 天不給值（新股、長期停牌）。還原用固定過去錨（同 `ml.dataset.attach_adjustment`）：
+    adj(t)＝t 以前（含）所有除權息因子的累乘，價格除以它——除息日的跳空不會被當成破底，
+    且只用 t 以前的事件。窗口內沒有事件時 adj＝1 是正確值（不需要還原），不是缺值。
+    方向 −1 只是使用者的先驗（破底不該買）；D-183 的開發期描述沒有看到差別，由第二保留期判。
+    """
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    prices = (
+        view.table("prices_daily")
+        .filter(pl.col("close") > 0)
+        .select("date", "stock_id", "close")
+        .sort("date")
+    )
+    events = (
+        view.table("corporate_events")
+        .filter(pl.col("adj_factor").is_not_null() & (pl.col("adj_factor") > 0.0))
+        .select("date", "stock_id", "adj_factor")
+        .sort("stock_id", "date")
+        .with_columns(adj=pl.col("adj_factor").cum_prod().over("stock_id"))
+        .select("date", "stock_id", "adj")
+        .sort("date")
+    )
+    # 這檔在那天以前還沒有任何除權息 → 累乘因子就是 1（定義，不是補缺值；同 attach_adjustment）
+    adj_close = safe_ratio(pl.col("close"), pl.col("adj").fill_null(1.0))
+    low = pl.col("_ac").rolling_min(window, min_samples=window).over("stock_id", order_by="date")
+    return (
+        prices.join_asof(events, on="date", by="stock_id", strategy="backward")
+        .with_columns(_ac=adj_close)
+        .with_columns(_lo=low)
+        .filter(pl.col("_lo").is_not_null())
+        .with_columns(value=(pl.col("_ac") <= pl.col("_lo")).cast(pl.Float64))
+        .select("date", "stock_id", "value")
+        .collect()
+    )
