@@ -1,6 +1,7 @@
 // 雲端版（T-332）的純函數：漲跌格式、均線、K 線標記。不碰 DOM，供 node 單元測試。
 import type { Group } from './group'
 import type { Reason } from './reasons'
+import type { DropStats, Weak } from './weak'
 import type { RefRow } from './reference'
 import type { Similar } from './similar'
 
@@ -25,10 +26,13 @@ export type Pick = {
   recent: (boolean | null)[]
   /** 近 6 日漲幅：窗口第一天收盤到當天收盤 */
   chg6: number | null
+  /** 破底標記（D-183）：近 20 日新低、連跌幾天；舊後端沒有這欄 */
+  weak?: Weak | null
 }
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示。ref：歷史同區間參考（D-179）的列，還沒算或舊後端沒有這欄 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[]; ref?: RefRow[] }
-export type PicksDay = { date: string; window?: string[]; lines: Line[] }
+/** drop：那天加權大跌時的歷史對照（D-183），沒大跌是 null；舊後端沒有這欄 */
+export type PicksDay = { date: string; window?: string[]; drop?: DropStats | null; lines: Line[] }
 /** 歷史名單日期選單的檔數（/api/picks/dates）：counts[日期][線別]＝檔數；since[線別]＝這條線第一天有名單的日子。 */
 export type DateCounts = { counts: Record<string, Record<string, number>>; since: Record<string, string> }
 

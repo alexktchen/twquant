@@ -25,6 +25,7 @@ import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
+import { dropNote, weakSummary, weakTags } from './weak'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { GroupsPage } from './GroupsPage'
@@ -205,6 +206,8 @@ export default function CloudApp() {
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   // 每日名單的日期列（date＝undefined 是最新一天）；past＝正在看過去某天：K 線停在那天、不抓即時價
   const nav = dayNav(dates, date)
+  const drop = dropNote(view?.drop, !nav.past)
+  const weakSum = current ? weakSummary(current.picks) : null
 
   const tracked = useMemo(() => new Set((watch?.items ?? []).map((w) => w.sid)), [watch])
   const watchCurrent = watchSel ?? watch?.items[0] ?? null
@@ -435,6 +438,12 @@ export default function CloudApp() {
                   </button>
                 )}
               </div>
+              {drop && (
+                <details className="cq-drop">
+                  <summary>{drop.title}</summary>
+                  <p>{drop.body}</p>
+                </details>
+              )}
               <div className="cq-seg">
                 {view?.lines.map((l) => (
                   <button
@@ -462,6 +471,11 @@ export default function CloudApp() {
                   ))}
                 </div>
               )}
+              {weakSum && (
+                <p className="cq-weak-sum" title="已還原除權息。只是提醒，名單照模型排名產生，不因此刪減。">
+                  {weakSum}
+                </p>
+              )}
               <div className="cq-head">
                 <span>代號／名稱／近 6 日上榜</span>
                 <span>{anyLive ? '現價／推薦價' : '收盤／6日'}</span>
@@ -478,7 +492,7 @@ export default function CloudApp() {
               </div>
               {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
               <p className="cq-note">
-                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。盤中價格每 10 秒更新，小字是推薦當天的收盤；漲停、跌停的價格加框、漲跌幅整格填色。模型每日收盤後產生，非投資建議。
+                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。綠框＝破底提醒，不影響名單。盤中價格每 10 秒更新，小字是推薦當天的收盤；漲停、跌停的價格加框、漲跌幅整格填色。模型每日收盤後產生，非投資建議。
               </p>
             </aside>
           )}
@@ -601,6 +615,11 @@ function Row({
           {p.new && <i className="cq-tag new">新上榜</i>}
           {p.streak > (p.recent?.length ?? 0) && <i className="cq-tag">連{p.streak}天</i>}
           {p.score !== null && <i className="cq-tag prob">{Math.round(p.score * 100)}%</i>}
+          {weakTags(p.weak).map((t) => (
+            <i key={t.text} className="cq-tag weak" title={t.title}>
+              {t.text}
+            </i>
+          ))}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
       </div>
