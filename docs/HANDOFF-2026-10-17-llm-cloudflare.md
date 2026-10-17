@@ -69,3 +69,17 @@
 - **判讀**（D-185 末段，兩週後）：看 `data/insights/` 缺席比率與 `unverified_numbers` 比率；缺席超過三成換候補模型或改 N。這是觀察，不是事前登記的門檻。
 - advisor／explainer 仍走 Claude（沒排程）；要全部走 Cloudflare 得另記一條裁決。
 - §一 列的其他 LLM 用法都沒有工單；使用者要哪一個再登記。
+
+## 六、實連結果（同日第二個 session）
+
+細節在 DECISIONS D-185「實連補記」。重點：
+
+- **連得上、跑得出來**：wrangler 登入（`npx wrangler whoami` 會刷新 token）的 OAuth token 有 `ai:write`，可以拿來臨時測試；
+  正式排程仍要使用者建專用 token 填 `.env`（§四 第 1、2 步沒變）。帳號 ID 見 `npx wrangler whoami`。
+- 修了兩個實連才看得到的問題（推理用光 `max_tokens` 回空內容、受限解碼省略有預設值的欄位），前 10 檔 10/10 產出。
+- **本機 PG 沒開時**：`insights-run` 只讀 PG，可把 `TWQUANT_PG_DSN` 暫時指向 `.env` 的 `TWQUANT_SUPABASE_DSN`。
+  CLI 不會自己讀 `.env`，要先 export。
+- **下一步要使用者決定**（都沒做）：
+  1. 新聞證據：10 檔有 9 檔「資料不足」，主因 `events_news_unavailable`。接 MOPS 重大訊息（PG 已有 `material_news`）當證據，或改提示。
+  2. 提示加 `/no_think`：便宜約三倍、實測 8/8 通過，但屬提示改版。
+  3. 雲端 pipeline 開洞悉步驟（§五 第一條）。

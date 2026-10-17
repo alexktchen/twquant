@@ -4007,7 +4007,7 @@ def llm_ping(
         schema=PingReply,
         prompt_version="ping-v1",
         now=now,
-        max_tokens=200,
+        max_tokens=1000,  # qwen3 實連：200 全被推理用掉而回空內容
     )
     if res is None:
         typer.secho(f"失敗：{absent}（細節在上方日誌）", fg=typer.colors.RED)

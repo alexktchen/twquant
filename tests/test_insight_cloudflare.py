@@ -108,10 +108,9 @@ def test_ac2_request_body_carries_schema_and_messages() -> None:
         {"role": "user", "content": "USER"},
     ]
     assert body["max_tokens"] == 777
-    assert body["response_format"] == {
-        "type": "json_schema",
-        "json_schema": DailyBrief.model_json_schema(),
-    }
+    expected = DailyBrief.model_json_schema()
+    expected["required"] = list(expected["properties"])  # 送出時所有欄位必填（見下方 nested 測試）
+    assert body["response_format"] == {"type": "json_schema", "json_schema": expected}
 
 
 def test_ac2_reply_object_or_wrapped_string_parses_and_usage_is_required() -> None:
@@ -142,6 +141,33 @@ def test_ac2_reply_object_or_wrapped_string_parses_and_usage_is_required() -> No
         )
     with pytest.raises(ValidationError):
         parse_cloudflare_reply(_payload({"nope": 1}, usage=usage), DailyBrief)  # 不符 schema 不補值
+
+
+def _real_shape(response: Any, content: Any, completion_tokens: int) -> dict[str, Any]:
+    """2026-10-17 實連 qwen3 的回應形狀：response 與 choices 兩個欄位同時存在。"""
+    return {
+        "result": {
+            "response": response,
+            "choices": [{"message": {"content": content, "reasoning": "好的，用户……"}}],
+            "usage": {"prompt_tokens": 53, "completion_tokens": completion_tokens},
+        },
+        "success": True,
+        "errors": [],
+    }
+
+
+def test_ac2_empty_reply_after_reasoning_names_max_tokens() -> None:
+    # 實連：max_tokens=200 全被推理用掉，response 與 content 都是 null
+    with pytest.raises(RuntimeError, match="max_tokens"):
+        parse_cloudflare_reply(_real_shape(None, None, 200), DailyBrief)
+
+
+def test_ac2_null_response_falls_back_to_choices_content() -> None:
+    obj = {"summary": "今日平靜。", "highlights": ["無"]}
+    parsed, _, o = parse_cloudflare_reply(
+        _real_shape(None, json.dumps(obj, ensure_ascii=False), 300), DailyBrief
+    )
+    assert parsed.summary == "今日平靜。" and o == 300
 
 
 # ── AC-3：依供應商選 backend；只有 ANTHROPIC key 不算可用 ──────────────────
@@ -293,12 +319,20 @@ class _Tiny(BaseModel):
     ok: bool
 
 
-def test_ac2_schema_with_nested_defs_is_passed_verbatim() -> None:
+def test_ac2_schema_with_nested_defs_marks_every_field_required() -> None:
+    # 實連 qwen3（2026-10-17）：有預設值的欄位不在 required 裡，受限解碼就會省略
+    # supporting_evidence_ids，stance=support 因此 6 次全數驗證失敗；全部標必填後 8/8 通過。
     from twquant.insight.schemas import CandidateAnalysis
 
+    pristine = CandidateAnalysis.model_json_schema()
     body = cloudflare_request_body("S", "U", CandidateAnalysis, 10)
     schema = body["response_format"]["json_schema"]
     assert "$defs" in schema and "InsightRisk" in schema["$defs"]
+    assert set(schema["required"]) == set(schema["properties"])
+    assert "supporting_evidence_ids" in schema["required"]
+    risk = schema["$defs"]["InsightRisk"]
+    assert set(risk["required"]) == set(risk["properties"])
+    assert CandidateAnalysis.model_json_schema() == pristine  # 不改到 pydantic 的快取
     assert cloudflare_request_body("S", "U", _Tiny, 1)["response_format"]["json_schema"][
         "properties"
     ] == {"ok": {"title": "Ok", "type": "boolean"}}
