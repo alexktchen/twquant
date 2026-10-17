@@ -1,5 +1,5 @@
 // 市場氛圍（D-181）：「盤勢」分頁最上面一條（族群熱力圖上方，橫跨兩欄）。盤中每 30 秒更新類股強弱，
-// 收盤後的族群資金算好後自動換成資金版。期貨與美股（D-185）：台指期日盤／夜盤、期現價差、美股四大指數，每分鐘更新，
+// 收盤後的族群資金算好後自動換成資金版。期貨與美股（D-186）：台指期日盤／夜盤、期現價差、美股四大指數，每分鐘更新，
 // 不分盤中收盤都顯示。只給登入的人（API 在 /api 底下）；三份都拿不到就不顯示，不擋族群資料。
 import { useEffect, useState } from 'react'
 import { fetchMoodClose, fetchMoodGlobal, fetchMoodLive } from './api'
@@ -114,7 +114,7 @@ function Flows({ items }: { items: FlowMove[] }) {
   )
 }
 
-/** 期貨與美股（D-185）：台指期兩節＋比加權高低幾點、美股四大指數。 */
+/** 期貨與美股（D-186）：台指期兩節＋比加權高低幾點、美股四大指數。 */
 function Global({ state, now }: { state: GlobalState; now: { date: string; time: string } }) {
   const g = globalView(state?.global ?? null, now)
   if (!g) return null

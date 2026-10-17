@@ -107,7 +107,7 @@ export const MOOD_POLL_MS = 30_000
 /** 收盤版多久重讀一次（傍晚排程算好後，開著的頁面自己換成資金版）。 */
 export const CLOSE_POLL_MS = 10 * 60_000
 
-// ── 期貨與美股（D-185）────────────────────────────────────────────────────────
+// ── 期貨與美股（D-186）────────────────────────────────────────────────────────
 // 後端資料形狀見 functions/_lib/taifex.ts、yahoo.ts、mood.ts（GlobalMood）。
 
 export type TxSession = 'day' | 'night'

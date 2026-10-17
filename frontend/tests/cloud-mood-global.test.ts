@@ -13,7 +13,7 @@ const near = (x: number, y: number, tol = 1e-9) => assert.ok(Math.abs(x - y) < t
 const DAY = parseTaifex(fixture('taifex-tx-2026-10-16-day-closed.json'), 'day')
 const NIGHT = parseTaifex(fixture('taifex-tx-2026-10-16-night-closed.json'), 'night')
 
-test('T-368 AC1：期交所日盤（實際回應 2026-10-16 收盤後）→ 近月合約與臺指現貨；價差與遠月不算', () => {
+test('T-369 AC1：期交所日盤（實際回應 2026-10-16 收盤後）→ 近月合約與臺指現貨；價差與遠月不算', () => {
   assert.equal(JSON.parse(taifexBody('day')).MarketType, '0')
   assert.equal(JSON.parse(taifexBody('night')).MarketType, '1')
   const q = DAY.near
@@ -32,7 +32,7 @@ test('T-368 AC1：期交所日盤（實際回應 2026-10-16 收盤後）→ 近�
   assert.deepEqual(DAY.spot, { date: '2026-10-16', time: '13:33:25', last: 47111.26, prev: 46969.87 })
 })
 
-test('T-368 AC2：夜盤——漲跌參考價＝當天日盤結算價、沒有結算價、凌晨成交時間配日盤的日期；現貨只有收盤；還沒成交的合約 last 是 null', () => {
+test('T-369 AC2：夜盤——漲跌參考價＝當天日盤結算價、沒有結算價、凌晨成交時間配日盤的日期；現貨只有收盤；還沒成交的合約 last 是 null', () => {
   const q = NIGHT.near
   assert.ok(q)
   assert.equal(q.symbol, 'TXFJ6')
@@ -56,7 +56,7 @@ test('T-368 AC2：夜盤——漲跌參考價＝當天日盤結算價、沒有�
   assert.equal(got.near?.ref, 48635)
 })
 
-test('T-368 AC3：期交所回應格式不對就丟錯（RtCode 不是 0、不是 JSON、HTTP 錯誤），不給空殼', async () => {
+test('T-369 AC3：期交所回應格式不對就丟錯（RtCode 不是 0、不是 JSON、HTTP 錯誤），不給空殼', async () => {
   assert.throws(() => parseTaifex({ RtCode: '1', RtMsg: '系統維護', RtData: {} }, 'day'), /RtCode 1：系統維護/)
   assert.throws(() => parseTaifex(null, 'day'), /回應異常/)
   await assert.rejects(readTaifex({ ok: true, status: 200, text: async () => '<html>擋</html>' }, 'day'), /不是 JSON/)
@@ -65,7 +65,7 @@ test('T-368 AC3：期交所回應格式不對就丟錯（RtCode 不是 0、不�
   assert.deepEqual(parseTaifex({ RtCode: '0', RtData: { QuoteList: [] } }, 'day'), { session: 'day', spot: null, near: null })
 })
 
-test('T-368 AC4：Yahoo 日線（實際回應 2026-10-16 收盤後）→ 最新一根對前一根，不用 chartPreviousClose（那是 5 天前）', async () => {
+test('T-369 AC4：Yahoo 日線（實際回應 2026-10-16 收盤後）→ 最新一根對前一根，不用 chartPreviousClose（那是 5 天前）', async () => {
   assert.equal(yahooUrl('^GSPC'), 'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=5d&interval=1d')
   const spx = parseYahooChart(fixture('yahoo-gspc-2026-10-16-closed.json'))
   assert.equal(spx.symbol, '^GSPC')
@@ -120,7 +120,7 @@ const tx = (session: 'day' | 'night', date: string, last: number | null, ref: nu
 const us = (chgs: number[]): UsIndex[] =>
   US_INDICES.slice(0, chgs.length).map((x, i) => ({ ...x, date: '2026-10-16', time: '04:02', open: false, last: 100 * (1 + chgs[i]), prev: 100, chg: chgs[i] }))
 
-test('T-368 AC5：最新一節——同一天夜盤在日盤後面；開盤前日盤還沒成交就是昨晚的夜盤；期現價差對加權最新（夜盤對收盤）', () => {
+test('T-369 AC5：最新一節——同一天夜盤在日盤後面；開盤前日盤還沒成交就是昨晚的夜盤；期現價差對加權最新（夜盤對收盤）', () => {
   assert.equal(latestSession(DAY.near, NIGHT.near), 'night')
   assert.equal(latestSession(tx('day', '2026-10-19', 47000, 47284), tx('night', '2026-10-16', 46140, 47284)), 'day')
   assert.equal(latestSession(tx('day', '2026-10-19', null, 47284), tx('night', '2026-10-16', 46140, 47284)), 'night')
@@ -156,7 +156,7 @@ test('T-368 AC5：最新一節——同一天夜盤在日盤後面；開盤前�
   assert.equal(usOnly.label, '美股大漲・偏多')
 })
 
-test('T-368 AC6：多空標籤門檻——±1% 大漲大跌、±0.5% 算一票，一多一空分歧、都沒方向平淡、都沒資料 null', () => {
+test('T-369 AC6：多空標籤門檻——±1% 大漲大跌、±0.5% 算一票，一多一空分歧、都沒方向平淡、都沒資料 null', () => {
   assert.equal(LEAN, 0.005)
   assert.equal(globalLabel({ session: 'night', chg: -0.0242 }, -0.019), '夜盤大跌・美股大跌・偏空')
   assert.equal(globalLabel({ session: 'day', chg: 0.003 }, 0.007), '偏多')
@@ -185,7 +185,7 @@ function fakeFetchers(log: string[], failing: Set<string> = new Set()): Fetchers
   }
 }
 
-test('T-368 AC7：共用抓取——整輪六個請求、兩輪至少隔 15 秒；哪個來源沒拿到就留它上一份並標 stale；全部都沒有才丟錯', async () => {
+test('T-369 AC7：共用抓取——整輪六個請求、兩輪至少隔 15 秒；哪個來源沒拿到就留它上一份並標 stale；全部都沒有才丟錯', async () => {
   let t = 1_000_000
   const log: string[] = []
   const failing = new Set<string>()
@@ -220,7 +220,7 @@ test('T-368 AC7：共用抓取——整輪六個請求、兩輪至少隔 15 秒�
   await assert.rejects(hub.get(), /期交所 day 擋下/)
 })
 
-test('T-368 AC8：端點進 60 秒暫存、用共用的 GlobalHub（不另外 new）；證交所的 QuoteHub 不碰期交所（靜態）', () => {
+test('T-369 AC8：端點進 60 秒暫存、用共用的 GlobalHub（不另外 new）；證交所的 QuoteHub 不碰期交所（靜態）', () => {
   const read = (p: string) => readFileSync(new URL(`../functions/${p}`, import.meta.url), 'utf8')
   const api = read('api/mood/global.ts')
   assert.ok(api.includes('cached(cacheKey('))
@@ -239,7 +239,7 @@ const webTx = (session: 'day' | 'night', date: string, last: number | null, ref:
   test,
 })
 
-test('T-368 AC9：卡片——日盤 8:45～13:45、夜盤 15:00～隔天 5:00 算盤中，其他「M/D 收」，沒成交「尚未成交」', () => {
+test('T-369 AC9：卡片——日盤 8:45～13:45、夜盤 15:00～隔天 5:00 算盤中，其他「M/D 收」，沒成交「尚未成交」', () => {
   assert.equal(nextDay('2026-10-16'), '2026-10-17')
   assert.equal(nextDay('2026-12-31'), '2027-01-01')
   const day = webTx('day', '2026-10-16', 47242, 46931)
@@ -258,7 +258,7 @@ test('T-368 AC9：卡片——日盤 8:45～13:45、夜盤 15:00～隔天 5:00 �
   assert.equal(pts(-971.26), '-971')
 })
 
-test('T-368 AC10：卡片——標籤顏色、兩節與價差、美股時間；沒有任何資料不畫', () => {
+test('T-369 AC10：卡片——標籤顏色、兩節與價差、美股時間；沒有任何資料不畫', () => {
   assert.equal(globalTone('夜盤大跌・美股大跌・偏空'), 'bear')
   assert.equal(globalTone('偏多'), 'bull')
   assert.equal(globalTone('多空分歧'), 'flat')

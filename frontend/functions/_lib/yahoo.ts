@@ -1,4 +1,4 @@
-// 美股指數（D-185）：Yahoo Finance 的 chart 介面（v8），一個指數一次請求，拿最近 5 個交易日的日線。
+// 美股指數（D-186）：Yahoo Finance 的 chart 介面（v8），一個指數一次請求，拿最近 5 個交易日的日線。
 // 不是正式開放的介面：格式不對就丟錯（端點給舊的一份）。純函數，供 node 單元測試。
 export const YAHOO_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/'
 

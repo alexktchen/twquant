@@ -210,7 +210,7 @@ export async function readClose(db: Db): Promise<CloseMood | null> {
   return closeMood(date, rows, { taiex: dayReturn(idx, 'TAIEX', date), otc: dayReturn(idx, 'TPEX', date) })
 }
 
-// ── 期貨與美股（D-185）────────────────────────────────────────────────────────
+// ── 期貨與美股（D-186）────────────────────────────────────────────────────────
 // 台指期日盤／夜盤（期交所，_lib/taifex.ts）與美股四大指數（Yahoo，_lib/yahoo.ts）合成「多空」一句。只供看盤，不進選股、不進模型。
 
 /** 台指期最新一節或美股平均漲跌的絕對值到這個（小數，0.5%）才算有方向；兩邊都不到就「多空平淡」。 */

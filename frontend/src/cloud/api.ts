@@ -94,7 +94,7 @@ export const deletePushSubscription = (endpoint: string) => get<{ ok: boolean }>
 export const fetchMoodLive = () => get<{ live: LiveMood | null; stale: boolean; retry_after: number | null }>('/api/mood/live')
 /** 市場氛圍收盤版：最近一天的族群資金；還沒算過 close 是 null。 */
 export const fetchMoodClose = () => get<{ close: CloseMood | null }>('/api/mood/close').then((r) => r.close)
-/** 市場氛圍期貨與美股版（D-185）：台指期日盤／夜盤、加權現貨、美股四大指數；stale＝有來源沒更新到、給的是上一份。 */
+/** 市場氛圍期貨與美股版（D-186）：台指期日盤／夜盤、加權現貨、美股四大指數；stale＝有來源沒更新到、給的是上一份。 */
 export const fetchMoodGlobal = () => get<{ global: GlobalMood; stale: boolean; errors: string[] }>('/api/mood/global')
 export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?line=${encodeURIComponent(line)}`)
 

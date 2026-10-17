@@ -1,4 +1,4 @@
-// 台指期即時行情（D-185）：期交所「期貨市況」的 getQuoteList，日盤（MarketType 0）與夜盤（MarketType 1）各問一次，
+// 台指期即時行情（D-186）：期交所「期貨市況」的 getQuoteList，日盤（MarketType 0）與夜盤（MarketType 1）各問一次，
 // 一次回全部月份的臺指期＋臺指現貨。不是正式開放的介面：格式不對就丟錯（端點給舊的一份或 503）。純函數，供 node 單元測試。
 export const TAIFEX_URL = 'https://mis.taifex.com.tw/futures/api/getQuoteList'
 

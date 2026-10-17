@@ -7,9 +7,13 @@ append-only 分片。落地在 reporting（IO 層）——洞悉層 insight/ 屬
 from __future__ import annotations
 
 import datetime as dt
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import polars as pl
+
+from twquant.conventions import TZ
 
 _SCHEMA = {
     "task": pl.String,
@@ -50,7 +54,9 @@ def record_usage(
         "date": now.date().isoformat(),
         "ts": now.isoformat(),
     }
-    stamp = now.strftime("%Y%m%dT%H%M%S%f")
+    # 檔名加亂數尾碼：run_insights 對同一批候選傳同一個 now，只用時間戳會互相覆蓋、
+    # 預算閘因此少算（T-368 實測）。
+    stamp = f"{now.strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
     final = d / f"part-{stamp}.parquet"
     tmp = d / f"part-{stamp}.parquet.tmp"
     pl.DataFrame([row], schema=_SCHEMA).write_parquet(tmp)
@@ -73,3 +79,33 @@ def today_cost_twd(data_dir: str | Path, day: dt.date) -> float:
     if same.is_empty():
         return 0.0
     return float(same.select(pl.col("cost_twd").sum()).item())
+
+
+NeuronRate = Callable[[str, int, int], float | None]  # (model_id, in_tok, out_tok) -> Neurons
+
+
+def _utc_date(ts: str) -> dt.date:
+    """紀錄的 ts 轉 UTC 日；naive 視為台北時間（舊紀錄與測試可能沒帶時區）。"""
+    when = dt.datetime.fromisoformat(ts)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=TZ)
+    return when.astimezone(dt.UTC).date()
+
+
+def today_neurons(data_dir: str | Path, utc_day: dt.date, rate: NeuronRate) -> float:
+    """某個 UTC 日累計的 Cloudflare Neurons（D-185 §4）。
+
+    免費額度在 UTC 00:00 重置，所以依 UTC 日而不是台北日累計；台北隔日凌晨的補跑
+    與前一天傍晚的主跑算同一天。非 Cloudflare 模型 `rate` 回 None，不計入。
+    """
+    log = read_usage(data_dir)
+    if log.is_empty():
+        return 0.0
+    total = 0.0
+    for row in log.iter_rows(named=True):
+        if _utc_date(row["ts"]) != utc_day:
+            continue
+        used = rate(row["model_id"], int(row["input_tokens"]), int(row["output_tokens"]))
+        if used is not None:
+            total += used
+    return total
