@@ -81,3 +81,12 @@ test('2026-10-17：新聞頭條的時間——晨報存的 ISO 字串 → 月/�
   assert.equal(headlineTime('2026-09-03T23:05:41+08:00'), '9/3 23:05')
   assert.equal(headlineTime('壞的'), '壞的')
 })
+
+test('除權息預告：種類中文與金額說明', async () => {
+  const { DIV_KIND, dividendText } = await import('../src/cloud/war.ts')
+  assert.deepEqual([DIV_KIND.cash, DIV_KIND.stock, DIV_KIND.both], ['除息', '除權', '除權息'])
+  assert.equal(dividendText({ cash_dividend: 1.2, stock_ratio: 0, rights_ratio: 0 }), '現金 1.2 元')
+  assert.equal(dividendText({ cash_dividend: 0.5000208, stock_ratio: 0.09999999, rights_ratio: null }), '現金 0.5 元、配股 0.1')
+  assert.equal(dividendText({ cash_dividend: 0, stock_ratio: 0, rights_ratio: 0.09128214 }), '現增 0.0913')
+  assert.equal(dividendText({ cash_dividend: null, stock_ratio: null, rights_ratio: null }), '')
+})

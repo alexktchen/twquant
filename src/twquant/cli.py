@@ -801,6 +801,23 @@ def taifex_daily_cmd(
     typer.secho(f"[OK] 期交所盤後 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="dividend-calendar")
+def dividend_calendar_cmd(
+    date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「除權息預告」步驟：證交所與櫃買的除權除息預告 → serving.dividend_calendar。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _dividend_calendar_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 除權息預告 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
 @app.command(name="conferences")
 def conferences_cmd(
     date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
@@ -1906,6 +1923,15 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _taifex_daily_for_day(day)
 
+    def _dividend_calendar_step() -> str:
+        # 除權除息預告：首頁行事曆用，休市日照跑（整份 upsert，冪等）。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _dividend_calendar_for_day(day)
+
     def _conferences_step() -> str:
         # T-376 法說會行事曆：MOPS 月表整月覆蓋，休市日照跑。best-effort。
         from twquant.data.serving import store
@@ -2029,6 +2055,7 @@ def _run_daily_pipeline(
         PipelineStep("大盤體檢", _market_daily_step),
         PipelineStep("期交所盤後", _taifex_daily_step),
         PipelineStep("法說會", _conferences_step),
+        PipelineStep("除權息預告", _dividend_calendar_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -3430,6 +3457,34 @@ def _conferences_for_day(day: dt.date) -> str:
         conn.close()
     upcoming = df.filter(pl.col("date") >= day).height
     return f"{df.height} 場（{len(frames)} 頁），今天起 {upcoming} 場"
+
+
+def _dividend_calendar_for_day(day: dt.date) -> str:
+    """除權除息預告（2026-10-17）：證交所＋櫃買兩份預告 → `dividend_calendar`（整份 upsert）。"""
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import dividend_calendar as dc
+    from twquant.data.sources.tpex import browser_client
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    twse = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
+    df = dc.fetch(twse, browser_client(cfg.source_rates["tpex"]), now_tw())
+    conn = store.connect(scfg)
+    try:
+        sch.ensure_tables(conn, (sch.DIVIDEND_CALENDAR_SPEC,), scfg.pg_schema)
+        sch.assert_columns(conn, sch.DIVIDEND_CALENDAR_SPEC, scfg.pg_schema)
+        if not df.is_empty():
+            with conn.cursor() as cur:
+                upsert(cur, scfg.pg_schema, sch.DIVIDEND_CALENDAR_SPEC, df)
+            conn.commit()
+    finally:
+        conn.close()
+    ahead = df.filter(df["date"] >= day)
+    return f"{df.height} 筆（上市 {int((df['market'] == 'TWSE').sum())}、上櫃 {int((df['market'] == 'TPEX').sum())}），今天起 {ahead.height} 筆"
 
 
 def _pick_reasons_for_day(day: dt.date) -> str:
