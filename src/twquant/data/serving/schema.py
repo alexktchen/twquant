@@ -762,6 +762,26 @@ MORNING_BRIEF_SPEC = TableSpec(
     pk=("date",),
 )
 
+# 除權除息預告（2026-10-17）：首頁行事曆用；證交所 TWT48U＋櫃買 tpex_exright_prepost，每天整份 upsert。
+# 欄位與 data/sources/dividend_calendar.SCHEMA 同名同序。還原權值仍用 corporate_events（除權息後的結果）。
+DIVIDEND_CALENDAR_SPEC = TableSpec(
+    "dividend_calendar",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("market", "text"),
+        ("name", "text"),
+        ("kind", "text"),
+        ("cash_dividend", "double precision"),
+        ("stock_ratio", "double precision"),
+        ("rights_ratio", "double precision"),
+        ("rights_price", "double precision"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "stock_id"),
+    indexes=(("date",),),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -786,6 +806,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     TAIFEX_DAILY_SPEC,
     CONFERENCE_CALENDAR_SPEC,
     MORNING_BRIEF_SPEC,
+    DIVIDEND_CALENDAR_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

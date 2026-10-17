@@ -263,6 +263,83 @@ def clean_tpex_valuation(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
     return _clean_valuation(raw, date, "股票代號", "N/A")
 
 
+# 櫃買三大法人買賣明細的七組欄位（去重後的欄名，依頁面順序）：每組「買進／賣出／買賣超股數」。
+# 外資＝外資及陸資合計（＝不含自營＋外資自營商，與上市 T86 的 foreign_net 同義）；自營商＝自營商合計。
+_TPEX_INSTI_NET = {
+    "foreign_ex_dealer": "買賣超股數",
+    "foreign_dealer": "買賣超股數_2",
+    "foreign": "買賣超股數_3",
+    "trust": "買賣超股數_4",
+    "dealer_self": "買賣超股數_5",
+    "dealer_hedge": "買賣超股數_6",
+    "dealer": "買賣超股數_7",
+}
+_TPEX_INSTI_TOTAL = "三大法人買賣超股數合計"
+
+
+def clean_tpex_institutional(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
+    """櫃買 insti/dailyTrade 原始 → institutional_daily（上櫃）。
+
+    欄名全是重複的「買進／賣出／買賣超股數」，只能依位置對應；所以先驗三條加總
+    （外資合計＝不含自營＋外資自營商、自營合計＝自行買賣＋避險、三大合計＝外資＋投信＋自營），
+    任何一列不符整天 raise——欄位位移不會報錯，只會給出一整天錯的數字（同上市 T86，T-102）。
+    """
+    need = [*_TPEX_INSTI_NET.values(), _TPEX_INSTI_TOTAL, "代號"]
+    missing = [c for c in need if c not in raw.columns]
+    if missing:
+        raise DataError(
+            "institutional_daily", date, f"櫃買法人表缺欄位 {missing}；現有 {raw.columns}"
+        )
+    n = {k: _int(v) for k, v in _TPEX_INSTI_NET.items()}
+    checks = {
+        "外資合計": n["foreign"] - (n["foreign_ex_dealer"] + n["foreign_dealer"]),
+        "自營合計": n["dealer"] - (n["dealer_self"] + n["dealer_hedge"]),
+        "三大合計": _int(_TPEX_INSTI_TOTAL) - (n["foreign"] + n["trust"] + n["dealer"]),
+    }
+    for name, diff in checks.items():
+        bad = raw.filter(diff.is_null() | (diff != 0))
+        if bad.height:
+            ids = bad["代號"].str.strip_chars().to_list()[:5]
+            raise DataError(
+                "institutional_daily",
+                date,
+                f"櫃買法人表「{name}」加總不符 {bad.height} 列（如 {ids}），欄位可能位移",
+            )
+    out = raw.select(
+        pl.lit(date, dtype=pl.Date).alias("date"),
+        pl.col("代號").str.strip_chars().alias("stock_id"),
+        n["foreign"].alias("foreign_net"),
+        n["trust"].alias("trust_net"),
+        n["dealer"].alias("dealer_net"),
+        pl.lit(_at(date, 18), dtype=schemas.TW_DT).alias("available_at"),
+    ).filter(pl.col("stock_id").str.contains(r"^[0-9]{4,6}[A-Z]?$"))
+    return schemas.validate("institutional_daily", out)
+
+
+def clean_tpex_margin(raw: pl.DataFrame, date: dt.date) -> pl.DataFrame:
+    """櫃買 margin/balance 原始 → margin_daily（上櫃）。資餘額／券餘額單位為張，×1000 轉股（SPEC-000）。"""
+    for col in ("代號", "資餘額", "券餘額"):
+        if col not in raw.columns:
+            raise DataError(
+                "margin_daily", date, f"櫃買融資融券表缺欄位「{col}」；現有 {raw.columns}"
+            )
+    out = raw.select(
+        pl.lit(date, dtype=pl.Date).alias("date"),
+        pl.col("代號").str.strip_chars().alias("stock_id"),
+        (_int("資餘額") * SHARES_PER_LOT).alias("margin_balance"),
+        (_int("券餘額") * SHARES_PER_LOT).alias("short_balance"),
+        pl.lit(_at(date, 21), dtype=schemas.TW_DT).alias("available_at"),
+    ).filter(pl.col("stock_id").str.contains(r"^[0-9]{4,6}[A-Z]?$"))
+    bad = out.filter(pl.col("margin_balance").is_null() | pl.col("short_balance").is_null())
+    if bad.height:
+        raise DataError(
+            "margin_daily",
+            date,
+            f"櫃買融資融券餘額有 {bad.height} 列不是數字（如 {bad['stock_id'].to_list()[:5]}）",
+        )
+    return schemas.validate("margin_daily", out)
+
+
 def _month_end(year: int, month: int) -> dt.date:
     """該月最後一個日曆日。"""
     nxt = dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)
@@ -473,6 +550,8 @@ CLEANERS = {
 TPEX_CLEANERS = {
     "prices_daily": clean_tpex_prices,
     "stock_valuation": clean_tpex_valuation,
+    "institutional_daily": clean_tpex_institutional,
+    "margin_daily": clean_tpex_margin,
 }
 
 # TDCC 專用清洗（集保戶股權分散）

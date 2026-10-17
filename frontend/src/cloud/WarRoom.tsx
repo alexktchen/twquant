@@ -10,7 +10,8 @@ import { pct } from './format'
 import { HEAT_KEY, loadPref, openPref, savePref } from './prefs'
 import type { Scorecard } from './scorecard'
 import {
-  EVENT_NAME,
+  DIV_KIND,
+  dividendText,
   breadth,
   dayLabel,
   signedYi,
@@ -388,10 +389,11 @@ export function WarRoom({
                 </span>
               </li>
               {data.calendar.dividends.map((d) => (
-                <li key={`${d.date}${d.stock_id}${d.event_type}`} onClick={() => onStock(d.stock_id, d.name)}>
-                  <b>{EVENT_NAME[d.event_type] ?? d.event_type}</b>
+                <li key={`${d.date}${d.stock_id}`} onClick={() => onStock(d.stock_id, d.name)}>
+                  <b>{DIV_KIND[d.kind] ?? d.kind}</b>
                   <span>
                     {dayLabel(d.date)} <em>{d.stock_id}</em> {d.name ?? ''}
+                    {dividendText(d) && <small className="cq-war-mute">　{dividendText(d)}</small>}
                   </span>
                 </li>
               ))}

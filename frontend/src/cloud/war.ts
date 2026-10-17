@@ -87,7 +87,15 @@ export type WarRoomData = {
   news: { since: string; items: NewsItem[] }
   calendar: {
     conferences: { date: string; stock_id: string; name: string | null; conf_time: string; summary: string | null }[]
-    dividends: { date: string; stock_id: string; name: string | null; event_type: string }[]
+    dividends: {
+      date: string
+      stock_id: string
+      name: string | null
+      kind: 'cash' | 'stock' | 'both'
+      cash_dividend: number | null
+      stock_ratio: number | null
+      rights_ratio: number | null
+    }[]
     revenue: { date: string; days: number }
   }
 }
@@ -120,13 +128,16 @@ export function tone(x: number | null | undefined): 'up' | 'down' | 'flat' {
   return x > 0 ? 'up' : 'down'
 }
 
-/** 事件代碼 → 中文。 */
-export const EVENT_NAME: Record<string, string> = {
-  cash_dividend: '除息',
-  stock_dividend: '除權',
-  cash_and_stock_dividend: '除權息',
-  split: '分割',
-  reverse_split: '減資',
+/** 除權息預告的種類 → 中文。 */
+export const DIV_KIND: Record<string, string> = { cash: '除息', stock: '除權', both: '除權息' }
+
+/** 一筆除權息預告的金額說明：「現金 1.2 元」「配股 0.1」「現增 0.09」；都沒有 → 空字串。 */
+export function dividendText(d: { cash_dividend: number | null; stock_ratio: number | null; rights_ratio: number | null }): string {
+  const parts: string[] = []
+  if (d.cash_dividend) parts.push(`現金 ${Number(d.cash_dividend.toFixed(4))} 元`)
+  if (d.stock_ratio) parts.push(`配股 ${Number(d.stock_ratio.toFixed(4))}`)
+  if (d.rights_ratio) parts.push(`現增 ${Number(d.rights_ratio.toFixed(4))}`)
+  return parts.join('、')
 }
 
 /** 「2026-10-17」→「10/17（六）」。 */
