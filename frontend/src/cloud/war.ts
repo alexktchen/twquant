@@ -20,6 +20,23 @@ export type Brief = {
 
 export type Headline = { news_id: number; title: string; summary: string | null; published_at: string; category: string | null; url: string; source: string }
 
+/** 某天大盤實際收盤（晨報寫在開盤前，拿來對照）。 */
+export type BriefActual = {
+  date: string
+  taiex_close: number | null
+  taiex_chg: number | null
+  otc_close: number | null
+  otc_chg: number | null
+  foreign_net: number | null
+}
+
+/** 日期清單（新到舊）裡，day 的前一天（較舊）與後一天（較新）；不在清單裡 → 都 null。 */
+export function briefNeighbors(dates: string[], day: string): { older: string | null; newer: string | null } {
+  const i = dates.indexOf(day)
+  if (i < 0) return { older: null, newer: null }
+  return { older: dates[i + 1] ?? null, newer: i > 0 ? dates[i - 1] : null }
+}
+
 /** 「2026-10-17T06:12:00+08:00」→「10/17 06:12」。 */
 export function headlineTime(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso)
@@ -91,6 +108,8 @@ export function carouselStep(i: number, n: number, dir: 1 | -1): number {
 export type WarRoomData = {
   today: string
   brief: Brief | null
+  /** 有晨報的日期（新到舊），給「今日一句話」切換歷史 */
+  brief_dates?: string[]
   market: Market | null
   taifex: Taifex | null
   picks: { date: string; lines: { code: string; name: string; n: number; new: number }[] } | null

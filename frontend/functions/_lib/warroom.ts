@@ -5,6 +5,9 @@ import { NEWS_CATEGORIES } from './news-categories.ts'
 export const NEWS_LIMIT = 40
 export const WATCH_NEWS_LIMIT = 30
 /** 行事曆看今天起幾天。 */
+/** 「今日一句話」歷史切換最多列幾天（晨報全史保留；一天一筆）。 */
+export const BRIEF_DATES_LIMIT = 400
+
 export const CALENDAR_DAYS = 3
 /** 月營收法定申報期限：每月 10 日。 */
 export const REVENUE_DEADLINE_DAY = 10

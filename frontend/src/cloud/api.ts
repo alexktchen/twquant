@@ -7,7 +7,7 @@ import type { Scorecard, TradeRow } from './scorecard'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
-import type { NewsItem, WarRoomData } from './war'
+import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -101,6 +101,9 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
+/** 過去某天的「今日一句話」與那天大盤實際收盤（使用者 2026-10-17：選日期看歷史）。 */
+export const fetchBriefDay = (date: string) =>
+  get<{ date: string; brief: Brief | null; actual: BriefActual | null }>(`/api/warroom/brief?date=${date}`)
 /** 追蹤股自 since 起的重大訊息（T-379）。 */
 export const fetchWarroomNews = (sids: string[], since: string) =>
   get<{ since: string; items: NewsItem[] }>(`/api/warroom/news?sids=${encodeURIComponent(sids.join(','))}&since=${since}`)
