@@ -101,6 +101,11 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
+/** 首頁版面（使用者 2026-10-17：依帳號儲存卡片位置與收起）：沒存過 → layout 是 null。 */
+export const fetchLayout = () => get<{ layout: { order: string[]; collapsed: string[] } | null }>('/api/layout')
+export const saveLayout = (layout: { order: string[]; collapsed: string[] }) => get<{ ok: boolean }>('/api/layout', 'PUT', layout)
+/** 恢復預設：刪掉帳號裡存的版面。 */
+export const resetLayout = () => get<{ ok: boolean }>('/api/layout', 'DELETE')
 /** 過去某天的「今日一句話」與那天大盤實際收盤（使用者 2026-10-17：選日期看歷史）。 */
 export const fetchBriefDay = (date: string) =>
   get<{ date: string; brief: Brief | null; actual: BriefActual | null }>(`/api/warroom/brief?date=${date}`)

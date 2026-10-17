@@ -3,6 +3,8 @@
 // 不分盤中收盤都顯示。只給登入的人（API 在 /api 底下）；三份都拿不到就不顯示，不擋族群資料。
 import { useEffect, useState } from 'react'
 import { fetchMoodClose, fetchMoodGlobal, fetchMoodLive } from './api'
+import { CardFrame } from './CardFrame'
+import type { Slide } from './Reel'
 import { pct, trend } from './format'
 import { liveBackoff, shouldPoll, taipeiNow } from './live'
 import { MOOD_KEY, loadPref, openPref, savePref } from './prefs'
@@ -178,6 +180,102 @@ function Global({ state, now }: { state: GlobalState; now: { date: string; time:
   )
 }
 
+type MoodView = ReturnType<typeof moodView>
+type GlobalViewT = ReturnType<typeof globalView>
+
+/** 市場氛圍的內容（期貨與美股、類股強弱、族群資金）；盤勢分頁與首頁共用。 */
+function MoodBody({ v, global, now }: { v: MoodView; global: GlobalState; now: { date: string; time: string } }) {
+  return (
+    <div className="cq-mood-body">
+      <Global state={global} now={now} />
+      {v?.sectors && (
+        <div className="cq-mood-col">
+          <div className="cq-mood-row">
+            <span>{v.sectors.words[0]}</span>
+            <Sectors items={v.sectors.strong} />
+          </div>
+          <div className="cq-mood-row">
+            <span>{v.sectors.words[1]}</span>
+            <Sectors items={v.sectors.weak} />
+          </div>
+          <p className="cq-mood-note">類股強弱：證交所類股指數，跟加權比；盤中每 30 秒更新。</p>
+        </div>
+      )}
+      {v?.flow && (
+        <div className="cq-mood-col">
+          <div className="cq-mood-row">
+            <span>資金流入</span>
+            <Flows items={v.flow.inflow} />
+          </div>
+          <div className="cq-mood-row">
+            <span>資金流出</span>
+            <Flows items={v.flow.outflow} />
+          </div>
+          <p className="cq-mood-note">
+            防禦族群（金融、電信、食品、油電燃氣）成交比重 {(v.flow.defShare * 100).toFixed(1)}%
+            {v.flow.defAvg !== null && `（前 20 日平均 ${(v.flow.defAvg * 100).toFixed(1)}%）`}・上漲 {v.flow.up.toLocaleString()} 檔、下跌{' '}
+            {v.flow.down.toLocaleString()} 檔。資金數字＝成交比重比前 20 日平均多幾個百分點。
+          </p>
+        </div>
+      )}
+      {v?.flowNote && (
+        <div className="cq-mood-col">
+          <p className="cq-mood-note">{v.flowNote}。</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 標題旁的加權、櫃買漲跌與氛圍標籤。 */
+function MoodTags({ v, g }: { v: MoodView; g: GlobalViewT }) {
+  return (
+    <>
+      {v && (
+        <span className="cq-mood-idx">
+          加權 <i className={trend(v.taiex)}>{pct(v.taiex)}</i>
+          {v.otc !== null && (
+            <>
+              {' '}櫃買 <i className={trend(v.otc)}>{pct(v.otc)}</i>
+            </>
+          )}
+        </span>
+      )}
+      {v?.label && <em className={`cq-mood-tag ${v.tone}`}>{v.label}</em>}
+      {g?.label && <em className={`cq-mood-tag ${g.tone}`}>{g.label}</em>}
+    </>
+  )
+}
+
+/** 收起時輪播的重點：台指期每一節、期現價差、美股每個指數、領漲／落後類股、資金流入／流出各一則。 */
+function moodSlides(v: MoodView, g: GlobalViewT): Slide[] {
+  const out: Slide[] = []
+  const line = (key: string, label: string, value: string, tone?: string, note?: string | null) =>
+    out.push({
+      key,
+      node: (
+        <p className="cq-reel-text cq-reel-kv">
+          <span>{label}</span>
+          <b className={tone}>{value}</b>
+          {note && <small className="cq-war-mute">{note}</small>}
+        </p>
+      ),
+    })
+  for (const q of g?.tx ?? [])
+    line(`tx${q.session}`, `台指期 ${q.name}`, `${q.last !== null ? pts(q.last) : '—'}　${signedPts(q.diff)}　${q.chg !== null ? pct(q.chg) : '—'}`, trend(q.chg), q.when)
+  if (g?.gap) line('gap', `${g.gap.session === 'night' ? '夜盤' : '日盤'}比加權`, `${signedPts(g.gap.pts)} 點（${pct(g.gap.pct, 1)}）`, trend(g.gap.pts), g.gap.pts >= 0 ? '正價差' : '逆價差')
+  for (const u of g?.us ?? []) line(`us${u.name}`, `美股 ${u.name}`, `${usPrice(u.last)}　${signedPts(u.diff, 2)}　${pct(u.chg)}`, trend(u.chg), g?.usWhen)
+  if (v?.sectors) {
+    line('strong', v.sectors.words[0], v.sectors.strong.map((m) => `${m.name} ${pct(m.chg, 1)}`).join('、'))
+    line('weak', v.sectors.words[1], v.sectors.weak.map((m) => `${m.name} ${pct(m.chg, 1)}`).join('、'))
+  }
+  if (v?.flow) {
+    line('in', '資金流入', v.flow.inflow.map((m) => `${m.grp} ${pp(m.diff)}`).join('、'))
+    line('out', '資金流出', v.flow.outflow.map((m) => `${m.grp} ${pp(m.diff)}`).join('、'))
+  }
+  return out
+}
+
 export function MoodCard({ enabled }: { enabled: boolean }) {
   const { live, close, global } = useMood(enabled)
   // 預設展開，點標題收起；展開／收起記在這台瀏覽器
@@ -195,62 +293,34 @@ export function MoodCard({ enabled }: { enabled: boolean }) {
       <button className="cq-mood-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <b>市場氛圍</b>
         {v && <span className="cq-mood-when">{v.when}</span>}
-        {v && (
-          <span className="cq-mood-idx">
-            加權 <i className={trend(v.taiex)}>{pct(v.taiex)}</i>
-            {v.otc !== null && (
-              <>
-                {' '}櫃買 <i className={trend(v.otc)}>{pct(v.otc)}</i>
-              </>
-            )}
-          </span>
-        )}
-        {v?.label && <em className={`cq-mood-tag ${v.tone}`}>{v.label}</em>}
-        {g?.label && <em className={`cq-mood-tag ${g.tone}`}>{g.label}</em>}
+        <MoodTags v={v} g={g} />
         <span className="cq-mood-caret" aria-hidden>
           {open ? '▾' : '▸'}
         </span>
       </button>
-      {open && (
-        <div className="cq-mood-body">
-          <Global state={global} now={now} />
-          {v?.sectors && (
-            <div className="cq-mood-col">
-              <div className="cq-mood-row">
-                <span>{v.sectors.words[0]}</span>
-                <Sectors items={v.sectors.strong} />
-              </div>
-              <div className="cq-mood-row">
-                <span>{v.sectors.words[1]}</span>
-                <Sectors items={v.sectors.weak} />
-              </div>
-              <p className="cq-mood-note">類股強弱：證交所類股指數，跟加權比；盤中每 30 秒更新。</p>
-            </div>
-          )}
-          {v?.flow && (
-            <div className="cq-mood-col">
-              <div className="cq-mood-row">
-                <span>資金流入</span>
-                <Flows items={v.flow.inflow} />
-              </div>
-              <div className="cq-mood-row">
-                <span>資金流出</span>
-                <Flows items={v.flow.outflow} />
-              </div>
-              <p className="cq-mood-note">
-                防禦族群（金融、電信、食品、油電燃氣）成交比重 {(v.flow.defShare * 100).toFixed(1)}%
-                {v.flow.defAvg !== null && `（前 20 日平均 ${(v.flow.defAvg * 100).toFixed(1)}%）`}・上漲 {v.flow.up.toLocaleString()} 檔、下跌{' '}
-                {v.flow.down.toLocaleString()} 檔。資金數字＝成交比重比前 20 日平均多幾個百分點。
-              </p>
-            </div>
-          )}
-          {v?.flowNote && (
-            <div className="cq-mood-col">
-              <p className="cq-mood-note">{v.flowNote}。</p>
-            </div>
-          )}
-        </div>
-      )}
+      {open && <MoodBody v={v} global={global} now={now} />}
     </section>
+  )
+}
+
+/** 首頁版（使用者 2026-10-17）：外框與收起輪播跟其他卡一樣，收起與否存在首頁版面（帳號）。 */
+export function HomeMoodCard({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const { live, close, global } = useMood(true)
+  const now = taipeiNow()
+  const v = moodView(live, close, now)
+  const g = globalView(global?.global ?? null, now)
+  return (
+    <CardFrame
+      title="市場氛圍"
+      className="cq-war-moodcard"
+      when={v?.when}
+      extra={<span className="cq-war-moodtags"><MoodTags v={v} g={g} /></span>}
+      collapsed={collapsed}
+      onToggle={onToggle}
+      slides={moodSlides(v, g)}
+      empty="行情讀取中…"
+    >
+      {v || g ? <MoodBody v={v} global={global} now={now} /> : <p className="cq-war-mute">行情讀取中…</p>}
+    </CardFrame>
   )
 }

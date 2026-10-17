@@ -1,28 +1,21 @@
-// 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、市場氛圍（美股、台指期、類股／資金，沿用 MoodCard）、
-// 其他國際行情、期貨籌碼、大盤體檢、法人與融資、昨日消息、今天名單速覽、名單成績、行事曆；族群熱力圖在最下面，預設打開。
+// 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、昨晚國際大事、市場氛圍、國際行情、期貨籌碼、大盤體檢、
+// 法人與融資、昨日消息、今天名單速覽、名單成績、行事曆、族群熱力圖。
+// 使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置，卡也要可以縮起來，縮起來後內容要可以輪播」——
+// 卡片照版面（useHomeLayout，登入後存在帳號）排；每張卡點標題收起，收起時輪播重點；「整理版面」拖曳或 ▲▼ 換位置。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
 import { CalendarCard } from './CalendarCard'
-import { GroupsPage } from './GroupsPage'
 import { HeadlinesCard } from './HeadlinesCard'
-import { MoodCard } from './MoodCard'
+import { ChipsCard, HeatCard, IntlCard, MarketCard, PicksCard, ScoreHomeCard, TaifexCard } from './HomeCards'
+import { LayoutEditor } from './LayoutEditor'
+import { HomeMoodCard } from './MoodCard'
 import { NewsCard } from './NewsCard'
-import { pct } from './format'
-import { HEAT_KEY, loadPref, openPref, savePref } from './prefs'
+import { cardDef, type CardId } from './layout'
 import type { Scorecard } from './scorecard'
-import {
-  breadth,
-  dayLabel,
-  firstLiveExit,
-  signedYi,
-  streakText,
-  tone,
-  type Brief,
-  type NewsItem,
-  type WarRoomData,
-} from './war'
+import { useHomeLayout } from './useHomeLayout'
+import type { Brief, NewsItem, WarRoomData } from './war'
 
 /** 名單成績卡列哪幾條線（大盤精選、潛伏飆股；高分爆量還在驗證、筆數太少不列）。 */
 const SCORE_LINES = ['CORE', 'QUIET']
@@ -36,7 +29,7 @@ export function WarRoom({
   onStock,
 }: {
   refresh: number
-  /** 追蹤股代號（登入後才有）：昨日消息多一個「追蹤」篩選 */
+  /** 追蹤股代號（登入後才有）：昨日消息多一個「追蹤」篩選、行事曆標「追蹤」 */
   watchSids: string[]
   /** 名單日期與各族群在名單上的股票（族群熱力圖標「在名單」用） */
   listed: { date: string; sids: Map<string, string[]> } | null
@@ -48,14 +41,10 @@ export function WarRoom({
   const [err, setErr] = useState('')
   const [watchNews, setWatchNews] = useState<NewsItem[]>([])
   const [scores, setScores] = useState<Record<string, Scorecard | null>>({})
-  // 使用者 2026-10-17：熱力圖預設打開，點過打開／收起記在這台瀏覽器
-  const [heatOpen, setHeatOpenState] = useState(() => openPref(loadPref(HEAT_KEY), true))
-  const setHeatOpen = (on: boolean) => {
-    setHeatOpenState(on)
-    savePref(HEAT_KEY, on ? '1' : '0')
-  }
   // 今日一句話目前顯示哪一天（切到歷史時，新聞頭條卡跟著換成那天的）
   const [shown, setShown] = useState<Brief | null>(null)
+  const { layout, toggle, setOrder, reset, error: layoutErr } = useHomeLayout()
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => {
     let stale = false
@@ -87,316 +76,69 @@ export function WarRoom({
   }, [data, sidsKey])
 
   const m = data?.market ?? null
-  const t = data?.taifex ?? null
   const b = data?.brief ?? null
   const shownBrief = shown ?? b
-  const br = m ? breadth(m.up, m.down, m.flat) : null
   const listedSids = useMemo(() => new Set(data?.picks?.sids ?? []), [data])
   const watchSet = useMemo(() => new Set(watchSids), [watchSids])
 
-  return (
-    <main className="cq-war">
-      {err && <div className="cq-err">{err}</div>}
-
-      {/* 今日一句話：模型晨報（數字都檢查過）；沒有就用規則版。可切換日期看歷史（BriefCard） */}
+  const fold = (id: CardId) => ({ collapsed: layout.collapsed.includes(id), onToggle: () => toggle(id) })
+  const card: Record<CardId, () => ReactNode> = {
+    brief: () => (
       <BriefCard
         latest={b}
         dates={data?.brief_dates ?? (b ? [b.date] : [])}
         latestActual={m && b && m.date === b.date ? m : null}
         loading={!data && !err}
         onShown={setShown}
+        {...fold('brief')}
       />
+    ),
+    heads: () => (
+      <HeadlinesCard items={shownBrief?.headlines ?? []} until={shownBrief ? shownBrief.generated_at.slice(11, 16) : null} {...fold('heads')} />
+    ),
+    mood: () => <HomeMoodCard {...fold('mood')} />,
+    intl: () => <IntlCard b={b} {...fold('intl')} />,
+    taifex: () => <TaifexCard t={data?.taifex ?? null} {...fold('taifex')} />,
+    market: () => <MarketCard m={m} {...fold('market')} />,
+    chips: () => <ChipsCard m={m} {...fold('chips')} />,
+    news: () => (
+      <NewsCard
+        since={data?.news.since ?? null}
+        items={data?.news.items ?? []}
+        watchNews={watchNews}
+        watchSids={watchSids}
+        onStock={onStock}
+        {...fold('news')}
+      />
+    ),
+    picks: () => <PicksCard picks={data?.picks ?? null} onPicks={onPicks} {...fold('picks')} />,
+    score: () => <ScoreHomeCard lines={SCORE_LINES} scores={scores} onScore={onScore} {...fold('score')} />,
+    cal: () => <CalendarCard calendar={data?.calendar ?? null} listedSids={listedSids} watchSids={watchSet} onStock={onStock} {...fold('cal')} />,
+    heat: () => <HeatCard refresh={refresh} listed={listed} onStock={onStock} {...fold('heat')} />,
+  }
 
-      {/* 昨晚國際大事・新聞頭條（HeadlinesCard：預設收起輪播，晨報 06:30 抓的鉅亨網頭條快照） */}
-      <HeadlinesCard items={shownBrief?.headlines ?? []} until={shownBrief ? shownBrief.generated_at.slice(11, 16) : null} />
-
-      {/* 美股、台指期、類股強弱／族群資金：沿用市場氛圍 */}
-      <div className="cq-war-mood">
-        <MoodCard enabled />
-      </div>
-
-      <div className="cq-war-grid">
-        {/* 其他國際行情（06:30 的快照） */}
-        <section className="cq-war-card">
-          <header>
-            <h2>國際行情</h2>
-            {b && <span className="cq-war-when">{b.generated_at.slice(5, 16).replace('-', '/')} 快照</span>}
-          </header>
-          {b?.extras && b.extras.length > 0 ? (
-            <table className="cq-war-table">
-              <tbody>
-                {b.extras.map((q) => (
-                  <tr key={q.symbol}>
-                    <th>{q.name}</th>
-                    <td>{q.symbol === '^TNX' ? `${q.last.toFixed(2)}%` : q.last.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-                    <td className={tone(q.chg)}>{pct(q.chg)}</td>
-                  </tr>
-                ))}
-                {b.adr_premium !== null && (
-                  <tr>
-                    <th>台積電 ADR 折溢價</th>
-                    <td colSpan={2} className={tone(b.adr_premium)}>
-                      {b.adr_premium >= 0 ? '溢價' : '折價'} {Math.abs(b.adr_premium * 100).toFixed(1)}%
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          ) : (
-            <p className="cq-war-mute">今早的快照還沒有。</p>
-          )}
-          <p className="cq-war-note">VIX＝美股恐慌指數；ADR 折溢價＝台積電 ADR 換算台幣後對台股收盤（1 張 ADR＝5 股）。</p>
-        </section>
-
-        {/* 期貨籌碼 */}
-        <section className="cq-war-card">
-          <header>
-            <h2>期貨籌碼</h2>
-            {t && <span className="cq-war-when">{dayLabel(t.date)} 盤後</span>}
-          </header>
-          {t ? (
-            <table className="cq-war-table">
-              <tbody>
-                <tr>
-                  <th>外資台指期淨未平倉</th>
-                  <td colSpan={2} className={tone(t.fut_foreign_net_oi)}>
-                    {t.fut_foreign_net_oi === null ? '—' : `${t.fut_foreign_net_oi >= 0 ? '淨多' : '淨空'} ${Math.abs(t.fut_foreign_net_oi).toLocaleString()} 口`}
-                  </td>
-                </tr>
-                <tr>
-                  <th>投信／自營</th>
-                  <td colSpan={2}>
-                    {t.fut_trust_net_oi?.toLocaleString() ?? '—'} ／ {t.fut_dealer_net_oi?.toLocaleString() ?? '—'} 口
-                  </td>
-                </tr>
-                <tr>
-                  <th>選擇權未平倉買賣權比</th>
-                  <td colSpan={2}>{t.pc_oi_ratio === null ? '—' : `${t.pc_oi_ratio.toFixed(1)}%`}</td>
-                </tr>
-                <tr>
-                  <th>選擇權成交量買賣權比</th>
-                  <td colSpan={2}>{t.pc_vol_ratio === null ? '—' : `${t.pc_vol_ratio.toFixed(1)}%`}</td>
-                </tr>
-              </tbody>
-            </table>
-          ) : (
-            <p className="cq-war-mute">期交所盤後統計還沒有。</p>
-          )}
-          <p className="cq-war-note">淨空單＝外資在台指期貨的空單比多單多；買賣權比＝賣權÷買權，大於 100% 代表避險（賣權）比較多。</p>
-        </section>
-
-        {/* 大盤體檢 */}
-        <section className="cq-war-card">
-          <header>
-            <h2>大盤體檢</h2>
-            {m && <span className="cq-war-when">{dayLabel(m.date)}</span>}
-          </header>
-          {m && br ? (
-            <>
-              <div className="cq-war-idx">
-                <span>
-                  加權 <b>{m.taiex_close?.toLocaleString('en-US', { maximumFractionDigits: 0 }) ?? '—'}</b>{' '}
-                  <i className={tone(m.taiex_chg)}>{pct(m.taiex_chg)}</i>
-                </span>
-                <span>
-                  櫃買 <b>{m.otc_close?.toFixed(2) ?? '—'}</b> <i className={tone(m.otc_chg)}>{pct(m.otc_chg)}</i>
-                </span>
-              </div>
-              <div className="cq-war-breadth" aria-label={`${m.up} 漲 ${m.down} 跌 ${m.flat} 平`}>
-                <span className="up" style={{ width: `${br.up}%` }} />
-                <span className="flat" style={{ width: `${br.flat}%` }} />
-                <span className="down" style={{ width: `${br.down}%` }} />
-              </div>
-              <div className="cq-war-breadth-label">
-                <span className="up">{m.up} 漲</span>
-                <span className="flat">{m.flat} 平</span>
-                <span className="down">{m.down} 跌</span>
-              </div>
-              <table className="cq-war-table">
-                <tbody>
-                  <tr>
-                    <th>漲停／跌停</th>
-                    <td colSpan={2}>
-                      <span className="up">{m.limit_up}</span> ／ <span className="down">{m.limit_down}</span> 家
-                    </td>
-                  </tr>
-                  <tr>
-                    <th>創 20 日新高／新低</th>
-                    <td colSpan={2}>
-                      {m.new_high === null ? '—' : <span className="up">{m.new_high}</span>} ／{' '}
-                      {m.new_low === null ? '—' : <span className="down">{m.new_low}</span>} 家
-                    </td>
-                  </tr>
-                  <tr>
-                    <th>成交金額</th>
-                    <td colSpan={2}>
-                      {Math.round(m.amount / 1e8).toLocaleString()} 億
-                      {m.amount_ratio !== null && <small>（20 日平均的 {m.amount_ratio.toFixed(2)} 倍）</small>}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </>
-          ) : (
-            <p className="cq-war-mute">大盤體檢還沒有（每個交易日收盤後約 17:40 算好）。</p>
-          )}
-          <p className="cq-war-note">家數與成交金額只算上市櫃普通股，不含 ETF、權證。</p>
-        </section>
-
-        {/* 法人與融資 */}
-        <section className="cq-war-card">
-          <header>
-            <h2>法人與融資</h2>
-            {m && <span className="cq-war-when">{dayLabel(m.date)}・估算</span>}
-          </header>
-          {m ? (
-            <table className="cq-war-table">
-              <tbody>
-                <tr>
-                  <th>外資</th>
-                  <td className={tone(m.foreign_net)}>{signedYi(m.foreign_net)}</td>
-                  <td className="cq-war-mute">{streakText(m.foreign_streak)}</td>
-                </tr>
-                <tr>
-                  <th>投信</th>
-                  <td className={tone(m.trust_net)}>{signedYi(m.trust_net)}</td>
-                  <td />
-                </tr>
-                <tr>
-                  <th>自營商</th>
-                  <td className={tone(m.dealer_net)}>{signedYi(m.dealer_net)}</td>
-                  <td />
-                </tr>
-                <tr>
-                  <th>融資餘額變化</th>
-                  <td className={tone(m.margin_delta)}>{signedYi(m.margin_delta)}</td>
-                  <td className="cq-war-mute">{m.margin_balance === null ? '' : `餘額約 ${Math.round(m.margin_balance / 1e8).toLocaleString()} 億`}</td>
-                </tr>
-              </tbody>
-            </table>
-          ) : (
-            <p className="cq-war-mute">還沒有資料。</p>
-          )}
-          <p className="cq-war-note">
-            估算＝每檔買賣超（或融資）股數 × 當天收盤加總，會和證交所公布的金額差幾個百分點（不含 ETF、用收盤價）。看方向與量級用。
-          </p>
-        </section>
-      </div>
-
-      {/* 昨日消息（NewsCard：預設名單股、點開看內文、收起時輪播） */}
-      <NewsCard since={data?.news.since ?? null} items={data?.news.items ?? []} watchNews={watchNews} watchSids={watchSids} onStock={onStock} />
-
-      <div className="cq-war-grid">
-        {/* 今日名單速覽 */}
-        <section className="cq-war-card">
-          <header>
-            <h2>今日名單</h2>
-            {data?.picks && <span className="cq-war-when">{dayLabel(data.picks.date)} 收盤後產生</span>}
-          </header>
-          {data?.picks ? (
-            <ul className="cq-war-picks">
-              {data.picks.lines.map((l) => (
-                <li key={l.code} onClick={() => onPicks(l.code)}>
-                  <b>{l.name}</b>
-                  <span>
-                    {l.n} 檔<small>（新增 {l.new}）</small>
-                  </span>
-                  <i>看名單 ›</i>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="cq-war-mute">還沒有名單。</p>
-          )}
-        </section>
-
-        {/* 名單成績（只顯示，不拿來調模型） */}
-        <section className="cq-war-card">
-          <header>
-            <h2>名單成績</h2>
-            <span className="cq-war-when">公布後的每一筆</span>
-          </header>
-          <table className="cq-war-table cq-war-score">
-            <thead>
-              <tr>
-                <th />
-                <th>筆數</th>
-                <th>每筆平均</th>
-                <th>中位數</th>
-                <th>最差</th>
-              </tr>
-            </thead>
-            <tbody>
-              {SCORE_LINES.map((code) => {
-                const s = scores[code]
-                const st = s?.trades.stats.live
-                // 2026-10-17 使用者：「名單成績沒有資料」——即時公布才幾天、還沒有抱滿天數賣出的，直接說哪天開始有
-                const waiting = s && st && st.n === 0
-                return (
-                  <tr key={code}>
-                    <th>{s?.name ?? code}</th>
-                    <td>{st ? st.n : s === null ? '—' : '…'}</td>
-                    {waiting ? (
-                      <td colSpan={3} className="cq-war-score-wait">
-                        還沒有抱滿 {s.trades.hold_sessions} 天的
-                        {s.live_since && `，約 ${dayLabel(firstLiveExit(s.live_since, s.trades.hold_sessions, s.nav.map((x) => x.d)))} 前後開始賣出`}
-                      </td>
-                    ) : (
-                      <>
-                        <td className={tone(st?.mean ?? null)}>{st && st.n > 0 ? pct(st.mean) : '—'}</td>
-                        <td className={tone(st?.median ?? null)}>{st && st.n > 0 ? pct(st.median) : '—'}</td>
-                        <td className={st && st.n > 0 ? 'down' : undefined}>{st && st.n > 0 ? pct(st.worst) : '—'}</td>
-                      </>
-                    )}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          {SCORE_LINES.some((code) => scores[code]?.account.live) && (
-            <p className="cq-war-score-acct">
-              <span>公布後的模擬帳戶（含還抱著的）：</span>
-              {SCORE_LINES.map((code) => {
-                const s = scores[code]
-                const a = s?.account.live
-                return (
-                  a && (
-                    <span key={code}>
-                      {s.name} <b className={tone(a.ret)}>{pct(a.ret, 1)}</b>
-                      <small className="cq-war-mute">（{dayLabel(a.start)} 起 {a.n_days} 個交易日）</small>
-                    </span>
-                  )
-                )
-              })}
-              {SCORE_LINES.some((code) => scores[code]?.account.live?.short) && <small className="cq-war-mute">期間還很短，看看就好。</small>}
-            </p>
-          )}
-          <p className="cq-war-note">
-            照名單規則當成真的買（含手續費、證交稅），只算公布之後已賣出的。看「每筆平均」不看勝率：台股大多時候在漲，隨便買的勝率也有七成多。
-            這些成績只拿來看，不拿來挑股或調模型（2027 年 3 月才用新資料正式檢驗）。
-            <button className="cq-war-link" onClick={() => onScore(SCORE_LINES[0])}>
-              詳細績效 ›
-            </button>
-          </p>
-        </section>
-
-        {/* 行事曆（CalendarCard：預設收起，留摘要與名單股、追蹤股的那幾筆） */}
-        <CalendarCard calendar={data?.calendar ?? null} listedSids={listedSids} watchSids={watchSet} onStock={onStock} />
-      </div>
-
-      {/* 族群熱力圖：預設折疊 */}
-      <section className="cq-war-card cq-war-heat">
-        <button className="cq-war-heat-head" aria-expanded={heatOpen} onClick={() => setHeatOpen(!heatOpen)}>
-          <h2>族群資金與熱力圖</h2>
-          <span className="cq-war-when">每個族群的資金倍數、漲跌與成員</span>
-          <span className="cq-mood-caret">{heatOpen ? '收起 ▲' : '展開 ▼'}</span>
-        </button>
-        {heatOpen && (
-          <div className="cq-war-heat-body">
-            <GroupsPage refresh={refresh} listed={listed} onStock={onStock} withMood={false} />
-          </div>
+  return (
+    <main className="cq-war">
+      {err && <div className="cq-err">{err}</div>}
+      <div className="cq-war-bar">
+        {layoutErr && !editing && <span className="cq-war-mute">{layoutErr}</span>}
+        {!editing && (
+          <button className="cq-edit-btn" onClick={() => setEditing(true)}>
+            整理版面
+          </button>
         )}
-      </section>
+      </div>
+      {editing ? (
+        <LayoutEditor layout={layout} onOrder={setOrder} onToggle={toggle} onReset={reset} onDone={() => setEditing(false)} error={layoutErr} />
+      ) : (
+        <div className="cq-war-cards">
+          {layout.order.map((id) => (
+            <div key={id} className={cardDef(id).wide ? 'cq-war-cell cq-wide' : 'cq-war-cell'} data-card={id}>
+              {card[id]()}
+            </div>
+          ))}
+        </div>
+      )}
     </main>
   )
 }
