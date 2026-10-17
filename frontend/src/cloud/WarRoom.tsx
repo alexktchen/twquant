@@ -15,6 +15,7 @@ import type { Scorecard } from './scorecard'
 import {
   breadth,
   dayLabel,
+  firstLiveExit,
   signedYi,
   streakText,
   tone,
@@ -329,18 +330,47 @@ export function WarRoom({
               {SCORE_LINES.map((code) => {
                 const s = scores[code]
                 const st = s?.trades.stats.live
+                // 2026-10-17 使用者：「名單成績沒有資料」——即時公布才幾天、還沒有抱滿天數賣出的，直接說哪天開始有
+                const waiting = s && st && st.n === 0
                 return (
                   <tr key={code}>
                     <th>{s?.name ?? code}</th>
                     <td>{st ? st.n : s === null ? '—' : '…'}</td>
-                    <td className={tone(st?.mean ?? null)}>{st && st.n > 0 ? pct(st.mean) : '—'}</td>
-                    <td className={tone(st?.median ?? null)}>{st && st.n > 0 ? pct(st.median) : '—'}</td>
-                    <td className="down">{st && st.n > 0 ? pct(st.worst) : '—'}</td>
+                    {waiting ? (
+                      <td colSpan={3} className="cq-war-score-wait">
+                        還沒有抱滿 {s.trades.hold_sessions} 天的
+                        {s.live_since && `，約 ${dayLabel(firstLiveExit(s.live_since, s.trades.hold_sessions, s.nav.map((x) => x.d)))} 前後開始賣出`}
+                      </td>
+                    ) : (
+                      <>
+                        <td className={tone(st?.mean ?? null)}>{st && st.n > 0 ? pct(st.mean) : '—'}</td>
+                        <td className={tone(st?.median ?? null)}>{st && st.n > 0 ? pct(st.median) : '—'}</td>
+                        <td className={st && st.n > 0 ? 'down' : undefined}>{st && st.n > 0 ? pct(st.worst) : '—'}</td>
+                      </>
+                    )}
                   </tr>
                 )
               })}
             </tbody>
           </table>
+          {SCORE_LINES.some((code) => scores[code]?.account.live) && (
+            <p className="cq-war-score-acct">
+              <span>公布後的模擬帳戶（含還抱著的）：</span>
+              {SCORE_LINES.map((code) => {
+                const s = scores[code]
+                const a = s?.account.live
+                return (
+                  a && (
+                    <span key={code}>
+                      {s.name} <b className={tone(a.ret)}>{pct(a.ret, 1)}</b>
+                      <small className="cq-war-mute">（{dayLabel(a.start)} 起 {a.n_days} 個交易日）</small>
+                    </span>
+                  )
+                )
+              })}
+              {SCORE_LINES.some((code) => scores[code]?.account.live?.short) && <small className="cq-war-mute">期間還很短，看看就好。</small>}
+            </p>
+          )}
           <p className="cq-war-note">
             照名單規則當成真的買（含手續費、證交稅），只算公布之後已賣出的。看「每筆平均」不看勝率：台股大多時候在漲，隨便買的勝率也有七成多。
             這些成績只拿來看，不拿來挑股或調模型（2027 年 3 月才用新資料正式檢驗）。
