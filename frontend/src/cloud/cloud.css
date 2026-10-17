@@ -640,6 +640,8 @@
 /* 昨晚國際大事・新聞頭條（使用者 2026-10-17） */
 .cq-war-heads ul { list-style: none; margin: 0; padding: 0; }
 .cq-war-heads li { display: grid; grid-template-columns: 84px 1fr auto; gap: 8px; align-items: baseline; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.cq-war-heads .cq-war-newstag { justify-self: start; }
+.cq-war-heads .cq-news-one li { border-bottom: 0; }
 .cq-war-heads li:last-child { border-bottom: 0; }
 .cq-war-heads a { color: var(--text); text-decoration: none; line-height: 1.5; }
 .cq-war-heads a:hover { color: var(--accent); }
