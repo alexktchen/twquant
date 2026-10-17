@@ -76,6 +76,7 @@ def test_ac1_parses_every_market_with_exact_timestamps() -> None:
         "fact_date": dt.date(2026, 10, 15),
         "mops_seq": 1,
         "available_at": dt.datetime(2026, 10, 15, 17, 35, 37, tzinfo=TZ),
+        "content": first["content"],  # 內文另外驗（見下方 content 測試）
     }
     # 同一公司同一天同主旨再發一次：發言時間區分（MOPS 編號 2），時間各自精確
     second = df.row(1, named=True)
@@ -186,3 +187,66 @@ def test_ac1_depositary_receipts_without_forms_are_read_from_visible_cells() -> 
     assert first["subject"].startswith("(匯率確認版)泰金寶")
     assert first["clause"] is None and first["fact_date"] is None
     assert df.filter(df["market"] != mn.DR_MARKET).height == 1
+
+
+# ── 內文（2026-10-17 使用者：「昨日消息點開要可以看到消息內文」）──────────────────────
+def test_ac1_content_is_kept_cleaned_and_capped() -> None:
+    df = mn.parse_day(_page(), _DAY, content_max=4000)
+    first = df.row(0, named=True)["content"]
+    assert first.startswith("1.契約種類:合建分屋") and "2.事實發生日:115/10/15~115/10/15" in first
+    assert "\r" not in first and "\n\n\n" not in first
+    assert all(c for c in df["content"].to_list())  # 有表單的列都有內文
+    short = mn.parse_day(_page(), _DAY, content_max=300).row(0, named=True)["content"]
+    assert short.endswith(mn.TRUNCATED) and len(short) <= 300 + len(mn.TRUNCATED)
+    dr = mn.parse_day(_page("t05st02_20260915_dr.html"), dt.date(2026, 9, 15))
+    assert dr.filter(dr["market"] == mn.DR_MARKET)["content"].to_list() == [None, None]
+
+
+def test_ac1_clean_content_normalises_breaks_and_blank_runs() -> None:
+    raw = "1.甲\r\n2.乙  \r\n\r\n\r\n\r\n3.丙（全形）\r\n"
+    assert mn.clean_content(raw, None) == "1.甲\n2.乙\n\n3.丙(全形)"
+    assert mn.clean_content("  \r\n ", 100) is None
+
+
+class _MigCur:
+    def __init__(self, cols: list[str]) -> None:
+        self.cols = cols
+        self.sql: list[str] = []
+
+    def __enter__(self) -> _MigCur:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
+        self.sql.append(sql)
+
+    def fetchall(self) -> list[tuple[str]]:
+        return [(c,) for c in self.cols]
+
+
+class _MigConn:
+    def __init__(self, cols: list[str]) -> None:
+        self.cur = _MigCur(cols)
+
+    def cursor(self) -> _MigCur:
+        return self.cur
+
+    def commit(self) -> None:
+        return None
+
+
+def test_ac4_old_table_gets_the_content_column_added() -> None:
+    spec = sch.MOPS_ANNOUNCEMENTS_SPEC
+    old = _MigConn(list(spec.column_names[:-1]))
+    assert sch.add_trailing_columns(old, spec, "serving") == ["content"]
+    assert 'ADD COLUMN IF NOT EXISTS "content" text' in old.cur.sql[-1]
+    assert sch.add_trailing_columns(_MigConn(list(spec.column_names)), spec, "serving") == []
+    assert (
+        sch.add_trailing_columns(_MigConn([]), spec, "serving") == []
+    )  # 表不存在：ensure_tables 會建
+    shuffled = _MigConn(["stock_id", "date"])  # 不是前段：不動，交給 assert_columns
+    assert sch.add_trailing_columns(shuffled, spec, "serving") == []
+    cfg = load_config(_ROOT / "configs" / "system.yaml", SystemConfig)
+    assert cfg.material_news.content_max_chars == 4000

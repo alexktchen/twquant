@@ -9,8 +9,18 @@ export const CALENDAR_DAYS = 3
 /** 月營收法定申報期限：每月 10 日。 */
 export const REVENUE_DEADLINE_DAY = 10
 
-export type NewsRow = { stock_id: string; name: string | null; subject: string; at: string }
-export type NewsItem = NewsRow & { tags: string[]; listed: boolean }
+/** ts＝發言時間 epoch 秒（找回內文用的鍵）；at＝台北時間字串（顯示用）。 */
+export type NewsRow = { stock_id: string; name: string | null; subject: string; at: string; ts: number }
+export type NewsItem = NewsRow & { tags: string[]; listed: boolean; content?: string | null }
+
+/** 一則公告的鍵（代號＋發言時間＋主旨，同 PG 主鍵）。 */
+export const newsKey = (n: { stock_id: string; ts: number; subject: string }): string => `${n.stock_id}|${n.ts}|${n.subject}`
+
+/** 把內文接回挑好的那幾則（找不到的留 null）。 */
+export function attachContent(items: NewsItem[], rows: { stock_id: string; ts: number; subject: string; content: string | null }[]): NewsItem[] {
+  const byKey = new Map(rows.map((r) => [newsKey(r), r.content]))
+  return items.map((n) => ({ ...n, content: byKey.get(newsKey(n)) ?? null }))
+}
 
 /** 主旨命中的分類（label）。 */
 export function newsTags(subject: string): string[] {

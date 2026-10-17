@@ -4,8 +4,8 @@
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { LINES } from '../../_lib/picks'
-import { readRows } from '../../_lib/scorecard'
-import { CALENDAR_DAYS, addDays, pickNews, revenueDeadline, taipeiDay, type NewsRow } from '../../_lib/warroom'
+import { readNewColumn, readRows } from '../../_lib/scorecard'
+import { CALENDAR_DAYS, addDays, attachContent, pickNews, revenueDeadline, taipeiDay, type NewsRow } from '../../_lib/warroom'
 
 type Row = Record<string, unknown>
 
@@ -66,11 +66,27 @@ const handle: PagesFunction<Env> = async ({ env }) =>
     const since = mdate ?? addDays(today, -1)
     const raw = await readRows(
       () => db<NewsRow[]>`
-        SELECT a.stock_id, a.name, a.subject, to_char(a.available_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS at
+        SELECT a.stock_id, a.name, a.subject, to_char(a.available_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS at,
+               extract(epoch FROM a.available_at)::bigint::int AS ts
         FROM serving.mops_announcements a
         WHERE a.available_at >= (${since}::date)::timestamp AT TIME ZONE 'Asia/Taipei'
         ORDER BY a.available_at DESC LIMIT 2000`,
     )
+
+    // 內文只撈挑出來的那幾則（2026-10-17 使用者：點開要看到內文）——不把兩千則全文都拉進 Worker
+    const picked = pickNews(raw, listed)
+    const ids = [...new Set(picked.map((n) => n.stock_id))]
+    // 內文欄是 2026-10-17 加的，排程第一次跑到之前不存在 → 當成沒有內文，首頁照常（readNewColumn）
+    const bodies = ids.length
+      ? await readNewColumn(
+          () => db<{ stock_id: string; ts: number; subject: string; content: string | null }[]>`
+            SELECT stock_id, extract(epoch FROM available_at)::bigint::int AS ts, subject, content
+            FROM serving.mops_announcements
+            WHERE stock_id = ANY(string_to_array(${ids.join(',')}, ','))
+              AND available_at >= (${since}::date)::timestamp AT TIME ZONE 'Asia/Taipei'`,
+        )
+      : []
+    const news = attachContent(picked, bodies)
 
     const until = addDays(today, CALENDAR_DAYS - 1)
     const conferences = await readRows(
@@ -91,7 +107,7 @@ const handle: PagesFunction<Env> = async ({ env }) =>
       market,
       taifex,
       picks,
-      news: { since, items: pickNews(raw, listed) },
+      news: { since, items: news },
       calendar: { conferences, dividends, revenue: revenueDeadline(today) },
     })
   })

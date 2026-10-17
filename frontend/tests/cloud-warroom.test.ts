@@ -52,3 +52,26 @@ test('T-379：首頁的數字格式——億帶正負號、連續天數白話、
   assert.equal(tone(-0.01), 'down')
   assert.equal(tone(null), 'flat')
 })
+
+test('使用者 2026-10-17：昨日消息的輪播頭尾相接；內文接回挑好的那幾則', async () => {
+  const { carouselStep, newsId } = await import('../src/cloud/war.ts')
+  const { attachContent } = await import('../functions/_lib/warroom.ts')
+  assert.equal(carouselStep(0, 3, 1), 1)
+  assert.equal(carouselStep(2, 3, 1), 0)
+  assert.equal(carouselStep(0, 3, -1), 2)
+  assert.equal(carouselStep(5, 0, 1), 0)
+  const item = { stock_id: '8084', name: null, subject: '變更交易方法', at: '2026-10-16 23:04', ts: 1792170240, tags: [], listed: true }
+  assert.equal(newsId(item), '8084|1792170240|變更交易方法')
+  const out = attachContent([item, { ...item, ts: 1 }], [{ stock_id: '8084', ts: 1792170240, subject: '變更交易方法', content: '1.事實發生日' }])
+  assert.deepEqual(out.map((n) => n.content), ['1.事實發生日', null])
+})
+
+test('內文欄還沒建（42703）或表還沒建（42P01）都當沒有資料；其他錯誤照丟', async () => {
+  const { readNewColumn } = await import('../functions/_lib/scorecard.ts')
+  const fail = (code: string) => async () => {
+    throw Object.assign(new Error(code), { code })
+  }
+  assert.deepEqual(await readNewColumn(fail('42703')), [])
+  assert.deepEqual(await readNewColumn(fail('42P01')), [])
+  await assert.rejects(readNewColumn(fail('57014')), /57014/)
+})

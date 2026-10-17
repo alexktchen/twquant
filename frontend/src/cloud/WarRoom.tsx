@@ -1,16 +1,16 @@
 // 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、市場氛圍（美股、台指期、類股／資金，沿用 MoodCard）、
 // 其他國際行情、期貨籌碼、大盤體檢、法人與融資、昨日消息、今天名單速覽、名單成績、行事曆；族群熱力圖在最下面，預設打開。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { GroupsPage } from './GroupsPage'
 import { MoodCard } from './MoodCard'
+import { NewsCard } from './NewsCard'
 import { pct } from './format'
 import { HEAT_KEY, loadPref, openPref, savePref } from './prefs'
 import type { Scorecard } from './scorecard'
 import {
   EVENT_NAME,
-  atLabel,
   breadth,
   dayLabel,
   signedYi,
@@ -22,8 +22,6 @@ import {
 
 /** 名單成績卡列哪幾條線（大盤精選、潛伏飆股；高分爆量還在驗證、筆數太少不列）。 */
 const SCORE_LINES = ['CORE', 'QUIET']
-
-type NewsFilter = 'all' | 'listed' | 'watch'
 
 export function WarRoom({
   refresh,
@@ -45,7 +43,6 @@ export function WarRoom({
   const [data, setData] = useState<WarRoomData | null>(null)
   const [err, setErr] = useState('')
   const [watchNews, setWatchNews] = useState<NewsItem[]>([])
-  const [filter, setFilter] = useState<NewsFilter>('all')
   const [scores, setScores] = useState<Record<string, Scorecard | null>>({})
   // 使用者 2026-10-17：熱力圖預設打開，點過打開／收起記在這台瀏覽器
   const [heatOpen, setHeatOpenState] = useState(() => openPref(loadPref(HEAT_KEY), true))
@@ -83,18 +80,6 @@ export function WarRoom({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, sidsKey])
-
-  const watchSet = useMemo(() => new Set(watchSids), [watchSids])
-  const news = useMemo(() => {
-    const base = data?.news.items ?? []
-    if (filter === 'listed') return base.filter((n) => n.listed)
-    if (filter === 'watch') return watchNews
-    // 全部：首頁那份＋追蹤股的（去重）
-    const seen = new Set(base.map((n) => `${n.stock_id}|${n.at}|${n.subject}`))
-    return [...base, ...watchNews.filter((n) => !seen.has(`${n.stock_id}|${n.at}|${n.subject}`))].sort((a, b) =>
-      b.at.localeCompare(a.at),
-    )
-  }, [data, watchNews, filter])
 
   const m = data?.market ?? null
   const t = data?.taifex ?? null
@@ -319,50 +304,8 @@ export function WarRoom({
         </section>
       </div>
 
-      {/* 昨日消息 */}
-      <section className="cq-war-card cq-war-news">
-        <header>
-          <h2>昨日消息</h2>
-          {data && <span className="cq-war-when">{dayLabel(data.news.since)} 起的重大訊息</span>}
-          <div className="cq-seg cq-seg-small">
-            <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
-              全部
-            </button>
-            <button className={filter === 'listed' ? 'on' : ''} onClick={() => setFilter('listed')}>
-              名單股
-            </button>
-            {watchSids.length > 0 && (
-              <button className={filter === 'watch' ? 'on' : ''} onClick={() => setFilter('watch')}>
-                追蹤股
-              </button>
-            )}
-          </div>
-        </header>
-        {data && news.length === 0 && <p className="cq-war-mute">沒有符合的公告。</p>}
-        <ul className="cq-war-newslist">
-          {news.map((n) => (
-            <li key={`${n.stock_id}|${n.at}|${n.subject}`} onClick={() => onStock(n.stock_id, n.name)}>
-              <span className="cq-war-newstime">{atLabel(n.at)}</span>
-              <span className="cq-war-newsco">
-                <em>{n.stock_id}</em> {n.name ?? ''}
-                {n.listed && <i className="cq-tag prob">名單</i>}
-                {watchSet.has(n.stock_id) && <i className="cq-tag">追蹤</i>}
-              </span>
-              <span className="cq-war-newssub">
-                {n.subject}
-                {n.tags.map((tg) => (
-                  <i key={tg} className="cq-war-newstag">
-                    {tg}
-                  </i>
-                ))}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="cq-war-note">
-          來源：公開資訊觀測站重大訊息（只有主旨）。「全部」＝名單股、追蹤股的每一則，加上全市場的處置、變更交易、減增資、併購、庫藏股、停工訴訟、董總異動。公告只說發生了什麼，不等於利多或利空。
-        </p>
-      </section>
+      {/* 昨日消息（NewsCard：預設名單股、點開看內文、收起時輪播） */}
+      <NewsCard since={data?.news.since ?? null} items={data?.news.items ?? []} watchNews={watchNews} watchSids={watchSids} onStock={onStock} />
 
       <div className="cq-war-grid">
         {/* 今日名單速覽 */}
