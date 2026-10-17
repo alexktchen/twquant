@@ -99,6 +99,12 @@ class MorningBriefConfig(BaseConfig):
     fx_symbol: str = "TWD=X"  # 美元兌台幣
     news_limit: int = Field(default=8, ge=1)  # 晨報最多引用幾則昨日公告
     top_groups: int = Field(default=3, ge=1)  # 資金流入／流出各列幾個族群
+    signal_big_move: float = Field(
+        default=0.02, gt=0
+    )  # 研判素材：夜盤／費半漲跌超過這個（小數）才提
+    signal_volume_hot: float = Field(default=1.2, gt=1)  # 成交量是 20 日平均幾倍以上算量能放大
+    signal_volume_cold: float = Field(default=0.8, gt=0, lt=1)  # 幾倍以下算量能萎縮
+    signal_streak: int = Field(default=5, ge=2)  # 外資連買／連賣幾天以上才提
     line_names: dict[
         str, str
     ] = {}  # 名單線代號 → 給人看的名字（網站 functions/_lib/picks.ts LINES 同名）

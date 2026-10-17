@@ -44,6 +44,7 @@ class MorningInputs:
     market_date: dt.date | None  # 昨天的交易日（大盤體檢那一列）
     market: dict[str, Any] | None
     taifex: dict[str, Any] | None
+    taifex_prev: dict[str, Any] | None = None  # 前一筆期交所盤後（算外資期貨未平倉增減）
     inflow: list[dict[str, Any]] = field(default_factory=list)
     outflow: list[dict[str, Any]] = field(default_factory=list)
     picks: list[dict[str, Any]] = field(default_factory=list)  # 每條線：code, name, n, new
@@ -57,6 +58,7 @@ class MorningInputs:
     tsmc_close: float | None = None
     adr_premium: float | None = None
     errors: list[str] = field(default_factory=list)
+    thresholds: dict[str, float] = field(default_factory=dict)  # 研判素材的門檻（system.yaml）
 
 
 def _rows(conn: Any, schema: str, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -99,7 +101,18 @@ def gather(
         "conference_calendar",
     )
     missing = [t for t in optional if not _exists(conn, schema, t)]
-    out = MorningInputs(day=day, market_date=None, market=None, taifex=None)
+    out = MorningInputs(
+        day=day,
+        market_date=None,
+        market=None,
+        taifex=None,
+        thresholds={
+            "big_move": cfg.signal_big_move,
+            "volume_hot": cfg.signal_volume_hot,
+            "volume_cold": cfg.signal_volume_cold,
+            "streak": float(cfg.signal_streak),
+        },
+    )
     if missing:
         out.errors.append(f"資料表還沒建：{'、'.join(missing)}（等每日 pipeline 跑過一次）")
     if "market_daily" not in missing:
@@ -117,10 +130,11 @@ def gather(
             tx = _rows(
                 conn,
                 schema,
-                'SELECT * FROM "{schema}"."taifex_daily" WHERE date <= %s ORDER BY date DESC LIMIT 1',
+                'SELECT * FROM "{schema}"."taifex_daily" WHERE date <= %s ORDER BY date DESC LIMIT 2',
                 (mdate,),
             )
             out.taifex = tx[0] if tx else None
+            out.taifex_prev = tx[1] if len(tx) > 1 else None
         flows = (
             _rows(
                 conn,
@@ -397,6 +411,81 @@ def facts(inp: MorningInputs) -> list[str]:
         out.append("今天除權息：" + "、".join(inp.dividends_today))
     if inp.revenue_deadline_in is not None:
         out.append(f"距離月營收申報截止還有 {inp.revenue_deadline_in} 天")
+    return out + signals(inp)
+
+
+def signals(inp: MorningInputs) -> list[str]:
+    """研判素材（2026-10-17 使用者：「多一點分析師的角度」）：規則從事實算出的對照與背離，寫成「研判素材：…」。
+
+    給模型做分析的依據，數字全出自上面的事實或在這裡算好（例：外資期貨空單增減），所以逐句檢查照樣成立。
+    門檻在 system.yaml `morning_brief`（signal_big_move、signal_volume_hot／cold、signal_streak）。
+    """
+    th = inp.thresholds
+    out: list[str] = []
+    m = inp.market
+    n = inp.night
+    if m and m.get("taiex_chg") is not None and n and n.chg is not None:
+        day_chg, night_chg = m["taiex_chg"], n.chg
+        if day_chg * night_chg < 0:
+            out.append(
+                f"研判素材：加權指數前一交易日 {_pct(day_chg, 2)}，夜盤卻 {_pct(night_chg, 2)}，日夜盤方向相反"
+            )
+        elif abs(night_chg) >= th["big_move"]:
+            out.append(f"研判素材：夜盤 {_pct(night_chg, 2)}，延續日盤方向且幅度擴大")
+    sox = next((q for q in inp.us if "費半" in q.name), None)
+    if sox and abs(sox.chg) >= th["big_move"]:
+        outlook = "開盤恐承壓" if sox.chg < 0 else "開盤可望受惠"
+        out.append(f"研判素材：費半 {_pct(sox.chg, 2)}，台股半導體與 AI 供應鏈權值股{outlook}")
+    if m:
+        f, t = m.get("foreign_net"), m.get("trust_net")
+        if f is not None and t is not None and f * t < 0:
+            out.append(
+                f"研判素材：外資估算{_bs(f, '買超', '賣超')}、投信估算{_bs(t, '買超', '賣超')}，法人看法分歧"
+            )
+        elif f is not None and t is not None and f < 0 and t < 0:
+            out.append("研判素材：外資與投信同步賣超，法人賣壓一致")
+        elif f is not None and t is not None and f > 0 and t > 0:
+            out.append("研判素材：外資與投信同步買超，法人看法一致偏多")
+        streak = m.get("foreign_streak") or 0
+        if abs(streak) >= th["streak"]:
+            out.append(f"研判素材：外資已連續{_bs(streak, '買超', '賣超')} {abs(streak)} 天")
+        chg, up, down = m.get("taiex_chg"), m.get("up"), m.get("down")
+        if chg is not None and up is not None and down is not None:
+            if chg > 0 and down > up:
+                out.append("研判素材：指數上漲但下跌家數較多，漲勢集中在權值股")
+            elif chg < 0 and up > down:
+                out.append("研判素材：指數下跌但上漲家數較多，中小型股相對抗跌")
+            elif chg > 0 and up > down:
+                out.append("研判素材：指數上漲且上漲家數較多，漲勢普及")
+            elif chg < 0 and down > up:
+                out.append("研判素材：指數下跌且下跌家數較多，賣壓普遍")
+        ratio = m.get("amount_ratio")
+        if ratio is not None and ratio >= th["volume_hot"]:
+            out.append("研判素材：成交量明顯高於 20 日平均，量能放大")
+        elif ratio is not None and ratio <= th["volume_cold"]:
+            out.append("研判素材：成交量明顯低於 20 日平均，量能萎縮、觀望氣氛濃")
+    t0, t1 = inp.taifex, inp.taifex_prev
+    if (
+        t0
+        and t1
+        and t0.get("fut_foreign_net_oi") is not None
+        and t1.get("fut_foreign_net_oi") is not None
+    ):
+        delta = t0["fut_foreign_net_oi"] - t1["fut_foreign_net_oi"]
+        if delta != 0:
+            side = "空單" if t0["fut_foreign_net_oi"] < 0 else "多單"
+            grow = (delta < 0) == (side == "空單")
+            out.append(
+                f"研判素材：外資台指期淨{side}比前一日{'增加' if grow else '減少'} {abs(delta):,} 口"
+                f"（{'避險／看空部位加碼' if side == '空單' and grow else '部位收斂' if not grow else '看多部位加碼'}）"
+            )
+    if inp.inflow and inp.outflow:
+        out.append(
+            "研判素材：資金由 "
+            + "、".join(x["grp"] for x in inp.outflow)
+            + " 轉向 "
+            + "、".join(x["grp"] for x in inp.inflow)
+        )
     return out
 
 
