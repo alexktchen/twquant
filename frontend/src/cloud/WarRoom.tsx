@@ -1,11 +1,12 @@
 // 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、市場氛圍（美股、台指期、類股／資金，沿用 MoodCard）、
-// 其他國際行情、期貨籌碼、大盤體檢、法人與融資、昨日消息、今天名單速覽、名單成績、行事曆；族群熱力圖預設折疊在最下面。
+// 其他國際行情、期貨籌碼、大盤體檢、法人與融資、昨日消息、今天名單速覽、名單成績、行事曆；族群熱力圖在最下面，預設打開。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
 import { useEffect, useMemo, useState } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { GroupsPage } from './GroupsPage'
 import { MoodCard } from './MoodCard'
 import { pct } from './format'
+import { HEAT_KEY, loadPref, openPref, savePref } from './prefs'
 import type { Scorecard } from './scorecard'
 import {
   EVENT_NAME,
@@ -46,7 +47,12 @@ export function WarRoom({
   const [watchNews, setWatchNews] = useState<NewsItem[]>([])
   const [filter, setFilter] = useState<NewsFilter>('all')
   const [scores, setScores] = useState<Record<string, Scorecard | null>>({})
-  const [heatOpen, setHeatOpen] = useState(false)
+  // 使用者 2026-10-17：熱力圖預設打開，點過打開／收起記在這台瀏覽器
+  const [heatOpen, setHeatOpenState] = useState(() => openPref(loadPref(HEAT_KEY), true))
+  const setHeatOpen = (on: boolean) => {
+    setHeatOpenState(on)
+    savePref(HEAT_KEY, on ? '1' : '0')
+  }
   const [factsOpen, setFactsOpen] = useState(false)
 
   useEffect(() => {
@@ -468,7 +474,7 @@ export function WarRoom({
       <section className="cq-war-card cq-war-heat">
         <button className="cq-war-heat-head" aria-expanded={heatOpen} onClick={() => setHeatOpen(!heatOpen)}>
           <h2>族群資金與熱力圖</h2>
-          <span className="cq-war-when">點開看每個族群的資金倍數、漲跌與成員</span>
+          <span className="cq-war-when">每個族群的資金倍數、漲跌與成員</span>
           <span className="cq-mood-caret">{heatOpen ? '收起 ▲' : '展開 ▼'}</span>
         </button>
         {heatOpen && (

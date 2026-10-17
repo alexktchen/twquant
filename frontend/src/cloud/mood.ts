@@ -168,7 +168,8 @@ export function globalTone(label: string | null): 'bull' | 'bear' | 'flat' {
   return 'flat'
 }
 
-export type TxView = { session: TxSession; name: string; last: number | null; chg: number | null; test: number | null; when: string }
+/** diff＝漲跌點數（最後成交 − 參考價）；缺一邊 → null。 */
+export type TxView = { session: TxSession; name: string; last: number | null; diff: number | null; chg: number | null; test: number | null; when: string }
 export type GlobalView = {
   label: string | null
   tone: 'bull' | 'bear' | 'flat'
@@ -176,7 +177,8 @@ export type GlobalView = {
   tx: TxView[]
   /** 最新一節比加權高（低）幾點 */
   gap: { session: TxSession; pts: number; pct: number } | null
-  us: { name: string; chg: number; last: number }[]
+  /** diff＝漲跌點數（最新收盤 − 前一個交易日收盤） */
+  us: { name: string; chg: number; last: number; diff: number }[]
   /** 美股的時間：「盤中」或「10/16 收」；沒有指數 → null */
   usWhen: string | null
   /** 日盤、夜盤都拿不到：台指期那一行改寫原因 */
@@ -199,7 +201,10 @@ export function globalView(g: GlobalMood | null, now: { date: string; time: stri
   if (!g || (g.day === null && g.night === null && g.us.length === 0)) return null
   const tx: TxView[] = []
   for (const q of [g.day, g.night]) {
-    if (q) tx.push({ session: q.session, name: q.session === 'day' ? '日盤' : '夜盤', last: q.last, chg: q.chg, test: q.test, when: txWhen(q, now) })
+    if (q) {
+      const diff = q.last !== null && q.ref !== null ? q.last - q.ref : null
+      tx.push({ session: q.session, name: q.session === 'day' ? '日盤' : '夜盤', last: q.last, diff, chg: q.chg, test: q.test, when: txWhen(q, now) })
+    }
   }
   const first = g.us[0]
   return {
@@ -207,7 +212,7 @@ export function globalView(g: GlobalMood | null, now: { date: string; time: stri
     tone: globalTone(g.label),
     tx,
     gap: g.gap && g.latest ? { session: g.latest, ...g.gap } : null,
-    us: g.us.map((u) => ({ name: u.name, chg: u.chg, last: u.last })),
+    us: g.us.map((u) => ({ name: u.name, chg: u.chg, last: u.last, diff: u.last - u.prev })),
     usWhen: first ? (first.open ? '盤中' : `${mdOf(first.date)} 收`) : null,
     txError: tx.length === 0 ? (g.tx_error ?? '期交所沒有回應') : null,
     fugle: [g.day, g.night].some((q) => q?.source === 'fugle'),
@@ -216,3 +221,13 @@ export function globalView(g: GlobalMood | null, now: { date: string; time: stri
 
 /** 點數（47242.5 → "47,243"）。 */
 export const pts = (x: number): string => Math.round(x).toLocaleString('en-US')
+
+/** 帶正負號的點數：台指期取整數（"+311"、"-1,144"），美股留兩位（"-84.62"）；null →「—」。 */
+export function signedPts(x: number | null, digits = 0): string {
+  if (x === null) return '—'
+  const v = Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  return `${x > 0 ? '+' : x < 0 ? '-' : ''}${v}`
+}
+
+/** 美股指數價位：兩位小數加千分位（7659.44 → "7,659.44"）。 */
+export const usPrice = (x: number): string => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

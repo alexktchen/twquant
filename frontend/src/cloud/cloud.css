@@ -587,3 +587,29 @@
   .cq-war-heat-body { height: auto; display: block; }
   .cq-war-card > header .cq-seg { margin: 4px 0 0; width: 100%; }
 }
+
+/* 市場氛圍對齊（使用者 2026-10-17：點數要明顯、紅漲綠跌、整塊對齊、美股也要點數） */
+.cq-mood-quotes { border-collapse: collapse; font-variant-numeric: tabular-nums; margin: 2px 0 0; }
+.cq-mood-quotes th, .cq-mood-quotes td { padding-top: 3px; padding-bottom: 3px; white-space: nowrap; vertical-align: baseline; }
+.cq-mood-quotes th { width: 4.2em; text-align: left; color: var(--mute); font-weight: 400; padding-right: 8px; }
+.cq-mood-quotes tr.cq-q-first th, .cq-mood-quotes tr.cq-q-first td { padding-top: 9px; }
+.cq-q-name { color: #c9ccd4; width: 6.5em; padding-right: 10px; }
+.cq-q-px { text-align: right; font-size: 17px; font-weight: 700; min-width: 5.6em; padding-right: 16px; }
+.cq-q-px small { font-size: 13px; font-weight: 500; color: var(--mute); }
+.cq-q-num { text-align: right; font-weight: 600; min-width: 5.2em; padding-right: 14px; }
+.cq-q-unit { color: var(--mute); font-weight: 400; text-align: left; padding-left: 4px; }
+.cq-q-when { color: var(--mute); font-size: 12px; padding-left: 4px; }
+.cq-q-gap td, .cq-q-gap th { border-top: 1px dashed var(--line); }
+.cq-q-gap .cq-q-px { font-size: 15px; }
+.cq-mood-cells { display: grid; grid-template-columns: repeat(3, 9.5em); gap: 2px 18px; font-variant-numeric: tabular-nums; }
+.cq-mood-cell { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; }
+.cq-mood-cell > span { color: #c9ccd4; overflow: hidden; text-overflow: ellipsis; }
+.cq-mood-cell > b { font-weight: 600; }
+@media (max-width: 820px) {
+  .cq-q-px { font-size: 15.5px; min-width: 4.8em; padding-right: 10px; }
+  .cq-q-num { min-width: 4.4em; padding-right: 8px; }
+  .cq-q-name { width: 5.2em; padding-right: 6px; }
+  .cq-mood-quotes th { width: 3.4em; }
+  .cq-mood-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 14px; }
+  .cq-q-when { font-size: 11px; padding-left: 2px; }
+}

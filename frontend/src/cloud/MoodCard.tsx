@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { fetchMoodClose, fetchMoodGlobal, fetchMoodLive } from './api'
 import { pct, trend } from './format'
 import { liveBackoff, shouldPoll, taipeiNow } from './live'
+import { MOOD_KEY, loadPref, openPref, savePref } from './prefs'
 import {
   CLOSE_POLL_MS,
   GLOBAL_POLL_MS,
@@ -13,6 +14,8 @@ import {
   moodView,
   pp,
   pts,
+  signedPts,
+  usPrice,
   type CloseMood,
   type FlowMove,
   type GlobalMood,
@@ -86,12 +89,14 @@ function useMood(enabled: boolean): { live: LiveMood | null; close: CloseMood | 
   return { live, close, global }
 }
 
+/** 類股強弱：每格「名稱＋漲跌」，固定欄寬，領漲／落後兩列的格子上下對齊。 */
 function Sectors({ items }: { items: SectorMove[] }) {
   return (
-    <span className="cq-mood-vals">
+    <span className="cq-mood-cells">
       {items.map((m) => (
-        <span key={m.code} className={trend(m.chg)} title={`比大盤${m.rel >= 0 ? '強' : '弱'} ${Math.abs(m.rel * 100).toFixed(1)} 個百分點`}>
-          {m.name} {pct(m.chg, 1)}
+        <span key={m.code} className="cq-mood-cell" title={`比大盤${m.rel >= 0 ? '強' : '弱'} ${Math.abs(m.rel * 100).toFixed(1)} 個百分點`}>
+          <span>{m.name}</span>
+          <b className={trend(m.chg)}>{pct(m.chg, 1)}</b>
         </span>
       ))}
     </span>
@@ -100,65 +105,73 @@ function Sectors({ items }: { items: SectorMove[] }) {
 
 function Flows({ items }: { items: FlowMove[] }) {
   return (
-    <span className="cq-mood-vals">
+    <span className="cq-mood-cells">
       {items.map((m) => (
         <span
           key={m.grp}
-          className={trend(m.diff)}
+          className="cq-mood-cell"
           title={`成交比重 ${(m.share * 100).toFixed(1)}%，比前 20 日平均${m.diff >= 0 ? '多' : '少'} ${Math.abs(m.diff * 100).toFixed(1)} 個百分點`}
         >
-          {m.grp} {pp(m.diff)}
+          <span>{m.grp}</span>
+          <b className={trend(m.diff)}>{pp(m.diff)}</b>
         </span>
       ))}
     </span>
   )
 }
 
-/** 期貨與美股（D-186）：台指期兩節＋比加權高低幾點、美股四大指數。 */
+/** 期貨與美股（D-186）：一張對齊的表——名稱、價位、漲跌點、漲跌幅、時間；價位放大、紅漲綠跌。 */
 function Global({ state, now }: { state: GlobalState; now: { date: string; time: string } }) {
   const g = globalView(state?.global ?? null, now)
   if (!g) return null
   return (
     <div className="cq-mood-col cq-mood-wide">
-      {g.txError && (
-        <div className="cq-mood-row">
-          <span>台指期</span>
-          <span className="cq-mood-vals cq-mood-gap">暫時取不到（{g.txError}），稍後自動再試</span>
-        </div>
-      )}
-      {g.tx.length > 0 && (
-        <div className="cq-mood-row">
-          <span>台指期</span>
-          <span className="cq-mood-vals">
-            {g.tx.map((q) => (
-              <span key={q.session} className={trend(q.chg)} title={q.session === 'night' ? '夜盤漲跌對當天日盤結算價' : '日盤漲跌對前一天結算價'}>
-                {q.name} {q.last !== null ? pts(q.last) : q.test !== null ? `試撮 ${pts(q.test)}` : ''} {q.chg !== null && pct(q.chg)}
-                <small>{q.when}</small>
-              </span>
-            ))}
-            {g.gap && (
-              <span className="cq-mood-gap" title="最新一節期貨最後成交對加權最新點數（夜盤對加權收盤）">
-                {g.gap.session === 'night' ? '夜盤' : '日盤'}比加權{g.gap.pts >= 0 ? '高' : '低'} {pts(Math.abs(g.gap.pts))} 點（{pct(g.gap.pct, 1)}）
-              </span>
-            )}
-          </span>
-        </div>
-      )}
-      {g.us.length > 0 && (
-        <div className="cq-mood-row">
-          <span>美股</span>
-          <span className="cq-mood-vals">
-            {g.us.map((u) => (
-              <span key={u.name} className={trend(u.chg)} title={`${u.last.toLocaleString('en-US', { maximumFractionDigits: 2 })} 點`}>
-                {u.name} {pct(u.chg)}
-              </span>
-            ))}
-            {g.usWhen && <small>{g.usWhen}</small>}
-          </span>
-        </div>
-      )}
+      <table className="cq-mood-quotes">
+        <tbody>
+          {g.txError && (
+            <tr>
+              <th>台指期</th>
+              <td colSpan={5} className="cq-mood-gap">
+                暫時取不到（{g.txError}），稍後自動再試
+              </td>
+            </tr>
+          )}
+          {g.tx.map((q, k) => (
+            <tr key={q.session} title={q.session === 'night' ? '夜盤漲跌對當天日盤結算價' : '日盤漲跌對前一天結算價'}>
+              <th>{k === 0 ? '台指期' : ''}</th>
+              <td className="cq-q-name">{q.name}</td>
+              <td className={`cq-q-px ${trend(q.chg)}`}>
+                {q.last !== null ? pts(q.last) : q.test !== null ? <small>試撮 {pts(q.test)}</small> : '—'}
+              </td>
+              <td className={`cq-q-num ${trend(q.diff)}`}>{signedPts(q.diff)}</td>
+              <td className={`cq-q-num ${trend(q.chg)}`}>{q.chg !== null ? pct(q.chg) : '—'}</td>
+              <td className="cq-q-when">{q.when}</td>
+            </tr>
+          ))}
+          {g.gap && (
+            <tr className="cq-q-gap" title="最新一節期貨最後成交對加權最新點數（夜盤對加權收盤）">
+              <th />
+              <td className="cq-q-name">{g.gap.session === 'night' ? '夜盤' : '日盤'}比加權</td>
+              <td className={`cq-q-px ${trend(g.gap.pts)}`}>{signedPts(g.gap.pts)}</td>
+              <td className="cq-q-num cq-q-unit">點</td>
+              <td className={`cq-q-num ${trend(g.gap.pct)}`}>{pct(g.gap.pct, 1)}</td>
+              <td className="cq-q-when">{g.gap.pts >= 0 ? '正價差' : '逆價差'}</td>
+            </tr>
+          )}
+          {g.us.map((u, k) => (
+            <tr key={u.name} className={k === 0 ? 'cq-q-first' : undefined}>
+              <th>{k === 0 ? '美股' : ''}</th>
+              <td className="cq-q-name">{u.name}</td>
+              <td className={`cq-q-px ${trend(u.chg)}`}>{usPrice(u.last)}</td>
+              <td className={`cq-q-num ${trend(u.diff)}`}>{signedPts(u.diff, 2)}</td>
+              <td className={`cq-q-num ${trend(u.chg)}`}>{pct(u.chg)}</td>
+              <td className="cq-q-when">{k === 0 ? g.usWhen : ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       <p className="cq-mood-note">
-        台指期：期交所近月合約{g.fugle && '（期交所沒回應，這次改用富果）'}，日盤漲跌對前一天結算價、夜盤對當天日盤結算價；「比加權」是最新一節的最後成交對加權最新點數（夜盤對加權收盤）。
+        台指期：期交所近月合約{g.fugle && '（期交所沒回應，這次改用富果）'}，日盤漲跌對前一天結算價、夜盤對當天日盤結算價；「比加權」是最新一節的最後成交對加權最新點數（夜盤對加權收盤），高＝正價差、低＝逆價差。
         美股：四大指數最近一個交易日（美股盤中為即時）。每分鐘更新，只供看盤{state?.stale && '；部分來源暫時沒更新到，顯示上一份'}。
       </p>
     </div>
@@ -167,8 +180,12 @@ function Global({ state, now }: { state: GlobalState; now: { date: string; time:
 
 export function MoodCard({ enabled }: { enabled: boolean }) {
   const { live, close, global } = useMood(enabled)
-  // 預設展開，點標題收起
-  const [open, setOpen] = useState(true)
+  // 預設展開，點標題收起；展開／收起記在這台瀏覽器
+  const [open, setOpenState] = useState(() => openPref(loadPref(MOOD_KEY), true))
+  const setOpen = (on: boolean) => {
+    setOpenState(on)
+    savePref(MOOD_KEY, on ? '1' : '0')
+  }
   const now = taipeiNow()
   const v = moodView(live, close, now)
   const g = globalView(global?.global ?? null, now)
