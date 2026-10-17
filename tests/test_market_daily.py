@@ -20,7 +20,7 @@ PAT = r"^[1-9][0-9]{3}$"
 
 
 def _prices() -> pl.DataFrame:
-    rows = []
+    rows: list[tuple[dt.date, str, float, float, float | None, float | None]] = []
     # 2330：一路漲，最後一天漲停且創新高；2317：一路跌，最後一天跌停且創新低；1101：平盤；0050（ETF）不算
     for i, d in enumerate(D):
         rows.append((d, "2330", 100.0 + i, 1e9, 100.0 + i if i == 4 else None, None))

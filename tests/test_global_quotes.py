@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,8 +14,11 @@ from twquant.errors import DataError
 _FIX = Path(__file__).resolve().parent / "fixtures" / "http"
 
 
-def _yahoo(name: str) -> dict:
-    return json.loads((_FIX / "yahoo" / f"{name}_5d.json").read_text(encoding="utf-8"))
+def _yahoo(name: str) -> dict[str, Any]:
+    body: dict[str, Any] = json.loads(
+        (_FIX / "yahoo" / f"{name}_5d.json").read_text(encoding="utf-8")
+    )
+    return body
 
 
 # ── AC-1：Yahoo 日線 → 最新一根對前一根；台積電 ADR、匯率也走同一條 ───────────────
