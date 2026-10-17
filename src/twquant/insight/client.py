@@ -11,6 +11,7 @@ schema 連 2 次失敗 → 回 None（AC-1）。每次成功呼叫寫 llm_log（
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
 import logging
@@ -274,11 +275,21 @@ def _as_model(schema: type) -> type[BaseModel]:
     return schema
 
 
+def _require_every_field(json_schema: dict[str, Any]) -> dict[str, Any]:
+    """所有物件的每個欄位都標必填（D-185 實連補記）：有預設值的欄位不列 required，
+    受限解碼就會省略它們（實測 qwen3 漏掉 supporting_evidence_ids）。回傳複本，不改原 schema。"""
+    out = copy.deepcopy(json_schema)
+    for node in [out, *out.get("$defs", {}).values()]:
+        if "properties" in node:
+            node["required"] = list(node["properties"])
+    return out
+
+
 def cloudflare_request_body(
     system: str, user: str, schema: type, max_tokens: int
 ) -> dict[str, Any]:
     """組請求：指令在 system、資料在 user（SPEC-008 §0.3），JSON mode 帶 pydantic 的 JSON Schema。"""
-    json_schema = _as_model(schema).model_json_schema()
+    json_schema = _require_every_field(_as_model(schema).model_json_schema())
     return {
         "messages": [
             {"role": "system", "content": system},
@@ -304,16 +315,20 @@ def parse_cloudflare_reply(payload: dict[str, Any], schema: type) -> tuple[Any, 
     if not payload.get("success"):
         raise RuntimeError(f"Workers AI 回報失敗：{payload.get('errors')!r}")
     result = payload.get("result") or {}
-    content: Any
-    if "response" in result:
-        content = result["response"]
-    else:
-        choices = result.get("choices") or []
-        if not choices:
-            raise RuntimeError(f"Workers AI 回應沒有 response 也沒有 choices：{sorted(result)}")
+    # 實連 qwen3（2026-10-17）：response 與 choices 同時存在；推理用光 max_tokens 時兩者的內容都是 null
+    content: Any = result.get("response")
+    choices = result.get("choices") or []
+    if content is None and choices:
         content = choices[0]["message"]["content"]
-    obj = json.loads(_unwrap_text(content)) if isinstance(content, str) else content
+    if content is None and "response" not in result and not choices:
+        raise RuntimeError(f"Workers AI 回應沒有 response 也沒有 choices：{sorted(result)}")
     usage = result.get("usage") or {}
+    if content is None:
+        raise RuntimeError(
+            "Workers AI 回應內容為空（completion_tokens="
+            f"{usage.get('completion_tokens')}）：推理模型可能把 max_tokens 全用在思考，需調高 max_tokens"
+        )
+    obj = json.loads(_unwrap_text(content)) if isinstance(content, str) else content
     in_tok, out_tok = usage.get("prompt_tokens"), usage.get("completion_tokens")
     if in_tok is None or out_tok is None:
         raise RuntimeError("Workers AI 回應沒有 usage.prompt_tokens／completion_tokens，無法記帳")

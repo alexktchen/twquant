@@ -91,6 +91,29 @@ uv run --all-groups python -m twquant llm-ping --task candidate_analysis
 看 `data/insights/` 的缺席比率（schema 連續失敗的比例）與 `unverified_numbers` 的比率。缺席超過三成就換候補模型或改 N；
 數字驗證要不要強制，照 D-081(d) 的原定程序決定。這些是觀察，不是事前登記的統計門檻。
 
+#### 實連補記（2026-10-17，同日第二個 session；AI 依實測修正請求形狀，使用者可推翻）
+
+以 wrangler 登入的 OAuth token（含 `ai:write`，只在行程內用、沒寫進 `.env`）實連 `@cf/qwen/qwen3-30b-a3b-fp8`，
+證據從雲端 Supabase 唯讀取（本機 Docker 沒在跑），推薦快照用本機最新的 `mlscore_20261007_a440dcf0669532ad`。
+
+1. **巢狀 `$defs`／`$ref` 吃得下**：`CandidateAnalysis` 原樣送出可正常受限解碼。上面「只有實連才知道」的疑問已解。
+2. **回應同時帶 `response` 與 `choices`**（後端是 vLLM）；推理把 `max_tokens` 用光時兩者內容都是 null。
+   原本會變成看不懂的 pydantic 錯誤，改為具名錯誤「回應內容為空…需調高 max_tokens」；`response` 為 null 時退回讀 `choices`。
+   `llm-ping` 原本 `max_tokens=200` 必定失敗（qwen3 光思考就用掉 250 左右），改 1000。
+3. **有預設值的欄位會被省略**：pydantic 只把沒預設值的欄位列進 `required`，受限解碼就跳過 `supporting_evidence_ids`，
+   `stance=support` 因此驗證失敗。簡化提示實測：原樣 0/6 通過，**送出前把每個物件的所有欄位標必填後 8/8 通過**。
+   只改送給 Cloudflare 的 schema 複本，pydantic 模型與 Anthropic 路徑不變。真實提示：修正前 3 檔缺席 1（JSON 被截斷），
+   修正後前 10 檔 10/10 產出。
+4. **用量**：每檔平均 31 Neurons（最多 50），等值 0.01 TWD；每晚 30 檔約 940 Neurons，是 9,000 上限的一成。
+   費率表算出的 Neurons 與 Cloudflare 回應裡的 `usage.neurons` 一致（16.55 vs 16.547）。
+5. **未採用、待使用者決定**：
+   - 提示加 `/no_think` 關掉推理：輸出 token 降到約三分之一（8 vs 23–42 Neurons），8/8 通過；但它改了已版本化的提示，屬提示變更。
+     `chat_template_kwargs.enable_thinking=false` 無效（內容仍為 null）。
+   - **內容價值偏低**：10 檔有 9 檔 `stance=insufficient_data`、bucket=watch，理由幾乎都是「沒有新聞」（`events_news_unavailable` 每檔都缺）。
+     要讓分析有用，得接上新聞／公告證據或改提示對「新聞缺席」的處理，否則雲端開了也只是每晚 30 句「資料不足」。
+   - 5314 的證據寫「殖利率 114.77%」，模型照抄；這是雲端 `fundamentals_valuation` 的資料問題，不是 LLM 的問題，另查。
+   - 失敗的呼叫不記用量（既有設計），但 Cloudflare 仍扣 Neurons，失敗多時預算閘會少算。
+
 ### D-184（2026-10-15，使用者：「要」——把 D-183 的兩條候選規則正式登記；**事前登記：寫於任何第二保留期（2026-09-09 起）的名單報酬、回測與判讀之前**；判讀規則為 AI 提出，使用者可推翻，但只能在開啟前）破底排除與大盤緩跌閘門，登記進第二保留期
 
 使用者的問題（D-183）：大跌的日子不該照樣推 15 檔、推的股票一直破底。D-183 只做了提醒；本條把「真的少買」的兩條規則寫死，
