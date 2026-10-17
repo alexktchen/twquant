@@ -671,6 +671,96 @@ INSIGHT_PACKS_SPEC = TableSpec(
     indexes=(("stock_id", "as_of"), ("date",)),
 )
 
+# 大盤體檢與籌碼（T-374／D-188）：每個交易日一列，首頁戰情室讀；欄位與 reporting/market_daily.MarketDaily 同名
+# （tests/test_market_daily.py 守著）。金額是 TWD；法人買賣超＝股數 × 當天收盤；融資餘額是來源單位（千元）。
+MARKET_DAILY_SPEC = TableSpec(
+    "market_daily",
+    (
+        ("date", "date"),
+        ("taiex_close", "double precision"),
+        ("taiex_chg", "double precision"),
+        ("otc_close", "double precision"),
+        ("otc_chg", "double precision"),
+        ("amount", "double precision"),
+        ("amount_avg", "double precision"),
+        ("amount_ratio", "double precision"),
+        ("up", "bigint"),
+        ("down", "bigint"),
+        ("flat", "bigint"),
+        ("limit_up", "bigint"),
+        ("limit_down", "bigint"),
+        ("new_high", "bigint"),
+        ("new_low", "bigint"),
+        ("foreign_net", "double precision"),
+        ("trust_net", "double precision"),
+        ("dealer_net", "double precision"),
+        ("foreign_streak", "bigint"),
+        ("margin_balance", "double precision"),
+        ("margin_delta", "double precision"),
+        ("short_balance", "double precision"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date",),
+)
+
+# 期交所盤後統計（T-375／D-188）：三大法人臺股期貨未平倉淨額、選擇權買賣權比；每個交易日一列。
+# 欄位與 data/sources/taifex_daily.SCHEMA 同名同序（tests/test_taifex_daily.py 守著）。
+TAIFEX_DAILY_SPEC = TableSpec(
+    "taifex_daily",
+    (
+        ("date", "date"),
+        ("fut_dealer_net_oi", "bigint"),
+        ("fut_trust_net_oi", "bigint"),
+        ("fut_foreign_net_oi", "bigint"),
+        ("fut_foreign_long_oi", "bigint"),
+        ("fut_foreign_short_oi", "bigint"),
+        ("pc_vol_ratio", "double precision"),
+        ("pc_oi_ratio", "double precision"),
+        ("put_oi", "bigint"),
+        ("call_oi", "bigint"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date",),
+)
+
+# 法說會行事曆（T-376／D-188）：MOPS 月表，當月＋下月，每天覆蓋；欄位與 data/sources/conferences.SCHEMA 同名同序。
+# 本機另一張研究用的 investor_conferences（2026-09-28 快照、以 row_key 為鍵）與它分開。
+CONFERENCE_CALENDAR_SPEC = TableSpec(
+    "conference_calendar",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("conf_time", "text"),
+        ("market", "text"),
+        ("name", "text"),
+        ("location", "text"),
+        ("summary", "text"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "stock_id", "conf_time"),
+    indexes=(("date",),),
+)
+
+# 晨報（T-377／D-188）：每天 06:30 一列；規則版一句話一定有，模型版（headline／bullets／risk_note）拿不到就空並寫原因。
+# inputs 是晨報引用的全部數字（jsonb），讓每句話都能對回來源。
+MORNING_BRIEF_SPEC = TableSpec(
+    "morning_brief",
+    (
+        ("date", "date"),
+        ("generated_at", "timestamptz"),
+        ("rule_text", "text"),
+        ("headline", "text"),
+        ("bullets", "jsonb"),
+        ("risk_note", "text"),
+        ("model_id", "text"),
+        ("absent_reason", "text"),
+        ("checks", "jsonb"),  # 數字檢查丟掉了哪些句子
+        ("facts", "jsonb"),  # 給模型的事實句（晨報的每個數字都出自這裡）
+        ("inputs", "jsonb"),
+    ),
+    pk=("date",),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -691,6 +781,10 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     *FUND_FLOW_SPECS,
     MOPS_ANNOUNCEMENTS_SPEC,
     INSIGHT_PACKS_SPEC,
+    MARKET_DAILY_SPEC,
+    TAIFEX_DAILY_SPEC,
+    CONFERENCE_CALENDAR_SPEC,
+    MORNING_BRIEF_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

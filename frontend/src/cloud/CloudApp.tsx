@@ -28,7 +28,7 @@ import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } fr
 import { dropNote, weakSummary, weakTags } from './weak'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
-import { GroupsPage } from './GroupsPage'
+import { WarRoom } from './WarRoom'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
@@ -45,8 +45,8 @@ const REFRESH_MIN_MS = 30_000
 const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e.message)
 
 export default function CloudApp() {
-  // 推播通知點開帶 ?tab=group（族群資金通知）就直接開那個分頁
-  const [tab, setTab] = useState<Tab>(() => tabFromUrl(window.location.href) ?? 'picks')
+  // 推播通知點開帶 ?tab=（族群資金通知帶 group → 首頁）就直接開那個分頁；預設是首頁戰情室（T-379）
+  const [tab, setTab] = useState<Tab>(() => tabFromUrl(window.location.href) ?? 'home')
   useEffect(() => {
     if (tabFromUrl(window.location.href)) window.history.replaceState(null, '', withoutTab(window.location.href))
     // 網站已開著時點通知：背景程式（sw.js）傳來要開的網址
@@ -165,8 +165,8 @@ export default function CloudApp() {
   }, [refresh, guest])
 
   useEffect(() => {
-    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）
-    if (guest || tab !== 'picks') return
+    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；首頁也抓（熱力圖標「在名單」）
+    if (guest || (tab !== 'picks' && tab !== 'home')) return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
     setErr('')
@@ -277,11 +277,11 @@ export default function CloudApp() {
           twquant
         </div>
         <nav className="cq-tabs">
+          <button className={tab === 'home' ? 'on' : ''} onClick={() => setTab('home')}>
+            首頁
+          </button>
           <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
             每日名單
-          </button>
-          <button className={tab === 'group' ? 'on' : ''} onClick={() => setTab('group')}>
-            盤勢
           </button>
           <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
             績效
@@ -319,20 +319,33 @@ export default function CloudApp() {
         </div>
       )}
 
-      {tab === 'group' ? (
+      {tab === 'home' ? (
         guest ? (
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
               <div className="cq-rows">
-                <Gate title="登入後看盤勢" text="盤中哪些類股抗跌、哪些領跌，收盤後資金往哪些族群跑：成交比重對自己前 20 日平均的倍數、幾檔漲幾檔跌。" />
+                <Gate title="登入後看今日戰情" text="開盤前一頁看完：昨晚美股與台指夜盤、昨天大盤漲跌家數與法人進出、重大訊息、族群資金往哪跑、今天名單有哪些新面孔。" />
               </div>
             </aside>
             <section className="cq-detail" />
           </main>
         ) : (
-          <GroupsPage
+          <WarRoom
             refresh={refresh}
+            watchSids={watchSids}
             listed={listedGroups}
+            onPicks={(code) => {
+              if (code) {
+                setLine(code)
+                savePref(LINE_KEY, code)
+              }
+              setTab('picks')
+            }}
+            onScore={(code) => {
+              setLine(code)
+              savePref(LINE_KEY, code)
+              setTab('score')
+            }}
             onStock={(sid, name) => {
               setWatchSel({ sid, name })
               setTab('watch')

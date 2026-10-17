@@ -1,0 +1,49 @@
+# T-377（D-188）：晨報——台北 06:30 的第三班。美股 05:00 收、台指期夜盤 05:00 收，收齊昨晚到今早的數字寫進
+# serving.morning_brief，首頁戰情室早上打開才是新的。只有一個步驟、不碰名單；失敗只是首頁沒有今天的晨報。
+# D-175：準時由 Cloudflare Worker（cron-trigger/）06:30 以 workflow_dispatch 帶日期觸發；下面的 schedule 是備援
+# （GHA schedule 常態晚發車，晚個把小時也還在早上）。週六不跑（沒有夜盤、美股週五晚收盤的數字週一早上才用得到）。
+name: morning-brief
+
+on:
+  schedule:
+    - cron: "40 22 * * 0-4" # 06:40 台北，週一到週五（UTC 週日到週四）
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "晨報日 YYYY-MM-DD（留空＝台北今天）"
+        required: false
+        default: ""
+
+concurrency:
+  group: morning-brief
+  cancel-in-progress: false
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TWQUANT_PG_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+      TWQUANT_SUPABASE_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
+      # 模型晨報走 Cloudflare Workers AI（D-185）；沒設就只有規則那一句
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync deps
+        run: uv sync --dev --all-groups
+
+      - name: Resolve day（台北今天；手動補跑可指定）
+        run: |
+          DAY="${{ inputs.date }}"
+          if [ -z "$DAY" ]; then DAY="$(TZ=Asia/Taipei date +%F)"; fi
+          echo "DAY=$DAY" >> "$GITHUB_ENV"
+
+      - name: 晨報（全球行情＋昨天的體檢、籌碼、公告 → 規則一句話＋模型三到六點）
+        run: uv run python -m twquant morning-brief --date "$DAY"

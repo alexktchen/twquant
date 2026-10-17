@@ -18,3 +18,21 @@ test('D-175：dispatch 請求帶 main 與日期；沒有 token 或 repo 格式�
   assert.throws(() => dispatchRequest({ ...env, GITHUB_TOKEN: '' }, '2026-10-12'), /GITHUB_TOKEN/)
   assert.throws(() => dispatchRequest({ ...env, GITHUB_REPO: 'bad repo' }, '2026-10-12'), /GITHUB_REPO/)
 })
+
+test('T-377：06:30 那條 cron 觸發晨報，其他照舊觸發每日 pipeline；工作流程檔名要像檔名', async () => {
+  const { workflowFor } = await import('../../cron-trigger/src/dispatch.ts')
+  const env = {
+    GITHUB_TOKEN: 't0k',
+    GITHUB_REPO: 'alexktchen/twquant',
+    WORKFLOW: 'daily-pipeline.yml',
+    MORNING_WORKFLOW: 'morning-brief.yml',
+    MORNING_CRON: '30 22 * * SUN-THU',
+  }
+  assert.equal(workflowFor(env, '30 22 * * SUN-THU'), 'morning-brief.yml')
+  assert.equal(workflowFor(env, '33 9 * * MON-FRI'), 'daily-pipeline.yml')
+  assert.equal(workflowFor(env, undefined), 'daily-pipeline.yml')
+  assert.equal(workflowFor({ ...env, MORNING_WORKFLOW: undefined }, '30 22 * * SUN-THU'), 'daily-pipeline.yml')
+  const { url } = dispatchRequest(env, '2026-10-20', 'morning-brief.yml')
+  assert.equal(url, 'https://api.github.com/repos/alexktchen/twquant/actions/workflows/morning-brief.yml/dispatches')
+  assert.throws(() => dispatchRequest(env, '2026-10-20', '../x.yml'), /檔名/)
+})

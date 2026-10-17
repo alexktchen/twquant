@@ -7,6 +7,7 @@ import type { Scorecard, TradeRow } from './scorecard'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
+import type { NewsItem, WarRoomData } from './war'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -97,6 +98,12 @@ export const fetchMoodClose = () => get<{ close: CloseMood | null }>('/api/mood/
 /** 市場氛圍期貨與美股版（D-186）：台指期日盤／夜盤、加權現貨、美股四大指數；stale＝有來源沒更新到、給的是上一份。 */
 export const fetchMoodGlobal = () => get<{ global: GlobalMood; stale: boolean; errors: string[] }>('/api/mood/global')
 export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?line=${encodeURIComponent(line)}`)
+
+/** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
+export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
+/** 追蹤股自 since 起的重大訊息（T-379）。 */
+export const fetchWarroomNews = (sids: string[], since: string) =>
+  get<{ since: string; items: NewsItem[] }>(`/api/warroom/news?sids=${encodeURIComponent(sids.join(','))}&since=${since}`)
 
 /** 族群排行（D-177 修訂）：最近一天每個族群的資金倍數、漲跌家數與成交金額最大的幾檔。 */
 export const fetchGroups = () => get<{ date: string; rows: RankRow[] }>('/api/groups')

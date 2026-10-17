@@ -22,6 +22,9 @@ source_rates:
   finmind:
     max_requests: 6
     per_seconds: 1.0
+  yahoo:  # 晨報的全球行情（T-377）：9 個代號各一次，不是正式開放的介面，放慢
+    max_requests: 2
+    per_seconds: 1.0
   tpex_ic:  # 櫃買中心產業價值鏈平台（族群標籤 D-177）：每週一次、47 頁
     max_requests: 1
     per_seconds: 1.0
@@ -49,6 +52,45 @@ quality_gate:
 # 週末也有公告，所以用日曆日。回看要蓋住證據包讀的 30 天，留幾天緩衝。第一次跑約 36 個請求（mops 限流 3 次／5 秒）。
 material_news:
   lookback_days: 35
+
+# T-374／D-188：大盤體檢（首頁戰情室）。成交金額對前 20 個交易日平均；創新高／新低看前 20 個交易日的收盤。
+# 只算四碼普通股（同 serving.yaml cloud.stock_pattern）。
+market_daily:
+  avg_sessions: 20
+  high_low_window: 20
+
+# T-375／D-188：期交所盤後統計（三大法人臺股期貨未平倉、選擇權買賣權比）。兩個下載端點都吃區間，
+# 每天重抓最近 10 個日曆日（冪等，排程停擺幾天自己補回來）。期交所約 15:00 後陸續更新，available_at 記 15:30。
+taifex_daily:
+  lookback_days: 10
+  available_time: "15:30"
+
+# T-376／D-188：法說會行事曆（MOPS 月表，上市／上櫃）。每天抓當月與下一個月（4 個請求），整月覆蓋。
+conferences:
+  months_ahead: 1
+
+# T-377／D-188：晨報。台北 06:30 那班（美股 05:00 收、夜盤 05:00 收）抓這些行情，連同昨天的大盤體檢、期交所盤後、
+# 族群資金、名單與公告，先用規則寫「今日一句話」，再請模型（configs/llm.yaml tasks.morning_brief）寫三到六點。
+# 符號是 Yahoo Finance 的寫法；網站 frontend/functions/_lib/yahoo.ts 的四大指數要與 us_indices 一致（test 守著）。
+morning_brief:
+  us_indices:
+    - {symbol: "^GSPC", name: "S&P 500"}
+    - {symbol: "^IXIC", name: "那斯達克"}
+    - {symbol: "^DJI", name: "道瓊"}
+    - {symbol: "^SOX", name: "費半"}
+  extras:
+    - {symbol: "^VIX", name: "VIX"}
+    - {symbol: "^TNX", name: "美債 10 年殖利率"}
+    - {symbol: "TWD=X", name: "美元／台幣"}
+    - {symbol: "TSM", name: "台積電 ADR"}
+    - {symbol: "DX-Y.NYB", name: "美元指數"}
+  adr_symbol: "TSM"
+  adr_ratio: 5
+  adr_underlying: "2330"
+  fx_symbol: "TWD=X"
+  news_limit: 8
+  top_groups: 3
+  line_names: {CORE: 大盤精選, QUIET: 潛伏飆股, QUIETV: 高分爆量}
 
 # T-310：官方每日當沖、借券賣出、處置、注意 → 直寫 PG（D-154 §五、D-157）。每日 pipeline 的「籌碼」步驟用。
 chip_daily:
