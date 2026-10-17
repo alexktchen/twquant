@@ -15,7 +15,8 @@ def _mirror() -> list[dict[str, object]]:
     )
     m = re.search(r"export const NEWS_CATEGORIES = (\[.*?\]) as const", ts, re.S)
     assert m, "找不到 NEWS_CATEGORIES 的 JSON 字面值"
-    return json.loads(m.group(1))
+    mirror: list[dict[str, object]] = json.loads(m.group(1))
+    return mirror
 
 
 def test_ac1_mirror_equals_config() -> None:
