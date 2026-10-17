@@ -120,6 +120,12 @@ function Global({ state, now }: { state: GlobalState; now: { date: string; time:
   if (!g) return null
   return (
     <div className="cq-mood-col cq-mood-wide">
+      {g.txError && (
+        <div className="cq-mood-row">
+          <span>台指期</span>
+          <span className="cq-mood-vals cq-mood-gap">暫時取不到（{g.txError}），稍後自動再試</span>
+        </div>
+      )}
       {g.tx.length > 0 && (
         <div className="cq-mood-row">
           <span>台指期</span>
@@ -152,7 +158,7 @@ function Global({ state, now }: { state: GlobalState; now: { date: string; time:
         </div>
       )}
       <p className="cq-mood-note">
-        台指期：期交所近月合約，日盤漲跌對前一天結算價、夜盤對當天日盤結算價；「比加權」是最新一節的最後成交對加權最新點數（夜盤對加權收盤）。
+        台指期：期交所近月合約{g.fugle && '（期交所沒回應，這次改用富果）'}，日盤漲跌對前一天結算價、夜盤對當天日盤結算價；「比加權」是最新一節的最後成交對加權最新點數（夜盤對加權收盤）。
         美股：四大指數最近一個交易日（美股盤中為即時）。每分鐘更新，只供看盤{state?.stale && '；部分來源暫時沒更新到，顯示上一份'}。
       </p>
     </div>

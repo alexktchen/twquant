@@ -124,6 +124,7 @@ export type TxQuote = {
   volume: number | null
   test: number | null
   chg: number | null
+  source?: 'taifex' | 'fugle'
 }
 export type TxSpot = { date: string; time: string | null; last: number | null; prev: number | null }
 export type UsIndex = { symbol: string; name: string; date: string; time: string | null; open: boolean; last: number; prev: number; chg: number }
@@ -136,6 +137,7 @@ export type GlobalMood = {
   us: UsIndex[]
   us_avg: number | null
   label: string | null
+  tx_error?: string | null
 }
 
 /** 多久問一次期貨與美股（伺服器 60 秒暫存，問得再密也是同一份）。 */
@@ -177,6 +179,10 @@ export type GlobalView = {
   us: { name: string; chg: number; last: number }[]
   /** 美股的時間：「盤中」或「10/16 收」；沒有指數 → null */
   usWhen: string | null
+  /** 日盤、夜盤都拿不到：台指期那一行改寫原因 */
+  txError: string | null
+  /** 有一節是富果補的（註記寫「期交所沒回應，改用富果」） */
+  fugle: boolean
 }
 
 const mdOf = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`
@@ -203,6 +209,8 @@ export function globalView(g: GlobalMood | null, now: { date: string; time: stri
     gap: g.gap && g.latest ? { session: g.latest, ...g.gap } : null,
     us: g.us.map((u) => ({ name: u.name, chg: u.chg, last: u.last })),
     usWhen: first ? (first.open ? '盤中' : `${mdOf(first.date)} 收`) : null,
+    txError: tx.length === 0 ? (g.tx_error ?? '期交所沒有回應') : null,
+    fugle: [g.day, g.night].some((q) => q?.source === 'fugle'),
   }
 }
 
