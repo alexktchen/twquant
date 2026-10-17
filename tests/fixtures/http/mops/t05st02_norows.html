@@ -1,0 +1,145 @@
+
+
+
+<html>
+<head>
+	<title>公開資訊觀測站</title>
+	
+	
+	<link href="css/css2.css" rel="stylesheet" type="text/css" Media="Screen"/> 
+	
+	<script type="text/javascript" src="js/mops2.js"></script>
+	
+	
+	
+</head>
+
+<body>
+
+
+<div id="div01" >
+<script src='/nocopy.js'></script>
+
+<div align=left><FONT SIZE='3' COLOR='#000000' valign=top><B> </B></FONT></div><table class='noBorder' align=center><tr><td class='compName' align='center'></td></tr><tr><td class='reportName' align='center'>公司當日重大訊息之詳細內容</td></tr>
+
+<tr><td class='reportCont' align='center'>(本日重大訊息包含前一日17:30以後之訊息)</td></tr></table>
+
+<table class='noBorder'><tr><td class='reportCont' align='center'></td></tr></table><script>
+
+var win;
+
+function popupWindow(){
+
+	if (win==null || win.closed){
+
+		win = window.open('/mops/web/ajax_t05st02','popup','top=10,left=10,toolbar=0,location=0,directories=0,status=1,menubar=1,scrollbars=1,resizable=1,titlebar=0,width=600,height=600');
+
+	}
+
+}
+
+</script>
+
+<TABLE >
+
+<tr><th class='tblHead' nowrap>發言日期</th><th class='tblHead' nowrap>發言時間</th><th class='tblHead' nowrap>公司代號</th><th class='tblHead' nowrap>公司名稱</FONT></th><th class='tblHead' nowrap>主旨</th><th class='tblHead' nowrap></th></tr> 
+
+
+
+
+
+</table>
+
+<form name='t59sb01_form' action='/mops/web/ajax_t59sb01' method='post' onsubmit='return false;'>
+
+<input type='hidden' name='firstin' value='true' />
+
+<input type=hidden name=co_id><input type=hidden name='TYPEK' value='all'>
+
+<input type=hidden name='YEAR' value='115'>
+
+<input type=hidden name='MONTH' value='10'>
+
+<input type=hidden name='SDAY' value='16'>
+
+<input type=hidden name='EDAY' value='16'>
+
+<input type=hidden name=DATE1><input type=hidden name=SKEY><input type=hidden name=step value='2b'>
+
+<TABLE >
+
+</table></form>
+
+<br><table class='noBorder'><tr><td class='reportCont' align='center'>請直接點選「詳細資料」以進一步察看詳細內容。</td></tr></table>
+
+
+</div>
+
+
+</body>
+
+
+
+<script>
+	try {
+		if(!document.querySelector('#table01')){
+			var table01 = document.createElement("div");
+			table01.id = "table01"; 
+			document.body.appendChild(table01);
+			if(document.querySelector("#div01")){
+				table01.appendChild(div01);
+			};
+		};
+
+		if (document.autoForm!=null && document.autoForm!=undefined && document.autoForm.run.value==''){
+			ajax1(document.autoForm,'div01');
+			document.querySelector('form[name=autoForm]').remove();
+		};
+
+		if (document.autoForm1!=null && document.autoForm1!=undefined && document.autoForm1.run.value==''){
+			ajax1(document.autoForm1,'div01');
+			document.querySelector('form[name=autoForm1]').remove();
+		};
+
+		if (document.autoRunScript!=null && document.autoRunScript!=undefined && document.autoRunScript.run!=null && document.autoRunScript.run.value!=''){
+			let s = document.autoRunScript.run.value;
+			let script = document.createElement("script");
+
+			script.innerText = s;
+			document.body.appendChild(script);
+			document.querySelector('form[name=autoRunScript] > input[name=run]').remove();
+		};
+
+		if (document.autoRunScript1!=null && document.autoRunScript1!=undefined){
+			if (document.autoRunScript1.count!=null && document.autoRunScript1.count!=undefined && document.autoRunScript1.count.value!=''){
+				var count = parseInt(document.autoRunScript1.count.value);
+				for (var i=0;i<count;i++){
+					var run = eval("document.autoRunScript1.run"+i);
+					if (run!=null && run!=undefined && run.value!=''){
+						var s = run.value;
+
+						var script = document.createElement("script");
+						script.textContent = s;
+						document.querySelector("body").appendChild(script);
+
+						run.remove();
+					};
+				};
+			}else if (document.autoRunScript1.run!=null && document.autoRunScript1.run!=undefined && document.autoRunScript1.run.value!=''){
+				var s = document.autoRunScript1.run.value;
+				s = htmlEncode(s);
+				var script = document.createElement("script");
+				script.textContent = s;
+				document.querySelector("body").appendChild(script);
+
+				document.querySelector('form[name=autoRunScript1] > input[name=run]').remove();
+			};
+		};
+	} catch (error) {
+		console.error("Script Error:", error);
+	};
+</script>
+
+
+
+</html>

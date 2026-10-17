@@ -63,6 +63,12 @@ class QualityGateConfig(BaseConfig):
 CHIP_DAILY_TABLES = ("daytrade_daily", "sbl_short_daily")
 
 
+class MaterialNewsConfig(BaseConfig):
+    """MOPS 重大訊息（T-371／D-187）。權威說明在 system.yaml 的註解。"""
+
+    lookback_days: int = Field(default=35, ge=1)  # 往回補「PG 一列都沒有」的日曆日
+
+
 class ChipDailyConfig(BaseConfig):
     """官方每日當沖／借券／處置／注意（T-310，D-154 §五／D-157）。權威說明在 system.yaml 的註解。"""
 
@@ -104,6 +110,7 @@ class SystemConfig(BaseConfig):
     source_rates: dict[str, SourceRate]
     quality_gate: QualityGateConfig = QualityGateConfig()
     chip_daily: ChipDailyConfig = ChipDailyConfig()
+    material_news: MaterialNewsConfig = MaterialNewsConfig()
 
 
 # D-020 綜合分有效子集的預設值（serving.yaml.composite_factors 缺省時後備）。

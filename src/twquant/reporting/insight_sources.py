@@ -17,6 +17,9 @@ from twquant.conventions import TZ
 _REVENUE_MONTHS = 6
 _CHIP_DAYS = 10
 _EVENT_DAYS = 90
+_NEWS_DAYS = 30  # 重大訊息（T-372）：給模型看近 30 個日曆日、最新幾則
+_NEWS_LIMIT = 5
+_ATTENTION_DAYS = 10
 
 
 def _taipei(value: Any) -> Any:
@@ -94,6 +97,21 @@ def fetch_sections(
         "WHERE stock_id = %s AND available_at <= %s AND date >= %s ORDER BY date DESC LIMIT 5",
         (stock_id, as_of, day - dt.timedelta(days=_EVENT_DAYS)),
     )
+    disposition = _rows(
+        conn,
+        schema,
+        "SELECT date, effective_start, effective_end, available_at FROM {schema}.disposition_stocks "
+        "WHERE stock_id = %s AND available_at <= %s AND effective_end >= %s "
+        "ORDER BY date DESC LIMIT 1",
+        (stock_id, as_of, day),
+    )
+    attention = _rows(
+        conn,
+        schema,
+        "SELECT date, available_at FROM {schema}.attention_stocks "
+        "WHERE stock_id = %s AND available_at <= %s AND date >= %s ORDER BY date DESC",
+        (stock_id, as_of, day - dt.timedelta(days=_ATTENTION_DAYS)),
+    )
     return {
         # ML 區段由呼叫端以「這一次推薦 run 自己的分數」填入：`ml_scores` 混有多個模型的
         # 回補列，取最新一列會拿到別的模型、甚至半年前的分數（2026-09-06 實跑時抓到）。
@@ -103,10 +121,50 @@ def fetch_sections(
         "institutional": institutional,
         "margin": margin,
         "corporate_events": events,
-        # 處置股票目前只在資料湖，供應層尚無此表；缺席會由建構器記成事件區段的缺口。
-        "disposition": [],
+        "disposition": disposition,
+        "attention": {"window_days": _ATTENTION_DAYS, "rows": attention},
+        "material_news": fetch_material_news(conn, schema, stock_id, as_of),
         "industry": industry_row,
     }
+
+
+def fetch_material_news(
+    conn: Any, schema: str, stock_id: str, as_of: dt.datetime
+) -> dict[str, Any] | None:
+    """近 30 日重大訊息（T-372）；來源沒涵蓋這段期間 → None（建構器記成缺口，不說「沒有公告」）。
+
+    涵蓋＝表裡最新一天不早於截點前一天；窗口起點取「30 天前」與「表裡最早一天」較晚者，
+    所以來源才剛開始收的時候，「近 N 日無重大訊息」的 N 是實際涵蓋的天數，不會誇大成 30。
+    """
+    day = as_of.date()
+    exists = _rows(conn, schema, "SELECT to_regclass(%s) AS t", (f"{schema}.material_news",))
+    if not exists or exists[0]["t"] is None:
+        return None
+    span = _rows(
+        conn,
+        schema,
+        "SELECT min(date) AS lo, max(date) AS hi FROM {schema}.material_news "
+        "WHERE date >= %s AND available_at <= %s",
+        (day - dt.timedelta(days=_NEWS_DAYS), as_of),
+    )
+    lo, hi = (span[0]["lo"], span[0]["hi"]) if span else (None, None)
+    if lo is None or hi is None or hi < day - dt.timedelta(days=1):
+        return None
+    window_days = (day - lo).days
+    if window_days < 1:
+        return None
+    # 同一主旨在公告期間內每天重刊（例：面額變更連刊三個月），只留最新那一則，不然 5 個名額全被它佔走
+    rows = _rows(
+        conn,
+        schema,
+        "SELECT date, subject, clause, available_at FROM ("
+        "  SELECT DISTINCT ON (subject) date, subject, clause, available_at FROM {schema}.material_news "
+        "  WHERE stock_id = %s AND available_at <= %s AND date >= %s "
+        "  ORDER BY subject, available_at DESC"
+        ") latest ORDER BY available_at DESC LIMIT %s",
+        (stock_id, as_of, lo, _NEWS_LIMIT),
+    )
+    return {"window_days": window_days, "rows": rows}
 
 
 def fetch_industry_rows(

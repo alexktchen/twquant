@@ -25,9 +25,9 @@ from twquant.reporting.insight_evidence import InsightEvidence
 
 _URI_PREFIX = "twquant://serving"
 _HASH_LENGTH = 16
-# 目前 repo 內沒有任何消息／公告／法說來源（見 D-081 的事實記錄）；這個區段
-# 因此恆為缺口，直到 T-223 接上真正的來源為止。不得由 LLM 以常識補寫。
-_NEWS_GAP_REASON = "repo 內尚無消息／公告／法說來源，本區段恆為缺口（T-223）"
+# 重大訊息（T-372）：呼叫端給 None＝來源沒涵蓋這段期間，記成缺口；不得由 LLM 以常識補寫。
+# 給了列表（可為空）＝來源涵蓋，空列表就是「近 N 日沒有公告」這個事實。
+_NEWS_GAP_REASON = "重大訊息來源未涵蓋這段期間，本區段為缺口（T-372）"
 
 
 @dataclass(frozen=True)
@@ -304,7 +304,11 @@ def _industry_section(
 def _events_section(
     stock_id: str, as_of: dt.datetime, sections: Mapping[str, Any]
 ) -> tuple[list[InsightEvidence], list[str]]:
-    """Dividends and splits are context; a disposition contradicts; news is always a gap."""
+    """Dividends, splits, attention flags and filings are context; a disposition contradicts.
+
+    Filings come from ``material_news``; ``None`` there means the source did not cover the
+    window, which stays a gap rather than being read as "nothing was announced".
+    """
     out: list[InsightEvidence] = []
     for row in _usable(sections.get("disposition") or [], as_of):
         available, captured = _timestamps(row, as_of)
@@ -337,8 +341,60 @@ def _events_section(
                 direction="neutral",
             )
         )
-    out.append(_gap("events_news_unavailable", _NEWS_GAP_REASON, stock_id, as_of, "news"))
-    return out, ["news"]
+    attention = sections.get("attention") or {}
+    flagged = _usable(attention.get("rows") or [], as_of)
+    if flagged:
+        latest = max(flagged, key=lambda r: r["date"])
+        available, captured = _timestamps(latest, as_of)
+        out.append(
+            _item(
+                "events_attention",
+                title=(
+                    f"近 {attention.get('window_days')} 日被列注意股 {len(flagged)} 次"
+                    f"（最近 {latest.get('date')}）"
+                ),
+                table="attention_stocks",
+                stock_id=stock_id,
+                day=latest.get("date"),
+                available_at=available,
+                captured_at=captured,
+                direction="neutral",
+            )
+        )
+    news = sections.get("material_news")
+    if news is None:
+        out.append(_gap("events_news_unavailable", _NEWS_GAP_REASON, stock_id, as_of, "news"))
+        return out, ["news"]
+    # 主旨只說發生了什麼，利多利空不由規則判斷 → 一律中性，讓分析自己讀
+    posted = sorted(_usable(news.get("rows") or [], as_of), key=lambda r: r["available_at"])
+    if not posted:
+        out.append(
+            _item(
+                "events_news_none",
+                title=f"近 {news.get('window_days')} 日無重大訊息",
+                table="material_news",
+                stock_id=stock_id,
+                day=None,
+                available_at=as_of,
+                captured_at=as_of,
+                direction="neutral",
+            )
+        )
+    for k, row in enumerate(reversed(posted), start=1):
+        available, captured = _timestamps(row, as_of)
+        out.append(
+            _item(
+                f"events_news_{k}",
+                title=f"{available:%Y-%m-%d %H:%M} 重大訊息：{row.get('subject')}",
+                table="material_news",
+                stock_id=stock_id,
+                day=row.get("date"),
+                available_at=available,
+                captured_at=captured,
+                direction="neutral",
+            )
+        )
+    return out, []
 
 
 def build_bundle(stock_id: str, as_of: dt.datetime, sections: Mapping[str, Any]) -> EvidenceBundle:
@@ -346,7 +402,7 @@ def build_bundle(stock_id: str, as_of: dt.datetime, sections: Mapping[str, Any])
 
     ``sections`` holds the caller's raw rows keyed by source (``ml``, ``monthly_revenue``,
     ``stock_valuation``, ``institutional``, ``margin``, ``industry``, ``corporate_events``,
-    ``disposition``). Nothing here reaches the database, so the point-in-time cutoff the
+    ``disposition``, ``attention``, ``material_news``). Nothing here reaches the database, so the point-in-time cutoff the
     caller queried with is the only cutoff that matters, and it is re-checked per row.
     """
     if not isinstance(stock_id, str):

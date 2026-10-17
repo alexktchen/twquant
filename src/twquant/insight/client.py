@@ -183,7 +183,9 @@ class InsightClient:
         in_tok = out_tok = 0
         for attempt in range(2):  # schema/呼叫失敗重試 2 次（AC-1）
             try:
-                parsed, in_tok, out_tok = backend(model.id, system, user, schema, max_tokens)
+                parsed, in_tok, out_tok = backend(
+                    model.id, system + model.system_suffix, user, schema, max_tokens
+                )
                 break
             except LlmRefusal as refusal:
                 # 政策拒答重試只是再花一次錢拿到同一個答案，直接記錄並放棄。

@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from twquant.errors import DataError
+
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
@@ -628,6 +630,46 @@ FUND_FLOW_SPECS: tuple[TableSpec, ...] = (
     ),
 )
 
+# MOPS 重大訊息（T-371／D-187）：直寫 PG、資料湖沒有。每日「重大訊息」步驟抓當天、前一天與回看窗內的缺日；
+# 欄位與 data/sources/material_news.SCHEMA 同名同序（tests/test_material_news.py 守著）。只存主旨不存全文。
+MATERIAL_NEWS_SPEC = TableSpec(
+    "material_news",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("market", "text"),
+        ("name", "text"),
+        ("subject", "text"),
+        ("clause", "text"),
+        ("fact_date", "date"),
+        ("mops_seq", "bigint"),
+        ("available_at", "timestamptz"),
+    ),
+    # MOPS 自己的編號不唯一（同公司同日不同公告都可能是 1），一則公告的身分是 (代號, 發言時間, 主旨)
+    pk=("stock_id", "available_at", "subject"),
+    indexes=(("date",),),
+)
+
+# 洞悉證據包（T-373／D-187）：每日 pipeline 分析完把 data/insights/*.json 整包寫進來（pack 欄 jsonb），
+# 雲端 runner 每次都是新機器，檔案留不住；網站個股頁從這裡讀。date＝as_of 的日期（雲端滾動窗用）。
+INSIGHT_PACKS_SPEC = TableSpec(
+    "insight_packs",
+    (
+        ("insight_run_id", "text"),
+        ("recommendation_run_id", "text"),
+        ("stock_id", "text"),
+        ("date", "date"),
+        ("as_of", "timestamptz"),
+        ("has_analysis", "boolean"),
+        ("stance", "text"),
+        ("recommended_bucket", "text"),
+        ("pack", "jsonb"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("insight_run_id",),
+    indexes=(("stock_id", "as_of"), ("date",)),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -646,6 +688,8 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     SIMILAR_LIBRARY_SPEC,
     PICK_SIMILAR_SPEC,
     *FUND_FLOW_SPECS,
+    MATERIAL_NEWS_SPEC,
+    INSIGHT_PACKS_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
@@ -733,6 +777,31 @@ def ensure_tables(conn: Any, specs: tuple[TableSpec, ...], schema: str = "servin
             for ddl in _spec_index_ddls(spec, schema):
                 cur.execute(ddl)
     conn.commit()
+
+
+def table_columns(conn: Any, table: str, schema: str = "serving") -> list[str]:
+    """PG 裡該表現有的欄位名（依順序）；表不存在回空列表。"""
+    _check_ident(schema)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+            (schema, table),
+        )
+        return [str(row[0]) for row in cur.fetchall()]
+
+
+def assert_columns(conn: Any, spec: TableSpec, schema: str = "serving") -> None:
+    """既有表的欄位要與 spec 一致，否則 raise 並說怎麼修——`CREATE TABLE IF NOT EXISTS` 不會改舊表，
+    欄位對不上時 COPY 會在半路噴出難懂的錯誤（2026-10-17 material_news 第一版表殘留在雲端時抓到）。"""
+    actual = table_columns(conn, spec.name, schema)
+    expected = list(spec.column_names)
+    if actual and actual != expected:
+        raise DataError(
+            spec.name,
+            None,
+            f'PG 的欄位 {actual} 與程式的 {expected} 不同；確認表裡沒有別人要的資料後 DROP TABLE "{schema}"."{spec.name}" 再重跑，表會重建',
+        )
 
 
 def ensure_schema(conn: Any, schema: str = "serving") -> None:
