@@ -14,6 +14,16 @@ export type Brief = {
   facts: string[] | null
   extras: Quote[] | null
   adr_premium: number | null
+  /** 昨晚到今早的新聞頭條（晨報 06:30 抓的快照；舊晨報沒有這欄） */
+  headlines?: Headline[] | null
+}
+
+export type Headline = { news_id: number; title: string; summary: string | null; published_at: string; category: string | null; url: string; source: string }
+
+/** 「2026-10-17T06:12:00+08:00」→「10/17 06:12」。 */
+export function headlineTime(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso)
+  return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}:${m[5]}` : iso
 }
 
 export type Market = {

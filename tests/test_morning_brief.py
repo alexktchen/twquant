@@ -11,6 +11,7 @@ from twquant.config import MorningBriefConfig, SystemConfig, load_config
 from twquant.conventions import TZ
 from twquant.data.serving import schema as sch
 from twquant.data.sources.global_quotes import NightFuture, Quote
+from twquant.data.sources.news_headlines import Headline
 from twquant.insight.client import InsightClient
 from twquant.insight.config import LlmConfig, load_llm_config
 from twquant.insight.prompts import MORNING_BRIEF_PROMPT_VERSION, MORNING_BRIEF_SYSTEM
@@ -22,8 +23,10 @@ from twquant.reporting.morning_brief import (
     compose,
     facts,
     gather,
+    reversed_directions,
     rule_text,
     signals,
+    strip_self_reference,
     user_payload,
 )
 
@@ -382,13 +385,17 @@ def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:
 
 def test_ac5_prompt_asks_for_analyst_judgement() -> None:
     # 使用者 2026-10-17：「太白話了」→ v3 盤前快訊；「多一點分析師的角度」→ v4 先研判、再依據、最後觀察重點；數字規則照舊
-    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-17.4"
+    # 同日：「也加上昨晚國際金融大事、新聞頭條」「不用加上『我以分析師角度』」→ v5 加【大事】、禁止自報身分
+    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-17.5"
     for word in (
         "盤勢分析師",
         "【研判】",
         "【國際】",
         "【籌碼】",
         "【觀察】",
+        "【大事】",
+        "新聞頭條",
+        "不要提到自己的身分",
         "研判素材",
         "逆價差",
         "不超過 30 字",
@@ -397,7 +404,7 @@ def test_ac5_prompt_asks_for_analyst_judgement() -> None:
     ):
         assert word in MORNING_BRIEF_SYSTEM
     assert "白話" not in MORNING_BRIEF_SYSTEM and "散戶" not in MORNING_BRIEF_SYSTEM
-    assert "只能使用事實句或研判素材裡出現的數字" in MORNING_BRIEF_SYSTEM
+    assert "只能使用事實句、研判素材或新聞頭條裡出現的數字" in MORNING_BRIEF_SYSTEM
     inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
     assert any("比加權收盤低 500 點（逆價差）" in x for x in facts(inp))
 
@@ -424,3 +431,129 @@ def test_ac6_day_night_divergence_is_called_out() -> None:
     sig = signals(inp)
     assert "研判素材：加權指數前一交易日 +0.30%，夜盤卻 -2.21%，日夜盤方向相反" in sig
     assert "研判素材：指數上漲且上漲家數較多，漲勢普及" in sig
+
+
+# ── AC-7：昨晚國際大事・新聞頭條（使用者 2026-10-17）──────────────────────────────
+def _head(nid: int, hour: int, title: str, day: int = 16) -> Headline:
+    return Headline(
+        news_id=nid,
+        title=title,
+        summary=None,
+        published_at=dt.datetime(2026, 10, day, hour, 0, tzinfo=TZ),
+        category="國際政經",
+        url=f"https://news.cnyes.com/news/id/{nid}",
+        source="鉅亨網",
+    )
+
+
+def _news(category: str, limit: int, label: str) -> list[Headline]:
+    if category == "headline":
+        return [
+            _head(1, 22, "Fed 官員暗示 12 月降息"),
+            _head(2, 13, "台股午盤震盪"),  # 前一天 14:00 以前 → 不列
+            _head(3, 5, "美股四大指數收黑", day=17),
+        ]
+    return [_head(1, 22, "Fed 官員暗示 12 月降息"), _head(4, 23, "油價跳漲 4%")]
+
+
+def test_ac7_gather_keeps_headlines_after_previous_close() -> None:
+    inp = gather(
+        _conn(),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        fetch_news=_news,
+        now=NOW,
+    )
+    assert [h.news_id for h in inp.headlines] == [3, 4, 1]  # 新到舊、去重、13:00 那則不列
+    f = facts(inp)
+    assert "新聞頭條（鉅亨網 10/17 05:00）：美股四大指數收黑" in f
+    assert "新聞頭條（鉅亨網 10/16 23:00）：油價跳漲 4%" in f
+    assert not any("台股午盤震盪" in x for x in f)
+    # 頭條裡的數字可以被引用：逐句檢查不會把「4%」當成編造
+    ok = MorningBrief(
+        headline="油價跳漲 4%，台股開盤恐承壓", bullets=["【大事】油價跳漲 4%"], risk_note=""
+    )
+    out, notes = check_brief(ok, inp)
+    assert out is not None and notes == []
+
+
+def test_ac7_news_failure_is_recorded_not_raised() -> None:
+    def broken(category: str, limit: int, label: str) -> list[Headline]:
+        raise RuntimeError("HTTP 503")
+
+    inp = gather(
+        _conn(),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        fetch_news=broken,
+        now=NOW,
+    )
+    assert inp.headlines == []
+    assert any(e.startswith("新聞 頭條") and "503" in e for e in inp.errors)
+
+
+def test_ac7_self_reference_is_stripped() -> None:
+    # 使用者 2026-10-17：「不用加上『我以分析師角度』」——模型寫了也刪掉
+    assert strip_self_reference("我以分析師角度來看，台股開盤恐承壓") == "台股開盤恐承壓"
+    assert (
+        strip_self_reference("【研判】從分析師的觀點而言，外資賣壓未歇") == "【研判】外資賣壓未歇"
+    )
+    assert strip_self_reference("站在分析師立場：量能萎縮") == "量能萎縮"
+    assert strip_self_reference("外資賣超 250 億") == "外資賣超 250 億"
+    inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    brief = MorningBrief(
+        headline="以分析師角度來看，外資連續賣超 4 天",
+        bullets=["我以分析師角度分析，外資賣超 250 億"],
+        risk_note="",
+    )
+    out, _ = check_brief(brief, inp)
+    assert out is not None
+    assert out.headline == "外資連續賣超 4 天" and out.bullets == ["外資賣超 250 億"]
+
+
+def test_ac7_flipped_news_direction_is_dropped() -> None:
+    # 2026-10-17 實見：頭條「AI賣壓燒向債市！美債殖利率急跌」，模型寫成「美債殖利率急升」
+    def news(category: str, limit: int, label: str) -> list[Headline]:
+        return [
+            _head(5, 22, "AI賣壓燒向債市！美債殖利率急跌 華爾街緊盯科技巨頭財報"),
+            _head(6, 23, "油價跳漲 4%"),
+            _head(7, 21, "金價上漲"),
+            _head(8, 20, "金價回落"),  # 頭條之間方向不一 → 金價不檢查
+        ]
+
+    inp = gather(
+        _conn(),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        fetch_news=news,
+        now=NOW,
+    )
+    assert reversed_directions("美債殖利率急升反映避險情緒", inp) == ["殖利率"]
+    assert reversed_directions("美債殖利率下降、油價走揚", inp) == []
+    assert reversed_directions("油價下跌", inp) == ["油價"]
+    assert reversed_directions("金價下跌", inp) == []
+    brief = MorningBrief(
+        headline="外資連續賣超 4 天，台股開盤恐承壓",
+        bullets=["【大事】美債殖利率急升反映避險情緒", "外資賣超 250 億"],
+        risk_note="",
+    )
+    out, notes = check_brief(brief, inp)
+    assert out is not None and out.bullets == ["外資賣超 250 億"]
+    assert any("殖利率" in n and "方向" in n for n in notes)
+    bad_head = MorningBrief(
+        headline="油價重挫，台股承壓", bullets=["外資賣超 250 億"], risk_note=""
+    )
+    out2, notes2 = check_brief(bad_head, inp)
+    assert out2 is None and "方向寫反" in notes2[0]

@@ -88,6 +88,11 @@ class QuoteSymbol(BaseConfig):
     name: str
 
 
+class NewsFeed(BaseConfig):
+    category: str  # 鉅亨網新聞分類代碼（headline、wd_stock…）
+    label: str
+
+
 class MorningBriefConfig(BaseConfig):
     """晨報（T-377／D-188）：06:30 那班抓的全球行情、晨報引用哪些資料。權威說明在 system.yaml 的註解。"""
 
@@ -105,6 +110,12 @@ class MorningBriefConfig(BaseConfig):
     signal_volume_hot: float = Field(default=1.2, gt=1)  # 成交量是 20 日平均幾倍以上算量能放大
     signal_volume_cold: float = Field(default=0.8, gt=0, lt=1)  # 幾倍以下算量能萎縮
     signal_streak: int = Field(default=5, ge=2)  # 外資連買／連賣幾天以上才提
+    news_feeds: list[NewsFeed] = []  # 晨報的新聞頭條來源（鉅亨網分類）
+    news_since_hour: int = Field(default=14, ge=0, le=23)  # 從前一天幾點（台北）起的新聞
+    news_fetch_limit: int = Field(default=30, ge=1)  # 每個分類抓幾則
+    headline_limit: int = Field(default=8, ge=1)  # 晨報與首頁列幾則
+    news_direction_subjects: list[str] = []  # 檢查晨報有沒有把頭條的漲跌方向寫反的標的
+    news_direction_window: int = Field(default=4, ge=1)  # 標的後面幾個字內找方向字
     line_names: dict[
         str, str
     ] = {}  # 名單線代號 → 給人看的名字（網站 functions/_lib/picks.ts LINES 同名）

@@ -15,7 +15,8 @@ const handle: PagesFunction<Env> = async ({ env }) =>
     const [brief] = await readRows(
       () => db<Row[]>`
         SELECT date::text AS date, to_char(generated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS generated_at, rule_text, headline, bullets, risk_note,
-               model_id, absent_reason, facts, inputs->'extras' AS extras, inputs->'adr_premium' AS adr_premium
+               model_id, absent_reason, facts, inputs->'extras' AS extras, inputs->'adr_premium' AS adr_premium,
+               inputs->'headlines' AS headlines
         FROM serving.morning_brief ORDER BY date DESC LIMIT 1`,
     )
     // to_jsonb：日期變成 "YYYY-MM-DD"、數字照數字，不經過驅動程式的 Date

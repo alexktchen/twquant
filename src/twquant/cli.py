@@ -850,6 +850,7 @@ def morning_brief_cmd(
     from twquant.data.http import HttpClient
     from twquant.data.serving import store
     from twquant.data.sources import global_quotes as gq
+    from twquant.data.sources import news_headlines as news
     from twquant.insight.client import InsightClient
     from twquant.insight.config import load_llm_config
     from twquant.reporting.morning_brief import compose, gather, rule_text, write_brief
@@ -863,6 +864,7 @@ def morning_brief_cmd(
         "categories"
     ]
     yahoo = HttpClient(source="yahoo", rate=cfg.source_rates["yahoo"])
+    cnyes = HttpClient(source="cnyes", rate=cfg.source_rates["cnyes"])
 
     def post_json(url: str, payload: dict[str, str]) -> dict[str, object]:
         req = urllib.request.Request(
@@ -884,6 +886,8 @@ def morning_brief_cmd(
             categories,
             fetch_quote=lambda sym, name: gq.fetch_yahoo(yahoo, sym, name),
             fetch_night=lambda: gq.fetch_taifex_night(post_json),
+            fetch_news=lambda cat, n, label: news.fetch(cnyes, cat, n, label),
+            now=now,
         )
         rule = rule_text(inputs)
         client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)

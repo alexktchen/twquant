@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,7 @@ from twquant.conventions import TZ
 from twquant.data.serving.schema import MORNING_BRIEF_SPEC, ensure_tables
 from twquant.data.serving.sync import upsert
 from twquant.data.sources.global_quotes import NightFuture, Quote
+from twquant.data.sources.news_headlines import Headline, window
 from twquant.insight.client import InsightClient
 from twquant.insight.prompts import MORNING_BRIEF_PROMPT_VERSION, MORNING_BRIEF_SYSTEM
 from twquant.insight.schemas import MorningBrief
@@ -34,6 +36,7 @@ REVENUE_DEADLINE_DAY = 10
 
 FetchQuote = Callable[[str, str], Quote]
 FetchNight = Callable[[], NightFuture]
+FetchNews = Callable[[str, int, str], list[Headline]]  # (分類, 則數, 標籤) → 頭條
 
 
 @dataclass
@@ -59,6 +62,8 @@ class MorningInputs:
     adr_premium: float | None = None
     errors: list[str] = field(default_factory=list)
     thresholds: dict[str, float] = field(default_factory=dict)  # 研判素材的門檻（system.yaml）
+    headlines: list[Headline] = field(default_factory=list)  # 昨晚到今早的新聞頭條
+    news_subjects: list[str] = field(default_factory=list)  # 檢查方向寫反的標的（system.yaml）
 
 
 def _rows(conn: Any, schema: str, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -90,6 +95,8 @@ def gather(
     *,
     fetch_quote: FetchQuote,
     fetch_night: FetchNight,
+    fetch_news: FetchNews | None = None,
+    now: dt.datetime | None = None,
 ) -> MorningInputs:
     """收齊今天晨報的輸入。行情抓不到記 errors，不 raise。"""
     optional = (
@@ -111,7 +118,9 @@ def gather(
             "volume_hot": cfg.signal_volume_hot,
             "volume_cold": cfg.signal_volume_cold,
             "streak": float(cfg.signal_streak),
+            "direction_window": float(cfg.news_direction_window),
         },
+        news_subjects=list(cfg.news_direction_subjects),
     )
     if missing:
         out.errors.append(f"資料表還沒建：{'、'.join(missing)}（等每日 pipeline 跑過一次）")
@@ -247,6 +256,18 @@ def gather(
         out.night = fetch_night()
     except Exception as exc:  # noqa: BLE001
         out.errors.append(f"台指期夜盤：{exc}")
+    if fetch_news is not None and cfg.news_feeds:
+        until = now or dt.datetime.combine(day, dt.time(23, 59), tzinfo=TZ)
+        since = dt.datetime.combine(
+            day - dt.timedelta(days=1), dt.time(cfg.news_since_hour), tzinfo=TZ
+        )
+        pool: list[Headline] = []
+        for feed in cfg.news_feeds:
+            try:
+                pool.extend(fetch_news(feed.category, cfg.news_fetch_limit, feed.label))
+            except Exception as exc:  # noqa: BLE001  # 新聞拿不到不擋晨報；原因留在 errors
+                out.errors.append(f"新聞 {feed.label}：{exc}")
+        out.headlines = window(pool, since, until, cfg.headline_limit)
     adr = next((q for q in out.extras if q.symbol == cfg.adr_symbol), None)
     fx = next((q for q in out.extras if q.symbol == cfg.fx_symbol), None)
     if adr and fx and out.tsmc_close:
@@ -397,6 +418,9 @@ def facts(inp: MorningInputs) -> list[str]:
         out.append(
             "成交比重比 20 日平均減少最多的族群：" + "、".join(x["grp"] for x in inp.outflow)
         )
+    for h in inp.headlines:
+        stamp = h.published_at.strftime("%m/%d %H:%M")
+        out.append(f"新聞頭條（{h.source} {stamp}）：{h.title}")
     for p in inp.picks:
         out.append(f"今天名單「{p['name']}」{p['n']} 檔，其中新增 {p['new']} 檔")
     for nw in inp.news:
@@ -496,25 +520,76 @@ def user_payload(inp: MorningInputs) -> str:
     return head + "\n".join(f"- {x}" for x in lines)
 
 
+# 使用者 2026-10-17：「不用加上『我以分析師角度』」——模型偶爾自報身分，程式再刪一次
+_SELF_REF = re.compile(
+    r"(我|本文)?(以|從|站在)?(資深)?(盤勢)?分析師(的)?(角度|觀點|立場)(來看|而言|分析)?[，,：:、]?"
+)
+
+
+def strip_self_reference(text: str) -> str:
+    """刪掉「以分析師角度來看」這類自報身分的字，前後多餘的標點一起收掉。"""
+    return _SELF_REF.sub("", text).strip(" ，,：:、")
+
+
+_UP = "升漲揚增強"
+_DOWN = "跌降挫滑落減貶弱"
+
+
+def directions(text: str, subjects: list[str], window: int) -> dict[str, int]:
+    """每個標的在句子裡的方向：標的後 window 個字內第一個方向字，升漲揚增強 → +1、跌降挫滑落減貶弱 → -1；同句前後矛盾 → 0。"""
+    out: dict[str, int] = {}
+    for s in subjects:
+        i = text.find(s)
+        while i >= 0:
+            tail = text[i + len(s) : i + len(s) + window]
+            d = next((1 if ch in _UP else -1 for ch in tail if ch in _UP or ch in _DOWN), None)
+            if d is not None:
+                out[s] = d if out.get(s, d) == d else 0
+            i = text.find(s, i + len(s))
+    return out
+
+
+def reversed_directions(text: str, inp: MorningInputs) -> list[str]:
+    """句子裡跟新聞頭條方向相反的標的。頭條之間自己方向不一的標的不檢查。"""
+    window = int(inp.thresholds.get("direction_window", 4))
+    head: dict[str, int] = {}
+    for h in inp.headlines:
+        for s, d in directions(h.title, inp.news_subjects, window).items():
+            head[s] = d if head.get(s, d) == d else 0
+    said = directions(text, inp.news_subjects, window)
+    return [s for s, d in said.items() if d and head.get(s, 0) == -d]
+
+
 def check_brief(brief: MorningBrief, inp: MorningInputs) -> tuple[MorningBrief | None, list[str]]:
     """每句的數字都要出自事實句；對不上的那一句丟掉。標題對不上 → 整份不用（回 None，網站改顯示規則版）。"""
     known = facts(inp)
+    brief = MorningBrief(
+        headline=strip_self_reference(brief.headline),
+        bullets=[strip_self_reference(b) for b in brief.bullets],
+        risk_note=strip_self_reference(brief.risk_note) if brief.risk_note else brief.risk_note,
+    )
     bad_head = unverified_numbers(brief.headline, known)
     if bad_head:
         return None, [f"標題含事實裡沒有的數字 {list(bad_head)}：{brief.headline}"]
+    flipped = reversed_directions(brief.headline, inp)
+    if flipped:
+        return None, [f"標題把新聞頭條的方向寫反 {flipped}：{brief.headline}"]
     notes: list[str] = []
     kept: list[str] = []
     for b in brief.bullets:
         bad = unverified_numbers(b, known)
+        flip = reversed_directions(b, inp)
         if bad:
             notes.append(f"丟掉一點（數字 {list(bad)} 不在事實裡）：{b}")
+        elif flip:
+            notes.append(f"丟掉一點（{flip} 的方向跟新聞頭條相反）：{b}")
         else:
             kept.append(b)
     risk = (brief.risk_note or "").strip()
     if risk.lower() in ("", "null", "none", "無"):
         risk = ""
-    elif unverified_numbers(risk, known):
-        notes.append(f"丟掉風險提醒（數字不在事實裡）：{risk}")
+    elif unverified_numbers(risk, known) or reversed_directions(risk, inp):
+        notes.append(f"丟掉風險提醒（數字不在事實裡或方向跟頭條相反）：{risk}")
         risk = ""
     if not kept:
         return None, [*notes, "每一點都有對不上的數字，整份不用"]

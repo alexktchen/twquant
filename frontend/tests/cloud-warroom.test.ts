@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { SID_RE } from '../functions/_lib/picks.ts'
 import { addDays, marketWide, newsTags, parseSids, pickNews, revenueDeadline, taipeiDay } from '../functions/_lib/warroom.ts'
-import { breadth, signedYi, streakText, tone } from '../src/cloud/war.ts'
+import { breadth, headlineTime, signedYi, streakText, tone } from '../src/cloud/war.ts'
 
 const row = (stock_id: string, subject: string, at: string) => ({ stock_id, name: null, subject, at })
 
@@ -74,6 +74,12 @@ test('內文欄還沒建（42703）或表還沒建（42P01）都當沒有資料�
   assert.deepEqual(await readNewColumn(fail('42703')), [])
   assert.deepEqual(await readNewColumn(fail('42P01')), [])
   await assert.rejects(readNewColumn(fail('57014')), /57014/)
+})
+
+test('2026-10-17：新聞頭條的時間——晨報存的 ISO 字串 → 月/日 時:分', () => {
+  assert.equal(headlineTime('2026-10-17T06:12:00+08:00'), '10/17 06:12')
+  assert.equal(headlineTime('2026-09-03T23:05:41+08:00'), '9/3 23:05')
+  assert.equal(headlineTime('壞的'), '壞的')
 })
 
 test('除權息預告：種類中文與金額說明', async () => {
