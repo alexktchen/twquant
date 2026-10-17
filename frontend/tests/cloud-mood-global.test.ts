@@ -443,3 +443,27 @@ test('T-370 AC4：網站——兩節都沒有就照樣畫台指期那一行寫�
   assert.ok(read('functions/api/mood/global.ts').includes('fugleFut(env.FUGLE_API_KEY)'))
   assert.ok(read('src/cloud/MoodCard.tsx').includes('g.txError'))
 })
+
+test('使用者 2026-10-17：台指期與美股都有漲跌點數，點數格式帶正負號', async () => {
+  const { signedPts, usPrice } = await import('../src/cloud/mood.ts')
+  const g: WebGlobal = {
+    spot: { date: '2026-10-16', time: '13:33:25', last: 47111.26, prev: 46969.87 },
+    day: webTx('day', '2026-10-16', 47242, 46931),
+    night: webTx('night', '2026-10-16', 46140, 47284),
+    latest: 'night',
+    gap: { pts: 46140 - 47111.26, pct: 46140 / 47111.26 - 1 },
+    us: [{ symbol: '^GSPC', name: 'S&P 500', date: '2026-10-16', time: '04:02', open: false, last: 7659.44, prev: 7744.06, chg: -0.0109 }],
+    us_avg: null,
+    label: null,
+  }
+  const v = globalView(g, { date: '2026-10-17', time: '09:00:00' })
+  assert.ok(v)
+  assert.deepEqual(v.tx.map((q) => q.diff), [311, -1144])
+  near(v.us[0].diff, -84.62)
+  assert.equal(signedPts(311), '+311')
+  assert.equal(signedPts(-1144), '-1,144')
+  assert.equal(signedPts(-84.62, 2), '-84.62')
+  assert.equal(signedPts(0), '0')
+  assert.equal(signedPts(null), '—')
+  assert.equal(usPrice(7659.44), '7,659.44')
+})
