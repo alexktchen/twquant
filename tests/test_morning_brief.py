@@ -245,12 +245,15 @@ def test_ac1_no_market_row_yet_means_empty_sections_not_errors() -> None:
 def test_ac2_rule_text_cites_inputs_and_skips_missing() -> None:
     inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
     text = rule_text(inp)
-    assert "四大指數平均 +1.5%" in text and "費半 +3.0%" in text
-    assert "台指夜盤收 26,500" in text and "比加權收盤低 500 點" in text
-    assert "昨天加權 -1.23%" in text and "543 漲 1238 跌" in text and "漲停 40 跌停 2" in text
-    assert "成交量是 20 日平均的 1.27 倍" in text and "外資 -250 億（連賣 4 天）" in text
-    assert "外資期貨淨空單 93,675 口" in text and "買賣權比 68%" in text
-    assert "資金流入 半導體、航運" in text and "大盤精選 2 檔（新增 1）" in text
+    # 2026-10-17 使用者：「太白話了」→ 改券商晨報口吻；數字與涵蓋的項目不變
+    assert "美股收紅，四大指數均幅 +1.5%、費半 +3.0%" in text
+    assert "台指期夜盤 26,500（-2.2%），逆價差 500 點" in text
+    assert "前一交易日加權 -1.23%，漲跌家數 543：1238，漲停 40、跌停 2，量能 1.27 倍均量" in text
+    assert "外資賣超 250 億（連 4 日賣超）" in text
+    assert "外資期貨淨空單 93,675 口，P/C 未平倉比 68%" in text
+    assert "資金流入 半導體、航運" in text and "今日名單 大盤精選 2 檔（新增 1）" in text
+    for casual in ("昨天", "是 20 日平均的", "連賣"):
+        assert casual not in text
     empty = MorningInputs(day=DAY, market_date=None, market=None, taifex=None)
     assert rule_text(empty) == "今天沒有可用的資料。"
 
@@ -361,3 +364,21 @@ def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:
     ok = MorningBrief(headline="外資連續賣超 4 天", bullets=["外資賣超 250 億"], risk_note="null")
     out2, notes2 = check_brief(ok, inp)
     assert out2 is not None and out2.risk_note is None and notes2 == []
+
+
+def test_ac5_prompt_asks_for_professional_premarket_tone() -> None:
+    # 使用者 2026-10-17：「今天的一句話太白話了」→ v3 改成盤前快訊口吻；數字規則照舊
+    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-17.3"
+    for word in (
+        "盤前快訊",
+        "【國際】",
+        "【籌碼】",
+        "逆價差",
+        "不超過 30 字",
+        "2% 以上才寫「大漲／重挫」",
+    ):
+        assert word in MORNING_BRIEF_SYSTEM
+    assert "白話" not in MORNING_BRIEF_SYSTEM and "散戶" not in MORNING_BRIEF_SYSTEM
+    assert "只能使用事實句裡出現的數字" in MORNING_BRIEF_SYSTEM
+    inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    assert any("比加權收盤低 500 點（逆價差）" in x for x in facts(inp))
