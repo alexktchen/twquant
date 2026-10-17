@@ -26,6 +26,7 @@ import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
 import { dropNote, weakSummary, weakTags } from './weak'
+import { insiderTag } from './insider'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
@@ -634,6 +635,11 @@ function Row({
               {t.text}
             </i>
           ))}
+          {insiderTag(p.insider) && (
+            <i className="cq-tag weak insider" title={insiderTag(p.insider)!.title}>
+              {insiderTag(p.insider)!.text}
+            </i>
+          )}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
       </div>

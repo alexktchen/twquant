@@ -3,8 +3,9 @@ import { dayLabel, dividendText } from './war.ts'
 
 export type StockCalItem = {
   date: string
-  kind: 'cash' | 'stock' | 'both' | 'split' | 'reduce' | 'conf'
+  kind: 'cash' | 'stock' | 'both' | 'split' | 'reduce' | 'conf' | 'insider'
   time: string | null
+  /** 法說會地點／說明；內部人申讓是「誰、怎麼賣、多少、期間」一句話（T-384） */
   summary: string | null
   cash_dividend: number | null
   stock_ratio: number | null
@@ -18,6 +19,7 @@ export const STOCK_CAL_KIND: Record<StockCalItem['kind'], string> = {
   split: '股票分割',
   reduce: '減資',
   conf: '法說會',
+  insider: '內部人申讓',
 }
 
 /** 收起時過去的事列幾筆。 */
@@ -35,9 +37,10 @@ export function calDate(day: string, today: string): string {
   return day.slice(0, 4) === today.slice(0, 4) ? dayLabel(day) : `${day.slice(0, 4)}/${dayLabel(day)}`
 }
 
-/** 這一筆的說明：除權息寫金額（預告才有；已發生的只有日期）、法說會寫時間。 */
+/** 這一筆的說明：除權息寫金額（預告才有；已發生的只有日期）、法說會寫時間、內部人申讓寫那一句話。 */
 export function calDetail(x: StockCalItem): string {
   if (x.kind === 'conf') return x.time ?? ''
+  if (x.kind === 'insider') return x.summary ?? ''
   if (x.kind === 'split' || x.kind === 'reduce') return ''
   return dividendText(x)
 }

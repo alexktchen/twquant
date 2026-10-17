@@ -782,6 +782,35 @@ DIVIDEND_CALENDAR_SPEC = TableSpec(
     indexes=(("date",),),
 )
 
+# 內部人持股轉讓事前申報（T-384，2026-10-18）：證交所 t187ap12_L＋櫃買 mopsfin_t187ap12_O，每天整份 upsert 累積成歷史。
+# 給人看（個股頁行事曆、名單小標），不進因子、不進模型。欄位與 data/sources/insider_transfer.SCHEMA 同名同序；
+# 與 2026-09-28 事件研究直寫的同名表欄位相同，所以不用重建。
+INSIDER_TRANSFER_SPEC = TableSpec(
+    "insider_transfer_notices",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("row_key", "text"),
+        ("market", "text"),
+        ("company_name", "text"),
+        ("role", "text"),
+        ("person", "text"),
+        ("method", "text"),
+        ("planned_shares", "double precision"),
+        ("daily_max_shares", "double precision"),
+        ("transferee", "text"),
+        ("held_own", "double precision"),
+        ("held_trust", "double precision"),
+        ("after_own", "double precision"),
+        ("after_trust", "double precision"),
+        ("period_start", "date"),
+        ("period_end", "date"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "stock_id", "row_key"),
+    indexes=(("stock_id", "date"),),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -807,6 +836,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     CONFERENCE_CALENDAR_SPEC,
     MORNING_BRIEF_SPEC,
     DIVIDEND_CALENDAR_SPEC,
+    INSIDER_TRANSFER_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)
