@@ -577,7 +577,7 @@
 .cq-war-picks i { margin-left: auto; font-style: normal; color: var(--accent); font-size: 12.5px; }
 .cq-war-cal em { font-style: normal; color: var(--mute); font-variant-numeric: tabular-nums; margin: 0 2px 0 4px; }
 .cq-war-score td { font-variant-numeric: tabular-nums; }
-.cq-war-heat { padding: 0; }
+.cq-war-heat .cq-war-heat-body { margin: 0 -16px -12px; }
 .cq-war-heat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; width: 100%; padding: 12px 16px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
 .cq-war-heat-body { height: 720px; display: flex; border-top: 1px solid var(--line); }
 .cq-war-heat-body > .cq-body { flex: 1; }
@@ -677,3 +677,36 @@
 .cq-war-score-acct { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .cq-war-score-acct b { font-weight: 600; }
 .cq-war-score-acct > small { flex-basis: 100%; }
+
+/* 首頁版面（使用者 2026-10-17：卡片可移動、依帳號存位置、可收起、收起時輪播） */
+.cq-war-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: -4px; font-size: 12.5px; }
+.cq-war-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.cq-war-cell { min-width: 0; }
+.cq-war-cell.cq-wide { grid-column: 1 / -1; }
+.cq-war-cell:empty { display: none; }
+.cq-war-card.cq-card-folded > header { margin-bottom: 4px; }
+.cq-reel-slide { min-width: 0; }
+.cq-reel-one { display: block; }
+.cq-reel-text { margin: 0; font-size: 14.5px; line-height: 1.6; }
+.cq-reel-text.cq-war-headline { font-size: 16.5px; }
+.cq-reel-kv { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-variant-numeric: tabular-nums; }
+.cq-reel-kv > span { color: var(--mute); }
+.cq-reel-kv > b { font-weight: 600; }
+.cq-reel-kv > small { font-size: 12px; }
+.cq-war-moodcard .cq-mood-body { font-size: 13px; }
+.cq-war-moodtags { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 13px; }
+.cq-layout-list { list-style: none; margin: 0; padding: 0; }
+.cq-layout-row { display: grid; grid-template-columns: 1fr auto auto auto 44px; align-items: center; gap: 6px; min-height: 52px; padding: 0 2px; border-bottom: 1px solid var(--line); }
+.cq-layout-row:last-child { border-bottom: 0; }
+.cq-layout-row b { font-weight: 500; font-size: 14.5px; min-width: 0; }
+.cq-layout-row.dragging { background: #23262f; box-shadow: inset 3px 0 0 var(--accent), 0 6px 18px rgba(0, 0, 0, .45); position: relative; z-index: 1; }
+.cq-layout-row.dragging .cq-handle { color: var(--accent); cursor: grabbing; }
+.cq-layout-row .cq-row-btn[aria-pressed="true"] { color: var(--mute); }
+.cq-layout-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+@media (max-width: 820px) {
+  .cq-war-cards { grid-template-columns: 1fr; }
+  .cq-layout-row { grid-template-columns: 1fr auto auto auto 40px; gap: 4px; }
+}
+/* 四張小卡並排時（每張約 300px）表格放不下：列名與括號小字可以換行，數字不換行 */
+.cq-war-cell .cq-war-table th { white-space: normal; }
+.cq-war-cell .cq-war-table td small { white-space: normal; }

@@ -3,6 +3,8 @@
 // 晨報寫在開盤前，歷史那天另列當天大盤實際收盤對照。讀的是存好的晨報，不重叫模型。
 import { useEffect, useState } from 'react'
 import { fetchBriefDay } from './api'
+import { CardFrame } from './CardFrame'
+import type { Slide } from './Reel'
 import { pct } from './format'
 import { briefNeighbors, dayLabel, signedYi, tone, type Brief, type BriefActual } from './war'
 
@@ -12,6 +14,8 @@ export function BriefCard({
   latestActual,
   loading,
   onShown,
+  collapsed,
+  onToggle,
 }: {
   latest: Brief | null
   /** 有晨報的日期，新到舊 */
@@ -21,6 +25,8 @@ export function BriefCard({
   loading: boolean
   /** 目前顯示的那份（新聞頭條卡跟著換） */
   onShown: (b: Brief | null) => void
+  collapsed: boolean
+  onToggle: () => void
 }) {
   const [day, setDay] = useState<string | null>(null) // null＝最新
   const [hist, setHist] = useState<{ date: string; brief: Brief | null; actual: BriefActual | null } | null>(null)
@@ -58,13 +64,35 @@ export function BriefCard({
     setDay(d === latest?.date ? null : d)
   }
 
+  // 收起時輪播：標題一則、每一點一則、風險一則；沒有模型版就輪播規則版那一句
+  const slides: Slide[] = !b
+    ? []
+    : b.headline && b.bullets
+      ? [
+          { key: 'h', node: <p className="cq-war-headline cq-reel-text">{b.headline}</p> },
+          ...b.bullets.map((x, k) => ({ key: `b${k}`, node: <p className="cq-reel-text">{x}</p> })),
+          ...(b.risk_note ? [{ key: 'r', node: <p className="cq-war-risk cq-reel-text">⚠ {b.risk_note}</p> }] : []),
+        ]
+      : [{ key: 'rule', node: <p className="cq-reel-text">{b.rule_text}</p> }]
+
   return (
-    <section className="cq-war-card cq-war-brief">
-      <header>
-        <h2>今日一句話</h2>
-        {viewing && <i className="cq-tag">歷史</i>}
-        {b && <span className="cq-war-when">整理於 {b.generated_at.slice(5, 16).replace('-', '/')}</span>}
-        {current && dates.length > 1 && (
+    <CardFrame
+      title="今日一句話"
+      className="cq-war-brief"
+      collapsed={collapsed}
+      onToggle={onToggle}
+      slides={slides}
+      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30 整理）。'}
+      when={
+        <>
+          {viewing && <i className="cq-tag">歷史</i>}
+          {b && <> 整理於 {b.generated_at.slice(5, 16).replace('-', '/')}</>}
+        </>
+      }
+      extra={
+        !collapsed &&
+        current &&
+        dates.length > 1 && (
           <div className="cq-brief-nav">
             <button aria-label="前一天" disabled={!older} onClick={() => go(older)}>
               ‹
@@ -86,9 +114,9 @@ export function BriefCard({
               </button>
             )}
           </div>
-        )}
-      </header>
-
+        )
+      }
+    >
       {err && <p className="cq-war-mute">讀不到 {viewing} 的晨報：{err}</p>}
       {(loading || waiting) && <p className="cq-war-mute">讀取中…</p>}
       {!loading && !waiting && !err && !b && (
@@ -152,6 +180,6 @@ export function BriefCard({
           ))}
         </ul>
       )}
-    </section>
+    </CardFrame>
   )
 }
