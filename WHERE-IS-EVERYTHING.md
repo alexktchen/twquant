@@ -422,7 +422,7 @@ docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend s
 `--env-file` 不可省：少了它 `TWQUANT_DATA_HOST` 會退回 `./data`，容器就掛到 worktree 自己的空資料夾（§1 的兩個 `data/` 陷阱）。
 `--no-deps` 是為了不碰 PG 容器。**不要跑 `docker compose config`**——它會把 `.env` 的密碼印出來。
 
-洞悉分析（LLM）步驟目前是離線降級：`.env` 沒有 `ANTHROPIC_API_KEY`。
+洞悉分析（LLM）步驟目前是離線降級。**D-185／T-368（2026-10-17）**：`candidate_analysis` 與 `daily_brief` 改路由到 Cloudflare Workers AI（`configs/llm.yaml` 的 `cf_qwen3`，免費額度每日 10,000 Neurons、UTC 重置；`daily_neuron_budget: 9000` 依 UTC 日累計），`.env` 要 `CLOUDFLARE_ACCOUNT_ID`＋`CLOUDFLARE_AI_TOKEN`（Workers AI › Read）；`advisor`／`explainer` 仍走 Claude（`ANTHROPIC_API_KEY`）。試連 `uv run --all-groups python -m twquant llm-ping --task candidate_analysis`。雲端 pipeline 仍跳過洞悉步驟（`skip_pipeline_steps`），要開另立任務。
 
 ## 8. 備份（事故後）
 - **2026-09-22 22:10：`twquant_serving_20260922-2210_post-crash-verify.dump`（5.5 GB）**——分點因子整批計算把 PG 連同 Docker 壓垮，WAL 當機復原完整、所有表列數與崩潰前一致之後做的。**目前最新的完整備份。**

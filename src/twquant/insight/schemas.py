@@ -28,6 +28,13 @@ class Proposal(BaseModel):
     confidence: Literal["low", "medium", "high"]
 
 
+class PingReply(BaseModel):
+    """`llm-ping` 的連線測試輸出（D-185）：只驗供應商、憑證、JSON mode 與記帳有沒有通。"""
+
+    ok: bool
+    echo: str  # 模型把使用者給的短句照抄回來，證明讀到了 user turn
+
+
 class DailyBrief(BaseModel):
     """每日洞悉摘要（daily_brief 輸出，SPEC-008 §2.1）。"""
 

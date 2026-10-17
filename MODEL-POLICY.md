@@ -12,8 +12,10 @@
 | OPUS | `claude-opus-5` | 最強推理；架構、核心引擎、審查 | 高 |
 | SONNET | `claude-sonnet-5` | 高性價比；規格明確的模組實作 | 中 |
 | HAIKU | `claude-haiku-4-5` | 快與便宜；機械性工作、固定格式輸出 | 低 |
+| CF_QWEN3 | `@cf/qwen/qwen3-30b-a3b-fp8`（Cloudflare Workers AI，D-185） | 試跑期間的 `candidate_analysis`／`daily_brief`；免費額度 10,000 Neurons／日 | 免費額度內 0 |
 
 程式碼與提示詞中禁止寫死模型字串；一律從 `configs/llm.yaml` 注入。
+模型規格的 `provider` 決定 backend（`anthropic` SDK 或 `cloudflare` REST）；Cloudflare 模型必須附 Neurons 費率（D-185）。
 換模型 = 改 config + 重跑 prompt 回歸測試（見 §4），不改程式。
 
 ## 2. 開發時分級（對應 TASKS.md 的「模型」欄）
