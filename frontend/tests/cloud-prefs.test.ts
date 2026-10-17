@@ -23,10 +23,10 @@ test('T-332 偏好：瀏覽器禁用儲存時不出錯，當作沒記過', () =>
 })
 
 test('使用者 2026-10-17：首頁兩塊的展開／收起——存過就照存的，沒存過或看不懂用預設', async () => {
-  const { openPref, HEAT_KEY, MOOD_KEY } = await import('../src/cloud/prefs.ts')
+  const { openPref, HEAT_KEY, MOOD_KEY, NEWS_KEY, HEADS_KEY } = await import('../src/cloud/prefs.ts')
   assert.equal(openPref('1', false), true)
   assert.equal(openPref('0', true), false)
   assert.equal(openPref(null, true), true)
   assert.equal(openPref('yes', true), true)
-  assert.notEqual(HEAT_KEY, MOOD_KEY)
+  assert.equal(new Set([HEAT_KEY, MOOD_KEY, NEWS_KEY, HEADS_KEY]).size, 4)
 })
