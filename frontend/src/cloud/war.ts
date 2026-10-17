@@ -196,6 +196,18 @@ export function calendarItems(cal: WarRoomData['calendar']): CalendarItem[] {
   return [...divs, ...confs].sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0))
 }
 
+/** 行事曆搜尋：股號開頭相符或股名含關鍵字（不分大小寫，例：「00694」「富邦」「b」）；空字串＝全部相符。 */
+export function calendarMatch(it: { stock_id: string; name: string | null }, q: string): boolean {
+  const k = q.trim().toLowerCase()
+  if (!k) return true
+  return it.stock_id.toLowerCase().startsWith(k) || (it.name ?? '').toLowerCase().includes(k)
+}
+
+/** 名單股、追蹤股的排前面，其餘照原順序（依日期）。 */
+export function mineFirst<T extends { stock_id: string }>(items: T[], mine: (sid: string) => boolean): T[] {
+  return [...items.filter((x) => mine(x.stock_id)), ...items.filter((x) => !mine(x.stock_id))]
+}
+
 /** 每天幾檔除權息、幾場法說會（收起時的摘要）。 */
 export function calendarDays(items: CalendarItem[]): { date: string; dividends: number; conferences: number }[] {
   const out = new Map<string, { date: string; dividends: number; conferences: number }>()

@@ -119,3 +119,20 @@ test('使用者 2026-10-17：首頁 API 回今天名單的代號（行事曆標�
   const src = readFileSync(new URL('../functions/api/warroom/index.ts', import.meta.url), 'utf8')
   assert.ok(src.includes('sids: [...listed]'))
 })
+
+test('使用者 2026-10-17：行事曆搜尋股號或股名、名單股與追蹤股排前面', async () => {
+  const { calendarMatch, mineFirst } = await import('../src/cloud/war.ts')
+  const fubon = { stock_id: '00694B', name: '富邦美債1-3' }
+  assert.equal(calendarMatch(fubon, '00694'), true)
+  assert.equal(calendarMatch(fubon, ' 富邦 '), true)
+  assert.equal(calendarMatch(fubon, '00694b'), true, '不分大小寫')
+  assert.equal(calendarMatch(fubon, '694'), false, '股號只比開頭，免得 694 撈到一堆')
+  assert.equal(calendarMatch({ stock_id: '2330', name: null }, '台積'), false)
+  assert.equal(calendarMatch(fubon, ''), true)
+  const rows = ['00694B', '2330', '00733', '2412'].map((stock_id) => ({ stock_id }))
+  const mine = new Set(['2412', '2330'])
+  assert.deepEqual(
+    mineFirst(rows, (s) => mine.has(s)).map((r) => r.stock_id),
+    ['2330', '2412', '00694B', '00733'],
+  )
+})
