@@ -24,6 +24,9 @@ class ModelSpec(BaseConfig):
     # Cloudflare 公布的每百萬 token Neurons（免費額度的計量單位）；anthropic 模型不填
     input_neurons_per_1m: float | None = None
     output_neurons_per_1m: float | None = None
+    # 接在 system prompt 尾端、只對這個模型生效（D-187：qwen3 的 " /no_think" 關掉推理）。
+    # 不屬於凍結的 prompt 本文，換模型就不帶；改了它要一併 bump PROMPT_VERSION，否則舊證據包會被沿用。
+    system_suffix: str = ""
 
     @model_validator(mode="after")
     def _cloudflare_needs_neuron_rates(self) -> ModelSpec:

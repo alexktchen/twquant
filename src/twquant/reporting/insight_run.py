@@ -20,10 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from twquant.errors import DataError, TwquantError
-from twquant.insight.candidate_analysis import analyse_candidate
+from twquant.insight.candidate_analysis import TASK, analyse_candidate, insight_run_id_for
 from twquant.insight.client import InsightClient
 from twquant.insight.evidence_bundle import build_bundle
-from twquant.reporting.insight_evidence import InsightPack, index_packs, save_pack
+from twquant.insight.prompts import PROMPT_VERSION
+from twquant.reporting.insight_evidence import InsightPack, index_packs, save_pack, select_packs
 from twquant.reporting.recommendation_snapshot import (
     RecommendationCandidate,
     RecommendationSnapshot,
@@ -109,6 +110,19 @@ def _analyse_one(
         "available_at": as_of,
     }
     bundle = build_bundle(stock_id, as_of, sections)
+    # 同一批證據、同一個 prompt 與模型已經有證據包（本機留的，或 restore_packs 從 PG 寫回來的）
+    # → 不再呼叫語言模型（T-373）：雲端一天兩班，第二班不該再花一次、也不該用另一份隨機結果取代。
+    run_id = insight_run_id_for(
+        recommendation_run_id, bundle, PROMPT_VERSION, client.config.model_for(TASK).id
+    )
+    known = select_packs(data_dir, insight_run_id=run_id).packs
+    if known:
+        summary.reused += 1
+        if known[0].analysis is None:
+            summary.absent += 1
+        else:
+            summary.analysed += 1
+        return
     outcome = analyse_candidate(
         bundle, client, now=now, recommendation_run_id=recommendation_run_id
     )

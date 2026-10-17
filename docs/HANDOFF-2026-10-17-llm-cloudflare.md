@@ -69,3 +69,43 @@
 - **判讀**（D-185 末段，兩週後）：看 `data/insights/` 缺席比率與 `unverified_numbers` 比率；缺席超過三成換候補模型或改 N。這是觀察，不是事前登記的門檻。
 - advisor／explainer 仍走 Claude（沒排程）；要全部走 Cloudflare 得另記一條裁決。
 - §一 列的其他 LLM 用法都沒有工單；使用者要哪一個再登記。
+
+## 六、實連結果（同日第二個 session）
+
+細節在 DECISIONS D-185「實連補記」。重點：
+
+- **連得上、跑得出來**：wrangler 登入（`npx wrangler whoami` 會刷新 token）的 OAuth token 有 `ai:write`，可以拿來臨時測試；
+  正式排程仍要使用者建專用 token 填 `.env`（§四 第 1、2 步沒變）。帳號 ID 見 `npx wrangler whoami`。
+- 修了兩個實連才看得到的問題（推理用光 `max_tokens` 回空內容、受限解碼省略有預設值的欄位），前 10 檔 10/10 產出。
+- **本機 PG 沒開時**：`insights-run` 只讀 PG，可把 `TWQUANT_PG_DSN` 暫時指向 `.env` 的 `TWQUANT_SUPABASE_DSN`。
+  CLI 不會自己讀 `.env`，要先 export。
+- **下一步要使用者決定**（都沒做）：
+  1. 新聞證據：10 檔有 9 檔「資料不足」，主因 `events_news_unavailable`。接 MOPS 重大訊息（PG 已有 `material_news`）當證據，或改提示。
+  2. 提示加 `/no_think`：便宜約三倍、實測 8/8 通過，但屬提示改版。
+  3. 雲端 pipeline 開洞悉步驟（§五 第一條）。
+
+## 七、同日第三輪：使用者放行全部（D-187，T-371～T-373）
+
+使用者：「可以全部允許不要再問了」。做了：
+
+| 件 | 結果 |
+|---|---|
+| 接新聞證據 | MOPS 重大訊息逐日清單 → PG `mops_announcements`（T-371）；證據包加近 30 日最新 5 則、注意股次數（T-372）。36 天 4,943 則實測 0 失敗 |
+| 關掉模型思考 | `configs/llm.yaml cf_qwen3.system_suffix: " /no_think"`，只對該模型生效；每檔 31 → 10.9 Neurons |
+| 雲端開洞悉步驟 | `skip_pipeline_steps` 拿掉；證據包副本進 PG `insight_packs`；第二班不重呼叫；網站 `/api/platform/insights` 改讀 PG（T-373） |
+| 憑證 | `.env` 加了 `CLOUDFLARE_ACCOUNT_ID`；**`CLOUDFLARE_AI_TOKEN` 要使用者在 Cloudflare 後台建**（我的登入沒有建 Token 的權限），填 `.env` 並 `gh secret set CLOUDFLARE_AI_TOKEN` |
+| 5314 殖利率 116% | 櫃買中心 OpenAPI 自己就寫每股股利 31.62、殖利率 116.03；8 月配股（約 1 配 4）後沒調整。不是我們的錯；要不要在證據上加註，D-187 §五待裁決 |
+
+實測（同 10 檔、加新聞、關推理）：10/10 產出、立場 支持 2／中性 1／資料不足 7（早上 1／0／9），模型會點名公告並判成背景。
+
+**使用者要做**：
+1. 建 Workers AI Token → `.env` 的 `CLOUDFLARE_AI_TOKEN` ＋ `gh secret set CLOUDFLARE_AI_TOKEN`。建好前雲端洞悉步驟只記「缺席：未設定 CLOUDFLARE_AI_TOKEN」。
+2. 本機 Docker 排程要重建映像才會有這些步驟（照 memory／§4 的部署步驟）。
+3. （可有可無）Supabase 的 `serving.material_news` 是我第一次失敗的測試留下的舊欄位表（206 列），改名後已不擋路，有空 DROP 掉。
+
+**陷阱**：
+- **本機 PG 早就有一張 `serving.material_news`**：2026-09-28 事件研究的全文快照（52 萬則、948 MB、主鍵含 content_md5），寫它的程式不在任何分支。每日主旨表因此叫 `mops_announcements`，不要把兩者合併或互相覆蓋；`assert_columns` 第一次就是被它擋下來才發現的。
+- 測試時 `TWQUANT_PG_DSN` 指向沒開的本機 PG，每條 PG 測試都等到連線逾時，全套跑超過 10 分鐘；PG 沒開就別設它（會 skip，3 分鐘跑完）。
+- wrangler 的 OAuth token 約一小時過期（Workers AI 回 401 Authentication error），`npx wrangler whoami` 會刷新。
+- MOPS 隱藏欄位 `h<列序><欄>`：列序會到三位數，欄位名取**最後一碼**；發言時間前導零會被吃掉（`658`＝00:06:58）。
+- Bash 工具單次指令超過 8 KB 會被截斷（寫文件要用檔案工具）。

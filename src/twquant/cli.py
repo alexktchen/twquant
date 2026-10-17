@@ -765,6 +765,64 @@ def chip_daily(
     typer.secho(f"[OK] 籌碼 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="material-news")
+def material_news_cmd(
+    date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「重大訊息」步驟（T-371）：MOPS 重大訊息 → 直寫 PG（serving.mops_announcements）。
+
+    抓這天與前一天，再補回看窗（system.yaml `material_news.lookback_days`）內 PG 一列都沒有的日曆日。
+    與 pipeline 同一個函數，平常不用手跑。
+    """
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _run_material_news_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 重大訊息 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+def _run_material_news_day(day: dt.date) -> str:
+    """每日「重大訊息」步驟（T-371）：當天、前一天與回看窗內的缺日 → upsert serving.mops_announcements。"""
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import material_news as mn
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    if not scfg.enabled or not store.ping(scfg):
+        return "PG 不可達，略過"
+    pg = scfg.pg_schema
+    lookback = cfg.material_news.lookback_days
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0 Safari/537.36"
+    client = HttpClient(source="mops", rate=cfg.source_rates["mops"], user_agent=ua)
+    rows = 0
+    with store.connect(scfg) as conn:
+        sch.ensure_tables(conn, (sch.MOPS_ANNOUNCEMENTS_SPEC,), pg)
+        sch.assert_columns(conn, sch.MOPS_ANNOUNCEMENTS_SPEC, pg)
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT DISTINCT date FROM "{pg}"."{mn.TABLE}" WHERE date >= %s',
+                (day - dt.timedelta(days=lookback),),
+            )
+            present = {r[0] for r in cur.fetchall()}
+        conn.commit()
+        plan = mn.fetch_plan(day, lookback, present)
+        for d in plan:
+            df = mn.fetch_day(client, d)
+            with conn.cursor() as cur:
+                upsert(cur, pg, sch.MOPS_ANNOUNCEMENTS_SPEC, df)
+            conn.commit()  # 逐日提交：中途失敗時已抓的日子留著，下次只補缺的
+            rows += df.height
+    return f"抓 {len(plan)} 天（{plan[0]}～{plan[-1]}），{rows:,} 則"
+
+
 def _seconds_until(now: dt.datetime, hh: int, mm: int) -> float:
     """距離下一個 hh:mm（同時區）的秒數；已過今日該時刻則算明日。"""
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
@@ -1527,6 +1585,10 @@ def _run_daily_pipeline(
         # 抓失敗會 raise（步驟標 failed、列出哪幾個），但不是關鍵步驟，不擋訊號主線。
         return _run_chip_day(day)
 
+    def _material_news_step() -> str:
+        # T-371：MOPS 重大訊息 → 直寫 PG，洞悉層的證據包讀它。休市日也有公告，照跑（冪等）；非關鍵步驟。
+        return _run_material_news_day(day)
+
     def _screener_step() -> str:
         # 選股池每日快照（SPEC-007 §6 / T-041）：需供應層已同步當日資料，故排在其後；
         # display-only、best-effort，寫入冪等（ON CONFLICT DO NOTHING）。
@@ -1717,6 +1779,7 @@ def _run_daily_pipeline(
     def _insight_step() -> str:
         # 洞悉分析（SPEC-014 §6 / T-221）：best-effort，失敗不擋主線——洞悉是增強不是依賴。
         # 前提是當日已有推薦快照；沒有就是正常的「沒有 L0 名單可分析」，不是錯誤。
+        from twquant.data.serving import schema as sch
         from twquant.data.serving import store
         from twquant.insight.client import InsightClient
         from twquant.insight.config import load_llm_config
@@ -1726,6 +1789,7 @@ def _run_daily_pipeline(
             fetch_industry_rows,
             fetch_sections,
         )
+        from twquant.reporting.insight_store import publish_packs, restore_packs
         from twquant.reporting.recommendation_snapshot import select_snapshots
 
         data_dir = Path(cfg.data_dir)
@@ -1739,6 +1803,10 @@ def _run_daily_pipeline(
         as_of = select_snapshots(data_dir, run_id=run_id).runs[0].as_of
         conn = store.connect(scfg)
         try:
+            # T-373：證據包的副本在 PG（雲端 runner 留不住檔案，網站從 PG 讀）。先把 PG 已有的寫回本機，
+            # 同一批證據就不再呼叫語言模型；跑完整包 upsert 回 PG。
+            sch.ensure_tables(conn, (sch.INSIGHT_PACKS_SPEC,), scfg.pg_schema)
+            restored = restore_packs(conn, scfg.pg_schema, data_dir, run_id)
             industries = fetch_industry_rows(conn, scfg.pg_schema, as_of, _SECTOR_WINDOW)
             summary = run_insights(
                 data_dir,
@@ -1754,17 +1822,20 @@ def _run_daily_pipeline(
                     industries.get(fetch_industry_of(conn, scfg.pg_schema, sid) or ""),
                 ),
             )
+            published = publish_packs(conn, scfg.pg_schema, data_dir, run_id, now_tw())
         finally:
             conn.close()
         return (
             f"分析 {summary.analysed}、缺席 {summary.absent}、新存 {summary.saved}、"
-            f"沿用 {summary.reused}、失敗 {len(summary.failures)}"
+            f"沿用 {summary.reused}（PG 寫回 {restored}）、失敗 {len(summary.failures)}、"
+            f"PG {published} 份"
         )
 
     steps = [
         PipelineStep("擷取", _ingest_step),
         PipelineStep("品質閘門", _gate_step, critical=True),
         PipelineStep("籌碼（當沖／借券／處置／注意）", _chip_step),
+        PipelineStep("重大訊息", _material_news_step),
         PipelineStep("ETF 單位數", _etf_units_step),
         PipelineStep("ETF 持股", _etf_holdings_step),
         PipelineStep("券商買賣超", _broker_step),
@@ -4007,7 +4078,7 @@ def llm_ping(
         schema=PingReply,
         prompt_version="ping-v1",
         now=now,
-        max_tokens=200,
+        max_tokens=1000,  # qwen3 實連：200 全被推理用掉而回空內容
     )
     if res is None:
         typer.secho(f"失敗：{absent}（細節在上方日誌）", fg=typer.colors.RED)
@@ -4443,6 +4514,7 @@ def insights_run(
     並寫明缺席原因——洞悉是增強不是依賴。相同輸入重跑為冪等，不會產生重複版本。
     """
     from twquant.conventions import now_tw
+    from twquant.data.serving import schema as sch
     from twquant.data.serving import store
     from twquant.insight.client import InsightClient
     from twquant.insight.config import load_llm_config
@@ -4452,6 +4524,7 @@ def insights_run(
         fetch_industry_rows,
         fetch_sections,
     )
+    from twquant.reporting.insight_store import publish_packs, restore_packs
     from twquant.reporting.recommendation_snapshot import select_snapshots
 
     data_dir = Path(out) if out else Path(_load_system().data_dir)
@@ -4463,6 +4536,8 @@ def insights_run(
     scfg = _load_serving()
     conn = store.connect(scfg)
     try:
+        sch.ensure_tables(conn, (sch.INSIGHT_PACKS_SPEC,), scfg.pg_schema)
+        restored = restore_packs(conn, scfg.pg_schema, data_dir, run)
         industries = fetch_industry_rows(conn, scfg.pg_schema, as_of, window)
 
         def sections(stock_id: str) -> dict[str, object]:
@@ -4480,12 +4555,14 @@ def insights_run(
             now=now_tw(),
             fetch_sections=sections,
         )
+        published = publish_packs(conn, scfg.pg_schema, data_dir, run, now_tw())
     finally:
         conn.close()
 
     typer.secho(
         f"[OK] {run}：{summary.requested} 檔候選 → 分析 {summary.analysed}、"
-        f"缺席 {summary.absent}、新存 {summary.saved}、沿用 {summary.reused}",
+        f"缺席 {summary.absent}、新存 {summary.saved}、沿用 {summary.reused}"
+        f"（PG 寫回 {restored}）、PG {published} 份",
         fg=typer.colors.GREEN,
     )
     for failure in summary.failures:

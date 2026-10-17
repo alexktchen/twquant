@@ -67,18 +67,20 @@ cloud:
     attention_stocks: 5
     disposition_stocks: 5
     group_flow_daily: 60           # 族群資金（D-177 修訂）：網站只看最新一天，留三個月左右
+    mops_announcements: 25              # 重大訊息（T-371）：證據包讀近 30 個日曆日，約 22 個交易日；一天約 300 則、只存主旨
+    insight_packs: 60              # 洞悉證據包副本（T-373）：網站個股頁讀最近幾份；30 檔／日 × 約 5 KB
   exclude_factors:                 # 雲端不算（見 CloudConfig 註解）
     - chip.broker_concentration_20d  # T-016：需 broker_trades 全歷史（隔日沖分點 expanding 比率）＋20 日窗 > 雲端 10 日
     - chip.broker_count_diff_5d
     - chip.broker_persistence_10d
   # `pipeline --cloud` 略過的步驟（D-170：網站只要每日推薦＋每日名單＋K 線）。名稱對不上就 raise。
+  # 洞悉分析自 T-373 起雲端照跑（Cloudflare Workers AI 免費額度，證據包副本進 insight_packs）。
   skip_pipeline_steps:
     - 券商買賣超      # 2026-10-10 使用者：先停。正式模型都沒用到分點，雲端只是存檔
     - 訊號生成        # 範例策略 sample_revenue_trust，與兩條線無關
     - 選股池快照      # 要 166 天分點明細，雲端只留 1 天，算出來是錯的
     - 紙上交易        # 帳本是檔案，runner 每次都是新機器，留不住
     - 每日選股看板    # 回測重播（2026-05-01 起），網站不再需要
-    - 洞悉分析        # 讀推薦快照檔與 LLM，不在雲端範圍
     - ETF 單位數      # SPEC-016 資金流研究只在地端（D-170：雲端只放推薦需要的資料）
     - ETF 持股        # 同上
     - 月營收          # workflow 在 pipeline 之前已抓上個月與當月（daily-pipeline.yml），不重複打 MOPS

@@ -16,7 +16,7 @@
 > **破底標記與大跌提醒（T-365／D-183，2026-10-15）**：`/api/picks` 每檔多 `weak`（20 日新低、連跌天數，還原除權息）、整天多 `drop`（加權單日跌 2% 以上才有，歷史大跌後 20 日的統計）。邏輯與門檻在 `functions/_lib/weak.ts`。**只提醒，不改名單**——要當濾網得先事前登記、用第二保留期驗證（D-183 有候選與當天的證據）。
 
 > **市場氛圍（T-363／D-181，2026-10-15）**：「盤勢」分頁（原「族群」，網址參數仍是 `?tab=group`）最上面、族群熱力圖上方。盤中 `/api/mood/live`：證交所即時報價介面問加權 t00、櫃買 o00、28 個類股指數，跟個股報價共用 `functions/_lib/quote-live.ts` 的 QuoteHub（**別再另外 new 一個**，請求間隔與被擋暫停要算在一起）；指數沒有成交金額。收盤後 `/api/mood/close`：讀 `group_flow_daily` 最近一天＋`index_daily`。分類與門檻在 `functions/_lib/mood.ts`（`SECTORS`、`DEF_GROUPS`、`BIG_MOVE`／`TILT`／`SHIFT`）。只供看盤。
-> **2026-10-17 交接：[docs/HANDOFF-2026-10-17-llm-cloudflare.md](docs/HANDOFF-2026-10-17-llm-cloudflare.md)**——洞悉層改走 Cloudflare Workers AI 免費額度（T-368／D-185），使用者填憑證後 `llm-ping` 試連；雲端仍未開洞悉步驟。
+> **2026-10-17 交接：[docs/HANDOFF-2026-10-17-llm-cloudflare.md](docs/HANDOFF-2026-10-17-llm-cloudflare.md)**——洞悉層改走 Cloudflare Workers AI 免費額度（T-368／D-185）；**同日 D-187（T-371～T-373）**：接上 MOPS 重大訊息、qwen3 關推理、雲端開洞悉步驟、證據包副本進 PG `insight_packs`。**使用者待辦**：建 `CLOUDFLARE_AI_TOKEN`（雲端那張殘留的 `material_news` 舊表已不擋路，有空再清）。
 > **期貨與美股（T-369／D-186，2026-10-17）**：同一張卡最上面多「台指期」「美股」兩行與第二個標籤（偏多／偏空／多空分歧／多空平淡）。`/api/mood/global`（60 秒暫存）→ `functions/_lib/global-live.ts` 的 `GlobalHub`（**不經證交所的 QuoteHub**，期交所與 Yahoo 各自保留上一份、兩輪隔 15 秒）；期交所 `mis.taifex.com.tw/futures/api/getQuoteList` 日盤／夜盤近月（`_lib/taifex.ts`，夜盤漲跌對當天日盤結算價、交易日標日盤那天）、Yahoo chart v8 四大指數（`_lib/yahoo.ts`，最新一根對前一根，別用 `chartPreviousClose`）。門檻 `LEAN`（±0.5% 一票）與 `BIG_MOVE`（±1%）在 `_lib/mood.ts`。**盤中欄位與 Cloudflare 出口打 Yahoo 會不會 429 都還沒在正式站看過**。**上線第一天正式站拿不到期交所（T-370）**：原因沒查出來（期交所前面是 Cloudflare，那天沙盒也時好時壞），已加富果備援（`fugleFut`，同一把 `FUGLE_API_KEY`，近月從 `futopt/intraday/tickers` 找）與 6 秒逾時；兩邊都沒有時卡片寫原因。要查原因：登入後直接開 `/api/mood/global` 看 `errors`。
 > **2026-10-07 交接：[docs/HANDOFF-2026-10-07-data-catchup.md](docs/HANDOFF-2026-10-07-data-catchup.md)**——
 > 機器在 10-01 ~ 10-07 停擺；10-08 凌晨已照它的 §4 補齊九月尾巴與十月五天、重建看板、備份（完成紀錄見該文件 §7）。
@@ -169,7 +169,9 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | 長天期回補原始檔 | `data/staging/finmind_hist_*` | 462MB |
 | **推薦快照** | `data/recommendations/<run_id>.json` | 2026-09-04 一份／1943 檔候選 |
 | **紙上交易帳本** | `data/paper_trading/<軌別>/events.jsonl`（D-142，append-only ＋ SHA-256 雜湊鏈） | 每交易日一列 |
-| **洞悉證據包** | `data/insights/<insight_run_id>.json` | 目前 0 份（頁面正確顯示尚未產生） |
+| **洞悉證據包** | `data/insights/<insight_run_id>.json`（正本）；副本在 PG `serving.insight_packs`（T-373，網站讀這裡） | 2026-10-17 本機實測約 20 份（run mlscore_20261007）；雲端每晚 30 份 |
+| **重大訊息主旨** | PG `serving.mops_announcements`（T-371，只存主旨；每日步驟回補 35 天；雲端留 25 個交易日） | 本機 2026-10-17 起；雲端合併後第一班建表 |
+| 重大訊息全文（研究快照） | 本機 PG `serving.material_news`（2026-09-28 事件研究 D-166／D-168；52 萬則、2019-12～2026-09-28、948 MB；寫它的程式不在任何分支） | 凍結，沒有每日更新 |
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
 
@@ -424,7 +426,7 @@ docker compose --env-file D:/project/twquant/.env up -d --no-deps api frontend s
 `--env-file` 不可省：少了它 `TWQUANT_DATA_HOST` 會退回 `./data`，容器就掛到 worktree 自己的空資料夾（§1 的兩個 `data/` 陷阱）。
 `--no-deps` 是為了不碰 PG 容器。**不要跑 `docker compose config`**——它會把 `.env` 的密碼印出來。
 
-洞悉分析（LLM）步驟目前是離線降級。**D-185／T-368（2026-10-17）**：`candidate_analysis` 與 `daily_brief` 改路由到 Cloudflare Workers AI（`configs/llm.yaml` 的 `cf_qwen3`，免費額度每日 10,000 Neurons、UTC 重置；`daily_neuron_budget: 9000` 依 UTC 日累計），`.env` 要 `CLOUDFLARE_ACCOUNT_ID`＋`CLOUDFLARE_AI_TOKEN`（Workers AI › Read）；`advisor`／`explainer` 仍走 Claude（`ANTHROPIC_API_KEY`）。試連 `uv run --all-groups python -m twquant llm-ping --task candidate_analysis`。雲端 pipeline 仍跳過洞悉步驟（`skip_pipeline_steps`），要開另立任務。
+洞悉分析（LLM）步驟目前是離線降級。**D-185／T-368（2026-10-17）**：`candidate_analysis` 與 `daily_brief` 改路由到 Cloudflare Workers AI（`configs/llm.yaml` 的 `cf_qwen3`，免費額度每日 10,000 Neurons、UTC 重置；`daily_neuron_budget: 9000` 依 UTC 日累計），`.env` 要 `CLOUDFLARE_ACCOUNT_ID`＋`CLOUDFLARE_AI_TOKEN`（Workers AI › Read）；`advisor`／`explainer` 仍走 Claude（`ANTHROPIC_API_KEY`）。試連 `uv run --all-groups python -m twquant llm-ping --task candidate_analysis`。**T-373 起雲端照跑洞悉步驟**：證據包 upsert 進 `serving.insight_packs`，第二班不重呼叫模型；`daily-pipeline.yml` 要 Secret `CLOUDFLARE_AI_TOKEN`（還沒建，建好前步驟記缺席）。證據多了 MOPS 重大訊息（T-371／T-372）。
 
 ## 8. 備份（事故後）
 - **2026-09-22 22:10：`twquant_serving_20260922-2210_post-crash-verify.dump`（5.5 GB）**——分點因子整批計算把 PG 連同 Docker 壓垮，WAL 當機復原完整、所有表列數與崩潰前一致之後做的。**目前最新的完整備份。**

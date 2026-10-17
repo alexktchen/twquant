@@ -44,6 +44,12 @@ quality_gate:
     - tpex/prices_daily
     - tpex/stock_valuation
 
+# T-371／D-187：MOPS 重大訊息主旨 → 直寫 PG（serving.mops_announcements；本機另一張 material_news 是研究用全文快照，不相干），洞悉層的證據包讀它。
+# 每天抓當天與前一天（前一天 17:30 以後的公告要隔天的頁才有），再補回看窗內 PG 一列都沒有的日曆日——
+# 週末也有公告，所以用日曆日。回看要蓋住證據包讀的 30 天，留幾天緩衝。第一次跑約 36 個請求（mops 限流 3 次／5 秒）。
+material_news:
+  lookback_days: 35
+
 # T-310：官方每日當沖、借券賣出、處置、注意 → 直寫 PG（D-154 §五、D-157）。每日 pipeline 的「籌碼」步驟用。
 chip_daily:
   # 當沖／借券只收四碼普通股——與 FinMind 回補的歷史宇宙同一條（D-154 §二.5），表不在中途換宇宙。
