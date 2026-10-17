@@ -8,6 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
+import type { StockCalItem } from './stockcal'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -62,6 +63,10 @@ export const fetchBars = (sid: string, days = 500) =>
 
 export const fetchStockPicks = (sid: string) =>
   get<{ days: Record<string, string[]> }>(`/api/stocks/${encodeURIComponent(sid)}/picks`).then((r) => r.days)
+
+/** 這一檔的行事曆（使用者 2026-10-17）：過去一年到往後 120 天的除權息、法說會、分割減資。 */
+export const fetchStockCalendar = (sid: string) =>
+  get<{ sid: string; today: string; items: StockCalItem[] }>(`/api/stocks/${encodeURIComponent(sid)}/calendar`)
 
 /** 三個模型最近幾天的分數與名次，加上最新一天在哪條線的名單上。 */
 export const fetchScores = (sid: string) => get<StockScores>(`/api/stocks/${encodeURIComponent(sid)}/scores`)

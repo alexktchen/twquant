@@ -36,6 +36,7 @@ import { currentPushState, disablePush, enablePush, registerServiceWorker } from
 import { LIVE_POLL_MS, limitPrices, liveBackoff, limitState, liveBar, liveLabel, pickPrice, quoteLimit, rowPrice, shouldPoll, taipeiNow, type Quote } from './live'
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
+import { StockCalendar } from './StockCalendar'
 
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
@@ -1110,6 +1111,7 @@ function Detail({
         )}
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
+      <StockCalendar sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (
