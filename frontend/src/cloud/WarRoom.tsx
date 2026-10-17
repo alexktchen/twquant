@@ -3,6 +3,7 @@
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
 import { useEffect, useState } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
+import { BriefCard } from './BriefCard'
 import { GroupsPage } from './GroupsPage'
 import { HeadlinesCard } from './HeadlinesCard'
 import { MoodCard } from './MoodCard'
@@ -18,6 +19,7 @@ import {
   signedYi,
   streakText,
   tone,
+  type Brief,
   type NewsItem,
   type WarRoomData,
 } from './war'
@@ -52,7 +54,8 @@ export function WarRoom({
     setHeatOpenState(on)
     savePref(HEAT_KEY, on ? '1' : '0')
   }
-  const [factsOpen, setFactsOpen] = useState(false)
+  // 今日一句話目前顯示哪一天（切到歷史時，新聞頭條卡跟著換成那天的）
+  const [shown, setShown] = useState<Brief | null>(null)
 
   useEffect(() => {
     let stale = false
@@ -86,55 +89,24 @@ export function WarRoom({
   const m = data?.market ?? null
   const t = data?.taifex ?? null
   const b = data?.brief ?? null
+  const shownBrief = shown ?? b
   const br = m ? breadth(m.up, m.down, m.flat) : null
 
   return (
     <main className="cq-war">
       {err && <div className="cq-err">{err}</div>}
 
-      {/* 今日一句話：模型晨報（數字都檢查過）；沒有就用規則版 */}
-      <section className="cq-war-card cq-war-brief">
-        <header>
-          <h2>今日一句話</h2>
-          {b && <span className="cq-war-when">{dayLabel(b.date)} 晨報・整理於 {b.generated_at.slice(5, 16).replace('-', '/')}</span>}
-        </header>
-        {!data && !err && <p className="cq-war-mute">讀取中…</p>}
-        {data && !b && <p className="cq-war-mute">今天的晨報還沒產生（每個交易日早上 6:30 整理）。</p>}
-        {b && b.headline && b.bullets ? (
-          <>
-            <p className="cq-war-headline">{b.headline}</p>
-            <ul className="cq-war-bullets">
-              {b.bullets.map((x) => (
-                <li key={x}>{x}</li>
-              ))}
-            </ul>
-            {b.risk_note && <p className="cq-war-risk">⚠ {b.risk_note}</p>}
-          </>
-        ) : (
-          b && <p className="cq-war-headline cq-war-rule">{b.rule_text}</p>
-        )}
-        {b && (
-          <p className="cq-war-note">
-            {b.headline ? 'AI 依下面的數字整理，每句裡的數字都檢查過出自這些數字；' : ''}
-            {b.absent_reason && !b.headline ? `（AI 摘要這次沒有產生：${b.absent_reason}）` : ''}
-            {b.facts && b.facts.length > 0 && (
-              <button className="cq-war-link" onClick={() => setFactsOpen(!factsOpen)}>
-                {factsOpen ? '收起數字' : `看全部 ${b.facts.length} 個數字`}
-              </button>
-            )}
-          </p>
-        )}
-        {factsOpen && b?.facts && (
-          <ul className="cq-war-facts">
-            {b.facts.map((f) => (
-              <li key={f}>{f}</li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {/* 今日一句話：模型晨報（數字都檢查過）；沒有就用規則版。可切換日期看歷史（BriefCard） */}
+      <BriefCard
+        latest={b}
+        dates={data?.brief_dates ?? (b ? [b.date] : [])}
+        latestActual={m && b && m.date === b.date ? m : null}
+        loading={!data && !err}
+        onShown={setShown}
+      />
 
       {/* 昨晚國際大事・新聞頭條（HeadlinesCard：預設收起輪播，晨報 06:30 抓的鉅亨網頭條快照） */}
-      <HeadlinesCard items={b?.headlines ?? []} until={b ? b.generated_at.slice(11, 16) : null} />
+      <HeadlinesCard items={shownBrief?.headlines ?? []} until={shownBrief ? shownBrief.generated_at.slice(11, 16) : null} />
 
       {/* 美股、台指期、類股強弱／族群資金：沿用市場氛圍 */}
       <div className="cq-war-mood">

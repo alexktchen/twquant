@@ -1,24 +1,20 @@
-// GET /api/warroom：首頁戰情室（T-379／D-188）——晨報、大盤體檢、期交所盤後、今天名單速覽、昨日重大訊息、行事曆。
+// GET /api/warroom：首頁戰情室（T-379／D-188）——晨報（另回有晨報的日期，給歷史切換；某天內容走 /api/warroom/brief）、大盤體檢、期交所盤後、今天名單速覽、昨日重大訊息、行事曆。
 // 每個人看到都一樣（追蹤股的消息另由 /api/warroom/news 查）：同一執行個體 60 秒暫存。任何一張表還沒建 → 那一塊是 null，不擋其他。
 // 即時的美股、台指期、類股強弱與族群資金照舊走 /api/mood/*、/api/groups。
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { LINES } from '../../_lib/picks'
 import { readNewColumn, readRows } from '../../_lib/scorecard'
-import { CALENDAR_DAYS, addDays, attachContent, pickNews, revenueDeadline, taipeiDay, type NewsRow } from '../../_lib/warroom'
+import { briefDates, selectBrief } from '../../_lib/brief-db'
+import { BRIEF_DATES_LIMIT, CALENDAR_DAYS, addDays, attachContent, pickNews, revenueDeadline, taipeiDay, type NewsRow } from '../../_lib/warroom'
 
 type Row = Record<string, unknown>
 
 const handle: PagesFunction<Env> = async ({ env }) =>
   guarded(env, async (db) => {
     const today = taipeiDay(Date.now())
-    const [brief] = await readRows(
-      () => db<Row[]>`
-        SELECT date::text AS date, to_char(generated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS generated_at, rule_text, headline, bullets, risk_note,
-               model_id, absent_reason, facts, inputs->'extras' AS extras, inputs->'adr_premium' AS adr_premium,
-               inputs->'headlines' AS headlines
-        FROM serving.morning_brief ORDER BY date DESC LIMIT 1`,
-    )
+    const brief = await selectBrief(db, null)
+    const briefDays = await briefDates(db, BRIEF_DATES_LIMIT)
     // to_jsonb：日期變成 "YYYY-MM-DD"、數字照數字，不經過驅動程式的 Date
     const [m] = await readRows(
       () => db<{ j: Row }[]>`SELECT to_jsonb(t) - 'created_at' AS j FROM serving.market_daily t ORDER BY date DESC LIMIT 1`,
@@ -105,7 +101,8 @@ const handle: PagesFunction<Env> = async ({ env }) =>
 
     return json({
       today,
-      brief: brief ?? null,
+      brief,
+      brief_dates: briefDays,
       market,
       taifex,
       picks,
