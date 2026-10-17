@@ -156,12 +156,12 @@ def test_ac3_fetch_plan_always_refetches_today_and_yesterday_and_fills_gaps() ->
 
 # ── AC-4：PG 表與解析器欄位一致；雲端有滾動窗 ──────────────────────────────────
 def test_ac4_pg_spec_matches_parser_schema_and_cloud_prunes_it() -> None:
-    spec = sch.spec_of("material_news")
-    assert spec is sch.MATERIAL_NEWS_SPEC
+    spec = sch.spec_of("mops_announcements")
+    assert spec is sch.MOPS_ANNOUNCEMENTS_SPEC
     assert spec.column_names == tuple(mn.SCHEMA)
     assert spec.pk == ("stock_id", "available_at", "subject")
     scfg = load_config(_ROOT / "configs" / "serving.yaml", ServingConfig)
-    assert scfg.cloud.windows["material_news"] >= 22  # 證據包讀近 30 個日曆日
+    assert scfg.cloud.windows["mops_announcements"] >= 22  # 證據包讀近 30 個日曆日
     cfg = load_config(_ROOT / "configs" / "system.yaml", SystemConfig)
     assert cfg.material_news.lookback_days >= 30
 

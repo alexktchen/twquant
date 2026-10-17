@@ -23,6 +23,8 @@
 同一頁出現兩列身分相同就 raise。隔天的頁再列出同一則時身分不變，upsert 覆寫成同一列。
 
 只存主旨不存全文：全文一天約 400 KB，雲端 500 MB 預算放不下，證據也只用主旨。
+表名 `mops_announcements`：本機 PG 另有 2026-09-28 事件研究（D-166／D-168）留下的 `material_news`
+（52 萬則全文、到 2026-09-28 為止的凍結快照、主鍵含 content_md5），這條每日主旨流不碰它、也不與它合併。
 available_at＝發言時間本身（到秒，Asia/Taipei）：公告上了 MOPS 那一刻就公開，PIT 精確。
 """
 
@@ -39,7 +41,7 @@ from twquant.conventions import TZ
 from twquant.data.http import HttpClient
 from twquant.errors import DataError
 
-TABLE = "material_news"
+TABLE = "mops_announcements"
 URL = "https://mopsov.twse.com.tw/mops/web/ajax_t05st02"
 MARKETS = ("sii", "otc", "rotc", "pub")
 # 頁首標題：沒有它就不是清單頁（錯誤頁、查詢過頻的提示頁），不能當成「當天沒有公告」

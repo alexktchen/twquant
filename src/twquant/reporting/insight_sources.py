@@ -131,19 +131,19 @@ def fetch_sections(
 def fetch_material_news(
     conn: Any, schema: str, stock_id: str, as_of: dt.datetime
 ) -> dict[str, Any] | None:
-    """近 30 日重大訊息（T-372）；來源沒涵蓋這段期間 → None（建構器記成缺口，不說「沒有公告」）。
+    """近 30 日重大訊息主旨（T-372，表 mops_announcements）；來源沒涵蓋這段期間 → None（建構器記成缺口，不說「沒有公告」）。
 
     涵蓋＝表裡最新一天不早於截點前一天；窗口起點取「30 天前」與「表裡最早一天」較晚者，
     所以來源才剛開始收的時候，「近 N 日無重大訊息」的 N 是實際涵蓋的天數，不會誇大成 30。
     """
     day = as_of.date()
-    exists = _rows(conn, schema, "SELECT to_regclass(%s) AS t", (f"{schema}.material_news",))
+    exists = _rows(conn, schema, "SELECT to_regclass(%s) AS t", (f"{schema}.mops_announcements",))
     if not exists or exists[0]["t"] is None:
         return None
     span = _rows(
         conn,
         schema,
-        "SELECT min(date) AS lo, max(date) AS hi FROM {schema}.material_news "
+        "SELECT min(date) AS lo, max(date) AS hi FROM {schema}.mops_announcements "
         "WHERE date >= %s AND available_at <= %s",
         (day - dt.timedelta(days=_NEWS_DAYS), as_of),
     )
@@ -158,7 +158,7 @@ def fetch_material_news(
         conn,
         schema,
         "SELECT date, subject, clause, available_at FROM ("
-        "  SELECT DISTINCT ON (subject) date, subject, clause, available_at FROM {schema}.material_news "
+        "  SELECT DISTINCT ON (subject) date, subject, clause, available_at FROM {schema}.mops_announcements "
         "  WHERE stock_id = %s AND available_at <= %s AND date >= %s "
         "  ORDER BY subject, available_at DESC"
         ") latest ORDER BY available_at DESC LIMIT %s",

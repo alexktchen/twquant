@@ -197,12 +197,12 @@ def test_ac2_restored_packs_stop_the_second_run_from_calling_the_model(tmp_path:
 
 # ── AC-3：PG 既有表欄位與程式不同 → 清楚說怎麼修，不在 COPY 半路噴錯 ───────────────
 def test_ac3_column_drift_names_the_fix() -> None:
-    spec = sch.MATERIAL_NEWS_SPEC
+    spec = sch.MOPS_ANNOUNCEMENTS_SPEC
     good = _Conn([(c,) for c in spec.column_names])
     sch.assert_columns(good, spec, "serving")
     sch.assert_columns(_Conn([]), spec, "serving")  # 表不存在：ensure_tables 會建
     stale = _Conn([(c,) for c in ("date", "stock_id", "seq", "subject", "available_at")])
-    with pytest.raises(DataError, match=r'DROP TABLE "serving"\."material_news"'):
+    with pytest.raises(DataError, match=r'DROP TABLE "serving"\."mops_announcements"'):
         sch.assert_columns(stale, spec, "serving")
 
 

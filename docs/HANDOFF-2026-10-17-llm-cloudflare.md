@@ -90,7 +90,7 @@
 
 | 件 | 結果 |
 |---|---|
-| 接新聞證據 | MOPS 重大訊息逐日清單 → PG `material_news`（T-371）；證據包加近 30 日最新 5 則、注意股次數（T-372）。36 天 4,943 則實測 0 失敗 |
+| 接新聞證據 | MOPS 重大訊息逐日清單 → PG `mops_announcements`（T-371）；證據包加近 30 日最新 5 則、注意股次數（T-372）。36 天 4,943 則實測 0 失敗 |
 | 關掉模型思考 | `configs/llm.yaml cf_qwen3.system_suffix: " /no_think"`，只對該模型生效；每檔 31 → 10.9 Neurons |
 | 雲端開洞悉步驟 | `skip_pipeline_steps` 拿掉；證據包副本進 PG `insight_packs`；第二班不重呼叫；網站 `/api/platform/insights` 改讀 PG（T-373） |
 | 憑證 | `.env` 加了 `CLOUDFLARE_ACCOUNT_ID`；**`CLOUDFLARE_AI_TOKEN` 要使用者在 Cloudflare 後台建**（我的登入沒有建 Token 的權限），填 `.env` 並 `gh secret set CLOUDFLARE_AI_TOKEN` |
@@ -99,12 +99,12 @@
 實測（同 10 檔、加新聞、關推理）：10/10 產出、立場 支持 2／中性 1／資料不足 7（早上 1／0／9），模型會點名公告並判成背景。
 
 **使用者要做**：
-1. Supabase SQL editor：`DROP TABLE serving.material_news;`（我第一次失敗的測試留下的舊欄位表，206 列；刪表的指令被權限系統攔下，我沒有再試）。
-   之後的每日 pipeline 會重建並回補 35 天；也可手動 `uv run --all-groups python -m twquant material-news`。
-2. 建 Workers AI Token → `.env` 的 `CLOUDFLARE_AI_TOKEN` ＋ `gh secret set CLOUDFLARE_AI_TOKEN`。建好前雲端洞悉步驟只記「缺席：未設定 CLOUDFLARE_AI_TOKEN」。
-3. 本機 Docker 排程要重建映像才會有這些步驟（照 memory／§4 的部署步驟）。
+1. 建 Workers AI Token → `.env` 的 `CLOUDFLARE_AI_TOKEN` ＋ `gh secret set CLOUDFLARE_AI_TOKEN`。建好前雲端洞悉步驟只記「缺席：未設定 CLOUDFLARE_AI_TOKEN」。
+2. 本機 Docker 排程要重建映像才會有這些步驟（照 memory／§4 的部署步驟）。
+3. （可有可無）Supabase 的 `serving.material_news` 是我第一次失敗的測試留下的舊欄位表（206 列），改名後已不擋路，有空 DROP 掉。
 
 **陷阱**：
+- **本機 PG 早就有一張 `serving.material_news`**：2026-09-28 事件研究的全文快照（52 萬則、948 MB、主鍵含 content_md5），寫它的程式不在任何分支。每日主旨表因此叫 `mops_announcements`，不要把兩者合併或互相覆蓋；`assert_columns` 第一次就是被它擋下來才發現的。
 - 測試時 `TWQUANT_PG_DSN` 指向沒開的本機 PG，每條 PG 測試都等到連線逾時，全套跑超過 10 分鐘；PG 沒開就別設它（會 skip，3 分鐘跑完）。
 - wrangler 的 OAuth token 約一小時過期（Workers AI 回 401 Authentication error），`npx wrangler whoami` 會刷新。
 - MOPS 隱藏欄位 `h<列序><欄>`：列序會到三位數，欄位名取**最後一碼**；發言時間前導零會被吃掉（`658`＝00:06:58）。

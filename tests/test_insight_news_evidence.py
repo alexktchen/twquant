@@ -39,7 +39,7 @@ def test_ac1_filings_become_neutral_evidence_newest_first() -> None:
     assert items["events_news_1"].title == "2026-10-15 14:05 重大訊息：公告本公司取得機器設備"
     assert items["events_news_2"].title.startswith("2026-10-10 17:40 重大訊息：")
     assert {items[k].direction for k in ("events_news_1", "events_news_2")} == {"neutral"}
-    assert items["events_news_1"].url == "twquant://serving/material_news/2330/2026-10-15"
+    assert items["events_news_1"].url == "twquant://serving/mops_announcements/2330/2026-10-15"
     assert "events_news_unavailable" not in items and "news" not in bundle.missing
 
 
@@ -123,7 +123,7 @@ class _Conn:
 
 
 def _span(
-    lo: dt.date | None, hi: dt.date | None, table: str | None = "serving.material_news"
+    lo: dt.date | None, hi: dt.date | None, table: str | None = "serving.mops_announcements"
 ) -> _Conn:
     return _Conn(
         [
@@ -156,7 +156,7 @@ def test_ac5_fetch_sections_reads_disposition_attention_and_news_from_pg() -> No
     assert sections["material_news"] == {"window_days": 30, "rows": []}
     joined = "\n".join(conn.cur.seen)
     assert "disposition_stocks" in joined and "effective_end >= %s" in joined
-    assert "attention_stocks" in joined and "material_news" in joined
+    assert "attention_stocks" in joined and "mops_announcements" in joined
 
 
 # ── AC-6：qwen3 帶 /no_think；prompt 改版並說明公告的讀法 ─────────────────────────

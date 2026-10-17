@@ -769,7 +769,7 @@ def chip_daily(
 def material_news_cmd(
     date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
 ) -> None:
-    """單獨跑每日 pipeline 的「重大訊息」步驟（T-371）：MOPS 重大訊息 → 直寫 PG。
+    """單獨跑每日 pipeline 的「重大訊息」步驟（T-371）：MOPS 重大訊息 → 直寫 PG（serving.mops_announcements）。
 
     抓這天與前一天，再補回看窗（system.yaml `material_news.lookback_days`）內 PG 一列都沒有的日曆日。
     與 pipeline 同一個函數，平常不用手跑。
@@ -787,7 +787,7 @@ def material_news_cmd(
 
 
 def _run_material_news_day(day: dt.date) -> str:
-    """每日「重大訊息」步驟（T-371）：當天、前一天與回看窗內的缺日 → upsert serving.material_news。"""
+    """每日「重大訊息」步驟（T-371）：當天、前一天與回看窗內的缺日 → upsert serving.mops_announcements。"""
     from twquant.data.http import HttpClient
     from twquant.data.serving import schema as sch
     from twquant.data.serving import store
@@ -804,8 +804,8 @@ def _run_material_news_day(day: dt.date) -> str:
     client = HttpClient(source="mops", rate=cfg.source_rates["mops"], user_agent=ua)
     rows = 0
     with store.connect(scfg) as conn:
-        sch.ensure_tables(conn, (sch.MATERIAL_NEWS_SPEC,), pg)
-        sch.assert_columns(conn, sch.MATERIAL_NEWS_SPEC, pg)
+        sch.ensure_tables(conn, (sch.MOPS_ANNOUNCEMENTS_SPEC,), pg)
+        sch.assert_columns(conn, sch.MOPS_ANNOUNCEMENTS_SPEC, pg)
         with conn.cursor() as cur:
             cur.execute(
                 f'SELECT DISTINCT date FROM "{pg}"."{mn.TABLE}" WHERE date >= %s',
@@ -817,7 +817,7 @@ def _run_material_news_day(day: dt.date) -> str:
         for d in plan:
             df = mn.fetch_day(client, d)
             with conn.cursor() as cur:
-                upsert(cur, pg, sch.MATERIAL_NEWS_SPEC, df)
+                upsert(cur, pg, sch.MOPS_ANNOUNCEMENTS_SPEC, df)
             conn.commit()  # 逐日提交：中途失敗時已抓的日子留著，下次只補缺的
             rows += df.height
     return f"抓 {len(plan)} 天（{plan[0]}～{plan[-1]}），{rows:,} 則"

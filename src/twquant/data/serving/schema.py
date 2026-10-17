@@ -630,10 +630,11 @@ FUND_FLOW_SPECS: tuple[TableSpec, ...] = (
     ),
 )
 
-# MOPS 重大訊息（T-371／D-187）：直寫 PG、資料湖沒有。每日「重大訊息」步驟抓當天、前一天與回看窗內的缺日；
+# MOPS 重大訊息主旨（T-371／D-187）：直寫 PG、資料湖沒有。每日「重大訊息」步驟抓當天、前一天與回看窗內的缺日；
 # 欄位與 data/sources/material_news.SCHEMA 同名同序（tests/test_material_news.py 守著）。只存主旨不存全文。
-MATERIAL_NEWS_SPEC = TableSpec(
-    "material_news",
+# 不叫 material_news：那是本機事件研究（2026-09-28）留下的全文凍結快照，欄位與主鍵都不同，不互相覆蓋。
+MOPS_ANNOUNCEMENTS_SPEC = TableSpec(
+    "mops_announcements",
     (
         ("date", "date"),
         ("stock_id", "text"),
@@ -688,7 +689,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     SIMILAR_LIBRARY_SPEC,
     PICK_SIMILAR_SPEC,
     *FUND_FLOW_SPECS,
-    MATERIAL_NEWS_SPEC,
+    MOPS_ANNOUNCEMENTS_SPEC,
     INSIGHT_PACKS_SPEC,
 )
 

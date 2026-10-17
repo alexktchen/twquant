@@ -25,7 +25,7 @@ from twquant.reporting.insight_evidence import InsightEvidence
 
 _URI_PREFIX = "twquant://serving"
 _HASH_LENGTH = 16
-# 重大訊息（T-372）：呼叫端給 None＝來源沒涵蓋這段期間，記成缺口；不得由 LLM 以常識補寫。
+# 重大訊息（T-372，表 mops_announcements；sections 的鍵仍叫 material_news）：呼叫端給 None＝來源沒涵蓋這段期間，記成缺口；不得由 LLM 以常識補寫。
 # 給了列表（可為空）＝來源涵蓋，空列表就是「近 N 日沒有公告」這個事實。
 _NEWS_GAP_REASON = "重大訊息來源未涵蓋這段期間，本區段為缺口（T-372）"
 
@@ -306,7 +306,7 @@ def _events_section(
 ) -> tuple[list[InsightEvidence], list[str]]:
     """Dividends, splits, attention flags and filings are context; a disposition contradicts.
 
-    Filings come from ``material_news``; ``None`` there means the source did not cover the
+    Filings come from ``mops_announcements`` (section key ``material_news``); ``None`` there means the source did not cover the
     window, which stays a gap rather than being read as "nothing was announced".
     """
     out: list[InsightEvidence] = []
@@ -372,7 +372,7 @@ def _events_section(
             _item(
                 "events_news_none",
                 title=f"近 {news.get('window_days')} 日無重大訊息",
-                table="material_news",
+                table="mops_announcements",
                 stock_id=stock_id,
                 day=None,
                 available_at=as_of,
@@ -386,7 +386,7 @@ def _events_section(
             _item(
                 f"events_news_{k}",
                 title=f"{available:%Y-%m-%d %H:%M} 重大訊息：{row.get('subject')}",
-                table="material_news",
+                table="mops_announcements",
                 stock_id=stock_id,
                 day=row.get("date"),
                 available_at=available,

@@ -44,7 +44,7 @@ quality_gate:
     - tpex/prices_daily
     - tpex/stock_valuation
 
-# T-371／D-187：MOPS 重大訊息 → 直寫 PG（serving.material_news），洞悉層的證據包讀它。
+# T-371／D-187：MOPS 重大訊息主旨 → 直寫 PG（serving.mops_announcements；本機另一張 material_news 是研究用全文快照，不相干），洞悉層的證據包讀它。
 # 每天抓當天與前一天（前一天 17:30 以後的公告要隔天的頁才有），再補回看窗內 PG 一列都沒有的日曆日——
 # 週末也有公告，所以用日曆日。回看要蓋住證據包讀的 30 天，留幾天緩衝。第一次跑約 36 個請求（mops 限流 3 次／5 秒）。
 material_news:
