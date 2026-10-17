@@ -92,6 +92,11 @@ morning_brief:
   fx_symbol: "TWD=X"
   news_limit: 8
   top_groups: 3
+  # 研判素材的門檻（使用者 2026-10-17：「多一點分析師的角度」）：規則先算出背離與對照，給模型當分析依據
+  signal_big_move: 0.02   # 夜盤、費半漲跌超過 2% 才提
+  signal_volume_hot: 1.2  # 成交量 ≥ 20 日平均 1.2 倍＝量能放大
+  signal_volume_cold: 0.8 # ≤ 0.8 倍＝量能萎縮
+  signal_streak: 5        # 外資連買／連賣 5 天以上才提
   line_names: {CORE: 大盤精選, QUIET: 潛伏飆股, QUIETV: 高分爆量}
 
 # T-310：官方每日當沖、借券賣出、處置、注意 → 直寫 PG（D-154 §五、D-157）。每日 pipeline 的「籌碼」步驟用。
