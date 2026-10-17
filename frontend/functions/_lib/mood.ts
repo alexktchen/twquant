@@ -230,6 +230,8 @@ export type GlobalMood = {
   /** 四大指數平均漲跌；少一個就不算（平均會偏）→ null */
   us_avg: number | null
   label: string | null
+  /** 日盤、夜盤都拿不到時的原因（GlobalHub 填；網站照樣畫台指期那一行並寫出來） */
+  tx_error?: string | null
 }
 
 /** 最近成交過的那一節：依期交所的交易日排序，同一天夜盤在日盤後面；還沒成交的不算。 */

@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { GlobalHub, FRESH_MS, MIN_GAP_MS, STALE_MAX_MS, type Fetchers } from '../functions/_lib/global-live.ts'
+import { GlobalHub, FRESH_MS, FUGLE_COOLDOWN_MS, MIN_GAP_MS, STALE_MAX_MS, nearAsOf, type Fetchers } from '../functions/_lib/global-live.ts'
 import { LEAN, globalLabel, globalMood, latestSession } from '../functions/_lib/mood.ts'
-import { parseTaifex, readTaifex, taifexBody, type TaifexQuotes, type TxQuote } from '../functions/_lib/taifex.ts'
+import {
+  fugleNearSymbol,
+  fugleQuoteUrl,
+  fugleTickersUrl,
+  parseFugleFut,
+  parseTaifex,
+  readFugleJson,
+  readTaifex,
+  taifexBody,
+  type TaifexQuotes,
+  type TxQuote,
+} from '../functions/_lib/taifex.ts'
 import { US_INDICES, parseYahooChart, readYahoo, yahooUrl, zoned, type UsIndex } from '../functions/_lib/yahoo.ts'
 import { globalTone, globalView, nextDay, pts, txOpen, txWhen, type GlobalMood as WebGlobal, type TxQuote as WebTx } from '../src/cloud/mood.ts'
 
@@ -294,4 +305,141 @@ test('T-369 AC10：卡片——標籤顏色、兩節與價差、美股時間；�
   const usOnly = globalView({ ...g, day: null, night: null, gap: null, latest: null }, now)
   assert.equal(usOnly?.tx.length, 0)
   assert.equal(usOnly?.us.length, 1)
+})
+
+// ── 富果備援（T-370／D-186 修訂）：正式站上線第一天台指期整行沒出來，期交所拿不到時改問富果 ─────────────
+// 富果的回應形狀照官方 SDK @fugle/marketdata 1.8.0 的型別（futopt/intraday/quote、tickers）；沙盒沒有金鑰，沒有實際回應可錄。
+
+/** 微秒時間戳：台北某日某時。 */
+const usAt = (date: string, time: string) => (Date.parse(`${date}T${time}+08:00`) * 1000)
+
+test('T-370 AC1：富果近月——TXF 一般月份裡最後交易日還沒過、最早到期的；價差與別的商品不算；網址', () => {
+  const body = {
+    type: 'FUTURE',
+    data: [
+      { symbol: 'TXFL6', name: '臺指期126', endDate: '2026-12-16', settlementDate: '2026-12-16' },
+      { symbol: 'TXFK6', name: '臺指期116', endDate: '2026-11-18', settlementDate: '2026-11-18' },
+      { symbol: 'TXFJ6', name: '臺指期106', endDate: '2026-10-21', settlementDate: '2026-10-21' },
+      { symbol: 'TXFJ6/K6', name: '價差', endDate: '2026-10-21' },
+      { symbol: 'MXFJ6', name: '小型臺指', endDate: '2026-10-21' },
+    ],
+  }
+  assert.equal(fugleNearSymbol(body, '2026-10-17'), 'TXFJ6')
+  assert.equal(fugleNearSymbol(body, '2026-10-21'), 'TXFJ6') // 結算日當天日盤還在交易
+  assert.equal(fugleNearSymbol(body, '2026-10-22'), 'TXFK6')
+  assert.throws(() => fugleNearSymbol({ data: [] }, '2026-10-17'), /找不到/)
+  assert.throws(() => fugleNearSymbol({ message: 'Unauthorized' }, '2026-10-17'), /沒有 data/)
+  assert.ok(fugleTickersUrl('day').endsWith('product=TXF&isSpread=false&session=REGULAR'))
+  assert.ok(fugleTickersUrl('night').endsWith('session=AFTERHOURS'))
+  assert.equal(fugleQuoteUrl('TXFJ6', 'day'), 'https://api.fugle.tw/marketdata/v1.0/futopt/intraday/quote/TXFJ6')
+  assert.equal(fugleQuoteUrl('TXFJ6', 'night'), 'https://api.fugle.tw/marketdata/v1.0/futopt/intraday/quote/TXFJ6?session=afterhours')
+  // 結算日晚上的夜盤：到期的那個已經不交易，用隔天找
+  assert.equal(nearAsOf('night', Date.parse('2026-10-21T20:00:00+08:00')), '2026-10-22')
+  assert.equal(nearAsOf('night', Date.parse('2026-10-22T01:00:00+08:00')), '2026-10-22')
+  assert.equal(nearAsOf('day', Date.parse('2026-10-21T10:00:00+08:00')), '2026-10-21')
+})
+
+test('T-370 AC2：富果行情 → 跟期交所同形狀；參考價＝成交價−漲跌；夜盤凌晨的成交算前一天；試撮不當成交', async () => {
+  const day = parseFugleFut(
+    { date: '2026-10-16', symbol: 'TXFJ6', lastPrice: 47242, closePrice: 47242, change: 311, changePercent: 0.66, total: { tradeVolume: 98384 }, lastTrade: { price: 47242, time: usAt('2026-10-16', '13:44:59') } },
+    'day',
+  )
+  assert.equal(day.source, 'fugle')
+  assert.equal(day.symbol, 'TXFJ6')
+  assert.equal(day.date, '2026-10-16')
+  assert.equal(day.time, '13:44:59')
+  assert.equal(day.last, 47242)
+  assert.equal(day.ref, 46931)
+  assert.equal(day.volume, 98384)
+  near(day.chg ?? 0, 47242 / 46931 - 1)
+  // 夜盤 04:59 成交（富果的 date 不管標哪天）→ 期交所的標法：接在 10/16 日盤後面那一節
+  const night = parseFugleFut({ date: '2026-10-19', symbol: 'TXFJ6', lastPrice: 46140, change: -1144, lastTrade: { price: 46140, time: usAt('2026-10-17', '04:59:57') } }, 'night')
+  assert.equal(night.date, '2026-10-16')
+  assert.equal(night.ref, 47284)
+  assert.equal(night.time, '04:59:57')
+  // 夜盤晚上 21:00 的成交 → 當天
+  assert.equal(parseFugleFut({ date: '2026-10-19', symbol: 'TXFJ6', lastPrice: 46000, change: -100, lastTrade: { time: usAt('2026-10-19', '21:00:00') } }, 'night').date, '2026-10-19')
+  // 試撮中：lastPrice 是試撮價 → 不當成交，放在 test
+  const trial = parseFugleFut({ date: '2026-10-19', symbol: 'TXFJ6', lastPrice: 47110, change: -174, isTrial: true, lastTrial: { price: 47110 }, lastUpdated: usAt('2026-10-19', '08:44:55') }, 'day')
+  assert.equal(trial.last, null)
+  assert.equal(trial.test, 47110)
+  assert.equal(trial.chg, null)
+  assert.equal(trial.time, null)
+  assert.equal(trial.date, '2026-10-19')
+  assert.throws(() => parseFugleFut({ message: 'Unauthorized' }, 'day'), /回應異常/)
+  await assert.rejects(readFugleJson({ ok: false, status: 429, json: async () => ({}) }), (e: Error & { status?: number }) => e.status === 429)
+})
+
+test('T-370 AC3：期交所拿不到 → 用富果補（沿用上一份的加權點數）；富果 429 就停一分鐘不問；兩個都沒有 → 寫出原因', async () => {
+  let t = 5_000_000
+  const log: string[] = []
+  let taifexDown = false
+  let fugleStatus = 0
+  const hub = new GlobalHub(
+    {
+      taifex: async (s) => {
+        log.push(`taifex:${s}`)
+        if (taifexDown) throw new Error('期交所沒有回應（等了 6 秒）')
+        return (s === 'day' ? DAY : NIGHT) as TaifexQuotes
+      },
+      yahoo: async (symbol, name) => ({ symbol, name, date: '2026-10-16', time: '04:42', open: false, last: 99, prev: 100, chg: -0.01 }),
+    },
+    () => t,
+  )
+  const fugle = async (s: 'day' | 'night'): Promise<TxQuote> => {
+    log.push(`fugle:${s}`)
+    if (fugleStatus) throw Object.assign(new Error(`富果期貨行情 HTTP ${fugleStatus}`), { status: fugleStatus })
+    return { ...(s === 'day' ? DAY.near : NIGHT.near)!, last: 46000, source: 'fugle' }
+  }
+  // 期交所正常：不問富果
+  await hub.get(fugle)
+  assert.ok(!log.some((x) => x.startsWith('fugle')))
+  // 期交所掛了：兩節都改問富果，現貨沿用上一份
+  taifexDown = true
+  t += MIN_GAP_MS
+  const r = await hub.get(fugle)
+  assert.deepEqual(log.filter((x) => x.startsWith('fugle')).sort(), ['fugle:day', 'fugle:night'])
+  assert.equal(r.global.night?.source, 'fugle')
+  assert.equal(r.global.night?.last, 46000)
+  assert.deepEqual(r.global.spot, DAY.spot)
+  assert.equal(r.global.tx_error, undefined)
+  assert.ok(r.errors.includes('期交所沒有回應（等了 6 秒）'))
+  // 富果 429：這一輪用上一份，接下來一分鐘不問富果
+  fugleStatus = 429
+  t += MIN_GAP_MS
+  await hub.get(fugle)
+  const asked = log.filter((x) => x.startsWith('fugle')).length
+  t += MIN_GAP_MS
+  await hub.get(fugle)
+  assert.equal(log.filter((x) => x.startsWith('fugle')).length, asked)
+  t += FUGLE_COOLDOWN_MS
+  await hub.get(fugle)
+  assert.ok(log.filter((x) => x.startsWith('fugle')).length > asked)
+  // 期交所與富果一直拿不到、上一份也太舊：美股照給，台指期寫原因
+  t += STALE_MAX_MS
+  const gone = await hub.get(fugle)
+  assert.equal(gone.global.day, null)
+  assert.equal(gone.global.night, null)
+  assert.equal(gone.global.us.length, 4)
+  assert.equal(gone.global.tx_error, '期交所沒有回應（等了 6 秒）')
+  // 沒有富果金鑰（不給備援）：一樣寫原因
+  const bare = new GlobalHub({ taifex: async () => Promise.reject(new Error('期交所行情 HTTP 522')), yahoo: async (symbol, name) => ({ symbol, name, date: '2026-10-16', time: null, open: false, last: 1, prev: 1, chg: 0 }) }, () => t)
+  assert.equal((await bare.get()).global.tx_error, '期交所行情 HTTP 522')
+})
+
+test('T-370 AC4：網站——兩節都沒有就照樣畫台指期那一行寫原因；富果補的要註明；每個對外請求有逾時、端點把富果金鑰傳進去（靜態）', () => {
+  const now = { date: '2026-10-17', time: '10:34:00' }
+  const us1 = [{ symbol: '^GSPC', name: 'S&P 500', date: '2026-10-16', time: '04:42', open: false, last: 7659.44, prev: 7744.06, chg: -0.0109 }]
+  const base: WebGlobal = { spot: null, day: null, night: null, latest: null, gap: null, us: us1, us_avg: null, label: '美股大跌・偏空' }
+  const v = globalView({ ...base, tx_error: '期交所沒有回應（等了 6 秒）' }, now)
+  assert.equal(v?.txError, '期交所沒有回應（等了 6 秒）')
+  assert.equal(globalView(base, now)?.txError, '期交所沒有回應')
+  const withFugle = globalView({ ...base, night: { ...webTx('night', '2026-10-16', 46140, 47284), source: 'fugle' }, latest: 'night' }, now)
+  assert.equal(withFugle?.txError, null)
+  assert.equal(withFugle?.fugle, true)
+  const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
+  const live = read('functions/_lib/global-live.ts')
+  assert.equal((live.match(/signal: timeout\(\)/g) ?? []).length, 4) // 期交所、Yahoo、富果 tickers、富果 quote
+  assert.ok(read('functions/api/mood/global.ts').includes('fugleFut(env.FUGLE_API_KEY)'))
+  assert.ok(read('src/cloud/MoodCard.tsx').includes('g.txError'))
 })
