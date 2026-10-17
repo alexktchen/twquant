@@ -23,6 +23,7 @@ from twquant.reporting.morning_brief import (
     facts,
     gather,
     rule_text,
+    signals,
     user_payload,
 )
 
@@ -97,11 +98,24 @@ def _conn(with_market: bool = True) -> _Conn:
     mcols, mrow = _market_row()
     tcols = list(sch.TAIFEX_DAILY_SPEC.column_names)
     trow = (MDATE, 3197, 82464, -93675, 9812, 103487, 88.75, 67.6, 55093, 81497, None)
+    trow_prev = (
+        dt.date(2026, 10, 15),
+        1000,
+        80000,
+        -89768,
+        9000,
+        98768,
+        74.99,
+        60.84,
+        77287,
+        127036,
+        None,
+    )
     return _Conn(
         [
             ("to_regclass", ["t"], [("ok",)]),
             ('"market_daily"', mcols, [mrow] if with_market else []),
-            ('"taifex_daily"', tcols, [trow]),
+            ('"taifex_daily"', tcols, [trow, trow_prev]),
             (
                 '"group_flow_daily"',
                 ["grp", "share", "share_avg", "ret"],
@@ -366,19 +380,47 @@ def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:
     assert out2 is not None and out2.risk_note is None and notes2 == []
 
 
-def test_ac5_prompt_asks_for_professional_premarket_tone() -> None:
-    # 使用者 2026-10-17：「今天的一句話太白話了」→ v3 改成盤前快訊口吻；數字規則照舊
-    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-17.3"
+def test_ac5_prompt_asks_for_analyst_judgement() -> None:
+    # 使用者 2026-10-17：「太白話了」→ v3 盤前快訊；「多一點分析師的角度」→ v4 先研判、再依據、最後觀察重點；數字規則照舊
+    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-17.4"
     for word in (
-        "盤前快訊",
+        "盤勢分析師",
+        "【研判】",
         "【國際】",
         "【籌碼】",
+        "【觀察】",
+        "研判素材",
         "逆價差",
         "不超過 30 字",
         "2% 以上才寫「大漲／重挫」",
+        "不給目標價",
     ):
         assert word in MORNING_BRIEF_SYSTEM
     assert "白話" not in MORNING_BRIEF_SYSTEM and "散戶" not in MORNING_BRIEF_SYSTEM
-    assert "只能使用事實句裡出現的數字" in MORNING_BRIEF_SYSTEM
+    assert "只能使用事實句或研判素材裡出現的數字" in MORNING_BRIEF_SYSTEM
     inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
     assert any("比加權收盤低 500 點（逆價差）" in x for x in facts(inp))
+
+
+# ── AC-6：研判素材——規則算出的背離、一致與部位增減（數字都在這裡算好，檢查照樣成立） ─────────
+def test_ac6_signals_spell_out_divergences_and_position_changes() -> None:
+    inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    sig = signals(inp)
+    assert "研判素材：夜盤 -2.21%，延續日盤方向且幅度擴大" in sig
+    assert "研判素材：費半 +3.00%，台股半導體與 AI 供應鏈權值股開盤可望受惠" in sig
+    assert "研判素材：外資估算賣超、投信估算買超，法人看法分歧" in sig
+    assert "研判素材：指數下跌且下跌家數較多，賣壓普遍" in sig
+    assert "研判素材：成交量明顯高於 20 日平均，量能放大" in sig
+    assert "研判素材：外資台指期淨空單比前一日增加 3,907 口（避險／看空部位加碼）" in sig
+    assert "研判素材：資金由 金融 轉向 半導體、航運" in sig
+    assert not any("連續" in x for x in sig)  # 外資連賣 4 天 < 門檻 5
+    assert set(sig) <= set(facts(inp))  # 研判素材也在事實清單裡，模型引用的數字可檢查
+
+
+def test_ac6_day_night_divergence_is_called_out() -> None:
+    inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    assert inp.market is not None
+    inp.market = {**inp.market, "taiex_chg": 0.003, "up": 1223, "down": 533}
+    sig = signals(inp)
+    assert "研判素材：加權指數前一交易日 +0.30%，夜盤卻 -2.21%，日夜盤方向相反" in sig
+    assert "研判素材：指數上漲且上漲家數較多，漲勢普及" in sig
