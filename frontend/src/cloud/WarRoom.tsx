@@ -1,7 +1,7 @@
 // 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、昨晚國際大事、市場氛圍、國際行情、期貨籌碼、大盤體檢、
 // 法人與融資、昨日消息、今天名單速覽、名單成績、行事曆、族群熱力圖。
 // 使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置，卡也要可以縮起來，縮起來後內容要可以輪播」——
-// 卡片照版面（useHomeLayout，登入後存在帳號）排；每張卡點標題收起，收起時輪播重點；「整理版面」拖曳或 ▲▼ 換位置。
+// 卡片照版面（useHomeLayout，登入後存在帳號）排；每張卡點標題收起，收起時輪播重點；「編輯版面」拖曳或 ▲▼ 換位置。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
@@ -124,7 +124,7 @@ export function WarRoom({
         {layoutErr && !editing && <span className="cq-war-mute">{layoutErr}</span>}
         {!editing && (
           <button className="cq-edit-btn" onClick={() => setEditing(true)}>
-            整理版面
+            編輯版面
           </button>
         )}
       </div>

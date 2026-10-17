@@ -1,4 +1,4 @@
-// 首頁「整理版面」（使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置」）：
+// 首頁「編輯版面」（使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置」）：
 // 每張卡一列——按住右邊 ≡ 拖曳到想要的位置（手機手指、電腦滑鼠都可以），或按 ▲ ▼ 一格一格移；「收起／展開」設定平常的樣子。
 // 每次放開就存（登入後存在帳號）。拖曳的做法與追蹤清單相同（reorder.ts）。
 import { useRef, useState } from 'react'
@@ -84,7 +84,7 @@ export function LayoutEditor({
   return (
     <section className="cq-war-card cq-layout-edit">
       <header>
-        <h2>整理版面</h2>
+        <h2>編輯版面</h2>
         <span className="cq-war-when">按住 ≡ 拖曳，或按 ▲ ▼ 移動；點「收起中／展開中」切換平常的樣子。登入後存在你的帳號，換裝置也一樣</span>
       </header>
       <ul ref={list} className="cq-editing cq-layout-list">
