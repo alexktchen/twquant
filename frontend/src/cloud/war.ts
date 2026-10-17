@@ -112,7 +112,8 @@ export type WarRoomData = {
   brief_dates?: string[]
   market: Market | null
   taifex: Taifex | null
-  picks: { date: string; lines: { code: string; name: string; n: number; new: number }[] } | null
+  /** sids：今天名單上的股票（三條線合起來；行事曆標「名單」用） */
+  picks: { date: string; lines: { code: string; name: string; n: number; new: number }[]; sids?: string[] } | null
   news: { since: string; items: NewsItem[] }
   calendar: {
     conferences: { date: string; stock_id: string; name: string | null; conf_time: string; summary: string | null }[]
@@ -155,6 +156,56 @@ export function breadth(up: number, down: number, flat: number): { up: number; d
 export function tone(x: number | null | undefined): 'up' | 'down' | 'flat' {
   if (x === null || x === undefined || x === 0) return 'flat'
   return x > 0 ? 'up' : 'down'
+}
+
+/** 行事曆的一筆（除權息或法說會合在一起排）。 */
+export type CalendarItem = {
+  key: string
+  date: string
+  kind: 'cash' | 'stock' | 'both' | 'conf'
+  stock_id: string
+  name: string | null
+  conf_time: string | null
+  summary: string | null
+  dividend: { cash_dividend: number | null; stock_ratio: number | null; rights_ratio: number | null } | null
+}
+
+/** 除權息與法說會合成一串，依日期、（法說會）時間、代號排。 */
+export function calendarItems(cal: WarRoomData['calendar']): CalendarItem[] {
+  const divs: CalendarItem[] = cal.dividends.map((d) => ({
+    key: `d${d.date}${d.stock_id}`,
+    date: d.date,
+    kind: d.kind,
+    stock_id: d.stock_id,
+    name: d.name,
+    conf_time: null,
+    summary: null,
+    dividend: { cash_dividend: d.cash_dividend, stock_ratio: d.stock_ratio, rights_ratio: d.rights_ratio },
+  }))
+  const confs: CalendarItem[] = cal.conferences.map((c) => ({
+    key: `c${c.date}${c.stock_id}${c.conf_time}`,
+    date: c.date,
+    kind: 'conf',
+    stock_id: c.stock_id,
+    name: c.name,
+    conf_time: c.conf_time,
+    summary: c.summary,
+    dividend: null,
+  }))
+  const order = (x: CalendarItem) => `${x.date}|${x.kind === 'conf' ? '1' : '0'}|${x.conf_time ?? ''}|${x.stock_id}`
+  return [...divs, ...confs].sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0))
+}
+
+/** 每天幾檔除權息、幾場法說會（收起時的摘要）。 */
+export function calendarDays(items: CalendarItem[]): { date: string; dividends: number; conferences: number }[] {
+  const out = new Map<string, { date: string; dividends: number; conferences: number }>()
+  for (const it of items) {
+    const d = out.get(it.date) ?? { date: it.date, dividends: 0, conferences: 0 }
+    if (it.kind === 'conf') d.conferences += 1
+    else d.dividends += 1
+    out.set(it.date, d)
+  }
+  return [...out.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
 }
 
 /** 除權息預告的種類 → 中文。 */

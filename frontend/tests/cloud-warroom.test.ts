@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { SID_RE } from '../functions/_lib/picks.ts'
 import { addDays, marketWide, newsTags, parseSids, pickNews, revenueDeadline, taipeiDay } from '../functions/_lib/warroom.ts'
@@ -89,4 +90,32 @@ test('除權息預告：種類中文與金額說明', async () => {
   assert.equal(dividendText({ cash_dividend: 0.5000208, stock_ratio: 0.09999999, rights_ratio: null }), '現金 0.5 元、配股 0.1')
   assert.equal(dividendText({ cash_dividend: 0, stock_ratio: 0, rights_ratio: 0.09128214 }), '現增 0.0913')
   assert.equal(dividendText({ cash_dividend: null, stock_ratio: null, rights_ratio: null }), '')
+})
+
+test('使用者 2026-10-17：行事曆收起——除權息與法說會依日期合併排序、每天的檔數', async () => {
+  const { calendarItems, calendarDays } = await import('../src/cloud/war.ts')
+  const div = (date: string, stock_id: string) => ({ date, stock_id, name: null, kind: 'cash' as const, cash_dividend: 0.3, stock_ratio: 0, rights_ratio: 0 })
+  const conf = (date: string, stock_id: string, conf_time: string) => ({ date, stock_id, name: null, conf_time, summary: null })
+  const cal = {
+    dividends: [div('2026-10-20', '00733'), div('2026-10-19', '00694B'), div('2026-10-19', '00695B')],
+    conferences: [conf('2026-10-19', '2330', '14:00'), conf('2026-10-19', '2317', '10:00')],
+    revenue: { date: '2026-11-10', days: 24 },
+  }
+  const items = calendarItems(cal)
+  assert.deepEqual(
+    items.map((x) => `${x.date.slice(5)} ${x.kind} ${x.stock_id}`),
+    ['10-19 cash 00694B', '10-19 cash 00695B', '10-19 conf 2317', '10-19 conf 2330', '10-20 cash 00733'],
+  )
+  assert.deepEqual(calendarDays(items), [
+    { date: '2026-10-19', dividends: 2, conferences: 2 },
+    { date: '2026-10-20', dividends: 1, conferences: 0 },
+  ])
+  assert.deepEqual(calendarDays([]), [])
+  assert.deepEqual(items[0].dividend, { cash_dividend: 0.3, stock_ratio: 0, rights_ratio: 0 })
+  assert.equal(items[2].dividend, null)
+})
+
+test('使用者 2026-10-17：首頁 API 回今天名單的代號（行事曆標名單）', () => {
+  const src = readFileSync(new URL('../functions/api/warroom/index.ts', import.meta.url), 'utf8')
+  assert.ok(src.includes('sids: [...listed]'))
 })

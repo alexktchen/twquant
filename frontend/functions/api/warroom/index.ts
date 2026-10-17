@@ -47,6 +47,7 @@ const handle: PagesFunction<Env> = async ({ env }) =>
       const codes = [...new Set(now.map((r) => r.line))]
       picks = {
         date: latest,
+        sids: [...listed],
         lines: codes.map((code) => {
           const mine = now.filter((r) => r.line === code)
           return {
