@@ -645,6 +645,7 @@ MOPS_ANNOUNCEMENTS_SPEC = TableSpec(
         ("fact_date", "date"),
         ("mops_seq", "bigint"),
         ("available_at", "timestamptz"),
+        ("content", "text"),  # 說明全文（2026-10-17 加，最後一欄：舊表 ADD COLUMN 即對齊）
     ),
     # MOPS 自己的編號不唯一（同公司同日不同公告都可能是 1），一則公告的身分是 (代號, 發言時間, 主旨)
     pk=("stock_id", "available_at", "subject"),
@@ -884,6 +885,27 @@ def table_columns(conn: Any, table: str, schema: str = "serving") -> list[str]:
             (schema, table),
         )
         return [str(row[0]) for row in cur.fetchall()]
+
+
+def add_trailing_columns(conn: Any, spec: TableSpec, schema: str = "serving") -> list[str]:
+    """既有表的欄位正好是 spec 的前段 → 補上後面缺的欄（只加不改，冪等）；回補了哪些。
+
+    新欄位一律加在 spec 最後就能這樣升級（例：mops_announcements.content，2026-10-17）。
+    欄位不是前段（改名、換順序、刪欄）→ 什麼都不做，交給 assert_columns 指名要 DROP。
+    """
+    actual = table_columns(conn, spec.name, schema)
+    expected = list(spec.column_names)
+    if not actual or actual == expected or actual != expected[: len(actual)]:
+        return []
+    types = dict(spec.columns)
+    added = expected[len(actual) :]
+    with conn.cursor() as cur:
+        for col in added:
+            cur.execute(
+                f'ALTER TABLE "{schema}"."{spec.name}" ADD COLUMN IF NOT EXISTS "{col}" {types[col]}'
+            )
+    conn.commit()
+    return added
 
 
 def assert_columns(conn: Any, spec: TableSpec, schema: str = "serving") -> None:

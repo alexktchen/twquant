@@ -14,15 +14,16 @@
 | 5 | MOPS 自己的編號（意義未公開；**不是**當日序號：同公司同日不同時間的公告都可能是 1，同主旨再發一次是 2） | 1 |
 | 6 | 符合條款（款次） | 20 |
 | 7 | 事實發生日（可空） | 20261015 |
-| 8 | 說明全文 | （不存） |
+| 8 | 說明全文 | 存進 `content`（超過 system.yaml `material_news.content_max_chars` 截斷並註明） |
 
 **存託憑證（91xx，例：9105 泰金寶-DR）沒有隱藏表單**：明細按鈕改走 `t59sb01_form`。這些列從看得到的
-儲存格取日期（民國）、時間、代號、名稱、主旨；市場記 `dr`，`mops_seq`／款次／事實發生日留空。
+儲存格取日期（民國）、時間、代號、名稱、主旨；市場記 `dr`，`mops_seq`／款次／事實發生日／內文留空。
 
 一則公告的身分＝(代號, 發言時間到秒, 主旨)：MOPS 的編號不唯一（2026-10-16 實測 1558 兩則不同公告都是 1），
 同一頁出現兩列身分相同就 raise。隔天的頁再列出同一則時身分不變，upsert 覆寫成同一列。
 
-只存主旨不存全文：全文一天約 400 KB，雲端 500 MB 預算放不下，證據也只用主旨。
+內文（2026-10-17 使用者：「昨日消息點開要可以看到消息內文」）：一天約 300 KB，雲端留 25 個交易日約 10 MB；
+洞悉層的證據仍只用主旨。`content` 放在最後一欄，舊表 `ALTER TABLE … ADD COLUMN` 就對齊。
 表名 `mops_announcements`：本機 PG 另有 2026-09-28 事件研究（D-166／D-168）留下的 `material_news`
 （52 萬則全文、到 2026-09-28 為止的凍結快照、主鍵含 content_md5），這條每日主旨流不碰它、也不與它合併。
 available_at＝發言時間本身（到秒，Asia/Taipei）：公告上了 MOPS 那一刻就公開，PIT 精確。
@@ -62,6 +63,7 @@ SCHEMA: dict[str, pl.DataType] = {
     "fact_date": pl.Date(),
     "mops_seq": pl.Int64(),
     "available_at": pl.Datetime("us", "Asia/Taipei"),
+    "content": pl.Utf8(),
 }
 
 
@@ -160,9 +162,25 @@ def _subject(raw: str) -> str:
     return _SPACES.sub(" ", unicodedata.normalize("NFKC", raw)).strip()
 
 
-def _row(raw: _Raw, day: dt.date) -> dict[str, object]:
+_BLANKS = re.compile(r"\n{3,}")
+TRUNCATED = "\n……（內文過長，以下略；全文見公開資訊觀測站）"
+
+
+def clean_content(raw: str, max_chars: int | None) -> str | None:
+    """說明全文：NFKC、換行統一、每行去尾空白、三個以上空行收成一個；超過 max_chars 截斷並註明。空的 → None。"""
+    text = unicodedata.normalize("NFKC", raw).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
+    text = _BLANKS.sub("\n\n", "\n".join(lines)).strip()
+    if not text:
+        return None
+    if max_chars is not None and len(text) > max_chars:
+        return text[:max_chars].rstrip() + TRUNCATED
+    return text
+
+
+def _row(raw: _Raw, day: dt.date, content_max: int | None) -> dict[str, object]:
     if raw.market is not None:
-        return _form_row(raw.market, raw.fields, day)
+        return _form_row(raw.market, raw.fields, day, content_max)
     if raw.dr:
         return _dr_row(raw.cells, day)
     raise DataError(
@@ -193,10 +211,13 @@ def _dr_row(cells: list[str], day: dt.date) -> dict[str, object]:
         "fact_date": None,
         "mops_seq": None,
         "available_at": dt.datetime.combine(date, t, tzinfo=TZ),
+        "content": None,
     }
 
 
-def _form_row(market: str, f: dict[str, str], day: dt.date) -> dict[str, object]:
+def _form_row(
+    market: str, f: dict[str, str], day: dt.date, content_max: int | None
+) -> dict[str, object]:
     missing = [k for k in "012345" if k not in f]
     sid = f.get("1", "").strip() or "?"
     if missing:
@@ -223,18 +244,21 @@ def _form_row(market: str, f: dict[str, str], day: dt.date) -> dict[str, object]
         "fact_date": _date(fact, day, sid, "事實發生日") if fact else None,
         "mops_seq": seq,
         "available_at": dt.datetime.combine(date, t, tzinfo=TZ),
+        "content": clean_content(f.get("8", ""), content_max),
     }
 
 
-def parse_day(page: str, day: dt.date) -> pl.DataFrame:
-    """解析查詢日 `day` 的清單頁。不是清單頁、認不出的列、鍵重複 → DataError（不丟列繼續）。"""
+def parse_day(page: str, day: dt.date, content_max: int | None = None) -> pl.DataFrame:
+    """解析查詢日 `day` 的清單頁。不是清單頁、認不出的列、鍵重複 → DataError（不丟列繼續）。
+    `content_max`：內文最多幾個字（system.yaml），None＝不截。"""
     if _PAGE_MARK not in page:
         raise DataError(
             TABLE, day, f"MOPS 回應不是重大訊息清單（{len(page)} 字元，前段 {page[:80]!r}）"
         )
     parser = _Rows()
     parser.feed(page)
-    df = pl.DataFrame([_row(raw, day) for raw in parser.rows], schema=SCHEMA, orient="row")
+    rows = [_row(raw, day, content_max) for raw in parser.rows]
+    df = pl.DataFrame(rows, schema=SCHEMA, orient="row")
     key = ["stock_id", "available_at", "subject"]
     dup = df.filter(pl.struct(*key).is_duplicated())
     if not dup.is_empty():
@@ -246,12 +270,12 @@ def parse_day(page: str, day: dt.date) -> pl.DataFrame:
     return df
 
 
-def fetch_day(client: HttpClient, day: dt.date) -> pl.DataFrame:
+def fetch_day(client: HttpClient, day: dt.date, content_max: int | None = None) -> pl.DataFrame:
     """抓查詢日 `day` 的清單並解析。頁面是 UTF-8；解不開就 raise，不猜編碼。"""
     resp = client.get(URL, params=query_params(day))
     if resp.status_code != 200:
         raise DataError(TABLE, day, f"MOPS HTTP {resp.status_code}")
-    return parse_day(resp.content.decode("utf-8"), day)
+    return parse_day(resp.content.decode("utf-8"), day, content_max)
 
 
 def fetch_plan(day: dt.date, lookback_days: int, present: set[dt.date]) -> list[dt.date]:
