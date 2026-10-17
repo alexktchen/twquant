@@ -220,6 +220,28 @@ export function calendarDays(items: CalendarItem[]): { date: string; dividends: 
   return [...out.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
 }
 
+/** 往後數 n 個平日（只跳週末、不知道國定假日，所以呼叫端要寫「約」）。 */
+export function addWeekdays(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`)
+  let left = n
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1)
+    const w = d.getUTCDay()
+    if (w !== 0 && w !== 6) left -= 1
+  }
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * 即時公布的第一批大約哪天開始賣：公布日收盤後產生 → 隔一個交易日開盤買 → 抱滿 hold 個交易日。
+ * tradingDays（模擬帳戶淨值的日期）裡已經過的交易日照實算（含國定假日停市），之後的只跳週末估。
+ */
+export function firstLiveExit(liveSince: string, hold: number, tradingDays: string[] = []): string {
+  const after = tradingDays.filter((d) => d > liveSince).sort()
+  if (after.length >= hold + 1) return after[hold]
+  return addWeekdays(after.length > 0 ? after[after.length - 1] : liveSince, hold + 1 - after.length)
+}
+
 /** 除權息預告的種類 → 中文。 */
 export const DIV_KIND: Record<string, string> = { cash: '除息', stock: '除權', both: '除權息' }
 

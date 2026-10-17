@@ -671,3 +671,9 @@
 .cq-cal-search input::-webkit-search-cancel-button { display: none; }
 .cq-cal-search button { position: absolute; right: 4px; top: 4px; width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--mute); cursor: pointer; }
 .cq-cal-search button:hover { color: var(--text); }
+
+/* 名單成績：還沒有賣出的、公布後模擬帳戶（使用者 2026-10-17：「名單成績沒有資料」） */
+.cq-war-score td.cq-war-score-wait { text-align: left; color: var(--mute); font-size: 13px; white-space: normal; }
+.cq-war-score-acct { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.cq-war-score-acct b { font-weight: 600; }
+.cq-war-score-acct > small { flex-basis: 100%; }
