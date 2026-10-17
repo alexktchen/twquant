@@ -13,6 +13,7 @@ import {
   EVENT_NAME,
   breadth,
   dayLabel,
+  headlineTime,
   signedYi,
   streakText,
   tone,
@@ -130,6 +131,28 @@ export function WarRoom({
           </ul>
         )}
       </section>
+
+      {/* 昨晚國際大事・新聞頭條（使用者 2026-10-17）：晨報 06:30 抓的鉅亨網頭條快照 */}
+      {b?.headlines && b.headlines.length > 0 && (
+        <section className="cq-war-card cq-war-heads">
+          <header>
+            <h2>昨晚國際大事・新聞頭條</h2>
+            <span className="cq-war-when">前一天 14:00 到今早 {b.generated_at.slice(11, 16)}</span>
+          </header>
+          <ul>
+            {b.headlines.map((h) => (
+              <li key={h.news_id}>
+                <span className="cq-war-newstime">{headlineTime(h.published_at)}</span>
+                <a href={h.url} target="_blank" rel="noopener noreferrer">
+                  {h.title}
+                </a>
+                {h.category && <i className="cq-war-newstag">{h.category}</i>}
+              </li>
+            ))}
+          </ul>
+          <p className="cq-war-note">來源：鉅亨網新聞（只列標題，點標題看原文）。「今日一句話」的【大事】由這些頭條整理。</p>
+        </section>
+      )}
 
       {/* 美股、台指期、類股強弱／族群資金：沿用市場氛圍 */}
       <div className="cq-war-mood">

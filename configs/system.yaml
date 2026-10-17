@@ -22,6 +22,9 @@ source_rates:
   finmind:
     max_requests: 6
     per_seconds: 1.0
+  cnyes:  # 晨報的新聞頭條：一天兩個請求
+    max_requests: 2
+    per_seconds: 1.0
   yahoo:  # 晨報的全球行情（T-377）：9 個代號各一次，不是正式開放的介面，放慢
     max_requests: 2
     per_seconds: 1.0
@@ -97,6 +100,17 @@ morning_brief:
   signal_volume_hot: 1.2  # 成交量 ≥ 20 日平均 1.2 倍＝量能放大
   signal_volume_cold: 0.8 # ≤ 0.8 倍＝量能萎縮
   signal_streak: 5        # 外資連買／連賣 5 天以上才提
+  # 昨晚國際金融大事與新聞頭條（使用者 2026-10-17）：鉅亨網新聞列表，取前一天 14:00（台股收盤後）到晨報當下的新聞
+  news_feeds:
+    - {category: headline, label: 頭條}
+    - {category: wd_stock, label: 國際股}
+  news_since_hour: 14
+  news_fetch_limit: 30
+  headline_limit: 8
+  # 頭條只有標題，數字檢查抓不到方向寫反（2026-10-17 實見：「美債殖利率急跌」被寫成「急升」）：
+  # 這些標的在頭條與晨報裡的方向（後面 4 個字內第一個升／漲／跌／降…）相反 → 那句丟掉
+  news_direction_subjects: [殖利率, 油價, 金價, 銀價, 美元, 日圓, 新台幣, 比特幣, 美股, 費半, 那斯達克, 道瓊, 標普, 台股]
+  news_direction_window: 4
   line_names: {CORE: 大盤精選, QUIET: 潛伏飆股, QUIETV: 高分爆量}
 
 # T-310：官方每日當沖、借券賣出、處置、注意 → 直寫 PG（D-154 §五、D-157）。每日 pipeline 的「籌碼」步驟用。
