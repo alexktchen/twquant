@@ -23,6 +23,21 @@ export function missingTable(e: unknown): boolean {
   return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === '42P01'
 }
 
+/** PostgreSQL「欄位不存在」（42703）：新欄位要等下一次排程才補上（例：mops_announcements.content，2026-10-17）。 */
+export function missingColumn(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === '42703'
+}
+
+/** 讀「新加的欄位」用：表或欄位還沒建都當成沒有資料（回空）；其他錯誤照樣丟出去。 */
+export async function readNewColumn<T>(query: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await query()
+  } catch (e) {
+    if (missingTable(e) || missingColumn(e)) return []
+    throw e
+  }
+}
+
 /** 查成績那張表；表還沒建當成「還沒有資料」（回空），其他錯誤照樣丟出去（503）。 */
 export async function readRows<T>(query: () => Promise<T[]>): Promise<T[]> {
   try {

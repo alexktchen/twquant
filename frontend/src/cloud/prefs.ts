@@ -5,6 +5,8 @@ export const LINE_KEY = 'twquant.line'
 export const HEAT_KEY = 'twquant.heat'
 /** 「市場氛圍」卡展開或收起 */
 export const MOOD_KEY = 'twquant.mood'
+/** 「昨日消息」展開（列表）或收起（輪播一則） */
+export const NEWS_KEY = 'twquant.news'
 
 /** 存起來的展開狀態：'1' 展開、'0' 收起；沒存過或看不懂 → 預設值。 */
 export function openPref(stored: string | null, fallback: boolean): boolean {

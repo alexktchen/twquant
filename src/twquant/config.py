@@ -108,6 +108,7 @@ class MaterialNewsConfig(BaseConfig):
     """MOPS 重大訊息（T-371／D-187）。權威說明在 system.yaml 的註解。"""
 
     lookback_days: int = Field(default=35, ge=1)  # 往回補「PG 一列都沒有」的日曆日
+    content_max_chars: int = Field(default=4000, ge=200)  # 說明全文最多存幾個字（超過截斷並註明）
 
 
 class ChipDailyConfig(BaseConfig):

@@ -941,17 +941,20 @@ def _run_material_news_day(day: dt.date) -> str:
     rows = 0
     with store.connect(scfg) as conn:
         sch.ensure_tables(conn, (sch.MOPS_ANNOUNCEMENTS_SPEC,), pg)
+        sch.add_trailing_columns(conn, sch.MOPS_ANNOUNCEMENTS_SPEC, pg)  # 舊表補 content 欄
         sch.assert_columns(conn, sch.MOPS_ANNOUNCEMENTS_SPEC, pg)
         with conn.cursor() as cur:
+            # 「有」＝那天至少一則有內文：加 content 欄之前抓的日子會被當成缺日、補抓一次
             cur.execute(
-                f'SELECT DISTINCT date FROM "{pg}"."{mn.TABLE}" WHERE date >= %s',
+                f'SELECT DISTINCT date FROM "{pg}"."{mn.TABLE}" '
+                "WHERE date >= %s AND content IS NOT NULL",
                 (day - dt.timedelta(days=lookback),),
             )
             present = {r[0] for r in cur.fetchall()}
         conn.commit()
         plan = mn.fetch_plan(day, lookback, present)
         for d in plan:
-            df = mn.fetch_day(client, d)
+            df = mn.fetch_day(client, d, cfg.material_news.content_max_chars)
             with conn.cursor() as cur:
                 upsert(cur, pg, sch.MOPS_ANNOUNCEMENTS_SPEC, df)
             conn.commit()  # 逐日提交：中途失敗時已抓的日子留著，下次只補缺的

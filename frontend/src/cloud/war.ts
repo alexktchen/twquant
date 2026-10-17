@@ -54,7 +54,29 @@ export type Taifex = {
   call_oi: number | null
 }
 
-export type NewsItem = { stock_id: string; name: string | null; subject: string; at: string; tags: string[]; listed: boolean }
+/** ts＝發言時間 epoch 秒；content＝說明全文（可能被截斷；存託憑證沒有）。 */
+export type NewsItem = {
+  stock_id: string
+  name: string | null
+  subject: string
+  at: string
+  ts: number
+  tags: string[]
+  listed: boolean
+  content?: string | null
+}
+
+/** 一則公告的鍵（同 PG 主鍵：代號＋發言時間＋主旨）。 */
+export const newsId = (n: { stock_id: string; ts: number; subject: string }): string => `${n.stock_id}|${n.ts}|${n.subject}`
+
+/** 收起時輪播多久換一則。 */
+export const CAROUSEL_MS = 6_000
+
+/** 輪播往前／往後一則（頭尾相接）；沒有東西 → 0。 */
+export function carouselStep(i: number, n: number, dir: 1 | -1): number {
+  if (n <= 0) return 0
+  return (((i + dir) % n) + n) % n
+}
 
 export type WarRoomData = {
   today: string
