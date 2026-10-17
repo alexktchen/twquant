@@ -4,6 +4,8 @@
 import type { sql } from './db.ts'
 import type { Quote } from './quote.ts'
 import { readRows } from './scorecard.ts'
+import type { Session, TxQuote, TxSpot } from './taifex.ts'
+import { US_INDICES, type UsIndex } from './yahoo.ts'
 
 /** 證交所即時報價的指數頻道（tse_t00.tw 等）；QuoteHub 把代號當股票問，上市、上櫃各一個頻道，問錯的只回空殼。 */
 export const TAIEX_CODE = 't00'
@@ -206,4 +208,86 @@ export async function readClose(db: Db): Promise<CloseMood | null> {
       WHERE index_id IN ('TAIEX', 'TPEX') AND date <= ${date}::date AND date > ${date}::date - 15`,
   )
   return closeMood(date, rows, { taiex: dayReturn(idx, 'TAIEX', date), otc: dayReturn(idx, 'TPEX', date) })
+}
+
+// ── 期貨與美股（D-186）────────────────────────────────────────────────────────
+// 台指期日盤／夜盤（期交所，_lib/taifex.ts）與美股四大指數（Yahoo，_lib/yahoo.ts）合成「多空」一句。只供看盤，不進選股、不進模型。
+
+/** 台指期最新一節或美股平均漲跌的絕對值到這個（小數，0.5%）才算有方向；兩邊都不到就「多空平淡」。 */
+export const LEAN = 0.005
+
+export type GlobalMood = {
+  /** 加權最新點數：日盤那份的現貨（盤中即時），開盤前沒有就用夜盤那份的參考價（＝加權收盤，prev 為 null） */
+  spot: TxSpot | null
+  day: TxQuote | null
+  night: TxQuote | null
+  /** 最近成交過的那一節（夜盤接在同一天的日盤後面）；兩節都還沒成交 → null */
+  latest: Session | null
+  /** 最新一節最後成交價 − 加權最新點數（夜盤對加權收盤），點數與對加權的比例；缺一邊 → null */
+  gap: { pts: number; pct: number } | null
+  /** 四大指數，照 US_INDICES 的順序；拿不到的不列 */
+  us: UsIndex[]
+  /** 四大指數平均漲跌；少一個就不算（平均會偏）→ null */
+  us_avg: number | null
+  label: string | null
+}
+
+/** 最近成交過的那一節：依期交所的交易日排序，同一天夜盤在日盤後面；還沒成交的不算。 */
+export function latestSession(day: TxQuote | null, night: TxQuote | null): Session | null {
+  const traded = [day, night].filter((q): q is TxQuote => q !== null && q.last !== null)
+  if (traded.length === 0) return null
+  traded.sort((a, b) => a.date.localeCompare(b.date) || Number(a.session === 'night') - Number(b.session === 'night'))
+  return traded[traded.length - 1].session
+}
+
+/**
+ * 多空一句：最新一節台指期 ±1%「日盤／夜盤大漲／大跌」、美股平均 ±1%「美股大漲／大跌」（有的話，接在前面），
+ * 再看方向——兩邊各自 ±LEAN 算一票，多的多就「偏多」、空的多就「偏空」、一多一空「多空分歧」、都沒方向「多空平淡」。
+ * 兩邊都沒有資料 → null。
+ */
+export function globalLabel(fut: { session: Session; chg: number } | null, usAvg: number | null): string | null {
+  if (fut === null && usAvg === null) return null
+  const words: string[] = []
+  if (fut !== null) {
+    const name = fut.session === 'night' ? '夜盤' : '日盤'
+    if (fut.chg <= -BIG_MOVE) words.push(`${name}大跌`)
+    else if (fut.chg >= BIG_MOVE) words.push(`${name}大漲`)
+  }
+  if (usAvg !== null) {
+    if (usAvg <= -BIG_MOVE) words.push('美股大跌')
+    else if (usAvg >= BIG_MOVE) words.push('美股大漲')
+  }
+  const vote = (x: number | null): number => (x === null ? 0 : x >= LEAN ? 1 : x <= -LEAN ? -1 : 0)
+  const a = vote(fut?.chg ?? null)
+  const b = vote(usAvg)
+  const score = a + b
+  words.push(score > 0 ? '偏多' : score < 0 ? '偏空' : a !== 0 && b !== 0 ? '多空分歧' : '多空平淡')
+  return words.join('・')
+}
+
+/** 期交所日盤、夜盤兩份（拿不到的給 null）＋美股四大指數（拿到幾個給幾個）→ 期貨與美股的氛圍。 */
+export function globalMood(
+  day: { spot: TxSpot | null; near: TxQuote | null } | null,
+  night: { spot: TxSpot | null; near: TxQuote | null } | null,
+  us: UsIndex[],
+): GlobalMood {
+  const dq = day?.near ?? null
+  const nq = night?.near ?? null
+  const spot: TxSpot | null =
+    day?.spot && day.spot.last !== null ? day.spot : night?.spot ? { ...night.spot, last: night.spot.prev, prev: null } : (day?.spot ?? null)
+  const latest = latestSession(dq, nq)
+  const q = latest === 'night' ? nq : latest === 'day' ? dq : null
+  const gap = q && q.last !== null && spot && spot.last !== null ? { pts: q.last - spot.last, pct: q.last / spot.last - 1 } : null
+  const ordered = US_INDICES.flatMap((x) => us.filter((u) => u.symbol === x.symbol).slice(0, 1))
+  const usAvg = ordered.length === US_INDICES.length ? ordered.reduce((a, u) => a + u.chg, 0) / ordered.length : null
+  return {
+    spot,
+    day: dq,
+    night: nq,
+    latest,
+    gap,
+    us: ordered,
+    us_avg: usAvg,
+    label: globalLabel(q && q.chg !== null && latest ? { session: latest, chg: q.chg } : null, usAvg),
+  }
 }

@@ -106,3 +106,105 @@ export function pp(x: number): string {
 export const MOOD_POLL_MS = 30_000
 /** 收盤版多久重讀一次（傍晚排程算好後，開著的頁面自己換成資金版）。 */
 export const CLOSE_POLL_MS = 10 * 60_000
+
+// ── 期貨與美股（D-186）────────────────────────────────────────────────────────
+// 後端資料形狀見 functions/_lib/taifex.ts、yahoo.ts、mood.ts（GlobalMood）。
+
+export type TxSession = 'day' | 'night'
+export type TxQuote = {
+  session: TxSession
+  symbol: string
+  name: string
+  /** 期交所的交易日；夜盤標的是它接在後面的那個日盤的日期 */
+  date: string
+  time: string | null
+  last: number | null
+  ref: number | null
+  settlement: number | null
+  volume: number | null
+  test: number | null
+  chg: number | null
+}
+export type TxSpot = { date: string; time: string | null; last: number | null; prev: number | null }
+export type UsIndex = { symbol: string; name: string; date: string; time: string | null; open: boolean; last: number; prev: number; chg: number }
+export type GlobalMood = {
+  spot: TxSpot | null
+  day: TxQuote | null
+  night: TxQuote | null
+  latest: TxSession | null
+  gap: { pts: number; pct: number } | null
+  us: UsIndex[]
+  us_avg: number | null
+  label: string | null
+}
+
+/** 多久問一次期貨與美股（伺服器 60 秒暫存，問得再密也是同一份）。 */
+export const GLOBAL_POLL_MS = 60_000
+
+// 台指期交易時段（台北）：日盤 8:45～13:45、夜盤 15:00～隔天 5:00
+const TX_DAY_OPEN = '08:45:00'
+const TX_DAY_CLOSE = '13:45:00'
+const TX_NIGHT_OPEN = '15:00:00'
+const TX_NIGHT_CLOSE = '05:00:00'
+
+/** YYYY-MM-DD 的隔天（日曆日，不管假日）。 */
+export function nextDay(date: string): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+}
+
+/** 這一節現在是不是在交易：日盤看同一天 8:45～13:45；夜盤看同一天 15:00 起、或隔天 5:00 前。 */
+export function txOpen(q: { session: TxSession; date: string }, now: { date: string; time: string }): boolean {
+  if (q.session === 'day') return now.date === q.date && now.time >= TX_DAY_OPEN && now.time < TX_DAY_CLOSE
+  return (now.date === q.date && now.time >= TX_NIGHT_OPEN) || (now.date === nextDay(q.date) && now.time < TX_NIGHT_CLOSE)
+}
+
+/** 多空標籤的顏色：偏多紅、偏空綠（台股習慣），分歧與平淡不上色。 */
+export function globalTone(label: string | null): 'bull' | 'bear' | 'flat' {
+  if (!label) return 'flat'
+  if (label.includes('偏多')) return 'bull'
+  if (label.includes('偏空')) return 'bear'
+  return 'flat'
+}
+
+export type TxView = { session: TxSession; name: string; last: number | null; chg: number | null; test: number | null; when: string }
+export type GlobalView = {
+  label: string | null
+  tone: 'bull' | 'bear' | 'flat'
+  /** 日盤、夜盤（拿到的才列）；when＝「盤中 10:32」「10/16 收」「尚未成交」 */
+  tx: TxView[]
+  /** 最新一節比加權高（低）幾點 */
+  gap: { session: TxSession; pts: number; pct: number } | null
+  us: { name: string; chg: number; last: number }[]
+  /** 美股的時間：「盤中」或「10/16 收」；沒有指數 → null */
+  usWhen: string | null
+}
+
+const mdOf = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`
+
+/** 一節台指期的狀態字：交易中「盤中 HH:MM」、收了「M/D 收」、還沒成交「尚未成交」（有試撮價時由卡片另外標）。 */
+export function txWhen(q: TxQuote, now: { date: string; time: string }): string {
+  if (q.last === null) return '尚未成交'
+  if (txOpen(q, now)) return `盤中 ${(q.time ?? '').slice(0, 5)}`.trim()
+  return `${mdOf(q.date)} 收`
+}
+
+/** 期貨與美股那一塊要畫的東西；沒有資料 → null。 */
+export function globalView(g: GlobalMood | null, now: { date: string; time: string }): GlobalView | null {
+  if (!g || (g.day === null && g.night === null && g.us.length === 0)) return null
+  const tx: TxView[] = []
+  for (const q of [g.day, g.night]) {
+    if (q) tx.push({ session: q.session, name: q.session === 'day' ? '日盤' : '夜盤', last: q.last, chg: q.chg, test: q.test, when: txWhen(q, now) })
+  }
+  const first = g.us[0]
+  return {
+    label: g.label,
+    tone: globalTone(g.label),
+    tx,
+    gap: g.gap && g.latest ? { session: g.latest, ...g.gap } : null,
+    us: g.us.map((u) => ({ name: u.name, chg: u.chg, last: u.last })),
+    usWhen: first ? (first.open ? '盤中' : `${mdOf(first.date)} 收`) : null,
+  }
+}
+
+/** 點數（47242.5 → "47,243"）。 */
+export const pts = (x: number): string => Math.round(x).toLocaleString('en-US')
