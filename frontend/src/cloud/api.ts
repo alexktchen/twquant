@@ -10,6 +10,7 @@ import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
+import type { StopHit } from './stophit'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -68,6 +69,10 @@ export const fetchStockPicks = (sid: string) =>
 /** 這一檔的行事曆（使用者 2026-10-17）：過去一年到往後 120 天的除權息、法說會、分割減資。 */
 export const fetchStockCalendar = (sid: string) =>
   get<{ sid: string; today: string; items: StockCalItem[] }>(`/api/stocks/${encodeURIComponent(sid)}/calendar`)
+
+/** 這一檔的波動度落在哪一組、那組 20 日內碰 −15%／+20% 的歷史比例（D-191 §三 C）；收盤不足是 null。 */
+export const fetchStockStopHit = (sid: string) =>
+  get<{ sid: string; today: string; hit: StopHit | null }>(`/api/stocks/${encodeURIComponent(sid)}/stophit`)
 
 /** 這一檔最近幾週的千張大戶比例（T-386）；還沒累積到資料是空陣列。 */
 export const fetchStockHolders = (sid: string) =>

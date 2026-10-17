@@ -28,7 +28,9 @@ import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } fr
 import { dropNote, weakSummary, weakTags } from './weak'
 import { insiderTag } from './insider'
 import { holdersTag } from './holders'
+import { stopHitLine, stopHitTitle } from './stophit'
 import { StockHolders } from './StockHolders'
+import { StockStopHit } from './StockStopHit'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
@@ -649,6 +651,11 @@ function Row({
           )}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
+        {stopHitLine(p.stop_hit) && (
+          <span className="cq-why cq-stophit" title={stopHitTitle(p.stop_hit)}>
+            {stopHitLine(p.stop_hit)}
+          </span>
+        )}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -1124,6 +1131,7 @@ function Detail({
         )}
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
+      <StockStopHit sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
       <StockHolders sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}

@@ -8,6 +8,7 @@ import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
 import { readHolders } from '../../_lib/holders'
 import { readInsider } from '../../_lib/insider'
+import { readStopHit } from '../../_lib/stop-hit'
 import { readReasons } from '../../_lib/reasons'
 import { readReference } from '../../_lib/reference'
 import { readSimilar } from '../../_lib/similar'
@@ -42,6 +43,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const weak = await readWeak(db, target, sids)
     const insider = await readInsider(db, target, sids)
     const holders = await readHolders(db, target, sids)
+    const stopHit = await readStopHit(db, target, sids)
     const drop = await readDrop(db, target)
     const reference = await readReference(db)
     const similar = await readSimilar(db, target)
@@ -93,6 +95,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             weak: weak.get(r.stock_id) ?? null,
             insider: insider.get(r.stock_id) ?? null,
             holders: holders.get(r.stock_id) ?? null,
+            stop_hit: stopHit.get(r.stock_id) ?? null,
           }
         }),
       }
