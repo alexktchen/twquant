@@ -248,46 +248,54 @@ def _yi(x: float | None) -> str:
     return "—" if x is None else f"{x / 1e8:+.0f} 億"
 
 
+def _gap_word(pts: float) -> str:
+    """期貨對現貨：高＝正價差、低＝逆價差。"""
+    return "正價差" if pts >= 0 else "逆價差"
+
+
 def rule_text(inp: MorningInputs) -> str:
-    """規則版「今日一句話」：兩到四句，有什麼說什麼，缺的不說。"""
+    """規則版盤前快訊（AI 版沒有時顯示）：券商晨報口吻，分號分段，有什麼說什麼，缺的不說。"""
     parts: list[str] = []
     if inp.us:
         avg = sum(q.chg for q in inp.us) / len(inp.us)
         sox = next((q for q in inp.us if "費半" in q.name), None)
-        s = f"美股{'漲' if avg >= 0 else '跌'}（四大指數平均 {_pct(avg)}"
+        s = f"美股{'收紅' if avg >= 0 else '收黑'}，四大指數均幅 {_pct(avg)}"
         if sox:
-            s += f"，費半 {_pct(sox.chg)}"
-        parts.append(s + "）")
+            s += f"、費半 {_pct(sox.chg)}"
+        parts.append(s)
     if inp.night and inp.night.last is not None:
-        s = f"台指夜盤收 {inp.night.last:,.0f}"
+        s = f"台指期夜盤 {inp.night.last:,.0f}"
         if inp.night.chg is not None:
             s += f"（{_pct(inp.night.chg)}）"
         if inp.night.gap_pts is not None:
-            s += f"，比加權收盤{'高' if inp.night.gap_pts >= 0 else '低'} {abs(inp.night.gap_pts):,.0f} 點"
+            s += f"，{_gap_word(inp.night.gap_pts)} {abs(inp.night.gap_pts):,.0f} 點"
         parts.append(s)
     m = inp.market
     if m:
-        s = f"昨天加權 {_pct(m.get('taiex_chg'), 2)}，{m.get('up')} 漲 {m.get('down')} 跌"
+        s = f"前一交易日加權 {_pct(m.get('taiex_chg'), 2)}，漲跌家數 {m.get('up')}：{m.get('down')}"
         if m.get("limit_up") is not None:
-            s += f"、漲停 {m['limit_up']} 跌停 {m['limit_down']}"
+            s += f"，漲停 {m['limit_up']}、跌停 {m['limit_down']}"
         if m.get("amount_ratio") is not None:
-            s += f"，成交量是 20 日平均的 {m['amount_ratio']:.2f} 倍"
-        s += f"；外資 {_yi(m.get('foreign_net'))}"
-        streak = m.get("foreign_streak") or 0
-        if abs(streak) >= 3:
-            s += f"（連{'買' if streak > 0 else '賣'} {abs(streak)} 天）"
+            s += f"，量能 {m['amount_ratio']:.2f} 倍均量"
         parts.append(s)
+        foreign = m.get("foreign_net")
+        if foreign is not None:
+            s = f"外資{'買超' if foreign >= 0 else '賣超'} {abs(foreign) / 1e8:,.0f} 億"
+            streak = m.get("foreign_streak") or 0
+            if abs(streak) >= 2:
+                s += f"（連 {abs(streak)} 日{'買超' if streak > 0 else '賣超'}）"
+            parts.append(s)
     if inp.taifex and inp.taifex.get("fut_foreign_net_oi") is not None:
         oi = inp.taifex["fut_foreign_net_oi"]
         s = f"外資期貨淨{'多' if oi >= 0 else '空'}單 {abs(oi):,} 口"
         if inp.taifex.get("pc_oi_ratio") is not None:
-            s += f"，選擇權未平倉買賣權比 {inp.taifex['pc_oi_ratio']:.0f}%"
+            s += f"，P/C 未平倉比 {inp.taifex['pc_oi_ratio']:.0f}%"
         parts.append(s)
     if inp.inflow:
         parts.append("資金流入 " + "、".join(x["grp"] for x in inp.inflow))
     if inp.picks:
         parts.append(
-            "今天名單 "
+            "今日名單 "
             + "、".join(f"{p['name']} {p['n']} 檔（新增 {p['new']}）" for p in inp.picks)
         )
     return "；".join(parts) + "。" if parts else "今天沒有可用的資料。"
@@ -332,7 +340,7 @@ def facts(inp: MorningInputs) -> list[str]:
         if n.chg is not None:
             s += f"，比日盤結算 {_pct(n.chg, 2)}"
         if n.gap_pts is not None:
-            s += f"，比加權收盤{_bs(n.gap_pts, '高', '低')} {abs(n.gap_pts):,.0f} 點"
+            s += f"，比加權收盤{_bs(n.gap_pts, '高', '低')} {abs(n.gap_pts):,.0f} 點（{_gap_word(n.gap_pts)}）"
         out.append(s)
     m = inp.market
     if m:
