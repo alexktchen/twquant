@@ -94,11 +94,12 @@ const handle: PagesFunction<Env> = async ({ env }) =>
         SELECT date::text AS date, stock_id, name, conf_time, summary FROM serving.conference_calendar
         WHERE date BETWEEN ${today}::date AND ${until}::date ORDER BY date, conf_time, stock_id`,
     )
+    // 除權除息預告（證交所＋櫃買）；corporate_events 是除權息之後才有的結果，查不到未來
     const dividends = await readRows(
       () => db<Row[]>`
-        SELECT e.date::text AS date, e.stock_id, m.name, e.event_type FROM serving.corporate_events e
-        LEFT JOIN serving.stock_meta m ON m.stock_id = e.stock_id
-        WHERE e.date BETWEEN ${today}::date AND ${until}::date ORDER BY e.date, e.stock_id`,
+        SELECT date::text AS date, stock_id, name, kind, cash_dividend, stock_ratio, rights_ratio
+        FROM serving.dividend_calendar
+        WHERE date BETWEEN ${today}::date AND ${until}::date ORDER BY date, stock_id`,
     )
 
     return json({

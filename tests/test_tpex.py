@@ -56,9 +56,14 @@ def test_tpex_clean_prices() -> None:
     assert row["available_at"] == dt.datetime(2026, 6, 30, 18, 0, tzinfo=TZ)
 
 
-def test_tpex_only_prices_supported() -> None:
-    with pytest.raises(DataError, match="FinMind"):
-        _source("{}").fetch("institutional_daily", _DATE)
+def test_tpex_unsupported_table_raises() -> None:
+    # D-189：上櫃法人與融資改由櫃買新網站每日抓（tests/test_tpex_chips.py），不再丟「走 FinMind」；不支援的表照樣 raise
+    src = _source("{}")
+    assert {"prices_daily", "stock_valuation", "institutional_daily", "margin_daily"} <= set(
+        src.tables
+    )
+    with pytest.raises(DataError, match="tpex 只支援"):
+        src.fetch("broker_trades", _DATE)
 
 
 def test_tpex_antibot_non_json_raises() -> None:
