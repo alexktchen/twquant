@@ -161,7 +161,9 @@
 .cq-line-note { color: var(--text); border-top: 1px solid var(--line); }
 .cq-empty { color: var(--mute); font-size: 14px; padding: 18px 14px; margin: 0; text-align: center; }
 
-.cq-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px 20px; gap: 10px; }
+/* 個股欄自己捲動（使用者 2026-10-17：「每日名單不能下捲」——模型卡片、選股依據、相似情境加進來後內容比畫面高，
+   外層 .cq-body 是 overflow: hidden，下半部連 K 線都被裁掉）。手機是整頁捲，這條不影響。 */
+.cq-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px 20px; gap: 10px; overflow-y: auto; }
 .cq-quote { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .cq-quote h1 { margin: 0; font-size: 22px; font-weight: 700; }
 .cq-quote h1 small { color: var(--mute); font-size: 17px; font-weight: 400; margin-right: 2px; }
