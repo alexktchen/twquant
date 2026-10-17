@@ -6,6 +6,7 @@
 // 每檔另附近 30 天的內部人持股轉讓申報摘要（T-384，serving.insider_transfer_notices；沒有就是 null）。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
+import { readHolders } from '../../_lib/holders'
 import { readInsider } from '../../_lib/insider'
 import { readReasons } from '../../_lib/reasons'
 import { readReference } from '../../_lib/reference'
@@ -40,6 +41,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const reasons = await readReasons(db, target)
     const weak = await readWeak(db, target, sids)
     const insider = await readInsider(db, target, sids)
+    const holders = await readHolders(db, target, sids)
     const drop = await readDrop(db, target)
     const reference = await readReference(db)
     const similar = await readSimilar(db, target)
@@ -90,6 +92,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             chg6: change(c, startClose.get(r.stock_id) ?? null),
             weak: weak.get(r.stock_id) ?? null,
             insider: insider.get(r.stock_id) ?? null,
+            holders: holders.get(r.stock_id) ?? null,
           }
         }),
       }

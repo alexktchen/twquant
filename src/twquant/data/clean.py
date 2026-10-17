@@ -434,8 +434,8 @@ def clean_shareholding_dispersion(raw: pl.DataFrame, date: dt.date) -> pl.DataFr
     （SPEC-001 §1）。持股分級只留 1..15：16=差異數、17=合計 為對帳/衍生列，schema 僅
     收 1..15，明確剔除（非靜默）；占集保庫存數比例% 欄不入 schema、捨棄。
 
-    覆蓋範圍：id=1-5 目前為 6 碼證券（ETF/受益證券/債券）；四碼普通股的集保分散表僅
-    TDCC 互動查詢站提供，屬另一個未來 SourcePort（D-017 可插拔設計即為此準備）。
+    覆蓋範圍：id=1-5 是全市場（含四碼普通股約 2,950 檔與 ETF／受益證券；T-386 實測），
+    代號保留前導零與字尾字母。
     """
     d = pl.col("資料日期").str.strptime(pl.Date, "%Y%m%d")
     # 基準日（週五）之後第一個週六（含當日）：polars weekday ISO 週一=1..週日=7，週六=6

@@ -42,7 +42,7 @@ composite_factors:
 cloud:
   dsn_env: TWQUANT_SUPABASE_DSN   # Supabase transaction pooler（6543）DSN 的環境變數
   stock_pattern: "^[1-9][0-9]{3}$" # 大表只留四碼普通股（同 screener 宇宙）
-  pattern_tables: [prices_daily, broker_trades]
+  pattern_tables: [prices_daily, broker_trades, shareholding_dispersion]  # 集保週快照全市場 3,350 檔，雲端只留四碼普通股（T-386）
   # 特別股不是四碼卻有產業別、會進產業平均；修剪時留下，否則產業相對因子和地端不同（2026-10-09 實測）
   industry_member_tables: [prices_daily]
   # 名單績效（D-176）的對照「同期買 0050 抱著」要它的行情；0050 不是四碼普通股，修剪時明確留下
@@ -69,6 +69,7 @@ cloud:
     group_flow_daily: 60           # 族群資金（D-177 修訂）：網站只看最新一天，留三個月左右
     mops_announcements: 25              # 重大訊息（T-371）：證據包讀近 30 個日曆日，約 22 個交易日；一天約 300 則、只存主旨
     insight_packs: 60              # 洞悉證據包副本（T-373）：網站個股頁讀最近幾份；30 檔／日 × 約 5 KB
+    shareholding_dispersion: 9     # 集保千張大戶（T-386）：**週**快照，窗口數＝週數；個股頁看 8 週走勢＋1 週算變化。四碼 2,950 檔 × 15 級 ≈ 4.4 萬列／週
   exclude_factors:                 # 雲端不算（見 CloudConfig 註解）
     - chip.broker_concentration_20d  # T-016：需 broker_trades 全歷史（隔日沖分點 expanding 比率）＋20 日窗 > 雲端 10 日
     - chip.broker_count_diff_5d

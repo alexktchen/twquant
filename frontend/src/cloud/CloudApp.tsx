@@ -27,6 +27,8 @@ import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
 import { dropNote, weakSummary, weakTags } from './weak'
 import { insiderTag } from './insider'
+import { holdersTag } from './holders'
+import { StockHolders } from './StockHolders'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
@@ -640,6 +642,11 @@ function Row({
               {insiderTag(p.insider)!.text}
             </i>
           )}
+          {holdersTag(p.holders) && (
+            <i className={`cq-tag holders ${(p.holders?.streak ?? 0) > 0 ? 'up' : 'down'}`} title={holdersTag(p.holders)!.title}>
+              {holdersTag(p.holders)!.text}
+            </i>
+          )}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
       </div>
@@ -1118,6 +1125,7 @@ function Detail({
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
       <StockCalendar sid={sid} refresh={refresh} />
+      <StockHolders sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (

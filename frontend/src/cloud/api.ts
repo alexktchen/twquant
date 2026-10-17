@@ -9,6 +9,7 @@ import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
 import type { StockCalItem } from './stockcal'
+import type { HoldersWeek } from './holders'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -67,6 +68,10 @@ export const fetchStockPicks = (sid: string) =>
 /** 這一檔的行事曆（使用者 2026-10-17）：過去一年到往後 120 天的除權息、法說會、分割減資。 */
 export const fetchStockCalendar = (sid: string) =>
   get<{ sid: string; today: string; items: StockCalItem[] }>(`/api/stocks/${encodeURIComponent(sid)}/calendar`)
+
+/** 這一檔最近幾週的千張大戶比例（T-386）；還沒累積到資料是空陣列。 */
+export const fetchStockHolders = (sid: string) =>
+  get<{ sid: string; today: string; weeks: HoldersWeek[] }>(`/api/stocks/${encodeURIComponent(sid)}/holders`)
 
 /** 三個模型最近幾天的分數與名次，加上最新一天在哪條線的名單上。 */
 export const fetchScores = (sid: string) => get<StockScores>(`/api/stocks/${encodeURIComponent(sid)}/scores`)

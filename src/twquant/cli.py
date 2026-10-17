@@ -1715,6 +1715,17 @@ def _run_daily_pipeline(
             raise DataError("monthly_revenue", day, "；".join(m for _, m in res))
         return "；".join(m for _, m in res)
 
+    def _tdcc_step() -> str:
+        # T-386 集保千張大戶：TDCC opendata 每週一份全市場快照（基準日週五、週六公布；實測含約 2,950 檔四碌普通股）。
+        # 每天抓一次寫進資料湖，「供應層」鏡射同步只補 PG 沒有的日期，平日重抓拿到同一週＝冪等。排在供應層前。best-effort。
+        import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
+        from twquant.data.ingest.orchestrator import run_ingest
+        from twquant.data.ingest.registry import get
+
+        outcomes = run_ingest([get("tdcc")], cfg, wh, day, data_dir=cfg.data_dir, tolerant=False)
+        rows = sum(o.rows for o in outcomes)
+        return f"{rows} 列，基準日 {wh.latest_date('shareholding_dispersion')}"
+
     def _serving_step() -> str:
         # 尾波：鏡射同步 + 物化當日因子 → PG 供應層（display-only，best-effort）。
         # 物化讀取源＝PG 鏡射（PgTableSource，D-026/T-057）：與 CLI serving materialize
@@ -2066,6 +2077,7 @@ def _run_daily_pipeline(
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),
         PipelineStep("月營收", _revenue_step),
+        PipelineStep("集保大戶", _tdcc_step),
         PipelineStep("供應層", _serving_step),
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
