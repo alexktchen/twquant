@@ -1,9 +1,10 @@
 // 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、市場氛圍（美股、台指期、類股／資金，沿用 MoodCard）、
 // 其他國際行情、期貨籌碼、大盤體檢、法人與融資、昨日消息、今天名單速覽、名單成績、行事曆；族群熱力圖在最下面，預設打開。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
+import { CalendarCard } from './CalendarCard'
 import { GroupsPage } from './GroupsPage'
 import { HeadlinesCard } from './HeadlinesCard'
 import { MoodCard } from './MoodCard'
@@ -12,8 +13,6 @@ import { pct } from './format'
 import { HEAT_KEY, loadPref, openPref, savePref } from './prefs'
 import type { Scorecard } from './scorecard'
 import {
-  DIV_KIND,
-  dividendText,
   breadth,
   dayLabel,
   signedYi,
@@ -91,6 +90,8 @@ export function WarRoom({
   const b = data?.brief ?? null
   const shownBrief = shown ?? b
   const br = m ? breadth(m.up, m.down, m.flat) : null
+  const listedSids = useMemo(() => new Set(data?.picks?.sids ?? []), [data])
+  const watchSet = useMemo(() => new Set(watchSids), [watchSids])
 
   return (
     <main className="cq-war">
@@ -349,46 +350,8 @@ export function WarRoom({
           </p>
         </section>
 
-        {/* 行事曆 */}
-        <section className="cq-war-card">
-          <header>
-            <h2>行事曆</h2>
-            {data && <span className="cq-war-when">今天起 3 天</span>}
-          </header>
-          {data ? (
-            <ul className="cq-war-cal">
-              <li>
-                <b>月營收截止</b>
-                <span>
-                  {dayLabel(data.calendar.revenue.date)}
-                  {data.calendar.revenue.days === 0 ? '（今天）' : `（還有 ${data.calendar.revenue.days} 天）`}
-                </span>
-              </li>
-              {data.calendar.dividends.map((d) => (
-                <li key={`${d.date}${d.stock_id}`} onClick={() => onStock(d.stock_id, d.name)}>
-                  <b>{DIV_KIND[d.kind] ?? d.kind}</b>
-                  <span>
-                    {dayLabel(d.date)} <em>{d.stock_id}</em> {d.name ?? ''}
-                    {dividendText(d) && <small className="cq-war-mute">　{dividendText(d)}</small>}
-                  </span>
-                </li>
-              ))}
-              {data.calendar.conferences.map((c) => (
-                <li key={`${c.date}${c.stock_id}${c.conf_time}`} onClick={() => onStock(c.stock_id, c.name)} title={c.summary ?? ''}>
-                  <b>法說會</b>
-                  <span>
-                    {dayLabel(c.date)} {c.conf_time} <em>{c.stock_id}</em> {c.name ?? ''}
-                  </span>
-                </li>
-              ))}
-              {data.calendar.dividends.length === 0 && data.calendar.conferences.length === 0 && (
-                <li className="cq-war-mute">這三天沒有除權息或法說會。</li>
-              )}
-            </ul>
-          ) : (
-            <p className="cq-war-mute">讀取中…</p>
-          )}
-        </section>
+        {/* 行事曆（CalendarCard：預設收起，留摘要與名單股、追蹤股的那幾筆） */}
+        <CalendarCard calendar={data?.calendar ?? null} listedSids={listedSids} watchSids={watchSet} onStock={onStock} />
       </div>
 
       {/* 族群熱力圖：預設折疊 */}

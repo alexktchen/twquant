@@ -9,6 +9,8 @@ export const MOOD_KEY = 'twquant.mood'
 export const NEWS_KEY = 'twquant.news'
 /** 「昨晚國際大事・新聞頭條」展開（列表）或收起（輪播一則；預設收起） */
 export const HEADS_KEY = 'twquant.heads'
+/** 「行事曆」展開（全部）或收起（摘要＋名單股、追蹤股；預設收起） */
+export const CAL_KEY = 'twquant.cal'
 
 /** 存起來的展開狀態：'1' 展開、'0' 收起；沒存過或看不懂 → 預設值。 */
 export function openPref(stored: string | null, fallback: boolean): boolean {
