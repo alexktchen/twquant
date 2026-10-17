@@ -710,3 +710,20 @@
 /* 四張小卡並排時（每張約 300px）表格放不下：列名與括號小字可以換行，數字不換行 */
 .cq-war-cell .cq-war-table th { white-space: normal; }
 .cq-war-cell .cq-war-table td small { white-space: normal; }
+
+/* 個股頁行事曆（使用者 2026-10-17：「個股資訊要顯示行事曆」） */
+.cq-stockcal ul { list-style: none; margin: 2px 0 0; padding: 0; }
+.cq-stockcal li { display: grid; grid-template-columns: 8.6em 4.2em 1fr; align-items: baseline; gap: 2px 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.cq-stockcal li:last-child { border-bottom: 0; }
+.cq-stockcal li.tap { cursor: pointer; }
+.cq-stockcal li.soon .cq-stockcal-date { color: var(--text); font-weight: 600; }
+.cq-stockcal li.soon b { color: var(--accent); }
+.cq-stockcal li.past { opacity: .75; }
+.cq-stockcal li b { font-weight: 500; color: var(--text); }
+.cq-stockcal-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cq-stockcal-detail { color: var(--text); font-variant-numeric: tabular-nums; min-width: 0; }
+.cq-stockcal-detail small { margin-left: 8px; color: var(--accent); font-size: 11.5px; }
+.cq-stockcal-sum { grid-column: 1 / -1; margin: 2px 0 0; color: var(--mute); font-size: 12px; line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.cq-stockcal-sum.on { display: block; -webkit-line-clamp: unset; }
+.cq-stockcal-past { margin-top: 4px !important; }
+.cq-stockcal .cq-war-link { margin: 2px 0 0; }
