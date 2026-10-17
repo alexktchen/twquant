@@ -15,12 +15,15 @@ export function GroupsPage({
   refresh,
   listed,
   onStock,
+  withMood = true,
 }: {
   refresh: number
   /** 名單日期與那天各族群在名單上的股票（只在跟族群資料同一天時標出來） */
   listed: { date: string; sids: Map<string, string[]> } | null
   /** 點成員：到「追蹤」分頁看那一檔的 K 線與評分 */
   onStock: (sid: string, name: string | null) => void
+  /** 頂端的市場氛圍；首頁戰情室已經放在上面，折疊的熱力圖裡不再重複（T-379） */
+  withMood?: boolean
 }) {
   const [data, setData] = useState<{ date: string; rows: RankRow[] } | null>(null)
   const [err, setErr] = useState('')
@@ -50,7 +53,7 @@ export function GroupsPage({
   const hotCount = (data?.rows ?? []).filter((r) => r.hot && r.n >= MIN_MEMBERS).length
   return (
     <main className={`cq-body cq-groups${view === 'heat' ? ' cq-groups-heat' : ''}`}>
-      <MoodCard enabled />
+      {withMood && <MoodCard enabled />}
       <aside className="cq-list">
         <div className="cq-groups-head">
           <span>

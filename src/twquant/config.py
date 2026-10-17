@@ -63,6 +63,47 @@ class QualityGateConfig(BaseConfig):
 CHIP_DAILY_TABLES = ("daytrade_daily", "sbl_short_daily")
 
 
+class MarketDailyConfig(BaseConfig):
+    """大盤體檢（T-374／D-188）。權威說明在 system.yaml 的註解。"""
+
+    avg_sessions: int = Field(default=20, ge=1)  # 成交金額對前幾個交易日平均
+    high_low_window: int = Field(default=20, ge=1)  # 創新高／新低看前幾個交易日
+
+
+class TaifexDailyConfig(BaseConfig):
+    """期交所盤後統計（T-375／D-188）。權威說明在 system.yaml 的註解。"""
+
+    lookback_days: int = Field(default=10, ge=1)  # 每天重抓這段日曆日的區間（冪等）
+    available_time: dt.time = dt.time(15, 30)  # 盤後公布時間（available_at）
+
+
+class ConferencesConfig(BaseConfig):
+    """法說會行事曆（T-376／D-188）。"""
+
+    months_ahead: int = Field(default=1, ge=0)  # 當月之外再抓往後幾個月
+
+
+class QuoteSymbol(BaseConfig):
+    symbol: str
+    name: str
+
+
+class MorningBriefConfig(BaseConfig):
+    """晨報（T-377／D-188）：06:30 那班抓的全球行情、晨報引用哪些資料。權威說明在 system.yaml 的註解。"""
+
+    us_indices: list[QuoteSymbol]
+    extras: list[QuoteSymbol]
+    adr_symbol: str = "TSM"  # 台積電 ADR；折溢價＝ADR 價 × 匯率 ÷ adr_ratio 對 2330 收盤
+    adr_ratio: float = Field(default=5.0, gt=0)  # 1 張 ADR＝幾股普通股
+    adr_underlying: str = "2330"
+    fx_symbol: str = "TWD=X"  # 美元兌台幣
+    news_limit: int = Field(default=8, ge=1)  # 晨報最多引用幾則昨日公告
+    top_groups: int = Field(default=3, ge=1)  # 資金流入／流出各列幾個族群
+    line_names: dict[
+        str, str
+    ] = {}  # 名單線代號 → 給人看的名字（網站 functions/_lib/picks.ts LINES 同名）
+
+
 class MaterialNewsConfig(BaseConfig):
     """MOPS 重大訊息（T-371／D-187）。權威說明在 system.yaml 的註解。"""
 
@@ -111,6 +152,10 @@ class SystemConfig(BaseConfig):
     quality_gate: QualityGateConfig = QualityGateConfig()
     chip_daily: ChipDailyConfig = ChipDailyConfig()
     material_news: MaterialNewsConfig = MaterialNewsConfig()
+    market_daily: MarketDailyConfig = MarketDailyConfig()
+    taifex_daily: TaifexDailyConfig = TaifexDailyConfig()
+    conferences: ConferencesConfig = ConferencesConfig()
+    morning_brief: MorningBriefConfig
 
 
 # D-020 綜合分有效子集的預設值（serving.yaml.composite_factors 缺省時後備）。

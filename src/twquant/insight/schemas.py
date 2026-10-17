@@ -42,6 +42,16 @@ class DailyBrief(BaseModel):
     highlights: list[str] = []
 
 
+class MorningBrief(BaseModel):
+    """晨報（morning_brief 輸出，T-377／D-188）：一句標題、三到六點、一句風險提醒。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str
+    bullets: list[str]
+    risk_note: str | None = None
+
+
 class Explanation(BaseModel):
     """異常事件解釋（explainer 輸出，SPEC-008 §2.3）。"""
 

@@ -521,3 +521,69 @@
 .cq-mood-tag.bear { color: var(--down); background: rgba(14, 203, 129, .1); }
 .cq-mood-vals small { color: var(--mute); font-size: 11.5px; margin-left: 4px; }
 .cq-mood-vals .cq-mood-gap { color: var(--mute); }
+
+/* ── 首頁戰情室（T-379／D-188）──────────────────────────────────────────── */
+.cq-war { flex: 1; overflow-y: auto; min-height: 0; padding: 12px 16px 28px; display: flex; flex-direction: column; gap: 12px; }
+.cq-war-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; min-width: 0; }
+.cq-war-card > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
+.cq-war-card > header .cq-seg { margin: 0 0 0 auto; padding: 0; }
+.cq-war-card h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.cq-war-when { color: var(--mute); font-size: 12.5px; }
+.cq-war-mute { color: var(--mute); font-size: 13.5px; margin: 4px 0; }
+.cq-war-note { color: var(--mute); font-size: 11.5px; line-height: 1.55; margin: 8px 0 0; }
+.cq-war-link { color: var(--accent); font-size: 12px; margin-left: 6px; padding: 0; background: none; border: 0; cursor: pointer; }
+.cq-war-brief { border-color: rgba(255, 122, 0, .45); }
+.cq-war-headline { font-size: 18px; font-weight: 600; line-height: 1.45; margin: 2px 0 6px; }
+.cq-war-rule { font-size: 15.5px; font-weight: 500; }
+.cq-war-bullets { margin: 0; padding-left: 20px; font-size: 14.5px; line-height: 1.7; }
+.cq-war-risk { margin: 8px 0 0; color: #ffb35c; font-size: 13.5px; }
+.cq-war-facts { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: #c9ccd4; line-height: 1.6; columns: 2; column-gap: 28px; }
+.cq-war-mood .cq-mood { border: 1px solid var(--line); border-radius: 10px; }
+.cq-war-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.cq-war-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.cq-war-table th, .cq-war-table td { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.cq-war-table th { text-align: left; color: var(--mute); font-weight: 400; }
+.cq-war-table thead th { font-size: 12.5px; text-align: right; }
+.cq-war-table thead th:first-child { text-align: left; }
+.cq-war-table small { color: var(--mute); font-size: 12px; margin-left: 4px; }
+.cq-war-table tr:last-child th, .cq-war-table tr:last-child td { border-bottom: 0; }
+.cq-war-idx { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; color: var(--mute); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.cq-war-idx b { color: var(--text); font-size: 17px; font-weight: 600; }
+.cq-war-idx i { font-style: normal; font-weight: 600; }
+.cq-war-breadth { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); }
+.cq-war-breadth .up { background: var(--up); }
+.cq-war-breadth .down { background: var(--down); }
+.cq-war-breadth .flat { background: #4a4e57; }
+.cq-war-breadth-label { display: flex; justify-content: space-between; font-size: 12.5px; margin: 3px 0 6px; font-variant-numeric: tabular-nums; }
+.cq-war-newslist { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; }
+.cq-war-newslist li { display: grid; grid-template-columns: 84px 150px 1fr; gap: 8px; padding: 7px 2px; border-bottom: 1px solid var(--line); font-size: 13.5px; cursor: pointer; align-items: baseline; }
+.cq-war-newslist li:hover { background: #1b1d24; }
+.cq-war-newstime { color: var(--mute); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.cq-war-newsco em { font-style: normal; color: var(--mute); margin-right: 4px; font-variant-numeric: tabular-nums; }
+.cq-war-newsco .cq-tag { margin-left: 4px; }
+.cq-war-newssub { line-height: 1.5; }
+.cq-war-newstag { font-style: normal; font-size: 11.5px; color: #c9ccd4; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-left: 6px; white-space: nowrap; }
+.cq-war-picks, .cq-war-cal { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.cq-war-picks li, .cq-war-cal li { display: flex; align-items: baseline; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cq-war-picks li:last-child, .cq-war-cal li:last-child { border-bottom: 0; }
+.cq-war-picks li:hover, .cq-war-cal li:hover { background: #1b1d24; }
+.cq-war-picks b, .cq-war-cal b { flex: none; width: 6.5em; font-weight: 500; }
+.cq-war-cal b { color: var(--accent); }
+.cq-war-picks small { color: var(--mute); margin-left: 4px; }
+.cq-war-picks i { margin-left: auto; font-style: normal; color: var(--accent); font-size: 12.5px; }
+.cq-war-cal em { font-style: normal; color: var(--mute); font-variant-numeric: tabular-nums; margin: 0 2px 0 4px; }
+.cq-war-score td { font-variant-numeric: tabular-nums; }
+.cq-war-heat { padding: 0; }
+.cq-war-heat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; width: 100%; padding: 12px 16px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.cq-war-heat-body { height: 720px; display: flex; border-top: 1px solid var(--line); }
+.cq-war-heat-body > .cq-body { flex: 1; }
+@media (max-width: 820px) {
+  .cq-war { padding: 10px 10px 24px; gap: 10px; }
+  .cq-war-card { padding: 10px 12px; }
+  .cq-war-headline { font-size: 16.5px; }
+  .cq-war-facts { columns: 1; }
+  .cq-war-grid { grid-template-columns: 1fr; }
+  .cq-war-newslist li { grid-template-columns: 1fr; gap: 2px; }
+  .cq-war-heat-body { height: auto; display: block; }
+  .cq-war-card > header .cq-seg { margin: 4px 0 0; width: 100%; }
+}

@@ -48,6 +48,8 @@ _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
 # 洞悉分析在 pipeline 的參數：N 為 D-081(b) 的事前登記值；窗口與 sector-flows 預設一致。
 _INSIGHT_TOP_N = 30
+# 晨報（T-377）模型輸出上限：三到六點＋標題，1,200 token 綽綽有餘；qwen3 推理已關
+_MORNING_BRIEF_MAX_TOKENS = 1200
 # 紙上交易的行情回看：前收與 20 日 ADV 中位數都在這個窗內（D-142／T-280）。
 _PAPER_LOOKBACK_DAYS = 90
 _SECTOR_WINDOW = 20
@@ -763,6 +765,140 @@ def chip_daily(
         typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
         raise typer.Exit(1) from exc
     typer.secho(f"[OK] 籌碼 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="market-daily")
+def market_daily_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「大盤體檢」步驟（T-374）：漲跌家數、量能、三大法人、融資 → serving.market_daily。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _market_daily_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 大盤體檢 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="taifex-daily")
+def taifex_daily_cmd(
+    date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「期交所盤後」步驟（T-375）：三大法人期貨未平倉、買賣權比 → serving.taifex_daily。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _taifex_daily_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 期交所盤後 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="conferences")
+def conferences_cmd(
+    date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「法說會」步驟（T-376）：MOPS 當月與下月的法說會 → serving.conference_calendar。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _conferences_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 法說會 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="morning-brief")
+def morning_brief_cmd(
+    date: str = typer.Option("today", help="晨報日（台北）YYYY-MM-DD 或 today"),
+    out: str = typer.Option(
+        "", help="資料根目錄（洞悉用量紀錄）；空＝configs/system.yaml data_dir"
+    ),
+) -> None:
+    """晨報（T-377）：收齊昨晚到今早的數字 → 規則一句話＋模型三到六點 → serving.morning_brief。06:30 排程呼叫。"""
+    import json
+    import urllib.request
+
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import store
+    from twquant.data.sources import global_quotes as gq
+    from twquant.insight.client import InsightClient
+    from twquant.insight.config import load_llm_config
+    from twquant.reporting.morning_brief import compose, gather, rule_text, write_brief
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    now = now_tw()
+    day = now.date() if date == "today" else dt.date.fromisoformat(date)
+    data_dir = Path(out) if out else Path(cfg.data_dir)
+    categories = json.loads((_CONFIG_DIR / "news_categories.json").read_text(encoding="utf-8"))[
+        "categories"
+    ]
+    yahoo = HttpClient(source="yahoo", rate=cfg.source_rates["yahoo"])
+
+    def post_json(url: str, payload: dict[str, str]) -> dict[str, object]:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:  # 固定 https 端點
+            return json.loads(resp.read().decode("utf-8"))  # type: ignore[no-any-return]
+
+    conn = store.connect(scfg)
+    try:
+        inputs = gather(
+            conn,
+            scfg.pg_schema,
+            day,
+            cfg.morning_brief,
+            categories,
+            fetch_quote=lambda sym, name: gq.fetch_yahoo(yahoo, sym, name),
+            fetch_night=lambda: gq.fetch_taifex_night(post_json),
+        )
+        rule = rule_text(inputs)
+        client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)
+        brief, model_id, absent, checks = compose(
+            client, inputs, now, max_tokens=_MORNING_BRIEF_MAX_TOKENS
+        )
+        write_brief(
+            conn,
+            scfg.pg_schema,
+            inputs,
+            rule,
+            brief,
+            model_id=model_id,
+            absent_reason=absent,
+            checks=checks,
+            now=now,
+        )
+    finally:
+        conn.close()
+    typer.secho(f"[OK] 晨報 @ {day}：{rule}", fg=typer.colors.GREEN)
+    if brief is not None:
+        typer.echo(f"標題：{brief.headline}")
+        for b in brief.bullets:
+            typer.echo(f"  · {b}")
+        if brief.risk_note:
+            typer.echo(f"風險：{brief.risk_note}")
+    else:
+        typer.secho(f"模型晨報缺席：{absent}", fg=typer.colors.YELLOW)
+    for c in checks:
+        typer.secho(f"  [檢查] {c}", fg=typer.colors.YELLOW)
+    for e in inputs.errors:
+        typer.secho(f"  [!] {e}", fg=typer.colors.YELLOW)
 
 
 @app.command(name="material-news")
@@ -1743,6 +1879,35 @@ def _run_daily_pipeline(
             return f"{day} 沒有行情（休市或尚未擷取），略過"
         return _group_flow_for_day(day)
 
+    def _market_daily_step() -> str:
+        # T-374 大盤體檢：排在族群資金之後（同樣要當天行情與法人）。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        if not _pg_has_prices(day):
+            return f"{day} 沒有行情（休市或尚未擷取），略過"
+        return _market_daily_for_day(day)
+
+    def _taifex_daily_step() -> str:
+        # T-375 期交所盤後：約 15:00 公布，17:33 那班一定有；休市日回「沒有資料」。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _taifex_daily_for_day(day)
+
+    def _conferences_step() -> str:
+        # T-376 法說會行事曆：MOPS 月表整月覆蓋，休市日照跑。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _conferences_for_day(day)
+
     def _paper_trading_step() -> str:
         # D-142：紙上交易帳本。排在策略持股之後——再平衡日的名單直接讀那一步剛存下的快照，
         # 不自己重算（重算＝允許事後補名單）。best-effort，不擋主線。
@@ -1854,6 +2019,9 @@ def _run_daily_pipeline(
         PipelineStep("名單績效", _scorecard_step),
         PipelineStep("族群標籤", _stock_groups_step),
         PipelineStep("族群資金", _group_flow_step),
+        PipelineStep("大盤體檢", _market_daily_step),
+        PipelineStep("期交所盤後", _taifex_daily_step),
+        PipelineStep("法說會", _conferences_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -3151,6 +3319,110 @@ def _group_flow_for_day(day: dt.date) -> str:
     return f"{len(flows)} 個族群，資金流入 {len(hot)} 個" + (
         f"：{'、'.join(hot[:5])}" if hot else ""
     )
+
+
+def _market_daily_for_day(day: dt.date) -> str:
+    """大盤體檢（T-374）：`day` 與之前的視窗 → `market_daily` 一列。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.market_daily_store import read_inputs, write_market_daily
+    from twquant.reporting.market_daily import market_daily
+
+    cfg = _load_system().market_daily
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        inputs = read_inputs(
+            conn, scfg.pg_schema, day, max(cfg.avg_sessions, cfg.high_low_window) + 1
+        )
+        row = market_daily(
+            day,
+            **inputs,
+            stock_pattern=scfg.cloud.stock_pattern,
+            avg_sessions=cfg.avg_sessions,
+            high_low_window=cfg.high_low_window,
+        )
+        write_market_daily(conn, scfg.pg_schema, row, now_tw())
+    finally:
+        conn.close()
+    taiex = f"{row.taiex_chg * 100:+.2f}%" if row.taiex_chg is not None else "—"
+    return (
+        f"加權 {taiex}，{row.up} 漲 {row.down} 跌，漲停 {row.limit_up} 跌停 {row.limit_down}，"
+        f"新高 {row.new_high} 新低 {row.new_low}，外資 {row.foreign_net / 1e8:+.1f} 億（連 {row.foreign_streak} 天）"
+    )
+
+
+def _taifex_daily_for_day(day: dt.date) -> str:
+    """期交所盤後（T-375）：重抓 [day − lookback, day] 的三大法人期貨未平倉與買賣權比 → `taifex_daily`。"""
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import taifex_daily as tx
+
+    cfg = _load_system()
+    tcfg = cfg.taifex_daily
+    scfg = _load_serving()
+    client = HttpClient(source="taifex", rate=cfg.source_rates["taifex"])
+    df = tx.fetch_range(
+        client, day - dt.timedelta(days=tcfg.lookback_days), day, tcfg.available_time
+    )
+    conn = store.connect(scfg)
+    try:
+        sch.ensure_tables(conn, (sch.TAIFEX_DAILY_SPEC,), scfg.pg_schema)
+        sch.assert_columns(conn, sch.TAIFEX_DAILY_SPEC, scfg.pg_schema)
+        if not df.is_empty():
+            with conn.cursor() as cur:
+                upsert(cur, scfg.pg_schema, sch.TAIFEX_DAILY_SPEC, df)
+            conn.commit()
+    finally:
+        conn.close()
+    if df.is_empty():
+        return "期交所這段期間沒有資料"
+    last = df.sort("date").row(-1, named=True)
+    oi = last["fut_foreign_net_oi"]
+    pc = last["pc_oi_ratio"]
+    return (
+        f"{df.height} 天；{last['date']} 外資期貨淨未平倉 {oi:+,} 口、買賣權未平倉比 {pc}%"
+        if oi is not None and pc is not None
+        else f"{df.height} 天（最新 {last['date']}）"
+    )
+
+
+def _conferences_for_day(day: dt.date) -> str:
+    """法說會行事曆（T-376）：當月＋往後幾個月、上市與上櫃 → `conference_calendar`（整月覆蓋，upsert）。"""
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import conferences as cf
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0 Safari/537.36"
+    client = HttpClient(source="mops", rate=cfg.source_rates["mops"], user_agent=ua)
+    fetched_at = now_tw()
+    frames = [
+        cf.fetch_month(client, market, y, m, fetched_at)
+        for (y, m) in cf.months_to_fetch(day, cfg.conferences.months_ahead)
+        for market in cf.MARKETS
+    ]
+    import polars as pl
+
+    df = pl.concat(frames)
+    conn = store.connect(scfg)
+    try:
+        sch.ensure_tables(conn, (sch.CONFERENCE_CALENDAR_SPEC,), scfg.pg_schema)
+        sch.assert_columns(conn, sch.CONFERENCE_CALENDAR_SPEC, scfg.pg_schema)
+        if not df.is_empty():
+            with conn.cursor() as cur:
+                upsert(cur, scfg.pg_schema, sch.CONFERENCE_CALENDAR_SPEC, df)
+            conn.commit()
+    finally:
+        conn.close()
+    upcoming = df.filter(pl.col("date") >= day).height
+    return f"{df.height} 場（{len(frames)} 頁），今天起 {upcoming} 場"
 
 
 def _pick_reasons_for_day(day: dt.date) -> str:

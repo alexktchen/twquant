@@ -1,0 +1,16 @@
+{
+  "_comment": "重大訊息主旨的分類（T-378／D-188）。首頁「昨日消息」用：名單股與追蹤股的公告全列；全市場只列 market_wide 為 true 的類別。frontend/functions/_lib/news-categories.ts 是同一份的鏡像（tests/test_news_categories.py 守著兩邊相同）。關鍵字比對主旨，命中任一個就算該類；一則可屬多類。",
+  "categories": [
+    { "id": "disposal", "label": "處置／注意", "market_wide": true, "keywords": ["處置", "注意交易資訊", "注意股票"] },
+    { "id": "trading", "label": "變更交易／下市", "market_wide": true, "keywords": ["變更交易方法", "停止買賣", "終止上市", "終止上櫃", "下市", "全額交割", "恢復交易"] },
+    { "id": "capital", "label": "減資／增資／私募", "market_wide": true, "keywords": ["減資", "現金增資", "私募", "可轉換公司債", "員工認股權", "限制員工權利新股"] },
+    { "id": "deal", "label": "併購／分割", "market_wide": true, "keywords": ["合併案", "吸收合併", "合併契約", "收購", "併購", "公開收購", "分割", "股份轉換"] },
+    { "id": "buyback", "label": "庫藏股", "market_wide": true, "keywords": ["庫藏股"] },
+    { "id": "ops", "label": "停工／災損／訴訟／裁罰", "market_wide": true, "keywords": ["停工", "停產", "火災", "罷工", "訴訟", "裁罰", "重大災", "資安"] },
+    { "id": "people", "label": "董總異動", "market_wide": true, "keywords": ["董事長", "總經理", "財務主管", "會計主管", "獨立董事", "辭任", "解任"] },
+    { "id": "press", "label": "重訊說明記者會", "market_wide": true, "keywords": ["記者會"] },
+    { "id": "conference", "label": "法說會", "market_wide": false, "keywords": ["法人說明會", "法說會", "說明會", "路演", "Conference", "Summit"] },
+    { "id": "earnings", "label": "營收／財報／股利", "market_wide": false, "keywords": ["營收", "盈餘", "虧損", "財務報告", "財務報表", "自結", "股利", "除息", "除權"] },
+    { "id": "order", "label": "訂單／合約／投資", "market_wide": false, "keywords": ["訂單", "合約", "契約", "取得", "處分", "投資", "合建", "設廠"] }
+  ]
+}
