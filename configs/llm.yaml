@@ -1,14 +1,22 @@
-# 洞悉層 LLM 設定（SPEC-008 §3 / MODEL-POLICY）。程式碼不得寫死模型字串，一律查此檔。
+# 洞悉層 LLM 設定（SPEC-008 §3 / MODEL-POLICY / D-185）。程式碼不得寫死模型字串，一律查此檔。
 usd_twd: 32.0                 # 匯率，估成本用
 daily_budget_twd: 300.0       # 日累計成本上限，超過當日停用洞悉層 + WARN
+# Cloudflare Workers AI 免費額度每日 10,000 Neurons（UTC 00:00 重置）；留 1,000 給其他用途（D-185 §4）
+daily_neuron_budget: 9000
+request_timeout_s: 120        # REST backend 單次請求逾時（秒）
 
 models:
+  # provider 預設 anthropic；cloudflare 模型必須給每百萬 token 的 Neurons（Cloudflare 定價頁），缺了載入即 raise
   opus:  {id: claude-opus-5, input_usd_per_1m: 5.0, output_usd_per_1m: 25.0}
   haiku: {id: claude-haiku-4-5, input_usd_per_1m: 1.0, output_usd_per_1m: 5.0}
+  # 試跑模型（D-185 §2）：每晚 30 檔 × (8k 進、1k 出) 約 2,000 Neurons；USD 是公布的超額單價，免費額度內實收 0
+  cf_qwen3: {id: "@cf/qwen/qwen3-30b-a3b-fp8", provider: cloudflare,
+             input_usd_per_1m: 0.051, output_usd_per_1m: 0.335,
+             input_neurons_per_1m: 4625, output_neurons_per_1m: 30475}
 
-# 任務→模型路由（SPEC-008 §2）
+# 任務→模型路由（SPEC-008 §2；D-185 §3 試跑期間 pipeline 兩個任務走 Cloudflare）
 tasks:
-  daily_brief: haiku          # 便宜快、格式固定
-  advisor: opus               # 策略調整提案，最強推理
+  daily_brief: cf_qwen3       # 便宜快、格式固定
+  advisor: opus               # 策略調整提案，最強推理（沒排程、錯誤成本高，留 Claude）
   explainer: opus             # 異常解釋，錯誤成本高
-  candidate_analysis: opus    # 每日候選證據分析（D-081a）；N=30／晚（D-081b）
+  candidate_analysis: cf_qwen3  # 每日候選證據分析；N=30／晚（D-081b）。D-081a 的 opus 路由由 D-185 暫改

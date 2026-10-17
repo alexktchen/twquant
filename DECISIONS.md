@@ -5,6 +5,64 @@
 
 ## 待裁決
 
+### D-185（2026-10-17，使用者：「那我要 cloudflare 方案試試」；做法、模型與門檻為 AI 提出，使用者可推翻）洞悉層加 Cloudflare Workers AI backend，用免費額度試跑
+
+#### 背景
+
+洞悉層（SPEC-008）基座早就蓋好，但 `.env` 沒有 `ANTHROPIC_API_KEY`，證據包至今 0 份。使用者問「有免費的 LLM API 嗎」
+「我付費的 Max 沒用嗎」。查證結果：Anthropic API 沒有永久免費層；Claude Max 訂閱只涵蓋 claude.ai 與 Claude Code，
+拿訂閱的 OAuth token 給自己寫的程式呼叫 API 自 2026 年初起明文禁止。Cloudflare Workers AI 每天 10,000 Neurons 免費
+（UTC 00:00 重置），而本專案已經在用 Cloudflare（Pages、Worker cron、Hyperdrive）。使用者選擇試 Cloudflare。
+
+#### 登記的內容
+
+1. **供應商欄位**：`configs/llm.yaml` 的模型規格加 `provider`（`anthropic`｜`cloudflare`，預設 `anthropic`，既有設定不變）。
+   `cloudflare` 模型必須同時給 `input_neurons_per_1m`／`output_neurons_per_1m`（Cloudflare 公布的每百萬 token Neurons），缺了 raise。
+2. **預設模型 `@cf/qwen/qwen3-30b-a3b-fp8`**：每百萬 token 4,625／30,475 Neurons，照 T-218 實測的用量（每檔 8k 進、1k 出、每晚 30 檔）
+   約 2,000 Neurons／晚，免費額度的五分之一；繁中能力足、32k 上下文。候補：`@cf/google/gemma-4-26b-a4b-it`（約 3,000）、
+   `@cf/zai-org/glm-4.7-flash`（約 2,400）。Cloudflare 文件明列支援 JSON mode 的 `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
+   每晚約 12,500 Neurons，**超過免費額度**，只有把 N 降到 20 以下才用得起。換模型只改 yaml。
+3. **路由**：`candidate_analysis` 與 `daily_brief` 改走 Cloudflare 模型；`advisor`／`explainer` 留 opus（沒排程、錯誤成本高）。
+   這修改了 D-081(a) 的 opus 路由，**是試跑期間的設定**；`insight_run_id` 含模型 id，所以換模型產生的是新 pack，舊 pack 不被覆寫。
+4. **Neurons 日預算閘**：`daily_neuron_budget: 9000`（留 1,000 給其他 Workers AI 用途），依 **UTC 日** 累計（Cloudflare 的重置邊界；
+   台北 02:13 的備援補跑與前一天 17:33 的主跑是同一個 UTC 日），超過即以具名缺席原因略過。TWD 日預算閘照舊，Cloudflare 模型
+   記的是公布的超額單價（免費額度內實收 0 元，記的是「若超額的等值成本」）。
+5. **憑證**：`CLOUDFLARE_ACCOUNT_ID`（GitHub secret 已有）、`CLOUDFLARE_AI_TOKEN`（新，自訂 token 權限 Account › Workers AI › Read）。
+   只在 `.env` 與 GitHub secret；沒有就離線降級，缺席原因寫明缺哪個變數。
+6. **結構化輸出**：請求帶 `response_format: {type: json_schema, json_schema: <pydantic model_json_schema()>}`；回應容錯只做
+   「去掉 `<think>…</think>` 與 code fence」兩件事，之後照 pydantic 驗證——不符 schema 不補值、不放寬，照 SPEC-008 AC-1 重試兩次後放棄。
+   回應沒有 `usage` 視為失敗（黃金規則 5：沒 token 數就不能記帳，不能估）。
+7. **純運算層的網路例外**：`insight/` 本來就是唯一能呼叫 LLM 的純運算層例外（`tests/test_io_boundary.py` 允許 `anthropic`）；
+   Cloudflare backend 用標準庫 `urllib.request`，HTTP 傳輸可注入，測試一律注入假傳輸、不連網。
+8. **本輪不做**：雲端 pipeline 開洞悉步驟（仍在 D-170 的 `skip_pipeline_steps`；要開得先解決雲端沒有推薦快照檔的問題）、
+   Message Batches、拿 Cloudflare 跑 advisor／explainer。
+
+#### 驗收條件（T-368）
+
+- AC-1：既有 `configs/llm.yaml` 的寫法（沒有 `provider`）照常載入且行為不變；`provider: cloudflare` 缺 Neurons 費率即拒絕載入。
+- AC-2：Cloudflare backend 組出的請求：URL 含帳號 id 與模型 id、`Authorization: Bearer`、system／user 兩則訊息、`max_tokens`、
+  `response_format.json_schema` 等於 pydantic schema；回應 `result.response` 為物件或含 `<think>`／code fence 的字串都能解析；
+  `success: false` 或沒有 `usage` 一律 raise。
+- AC-3：任務路由到 Cloudflare 模型而憑證齊全時走 Cloudflare backend；只有 `ANTHROPIC_API_KEY` 不算可用，缺席原因寫明缺哪個變數。
+- AC-4：當日（UTC）Neurons 累計 ≥ `daily_neuron_budget` → 略過並給具名原因；台北隔日 02:00 的用量算進同一個 UTC 日。
+- AC-5：所有測試注入假傳輸，不連網；`tests/test_io_boundary.py` 照常通過。
+- AC-6：`configs/llm.yaml` 的 `candidate_analysis`／`daily_brief` 路由到 Cloudflare 模型，`advisor`／`explainer` 仍為 opus。
+
+#### 怎麼試
+
+```bash
+# .env 填 CLOUDFLARE_ACCOUNT_ID、CLOUDFLARE_AI_TOKEN 後
+uv run --all-groups python -m twquant llm-ping --task candidate_analysis
+```
+
+印出模型、token 數、Neurons、等值成本與解析後的回覆；失敗會印 Cloudflare 回的錯誤原文。之後再跑
+`insights-run --run <run_id> --top 3` 看真正的證據包分析。
+
+#### 判讀（兩週後，接 D-081(d)）
+
+看 `data/insights/` 的缺席比率（schema 連續失敗的比例）與 `unverified_numbers` 的比率。缺席超過三成就換候補模型或改 N；
+數字驗證要不要強制，照 D-081(d) 的原定程序決定。這些是觀察，不是事前登記的統計門檻。
+
 ### D-184（2026-10-15，使用者：「要」——把 D-183 的兩條候選規則正式登記；**事前登記：寫於任何第二保留期（2026-09-09 起）的名單報酬、回測與判讀之前**；判讀規則為 AI 提出，使用者可推翻，但只能在開啟前）破底排除與大盤緩跌閘門，登記進第二保留期
 
 使用者的問題（D-183）：大跌的日子不該照樣推 15 檔、推的股票一直破底。D-183 只做了提醒；本條把「真的少買」的兩條規則寫死，

@@ -95,6 +95,13 @@ proposal = response.parsed_output     # 已通過 schema 驗證
   `daily_budget_twd` → 當日停用洞悉層 + WARN 告警
 - 429/5xx 交給 SDK 內建 retry；仍失敗 → 該次功能靜默降級（日報無 LLM 摘要
   也要照常發出），不得阻塞 pipeline
+- **多供應商（D-185）**：`configs/llm.yaml` 每個模型有 `provider`（`anthropic` 預設｜`cloudflare`）。
+  `cloudflare` 走 Workers AI REST `POST /accounts/{id}/ai/run/{model}`，請求帶
+  `response_format: {type: json_schema, json_schema: <pydantic model_json_schema()>}`，
+  回應只去掉 `<think>` 區塊與 code fence 後交給 pydantic 驗證，不符 schema 不補值；
+  回應沒有 `usage` 視為失敗（沒 token 數不能記帳）。憑證 `CLOUDFLARE_ACCOUNT_ID`／
+  `CLOUDFLARE_AI_TOKEN`；另有 `daily_neuron_budget`（依 **UTC 日** 累計，Cloudflare 的重置邊界）。
+  HTTP 傳輸可注入，測試不連網。`twquant llm-ping --task <task>` 做連線測試。
 
 ## 4. 提案生命週期（狀態機）
 

@@ -123,7 +123,9 @@ def test_retry_exhausted_returns_none(tmp_path: Path) -> None:
 
 def test_sample_llm_yaml_loads() -> None:
     cfg = load_llm_config(Path("configs/llm.yaml"))
-    # D-081(a): OPUS 換代為現行世代；advisor／explainer 一併換（裁決已明記此副作用）。
+    # D-081(a): OPUS 換代為現行世代；advisor／explainer 留 opus。
+    # D-185：candidate_analysis 試跑期間改走 Cloudflare（詳 tests/test_insight_cloudflare.py AC-6）。
     assert cfg.model_for("advisor").id == "claude-opus-5"
-    assert cfg.model_for("candidate_analysis").id == "claude-opus-5"
+    assert cfg.model_for("explainer").id == "claude-opus-5"
+    assert cfg.model_for("candidate_analysis").provider == "cloudflare"
     assert cfg.daily_budget_twd > 0
