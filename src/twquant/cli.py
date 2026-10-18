@@ -818,6 +818,57 @@ def dividend_calendar_cmd(
     typer.secho(f"[OK] 除權息預告 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="down-risk")
+def down_risk_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「易跌標記」步驟（T-391／D-193）：D-192 模型 → serving.pick_down_risk。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _down_risk_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 易跌標記 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="warrants")
+def warrants_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「權證」步驟：條款版本、日行情、每檔標的摘要 → serving.warrant_*。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _warrants_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 權證 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
+@app.command(name="insider-transfers")
+def insider_transfers_cmd(
+    date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「內部人申讓」步驟：證交所與櫃買的內部人持股轉讓事前申報 → serving.insider_transfer_notices。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _insider_transfers_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 內部人申讓 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
 @app.command(name="conferences")
 def conferences_cmd(
     date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
@@ -1698,6 +1749,17 @@ def _run_daily_pipeline(
             raise DataError("monthly_revenue", day, "；".join(m for _, m in res))
         return "；".join(m for _, m in res)
 
+    def _tdcc_step() -> str:
+        # T-386 集保千張大戶：TDCC opendata 每週一份全市場快照（基準日週五、週六公布；實測含約 2,950 檔四碌普通股）。
+        # 每天抓一次寫進資料湖，「供應層」鏡射同步只補 PG 沒有的日期，平日重抓拿到同一週＝冪等。排在供應層前。best-effort。
+        import twquant.data.ingest.builtins  # noqa: F401  # 匯入觸發來源註冊
+        from twquant.data.ingest.orchestrator import run_ingest
+        from twquant.data.ingest.registry import get
+
+        outcomes = run_ingest([get("tdcc")], cfg, wh, day, data_dir=cfg.data_dir, tolerant=False)
+        rows = sum(o.rows for o in outcomes)
+        return f"{rows} 列，基準日 {wh.latest_date('shareholding_dispersion')}"
+
     def _serving_step() -> str:
         # 尾波：鏡射同步 + 物化當日因子 → PG 供應層（display-only，best-effort）。
         # 物化讀取源＝PG 鏡射（PgTableSource，D-026/T-057）：與 CLI serving materialize
@@ -1932,6 +1994,35 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _dividend_calendar_for_day(day)
 
+    def _down_risk_step() -> str:
+        # T-391／D-193 易跌標記：D-192 模型對當天大盤精選打機率、標 5 檔。模型檔不在（雲端 Release 包還沒更新）
+        # → 記缺席不 raise；網站那天沒有標記。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _down_risk_for_day(day)
+
+    def _warrants_step() -> str:
+        # T-385 權證：條款變了才多一版、日行情一天一份、每檔標的一列摘要。要標的成交金額（供應層同步後的 prices_daily）。
+        # 休市日證交所回 0 列 → 只更新條款。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _warrants_for_day(day)
+
+    def _insider_transfers_step() -> str:
+        # T-384 內部人申讓：兩份官方表都是當天快照，每天 upsert 累積成歷史；休市日照跑（拿到同一天，冪等）。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _insider_transfers_for_day(day)
+
     def _conferences_step() -> str:
         # T-376 法說會行事曆：MOPS 月表整月覆蓋，休市日照跑。best-effort。
         from twquant.data.serving import store
@@ -2040,13 +2131,16 @@ def _run_daily_pipeline(
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),
         PipelineStep("月營收", _revenue_step),
+        PipelineStep("集保大戶", _tdcc_step),
         PipelineStep("供應層", _serving_step),
+        PipelineStep("權證", _warrants_step),
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
         PipelineStep("潛伏飆股打分", _quiet_score_step),
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
         PipelineStep("名單理由", _pick_reasons_step),
+        PipelineStep("易跌標記", _down_risk_step),
         PipelineStep("相似情境", _similar_step),
         PipelineStep("對照行情", _benchmark_fill_step),
         PipelineStep("名單績效", _scorecard_step),
@@ -2056,6 +2150,7 @@ def _run_daily_pipeline(
         PipelineStep("期交所盤後", _taifex_daily_step),
         PipelineStep("法說會", _conferences_step),
         PipelineStep("除權息預告", _dividend_calendar_step),
+        PipelineStep("內部人申讓", _insider_transfers_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -3457,6 +3552,160 @@ def _conferences_for_day(day: dt.date) -> str:
         conn.close()
     upcoming = df.filter(pl.col("date") >= day).height
     return f"{df.height} 場（{len(frames)} 頁），今天起 {upcoming} 場"
+
+
+DOWN_RISK_MODEL_ID = "lgbm_d192_core_down15_20261018"  # D-193：固定這一個，不進 ml.yaml 生產清單
+
+
+def _down_risk_for_day(day: dt.date) -> str:
+    """易跌標記（T-391／D-193）：當天大盤精選 15 檔的 D-192 機率、最高 5 檔 flagged → `pick_down_risk`（整天覆蓋）。"""
+    import polars as pl
+
+    from twquant.conventions import now_tw
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.pick_reasons_store import read_day_picks, read_factor_raw
+    from twquant.data.serving.sync import upsert
+    from twquant.ml import down_risk as dr
+
+    model_dir = Path(_load_system().data_dir) / "models" / DOWN_RISK_MODEL_ID
+    if not (model_dir / "model.txt").exists() or not (model_dir / "meta.json").exists():
+        return f"模型檔缺席（{model_dir}），今天沒有標記"
+    model = dr.load_model(model_dir)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        picks = [
+            (p.stock_id, p.rank, p.score)
+            for p in read_day_picks(conn, scfg.pg_schema, day)
+            if p.line == dr.LINE
+        ]
+        if not picks:
+            return f"{day} 沒有大盤精選名單，略過"
+        factors = [f for f in model.features if f not in ("score", "rank")]
+        raw = read_factor_raw(conn, scfg.pg_schema, day, factors, [s for s, _, _ in picks])
+        # 當天整個市場都沒算的因子（分點類三支本機與雲端都不算，訓練期曾有）→ 整欄 NaN 交給模型，不算錯；
+        # 有算但名單股全缺的因子才 raise（score_picks 裡判）
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT DISTINCT factor FROM "{scfg.pg_schema}"."factor_values" WHERE date = %s',
+                (day,),
+            )
+            available = {str(r[0]) for r in cur.fetchall()}
+        structural = {f for f in factors if f not in available}
+        df, missing = dr.score_picks(day, picks, raw, model, now_tw(), structural)
+        sch.ensure_tables(conn, (sch.PICK_DOWN_RISK_SPEC,), scfg.pg_schema)
+        sch.assert_columns(conn, sch.PICK_DOWN_RISK_SPEC, scfg.pg_schema)
+        with conn.cursor() as cur:
+            upsert(cur, scfg.pg_schema, sch.PICK_DOWN_RISK_SPEC, df)
+        conn.commit()
+    finally:
+        conn.close()
+    flagged = df.filter(pl.col("flagged")).sort("p", descending=True)
+    names = "、".join(
+        f"{s}({p:.0%})" for s, p in zip(flagged["stock_id"], flagged["p"], strict=True)
+    )
+    absent = (
+        f"；整欄缺值的因子 {len(missing)} 個（當天全市場沒算 {len(structural)} 個，其餘是型態類稀疏因子）"
+        if missing
+        else ""
+    )
+    return f"大盤精選 {df.height} 檔打分，標 {flagged.height} 檔：{names}{absent}"
+
+
+def _warrants_for_day(day: dt.date) -> str:
+    """權證（T-385）：條款（變了才多一版）＋ day 的日行情 ＋ 每檔四碼標的的摘要 → PG。"""
+    import polars as pl
+
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import warrant as wr
+    from twquant.data.sources.tpex import browser_client
+    from twquant.reporting import warrant_summary as ws
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    now = now_tw()
+    twse = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
+    tpex = browser_client(cfg.source_rates["tpex"])
+    fresh = wr.fetch_terms(twse, tpex, now)
+    daily = wr.fetch_daily(twse, tpex, day, now)
+    conn = store.connect(scfg)
+    try:
+        specs = (sch.WARRANT_TERMS_SPEC, sch.WARRANT_DAILY_SPEC, sch.WARRANT_SUMMARY_SPEC)
+        sch.ensure_tables(conn, specs, scfg.pg_schema)
+        for spec in specs:
+            sch.assert_columns(conn, spec, scfg.pg_schema)
+        q = scfg.pg_schema
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT DISTINCT ON (warrant_id) {', '.join(sch.WARRANT_TERMS_SPEC.column_names)} "
+                f'FROM "{q}"."warrant_terms" ORDER BY warrant_id, valid_from DESC'
+            )
+            latest = pl.DataFrame(cur.fetchall(), schema=wr.TERMS_SCHEMA, orient="row")
+            new_terms = wr.new_versions(fresh, latest, day)
+            if not new_terms.is_empty():
+                upsert(cur, q, sch.WARRANT_TERMS_SPEC, new_terms)
+            if not daily.is_empty():
+                upsert(cur, q, sch.WARRANT_DAILY_SPEC, daily)
+            cur.execute(
+                f'SELECT stock_id, amount FROM "{q}"."prices_daily" WHERE date = %s AND amount IS NOT NULL',
+                (day,),
+            )
+            amounts = pl.DataFrame(
+                cur.fetchall(), schema={"stock_id": pl.Utf8(), "amount": pl.Float64()}, orient="row"
+            )
+            # 摘要用「今天抓到的條款」（含還沒寫進 PG 的新版本），不用 PG 舊版
+            summary = ws.summarize(daily, fresh, amounts, day, cfg.warrants, now)
+            if not summary.is_empty():
+                upsert(cur, q, sch.WARRANT_SUMMARY_SPEC, summary)
+        conn.commit()
+    finally:
+        conn.close()
+    if daily.is_empty():
+        return f"休市或還沒公布：行情 0 列；條款新版本 {new_terms.height}（存續 {fresh.height} 檔）"
+    with_iv = int(summary["iv_call"].is_not_null().sum())
+    return (
+        f"行情 {daily.height} 列（上市 {int((daily['market'] == 'twse').sum())}、"
+        f"上櫃 {int((daily['market'] == 'tpex').sum())}），條款新版本 {new_terms.height}（存續 {fresh.height} 檔），"
+        f"摘要 {summary.height} 檔標的、{with_iv} 檔算得出認購隱含波動"
+    )
+
+
+def _insider_transfers_for_day(day: dt.date) -> str:
+    """內部人持股轉讓事前申報（T-384）：證交所＋櫃買兩份當日快照 → `insider_transfer_notices`（upsert 累積）。"""
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import insider_transfer as it
+    from twquant.data.sources.tpex import browser_client
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    twse = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
+    df = it.fetch(twse, browser_client(cfg.source_rates["tpex"]), now_tw())
+    conn = store.connect(scfg)
+    try:
+        sch.ensure_tables(conn, (sch.INSIDER_TRANSFER_SPEC,), scfg.pg_schema)
+        sch.assert_columns(conn, sch.INSIDER_TRANSFER_SPEC, scfg.pg_schema)
+        if not df.is_empty():
+            with conn.cursor() as cur:
+                upsert(cur, scfg.pg_schema, sch.INSIDER_TRANSFER_SPEC, df)
+            conn.commit()
+    finally:
+        conn.close()
+    if df.is_empty():
+        return "0 筆（兩個市場今天都沒有申報）"
+    report_day = cast(dt.date, df["date"].max())
+    return (
+        f"{df.height} 筆（上市 {int((df['market'] == 'twse').sum())}、上櫃 {int((df['market'] == 'tpex').sum())}），"
+        f"出表日 {report_day}，{df['stock_id'].n_unique()} 檔"
+    )
 
 
 def _dividend_calendar_for_day(day: dt.date) -> str:

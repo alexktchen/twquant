@@ -2,9 +2,15 @@
 // 與「為什麼選它」的理由（D-180，serving.pick_reasons；那天沒算就是 null）；
 // 破底標記（weak）與加權大跌那天的歷史對照（drop，沒大跌是 null）——D-183，只供看盤，不改名單；
 // 每條線另附歷史同區間參考（D-179，serving.score_reference），網站每檔依分數對到區間；
-// 潛伏兩條線每檔另附歷史相似情境（D-182，serving.pick_similar；那天沒算就是 null）。
+// 潛伏兩條線每檔另附歷史相似情境（D-182，serving.pick_similar；那天沒算就是 null）；
+// 每檔另附近 30 天的內部人持股轉讓申報摘要（T-384，serving.insider_transfer_notices；沒有就是 null）。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
+import { readHolders } from '../../_lib/holders'
+import { readInsider } from '../../_lib/insider'
+import { readStopHit } from '../../_lib/stop-hit'
+import { readRisks } from '../../_lib/risks'
+import { readDownRisk } from '../../_lib/down-risk'
 import { readReasons } from '../../_lib/reasons'
 import { readReference } from '../../_lib/reference'
 import { readSimilar } from '../../_lib/similar'
@@ -37,6 +43,11 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const groups = await groupsFor(db, target, meta)
     const reasons = await readReasons(db, target)
     const weak = await readWeak(db, target, sids)
+    const insider = await readInsider(db, target, sids)
+    const holders = await readHolders(db, target, sids)
+    const stopHit = await readStopHit(db, target, sids)
+    const risks = await readRisks(db, target, sids)
+    const downRisk = await readDownRisk(db, target)
     const drop = await readDrop(db, target)
     const reference = await readReference(db)
     const similar = await readSimilar(db, target)
@@ -86,6 +97,11 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             recent: recentFlags(r.stock_id, recentLists),
             chg6: change(c, startClose.get(r.stock_id) ?? null),
             weak: weak.get(r.stock_id) ?? null,
+            insider: insider.get(r.stock_id) ?? null,
+            holders: holders.get(r.stock_id) ?? null,
+            stop_hit: stopHit.get(r.stock_id) ?? null,
+            risks: risks.get(r.stock_id) ?? null,
+            down_risk: downRisk.get(`${code}|${r.stock_id}`) ?? null,
           }
         }),
       }

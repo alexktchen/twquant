@@ -49,11 +49,12 @@ test('使用者 2026-10-17：個股行事曆——今天以後由近到遠、以
   assert.equal(daysAway('2026-10-01', '2026-10-17'), '')
 })
 
-test('使用者 2026-10-17：個股行事曆端點驗代號、三個來源都容許表還沒建；個股頁有放', () => {
+test('使用者 2026-10-17：個股行事曆端點驗代號、四個來源都容許表還沒建（T-384 加第四個：內部人申讓）；個股頁有放', () => {
   const api = readFileSync(new URL('../functions/api/stocks/[sid]/calendar.ts', import.meta.url), 'utf8')
   assert.ok(api.includes('SID_RE.test(sid)') && api.includes('fail(400'))
-  assert.equal(api.match(/readRows\(/g)?.length, 3)
-  for (const t of ['serving.dividend_calendar', 'serving.conference_calendar', 'serving.corporate_events']) assert.ok(api.includes(t), t)
+  assert.equal(api.match(/readRows\(/g)?.length, 4)
+  for (const t of ['serving.dividend_calendar', 'serving.conference_calendar', 'serving.corporate_events', 'serving.insider_transfer_notices'])
+    assert.ok(api.includes(t), t)
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
   assert.ok(app.includes('<StockCalendar sid={sid} refresh={refresh} />'))
 })

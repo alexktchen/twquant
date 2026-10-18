@@ -2,6 +2,11 @@
 import type { Group } from './group'
 import type { Reason } from './reasons'
 import type { DropStats, Weak } from './weak'
+import type { InsiderFlag } from './insider'
+import type { HoldersFlag } from './holders'
+import type { StopHit } from './stophit'
+import type { Risk } from './risks'
+import type { DownRisk } from './downrisk'
 import type { RefRow } from './reference'
 import type { Similar } from './similar'
 
@@ -28,6 +33,16 @@ export type Pick = {
   chg6: number | null
   /** 破底標記（D-183）：近 20 日新低、連跌幾天；舊後端沒有這欄 */
   weak?: Weak | null
+  /** 內部人申讓（T-384）：近 30 天的申報摘要；沒有、舊後端沒有這欄 → null／undefined */
+  insider?: InsiderFlag | null
+  /** 千張大戶（T-386）：名單那天之前最新一週的比例與連增連減；沒資料、舊後端沒有這欄 → null／undefined */
+  holders?: HoldersFlag | null
+  /** 同波動股票 20 日內碰 −15%／+20% 的歷史比例（D-191 §三 C）；收盤不足、舊後端沒有這欄 → null／undefined */
+  stop_hit?: StopHit | null
+  /** 風險日曆（T-387）：處置、注意、近期除權息／法說會、營收待公布；沒有、舊後端沒有這欄 → null／undefined */
+  risks?: Risk[] | null
+  /** 易跌標記（T-391／D-193）：D-192 模型機率與是否在今天前 5；只有大盤精選有；舊後端沒有這欄 → null／undefined */
+  down_risk?: DownRisk | null
 }
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示。ref：歷史同區間參考（D-179）的列，還沒算或舊後端沒有這欄 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[]; ref?: RefRow[] }

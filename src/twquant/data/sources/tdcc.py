@@ -4,9 +4,9 @@ opendata `getOD.ashx?id=1-5`：單一全市場週快照 CSV（utf-8-sig）。實
 （load = fetch → raw_frame → clean_shareholding_dispersion）；同時保留 `fetch`（raw）
 以便以假 transport 離線測試傳輸/解析。
 
-覆蓋範圍：id=1-5 目前為 6 碼證券（ETF/受益證券/債券）；四碼普通股的集保分散表僅
-TDCC 互動查詢站提供（表單 POST），屬未來另一個 SourcePort——正是 D-017 可插拔設計
-要讓其一檔＋一筆註冊即可加入的情境。
+覆蓋範圍：id=1-5 是**全市場**（2026-10-18 本機實測一週 3,350 檔，其中四碼普通股約 2,950 檔；
+早先註解寫「只有 6 碼證券」是錯的）。T-386 起由每日 pipeline「集保大戶」步驟每天抓，
+週六公布新的一週才會多一個基準日；給人看（個股頁千張大戶走勢、名單小標），不進因子。
 """
 
 from __future__ import annotations

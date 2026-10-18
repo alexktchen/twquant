@@ -782,6 +782,116 @@ DIVIDEND_CALENDAR_SPEC = TableSpec(
     indexes=(("date",),),
 )
 
+# 內部人持股轉讓事前申報（T-384，2026-10-18）：證交所 t187ap12_L＋櫃買 mopsfin_t187ap12_O，每天整份 upsert 累積成歷史。
+# 給人看（個股頁行事曆、名單小標），不進因子、不進模型。欄位與 data/sources/insider_transfer.SCHEMA 同名同序；
+# 與 2026-09-28 事件研究直寫的同名表欄位相同，所以不用重建。
+INSIDER_TRANSFER_SPEC = TableSpec(
+    "insider_transfer_notices",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("row_key", "text"),
+        ("market", "text"),
+        ("company_name", "text"),
+        ("role", "text"),
+        ("person", "text"),
+        ("method", "text"),
+        ("planned_shares", "double precision"),
+        ("daily_max_shares", "double precision"),
+        ("transferee", "text"),
+        ("held_own", "double precision"),
+        ("held_trust", "double precision"),
+        ("after_own", "double precision"),
+        ("after_trust", "double precision"),
+        ("period_start", "date"),
+        ("period_end", "date"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "stock_id", "row_key"),
+    indexes=(("stock_id", "date"),),
+)
+
+# 權證（T-385，2026-10-18）：條款只在變了才多一版（valid_from，不是 date，所以不能進 cloud.windows）；
+# 日行情每天一份（雲端只留 2 天，摘要算完就用不到）；摘要每檔四碼標的一列（網站讀這張）。
+# 欄位與 data/sources/warrant.TERMS_SCHEMA／DAILY_SCHEMA、reporting/warrant_summary.SUMMARY_SCHEMA 同名同序。
+WARRANT_TERMS_SPEC = TableSpec(
+    "warrant_terms",
+    (
+        ("valid_from", "date"),
+        ("warrant_id", "text"),
+        ("market", "text"),
+        ("underlying_id", "text"),
+        ("underlying_name", "text"),
+        ("kind", "text"),
+        ("style", "text"),
+        ("category", "text"),
+        ("expiry_date", "date"),
+        ("last_trade_date", "date"),
+        ("strike", "double precision"),
+        ("ratio", "double precision"),
+        ("cap", "double precision"),
+        ("floor", "double precision"),
+        ("issued_k_units", "double precision"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("warrant_id", "valid_from"),
+)
+WARRANT_DAILY_SPEC = TableSpec(
+    "warrant_daily",
+    (
+        ("date", "date"),
+        ("warrant_id", "text"),
+        ("market", "text"),
+        ("underlying_id", "text"),
+        ("kind", "text"),
+        ("close", "double precision"),
+        ("volume_units", "double precision"),
+        ("trade_value", "double precision"),
+        ("trades", "double precision"),
+        ("last_bid", "double precision"),
+        ("last_ask", "double precision"),
+        ("underlying_close", "double precision"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("warrant_id", "date"),
+    indexes=(("underlying_id", "date"),),
+)
+WARRANT_SUMMARY_SPEC = TableSpec(
+    "warrant_summary_daily",
+    (
+        ("date", "date"),
+        ("underlying_id", "text"),
+        ("n_call", "bigint"),
+        ("n_put", "bigint"),
+        ("call_value", "double precision"),
+        ("put_value", "double precision"),
+        ("underlying_amount", "double precision"),
+        ("value_ratio", "double precision"),
+        ("iv_call", "double precision"),
+        ("iv_put", "double precision"),
+        ("iv_call_days", "bigint"),
+        ("iv_put_days", "bigint"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "underlying_id"),
+    indexes=(("underlying_id", "date"),),
+)
+
+# 易跌標記（T-391／D-193）：D-192 模型對當天大盤精選 15 檔的機率，機率最高 5 檔 flagged。只給人看；小表全史保留。
+PICK_DOWN_RISK_SPEC = TableSpec(
+    "pick_down_risk",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("stock_id", "text"),
+        ("model_id", "text"),
+        ("p", "double precision"),  # 20 日內碰 −15% 的模型機率（校準偏高，見 D-192 §七）
+        ("flagged", "boolean"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -807,6 +917,11 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     CONFERENCE_CALENDAR_SPEC,
     MORNING_BRIEF_SPEC,
     DIVIDEND_CALENDAR_SPEC,
+    INSIDER_TRANSFER_SPEC,
+    WARRANT_TERMS_SPEC,
+    WARRANT_DAILY_SPEC,
+    WARRANT_SUMMARY_SPEC,
+    PICK_DOWN_RISK_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

@@ -9,6 +9,10 @@ import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
 import type { StockCalItem } from './stockcal'
+import type { HoldersWeek } from './holders'
+import type { StopHit } from './stophit'
+import type { WarrantDay } from './warrants'
+import type { Trade, TradeList } from './trades'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -68,6 +72,18 @@ export const fetchStockPicks = (sid: string) =>
 export const fetchStockCalendar = (sid: string) =>
   get<{ sid: string; today: string; items: StockCalItem[] }>(`/api/stocks/${encodeURIComponent(sid)}/calendar`)
 
+/** 這一檔的波動度落在哪一組、那組 20 日內碰 −15%／+20% 的歷史比例（D-191 §三 C）；收盤不足是 null。 */
+export const fetchStockStopHit = (sid: string) =>
+  get<{ sid: string; today: string; hit: StopHit | null }>(`/api/stocks/${encodeURIComponent(sid)}/stophit`)
+
+/** 這一檔最近幾天的權證摘要（T-385）；沒有權證或還沒算是空陣列。 */
+export const fetchStockWarrants = (sid: string) =>
+  get<{ sid: string; today: string; days: WarrantDay[] }>(`/api/stocks/${encodeURIComponent(sid)}/warrants`)
+
+/** 這一檔最近幾週的千張大戶比例（T-386）；還沒累積到資料是空陣列。 */
+export const fetchStockHolders = (sid: string) =>
+  get<{ sid: string; today: string; weeks: HoldersWeek[] }>(`/api/stocks/${encodeURIComponent(sid)}/holders`)
+
 /** 三個模型最近幾天的分數與名次，加上最新一天在哪條線的名單上。 */
 export const fetchScores = (sid: string) => get<StockScores>(`/api/stocks/${encodeURIComponent(sid)}/scores`)
 
@@ -84,6 +100,11 @@ export const setTracked = (sid: string, on: boolean) =>
 
 /** 存追蹤股的順序（由上到下的代號）。 */
 export const saveWatchOrder = (order: string[]) => get<{ ok: boolean }>('/api/watchlist', 'PUT', { order })
+
+/** 我的下單（T-388）：列出、記一筆（同代號同日同方向覆蓋）、刪一筆。 */
+export const fetchTrades = () => get<TradeList>('/api/trades')
+export const saveTrade = (t: Omit<Trade, 'created_at'>) => get<{ ok: boolean }>('/api/trades', 'PUT', t)
+export const deleteTrade = (k: { sid: string; date: string; side: Trade['side'] }) => get<{ ok: boolean }>('/api/trades', 'DELETE', k)
 
 /** 盤中即時量價（證交所，約 5 秒更新）；最多 100 檔。 */
 export const fetchQuotes = (sids: string[]) =>

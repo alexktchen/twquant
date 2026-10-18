@@ -12,6 +12,9 @@ import {
   fetchScores,
   fetchStockPicks,
   fetchWatchlist,
+  fetchTrades,
+  saveTrade,
+  deleteTrade,
   logoutTarget,
   saveWatchOrder,
   searchStocks,
@@ -26,6 +29,16 @@ import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
 import { dropNote, weakSummary, weakTags } from './weak'
+import { insiderTag } from './insider'
+import { holdersTag } from './holders'
+import { stopHitLine, stopHitTitle } from './stophit'
+import { riskTags } from './risks'
+import { downRiskTag } from './downrisk'
+import { TradesPanel } from './TradesPanel'
+import { boughtKeys, type Trade, type TradeList } from './trades'
+import { StockHolders } from './StockHolders'
+import { StockStopHit } from './StockStopHit'
+import { StockWarrants } from './StockWarrants'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
@@ -77,6 +90,9 @@ export default function CloudApp() {
   // 追蹤股：存在帳號裡（伺服器），手機和電腦同一份
   const [watch, setWatch] = useState<WatchList | null>(null)
   const [watchErr, setWatchErr] = useState('')
+  // 我的下單（T-388）：名單上勾的「我買了」與手動補的，存在帳號裡
+  const [trades, setTrades] = useState<TradeList | null>(null)
+  const [tradesErr, setTradesErr] = useState('')
   // 追蹤分頁正在看的股票：清單裡的，或剛搜尋到、還沒加入的
   const [watchSel, setWatchSel] = useState<{ sid: string; name: string | null } | null>(null)
   // 從背景回來時加一：名單、追蹤股、個股跟著重抓（見下方 visibilitychange）
@@ -100,6 +116,13 @@ export default function CloudApp() {
         setWatchErr('')
       })
       .catch((e: Error) => setWatchErr(watchError(e)))
+  const loadTrades = () =>
+    fetchTrades()
+      .then((t) => {
+        setTrades(t)
+        setTradesErr('')
+      })
+      .catch((e: Error) => setTradesErr(watchError(e)))
 
   useEffect(() => {
     // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可。確定登入了才抓追蹤股
@@ -110,6 +133,7 @@ export default function CloudApp() {
           .then(setPush)
           .catch((e: Error) => console.warn('通知狀態讀取失敗', e))
         loadWatch()
+        loadTrades()
       })
       .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
     fetchPickDates()
@@ -213,6 +237,18 @@ export default function CloudApp() {
   const tracked = useMemo(() => new Set((watch?.items ?? []).map((w) => w.sid)), [watch])
   const watchCurrent = watchSel ?? watch?.items[0] ?? null
   const toggleTrack = (s: string, on: boolean) => setTracked(s, on).then(loadWatch)
+  // 「我買了」：記名單日、那條線、代號（來源＝pick）；再按一次取消
+  const bought = useMemo(() => boughtKeys(trades?.items ?? []), [trades])
+  const toggleBuy = (s: string, on: boolean) => {
+    if (!view) return
+    const req = on
+      ? saveTrade({ sid: s, date: view.date, side: 'buy', price: null, qty: null, source: 'pick', line: current?.code ?? null })
+      : deleteTrade({ sid: s, date: view.date, side: 'buy' })
+    req.then(loadTrades).catch((e: Error) => setNotice(watchError(e)))
+  }
+  const lineName = (code: string | null) => view?.lines.find((l) => l.code === code)?.name ?? null
+  const addTrade = (t: Omit<Trade, 'created_at'>) => saveTrade(t).then(loadTrades)
+  const removeTrade = (t: Trade) => deleteTrade({ sid: t.sid, date: t.date, side: t.side }).then(loadTrades)
   // 存順序：畫面先照新順序排，再一筆一筆依序送出（連拖幾次也不會後送先到）；失敗就顯示原因並重抓伺服器上的順序
   const orderChain = useRef<Promise<void>>(Promise.resolve())
   const reorderWatch = (order: string[]) => {
@@ -429,6 +465,7 @@ export default function CloudApp() {
               <p className="cq-note">
                 追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。非投資建議。
               </p>
+              {!guest && <TradesPanel trades={trades} err={tradesErr} lineName={lineName} onAdd={addTrade} onDelete={removeTrade} />}
             </aside>
           ) : (
             <aside className={guest ? 'cq-list cq-list-guest' : 'cq-list'}>
@@ -498,7 +535,15 @@ export default function CloudApp() {
               <div className="cq-rows">
                 <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
                   {current?.picks.map((p) => (
-                    <Row key={p.sid} p={p} px={rowPx(p)} on={p.sid === sid} onClick={() => setSid(p.sid)} />
+                    <Row
+                      key={p.sid}
+                      p={p}
+                      px={rowPx(p)}
+                      on={p.sid === sid}
+                      onClick={() => setSid(p.sid)}
+                      bought={view ? bought.has(`${view.date}|${p.sid}`) : false}
+                      onBuy={!guest && view && trades ? toggleBuy : undefined}
+                    />
                   ))}
                 </ul>
                 {current && current.picks.length === 0 && <p className="cq-empty">今天沒有符合條件的股票。</p>}
@@ -595,12 +640,17 @@ function Row({
   px,
   on,
   onClick,
+  bought,
+  onBuy,
 }: {
   p: Pick
   /** 要顯示的價格（pickPrice）：盤中是即時價、rec＝推薦當天的收盤；沒給（沒登入的假資料）就是名單那天的收盤 */
   px?: ReturnType<typeof pickPrice>
   on: boolean
   onClick: () => void
+  /** 「我買了」（T-388）：這檔在這天的名單有沒有被記下來；沒給（沒登入）就不顯示按鈕 */
+  bought?: boolean
+  onBuy?: (sid: string, on: boolean) => void
 }) {
   px ??= pickPrice(p, undefined, undefined, '', true)
   const t = trend(px.chg)
@@ -634,8 +684,45 @@ function Row({
               {t.text}
             </i>
           ))}
+          {insiderTag(p.insider) && (
+            <i className="cq-tag weak insider" title={insiderTag(p.insider)!.title}>
+              {insiderTag(p.insider)!.text}
+            </i>
+          )}
+          {holdersTag(p.holders) && (
+            <i className={`cq-tag holders ${(p.holders?.streak ?? 0) > 0 ? 'up' : 'down'}`} title={holdersTag(p.holders)!.title}>
+              {holdersTag(p.holders)!.text}
+            </i>
+          )}
+          {riskTags(p.risks).map((t) => (
+            <i key={`${t.kind}${t.text}`} className={`cq-tag warn risk ${t.kind}`} title={t.title}>
+              {t.text}
+            </i>
+          ))}
+          {downRiskTag(p.down_risk) && (
+            <i className="cq-tag weak downrisk" title={downRiskTag(p.down_risk)!.title}>
+              {downRiskTag(p.down_risk)!.text}
+            </i>
+          )}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
+        {stopHitLine(p.stop_hit) && (
+          <span className="cq-why cq-stophit" title={stopHitTitle(p.stop_hit)}>
+            {stopHitLine(p.stop_hit)}
+          </span>
+        )}
+        {onBuy && (
+          <button
+            className={bought ? 'cq-buy on' : 'cq-buy'}
+            title={bought ? '已記下你在這天買了這檔；再按一次取消' : '記下你在這天買了這檔（只記、不評；追蹤分頁可以補價格張數）'}
+            onClick={(e) => {
+              e.stopPropagation()
+              onBuy(p.sid, !bought)
+            }}
+          >
+            {bought ? '✓ 已記我買了' : '我買了'}
+          </button>
+        )}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -1111,7 +1198,10 @@ function Detail({
         )}
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
+      <StockStopHit sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
+      <StockHolders sid={sid} refresh={refresh} />
+      <StockWarrants sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (
