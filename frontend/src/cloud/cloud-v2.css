@@ -185,3 +185,15 @@
   .cq-hero-price > b { font-size: 36px; }
   .cq-sec { padding: 12px; }
 }
+
+/* 一句話（T-393）：名單列第三行（最多兩行）；個股頁頂端一整句，右邊標 AI 或規則。圖示用對話框（星號已是「新上榜」）。 */
+.cq-row .cq-name small.cq-blurb { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 5px; margin-top: 5px; font-size: 13.5px; line-height: 1.35; color: #c9ccd3; min-width: 0; }
+.cq-row .cq-blurb svg { flex: none; color: var(--mute); margin-top: 2px; }
+/* 最多兩行：後半句的「但…」是提醒，截掉就看不到 */
+.cq-row .cq-blurb span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; white-space: normal; min-width: 0; }
+.cq-blurb-full { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); font-size: 16px; line-height: 1.5; color: var(--text); }
+.cq-blurb-full svg { flex: none; margin-top: 3px; color: var(--mute); }
+.cq-blurb-full.ai svg { color: #ffc04d; }
+.cq-blurb-full span { flex: 1; min-width: 0; }
+.cq-blurb-full em { flex: none; font-style: normal; font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 5px; color: var(--mute); background: var(--tile); margin-top: 3px; }
+.cq-blurb-full.ai em { color: #ffc04d; background: rgba(255, 192, 77, .12); }

@@ -32,26 +32,9 @@ import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, type Reason } from './reasons'
 import { dropNote, weakSummary } from './weak'
-import {
-  ArrowDown,
-  ArrowUp,
-  Banknote,
-  CandlestickChart,
-  Check,
-  ChevronDown,
-  CircleDot,
-  CircleHelp,
-  CircleMinus,
-  CirclePlus,
-  Gauge,
-  History,
-  Info,
-  Layers,
-  Lightbulb,
-  ShoppingBag,
-  Trophy,
-} from 'lucide-react'
+import { ArrowDown, ArrowUp, Banknote, CandlestickChart, Check, ChevronDown, CircleDot, CircleHelp, CircleMinus, CirclePlus, Gauge, History, Info, Layers, Lightbulb, MessageSquareText, ShoppingBag, Trophy } from 'lucide-react'
 import { Kpi, Section } from './Section'
+import { blurbTitle, type Blurb } from './blurb'
 import { pickBadges, rowBadges, type Badge } from './badges'
 import { BadgeChip } from './Icon'
 import { BadgeLegend } from './Legend'
@@ -625,6 +608,7 @@ export default function CloudApp() {
                 onTrack={watch ? toggleTrack : undefined}
                 refresh={refresh}
                 badges={pickBadges({ ...selected, line: current?.code ?? null })}
+                blurb={selected.blurb ?? null}
               />
             ) : null}
           </section>
@@ -715,6 +699,12 @@ function Row({
             </span>
           )}
         </small>
+        {p.blurb && (
+          <small className="cq-blurb" title={blurbTitle(p.blurb)}>
+            <MessageSquareText size={13} strokeWidth={2.2} aria-hidden="true" />
+            <span>{p.blurb.text}</span>
+          </small>
+        )}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -1077,6 +1067,7 @@ function Detail({
   onTrack,
   refresh,
   badges = [],
+  blurb = null,
 }: {
   sid: string
   name: string | null
@@ -1104,6 +1095,8 @@ function Detail({
   refresh: number
   /** 名單上這一檔的全部標記（處置、除權息、模型易跌…）；不是從名單點進來就沒有 */
   badges?: Badge[]
+  /** 名單上這一檔的一句話（T-393）；不是從名單點進來就沒有 */
+  blurb?: Blurb | null
 }) {
   // K 線資料記著是哪一檔：換股時舊圖先留著（不閃白），但報價列只用這一檔自己的資料
   const [chart, setChart] = useState<{ sid: string; bars: Bar[]; days: Record<string, string[]> }>({ sid: '', bars: [], days: {} })
@@ -1224,6 +1217,13 @@ function Detail({
           </dl>
         )}
       </header>
+      {blurb && (
+        <p className={`cq-blurb-full${blurb.ai ? ' ai' : ''}`} title={blurbTitle(blurb)}>
+          <MessageSquareText size={16} strokeWidth={2.2} aria-hidden="true" />
+          <span>{blurb.text}</span>
+          <em>{blurb.ai ? 'AI' : '規則'}</em>
+        </p>
+      )}
       {badges.length > 0 && (
         <div className="cq-badges" aria-label="提醒">
           {badges.map((b) => (

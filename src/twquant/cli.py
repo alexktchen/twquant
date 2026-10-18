@@ -835,6 +835,34 @@ def down_risk_cmd(
     typer.secho(f"[OK] 易跌標記 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="pick-blurbs")
+def pick_blurbs_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+    force: bool = typer.Option(False, help="模型已寫好的也重寫（預設沿用，不重呼叫）"),
+    out: str = typer.Option(
+        "", help="資料根目錄（洞悉用量紀錄）；空＝configs/system.yaml data_dir"
+    ),
+) -> None:
+    """單獨跑每日 pipeline 的「名單一句話」步驟（T-393／D-195）：每檔一句話 → serving.pick_blurbs。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary, written, errors = _pick_blurbs_for_day(day, force=force, out=out)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 名單一句話 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+    for w in written:
+        mark = "AI" if w.source == "model" else "規則"
+        typer.echo(f"  {w.line} {w.stock_id} [{mark}] {w.text}")
+        for c in w.checks:
+            typer.secho(f"      [檢查] {c}", fg=typer.colors.YELLOW)
+    for e in errors:
+        typer.secho(f"  [!] {e}", fg=typer.colors.YELLOW)
+
+
 @app.command(name="warrants")
 def warrants_cmd(
     date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
@@ -2004,6 +2032,17 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _down_risk_for_day(day)
 
+    def _pick_blurbs_step() -> str:
+        # T-393／D-195 名單一句話：模型缺席（沒 token、額度用完）或沒過檢查 → 規則句，網站照樣有一句。
+        # 第二班沿用第一班模型寫好的（不重呼叫）。best-effort，不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        summary, _, errors = _pick_blurbs_for_day(day)
+        return summary + (f"；{'、'.join(errors)}" if errors else "")
+
     def _warrants_step() -> str:
         # T-385 權證：條款變了才多一版、日行情一天一份、每檔標的一列摘要。要標的成交金額（供應層同步後的 prices_daily）。
         # 休市日證交所回 0 列 → 只更新條款。best-effort。
@@ -2151,6 +2190,7 @@ def _run_daily_pipeline(
         PipelineStep("法說會", _conferences_step),
         PipelineStep("除權息預告", _dividend_calendar_step),
         PipelineStep("內部人申讓", _insider_transfers_step),
+        PipelineStep("名單一句話", _pick_blurbs_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -3552,6 +3592,36 @@ def _conferences_for_day(day: dt.date) -> str:
         conn.close()
     upcoming = df.filter(pl.col("date") >= day).height
     return f"{df.height} 場（{len(frames)} 頁），今天起 {upcoming} 場"
+
+
+def _pick_blurbs_for_day(
+    day: dt.date, *, force: bool = False, out: str = ""
+) -> tuple[str, list[Any], list[str]]:
+    """名單一句話（T-393／D-195）：讀當天名單與事實 → 模型一條線一次 → 逐句檢查 → `pick_blurbs`。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.insight.client import InsightClient
+    from twquant.insight.config import load_llm_config
+    from twquant.reporting.pick_blurbs import run_for_day
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    data_dir = Path(out) if out else Path(cfg.data_dir)
+    client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)
+    conn = store.connect(scfg)
+    try:
+        return run_for_day(
+            conn,
+            scfg.pg_schema,
+            day,
+            client,
+            cfg.pick_blurbs,
+            cfg.morning_brief.line_names,
+            now_tw(),
+            force=force,
+        )
+    finally:
+        conn.close()
 
 
 DOWN_RISK_MODEL_ID = "lgbm_d192_core_down15_20261018"  # D-193：固定這一個，不進 ml.yaml 生產清單

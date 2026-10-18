@@ -52,6 +52,23 @@ class MorningBrief(BaseModel):
     risk_note: str | None = None
 
 
+class PickBlurbItem(BaseModel):
+    """名單一檔的一句話（T-393／D-195）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sid: str
+    text: str
+
+
+class PickBlurbs(BaseModel):
+    """名單一條線每檔一句話（pick_blurb 輸出）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PickBlurbItem]
+
+
 class Explanation(BaseModel):
     """異常事件解釋（explainer 輸出，SPEC-008 §2.3）。"""
 
