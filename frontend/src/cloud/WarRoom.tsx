@@ -3,6 +3,7 @@
 // 使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置，卡也要可以縮起來，縮起來後內容要可以輪播」——
 // 卡片照版面（useHomeLayout，登入後存在帳號）排；每張卡點標題收起，收起時輪播重點；「編輯版面」拖曳或 ▲▼ 換位置。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
+import { Pencil } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
@@ -124,7 +125,7 @@ export function WarRoom({
         {layoutErr && !editing && <span className="cq-war-mute">{layoutErr}</span>}
         {!editing && (
           <button className="cq-edit-btn" onClick={() => setEditing(true)}>
-            編輯版面
+            <Pencil size={15} aria-hidden="true" /> 版面
           </button>
         )}
       </div>

@@ -1,0 +1,170 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   首頁戰情室 2026-10-18 改版（使用者：「像地鐵告示一樣，顏色歸類、圖案輔佐、減少閱讀文字…字體大一點點」）。
+   載入在 cloud.css、cloud-v2.css 之後。五條路線色（固定意思）：看法橘、行情青、名單紫、事件藍、族群粉。
+   每張卡：左邊一條路線色、圖示、短標題；內容是數字卡或一行一筆的清單；說明只在 title（滑過／長按）。
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+.cq {
+  --line-view: #ff7a00;
+  --line-quote: #2dd4bf;
+  --line-list: #a78bfa;
+  --line-event: #3d9bff;
+  --line-group: #f472b6;
+}
+.cq-war { font-size: 15.5px; padding: 10px 12px 28px; gap: 10px; }
+.cq-war-cards { gap: 10px; }
+.cq-war-bar { display: flex; justify-content: flex-end; }
+.cq .cq-war-bar .cq-edit-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; padding: 4px 10px; }
+
+/* ── 卡片外框 ── */
+.cq-war-card.cq-hc { position: relative; border-radius: 12px; padding: 12px 14px 12px 18px; border: 1px solid var(--line); overflow: hidden; }
+.cq-hc::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--c); }
+.cq-hc-view { --c: var(--line-view); }
+.cq-hc-quote { --c: var(--line-quote); }
+.cq-hc-list { --c: var(--line-list); }
+.cq-hc-event { --c: var(--line-event); }
+.cq-hc-group { --c: var(--line-group); }
+.cq-war-card.cq-hc > header.cq-hc-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0; }
+.cq .cq-hc-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0; text-align: left; }
+.cq-hc-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); flex: none; }
+.cq-war-card.cq-hc h2 { margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap; }
+.cq-hc-when { color: var(--mute); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cq-hc-caret { margin-left: auto; color: var(--mute); flex: none; }
+.cq-hc-caret.flip { transform: rotate(180deg); }
+.cq-hc-body { margin-top: 10px; }
+.cq .cq-hc-link { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); font-size: 14px; font-weight: 600; padding: 2px 4px; }
+.cq-war-card.cq-hc .cq-war-mute { font-size: 14.5px; }
+/* 收起時的輪播：一行文字放大 */
+.cq-hc .cq-reel-text { font-size: 15.5px; }
+.cq-hc .cq-reel-kv { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.cq-hc .cq-reel-kv > span:first-child { color: var(--mute); }
+.cq-hc .cq-reel-kv > b { font-size: 18px; }
+.cq-hc .cq-reel-kv small { font-size: 13px; }
+
+/* ── 數字卡格（沿用 cloud-v2 的 .cq-kpi） ── */
+.cq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.cq-tiles + .cq-tiles { margin-top: 8px; }
+.cq-tiles-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cq-tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cq-hc .cq-kpi { background: var(--tile); border-radius: 10px; padding: 10px 12px; gap: 3px; }
+.cq-hc .cq-kpi-label { font-size: 13.5px; }
+.cq-hc .cq-kpi-value { font-size: 24px; }
+.cq-hc .cq-kpi-value small { font-size: 14px; font-weight: 600; color: var(--mute); }
+.cq-hc .cq-kpi-sub { font-size: 13px; }
+.cq-kpi-sub.up, .cq-hc .cq-kpi-value.up ~ .cq-kpi-sub { color: var(--up); }
+.cq-hc .cq-kpi-value.down ~ .cq-kpi-sub { color: var(--down); }
+/* 名單卡的兩顆按鈕 */
+.cq .cq-tile-btn { display: flex; flex-direction: column; gap: 3px; text-align: left; background: var(--tile); border-radius: 10px; padding: 10px 12px; min-width: 0; border: 1px solid transparent; }
+.cq .cq-tile-btn:hover { border-color: var(--line-list); }
+.cq .cq-tile-btn .cq-kpi-row svg { color: var(--line-list); }
+
+/* ── 分類色塊（小、固定寬、不換行） ── */
+.cq-cat { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 600; white-space: nowrap; font-style: normal; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); }
+.cq-cat-view { --c: var(--line-view); }
+.cq-cat-quote { --c: var(--line-quote); }
+.cq-cat-list { --c: var(--line-list); }
+.cq-cat-event { --c: var(--line-event); }
+.cq-cat-group { --c: var(--line-group); }
+
+/* ── 今日一句話 ── */
+.cq-brief-headline { margin: 0 0 10px; font-size: 20px; font-weight: 700; line-height: 1.45; }
+.cq-brief-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cq-brief-points li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; font-size: 15.5px; line-height: 1.55; }
+.cq-brief-tag { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 6px; font-size: 13.5px; font-weight: 700; color: var(--line-view); background: rgba(255, 122, 0, .14); white-space: nowrap; margin-top: 1px; }
+.cq-brief-risk { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: rgba(255, 176, 32, .12); color: #ffc04d; font-size: 15px; line-height: 1.5; }
+.cq-brief-risk svg { flex: none; margin-top: 3px; }
+.cq-brief-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 14px; }
+.cq-brief-today { color: var(--mute); }
+.cq-brief-today b { font-weight: 600; }
+.cq-brief-nav { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.cq .cq-brief-nav button, .cq-brief-nav select { height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 14.5px; }
+.cq .cq-brief-nav button { min-width: 32px; display: inline-grid; place-items: center; padding: 0; }
+.cq .cq-brief-nav button:disabled { opacity: .35; }
+.cq-brief-nav select { padding: 0 8px; font-variant-numeric: tabular-nums; }
+.cq-brief-actual { margin-top: 10px; }
+.cq-war-facts { margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #c9ccd4; line-height: 1.6; }
+
+/* ── 市場氛圍 ── */
+.cq-war-moodcard .cq-mood-body { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 0; }
+.cq-war-moodcard .cq-mood-col { min-width: 0; }
+.cq-war-moodcard .cq-mood-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 4px 0; }
+.cq-war-moodcard .cq-mood-row > span:first-child { width: auto; }
+.cq-war-moodcard .cq-mood-cells { display: flex; flex-wrap: wrap; gap: 6px; }
+.cq-war-moodcard .cq-mood-cell { display: inline-flex; gap: 6px; align-items: baseline; height: 28px; padding: 0 9px; border-radius: 6px; background: var(--tile); font-size: 14.5px; white-space: nowrap; }
+.cq-war-moodcard .cq-mood-cell > span { color: #c9ccd4; }
+.cq-war-moodcard .cq-mood-cell > b { font-weight: 700; }
+.cq-war-moodtags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cq-war-moodtags .cq-mood-idx { font-size: 14.5px; }
+.cq-war-moodtags .cq-mood-tag { height: 26px; display: inline-flex; align-items: center; font-size: 13.5px; font-weight: 600; }
+
+/* ── 大盤體檢：漲跌家數橫條（數字寫在條上） ── */
+.cq-breadth { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin: 8px 0; font-size: 13.5px; font-weight: 700; color: #fff; }
+.cq-breadth span { display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; min-width: 0; }
+.cq-breadth .up { background: var(--up); }
+.cq-breadth .down { background: var(--down); }
+.cq-breadth .flat { background: #4a4e57; }
+
+/* ── 名單成績 ── */
+.cq-score-lines { display: grid; gap: 10px; }
+.cq-score-name { font-size: 15px; font-weight: 700; margin-bottom: 6px; color: var(--line-list); }
+
+/* ── 新聞頭條 ── */
+.cq-heads { list-style: none; margin: 0; padding: 0; }
+.cq-heads li { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cq-heads li:last-child, .cq-news-one li { border-bottom: 0; }
+.cq-heads a { color: var(--text); text-decoration: none; font-size: 15.5px; line-height: 1.45; display: inline-flex; gap: 4px; align-items: baseline; }
+.cq-heads a svg { color: var(--mute); flex: none; }
+.cq-heads a:hover { color: var(--accent); }
+.cq-heads time { color: var(--mute); font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── 昨日消息 ── */
+.cq-newslist { list-style: none; margin: 0; padding: 0; max-height: 460px; overflow-y: auto; }
+.cq-newslist li { padding: 8px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cq-newslist li:last-child { border-bottom: 0; }
+.cq-newslist li.on, .cq-newslist li:hover { background: #1b1d24; }
+.cq-newsrow { display: grid; grid-template-columns: 3.4em 10em minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.cq-newsrow time { color: var(--mute); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.cq-newsco { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.cq-newsco em { font-style: normal; font-weight: 500; color: var(--mute); font-variant-numeric: tabular-nums; }
+.cq-newssub { font-size: 15px; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cq-newssub.open { white-space: normal; }
+.cq-newstags { display: flex; align-items: center; gap: 4px; color: var(--mute); }
+.cq-newstags .cq-cat { height: 22px; font-size: 12.5px; padding: 0 6px; }
+.cq-newstags .flip { transform: rotate(180deg); }
+.cq-war-news .cq-seg-small button { font-size: 14px; }
+.cq-news-body { font-size: 14.5px; }
+.cq-news-body pre { font-size: 14.5px; }
+
+/* ── 行事曆（沿用 cloud-v2 的事件列） ── */
+.cq-hc .cq-ev li { cursor: pointer; }
+.cq-hc .cq-ev li.cq-cal-static { cursor: default; }
+.cq-hc .cq-ev li:hover:not(.cq-cal-static) { background: #1b1d24; }
+.cq-hc .cq-ev-main b em { font-style: normal; font-weight: 500; color: var(--mute); margin-right: 2px; }
+.cq-hc .cq-ev-main b .cq-b { margin-left: 6px; vertical-align: 2px; }
+.cq-hc .cq-tiles + .cq-ev { margin-top: 8px; }
+.cq-cal-search { position: relative; display: flex; align-items: center; gap: 8px; margin: 10px 0 0; padding: 0 10px; height: 36px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); color: var(--mute); }
+.cq-cal-search input { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; font-size: 15px; outline: none; }
+.cq .cq-cal-search button { display: inline-grid; place-items: center; width: 24px; height: 24px; color: var(--mute); }
+
+/* ── 族群 ── */
+.cq-war-heat .cq-hc-body { margin-top: 10px; }
+.cq-war-heat .cq-war-heat-body { margin: 0 -14px -12px -18px; }
+
+@media (max-width: 820px) {
+  .cq-war { padding: 8px 10px 28px; }
+  .cq-war-card.cq-hc { padding: 12px 12px 12px 16px; border-radius: 12px; }
+  .cq-war-card.cq-hc h2 { font-size: 18px; }
+  .cq-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cq-tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cq-tiles-3 .cq-kpi { padding: 8px; }
+  .cq-tiles-3 .cq-kpi-value { font-size: 20px; }
+  .cq-hc .cq-kpi-value { font-size: 22px; }
+  .cq-newsrow { grid-template-columns: 3.2em minmax(0, 1fr) auto; }
+  .cq-newsrow .cq-newssub { grid-column: 1 / -1; }
+  .cq-brief-nav { margin-left: 0; width: 100%; }
+  .cq-brief-nav select { flex: 1; }
+  .cq-war-moodcard .cq-mood-row { grid-template-columns: 1fr; gap: 4px; }
+  /* 新聞頭條：手機上分類色塊＋標題一列，時間在下一列靠右 */
+  .cq-heads li { grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; }
+  .cq-heads time { grid-column: 2; justify-self: end; }
+  .cq-hc .cq-reel-slide .cq-heads li { padding: 2px 0; }
+}

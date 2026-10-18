@@ -4,6 +4,8 @@
 import { useEffect, useState } from 'react'
 import { fetchMoodClose, fetchMoodGlobal, fetchMoodLive } from './api'
 import { CardFrame } from './CardFrame'
+import { ptsSub } from './home'
+import { Kpi } from './Section'
 import type { Slide } from './Reel'
 import { pct, trend } from './format'
 import { liveBackoff, shouldPoll, taipeiNow } from './live'
@@ -26,6 +28,8 @@ import {
 } from './mood'
 
 type GlobalState = { global: GlobalMood; stale: boolean } | null
+
+const kt = (x: number | null | undefined): 'up' | 'down' | 'plain' => (x === null || x === undefined || x === 0 ? 'plain' : x > 0 ? 'up' : 'down')
 
 function useMood(enabled: boolean): { live: LiveMood | null; close: CloseMood | null; global: GlobalState } {
   const [live, setLive] = useState<LiveMood | null>(null)
@@ -122,60 +126,33 @@ function Flows({ items }: { items: FlowMove[] }) {
   )
 }
 
-/** 期貨與美股（D-186）：一張對齊的表——名稱、價位、漲跌點、漲跌幅、時間；價位放大、紅漲綠跌。 */
+/** 期貨與美股（D-186）。2026-10-18 改版（地鐵告示）：每個價位一張數字卡（名稱、大數字、▲▼ 點數與幅度）；說明移到 title。 */
 function Global({ state, now }: { state: GlobalState; now: { date: string; time: string } }) {
   const g = globalView(state?.global ?? null, now)
   if (!g) return null
   return (
-    <div className="cq-mood-col cq-mood-wide">
-      <table className="cq-mood-quotes">
-        <tbody>
-          {g.txError && (
-            <tr>
-              <th>台指期</th>
-              <td colSpan={5} className="cq-mood-gap">
-                暫時取不到（{g.txError}），稍後自動再試
-              </td>
-            </tr>
-          )}
-          {g.tx.map((q, k) => (
-            <tr key={q.session} title={q.session === 'night' ? '夜盤漲跌對當天日盤結算價' : '日盤漲跌對前一天結算價'}>
-              <th>{k === 0 ? '台指期' : ''}</th>
-              <td className="cq-q-name">{q.name}</td>
-              <td className={`cq-q-px ${trend(q.chg)}`}>
-                {q.last !== null ? pts(q.last) : q.test !== null ? <small>試撮 {pts(q.test)}</small> : '—'}
-              </td>
-              <td className={`cq-q-num ${trend(q.diff)}`}>{signedPts(q.diff)}</td>
-              <td className={`cq-q-num ${trend(q.chg)}`}>{q.chg !== null ? pct(q.chg) : '—'}</td>
-              <td className="cq-q-when">{q.when}</td>
-            </tr>
-          ))}
-          {g.gap && (
-            <tr className="cq-q-gap" title="最新一節期貨最後成交對加權最新點數（夜盤對加權收盤）">
-              <th />
-              <td className="cq-q-name">{g.gap.session === 'night' ? '夜盤' : '日盤'}比加權</td>
-              <td className={`cq-q-px ${trend(g.gap.pts)}`}>{signedPts(g.gap.pts)}</td>
-              <td className="cq-q-num cq-q-unit">點</td>
-              <td className={`cq-q-num ${trend(g.gap.pct)}`}>{pct(g.gap.pct, 1)}</td>
-              <td className="cq-q-when">{g.gap.pts >= 0 ? '正價差' : '逆價差'}</td>
-            </tr>
-          )}
-          {g.us.map((u, k) => (
-            <tr key={u.name} className={k === 0 ? 'cq-q-first' : undefined}>
-              <th>{k === 0 ? '美股' : ''}</th>
-              <td className="cq-q-name">{u.name}</td>
-              <td className={`cq-q-px ${trend(u.chg)}`}>{usPrice(u.last)}</td>
-              <td className={`cq-q-num ${trend(u.diff)}`}>{signedPts(u.diff, 2)}</td>
-              <td className={`cq-q-num ${trend(u.chg)}`}>{pct(u.chg)}</td>
-              <td className="cq-q-when">{k === 0 ? g.usWhen : ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="cq-mood-note">
-        台指期：期交所近月合約{g.fugle && '（期交所沒回應，這次改用富果）'}，日盤漲跌對前一天結算價、夜盤對當天日盤結算價；「比加權」是最新一節的最後成交對加權最新點數（夜盤對加權收盤），高＝正價差、低＝逆價差。
-        美股：四大指數最近一個交易日（美股盤中為即時）。每分鐘更新，只供看盤{state?.stale && '；部分來源暫時沒更新到，顯示上一份'}。
-      </p>
+    <div
+      className="cq-mood-col cq-mood-wide"
+      title={`台指期：期交所近月合約${g.fugle ? '（期交所沒回應，這次改用富果）' : ''}，日盤漲跌對前一天結算價、夜盤對當天日盤結算價；「比加權」＝最新一節的最後成交對加權最新點數（高＝正價差、低＝逆價差）。美股：四大指數最近一個交易日（盤中為即時）。每分鐘更新${state?.stale ? '；部分來源暫時沒更新到，顯示上一份' : ''}`}
+    >
+      <div className="cq-tiles">
+        {g.txError && <Kpi label="台指期" value="—" sub={`取不到：${g.txError}`} tone="na" />}
+        {g.tx.map((q) => (
+          <Kpi
+            key={q.session}
+            label={`台指期 ${q.name}`}
+            value={q.last !== null ? pts(q.last) : q.test !== null ? `試 ${pts(q.test)}` : '—'}
+            sub={`${ptsSub(q.diff, q.chg)}・${q.when}`}
+            tone={kt(q.chg)}
+          />
+        ))}
+        {g.gap && (
+          <Kpi label={`${g.gap.session === 'night' ? '夜盤' : '日盤'}比加權`} value={signedPts(g.gap.pts)} sub={`${g.gap.pts >= 0 ? '正價差' : '逆價差'}・${pct(g.gap.pct, 1)}`} tone={kt(g.gap.pts)} />
+        )}
+        {g.us.map((u) => (
+          <Kpi key={u.name} label={u.name} value={usPrice(u.last)} sub={`${ptsSub(u.diff, u.chg)}${g.usWhen ? `・${g.usWhen}` : ''}`} tone={kt(u.chg)} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -189,40 +166,33 @@ function MoodBody({ v, global, now }: { v: MoodView; global: GlobalState; now: {
     <div className="cq-mood-body">
       <Global state={global} now={now} />
       {v?.sectors && (
-        <div className="cq-mood-col">
+        <div className="cq-mood-col" title="類股強弱：證交所類股指數，跟加權比；盤中每 30 秒更新">
           <div className="cq-mood-row">
-            <span>{v.sectors.words[0]}</span>
+            <span className="cq-cat cq-cat-quote">{v.sectors.words[0]}</span>
             <Sectors items={v.sectors.strong} />
           </div>
           <div className="cq-mood-row">
-            <span>{v.sectors.words[1]}</span>
+            <span className="cq-cat cq-cat-quote">{v.sectors.words[1]}</span>
             <Sectors items={v.sectors.weak} />
           </div>
-          <p className="cq-mood-note">類股強弱：證交所類股指數，跟加權比；盤中每 30 秒更新。</p>
         </div>
       )}
       {v?.flow && (
-        <div className="cq-mood-col">
+        <div
+          className="cq-mood-col"
+          title={`資金數字＝成交比重比前 20 日平均多幾個百分點。防禦族群（金融、電信、食品、油電燃氣）成交比重 ${(v.flow.defShare * 100).toFixed(1)}%${v.flow.defAvg !== null ? `（前 20 日平均 ${(v.flow.defAvg * 100).toFixed(1)}%）` : ''}；上漲 ${v.flow.up.toLocaleString()} 檔、下跌 ${v.flow.down.toLocaleString()} 檔`}
+        >
           <div className="cq-mood-row">
-            <span>資金流入</span>
+            <span className="cq-cat cq-cat-group">資金流入</span>
             <Flows items={v.flow.inflow} />
           </div>
           <div className="cq-mood-row">
-            <span>資金流出</span>
+            <span className="cq-cat cq-cat-group">資金流出</span>
             <Flows items={v.flow.outflow} />
           </div>
-          <p className="cq-mood-note">
-            防禦族群（金融、電信、食品、油電燃氣）成交比重 {(v.flow.defShare * 100).toFixed(1)}%
-            {v.flow.defAvg !== null && `（前 20 日平均 ${(v.flow.defAvg * 100).toFixed(1)}%）`}・上漲 {v.flow.up.toLocaleString()} 檔、下跌{' '}
-            {v.flow.down.toLocaleString()} 檔。資金數字＝成交比重比前 20 日平均多幾個百分點。
-          </p>
         </div>
       )}
-      {v?.flowNote && (
-        <div className="cq-mood-col">
-          <p className="cq-mood-note">{v.flowNote}。</p>
-        </div>
-      )}
+      {v?.flowNote && <p className="cq-war-mute">{v.flowNote}</p>}
     </div>
   )
 }
@@ -311,7 +281,7 @@ export function HomeMoodCard({ collapsed, onToggle }: { collapsed: boolean; onTo
   const g = globalView(global?.global ?? null, now)
   return (
     <CardFrame
-      title="市場氛圍"
+      id="mood"
       className="cq-war-moodcard"
       when={v?.when}
       extra={<span className="cq-war-moodtags"><MoodTags v={v} g={g} /></span>}
