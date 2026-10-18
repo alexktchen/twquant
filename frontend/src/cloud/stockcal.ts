@@ -22,9 +22,6 @@ export const STOCK_CAL_KIND: Record<StockCalItem['kind'], string> = {
   insider: '內部人申讓',
 }
 
-/** 收起時過去的事列幾筆。 */
-export const STOCK_CAL_PAST_SHOWN = 3
-
 /** 今天（含）以後的照日期由近到遠，以前的由新到舊。 */
 export function splitByToday(items: StockCalItem[], today: string): { upcoming: StockCalItem[]; past: StockCalItem[] } {
   const upcoming = items.filter((x) => x.date >= today).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))

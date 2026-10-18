@@ -46,6 +46,10 @@ TABLES: tuple[str, ...] = (
     "conference_calendar",
     "dividend_calendar",
     "group_flow_daily",
+    # D-191～D-193 的新表（雲端每日步驟產生）
+    "insider_transfer_notices",
+    "warrant_summary_daily",
+    "pick_down_risk",
 )
 
 

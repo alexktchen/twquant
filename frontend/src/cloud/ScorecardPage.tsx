@@ -1,11 +1,13 @@
 // 名單績效（D-176，網站分頁「績效」）：每條線照公布的名單自動操作的模擬帳戶淨值曲線，以及每一檔新進名單的逐筆結果。
 // 名單出來就照固定規則全部當成買了、事後結算，使用者不能挑——這是名單本身的紀錄，不是個人損益。
 // 0050 對照：2026-10-13 拿掉（D-176 修訂），2026-10-14 使用者「績效把0050也放上去試試」放回來（D-176 修訂三）。
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+// 2026-10-18 改版（地鐵告示）：整頁是「名單」路線（紫）；數字全部是數字卡，說明收進「規則」卡，列表有固定欄位與分類色標。
+import { ArrowLeftRight, BarChart3, BookOpen, Landmark, LineChart, ListOrdered, Scale, TriangleAlert } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ColorType, CrosshairMode, LineSeries, LineStyle, createChart, createSeriesMarkers } from 'lightweight-charts'
 import { fetchScorecard, fetchScorecardTrades } from './api'
 import { GUEST_LINES } from './auth'
-import { pct, price, trend } from './format'
+import { pct, price } from './format'
 import {
   md,
   navLines,
@@ -24,12 +26,15 @@ import {
   type TradeRow,
   type TradeStats,
 } from './scorecard'
+import { benchDiff, cashRatio, heldText, statTiles, tone } from './score-view'
+import { Kpi, Section } from './Section'
 
-const ACCOUNT = '#FF7A00'
+/** 帳戶的線：名單路線色（紫） */
+const ACCOUNT = '#A78BFA'
 /** 0050 對照線：中性的淺灰，不搶帳戶的顏色 */
 const BENCH = '#9AA0AC'
 /** 另外的對照（D-176 修訂四）依序用的顏色 */
-const EXTRA = ['#4FB3BF', '#B58CF0']
+const EXTRA = ['#4FB3BF', '#FF7A00']
 /** 明細一次顯示幾筆（「再顯示」每按一次多這麼多）。 */
 const PAGE = 50
 /** 帳戶買賣紀錄一次顯示幾筆。 */
@@ -71,7 +76,7 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
   const list = useMemo(() => viewRows(rows ?? [], status, filter), [rows, status, filter])
   const counts = useMemo(() => statusCounts(rows ?? []), [rows])
   return (
-    <main className="cq-body cq-score">
+    <main className="cq-body cq-score cq-sc">
       <aside className="cq-list cq-score-side">
         <div className="cq-seg">
           {GUEST_LINES.map((l) => (
@@ -88,53 +93,40 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
         {c && (
           <>
             <NavChart c={c} />
-            <AccountTrades c={c} />
             <Trades c={c} />
-            <div className="cq-score-block">
-              <div className="cq-score-head">
-                <h2>逐筆明細</h2>
-                <div className="cq-seg cq-seg-small">
-                  {(
-                    [
-                      ['closed', '已賣出'],
-                      ['open', '還沒賣'],
-                      ['all', '全部'],
-                    ] as const
-                  ).map(([k, label]) => (
-                    <button
-                      key={k}
-                      className={status === k ? 'on' : ''}
-                      onClick={() => {
-                        setStatus(k)
-                        setShown(PAGE)
-                      }}
-                    >
-                      {label}
-                      {rows !== null && <em>{counts[k]}</em>}
-                    </button>
-                  ))}
-                </div>
-                <div className="cq-seg cq-seg-small">
-                  {(
-                    [
-                      ['all', '全部'],
-                      ['live', '即時'],
-                      ['backfill', '事後補'],
-                    ] as const
-                  ).map(([k, label]) => (
-                    <button
-                      key={k}
-                      className={filter === k ? 'on' : ''}
-                      onClick={() => {
-                        setFilter(k)
-                        setShown(PAGE)
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+            <AccountTrades c={c} />
+            <Section
+              icon={ListOrdered}
+              title="逐筆明細"
+              meta={
+                <Seg
+                  value={status}
+                  items={[
+                    ['closed', '已賣出', counts.closed],
+                    ['open', '還沒賣', counts.open],
+                    ['all', '全部', counts.all],
+                  ]}
+                  counted={rows !== null}
+                  onChange={(k) => {
+                    setStatus(k)
+                    setShown(PAGE)
+                  }}
+                />
+              }
+            >
+              <Seg
+                value={filter}
+                items={[
+                  ['all', '全部'],
+                  ['live', '即時'],
+                  ['backfill', '事後補'],
+                ]}
+                onChange={(k) => {
+                  setFilter(k)
+                  setShown(PAGE)
+                }}
+                small
+              />
               {rowsErr && <p className="cq-empty">{rowsErr}</p>}
               {!rowsErr && rows === null && <p className="cq-empty">讀取中…</p>}
               {rows !== null && list.length === 0 && <p className="cq-empty">沒有符合的筆數。</p>}
@@ -144,7 +136,7 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
                   再顯示 {Math.min(PAGE, list.length - shown)} 筆（共 {list.length} 筆）
                 </button>
               )}
-            </div>
+            </Section>
           </>
         )}
       </section>
@@ -152,93 +144,116 @@ export function ScorecardPage({ line, onLine, refresh }: { line: string; onLine:
   )
 }
 
-/** 左欄：模擬帳戶的數字、即時段、規則與注意事項。 */
+/** 分段按鈕：值、標籤、（有的話）筆數。 */
+function Seg<K extends string>({
+  value,
+  items,
+  onChange,
+  counted = true,
+  small = false,
+}: {
+  value: K
+  items: readonly (readonly [K, string] | readonly [K, string, number])[]
+  onChange: (k: K) => void
+  counted?: boolean
+  small?: boolean
+}) {
+  return (
+    <div className={`cq-seg cq-seg-small${small ? ' cq-seg-tiny' : ''}`}>
+      {items.map(([k, label, n]) => (
+        <button key={k} className={value === k ? 'on' : ''} onClick={() => onChange(k)}>
+          {label}
+          {counted && n !== undefined && <em>{n}</em>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** 左欄：模擬帳戶的數字卡、對照、規則。 */
 function Account({ c }: { c: Scorecard }) {
   const all = c.account.all
   const live = c.account.live
-  const cashPct = c.account.equity > 0 ? c.account.cash / c.account.equity : null
+  const cash = cashRatio(c.account.cash, c.account.equity)
+  const benches = [
+    { code: c.benchmark.code, ret: all.bench_ret, mdd: all.bench_mdd, error: c.benchmark.error, liveRet: live?.bench_ret ?? null },
+    ...(c.extra_benchmarks ?? []).map((e) => ({ code: e.code, ret: e.all?.ret ?? null, mdd: e.all?.mdd ?? null, error: e.error, liveRet: e.live?.ret ?? null })),
+  ]
   return (
     <div className="cq-score-acct">
-      <div className="cq-score-label">模擬帳戶 · 照名單自動買賣</div>
-      <div className={`cq-big ${trend(all.ret)}`}>
-        {pct(all.ret, 1)}
-        <span className="cq-score-sub">
+      <div className="cq-sc-hero" title="模擬帳戶：名單出來就照固定規則全部當成買了、事後結算，使用者不能挑。這是名單本身的紀錄，不是個人損益，也不是投資建議">
+        <span className="cq-sc-hero-label">
+          <Landmark size={16} strokeWidth={2.2} aria-hidden="true" /> 模擬帳戶 · 照名單自動買賣
+        </span>
+        <b className={`cq-sc-hero-value ${tone(all.ret)}`}>{pct(all.ret, 1)}</b>
+        <span className="cq-sc-hero-sub">
           {md(c.start)} 起 · {wan(c.initial_capital)} → {wan(c.account.equity)}
         </span>
       </div>
-      <dl className="cq-score-dl">
-        <dt>最大回撤</dt>
-        <dd className="down">{pct(all.mdd, 1)}</dd>
-        <dt>年化{all.short ? '（不滿一年，換算）' : ''}</dt>
-        <dd className={trend(all.cagr)}>{pct(all.cagr, 1)}</dd>
-        <dt>目前持股</dt>
-        <dd>
-          {c.account.holdings.length} 檔 · 現金 {ratio(cashPct)}
-        </dd>
-      </dl>
-      <Bench label={`同期買 ${c.benchmark.code} 抱著（含息）`} ret={all.bench_ret} mdd={all.bench_mdd} acct={all.ret} error={c.benchmark.error} code={c.benchmark.code} />
-      {(c.extra_benchmarks ?? []).map((e) => (
-        <Bench key={e.code} label={`同期買 ${e.code} 抱著（含息）`} ret={e.all?.ret ?? null} mdd={e.all?.mdd ?? null} acct={all.ret} error={e.error} code={e.code} />
-      ))}
-      <div className="cq-score-live">
-        <b>即時公布以來</b>
+      <div className="cq-tiles cq-tiles-2">
+        <Kpi label="最大回撤" value={pct(all.mdd, 1)} tone="down" title="淨值從最高點往下掉最多的幅度" />
+        <Kpi label={all.short ? '年化（不滿一年）' : '年化'} value={pct(all.cagr, 1)} tone={tone(all.cagr)} title={all.short ? '不滿一年，按日數換算成一年' : undefined} />
+        <Kpi label="目前持股" value={`${c.account.holdings.length} 檔`} sub={`現金 ${ratio(cash)}`} />
         {live ? (
-          <>
-            <small>
-              {md(live.start)} 起 · {live.n_days} 個交易日
-            </small>
-            <dl className="cq-score-dl compact">
-              <dt>帳戶</dt>
-              <dd className={trend(live.ret)}>{pct(live.ret, 1)}</dd>
-              <dt>最大回撤</dt>
-              <dd className="down">{pct(live.mdd, 1)}</dd>
-              {live.bench_ret !== null && (
-                <>
-                  <dt>同期 {c.benchmark.code}</dt>
-                  <dd className={trend(live.bench_ret)}>{pct(live.bench_ret, 1)}</dd>
-                </>
-              )}
-              {(c.extra_benchmarks ?? []).map(
-                (e) =>
-                  e.live && (
-                    <Fragment key={e.code}>
-                      <dt>同期 {e.code}</dt>
-                      <dd className={trend(e.live.ret)}>{pct(e.live.ret, 1)}</dd>
-                    </Fragment>
-                  ),
-              )}
-            </dl>
-          </>
+          <Kpi label="即時公布以來" value={pct(live.ret, 1)} tone={tone(live.ret)} sub={`${md(live.start)} 起 · ${live.n_days} 天 · 回撤 ${pct(live.mdd, 1)}`} title="名單在下一個交易日開盤前寫進資料庫才算即時公布；之前的是事後補的" />
         ) : (
-          <small>還沒有——目前所有名單都是事後補的。</small>
+          <Kpi label="即時公布以來" value="—" tone="na" sub="全部是事後補的" />
         )}
       </div>
-      <div className="cq-score-notes">
-        <p>
-          <b>規則</b>
-          {c.summary}
-        </p>
-        <p>
-          <b>成交</b>
-          名單收盤後才公布，一律隔天開盤價買進（不假裝用當天收盤價買到）；零股、1,000 萬起始；扣手續費（{(c.trades.costs.commission * 100).toFixed(4)}
-          %，最低 20 元）、賣出證交稅 {(c.trades.costs.tax * 100).toFixed(1)}% 與滑價；股利入帳。
-        </p>
-        <p>
-          <b>即時與事後補</b>
-          名單在下一個交易日開盤前寫進資料庫才算即時公布。
-          {c.live_since
-            ? `${md(c.live_since)} 之前的名單是網站上線後用同一套程式回頭補出來的（圖上虛線），不是當天公布的。`
-            : '目前全部是網站上線後用同一套程式回頭補出來的（圖上虛線），不是當天公布的。'}
-          兩個模型的訓練資料都在 2026-05-04 之前截止（排序模型到 2/25、潛伏飆股模型到 4/30），這段對模型是沒看過的資料。
-        </p>
-        <p>規則事先寫死、之後不改；賠的照列，不挑不刪。這是名單本身的紀錄，不是個人損益，也不是投資建議。</p>
+      <Section icon={Scale} title="同期對照" meta="買進抱著 · 含息">
+        <div className="cq-tiles cq-tiles-2">
+          {benches.map((b) => {
+            const d = benchDiff(all.ret, b.ret)
+            if (b.ret === null)
+              return <Kpi key={b.code} label={b.code} value="—" tone="na" sub={b.error ? `算不出來：${b.error}` : '算不出來'} />
+            return (
+              <Kpi
+                key={b.code}
+                label={b.code}
+                value={pct(b.ret, 1)}
+                tone={tone(b.ret)}
+                sub={`回撤 ${pct(b.mdd, 1)}`}
+                side={d && <i className={`cq-cat ${d.win ? 'cq-cat-list' : 'cq-cat-mute'}`}>{d.text}</i>}
+                title={`同一段期間把同樣的錢拿去買 ${b.code} 抱著不動（含股利）的結果；右邊是帳戶比它多賺或少賺幾個百分點${b.liveRet !== null ? `。即時公布以來這段：${pct(b.liveRet, 1)}` : ''}`}
+              />
+            )
+          })}
+        </div>
+      </Section>
+      <Section icon={BookOpen} title="規則" fold summary="事先寫死、之後不改">
+        <ul className="cq-sc-rules">
+          <li>
+            <i className="cq-cat cq-cat-list">名單</i>
+            <span>{c.summary}</span>
+          </li>
+          <li>
+            <i className="cq-cat cq-cat-list">成交</i>
+            <span>
+              名單收盤後才公布，一律隔天開盤價買進；零股、{wan(c.initial_capital)}起始；手續費 {(c.trades.costs.commission * 100).toFixed(4)}
+              %（最低 20 元）、賣出證交稅 {(c.trades.costs.tax * 100).toFixed(1)}%、滑價；股利入帳。
+            </span>
+          </li>
+          <li>
+            <i className="cq-cat cq-cat-event">即時</i>
+            <span>
+              名單在下一個交易日開盤前寫進資料庫才算即時公布。
+              {c.live_since ? `${md(c.live_since)} 之前的名單是網站上線後用同一套程式回頭補的（圖上虛線）。` : '目前全部是網站上線後用同一套程式回頭補的（圖上虛線）。'}
+              兩個模型的訓練資料都在 2026-05-04 之前截止，這段對模型是沒看過的資料。
+            </span>
+          </li>
+          <li>
+            <i className="cq-cat cq-cat-mute">聲明</i>
+            <span>賠的照列，不挑不刪。這是名單本身的紀錄，不是個人損益，也不是投資建議。</span>
+          </li>
+        </ul>
         {c.gaps.length > 0 && (
-          <p className="cq-score-warn">
-            有 {c.gaps.length} 個交易日沒有公布名單（{c.gaps.slice(0, 5).map(md).join('、')}
+          <p className="cq-sc-warn">
+            <TriangleAlert size={15} strokeWidth={2.2} aria-hidden="true" />
+            {c.gaps.length} 個交易日沒有名單（{c.gaps.slice(0, 5).map(md).join('、')}
             {c.gaps.length > 5 ? '…' : ''}），那幾天沒有新買進。
           </p>
         )}
-      </div>
+      </Section>
     </div>
   )
 }
@@ -263,7 +278,7 @@ function NavChart({ c }: { c: Scorecard }) {
     const chart = createChart(box, {
       width: box.clientWidth,
       height: box.clientHeight,
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#8A8F98', fontSize: 12 },
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#8A8F98', fontSize: 13 },
       grid: { vertLines: { color: '#1C1E25' }, horzLines: { color: '#1C1E25' } },
       rightPriceScale: { borderColor: '#23252D' },
       timeScale: { borderColor: '#23252D', fixLeftEdge: true, fixRightEdge: true },
@@ -300,81 +315,43 @@ function NavChart({ c }: { c: Scorecard }) {
       chart.remove()
     }
   }, [lines, c.nav.length])
+  const extras = (c.extra_benchmarks ?? []).filter((e) => extraLine(c.nav, e.values).length > 0)
   return (
-    <div className="cq-score-block">
-      <div className="cq-score-head">
-        <h2>{c.name} 模擬帳戶</h2>
-        {at && (
-          <span className="cq-score-at">
-            {md(at.d)}　<b style={{ color: ACCOUNT }}>帳戶 {pct(at.v, 1)}</b>
-            {at.b !== null && <b style={{ color: BENCH }}>　{c.benchmark.code} {pct(at.b, 1)}</b>}
-            {at.extras.map(
-              (e, k) =>
-                e.r !== null && (
-                  <b key={e.code} style={{ color: EXTRA[k % EXTRA.length] }}>
-                    　{e.code} {pct(e.r, 1)}
-                  </b>
-                ),
-            )}
-          </span>
-        )}
-      </div>
-      <div className="cq-score-legend">
+    <Section icon={LineChart} title={`${c.name} 淨值`} meta={at && <span className="cq-sc-at">{md(at.d)}</span>}>
+      <div className="cq-sc-legend">
         <span>
           <i className="dash" style={{ borderColor: ACCOUNT }} />
-          事後補的名單
+          事後補
         </span>
         <span>
           <i style={{ background: ACCOUNT }} />
-          即時公布的名單
+          即時公布
+          {at && <b style={{ color: ACCOUNT }}>{pct(at.v, 1)}</b>}
         </span>
         {lines.bench.length > 0 && (
           <span>
             <i style={{ background: BENCH }} />
-            同期 {c.benchmark.code}（含息）
+            {c.benchmark.code}
+            {at && at.b !== null && <b style={{ color: BENCH }}>{pct(at.b, 1)}</b>}
           </span>
         )}
-        {(c.extra_benchmarks ?? []).map(
-          (e, k) =>
-            extraLine(c.nav, e.values).length > 0 && (
-              <span key={e.code}>
-                <i style={{ background: EXTRA[k % EXTRA.length] }} />
-                同期 {e.code}（含息）
-              </span>
-            ),
-        )}
+        {extras.map((e, k) => {
+          const r = at?.extras.find((x) => x.code === e.code)?.r ?? null
+          return (
+            <span key={e.code}>
+              <i style={{ background: EXTRA[k % EXTRA.length] }} />
+              {e.code}
+              {r !== null && <b style={{ color: EXTRA[k % EXTRA.length] }}>{pct(r, 1)}</b>}
+            </span>
+          )
+        })}
       </div>
       <div className="cq-score-chart" ref={el} />
-    </div>
+    </Section>
   )
 }
 
-/** 對照：同期買 0050 抱著的報酬與回撤，以及帳戶贏／輸幾個百分點；算不出來就寫原因（不寫 0）。 */
-function Bench({ label, ret, mdd, acct, error, code }: { label: string; ret: number | null; mdd: number | null; acct: number | null; error: string | null; code: string }) {
-  if (ret === null) {
-    return <p className="cq-score-bench off">{code} 對照算不出來{error ? `：${error}` : ''}</p>
-  }
-  const diff = acct === null ? null : acct - ret
-  return (
-    <div className="cq-score-bench">
-      <b>{label}</b>
-      <dl className="cq-score-dl compact">
-        <dt>報酬</dt>
-        <dd className={trend(ret)}>{pct(ret, 1)}</dd>
-        <dt>最大回撤</dt>
-        <dd className="down">{pct(mdd, 1)}</dd>
-        {diff !== null && (
-          <>
-            <dt>帳戶{diff >= 0 ? '贏' : '輸'}</dt>
-            <dd className={trend(diff)}>{(Math.abs(diff) * 100).toFixed(1)} 個百分點</dd>
-          </>
-        )}
-      </dl>
-    </div>
-  )
-}
-
-/** 模擬帳戶自己的買賣（新到舊）：照名單真的下了哪些單、什麼時候賣、為什麼賣。 */
+/** 模擬帳戶自己的買賣（新到舊）：照名單真的下了哪些單、什麼時候賣、為什麼賣。預設收起。 */
 function AccountTrades({ c }: { c: Scorecard }) {
   const [shown, setShown] = useState(LEDGER_PAGE)
   const [onlySells, setOnlySells] = useState(false)
@@ -386,41 +363,30 @@ function AccountTrades({ c }: { c: Scorecard }) {
   const sells = all?.filter((t) => t.side === 'sell').length ?? 0
   const list = all && onlySells ? all.filter((t) => t.side === 'sell') : all
   return (
-    <div className="cq-score-block">
-      <div className="cq-score-head">
-        <h2>帳戶買賣紀錄</h2>
-        {all && (
-          <div className="cq-seg cq-seg-small">
-            <button
-              className={onlySells ? '' : 'on'}
-              onClick={() => {
-                setOnlySells(false)
-                setShown(LEDGER_PAGE)
-              }}
-            >
-              買賣都看<em>{all.length}</em>
-            </button>
-            <button
-              className={onlySells ? 'on' : ''}
-              onClick={() => {
-                setOnlySells(true)
-                setShown(LEDGER_PAGE)
-              }}
-            >
-              只看賣出<em>{sells}</em>
-            </button>
-          </div>
-        )}
-      </div>
-      <p className="cq-score-p">
-        模擬帳戶照名單實際下的單，都是隔天開盤成交；同一天先賣後買。賣出的「價差」是賣價對這一輪平均買價，不含手續費、證交稅與股利；帳戶淨值才是扣完成本、含股利的結果。
+    <Section icon={ArrowLeftRight} title="帳戶買賣紀錄" fold summary={all ? `${all.length} 筆 · 賣出 ${sells}` : '下一次排程後'}>
+      {all && (
+        <Seg
+          value={onlySells ? 'sell' : 'all'}
+          items={[
+            ['all', '買賣都看', all.length],
+            ['sell', '只看賣出', sells],
+          ]}
+          onChange={(k) => {
+            setOnlySells(k === 'sell')
+            setShown(LEDGER_PAGE)
+          }}
+          small
+        />
+      )}
+      <p className="cq-sc-note" title="帳戶淨值才是扣完成本、含股利的結果">
+        都是隔天開盤成交；同一天先賣後買。賣出的「價差」是賣價對這一輪平均買價，不含費用與股利。
       </p>
       {!list && <p className="cq-empty">下一次排程算完後會出現。</p>}
       {list && list.length === 0 && <p className="cq-empty">還沒有任何買賣。</p>}
       {list && list.length > 0 && (
         <div className="cq-score-trades">
           <div className="cq-trade cq-trade-head">
-            <span>股票／成交日</span>
+            <span>股票 · 成交日</span>
             <span>動作</span>
             <span>成交價</span>
             <span>價差</span>
@@ -435,16 +401,14 @@ function AccountTrades({ c }: { c: Scorecard }) {
                 </small>
               </span>
               <span className="cq-trade-px">
-                <i className={t.side === 'buy' ? 'cq-tag cq-tag-buy' : 'cq-tag cq-tag-sell'}>{t.side === 'buy' ? '買' : '賣'}</i>
+                <i className={t.side === 'buy' ? 'cq-cat cq-cat-event' : 'cq-cat cq-cat-mute'}>{t.side === 'buy' ? '買' : '賣'}</i>
                 <small>{tradeReason(t, c.kind)}</small>
               </span>
               <span className="cq-trade-px">
                 {price(t.price)}
                 <small>{t.shares.toLocaleString('zh-TW')} 股</small>
               </span>
-              <span className="cq-trade-ret">
-                {t.ret === null ? <small>—</small> : <b className={trend(t.ret)}>{pct(t.ret, 1)}</b>}
-              </span>
+              <span className="cq-trade-ret">{t.ret === null ? <small>—</small> : <b className={tone(t.ret)}>{pct(t.ret, 1)}</b>}</span>
             </div>
           ))}
         </div>
@@ -454,66 +418,68 @@ function AccountTrades({ c }: { c: Scorecard }) {
           再顯示 {Math.min(LEDGER_PAGE, list.length - shown)} 筆（共 {list.length} 筆）
         </button>
       )}
-    </div>
+    </Section>
   )
 }
 
-/** 逐筆統計：全部／事後補／即時三欄。 */
+type StatCol = 'all' | 'backfill' | 'live'
+
+/** 逐筆統計：全部／事後補／即時三欄，一次看一欄的數字卡。 */
 function Trades({ c }: { c: Scorecard }) {
   const t = c.trades
-  const cols: [string, TradeStats][] = [
-    ['全部', t.stats.all],
-    ['事後補', t.stats.backfill],
-    ['即時', t.stats.live],
-  ]
-  const loss = Math.round(-t.big_loss * 100)
-  const rows: [string, (s: TradeStats) => string, (s: TradeStats) => string][] = [
-    ['已結算筆數', (s) => String(s.n), () => ''],
-    ['每筆平均', (s) => pct(s.mean, 2), (s) => trend(s.mean)],
-    ['中位數', (s) => pct(s.median, 2), (s) => trend(s.median)],
-    ['賺錢的比例', (s) => ratio(s.win_rate), () => ''],
-    [`虧超過 ${loss}% 的比例`, (s) => ratio(s.big_loss_rate), () => ''],
-    ['最好的一筆', (s) => pct(s.best, 1), (s) => trend(s.best)],
-    ['最差的一筆', (s) => pct(s.worst, 1), (s) => trend(s.worst)],
-  ]
+  const [col, setCol] = useState<StatCol>('all')
+  useEffect(() => setCol('all'), [c.code])
+  const cols: Record<StatCol, TradeStats> = { all: t.stats.all, backfill: t.stats.backfill, live: t.stats.live }
+  const s = cols[col]
+  const tiles = statTiles(s, t.big_loss)
   return (
-    <div className="cq-score-block">
-      <div className="cq-score-head">
-        <h2>逐筆統計</h2>
+    <Section
+      icon={BarChart3}
+      title="逐筆統計"
+      meta={
+        <Seg
+          value={col}
+          items={[
+            ['all', '全部', t.stats.all.n],
+            ['backfill', '事後補', t.stats.backfill.n],
+            ['live', '即時', t.stats.live.n],
+          ]}
+          onChange={setCol}
+        />
+      }
+    >
+      <div
+        className="cq-tiles cq-tiles-stat"
+        title={`每一檔「新進名單」都算一筆：隔天開盤買，抱滿 ${t.hold_sessions} 個交易日後隔天開盤賣；每筆約 ${wan(t.notional)}、扣成本、含股利，不受帳戶位子限制。同一檔還抱著時又進名單不重複買、不另算一筆`}
+      >
+        {tiles.map((x) => (
+          <Kpi key={x.key} label={x.label} value={x.value} sub={x.sub} tone={x.tone} />
+        ))}
       </div>
-      <p className="cq-score-p">
-        每一檔「新進名單」（前一份名單沒有的）都算一筆：隔天開盤買，抱滿 {t.hold_sessions} 個交易日後隔天開盤賣；每筆約 {wan(t.notional)}
-        、扣成本、含股利，不受帳戶位子限制。同一檔還抱著時又進名單，不重複買、也不另算一筆（同坊間回測：同一檔同時只有一個部位）。
-      </p>
-      <table className="cq-score-stats">
-        <thead>
-          <tr>
-            <th />
-            {cols.map(([label]) => (
-              <th key={label}>{label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([label, fmt, cls]) => (
-            <tr key={label}>
-              <th>{label}</th>
-              {cols.map(([k, s]) => (
-                <td key={k} className={cls(s)}>
-                  {fmt(s)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="cq-score-p">
-        還抱著 {t.stats.open} 筆、明天開盤買 {t.stats.pending} 筆、買不到 {t.stats.unfilled} 筆（開盤漲停、停牌等），都不算進上面的統計。
-        {t.stats.repeat !== undefined && t.stats.repeat > 0 && `還抱著又進名單 ${t.stats.repeat} 次，沒有重複算。`}
-        {t.stats.all.n < FEW && <span className="cq-score-warn"> 已結算不到 {FEW} 筆，數字很不穩定，看看就好。</span>}
-        {t.stats.live.n === 0 && <span> 即時公布的名單還沒有抱滿 {t.hold_sessions} 天的，所以即時欄還是空的。</span>}
-      </p>
-    </div>
+      <div className="cq-sc-foot">
+        <span>
+          <i className="cq-cat cq-cat-list">抱著</i> {t.stats.open}
+        </span>
+        <span>
+          <i className="cq-cat cq-cat-event">明天買</i> {t.stats.pending}
+        </span>
+        <span>
+          <i className="cq-cat cq-cat-mute">買不到</i> {t.stats.unfilled}
+        </span>
+        {t.stats.repeat !== undefined && t.stats.repeat > 0 && (
+          <span>
+            <i className="cq-cat cq-cat-mute">重複進榜</i> {t.stats.repeat}
+          </span>
+        )}
+      </div>
+      {s.n < FEW && (
+        <p className="cq-sc-warn">
+          <TriangleAlert size={15} strokeWidth={2.2} aria-hidden="true" />
+          已結算不到 {FEW} 筆，數字很不穩定，看看就好。
+        </p>
+      )}
+      {col === 'live' && t.stats.live.n === 0 && <p className="cq-sc-note">即時公布的名單還沒有抱滿 {t.hold_sessions} 天的。</p>}
+    </Section>
   )
 }
 
@@ -521,7 +487,7 @@ function TradeTable({ rows }: { rows: TradeRow[] }) {
   return (
     <div className="cq-score-trades">
       <div className="cq-trade cq-trade-head">
-        <span>股票／公布日</span>
+        <span>股票 · 公布日</span>
         <span>買進</span>
         <span>賣出</span>
         <span>報酬</span>
@@ -532,8 +498,8 @@ function TradeTable({ rows }: { rows: TradeRow[] }) {
             <b>{stockTitle(r)}</b>
             <small>
               {r.name && <em>{r.sid}</em>}
-              {md(r.signal)} 公布
-              <i className={r.live ? 'cq-tag new' : 'cq-tag'}>{r.live ? '即時' : '補'}</i>
+              {md(r.signal)}
+              <i className={r.live ? 'cq-cat cq-cat-event' : 'cq-cat cq-cat-mute'}>{r.live ? '即時' : '補'}</i>
             </small>
           </span>
           <span className="cq-trade-px">
@@ -550,17 +516,17 @@ function TradeTable({ rows }: { rows: TradeRow[] }) {
             {r.status === 'closed' || r.status === 'open' ? (
               <>
                 {price(r.exit_price)}
-                <small>{r.status === 'open' ? '最新收盤' : md(r.exit_date)}</small>
+                <small>{r.status === 'open' ? '最新' : md(r.exit_date)}</small>
               </>
             ) : (
               '—'
             )}
           </span>
           <span className="cq-trade-ret">
-            <b className={trend(r.ret)}>{pct(r.ret, 1)}</b>
+            <b className={tone(r.ret)}>{pct(r.ret, 1)}</b>
             <small>
               {statusText(r)}
-              {r.status === 'closed' || r.status === 'open' ? ` · ${r.held} 天` : ''}
+              {heldText(r.status, r.held) ? ` · ${heldText(r.status, r.held)}` : ''}
             </small>
           </span>
         </div>

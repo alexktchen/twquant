@@ -1,0 +1,40 @@
+// 績效頁每張卡的手機截圖（手動檢查用）：node tests/shot-score-cards.cjs <baseUrl> <outDir>
+const { chromium } = require('playwright')
+const path = require('node:path')
+;(async () => {
+  const [base, out] = process.argv.slice(2)
+  const browser = await chromium.launch()
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage()
+  await page.setExtraHTTPHeaders({ 'cf-access-authenticated-user-email': 'cktalex@gmail.com' })
+  await page.route('**/api/trades', (r) => r.fulfill({ json: { today: '2026-10-18', max: 5000, items: [] } }))
+  await page.route('**/api/watchlist', (r) => r.fulfill({ json: { max: 100, date: '2026-10-16', items: [] } }))
+  await page.route('**/api/layout', (r) => r.fulfill({ json: { order: null, hidden: [] } }))
+  await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+  const btn = page.getByRole('button', { name: '同意並進入' })
+  if ((await btn.count()) > 0) {
+    await page.locator('input[type="checkbox"]').first().check()
+    await btn.click()
+  }
+  await page.getByRole('button', { name: '績效', exact: true }).click()
+  await page.waitForTimeout(4000)
+  const secs = page.locator('.cq-score-main > .cq-sec')
+  const n = await secs.count()
+  for (let i = 0; i < n; i++) {
+    const s = secs.nth(i)
+    if (i === 2) await s.locator('summary').click()
+    await s.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(300)
+    await s.screenshot({ path: path.join(out, `score-card-${i}.png`) })
+  }
+  const rules = page.locator('.cq-score-side .cq-sec-fold')
+  await rules.locator('summary').click()
+  await page.waitForTimeout(300)
+  await rules.screenshot({ path: path.join(out, 'score-card-rules.png') })
+  await browser.close()
+  console.log('score cards ok', n)
+})().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})

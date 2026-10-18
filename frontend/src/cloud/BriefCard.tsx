@@ -1,12 +1,20 @@
 // 首頁「今日一句話」（T-377／D-188）：模型晨報（數字都檢查過），沒有就用規則版。
-// 使用者 2026-10-17：「做一個可以選日期看歷史的頁面」——標題列可選日期或按 ‹ › 換天，看過去的晨報；
-// 晨報寫在開盤前，歷史那天另列當天大盤實際收盤對照。讀的是存好的晨報，不重叫模型。
+// 使用者 2026-10-17：可選日期看歷史晨報；歷史那天另列當天大盤實際收盤對照。讀的是存好的晨報，不重叫模型。
+// 2026-10-18 改版（地鐵告示）：標題一行大字；每一點前面是【標籤】的圖示；風險一行；「數字」按鈕才展開 45 個數字；說明移到 title。
+import { ChevronLeft, ChevronRight, Hash, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchBriefDay } from './api'
-import { CardFrame } from './CardFrame'
-import type { Slide } from './Reel'
+import { CardFrame, HomeIconSvg } from './CardFrame'
 import { pct } from './format'
-import { briefNeighbors, dayLabel, signedYi, tone, type Brief, type BriefActual } from './war'
+import { chgSub, parseBullet, signedBig } from './home'
+import type { Slide } from './Reel'
+import { Kpi } from './Section'
+import { briefNeighbors, dayLabel, tone, type Brief, type BriefActual } from './war'
+
+const kt = (x: number | null | undefined): 'up' | 'down' | 'plain' => {
+  const t = tone(x)
+  return t === 'flat' ? 'plain' : t
+}
 
 export function BriefCard({
   latest,
@@ -75,27 +83,24 @@ export function BriefCard({
         ]
       : [{ key: 'rule', node: <p className="cq-reel-text">{b.rule_text}</p> }]
 
+  const bullets = (b?.bullets ?? []).map(parseBullet)
+
   return (
     <CardFrame
-      title="今日一句話"
+      id="brief"
       className="cq-war-brief"
       collapsed={collapsed}
       onToggle={onToggle}
       slides={slides}
       empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30 整理）。'}
-      when={
-        <>
-          {viewing && <i className="cq-tag">歷史</i>}
-          {b && <> 整理於 {b.generated_at.slice(5, 16).replace('-', '/')}</>}
-        </>
-      }
+      when={b ? `${viewing ? '歷史・' : ''}${b.generated_at.slice(5, 16).replace('-', '/')}` : undefined}
       extra={
         !collapsed &&
         current &&
         dates.length > 1 && (
           <div className="cq-brief-nav">
             <button aria-label="前一天" disabled={!older} onClick={() => go(older)}>
-              ‹
+              <ChevronLeft size={18} aria-hidden="true" />
             </button>
             <select aria-label="選日期" value={current} onChange={(e) => go(e.target.value)}>
               {dates.map((d) => (
@@ -106,13 +111,8 @@ export function BriefCard({
               ))}
             </select>
             <button aria-label="後一天" disabled={!newer} onClick={() => go(newer)}>
-              ›
+              <ChevronRight size={18} aria-hidden="true" />
             </button>
-            {viewing && (
-              <button className="cq-brief-latest" onClick={() => go(null)}>
-                回到最新
-              </button>
-            )}
           </div>
         )
       }
@@ -124,54 +124,58 @@ export function BriefCard({
       )}
       {b && b.headline && b.bullets ? (
         <>
-          <p className="cq-war-headline">{b.headline}</p>
-          <ul className="cq-war-bullets">
-            {b.bullets.map((x) => (
-              <li key={x}>{x}</li>
+          <p className="cq-brief-headline">{b.headline}</p>
+          <ul className="cq-brief-points" title="AI 依下面的數字整理，每句裡的數字都檢查過出自這些數字">
+            {bullets.map((x, k) => (
+              <li key={k}>
+                <span className="cq-brief-tag">
+                  <HomeIconSvg name={x.icon} size={15} />
+                  {x.tag ?? ''}
+                </span>
+                <span>{x.text}</span>
+              </li>
             ))}
           </ul>
-          {b.risk_note && <p className="cq-war-risk">⚠ {b.risk_note}</p>}
+          {b.risk_note && (
+            <p className="cq-brief-risk">
+              <TriangleAlert size={16} aria-hidden="true" />
+              <span>{b.risk_note}</span>
+            </p>
+          )}
         </>
       ) : (
-        b && <p className="cq-war-headline cq-war-rule">{b.rule_text}</p>
+        b && <p className="cq-brief-headline cq-war-rule">{b.rule_text}</p>
       )}
 
       {viewing && b && (
-        <p className="cq-brief-actual">
+        <div className="cq-brief-actual" title="晨報寫在開盤前；這是那天收盤後的結果，拿來對照，不是晨報的一部分">
           {actual ? (
-            <>
-              <span>{dayLabel(actual.date)} 收盤實際：</span>
-              <span>
-                加權 <b className={tone(actual.taiex_chg)}>{pct(actual.taiex_chg)}</b>
-              </span>
-              {actual.otc_chg !== null && (
-                <span>
-                  櫃買 <b className={tone(actual.otc_chg)}>{pct(actual.otc_chg)}</b>
-                </span>
-              )}
-              {actual.foreign_net !== null && (
-                <span>
-                  外資 <b className={tone(actual.foreign_net)}>{signedYi(actual.foreign_net)}</b>
-                </span>
-              )}
-            </>
+            <div className="cq-tiles cq-tiles-3">
+              <Kpi label={`${dayLabel(actual.date)} 加權`} value={pct(actual.taiex_chg)} sub="實際收盤" tone={kt(actual.taiex_chg)} />
+              {actual.otc_chg !== null && <Kpi label="櫃買" value={pct(actual.otc_chg)} sub="實際收盤" tone={kt(actual.otc_chg)} />}
+              {actual.foreign_net !== null && <Kpi label="外資" value={signedBig(actual.foreign_net)} sub="實際買賣超" tone={kt(actual.foreign_net)} />}
+            </div>
           ) : (
-            <span className="cq-war-mute">{dayLabel(viewing)} 休市或還沒收盤，沒有實際收盤可對照。</span>
+            <p className="cq-war-mute">{dayLabel(viewing)} 休市或還沒收盤，沒有實際收盤可對照。</p>
           )}
-          {actual && <small>晨報寫在開盤前；這是那天收盤後的結果，拿來對照，不是晨報的一部分。</small>}
-        </p>
+        </div>
       )}
 
       {b && (
-        <p className="cq-war-note">
-          {b.headline ? 'AI 依下面的數字整理，每句裡的數字都檢查過出自這些數字；' : ''}
-          {b.absent_reason && !b.headline ? `（AI 摘要這次沒有產生：${b.absent_reason}）` : ''}
+        <div className="cq-brief-foot">
+          {b.absent_reason && !b.headline && <span className="cq-war-mute">AI 摘要這次沒有產生：{b.absent_reason}</span>}
           {b.facts && b.facts.length > 0 && (
-            <button className="cq-war-link" onClick={() => setFactsOpen(!factsOpen)}>
-              {factsOpen ? '收起數字' : `看全部 ${b.facts.length} 個數字`}
+            <button className="cq-hc-link" aria-expanded={factsOpen} onClick={() => setFactsOpen(!factsOpen)}>
+              <Hash size={15} aria-hidden="true" />
+              {factsOpen ? '收起數字' : `${b.facts.length} 個數字`}
             </button>
           )}
-        </p>
+          {!viewing && latestActual && chgSub(latestActual.taiex_chg) !== '—' && (
+            <span className="cq-brief-today" title="今天已收盤：加權實際漲跌">
+              今收 <b className={tone(latestActual.taiex_chg)}>{chgSub(latestActual.taiex_chg)}</b>
+            </span>
+          )}
+        </div>
       )}
       {factsOpen && b?.facts && (
         <ul className="cq-war-facts">
