@@ -7848,7 +7848,7 @@ AI 問：反覆討論裡一直繞著、沒問出口的問題是不是「這套�
 
 ##### 三-3 結果（2026-10-18 跑完後追記；定義一字未改）
 
-觀察 3,491,606 筆、2,061 檔（窗內有除權息等事件剔除 264,887 筆）。報告 `docs/reports/d191-stop-hit-reference.md`，凍結 `configs/stop_hit_reference.json`（sha256 `30b004a2…995cc`）。
+觀察 3,491,606 筆、2,061 檔（窗內有除權息等事件剔除 264,887 筆）。報告 `docs/reports/d191-stop-hit-reference.md`，凍結 `configs/stop_hit_reference.json`（sha256 `63a88697…e75c54e`，以換行統一成 LF 的內容計算；最初記的 `30b004a2…` 是 Windows CRLF 檔的指紋，內容相同）。
 
 | 組 | 日波動度 | 碰 −15% | 碰 +20% | 20 日中位數 |
 |---|---|---|---|---|

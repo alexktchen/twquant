@@ -14,7 +14,13 @@ _JSON = _ROOT / "configs" / "stop_hit_reference.json"
 _MIRROR = _ROOT / "frontend" / "functions" / "_lib" / "stop-hit-table.ts"
 _TS_TEST = _ROOT / "frontend" / "tests" / "cloud-stophit.test.ts"
 # 2026-10-18 跑完登記的定義後凍結（D-191 §三-3）。改了就是改定義，只能另立登記重算。
-_SHA256 = "30b004a2c7fc3c2af051f5df75d1d266db6f4fdabc042ddd8b4f1ad0f64995cc"
+# 指紋算在「換行統一成 LF」的內容上（＝git 裡存的那份）：Windows checkout 會變 CRLF、CI 是 LF，內容一樣指紋要一樣。
+# 原本 30b004a2…995cc 是 Windows 上 CRLF 檔案的指紋，CI 因此紅過一次（2026-10-18），內容一字未改。
+_SHA256 = "63a88697e4358b2768beeaa43ac0b06e16adc73503aabb53fd1f4c601e75c54e"
+
+
+def _frozen_bytes() -> bytes:
+    return _JSON.read_bytes().replace(b"\r\n", b"\n")
 
 
 def _table() -> dict[str, object]:
@@ -24,7 +30,7 @@ def _table() -> dict[str, object]:
 
 # ── AC-1：查表凍結（sha256）、結構照登記：十組、九條界線、定義欄位 ──────────────────
 def test_ac1_table_is_frozen_and_shaped_as_registered() -> None:
-    assert hashlib.sha256(_JSON.read_bytes()).hexdigest() == _SHA256
+    assert hashlib.sha256(_frozen_bytes()).hexdigest() == _SHA256
     t = _table()
     assert (t["dev_start"], t["dev_end"], t["horizon_days"], t["stop"], t["surge"]) == (
         "2017-09-26",

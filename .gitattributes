@@ -1,0 +1,2 @@
+# 凍結檔的指紋測試以 LF 內容計算；固定成 LF 免得各平台 checkout 不同
+configs/stop_hit_reference.json text eol=lf
