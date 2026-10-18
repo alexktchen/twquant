@@ -863,6 +863,52 @@ def pick_blurbs_cmd(
         typer.secho(f"  [!] {e}", fg=typer.colors.YELLOW)
 
 
+@app.command(name="pick-review")
+def pick_review_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+    force: bool = typer.Option(False, help="模型已評過的線也重評（預設沿用，不重呼叫）"),
+    out: str = typer.Option(
+        "", help="資料根目錄（洞悉用量紀錄）；空＝configs/system.yaml data_dir"
+    ),
+) -> None:
+    """單獨跑每日 pipeline 的「名單評分」步驟（T-394／D-196）：四面向評分＋AI 首選 → serving.pick_reviews。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary, written, errors = _pick_review_for_day(day, force=force, out=out)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 名單評分 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+    for w in written:
+        sc = w.scores
+        s4 = (
+            " ".join(
+                f"{k}{sc[key]}"
+                for k, key in zip("消技籌基", ("news", "tech", "chips", "fund"), strict=True)
+            )
+            if sc
+            else "沒有分數"
+        )
+        top = (
+            f"  ★首選（{'AI' if w.source == 'model' else '規則'}）：{w.reason}" if w.is_top else ""
+        )
+        typer.echo(
+            f"  {w.line} {w.stock_id} {s4} [{w.stance or '-'}] {w.conclusion or '（結論沒過）'}{top}"
+        )
+        for k, name in zip(
+            ("news", "tech", "chips", "fund"), ("消息", "技術", "籌碼", "基本"), strict=True
+        ):
+            if w.views.get(k):
+                typer.echo(f"      {name}：{w.views[k]}")
+        for c in w.checks:
+            typer.secho(f"      [檢查] {c}", fg=typer.colors.YELLOW)
+    for e in errors:
+        typer.secho(f"  [!] {e}", fg=typer.colors.YELLOW)
+
+
 @app.command(name="warrants")
 def warrants_cmd(
     date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
@@ -2043,6 +2089,16 @@ def _run_daily_pipeline(
         summary, _, errors = _pick_blurbs_for_day(day)
         return summary + (f"；{'、'.join(errors)}" if errors else "")
 
+    def _pick_review_step() -> str:
+        # T-394／D-196 名單評分：四面向 1～5 分＋AI 首選。模型缺席 → 那天沒有評分（網站不顯示），不擋主線。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        summary, _, errors = _pick_review_for_day(day)
+        return summary + (f"；{'、'.join(errors)}" if errors else "")
+
     def _warrants_step() -> str:
         # T-385 權證：條款變了才多一版、日行情一天一份、每檔標的一列摘要。要標的成交金額（供應層同步後的 prices_daily）。
         # 休市日證交所回 0 列 → 只更新條款。best-effort。
@@ -2191,6 +2247,7 @@ def _run_daily_pipeline(
         PipelineStep("除權息預告", _dividend_calendar_step),
         PipelineStep("內部人申讓", _insider_transfers_step),
         PipelineStep("名單一句話", _pick_blurbs_step),
+        PipelineStep("名單評分", _pick_review_step),
         PipelineStep("紙上交易", _paper_trading_step),
         PipelineStep("每日選股看板", _pick_board_step),
         PipelineStep("洞悉分析", _insight_step),
@@ -3615,6 +3672,37 @@ def _pick_blurbs_for_day(
             scfg.pg_schema,
             day,
             client,
+            cfg.pick_blurbs,
+            cfg.morning_brief.line_names,
+            now_tw(),
+            force=force,
+        )
+    finally:
+        conn.close()
+
+
+def _pick_review_for_day(
+    day: dt.date, *, force: bool = False, out: str = ""
+) -> tuple[str, list[Any], list[str]]:
+    """名單評分（T-394／D-196）：四面向事實 → 模型一條線一次 → 核對 → `pick_reviews`。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.insight.client import InsightClient
+    from twquant.insight.config import load_llm_config
+    from twquant.reporting.pick_review import run_for_day
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    data_dir = Path(out) if out else Path(cfg.data_dir)
+    client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)
+    conn = store.connect(scfg)
+    try:
+        return run_for_day(
+            conn,
+            scfg.pg_schema,
+            day,
+            client,
+            cfg.pick_review,
             cfg.pick_blurbs,
             cfg.morning_brief.line_names,
             now_tw(),

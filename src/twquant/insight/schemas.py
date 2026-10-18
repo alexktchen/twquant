@@ -50,6 +50,8 @@ class MorningBrief(BaseModel):
     headline: str
     bullets: list[str]
     risk_note: str | None = None
+    stance: str  # 今天的立場：偏多／中性／偏空（T-396）；核對過才存成第一點【方向】。必填：選填時 qwen3 直接略過
+    strategy: str  # 今天的操作方向一句
 
 
 class PickBlurbItem(BaseModel):
@@ -67,6 +69,32 @@ class PickBlurbs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[PickBlurbItem]
+
+
+class PickReviewItem(BaseModel):
+    """名單一檔的四面向分數、觀點、立場、結論（T-394／D-196）；範圍與文字由程式核對（不在結構層擋，免得一個欄位錯整檔重試）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    news: int
+    tech: int
+    chips: int
+    fund: int
+    news_view: str
+    tech_view: str
+    chips_view: str
+    fund_view: str
+    stance: str
+    conclusion: str
+
+
+class PickTop(BaseModel):
+    """名單一條線的首選（pick_review 第二步）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    top_sid: str
+    top_reason: str
 
 
 class Explanation(BaseModel):

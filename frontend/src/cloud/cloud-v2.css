@@ -197,3 +197,44 @@
 .cq-blurb-full span { flex: 1; min-width: 0; }
 .cq-blurb-full em { flex: none; font-style: normal; font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 5px; color: var(--mute); background: var(--tile); margin-top: 3px; }
 .cq-blurb-full.ai em { color: #ffc04d; background: rgba(255, 192, 77, .12); }
+
+/* 四面向評分（T-394）：名單列四根小直條（顏色＝面向、高度＝分數）；名單上方首選卡；個股頁四張分數卡。 */
+.cq-s4 { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; padding: 2px 3px; border-radius: 4px; background: var(--tile); flex: none; }
+.cq-s4 i { width: 4px; min-height: 2px; border-radius: 1px; display: block; }
+.cq-s4-md { height: 22px; }
+.cq-s4-md i { width: 5px; }
+.cq .cq-toppick { display: flex; align-items: flex-start; gap: 10px; width: auto; max-width: calc(100% - 24px); box-sizing: border-box; white-space: normal; flex: none; margin: 4px 12px 8px; padding: 10px 12px; border-radius: 12px; text-align: left;
+  background: linear-gradient(90deg, rgba(255, 192, 77, .12), rgba(255, 192, 77, .03)); border: 1px solid rgba(255, 192, 77, .35); color: var(--text); }
+.cq .cq-toppick.on { border-color: #ffc04d; }
+.cq-toppick-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: #ffc04d; background: rgba(255, 192, 77, .15); flex: none; }
+.cq-toppick-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.cq-toppick-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; }
+.cq-toppick-head > b { color: #ffc04d; font-size: 13.5px; }
+.cq-toppick-head em { font-style: normal; color: var(--mute); font-variant-numeric: tabular-nums; }
+.cq-toppick-head strong { font-size: 16.5px; }
+.cq-toppick-head small { color: var(--mute); font-size: 13px; }
+.cq-toppick-reason { overflow-wrap: anywhere; font-size: 14.5px; line-height: 1.45; color: #d6d8de; }
+.cq-rv-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.cq-rv-tile { background: var(--tile); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; border-top: 3px solid var(--c); }
+.cq-rv-name { font-size: 14px; color: var(--c); font-weight: 700; }
+.cq-rv-tile b { font-size: 26px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.cq-rv-tile b small { font-size: 14px; font-weight: 500; color: var(--mute); }
+.cq-rv-meter { display: flex; gap: 3px; }
+.cq-rv-meter i { flex: 1; height: 6px; border-radius: 2px; background: #2a2d36; }
+.cq-rv-meter i.on { background: var(--c); }
+.cq-rv-top { display: flex; align-items: flex-start; gap: 6px; margin: 10px 0 0; font-size: 15px; line-height: 1.45; }
+.cq-rv-top svg { flex: none; margin-top: 3px; color: #ffc04d; }
+.cq-rv-note { margin: 8px 0 0; font-size: 12.5px; color: var(--mute); line-height: 1.5; }
+@media (max-width: 820px) {
+  .cq-rv-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 分析師觀點（T-394 v2）：立場小標、結論、每張分數卡底下一句觀點 */
+.cq .cq-stance { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px; font-style: normal; font-size: 12px; font-weight: 700; }
+.cq .cq-stance.up { color: var(--up); background: rgba(246, 70, 93, .14); }
+.cq .cq-stance.down { color: var(--down); background: rgba(14, 203, 129, .14); }
+.cq .cq-stance.flat { color: var(--mute); background: var(--tile); }
+.cq-row .cq-name small.cq-blurb .cq-stance { margin-top: 0; }
+.cq-rv-concl { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; font-size: 16px; line-height: 1.5; }
+.cq-rv-concl .cq-stance { margin-top: 3px; height: 22px; font-size: 13px; }
+.cq-rv-view { font-size: 13.5px; line-height: 1.45; color: #d6d8de; }

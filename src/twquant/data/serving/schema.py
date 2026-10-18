@@ -911,6 +911,40 @@ PICK_BLURBS_SPEC = TableSpec(
     pk=("date", "line", "stock_id"),
 )
 
+# 名單四面向評分、分析師觀點與 AI 首選（T-394／D-196）：每條線每檔一列。news／tech／chips／fund 1～5 分（沒過＝NULL）；
+# is_top＝這條線當天的首選，source＝model（AI 挑、理由核對過）或 rule（理由沒過→四面向加總最高）。D-196 事後檢驗讀它。
+PICK_REVIEWS_SPEC = TableSpec(
+    "pick_reviews",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("stock_id", "text"),
+        ("news", "integer"),
+        ("tech", "integer"),
+        ("chips", "integer"),
+        ("fund", "integer"),
+        ("total", "integer"),
+        ("news_view", "text"),  # 每個面向一句分析師觀點（沒過核對＝NULL）
+        ("tech_view", "text"),
+        ("chips_view", "text"),
+        ("fund_view", "text"),
+        ("stance", "text"),  # 偏多｜中性｜偏空（跟總分不一致＝NULL）
+        (
+            "conclusion",
+            "text",
+        ),  # 綜合結論（含建議）；名單列顯示這句，沒過核對＝NULL → 網站改顯示一句話（T-393）
+        ("is_top", "boolean"),
+        ("top_reason", "text"),
+        ("source", "text"),
+        ("model_id", "text"),
+        ("prompt_version", "text"),
+        ("facts", "jsonb"),
+        ("checks", "jsonb"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -926,6 +960,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     GROUP_FLOW_SPEC,
     PICK_REASONS_SPEC,
     PICK_BLURBS_SPEC,
+    PICK_REVIEWS_SPEC,
     SCORE_REFERENCE_SPEC,
     SIMILAR_LIBRARY_SPEC,
     PICK_SIMILAR_SPEC,

@@ -64,6 +64,10 @@ class MorningInputs:
     thresholds: dict[str, float] = field(default_factory=dict)  # 研判素材的門檻（system.yaml）
     headlines: list[Headline] = field(default_factory=list)  # 昨晚到今早的新聞頭條
     news_subjects: list[str] = field(default_factory=list)  # 檢查方向寫反的標的（system.yaml）
+    stances: list[str] = field(default_factory=list)  # 今天的操作方向：立場三選一（T-396）
+    strategy_chars: int = 60  # 操作方向一句最多幾個字
+    forbidden_terms: list[str] = field(default_factory=list)  # 操作方向不准出現的字
+    stance_conflicts: dict[str, list[str]] = field(default_factory=dict)  # 立場與持股水位矛盾的字
 
 
 def _rows(conn: Any, schema: str, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -121,6 +125,10 @@ def gather(
             "direction_window": float(cfg.news_direction_window),
         },
         news_subjects=list(cfg.news_direction_subjects),
+        stances=list(cfg.stances),
+        strategy_chars=cfg.strategy_chars,
+        forbidden_terms=list(cfg.forbidden_terms),
+        stance_conflicts={k: list(v) for k, v in cfg.stance_conflicts.items()},
     )
     if missing:
         out.errors.append(f"資料表還沒建：{'、'.join(missing)}（等每日 pipeline 跑過一次）")
@@ -567,6 +575,8 @@ def check_brief(brief: MorningBrief, inp: MorningInputs) -> tuple[MorningBrief |
         headline=strip_self_reference(brief.headline),
         bullets=[strip_self_reference(b) for b in brief.bullets],
         risk_note=strip_self_reference(brief.risk_note) if brief.risk_note else brief.risk_note,
+        stance=brief.stance,
+        strategy=brief.strategy,
     )
     bad_head = unverified_numbers(brief.headline, known)
     if bad_head:
@@ -593,7 +603,65 @@ def check_brief(brief: MorningBrief, inp: MorningInputs) -> tuple[MorningBrief |
         risk = ""
     if not kept:
         return None, [*notes, "每一點都有對不上的數字，整份不用"]
-    return MorningBrief(headline=brief.headline, bullets=kept, risk_note=risk or None), notes
+    direction = check_direction(brief, inp, known, notes)
+    if direction:
+        kept.insert(0, direction)
+    return (
+        MorningBrief(
+            headline=brief.headline,
+            bullets=kept,
+            risk_note=risk or None,
+            stance=brief.stance,
+            strategy=brief.strategy,
+        ),
+        notes,
+    )
+
+
+DIRECTION_TAG = "方向"
+# 「五成」「三成」：模型自己編的持股比例（2026-10-18 實測照抄提示詞例子）；同一句話（T-393）的中文數字規則
+_CN_NUMBER = re.compile(r"[一二兩三四五六七八九十百半]+[成倍旬]|百分之[一二兩三四五六七八九十]")
+
+
+def check_direction(
+    brief: MorningBrief, inp: MorningInputs, known: list[str], notes: list[str]
+) -> str | None:
+    """今天的操作方向（T-396）：立場三選一、一句方向的數字出自事實、方向詞不說反、不喊價保證、不太長。
+    過了回「【方向】偏空｜開盤不追高…」，網站把它放在最上面；沒過記原因、回 None（晨報其他照常）。"""
+    stances = inp.stances
+    stance = (brief.stance or "").strip()
+    text = strip_self_reference(brief.strategy or "").strip().rstrip("。")
+    if not stance and not text:
+        return None
+    if stance not in stances:
+        notes.append(f"丟掉方向（立場不是 {stances}）：{stance}")
+        return None
+    problems: list[str] = []
+    limit = inp.strategy_chars
+    if not text:
+        problems.append("沒有操作方向")
+    if len(text) > limit:
+        problems.append(f"太長（{len(text)} 字）")
+    bad = unverified_numbers(text, known)
+    if bad:
+        problems.append(f"數字 {list(bad)} 不在事實裡")
+    if reversed_directions(text, inp):
+        problems.append("方向跟新聞頭條相反")
+    cn = _CN_NUMBER.findall(text)
+    if cn:
+        problems.append(f"把數字換成中文 {cn}（持股比例不是事實）")
+    if "〈" in text or "〉" in text:
+        problems.append("照抄了句型的佔位")
+    conflict = [w for w in inp.stance_conflicts.get(stance, []) if w in text]
+    if conflict:
+        problems.append(f"立場「{stance}」跟 {conflict} 矛盾")
+    banned = [w for w in inp.forbidden_terms if w in text]
+    if banned:
+        problems.append(f"喊價或保證 {banned}")
+    if problems:
+        notes.append(f"丟掉方向（{'；'.join(problems)}）：{stance}｜{text}")
+        return None
+    return f"【{DIRECTION_TAG}】{stance}｜{text}"
 
 
 def write_brief(

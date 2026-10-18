@@ -297,6 +297,8 @@ def test_ac3_compose_sends_data_in_user_turn_and_degrades(tmp_path: Path) -> Non
                     "加權指數收 27,000 點，跌了 7%",
                 ],
                 risk_note=None,
+                stance="",
+                strategy="",
             ),
             3000,
             300,
@@ -375,10 +377,22 @@ def test_ac5_facts_are_formatted_with_units_and_direction() -> None:
 
 def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:
     inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
-    bad = MorningBrief(headline="外資逾 140 億賣超", bullets=["外資賣超 250 億"], risk_note=None)
+    bad = MorningBrief(
+        headline="外資逾 140 億賣超",
+        bullets=["外資賣超 250 億"],
+        risk_note=None,
+        stance="",
+        strategy="",
+    )
     out, notes = check_brief(bad, inp)
     assert out is None and "140" in notes[0]
-    ok = MorningBrief(headline="外資連續賣超 4 天", bullets=["外資賣超 250 億"], risk_note="null")
+    ok = MorningBrief(
+        headline="外資連續賣超 4 天",
+        bullets=["外資賣超 250 億"],
+        risk_note="null",
+        stance="",
+        strategy="",
+    )
     out2, notes2 = check_brief(ok, inp)
     assert out2 is not None and out2.risk_note is None and notes2 == []
 
@@ -386,7 +400,10 @@ def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:
 def test_ac5_prompt_asks_for_analyst_judgement() -> None:
     # 使用者 2026-10-17：「太白話了」→ v3 盤前快訊；「多一點分析師的角度」→ v4 先研判、再依據、最後觀察重點；數字規則照舊
     # 同日：「也加上昨晚國際金融大事、新聞頭條」「不用加上『我以分析師角度』」→ v5 加【大事】、禁止自報身分
-    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-17.5"
+    # 2026-10-18：「首頁的今日一句話也是要有推薦的方向」→ v6 加 stance＋strategy（今天的操作方向；不准喊點位或保證）
+    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-18.7"
+    for word in ("stance", "strategy", "持股水位", "偏多", "偏空", "不保證漲跌"):
+        assert word in MORNING_BRIEF_SYSTEM
     for word in (
         "盤勢分析師",
         "【研判】",
@@ -475,7 +492,11 @@ def test_ac7_gather_keeps_headlines_after_previous_close() -> None:
     assert not any("台股午盤震盪" in x for x in f)
     # 頭條裡的數字可以被引用：逐句檢查不會把「4%」當成編造
     ok = MorningBrief(
-        headline="油價跳漲 4%，台股開盤恐承壓", bullets=["【大事】油價跳漲 4%"], risk_note=""
+        headline="油價跳漲 4%，台股開盤恐承壓",
+        bullets=["【大事】油價跳漲 4%"],
+        risk_note="",
+        stance="",
+        strategy="",
     )
     out, notes = check_brief(ok, inp)
     assert out is not None and notes == []
@@ -513,6 +534,8 @@ def test_ac7_self_reference_is_stripped() -> None:
         headline="以分析師角度來看，外資連續賣超 4 天",
         bullets=["我以分析師角度分析，外資賣超 250 億"],
         risk_note="",
+        stance="",
+        strategy="",
     )
     out, _ = check_brief(brief, inp)
     assert out is not None
@@ -548,12 +571,54 @@ def test_ac7_flipped_news_direction_is_dropped() -> None:
         headline="外資連續賣超 4 天，台股開盤恐承壓",
         bullets=["【大事】美債殖利率急升反映避險情緒", "外資賣超 250 億"],
         risk_note="",
+        stance="",
+        strategy="",
     )
     out, notes = check_brief(brief, inp)
     assert out is not None and out.bullets == ["外資賣超 250 億"]
     assert any("殖利率" in n and "方向" in n for n in notes)
     bad_head = MorningBrief(
-        headline="油價重挫，台股承壓", bullets=["外資賣超 250 億"], risk_note=""
+        headline="油價重挫，台股承壓",
+        bullets=["外資賣超 250 億"],
+        risk_note="",
+        stance="",
+        strategy="",
     )
     out2, notes2 = check_brief(bad_head, inp)
     assert out2 is None and "方向寫反" in notes2[0]
+
+
+# ── AC-8：今天的操作方向（T-396）——立場三選一、數字出自事實、不喊價；過了放在第一點【方向】 ─────────
+def test_ac8_direction_is_checked_and_put_first() -> None:
+    inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    assert inp.stances == ["偏多", "中性", "偏空"] and "目標價" in inp.forbidden_terms
+
+    def brief(stance: str, strategy: str) -> MorningBrief:
+        return MorningBrief(
+            headline="外資連續賣超 4 天",
+            bullets=["外資賣超 250 億"],
+            risk_note="",
+            stance=stance,
+            strategy=strategy,
+        )
+
+    out, notes = check_brief(brief("偏空", "開盤不追高、持股降低，留意資金流入的半導體。"), inp)
+    assert (
+        out is not None
+        and out.bullets[0] == "【方向】偏空｜開盤不追高、持股降低，留意資金流入的半導體"
+        and notes == []
+    )
+    for stance, text, why in (
+        ("看多", "逢低布局", "立場不是"),
+        ("偏多", "目標價看 30000 點", "喊價或保證"),
+        ("偏多", "外資賣超 999 億仍可布局", "不在事實裡"),
+        ("偏多", "開盤" * 40, "太長"),
+        ("偏空", "持股維持五成以下", "中文"),
+        ("偏空", "持股提高、逢低進場", "矛盾"),
+        ("偏空", "持股〈降低〉、開盤不追高", "佔位"),
+    ):
+        out2, notes2 = check_brief(brief(stance, text), inp)
+        assert out2 is not None and not out2.bullets[0].startswith("【方向】"), why
+        assert any(why in n for n in notes2), (why, notes2)
+    out3, notes3 = check_brief(brief("", ""), inp)  # 舊版模型沒寫方向：不加這一點、不算錯
+    assert out3 is not None and out3.bullets == ["外資賣超 250 億"] and notes3 == []
