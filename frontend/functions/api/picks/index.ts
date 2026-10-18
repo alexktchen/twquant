@@ -10,6 +10,7 @@ import { readHolders } from '../../_lib/holders'
 import { readInsider } from '../../_lib/insider'
 import { readStopHit } from '../../_lib/stop-hit'
 import { readRisks } from '../../_lib/risks'
+import { readDownRisk } from '../../_lib/down-risk'
 import { readReasons } from '../../_lib/reasons'
 import { readReference } from '../../_lib/reference'
 import { readSimilar } from '../../_lib/similar'
@@ -46,6 +47,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const holders = await readHolders(db, target, sids)
     const stopHit = await readStopHit(db, target, sids)
     const risks = await readRisks(db, target, sids)
+    const downRisk = await readDownRisk(db, target)
     const drop = await readDrop(db, target)
     const reference = await readReference(db)
     const similar = await readSimilar(db, target)
@@ -99,6 +101,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             holders: holders.get(r.stock_id) ?? null,
             stop_hit: stopHit.get(r.stock_id) ?? null,
             risks: risks.get(r.stock_id) ?? null,
+            down_risk: downRisk.get(`${code}|${r.stock_id}`) ?? null,
           }
         }),
       }

@@ -400,6 +400,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", required=True)
     ap.add_argument("--json", default=None)
+    ap.add_argument(
+        "--save-model",
+        default=None,
+        help="D-193：另在大盤精選全部開發期列訓練一次最終模型，存到這個目錄（<dir>/model.txt＋meta.json）；只給網站當資訊標記",
+    )
     args = ap.parse_args()
     dsn = os.environ.get("TWQUANT_PG_DSN")
     if not dsn:
@@ -448,7 +453,41 @@ def main() -> int:
             json.dumps(res, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
         )
     print(res["verdict"])
+    if args.save_model:
+        save_final_model(
+            data.filter(pl.col("line") == "CORE"), base_feats, pathlib.Path(args.save_model)
+        )
     return 0
+
+
+FINAL_MODEL_ID = "lgbm_d192_core_down15_20261018"
+
+
+def save_final_model(core: pl.DataFrame, feats: list[str], out_dir: pathlib.Path) -> None:
+    """D-193：大盤精選全部開發期列訓練一次（同超參數、同特徵）→ model.txt＋meta.json。只給網站標記，不進生產模型清單。"""
+    x = core.select(feats).to_numpy().astype(float)
+    y = core["y"].to_numpy().astype(int)
+    booster = lgb.train(LGB_PARAMS, lgb.Dataset(x, label=y), num_boost_round=NUM_ROUNDS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    booster.save_model(str(out_dir / "model.txt"))
+    meta = {
+        "model_id": FINAL_MODEL_ID,
+        "registered": "DECISIONS.md D-192 §二（訓練）／D-193 §二（用途：只標大盤精選、只給人看）",
+        "line": "CORE",
+        "label": f"{HORIZON} 日內最低收盤 ≤ {STOP:.0%}",
+        "train_rows": int(core.height),
+        "train_start": str(core["date"].min()),
+        "train_end": str(core["date"].max()),
+        "pos_rate": float(cast(float, core["y"].cast(pl.Float64).mean())),
+        "features": feats,
+        "params": LGB_PARAMS,
+        "num_boost_round": NUM_ROUNDS,
+        "flag_top_k": DROP_K,
+    }
+    (out_dir / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"最終模型存到 {out_dir}（{core.height:,} 列、{len(feats)} 特徵）")
 
 
 if __name__ == "__main__":

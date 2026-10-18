@@ -818,6 +818,23 @@ def dividend_calendar_cmd(
     typer.secho(f"[OK] 除權息預告 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="down-risk")
+def down_risk_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「易跌標記」步驟（T-391／D-193）：D-192 模型 → serving.pick_down_risk。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _down_risk_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 易跌標記 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
 @app.command(name="warrants")
 def warrants_cmd(
     date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
@@ -1977,6 +1994,16 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _dividend_calendar_for_day(day)
 
+    def _down_risk_step() -> str:
+        # T-391／D-193 易跌標記：D-192 模型對當天大盤精選打機率、標 5 檔。模型檔不在（雲端 Release 包還沒更新）
+        # → 記缺席不 raise；網站那天沒有標記。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _down_risk_for_day(day)
+
     def _warrants_step() -> str:
         # T-385 權證：條款變了才多一版、日行情一天一份、每檔標的一列摘要。要標的成交金額（供應層同步後的 prices_daily）。
         # 休市日證交所回 0 列 → 只更新條款。best-effort。
@@ -2113,6 +2140,7 @@ def _run_daily_pipeline(
         PipelineStep("策略持股", _strategy_targets_step),
         PipelineStep("每日名單", _daily_picks_step),
         PipelineStep("名單理由", _pick_reasons_step),
+        PipelineStep("易跌標記", _down_risk_step),
         PipelineStep("相似情境", _similar_step),
         PipelineStep("對照行情", _benchmark_fill_step),
         PipelineStep("名單績效", _scorecard_step),
@@ -3524,6 +3552,65 @@ def _conferences_for_day(day: dt.date) -> str:
         conn.close()
     upcoming = df.filter(pl.col("date") >= day).height
     return f"{df.height} 場（{len(frames)} 頁），今天起 {upcoming} 場"
+
+
+DOWN_RISK_MODEL_ID = "lgbm_d192_core_down15_20261018"  # D-193：固定這一個，不進 ml.yaml 生產清單
+
+
+def _down_risk_for_day(day: dt.date) -> str:
+    """易跌標記（T-391／D-193）：當天大盤精選 15 檔的 D-192 機率、最高 5 檔 flagged → `pick_down_risk`（整天覆蓋）。"""
+    import polars as pl
+
+    from twquant.conventions import now_tw
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.pick_reasons_store import read_day_picks, read_factor_raw
+    from twquant.data.serving.sync import upsert
+    from twquant.ml import down_risk as dr
+
+    model_dir = Path(_load_system().data_dir) / "models" / DOWN_RISK_MODEL_ID
+    if not (model_dir / "model.txt").exists() or not (model_dir / "meta.json").exists():
+        return f"模型檔缺席（{model_dir}），今天沒有標記"
+    model = dr.load_model(model_dir)
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        picks = [
+            (p.stock_id, p.rank, p.score)
+            for p in read_day_picks(conn, scfg.pg_schema, day)
+            if p.line == dr.LINE
+        ]
+        if not picks:
+            return f"{day} 沒有大盤精選名單，略過"
+        factors = [f for f in model.features if f not in ("score", "rank")]
+        raw = read_factor_raw(conn, scfg.pg_schema, day, factors, [s for s, _, _ in picks])
+        # 當天整個市場都沒算的因子（分點類三支本機與雲端都不算，訓練期曾有）→ 整欄 NaN 交給模型，不算錯；
+        # 有算但名單股全缺的因子才 raise（score_picks 裡判）
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT DISTINCT factor FROM "{scfg.pg_schema}"."factor_values" WHERE date = %s',
+                (day,),
+            )
+            available = {str(r[0]) for r in cur.fetchall()}
+        structural = {f for f in factors if f not in available}
+        df, missing = dr.score_picks(day, picks, raw, model, now_tw(), structural)
+        sch.ensure_tables(conn, (sch.PICK_DOWN_RISK_SPEC,), scfg.pg_schema)
+        sch.assert_columns(conn, sch.PICK_DOWN_RISK_SPEC, scfg.pg_schema)
+        with conn.cursor() as cur:
+            upsert(cur, scfg.pg_schema, sch.PICK_DOWN_RISK_SPEC, df)
+        conn.commit()
+    finally:
+        conn.close()
+    flagged = df.filter(pl.col("flagged")).sort("p", descending=True)
+    names = "、".join(
+        f"{s}({p:.0%})" for s, p in zip(flagged["stock_id"], flagged["p"], strict=True)
+    )
+    absent = (
+        f"；整欄缺值的因子 {len(missing)} 個（當天全市場沒算 {len(structural)} 個，其餘是型態類稀疏因子）"
+        if missing
+        else ""
+    )
+    return f"大盤精選 {df.height} 檔打分，標 {flagged.height} 檔：{names}{absent}"
 
 
 def _warrants_for_day(day: dt.date) -> str:

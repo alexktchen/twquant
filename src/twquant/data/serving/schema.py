@@ -877,6 +877,21 @@ WARRANT_SUMMARY_SPEC = TableSpec(
     indexes=(("underlying_id", "date"),),
 )
 
+# 易跌標記（T-391／D-193）：D-192 模型對當天大盤精選 15 檔的機率，機率最高 5 檔 flagged。只給人看；小表全史保留。
+PICK_DOWN_RISK_SPEC = TableSpec(
+    "pick_down_risk",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("stock_id", "text"),
+        ("model_id", "text"),
+        ("p", "double precision"),  # 20 日內碰 −15% 的模型機率（校準偏高，見 D-192 §七）
+        ("flagged", "boolean"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -906,6 +921,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     WARRANT_TERMS_SPEC,
     WARRANT_DAILY_SPEC,
     WARRANT_SUMMARY_SPEC,
+    PICK_DOWN_RISK_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

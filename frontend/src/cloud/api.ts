@@ -12,6 +12,7 @@ import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
 import type { WarrantDay } from './warrants'
+import type { Trade, TradeList } from './trades'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -99,6 +100,11 @@ export const setTracked = (sid: string, on: boolean) =>
 
 /** 存追蹤股的順序（由上到下的代號）。 */
 export const saveWatchOrder = (order: string[]) => get<{ ok: boolean }>('/api/watchlist', 'PUT', { order })
+
+/** 我的下單（T-388）：列出、記一筆（同代號同日同方向覆蓋）、刪一筆。 */
+export const fetchTrades = () => get<TradeList>('/api/trades')
+export const saveTrade = (t: Omit<Trade, 'created_at'>) => get<{ ok: boolean }>('/api/trades', 'PUT', t)
+export const deleteTrade = (k: { sid: string; date: string; side: Trade['side'] }) => get<{ ok: boolean }>('/api/trades', 'DELETE', k)
 
 /** 盤中即時量價（證交所，約 5 秒更新）；最多 100 檔。 */
 export const fetchQuotes = (sids: string[]) =>

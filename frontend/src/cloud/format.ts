@@ -6,6 +6,7 @@ import type { InsiderFlag } from './insider'
 import type { HoldersFlag } from './holders'
 import type { StopHit } from './stophit'
 import type { Risk } from './risks'
+import type { DownRisk } from './downrisk'
 import type { RefRow } from './reference'
 import type { Similar } from './similar'
 
@@ -40,6 +41,8 @@ export type Pick = {
   stop_hit?: StopHit | null
   /** 風險日曆（T-387）：處置、注意、近期除權息／法說會、營收待公布；沒有、舊後端沒有這欄 → null／undefined */
   risks?: Risk[] | null
+  /** 易跌標記（T-391／D-193）：D-192 模型機率與是否在今天前 5；只有大盤精選有；舊後端沒有這欄 → null／undefined */
+  down_risk?: DownRisk | null
 }
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示。ref：歷史同區間參考（D-179）的列，還沒算或舊後端沒有這欄 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[]; ref?: RefRow[] }
