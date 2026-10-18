@@ -23,4 +23,5 @@ tasks:
   advisor: opus               # 策略調整提案，最強推理（沒排程、錯誤成本高，留 Claude）
   explainer: opus             # 異常解釋，錯誤成本高
   morning_brief: cf_qwen3     # 06:30 晨報（T-377／D-188）；一天一次、約 3k 進 400 出
+  pick_blurb: cf_qwen3         # 名單每檔一句話（T-393／D-195）；一條線一次呼叫，約 2.5k 進 800 出
   candidate_analysis: cf_qwen3  # 每日候選證據分析；N=30／晚（D-081b）。D-081a 的 opus 路由由 D-185 暫改

@@ -7,6 +7,7 @@ import type { HoldersFlag } from './holders'
 import type { StopHit } from './stophit'
 import type { Risk } from './risks'
 import type { DownRisk } from './downrisk'
+import type { Blurb } from './blurb'
 import type { RefRow } from './reference'
 import type { Similar } from './similar'
 
@@ -43,6 +44,8 @@ export type Pick = {
   risks?: Risk[] | null
   /** 易跌標記（T-391／D-193）：D-192 模型機率與是否在今天前 5；只有大盤精選有；舊後端沒有這欄 → null／undefined */
   down_risk?: DownRisk | null
+  /** 一句話（T-393／D-195）：AI 寫的或規則句；那天沒算、舊後端沒有這欄 → null／undefined */
+  blurb?: Blurb | null
 }
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示。ref：歷史同區間參考（D-179）的列，還沒算或舊後端沒有這欄 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[]; ref?: RefRow[] }

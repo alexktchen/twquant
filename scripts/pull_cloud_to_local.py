@@ -50,6 +50,7 @@ TABLES: tuple[str, ...] = (
     "insider_transfer_notices",
     "warrant_summary_daily",
     "pick_down_risk",
+    "pick_blurbs",  # T-393
 )
 
 

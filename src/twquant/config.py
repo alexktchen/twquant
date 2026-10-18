@@ -93,6 +93,28 @@ class NewsFeed(BaseConfig):
     label: str
 
 
+class PickBlurbsConfig(BaseConfig):
+    """名單每檔一句話（T-393／D-195）。權威說明在 system.yaml 的註解。"""
+
+    lines: list[str]
+    max_chars: int = Field(gt=0)
+    max_numbers: int = Field(ge=0)
+    near_high: float = Field(ge=0)
+    max_tokens: int = Field(gt=0)
+    move_days: int = Field(ge=1)
+    drop_alert: float = Field(gt=0)
+    ahead_days: int = Field(ge=0)
+    announcement_days: int = Field(ge=1)
+    announcement_max: int = Field(ge=0)
+    announcement_chars: int = Field(gt=0)
+    insider_days: int = Field(ge=1)
+    common_share: float = Field(gt=0, le=1)
+    state_terms: list[str]
+    evidence_terms: dict[str, list[str]]
+    jargon_terms: list[str]
+    advice_terms: list[str]
+
+
 class MorningBriefConfig(BaseConfig):
     """晨報（T-377／D-188）：06:30 那班抓的全球行情、晨報引用哪些資料。權威說明在 system.yaml 的註解。"""
 
@@ -185,6 +207,7 @@ class SystemConfig(BaseConfig):
     conferences: ConferencesConfig = ConferencesConfig()
     warrants: WarrantConfig = WarrantConfig()
     morning_brief: MorningBriefConfig
+    pick_blurbs: PickBlurbsConfig
 
 
 # D-020 綜合分有效子集的預設值（serving.yaml.composite_factors 缺省時後備）。

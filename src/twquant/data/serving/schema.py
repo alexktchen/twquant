@@ -892,6 +892,25 @@ PICK_DOWN_RISK_SPEC = TableSpec(
     pk=("date", "line", "stock_id"),
 )
 
+# 名單每檔一句話（T-393／D-195）：每條線每檔一列。source＝model（模型寫、通過檢查）或 rule（規則句：模型缺席或沒過檢查）。
+# facts＝給模型看的事實句、checks＝沒過的原因；網站只讀 text 與 source。
+PICK_BLURBS_SPEC = TableSpec(
+    "pick_blurbs",
+    (
+        ("date", "date"),
+        ("line", "text"),
+        ("stock_id", "text"),
+        ("text", "text"),
+        ("source", "text"),
+        ("model_id", "text"),
+        ("prompt_version", "text"),
+        ("facts", "jsonb"),
+        ("checks", "jsonb"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "line", "stock_id"),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -906,6 +925,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     STOCK_GROUP_SPEC,
     GROUP_FLOW_SPEC,
     PICK_REASONS_SPEC,
+    PICK_BLURBS_SPEC,
     SCORE_REFERENCE_SPEC,
     SIMILAR_LIBRARY_SPEC,
     PICK_SIMILAR_SPEC,
