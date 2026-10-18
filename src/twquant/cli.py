@@ -818,6 +818,23 @@ def dividend_calendar_cmd(
     typer.secho(f"[OK] 除權息預告 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
 
 
+@app.command(name="warrants")
+def warrants_cmd(
+    date: str = typer.Option("today", help="交易日 YYYY-MM-DD 或 today"),
+) -> None:
+    """單獨跑每日 pipeline 的「權證」步驟：條款版本、日行情、每檔標的摘要 → serving.warrant_*。"""
+    from twquant.conventions import now_tw
+    from twquant.errors import DataError
+
+    day = now_tw().date() if date == "today" else dt.date.fromisoformat(date)
+    try:
+        summary = _warrants_for_day(day)
+    except DataError as exc:
+        typer.secho(f"[FAILED] {exc}", fg=typer.colors.RED, bold=True)
+        raise typer.Exit(1) from exc
+    typer.secho(f"[OK] 權證 @ {day}：{summary}", fg=typer.colors.GREEN, bold=True)
+
+
 @app.command(name="insider-transfers")
 def insider_transfers_cmd(
     date: str = typer.Option("today", help="以哪一天為「今天」YYYY-MM-DD 或 today"),
@@ -1960,6 +1977,16 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _dividend_calendar_for_day(day)
 
+    def _warrants_step() -> str:
+        # T-385 權證：條款變了才多一版、日行情一天一份、每檔標的一列摘要。要標的成交金額（供應層同步後的 prices_daily）。
+        # 休市日證交所回 0 列 → 只更新條款。best-effort。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _warrants_for_day(day)
+
     def _insider_transfers_step() -> str:
         # T-384 內部人申讓：兩份官方表都是當天快照，每天 upsert 累積成歷史；休市日照跑（拿到同一天，冪等）。best-effort。
         from twquant.data.serving import store
@@ -2079,6 +2106,7 @@ def _run_daily_pipeline(
         PipelineStep("月營收", _revenue_step),
         PipelineStep("集保大戶", _tdcc_step),
         PipelineStep("供應層", _serving_step),
+        PipelineStep("權證", _warrants_step),
         PipelineStep("選股池快照", _screener_step),
         PipelineStep("ML 推薦名單", _recommendation_step),
         PipelineStep("潛伏飆股打分", _quiet_score_step),
@@ -3496,6 +3524,68 @@ def _conferences_for_day(day: dt.date) -> str:
         conn.close()
     upcoming = df.filter(pl.col("date") >= day).height
     return f"{df.height} 場（{len(frames)} 頁），今天起 {upcoming} 場"
+
+
+def _warrants_for_day(day: dt.date) -> str:
+    """權證（T-385）：條款（變了才多一版）＋ day 的日行情 ＋ 每檔四碼標的的摘要 → PG。"""
+    import polars as pl
+
+    from twquant.conventions import now_tw
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+    from twquant.data.serving.sync import upsert
+    from twquant.data.sources import warrant as wr
+    from twquant.data.sources.tpex import browser_client
+    from twquant.reporting import warrant_summary as ws
+
+    cfg = _load_system()
+    scfg = _load_serving()
+    now = now_tw()
+    twse = HttpClient(source="twse_rwd", rate=cfg.source_rates["twse_rwd"])
+    tpex = browser_client(cfg.source_rates["tpex"])
+    fresh = wr.fetch_terms(twse, tpex, now)
+    daily = wr.fetch_daily(twse, tpex, day, now)
+    conn = store.connect(scfg)
+    try:
+        specs = (sch.WARRANT_TERMS_SPEC, sch.WARRANT_DAILY_SPEC, sch.WARRANT_SUMMARY_SPEC)
+        sch.ensure_tables(conn, specs, scfg.pg_schema)
+        for spec in specs:
+            sch.assert_columns(conn, spec, scfg.pg_schema)
+        q = scfg.pg_schema
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT DISTINCT ON (warrant_id) {', '.join(sch.WARRANT_TERMS_SPEC.column_names)} "
+                f'FROM "{q}"."warrant_terms" ORDER BY warrant_id, valid_from DESC'
+            )
+            latest = pl.DataFrame(cur.fetchall(), schema=wr.TERMS_SCHEMA, orient="row")
+            new_terms = wr.new_versions(fresh, latest, day)
+            if not new_terms.is_empty():
+                upsert(cur, q, sch.WARRANT_TERMS_SPEC, new_terms)
+            if not daily.is_empty():
+                upsert(cur, q, sch.WARRANT_DAILY_SPEC, daily)
+            cur.execute(
+                f'SELECT stock_id, amount FROM "{q}"."prices_daily" WHERE date = %s AND amount IS NOT NULL',
+                (day,),
+            )
+            amounts = pl.DataFrame(
+                cur.fetchall(), schema={"stock_id": pl.Utf8(), "amount": pl.Float64()}, orient="row"
+            )
+            # 摘要用「今天抓到的條款」（含還沒寫進 PG 的新版本），不用 PG 舊版
+            summary = ws.summarize(daily, fresh, amounts, day, cfg.warrants, now)
+            if not summary.is_empty():
+                upsert(cur, q, sch.WARRANT_SUMMARY_SPEC, summary)
+        conn.commit()
+    finally:
+        conn.close()
+    if daily.is_empty():
+        return f"休市或還沒公布：行情 0 列；條款新版本 {new_terms.height}（存續 {fresh.height} 檔）"
+    with_iv = int(summary["iv_call"].is_not_null().sum())
+    return (
+        f"行情 {daily.height} 列（上市 {int((daily['market'] == 'twse').sum())}、"
+        f"上櫃 {int((daily['market'] == 'tpex').sum())}），條款新版本 {new_terms.height}（存續 {fresh.height} 檔），"
+        f"摘要 {summary.height} 檔標的、{with_iv} 檔算得出認購隱含波動"
+    )
 
 
 def _insider_transfers_for_day(day: dt.date) -> str:

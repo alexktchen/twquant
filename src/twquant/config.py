@@ -162,6 +162,16 @@ class ChipDailyConfig(BaseConfig):
         return self
 
 
+class WarrantConfig(BaseConfig):
+    """權證（T-385／D-191 方向 4）。權威說明在 system.yaml 的註解。"""
+
+    risk_free_rate: float = Field(default=0.016, ge=0.0, le=0.2)  # 隱含波動用的年化無風險利率
+    iv_min_days: int = Field(default=20, ge=1)  # 算隱含波動只看距到期這麼多天以上的權證
+    iv_max_days: int = Field(default=120, ge=1)  # …到這麼多天以下
+    iv_max_moneyness: float = Field(default=0.15, gt=0.0)  # |履約價／標的價 − 1| 上限（價平附近）
+    stock_pattern: str = "^[1-9][0-9]{3}$"  # 摘要只算四碼普通股標的
+
+
 class SystemConfig(BaseConfig):
     """system.yaml 的最小模型（SPEC-001 為權威來源，後續任務擴充）。"""
 
@@ -173,6 +183,7 @@ class SystemConfig(BaseConfig):
     market_daily: MarketDailyConfig = MarketDailyConfig()
     taifex_daily: TaifexDailyConfig = TaifexDailyConfig()
     conferences: ConferencesConfig = ConferencesConfig()
+    warrants: WarrantConfig = WarrantConfig()
     morning_brief: MorningBriefConfig
 
 

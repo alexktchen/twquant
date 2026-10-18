@@ -31,6 +31,7 @@ import { holdersTag } from './holders'
 import { stopHitLine, stopHitTitle } from './stophit'
 import { StockHolders } from './StockHolders'
 import { StockStopHit } from './StockStopHit'
+import { StockWarrants } from './StockWarrants'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
@@ -1134,6 +1135,7 @@ function Detail({
       <StockStopHit sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
       <StockHolders sid={sid} refresh={refresh} />
+      <StockWarrants sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (

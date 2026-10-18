@@ -811,6 +811,72 @@ INSIDER_TRANSFER_SPEC = TableSpec(
     indexes=(("stock_id", "date"),),
 )
 
+# 權證（T-385，2026-10-18）：條款只在變了才多一版（valid_from，不是 date，所以不能進 cloud.windows）；
+# 日行情每天一份（雲端只留 2 天，摘要算完就用不到）；摘要每檔四碼標的一列（網站讀這張）。
+# 欄位與 data/sources/warrant.TERMS_SCHEMA／DAILY_SCHEMA、reporting/warrant_summary.SUMMARY_SCHEMA 同名同序。
+WARRANT_TERMS_SPEC = TableSpec(
+    "warrant_terms",
+    (
+        ("valid_from", "date"),
+        ("warrant_id", "text"),
+        ("market", "text"),
+        ("underlying_id", "text"),
+        ("underlying_name", "text"),
+        ("kind", "text"),
+        ("style", "text"),
+        ("category", "text"),
+        ("expiry_date", "date"),
+        ("last_trade_date", "date"),
+        ("strike", "double precision"),
+        ("ratio", "double precision"),
+        ("cap", "double precision"),
+        ("floor", "double precision"),
+        ("issued_k_units", "double precision"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("warrant_id", "valid_from"),
+)
+WARRANT_DAILY_SPEC = TableSpec(
+    "warrant_daily",
+    (
+        ("date", "date"),
+        ("warrant_id", "text"),
+        ("market", "text"),
+        ("underlying_id", "text"),
+        ("kind", "text"),
+        ("close", "double precision"),
+        ("volume_units", "double precision"),
+        ("trade_value", "double precision"),
+        ("trades", "double precision"),
+        ("last_bid", "double precision"),
+        ("last_ask", "double precision"),
+        ("underlying_close", "double precision"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("warrant_id", "date"),
+    indexes=(("underlying_id", "date"),),
+)
+WARRANT_SUMMARY_SPEC = TableSpec(
+    "warrant_summary_daily",
+    (
+        ("date", "date"),
+        ("underlying_id", "text"),
+        ("n_call", "bigint"),
+        ("n_put", "bigint"),
+        ("call_value", "double precision"),
+        ("put_value", "double precision"),
+        ("underlying_amount", "double precision"),
+        ("value_ratio", "double precision"),
+        ("iv_call", "double precision"),
+        ("iv_put", "double precision"),
+        ("iv_call_days", "bigint"),
+        ("iv_put_days", "bigint"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "underlying_id"),
+    indexes=(("underlying_id", "date"),),
+)
+
 _ALL_SPECS: tuple[TableSpec, ...] = (
     *MIRROR_SPECS,
     *FACTOR_SPECS,
@@ -837,6 +903,9 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     MORNING_BRIEF_SPEC,
     DIVIDEND_CALENDAR_SPEC,
     INSIDER_TRANSFER_SPEC,
+    WARRANT_TERMS_SPEC,
+    WARRANT_DAILY_SPEC,
+    WARRANT_SUMMARY_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

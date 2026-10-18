@@ -11,6 +11,7 @@ import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
+import type { WarrantDay } from './warrants'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -73,6 +74,10 @@ export const fetchStockCalendar = (sid: string) =>
 /** 這一檔的波動度落在哪一組、那組 20 日內碰 −15%／+20% 的歷史比例（D-191 §三 C）；收盤不足是 null。 */
 export const fetchStockStopHit = (sid: string) =>
   get<{ sid: string; today: string; hit: StopHit | null }>(`/api/stocks/${encodeURIComponent(sid)}/stophit`)
+
+/** 這一檔最近幾天的權證摘要（T-385）；沒有權證或還沒算是空陣列。 */
+export const fetchStockWarrants = (sid: string) =>
+  get<{ sid: string; today: string; days: WarrantDay[] }>(`/api/stocks/${encodeURIComponent(sid)}/warrants`)
 
 /** 這一檔最近幾週的千張大戶比例（T-386）；還沒累積到資料是空陣列。 */
 export const fetchStockHolders = (sid: string) =>

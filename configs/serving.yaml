@@ -69,6 +69,8 @@ cloud:
     group_flow_daily: 60           # 族群資金（D-177 修訂）：網站只看最新一天，留三個月左右
     mops_announcements: 25              # 重大訊息（T-371）：證據包讀近 30 個日曆日，約 22 個交易日；一天約 300 則、只存主旨
     insight_packs: 60              # 洞悉證據包副本（T-373）：網站個股頁讀最近幾份；30 檔／日 × 約 5 KB
+    warrant_daily: 2               # 權證日行情（T-385）：摘要當天算完就用不到；一天約 4.8 萬列
+    warrant_summary_daily: 60      # 權證摘要（T-385）：網站個股頁看近幾天；一天約 600 列
     shareholding_dispersion: 9     # 集保千張大戶（T-386）：**週**快照，窗口數＝週數；個股頁看 8 週走勢＋1 週算變化。四碼 2,950 檔 × 15 級 ≈ 4.4 萬列／週
   exclude_factors:                 # 雲端不算（見 CloudConfig 註解）
     - chip.broker_concentration_20d  # T-016：需 broker_trades 全歷史（隔日沖分點 expanding 比率）＋20 日窗 > 雲端 10 日
