@@ -19,19 +19,15 @@ const path = require('node:path')
   }
   await page.getByRole('button', { name: '績效', exact: true }).click()
   await page.waitForTimeout(4000)
-  const secs = page.locator('.cq-score-main > .cq-sec')
+  const secs = page.locator('.cq-score-main > .cq-sec, .cq-score-acct > .cq-sec')
   const n = await secs.count()
   for (let i = 0; i < n; i++) {
     const s = secs.nth(i)
-    if (i === 2) await s.locator('summary').click()
+    if ((await s.locator(':scope > summary').count()) > 0) await s.locator(':scope > summary').click()
     await s.scrollIntoViewIfNeeded()
     await page.waitForTimeout(300)
     await s.screenshot({ path: path.join(out, `score-card-${i}.png`) })
   }
-  const rules = page.locator('.cq-score-side .cq-sec-fold')
-  await rules.locator('summary').click()
-  await page.waitForTimeout(300)
-  await rules.screenshot({ path: path.join(out, 'score-card-rules.png') })
   await browser.close()
   console.log('score cards ok', n)
 })().catch((e) => {

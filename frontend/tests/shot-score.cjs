@@ -1,10 +1,10 @@
-// 績效頁截圖（手動檢查用，不進 npm test）：node tests/shot-score.cjs <baseUrl> <outDir> <prefix>
+// 績效頁截圖（手動檢查用，不進 npm test）：node tests/shot-score.cjs <baseUrl> <outDir> <prefix> [線別名稱]
 // 桌機整頁、手機整頁、手機上半。追蹤股與下單 API 本機拿不到 Cloudflare 權杖 → 用假資料攔下。
 const { chromium } = require('playwright')
 const path = require('node:path')
 
 ;(async () => {
-  const [base, out, prefix] = process.argv.slice(2)
+  const [base, out, prefix, lineName] = process.argv.slice(2)
   const browser = await chromium.launch()
   const open = async (w, h, mobile) => {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: mobile ? 2 : 1, isMobile: mobile, hasTouch: mobile })
@@ -28,7 +28,11 @@ const path = require('node:path')
     await page.waitForTimeout(1500)
     await agree(page)
     await page.getByRole('button', { name: '績效', exact: true }).click()
-    await page.waitForTimeout(4000)
+    await page.waitForTimeout(3000)
+    if (lineName) {
+      await page.locator('.cq-score-side .cq-seg button', { hasText: lineName }).click()
+      await page.waitForTimeout(3000)
+    }
   }
   const d = await open(1360, 900, false)
   await go(d)

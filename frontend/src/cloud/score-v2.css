@@ -87,3 +87,99 @@
   .cq-sc .cq-tiles-stat { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cq-sc .cq-trade { grid-template-columns: minmax(0, 1fr) 68px 68px 96px; }
 }
+
+/* ── 第二版（2026-10-18，使用者：「看不太懂」）：每張卡一個問題＋一句結論，長條與比例條取代表格 ── */
+.cq-sc .cq-sec-head > b { white-space: normal; }
+.cq-sc-big { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.cq-sc-big b { font-size: 40px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.cq-sc-big b.up { color: var(--up); }
+.cq-sc-big b.down { color: var(--down); }
+.cq-sc-big span { color: var(--mute); font-size: 15px; font-variant-numeric: tabular-nums; }
+
+/* 橫條：名稱｜長條｜數字 */
+.cq-bars { display: flex; flex-direction: column; gap: 8px; }
+.cq-bar-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 70px; align-items: center; gap: 8px; font-size: 15px; }
+.cq-bar-row.main { font-weight: 700; }
+.cq-bar-label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cq-bar-label i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.cq-bar-track { position: relative; height: 16px; border-radius: 4px; background: var(--tile); overflow: hidden; }
+.cq-bar-track.split::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #3a3d46; }
+.cq-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.cq-bar-row:not(.main) .cq-bar-fill { opacity: .75; }
+.cq-bar-value { text-align: right; font-variant-numeric: tabular-nums; font-size: 16px; }
+.cq-bar-value.up { color: var(--up); }
+.cq-bar-value.down { color: var(--down); }
+.cq-bar-value.na { color: var(--mute); }
+.cq-sc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.cq-sc-chips .cq-cat { height: 28px; font-size: 14px; padding: 0 10px; }
+
+/* 一句結論 */
+.cq-sc-verdict { display: flex; align-items: flex-start; gap: 6px; margin: 12px 0 0; font-size: 15px; line-height: 1.45; color: var(--text); }
+.cq-sc-verdict svg { flex: none; margin-top: 2px; color: #ffc04d; }
+.cq-sc-verdict.big { margin: 0 0 12px; font-size: 17px; font-weight: 700; }
+
+/* 時間軸：回頭補算（虛線框）＋每天公布（實心） */
+.cq-timeline { display: flex; gap: 3px; height: 14px; }
+.cq-timeline span { border-radius: 4px; }
+.cq-tl-back { background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--line-list) 55%, transparent) 0 8px, transparent 8px 12px); }
+.cq-tl-live { background: var(--line-list); }
+.cq-tl-legend { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.cq-tl-legend > div { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 15px; }
+.cq-tl-legend small { color: var(--mute); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-tl-legend em { font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cq-tl-legend em.up { color: var(--up); }
+.cq-tl-legend em.down { color: var(--down); }
+.cq-tl-key { width: 14px; height: 10px; border-radius: 3px; }
+.cq-tl-key.back { background: repeating-linear-gradient(90deg, var(--line-list) 0 4px, transparent 4px 6px); }
+.cq-tl-key.live { background: var(--line-list); }
+
+/* 圖例：每條線一個色塊＋名稱＋當天數字；虛實線說明靠右 */
+.cq-sc-legend b.up { color: var(--up); }
+.cq-sc-legend b.down { color: var(--down); }
+.cq-sc-legend-note { margin-left: auto; font-size: 13px; }
+.cq-sc-legend-note i + i { margin-left: 10px; }
+
+/* 四格比例條：大賺（深紅）小賺（淺紅）小賠（淺綠）大賠（深綠） */
+.cq-stack { display: flex; height: 34px; border-radius: 8px; overflow: hidden; gap: 2px; }
+.cq-stack span { display: grid; place-items: center; min-width: 4px; font-size: 14px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.cq-stack-bw { background: var(--up); }
+.cq-stack-w { background: color-mix(in srgb, var(--up) 45%, var(--tile)); }
+.cq-stack-l { background: color-mix(in srgb, var(--down) 45%, var(--tile)); }
+.cq-stack-bl { background: var(--down); }
+.cq-stack span.cq-stack-bl, .cq-stack span.cq-stack-l { color: #0e0f14; }
+.cq-stack-legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.cq-stack-legend > div { display: grid; grid-template-columns: 12px auto; grid-template-rows: auto auto auto; column-gap: 6px; align-items: center; }
+.cq-stack-dot { width: 12px; height: 12px; border-radius: 3px; grid-row: 1; }
+.cq-stack-legend b { font-size: 15px; }
+.cq-stack-legend small { grid-column: 1 / -1; color: var(--mute); font-size: 12.5px; white-space: nowrap; }
+.cq-stack-legend em { grid-column: 1 / -1; font-style: normal; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cq-sc-out-tiles { margin-top: 12px; }
+
+/* 每一檔的結果：名稱｜小長條（中間是 0）｜報酬，第二行買賣路徑 */
+.cq-pk-list { border-top: 1px solid var(--line); }
+.cq-pk { display: grid; grid-template-columns: minmax(0, 1fr) 110px 86px; grid-template-rows: auto auto; column-gap: 10px; row-gap: 2px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.cq-pk-name { min-width: 0; }
+.cq-pk-name b { display: block; font-size: 16.5px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.cq-pk-name small { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; color: var(--mute); font-size: 13.5px; }
+.cq-pk-name small em { font-style: normal; font-variant-numeric: tabular-nums; }
+.cq-pk-name small .cq-cat { height: 20px; font-size: 12px; padding: 0 5px; }
+.cq-pk-bar { position: relative; height: 12px; border-radius: 3px; background: var(--tile); }
+.cq-pk-bar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: #3a3d46; }
+.cq-pk-bar > span { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.cq-pk-bar > span.pos { background: var(--up); }
+.cq-pk-bar > span.neg { background: var(--down); }
+.cq-pk-ret { display: flex; flex-direction: column; align-items: flex-end; }
+.cq-pk-ret b { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cq-pk-ret b.up { color: var(--up); }
+.cq-pk-ret b.down { color: var(--down); }
+.cq-pk-ret b.na { color: var(--mute); }
+.cq-pk-ret small { color: var(--mute); font-size: 12.5px; }
+.cq-pk-path { grid-column: 1 / -1; color: #b9bdc6; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 820px) {
+  .cq-sc-big b { font-size: 36px; }
+  .cq-bar-row { grid-template-columns: 76px minmax(0, 1fr) 66px; }
+  .cq-stack-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; }
+  .cq-pk { grid-template-columns: minmax(0, 1fr) 64px 80px; column-gap: 8px; }
+  .cq-sc-legend-note { margin-left: 0; }
+}
