@@ -2,6 +2,7 @@
 // 深色底、橘色強調、左側自選股式名單、右側 K 線。漲紅跌綠（台股習慣）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './cloud.css'
+import './cloud-v2.css'
 import {
   fetchBars,
   fetchMe,
@@ -26,13 +27,32 @@ import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
-import { flowText, groupLine, groupTitle, sameGroups, tagText, type Group } from './group'
-import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } from './reasons'
-import { dropNote, weakSummary, weakTags } from './weak'
-import { insiderTag } from './insider'
-import { holdersTag } from './holders'
-import { riskTags } from './risks'
-import { downRiskTag } from './downrisk'
+import { flowText, groupLine, groupTitle, sameGroups, type Group } from './group'
+import { cardReasons, factorsNote, mark, primaryModel, type Reason } from './reasons'
+import { dropNote, weakSummary } from './weak'
+import {
+  ArrowDown,
+  ArrowUp,
+  Banknote,
+  CandlestickChart,
+  Check,
+  ChevronDown,
+  CircleDot,
+  CircleHelp,
+  CircleMinus,
+  CirclePlus,
+  Gauge,
+  History,
+  Info,
+  Layers,
+  Lightbulb,
+  ShoppingBag,
+  Trophy,
+} from 'lucide-react'
+import { Kpi, Section } from './Section'
+import { pickBadges, rowBadges, type Badge } from './badges'
+import { BadgeChip } from './Icon'
+import { BadgeLegend } from './Legend'
 import { TradesPanel } from './TradesPanel'
 import { boughtKeys, type Trade, type TradeList } from './trades'
 import { StockFacts } from './StockFacts'
@@ -99,6 +119,8 @@ export default function CloudApp() {
   const [notice, setNotice] = useState('')
   // 追蹤清單的編輯模式（拖曳排序、置頂、刪除）
   const [editing, setEditing] = useState(false)
+  // 名單表頭的「圖示說明」
+  const [legend, setLegend] = useState(false)
   // 沒登入（或登入過期）：資料 API 被 Access 擋下 → 版面照常可操作，只有股票列與 K 線換成模糊的假資料；其他錯誤照常顯示
   const onFail = (e: Error) => {
     if (!(e instanceof LoginRequired)) return setErr(e.message)
@@ -430,9 +452,9 @@ export default function CloudApp() {
               )}
               {!editMode && (
                 <div className="cq-head">
-                  <span>代號／名稱／模型評分</span>
-                  <span>股價</span>
-                  <span>漲跌幅</span>
+                  <span>股票</span>
+                  <span>現價</span>
+                  <span>漲跌</span>
                 </div>
               )}
               <div className="cq-rows">
@@ -527,10 +549,16 @@ export default function CloudApp() {
                 </p>
               )}
               <div className="cq-head">
-                <span>代號／名稱／近 6 日上榜</span>
-                <span>{anyLive ? '現價／推薦價' : '收盤／6日'}</span>
-                <span>漲跌幅</span>
+                <span>
+                  股票
+                  <button className="cq-legend-btn" onClick={() => setLegend(!legend)} aria-expanded={legend}>
+                    <Info size={13} aria-hidden="true" /> 圖示說明
+                  </button>
+                </span>
+                <span>{anyLive ? '現價' : '收盤'}</span>
+                <span>漲跌</span>
               </div>
+              {legend && <BadgeLegend onClose={() => setLegend(false)} />}
               <div className="cq-rows">
                 <ul className={guest ? 'cq-locked' : undefined} aria-hidden={guest || undefined}>
                   {current?.picks.map((p) => (
@@ -542,6 +570,7 @@ export default function CloudApp() {
                       onClick={() => setSid(p.sid)}
                       bought={view ? bought.has(`${view.date}|${p.sid}`) : false}
                       onBuy={!guest && view && trades ? toggleBuy : undefined}
+                      line={current?.code ?? null}
                     />
                   ))}
                 </ul>
@@ -593,6 +622,7 @@ export default function CloudApp() {
                 tracked={tracked.has(selected.sid)}
                 onTrack={watch ? toggleTrack : undefined}
                 refresh={refresh}
+                badges={pickBadges({ ...selected, line: current?.code ?? null })}
               />
             ) : null}
           </section>
@@ -642,12 +672,15 @@ function Row({
   onClick,
   bought,
   onBuy,
+  line = null,
 }: {
   p: Pick
   /** 要顯示的價格（pickPrice）：盤中是即時價、rec＝推薦當天的收盤；沒給（沒登入的假資料）就是名單那天的收盤 */
   px?: ReturnType<typeof pickPrice>
   on: boolean
   onClick: () => void
+  /** 這條線的代號（大盤精選不顯示飆漲機率標記） */
+  line?: string | null
   /** 「我買了」（T-388）：這檔在這天的名單有沒有被記下來；沒給（沒登入）就不顯示按鈕 */
   bought?: boolean
   onBuy?: (sid: string, on: boolean) => void
@@ -655,70 +688,31 @@ function Row({
   px ??= pickPrice(p, undefined, undefined, '', true)
   const t = trend(px.chg)
   const h = hits(p.recent ?? [])
+  // 2026-10-18 改版：每列兩行——上面代號名稱，下面「近 6 日上榜」方格＋圖示標記（最多 4 個，其餘 +N）。
+  // 族群、選股理由、停損機率都搬到個股頁；名單只留掃一眼要知道的。
+  const { shown, more } = rowBadges(pickBadges({ ...p, line }))
   return (
-    <li className={on ? 'on' : ''} onClick={onClick}>
+    <li className={on ? 'on cq-row' : 'cq-row'} onClick={onClick}>
       <div className="cq-name">
         <b>
           <em>{p.sid}</em>
           {p.name ?? ''}
-          {p.group && (
-            <i className={`cq-grp${p.group.official ? ' official' : ''}${p.group.flow?.hot ? ' hot' : ''}`} title={groupTitle(p.group)}>
-              {tagText(p.group)}
-            </i>
-          )}
         </b>
-        <small>
-          <span className="cq-dots" title={`近 6 日上榜 ${h.on}/${h.of}`}>
+        <small className="cq-meta">
+          <span className="cq-dots" title={`近 6 個交易日有 ${h.on} 天在名單上（舊→新）`}>
             {(p.recent ?? []).map((x, i) => (
               <i key={i} className={x === null ? 'na' : x ? 'in' : ''} />
             ))}
           </span>
-          <span className="cq-hits">
-            {h.on}/{h.of}
-          </span>
-          {p.new && <i className="cq-tag new">新上榜</i>}
-          {p.streak > (p.recent?.length ?? 0) && <i className="cq-tag">連{p.streak}天</i>}
-          {p.score !== null && <i className="cq-tag prob">{Math.round(p.score * 100)}%</i>}
-          {weakTags(p.weak).map((t) => (
-            <i key={t.text} className="cq-tag weak" title={t.title}>
-              {t.text}
-            </i>
+          {shown.map((b) => (
+            <BadgeChip key={b.key} b={b} compact />
           ))}
-          {insiderTag(p.insider) && (
-            <i className="cq-tag weak insider" title={insiderTag(p.insider)!.title}>
-              {insiderTag(p.insider)!.text}
-            </i>
-          )}
-          {holdersTag(p.holders) && (
-            <i className={`cq-tag holders ${(p.holders?.streak ?? 0) > 0 ? 'up' : 'down'}`} title={holdersTag(p.holders)!.title}>
-              {holdersTag(p.holders)!.text}
-            </i>
-          )}
-          {riskTags(p.risks).map((t) => (
-            <i key={`${t.kind}${t.text}`} className={`cq-tag warn risk ${t.kind}`} title={t.title}>
-              {t.text}
-            </i>
-          ))}
-          {downRiskTag(p.down_risk) && (
-            <i className="cq-tag weak downrisk" title={downRiskTag(p.down_risk)!.title}>
-              {downRiskTag(p.down_risk)!.text}
-            </i>
-          )}
-          {onBuy && (
-            <button
-              className={bought ? 'cq-buy on' : 'cq-buy'}
-              aria-label={bought ? '取消「我買了」' : '我買了'}
-              title={bought ? '已記下你在這天買了這檔；再按一次取消' : '記下你在這天買了這檔（追蹤分頁可以補價格張數）'}
-              onClick={(e) => {
-                e.stopPropagation()
-                onBuy(p.sid, !bought)
-              }}
-            >
-              {bought ? '✓買' : '＋買'}
-            </button>
+          {more > 0 && (
+            <span className="cq-b cq-b-more" title="點進個股頁看全部">
+              +{more}
+            </span>
           )}
         </small>
-        {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -729,10 +723,28 @@ function Row({
             推 {price(px.rec)}
           </small>
         ) : (
-          <small className={trend(p.chg6)}>{pct(p.chg6, 1)}</small>
+          <small className={trend(p.chg6)} title="近 6 日漲幅">
+            6日 {pct(p.chg6, 1)}
+          </small>
         )}
       </span>
-      <span className={`cq-chg ${t}${px.limit ? ` limit-${px.limit}` : ''}`}>{pct(px.chg)}</span>
+      <span className="cq-chgcol">
+        <span className={`cq-chg cq-pill ${t}${px.limit ? ` limit-${px.limit}` : ''}`}>{pct(px.chg)}</span>
+        {onBuy && (
+          <button
+            className={bought ? 'cq-buy on' : 'cq-buy'}
+            aria-label={bought ? '取消「我買了」' : '記下我買了'}
+            title={bought ? '已記下你在這天買了這檔；再按一次取消' : '記下你在這天買了這檔（追蹤分頁可以補價格張數）'}
+            onClick={(e) => {
+              e.stopPropagation()
+              onBuy(p.sid, !bought)
+            }}
+          >
+            {bought ? <Check size={13} strokeWidth={3} aria-hidden="true" /> : <ShoppingBag size={13} strokeWidth={2.2} aria-hidden="true" />}
+            {bought ? '已買' : '買'}
+          </button>
+        )}
+      </span>
     </li>
   )
 }
@@ -755,17 +767,17 @@ function WatchRow({
 }) {
   const t = trend(live.chg)
   return (
-    <li className={on ? 'on' : ''} onClick={onClick}>
+    <li className={on ? 'on cq-row' : 'cq-row'} onClick={onClick}>
       <div className="cq-name">
         <b>
           <em>{w.sid}</em>
           {w.name ?? ''}
         </b>
-        <small>
+        <small className="cq-meta">
           {scoreTags(w.models).map((g) => (
-            <i key={g.text} className={`cq-tag ${g.tone}`}>
+            <span key={g.text} className={`cq-b cq-b-compact ${g.tone === 'hot' ? 'cq-b-good' : g.tone === 'warn' ? 'cq-b-warn' : 'cq-b-chip'}`}>
               {g.text}
-            </i>
+            </span>
           ))}
         </small>
       </div>
@@ -773,7 +785,9 @@ function WatchRow({
         <span className={`cq-px ${t}${limit ? ` limit-${limit}` : ''}`}>{price(live.close)}</span>
         {live.tag && <small className="cq-live-tag">{live.tag}</small>}
       </span>
-      <span className={`cq-chg ${t}${limit ? ` limit-${limit}` : ''}`}>{pct(live.chg)}</span>
+      <span className="cq-chgcol">
+        <span className={`cq-chg cq-pill ${t}${limit ? ` limit-${limit}` : ''}`}>{pct(live.chg)}</span>
+      </span>
     </li>
   )
 }
@@ -955,39 +969,47 @@ function StockSearch({ disabled, tracked, onPick }: { disabled: boolean; tracked
   )
 }
 
-/** 選股依據（D-180）：掛在選出這檔的模型卡片裡——貢獻度最高的因子（正向）、拖累最大的一項（負向）、篩選門檻。 */
+/** 選股理由（D-180）：加分的在前，扣分與門檻收在「更多」；每條前面一個 ＋／－／・ 圖示。 */
 function Factors({ reasons, note }: { reasons: Reason[]; note: string }) {
+  const [all, setAll] = useState(false)
+  const sorted = [...reasons].sort((a, b) => b.s - a.s)
+  const shown = all ? sorted : sorted.slice(0, FACTORS_SHOWN)
   return (
-    <div className="cq-factors">
-      <div className="cq-factors-head">
-        選股依據<small>{note}・僅供參考，非投資建議</small>
-      </div>
-      <ul>
-        {reasons.map((r) => {
+    <Section icon={Lightbulb} title="為什麼選它" meta={<span className="cq-sec-note" title={`${note}・僅供參考，非投資建議`}>{note}</span>}>
+      <ul className="cq-reasons">
+        {shown.map((r) => {
           const m = mark(r.s)
+          const I = r.s > 0 ? CirclePlus : r.s < 0 ? CircleMinus : CircleDot
           return (
             <li key={r.f} className={m.tone} title={m.label}>
-              <i>{m.sym}</i>
-              {r.t}
+              <I size={15} strokeWidth={2.2} aria-hidden="true" />
+              <span>{r.t}</span>
             </li>
           )
         })}
       </ul>
-    </div>
+      {sorted.length > FACTORS_SHOWN && (
+        <button className="cq-more" onClick={() => setAll(!all)}>
+          {all ? '收起' : `更多 ${sorted.length - FACTORS_SHOWN} 項`}
+          <ChevronDown size={14} className={all ? 'flip' : undefined} aria-hidden="true" />
+        </button>
+      )}
+    </Section>
   )
 }
+
+/** 選股理由預設列幾條。 */
+const FACTORS_SHOWN = 4
 
 /** 歷史同區間參考（D-179）：這一檔對到的區間在開發期／模型沒看過的期間，抱 20 天的報酬分布。 */
 /** 歷史相似情境（D-182）：大盤狀態相近的日子裡，個股條件最像的 k 次，照名單規則買進抱 20 天的分布與最像的幾次。 */
 function SimilarBlock({ s }: { s: Similar }) {
   const bar = similarBar(s)
   const span = spanText(s)
+  // 2026-10-18 改版：收成一行（預設收起），點開才看分布條與最像的幾次
   return (
-    <div className="cq-ref">
-      <h3>
-        歷史相似情境：大盤相近、條件最像的 {s.n.toLocaleString()} 次，照名單規則買進抱 20 天<small>過去的分布，不是預測</small>
-      </h3>
-      <div className="cq-ref-row">
+    <Section icon={History} title="歷史相似" fold summary={`最像的 ${s.n.toLocaleString()} 次・抱 20 天`}>
+      <div className="cq-ref-row" title="比的是模型看的條件（波動、市值、營收、籌碼……）和當時的大盤狀態，只用 2026 年 8 月以前的資料；相似不代表會走一樣的路。">
         <span>{span}</span>
         <p>{similarText(s)}</p>
         {bar && (
@@ -1007,22 +1029,18 @@ function SimilarBlock({ s }: { s: Similar }) {
           ))}
         </ul>
       )}
-      <p className="cq-ref-note">比的是模型看的條件（波動、市值、營收、籌碼……）和當時的大盤狀態，只用 2026 年 8 月以前的資料；相似不代表會走一樣的路。</p>
-    </div>
+    </Section>
   )
 }
 
 function Reference({ rows }: { rows: RefRow[] }) {
   if (rows.length === 0) return null
   return (
-    <div className="cq-ref">
-      <h3>
-        過去{bucketText(rows[0])}的股票，照名單規則買進抱 20 天<small>開發期參考，不保證未來</small>
-      </h3>
+    <Section icon={History} title="歷史參考" fold summary={`過去${bucketText(rows[0])}・抱 20 天`}>
       {rows.map((r) => {
         const bar = refBar(r)
         return (
-          <div className="cq-ref-row" key={r.period}>
+          <div className="cq-ref-row" key={r.period} title="分布來自同區間的所有股票，不是針對這一檔；開發期是規則在那段資料上試出來的，數字會偏好看。">
             <span>{r.label.replace(/（.*）/, '')}</span>
             <p>{refText(r)}</p>
             {bar && (
@@ -1035,8 +1053,7 @@ function Reference({ rows }: { rows: RefRow[] }) {
           </div>
         )
       })}
-      <p className="cq-ref-note">分布來自同區間的所有股票，不是針對這一檔；開發期是規則在那段資料上試出來的，數字會偏好看。</p>
-    </div>
+    </Section>
   )
 }
 
@@ -1057,6 +1074,7 @@ function Detail({
   tracked,
   onTrack,
   refresh,
+  badges = [],
 }: {
   sid: string
   name: string | null
@@ -1082,6 +1100,8 @@ function Detail({
   onTrack?: (sid: string, on: boolean) => Promise<void>
   /** 從背景回來時加一：重抓 K 線、被推薦日與評分 */
   refresh: number
+  /** 名單上這一檔的全部標記（處置、除權息、模型易跌…）；不是從名單點進來就沒有 */
+  badges?: Badge[]
 }) {
   // K 線資料記著是哪一檔：換股時舊圖先留著（不閃白），但報價列只用這一檔自己的資料
   const [chart, setChart] = useState<{ sid: string; bars: Bar[]; days: Record<string, string[]> }>({ sid: '', bars: [], days: {} })
@@ -1138,81 +1158,101 @@ function Detail({
       : limitState(bigClose, lim.up, lim.down)
   return (
     <>
-      <div className="cq-quote">
-        <div>
+      {/* 2026-10-18 改版：價格區（名稱、族群、大價格、開高低量）→ 標記 → 評分 → 理由 → 籌碼與風險 → 事件 → 歷史（收起）→ K 線 */}
+      <header className="cq-hero">
+        <div className="cq-hero-top">
           <h1>
-            <small>{sid}</small> {name ?? sc?.name ?? ''}
-            {onTrack && <TrackButton sid={sid} on={tracked} onTrack={onTrack} />}
+            <small>{sid}</small>
+            {name ?? sc?.name ?? ''}
           </h1>
-          {grp && gl && (
-            <p className="cq-group" title={groupTitle(grp)}>
-              <b className={grp.official ? 'official' : undefined}>{gl.main}</b>
-              {gl.also && <span>{gl.also}</span>}
-            </p>
-          )}
-          {grp?.flow && (
-            <p className={`cq-group cq-group-flow${grp.flow.hot ? ' hot' : ''}`}>
-              {grp.flow.hot && <i className="cq-tag hot">資金流入</i>}
-              <span>
-                {grp.name}・{grp.flow.date}：{flowText(grp.flow)}
+          {onTrack && <TrackButton sid={sid} on={tracked} onTrack={onTrack} />}
+        </div>
+        {grp && gl && (
+          <div className="cq-hero-group">
+            <span className={`cq-b cq-b-chip${grp.official ? ' official' : ''}`} title={groupTitle(grp)}>
+              <Layers size={13} aria-hidden="true" />
+              <span className="cq-b-label">{gl.main}</span>
+            </span>
+            {grp.flow && grp.flow.ratio !== null && (
+              <span className={`cq-b ${grp.flow.hot ? 'cq-b-good' : 'cq-b-chip'}`} title={`${grp.name}・${grp.flow.date}：${flowText(grp.flow)}`}>
+                <Banknote size={13} aria-hidden="true" />
+                <span className="cq-b-label">族群資金</span>
+                <span className="cq-b-short">{grp.flow.ratio.toFixed(1)}倍</span>
               </span>
-            </p>
-          )}
-          <div className={`cq-big ${t}`}>
-            <b className={bigLimit ? `cq-limit ${bigLimit}` : undefined} title={bigLimit === 'up' ? '漲停' : bigLimit === 'down' ? '跌停' : undefined}>
-              {price(bigClose)}
-            </b>{' '}
-            <span>{pct(bigChg)}</span>
-            {label && (
-              <em className="cq-live" title="證交所即時報價，約延遲 5 秒；盤中每 10 秒更新">
-                {label}
-              </em>
-            )}
-            {!asOf && (live.error || live.stale) && shouldPoll(taipeiNow(), []) && (
-              <em className="cq-live off" title={live.error || undefined}>
-                {quote ? '即時報價暫停更新（證交所限流）' : '即時報價暫時取不到'}
-              </em>
             )}
           </div>
+        )}
+        <div className={`cq-hero-price ${t}`}>
+          <b className={bigLimit ? `cq-limit ${bigLimit}` : undefined} title={bigLimit === 'up' ? '漲停' : bigLimit === 'down' ? '跌停' : undefined}>
+            {price(bigClose)}
+          </b>
+          <span className={`cq-pill ${t}`}>
+            {bigChg !== null && bigChg > 0 ? <ArrowUp size={14} strokeWidth={3} aria-hidden="true" /> : bigChg !== null && bigChg < 0 ? <ArrowDown size={14} strokeWidth={3} aria-hidden="true" /> : null}
+            {pct(bigChg)}
+          </span>
+          {label && (
+            <em className="cq-live" title="證交所即時報價，約延遲 5 秒；盤中每 10 秒更新">
+              {label}
+            </em>
+          )}
+          {!asOf && (live.error || live.stale) && shouldPoll(taipeiNow(), []) && (
+            <em className="cq-live off" title={live.error || undefined}>
+              {quote ? '即時報價暫停（限流）' : '即時報價取不到'}
+            </em>
+          )}
         </div>
         {q && (
-          <dl className="cq-ohlc">
-            <dt>開</dt>
-            <dd>{price(q.bar.open)}</dd>
-            <dt>高</dt>
-            <dd className="up">{price(q.bar.high)}</dd>
-            <dt>低</dt>
-            <dd className="down">{price(q.bar.low)}</dd>
-            <dt>收</dt>
-            <dd className={trend(q.chg)}>{price(q.bar.close)}</dd>
-            <dt>量</dt>
-            <dd>{Math.round(q.bar.volume / 1000).toLocaleString()} 張</dd>
-            <dt>漲跌</dt>
-            <dd className={trend(q.chg)}>{pct(q.chg)}</dd>
-            <dd className="cq-ohlc-date">{q.bar.date}</dd>
+          <dl className="cq-hero-ohlc" title={q.bar.date}>
+            <div>
+              <dt>開</dt>
+              <dd>{price(q.bar.open)}</dd>
+            </div>
+            <div>
+              <dt>高</dt>
+              <dd className="up">{price(q.bar.high)}</dd>
+            </div>
+            <div>
+              <dt>低</dt>
+              <dd className="down">{price(q.bar.low)}</dd>
+            </div>
+            <div>
+              <dt>量</dt>
+              <dd>{Math.round(q.bar.volume / 1000).toLocaleString()}張</dd>
+            </div>
           </dl>
         )}
-      </div>
+      </header>
+      {badges.length > 0 && (
+        <div className="cq-badges" aria-label="提醒">
+          {badges.map((b) => (
+            <BadgeChip key={b.key} b={b} />
+          ))}
+        </div>
+      )}
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
       <StockFacts sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
-      <div className="cq-legend">
-        {MA_LEGEND.map((m) => (
-          <span key={m.n} style={{ color: m.color }}>
-            MA{m.n}
+      <Section
+        icon={CandlestickChart}
+        title="K 線"
+        meta={
+          <span className="cq-chart-legend">
+            {MA_LEGEND.map((m) => (
+              <span key={m.n} style={{ color: m.color }}>
+                MA{m.n}
+              </span>
+            ))}
+            {Object.entries(lineNames).map(([code, n]) => (
+              <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }} title={`▼＝${n}推薦日`}>
+                ▼{n}
+              </b>
+            ))}
           </span>
-        ))}
-        <span className="cq-legend-note">
-          推薦日
-          {Object.entries(lineNames).map(([code, n]) => (
-            <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }}>
-              ▼{n}
-            </b>
-          ))}
-        </span>
-      </div>
-      {err ? <div className="cq-err">{err}</div> : <KChart bars={chart.bars} live={chart.sid === sid ? todayBar : null} pickDays={chart.days} lineNames={lineNames} />}
+        }
+      >
+        {err ? <div className="cq-err">{err}</div> : <KChart bars={chart.bars} live={chart.sid === sid ? todayBar : null} pickDays={chart.days} lineNames={lineNames} />}
+      </Section>
     </>
   )
 }
@@ -1303,57 +1343,57 @@ function ModelPanel({
   line?: string | null
 }) {
   const [help, setHelp] = useState(false)
-  if (err) return <div className="cq-models cq-models-msg">模型評分：{err}</div>
-  if (!scores) return <div className="cq-models cq-models-msg">模型評分計算中…</div>
+  if (err) return <div className="cq-sec cq-models-msg">模型評分：{err}</div>
+  if (!scores) return <div className="cq-sec cq-models-msg">模型評分計算中…</div>
   const views = scores.models.map((m) => ({ m, v: modelView(m) }))
   const date = scores.models.map((m) => m.date).find((d) => d !== null) ?? null
   const primaryCode = primaryModel(line, reasons)
-  const primary = views.find(({ m }) => m.code === primaryCode) ?? null
-  const rest = primary ? views.filter((x) => x !== primary) : views
-  const card = ({ m, v }: (typeof views)[number], extra?: React.ReactNode) => (
-    <div key={m.code} className={`cq-card${extra ? ' cq-card-primary' : ''}`} title={v.what}>
-      <div className="cq-card-top">
-        <b>{v.title}</b>
-        <small>{v.who}</small>
-      </div>
-      <div className="cq-card-mid">
-        <span className={`cq-card-big ${v.tone}`}>{v.big}</span>
-        <Spark points={sparkPoints(m)} />
-      </div>
-      <div className="cq-card-sub">
-        {v.sub}
-        {m.date !== null && date !== null && m.date !== date && `（${m.date}）`}
-      </div>
-      {extra}
-    </div>
+  // 2026-10-18 改版：三張數字卡並排（標題、大數字、小折線），細節在滑過與「?」；選出這檔的模型那張加框。
+  const tile = ({ m, v }: (typeof views)[number]) => (
+    <Kpi
+      key={m.code}
+      label={v.title}
+      value={v.big}
+      tone={v.tone === 'hot' ? 'hot' : v.tone === 'warn' ? 'warn' : v.tone === 'na' ? 'na' : 'plain'}
+      side={<Spark points={sparkPoints(m)} />}
+      on={m.code === primaryCode}
+      title={`${v.sub}${m.date !== null && date !== null && m.date !== date ? `（${m.date}）` : ''}——${v.what}`}
+    />
   )
   return (
-    <div className="cq-models">
-      <div className="cq-models-head">
-        <b>模型評分</b>
-        {date && <span>{date} 收盤後</span>}
-        {scores.lists.map((l) => (
-          <i key={l.line} className="cq-tag new" title={`${l.date} 的名單`}>
-            {l.name}第 {l.rank} 名
-          </i>
-        ))}
-        <button className="cq-help" onClick={() => setHelp(!help)}>
-          {help ? '收起說明' : '這些分數是什麼？'}
-        </button>
-      </div>
-      {primary && primaryCode && reasons && card(primary, <Factors reasons={cardReasons(reasons, primaryCode)} note={factorsNote(primaryCode)} />)}
-      <div className={`cq-cards${primary ? ' cq-cards-rest' : ''}`}>{rest.map((x) => card(x))}</div>
-      {help && (
-        <ul className="cq-models-help">
-          {views.map(({ m, v }) => (
-            <li key={m.code}>
-              <b>{v.title}</b>（{v.who}）：{v.what}
-            </li>
-          ))}
-          <li>右上小折線是最近幾個交易日的變化，越往上越好。分數是模型的估計，不保證會發生，非投資建議。</li>
-        </ul>
-      )}
-    </div>
+    <>
+      <Section
+        icon={Gauge}
+        title="模型評分"
+        meta={
+          <>
+            {scores.lists.map((l) => (
+              <span key={l.line} className="cq-b cq-b-good" title={`${l.date} 的名單`}>
+                <Trophy size={13} aria-hidden="true" />
+                <span className="cq-b-label">{l.name}</span>
+                <span className="cq-b-short">#{l.rank}</span>
+              </span>
+            ))}
+            <button className="cq-icon-btn" aria-label="這些分數是什麼" aria-expanded={help} onClick={() => setHelp(!help)}>
+              <CircleHelp size={17} aria-hidden="true" />
+            </button>
+          </>
+        }
+      >
+        <div className="cq-kpis cq-kpis-3">{views.map(tile)}</div>
+        {help && (
+          <ul className="cq-models-help">
+            {views.map(({ m, v }) => (
+              <li key={m.code}>
+                <b>{v.title}</b>：{v.what}
+              </li>
+            ))}
+            <li>小折線是最近幾個交易日的變化，越往上越好。{date ? `${date} 收盤後算的。` : ''}分數是模型的估計，不保證會發生。</li>
+          </ul>
+        )}
+      </Section>
+      {primaryCode && reasons && <Factors reasons={cardReasons(reasons, primaryCode)} note={factorsNote(primaryCode)} />}
+    </>
   )
 }
 

@@ -72,5 +72,6 @@ test('T-386 AC-5（靜態）：名單只用早於名單那天的週（週六才�
   const picks = readFileSync(new URL('../functions/api/picks/index.ts', import.meta.url), 'utf8')
   assert.ok(picks.includes('readHolders(db, target, sids)') && picks.includes('holders: holders.get(r.stock_id) ?? null'))
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
-  assert.ok(app.includes('holdersTag(p.holders)') && app.includes('<StockFacts sid={sid} refresh={refresh} />'))
+  // 2026-10-18 改版：名單列的標記統一由 badges.ts 產生，App 用 pickBadges
+  assert.ok(app.includes('pickBadges(') && readFileSync(new URL('../src/cloud/badges.ts', import.meta.url), 'utf8').includes('holdersTag(p.holders)') && app.includes('<StockFacts sid={sid} refresh={refresh} />'))
 })

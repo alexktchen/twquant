@@ -83,5 +83,6 @@ test('T-384 AC-5（靜態）：名單 API 與個股行事曆 API 都讀 serving.
   const cal = readFileSync(new URL('../functions/api/stocks/[sid]/calendar.ts', import.meta.url), 'utf8')
   assert.ok(cal.includes('serving.insider_transfer_notices') && cal.includes('BETWEEN ${since}::date AND ${today}::date'))
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
-  assert.ok(app.includes('insiderTag(p.insider)'))
+  // 2026-10-18 改版：名單列的標記統一由 badges.ts 產生，App 用 pickBadges
+  assert.ok(app.includes('pickBadges(') && readFileSync(new URL('../src/cloud/badges.ts', import.meta.url), 'utf8').includes('insiderTag(p.insider)'))
 })

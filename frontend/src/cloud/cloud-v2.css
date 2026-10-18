@@ -1,0 +1,187 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   2026-10-18 改版（使用者：「又小又亂…一目瞭然、資訊清楚、指引明顯，多用符號來代替文字」）。載入順序在 cloud.css 之後。
+   依據：重要的數字放大放前（價格、漲跌），次要的小而淡；圖示配極短字（NN/g：只有圖示要用猜的）；
+   數字卡＝標籤＋大數字＋一行小字；次要資訊點了才展開（漸進展開）。顏色只有五類，各有固定意思。
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+.cq { --tile: #1c1e26; --tile-line: #2a2c36; }
+
+/* ── 標記：五種顏色類別（紅＝交易受限、黃＝留意、藍＝日程、灰＝籌碼走勢、橘＝正面） ── */
+.cq-b {
+  display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0 7px; border-radius: 6px;
+  font-size: 13px; font-weight: 600; line-height: 1; white-space: nowrap; font-style: normal; flex: none;
+}
+.cq-b svg { flex: none; }
+.cq-b-compact { height: 21px; padding: 0 5px; font-size: 12px; gap: 2px; }
+.cq-b-risk { color: #ff6b7d; background: rgba(246, 70, 93, .16); }
+.cq-b-warn { color: #ffc04d; background: rgba(255, 176, 32, .15); }
+.cq-b-event { color: #79b8ff; background: rgba(61, 155, 255, .15); }
+.cq-b-chip { color: #c9ccd4; background: #262830; }
+.cq-b-chip.official { color: var(--mute); }
+.cq-b-good { color: var(--accent); background: rgba(255, 122, 0, .15); }
+.cq-b-more { color: var(--mute); background: transparent; box-shadow: inset 0 0 0 1px var(--tile-line); }
+.cq-b-short { font-variant-numeric: tabular-nums; }
+.cq-b-label + .cq-b-short { margin-left: 2px; opacity: .85; }
+
+/* ── 名單列：上＝代號名稱；下＝6 日方格＋最多 4 個標記；右＝價格與漲跌色塊 ── */
+.cq-list li.cq-row { min-height: 66px; padding-top: 10px; padding-bottom: 10px; align-items: center; }
+.cq-row .cq-name { min-width: 0; }
+.cq-row .cq-name b { font-size: 16.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-row .cq-name b em { font-size: 13.5px; }
+.cq-name small.cq-meta { flex-wrap: nowrap; overflow: hidden; gap: 4px; margin-top: 6px; }
+.cq-meta .cq-dots { margin-right: 2px; }
+.cq-meta .cq-dots i { width: 8px; height: 8px; }
+.cq-row .cq-px { font-size: 17px; font-weight: 600; }
+.cq-row .cq-pxcol small { font-size: 12px; color: var(--mute); }
+.cq-row .cq-pxcol small.up { color: var(--up); }
+.cq-row .cq-pxcol small.down { color: var(--down); }
+.cq-chgcol { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.cq-pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 2px; min-width: 72px; height: 28px; padding: 0 8px;
+  box-sizing: border-box; border-radius: 6px; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.cq-pill.up { color: var(--up); background: rgba(246, 70, 93, .15); }
+.cq-pill.down { color: var(--down); background: rgba(14, 203, 129, .15); }
+.cq-pill.flat { color: var(--mute); background: #262830; }
+.cq-chg.cq-pill.limit-up { color: #fff; background: var(--up); }
+.cq-chg.cq-pill.limit-down { color: #fff; background: var(--down); }
+.cq .cq-buy {
+  display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 11px;
+  font-size: 12px; font-weight: 600; color: var(--mute); background: transparent; border: 1px solid var(--tile-line);
+}
+.cq .cq-buy:hover { color: var(--text); border-color: #3a3d46; }
+.cq .cq-buy.on { color: #111; background: var(--accent); border-color: var(--accent); }
+
+/* 表頭「圖示說明」與說明框 */
+.cq .cq-legend-btn { display: inline-flex; align-items: center; gap: 3px; margin-left: 10px; color: var(--accent); font-size: 12.5px; }
+/* 圖示說明：蓋在畫面上的彈出框（手機從底部升起、桌機置中） */
+.cq-sheet-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .55); display: grid; place-items: center; padding: 16px; }
+.cq-sheet {
+  width: min(460px, 100%); max-height: 82vh; overflow-y: auto; box-sizing: border-box;
+  padding: 14px 16px 18px; background: var(--tile); border: 1px solid var(--tile-line); border-radius: 14px; font-size: 14px;
+}
+.cq-legend-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 16px; }
+.cq-sheet ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.cq-sheet li { display: grid; grid-template-columns: 8.2em minmax(0, 1fr); gap: 10px; align-items: center; color: #c9ccd4; line-height: 1.4; }
+.cq-sheet li .cq-b { justify-self: start; }
+.cq-legend-dots { display: grid; grid-template-columns: 8.2em minmax(0, 1fr); gap: 10px; align-items: center; margin-bottom: 12px; color: #c9ccd4; line-height: 1.4; }
+.cq-sheet p { margin: 14px 0 0; color: var(--mute); font-size: 12.5px; line-height: 1.5; }
+@media (max-width: 820px) {
+  .cq-sheet-backdrop { place-items: end stretch; padding: 0; }
+  .cq-sheet { width: 100%; max-height: 78vh; border-radius: 16px 16px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ── 個股頁：價格區 ── */
+.cq .cq-detail { gap: 12px; }
+.cq-hero { display: grid; gap: 10px; }
+.cq-hero-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cq-hero-top h1 { margin: 0; font-size: 23px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.cq-hero-top h1 small { font-size: 15px; color: var(--mute); font-weight: 500; font-variant-numeric: tabular-nums; }
+.cq-hero-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.cq-hero-price { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.cq-hero-price > b { font-size: 40px; font-weight: 800; letter-spacing: -.5px; line-height: 1; font-variant-numeric: tabular-nums; }
+.cq-hero-price > b.cq-limit { padding: 2px 8px; border-radius: 8px; }
+.cq-hero-price > b.cq-limit.up { box-shadow: inset 0 0 0 2px var(--up); }
+.cq-hero-price > b.cq-limit.down { box-shadow: inset 0 0 0 2px var(--down); }
+.cq-hero-price.up > b { color: var(--up); }
+.cq-hero-price.down > b { color: var(--down); }
+.cq-hero-price .cq-pill { height: 32px; font-size: 17px; min-width: 0; padding: 0 10px; }
+.cq-hero-ohlc { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.cq-hero-ohlc > div { background: var(--tile); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cq-hero-ohlc dt { font-size: 11.5px; color: var(--mute); }
+.cq-hero-ohlc dd { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.cq-badges .cq-b { height: 28px; padding: 0 9px; font-size: 13.5px; }
+
+/* ── 區塊卡片：左上圖示＋標題、右上小字 ── */
+.cq-sec { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.cq-sec-head { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 15.5px; }
+.cq-sec-head > b { font-weight: 700; white-space: nowrap; }
+.cq-sec-icon { color: var(--accent); flex: none; }
+.cq-sec-meta { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--mute); min-width: 0; text-align: right; }
+.cq-sec-body { margin-top: 10px; }
+.cq-sec-fold > summary { list-style: none; cursor: pointer; }
+.cq-sec-fold > summary::-webkit-details-marker { display: none; }
+.cq-sec-fold > summary::after { content: '▾'; color: var(--mute); font-size: 13px; margin-left: 4px; }
+.cq-sec-fold[open] > summary::after { content: '▴'; }
+.cq-sec-fold:not([open]) { padding-top: 10px; padding-bottom: 10px; }
+.cq .cq-icon-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--mute); }
+.cq .cq-icon-btn:hover, .cq .cq-icon-btn[aria-expanded='true'] { color: var(--text); background: #262830; }
+.cq-models-msg { color: var(--mute); font-size: 14px; }
+
+/* ── 數字卡 ── */
+.cq-kpis { display: grid; gap: 8px; }
+.cq-kpis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cq-kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cq-kpi { background: var(--tile); border: 1px solid transparent; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cq-kpi.tap { cursor: pointer; }
+.cq-kpi.tap:hover { border-color: #3a3d46; }
+.cq-kpi.on { border-color: var(--accent); }
+.cq-kpi-label { font-size: 12.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-kpi-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+.cq-kpi-value { font-size: 23px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cq-kpi-value.hot { color: var(--accent); }
+.cq-kpi-value.warn { color: #ffc04d; }
+.cq-kpi-value.na { color: var(--mute); }
+.cq-kpi-value.up { color: var(--up); }
+.cq-kpi-value.down { color: var(--down); }
+.cq-kpi-sub { font-size: 11.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-kpi .cq-spark { width: 44px; height: auto; }
+
+/* ── 選股理由 ── */
+.cq-reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.cq-reasons li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; line-height: 1.45; }
+.cq-reasons li svg { flex: none; margin-top: 2px; }
+.cq-reasons li.plus svg { color: var(--up); }
+.cq-reasons li.minus { color: #b5b9c2; }
+.cq-reasons li.minus svg { color: var(--down); }
+.cq-reasons li.base, .cq-reasons li.base svg { color: var(--mute); }
+.cq .cq-more { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.cq .cq-more .flip { transform: rotate(180deg); }
+
+/* ── 事件時間軸 ── */
+.cq-ev { list-style: none; margin: 0; padding: 0; }
+.cq-ev li { display: grid; grid-template-columns: 30px 6.6em minmax(0, 1fr); align-items: center; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cq-ev li:last-child { border-bottom: 0; }
+.cq-ev li.tap { cursor: pointer; }
+.cq-ev-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; }
+.cq-ev-date { display: flex; flex-direction: column; font-size: 13.5px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.cq-ev-date em { font-style: normal; font-size: 11.5px; color: var(--accent); }
+.cq-ev-past .cq-ev-date { color: var(--mute); font-weight: 500; }
+.cq-ev-main { display: flex; flex-direction: column; min-width: 0; font-size: 14px; line-height: 1.3; }
+.cq-ev-main b { font-weight: 600; }
+.cq-ev-main span { color: var(--mute); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-ev-sum { grid-column: 2 / -1; margin: 2px 0 0; font-size: 12.5px; line-height: 1.5; color: #b5b9c2; display: none; }
+.cq-ev-sum.on { display: block; }
+.cq-ev-past { margin-top: 4px; }
+
+/* ── 細節小表 ── */
+.cq-fact-more { margin-top: 10px; font-size: 12.5px; color: var(--mute); line-height: 1.5; }
+.cq-fact-more p { margin: 6px 0 0; }
+.cq-mini { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--text); }
+.cq-mini th, .cq-mini td { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.cq-mini th { color: var(--mute); font-weight: 500; font-size: 12px; }
+.cq-mini .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── 歷史參考（收起）、K 線區塊 ── */
+.cq-sec .cq-ref-row { margin-top: 6px; font-size: 13px; color: #c9ccd4; }
+.cq-chart-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
+.cq-chart-legend b { font-weight: 600; }
+.cq-sec .cq-chart-wrap { min-height: 340px; }
+
+/* ── 我的下單（追蹤分頁，收起） ── */
+.cq-trades > summary { font-size: 14.5px; }
+
+@media (max-width: 820px) {
+  .cq .cq-detail { padding: 14px 12px; }
+  /* 同族群一行左右滑，不換行 */
+  .cq-same { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .cq-same::-webkit-scrollbar { display: none; }
+  .cq-same > span, .cq-same > b { flex: none; white-space: nowrap; }
+  .cq-sec-note { display: none; }
+  .cq-kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cq-kpis-3 .cq-kpi { padding: 8px; }
+  .cq-kpis-3 .cq-kpi-value { font-size: 20px; }
+  .cq-kpis-3 .cq-spark { display: none; }
+  .cq-hero-price > b { font-size: 36px; }
+  .cq-sec { padding: 12px; }
+}

@@ -86,5 +86,6 @@ test('T-387 AC-5（靜態）：名單 API 每檔附 risks、五張表都容許�
     assert.ok(lib.includes(t), t)
   assert.equal(lib.match(/readRows\(/g)?.length, 5)
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
-  assert.ok(app.includes('riskTags(p.risks)'))
+  // 2026-10-18 改版：名單列的標記統一由 badges.ts 產生（每個風險一個 riskBadge），App 用 pickBadges
+  assert.ok(app.includes('pickBadges(') && readFileSync(new URL('../src/cloud/badges.ts', import.meta.url), 'utf8').includes('riskBadge(r)'))
 })

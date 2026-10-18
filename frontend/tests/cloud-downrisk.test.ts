@@ -24,5 +24,6 @@ test('T-391 AC-2（靜態）：名單 API 讀 pick_down_risk、以線＋代號�
   const picks = readFileSync(new URL('../functions/api/picks/index.ts', import.meta.url), 'utf8')
   assert.ok(picks.includes('readDownRisk(db, target)') && picks.includes('down_risk: downRisk.get(`${code}|${r.stock_id}`) ?? null'))
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
-  assert.ok(app.includes('downRiskTag(p.down_risk)'))
+  // 2026-10-18 改版：名單列的標記統一由 badges.ts 產生，App 用 pickBadges
+  assert.ok(app.includes('pickBadges(') && readFileSync(new URL('../src/cloud/badges.ts', import.meta.url), 'utf8').includes('downRiskTag(p.down_risk)'))
 })
