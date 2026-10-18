@@ -154,13 +154,25 @@ def value_count(text: str) -> int:
 
 def unit_mismatch(text: str, known: Iterable[str]) -> list[str]:
     """句子裡「數字＋單位」在事實裡找不到同樣組合的；沒帶單位的數字交給 unverified_numbers。"""
-    have = {(m.group(1).replace(",", ""), m.group(2)) for f in known for m in _NUM_UNIT.finditer(f)}
+    have = {_num_unit(m) for f in known for m in _NUM_UNIT.finditer(f)}
     out: list[str] = []
     for m in _NUM_UNIT.finditer(text):
-        n, u = m.group(1).replace(",", ""), m.group(2)
+        n, u = _num_unit(m)
         if u and (n, u) not in have and f"{n}{u}" not in out:
             out.append(f"{n}{u}")
     return out
+
+
+_SAME_UNIT = {"天": "日"}  # 「連賣 2 日」＝「連續賣超 2 天」
+
+
+def _num_unit(m: re.Match[str]) -> tuple[str, str | None]:
+    """（數字, 單位）比對用：去千分位與小數尾零（10.0 倍＝10 倍）、同義單位合併。"""
+    n = m.group(1).replace(",", "")
+    if "." in n:
+        n = n.rstrip("0").rstrip(".")
+    u = m.group(2)
+    return n, _SAME_UNIT.get(u, u) if u else u
 
 
 def rule_text(p: PickFacts, drop_alert: float) -> str:

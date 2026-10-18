@@ -4,6 +4,8 @@ import { X } from 'lucide-react'
 import { useEffect } from 'react'
 import { BADGE_LEGEND } from './badges'
 import { Icon } from './Icon'
+import { DIMS } from './pickreview'
+import { ScoreBars } from './Review'
 
 export function BadgeLegend({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -30,6 +32,19 @@ export function BadgeLegend({ onClose }: { onClose: () => void }) {
             <i className="in" />
           </span>
           <span>近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）</span>
+        </div>
+        <div className="cq-legend-dots">
+          <ScoreBars
+            r={{ news: 3, tech: 5, chips: 4, fund: 2, total: 14, top: false, reason: null, ai: true, views: { news: null, tech: null, chips: null, fund: null }, stance: null, conclusion: null }}
+          />
+          <span>
+            AI 四面向評分（高＝分數高，滿分 5）：
+            {DIMS.map((d) => (
+              <b key={d.key} style={{ color: d.color, marginLeft: 6 }}>
+                {d.name}
+              </b>
+            ))}
+          </span>
         </div>
         <ul>
           {BADGE_LEGEND.map((l) => (

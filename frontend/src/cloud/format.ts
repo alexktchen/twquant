@@ -8,6 +8,7 @@ import type { StopHit } from './stophit'
 import type { Risk } from './risks'
 import type { DownRisk } from './downrisk'
 import type { Blurb } from './blurb'
+import type { Review } from './pickreview'
 import type { RefRow } from './reference'
 import type { Similar } from './similar'
 
@@ -46,6 +47,8 @@ export type Pick = {
   down_risk?: DownRisk | null
   /** 一句話（T-393／D-195）：AI 寫的或規則句；那天沒算、舊後端沒有這欄 → null／undefined */
   blurb?: Blurb | null
+  /** 四面向評分與首選（T-394／D-196）：AI 1～5 分；那天沒算、舊後端沒有這欄 → null／undefined */
+  review?: Review | null
 }
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示。ref：歷史同區間參考（D-179）的列，還沒算或舊後端沒有這欄 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[]; ref?: RefRow[] }

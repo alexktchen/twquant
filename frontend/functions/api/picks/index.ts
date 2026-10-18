@@ -4,7 +4,7 @@
 // 每條線另附歷史同區間參考（D-179，serving.score_reference），網站每檔依分數對到區間；
 // 潛伏兩條線每檔另附歷史相似情境（D-182，serving.pick_similar；那天沒算就是 null）；
 // 每檔另附近 30 天的內部人持股轉讓申報摘要（T-384，serving.insider_transfer_notices；沒有就是 null）；
-// 每檔另附一句話（T-393，serving.pick_blurbs；那天沒算就是 null）。
+// 每檔另附一句話（T-393，serving.pick_blurbs）與四面向評分＋首選（T-394，serving.pick_reviews）；那天沒算就是 null。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { groupsFor } from '../../_lib/groups'
 import { readHolders } from '../../_lib/holders'
@@ -13,6 +13,7 @@ import { readStopHit } from '../../_lib/stop-hit'
 import { readRisks } from '../../_lib/risks'
 import { readDownRisk } from '../../_lib/down-risk'
 import { readBlurbs } from '../../_lib/blurbs'
+import { readReviews } from '../../_lib/reviews'
 import { readReasons } from '../../_lib/reasons'
 import { readReference } from '../../_lib/reference'
 import { readSimilar } from '../../_lib/similar'
@@ -51,6 +52,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const risks = await readRisks(db, target, sids)
     const downRisk = await readDownRisk(db, target)
     const blurbs = await readBlurbs(db, target)
+    const reviews = await readReviews(db, target)
     const drop = await readDrop(db, target)
     const reference = await readReference(db)
     const similar = await readSimilar(db, target)
@@ -106,6 +108,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             risks: risks.get(r.stock_id) ?? null,
             down_risk: downRisk.get(`${code}|${r.stock_id}`) ?? null,
             blurb: blurbs.get(`${code}|${r.stock_id}`) ?? null,
+            review: reviews.get(`${code}|${r.stock_id}`) ?? null,
           }
         }),
       }

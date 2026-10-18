@@ -34,6 +34,8 @@ import { cardReasons, factorsNote, mark, primaryModel, type Reason } from './rea
 import { dropNote, weakSummary } from './weak'
 import { ArrowDown, ArrowUp, Banknote, CandlestickChart, Check, ChevronDown, CircleDot, CircleHelp, CircleMinus, CirclePlus, Gauge, History, Info, Layers, Lightbulb, MessageSquareText, ShoppingBag, Trophy } from 'lucide-react'
 import { Kpi, Section } from './Section'
+import { ScoreBars, ReviewTiles, StanceChip, TopPickCard } from './Review'
+import { DIMS, MAX_SCORE, REVIEW_NOTE, topOf, type Review } from './pickreview'
 import { blurbTitle, type Blurb } from './blurb'
 import { pickBadges, rowBadges, type Badge } from './badges'
 import { BadgeChip } from './Icon'
@@ -232,6 +234,7 @@ export default function CloudApp() {
     [view],
   )
   const current = view?.lines.find((l) => l.code === line) ?? view?.lines[0]
+  const topPick = current ? topOf(current.picks) : null
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   // 每日名單的日期列（date＝undefined 是最新一天）；past＝正在看過去某天：K 線停在那天、不抓即時價
   const nav = dayNav(dates, date)
@@ -533,6 +536,9 @@ export default function CloudApp() {
                   {weakSum}
                 </p>
               )}
+              {!guest && topPick?.review && (
+                <TopPickCard sid={topPick.sid} name={topPick.name} r={topPick.review} on={topPick.sid === sid} onClick={() => setSid(topPick.sid)} />
+              )}
               <div className="cq-head">
                 <span>
                   股票
@@ -609,6 +615,7 @@ export default function CloudApp() {
                 refresh={refresh}
                 badges={pickBadges({ ...selected, line: current?.code ?? null })}
                 blurb={selected.blurb ?? null}
+                review={selected.review ?? null}
               />
             ) : null}
           </section>
@@ -690,6 +697,7 @@ function Row({
               <i key={i} className={x === null ? 'na' : x ? 'in' : ''} />
             ))}
           </span>
+          {p.review && <ScoreBars r={p.review} />}
           {shown.map((b) => (
             <BadgeChip key={b.key} b={b} compact />
           ))}
@@ -699,7 +707,12 @@ function Row({
             </span>
           )}
         </small>
-        {p.blurb && (
+        {p.review?.conclusion ? (
+          <small className="cq-blurb" title={REVIEW_NOTE}>
+            <StanceChip s={p.review.stance} />
+            <span>{p.review.conclusion}</span>
+          </small>
+        ) : p.blurb && (
           <small className="cq-blurb" title={blurbTitle(p.blurb)}>
             <MessageSquareText size={13} strokeWidth={2.2} aria-hidden="true" />
             <span>{p.blurb.text}</span>
@@ -1068,6 +1081,7 @@ function Detail({
   refresh,
   badges = [],
   blurb = null,
+  review = null,
 }: {
   sid: string
   name: string | null
@@ -1097,6 +1111,8 @@ function Detail({
   badges?: Badge[]
   /** 名單上這一檔的一句話（T-393）；不是從名單點進來就沒有 */
   blurb?: Blurb | null
+  /** 名單上這一檔的四面向評分（T-394）；不是從名單點進來就沒有 */
+  review?: Review | null
 }) {
   // K 線資料記著是哪一檔：換股時舊圖先留著（不閃白），但報價列只用這一檔自己的資料
   const [chart, setChart] = useState<{ sid: string; bars: Bar[]; days: Record<string, string[]> }>({ sid: '', bars: [], days: {} })
@@ -1217,7 +1233,11 @@ function Detail({
           </dl>
         )}
       </header>
-      {blurb && (
+      {review ? (
+        <Section icon={Gauge} title="AI 分析師觀點" meta={`共 ${review.total}／${MAX_SCORE * DIMS.length}`}>
+          <ReviewTiles r={review} />
+        </Section>
+      ) : blurb && (
         <p className={`cq-blurb-full${blurb.ai ? ' ai' : ''}`} title={blurbTitle(blurb)}>
           <MessageSquareText size={16} strokeWidth={2.2} aria-hidden="true" />
           <span>{blurb.text}</span>

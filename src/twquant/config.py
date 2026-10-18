@@ -115,6 +115,37 @@ class PickBlurbsConfig(BaseConfig):
     advice_terms: list[str]
 
 
+class PickReviewConfig(BaseConfig):
+    """名單四面向評分與 AI 首選（T-394／D-196）。權威說明在 system.yaml 的註解。"""
+
+    lines: list[str]
+    max_tokens: int = Field(gt=0)
+    view_chars: int = Field(gt=0)
+    conclusion_chars: int = Field(gt=0)
+    stances: list[str]
+    bull_min: int = Field(ge=4, le=20)
+    bear_max: int = Field(ge=4, le=20)
+    forbidden_terms: list[str]
+    interpretive_terms: list[str]
+    conclusion_allow: list[str]
+    dim_words: dict[str, list[str]]
+    top_max_tokens: int = Field(gt=0)
+    reason_chars: int = Field(gt=0)
+    top_total_slack: int = Field(ge=0)
+    history_days: int = Field(gt=0)
+    move_days: list[int]
+    ma_days: list[int]
+    high_days: int = Field(gt=0)
+    low_days: int = Field(gt=1)
+    volume_days: int = Field(gt=0)
+    chip_days: int = Field(gt=0)
+    chip_long_days: int = Field(gt=0)
+    streak_min: int = Field(ge=1)
+    holders_level: int
+    holders_lookback_days: int = Field(gt=0)
+    revenue_months: int = Field(ge=1)
+
+
 class MorningBriefConfig(BaseConfig):
     """晨報（T-377／D-188）：06:30 那班抓的全球行情、晨報引用哪些資料。權威說明在 system.yaml 的註解。"""
 
@@ -208,6 +239,7 @@ class SystemConfig(BaseConfig):
     warrants: WarrantConfig = WarrantConfig()
     morning_brief: MorningBriefConfig
     pick_blurbs: PickBlurbsConfig
+    pick_review: PickReviewConfig
 
 
 # D-020 綜合分有效子集的預設值（serving.yaml.composite_factors 缺省時後備）。
