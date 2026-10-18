@@ -29,6 +29,7 @@ import { dropNote, weakSummary, weakTags } from './weak'
 import { insiderTag } from './insider'
 import { holdersTag } from './holders'
 import { stopHitLine, stopHitTitle } from './stophit'
+import { riskTags } from './risks'
 import { StockHolders } from './StockHolders'
 import { StockStopHit } from './StockStopHit'
 import { StockWarrants } from './StockWarrants'
@@ -650,6 +651,11 @@ function Row({
               {holdersTag(p.holders)!.text}
             </i>
           )}
+          {riskTags(p.risks).map((t) => (
+            <i key={`${t.kind}${t.text}`} className={`cq-tag warn risk ${t.kind}`} title={t.title}>
+              {t.text}
+            </i>
+          ))}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
         {stopHitLine(p.stop_hit) && (
