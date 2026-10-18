@@ -72,5 +72,5 @@ test('T-386 AC-5（靜態）：名單只用早於名單那天的週（週六才�
   const picks = readFileSync(new URL('../functions/api/picks/index.ts', import.meta.url), 'utf8')
   assert.ok(picks.includes('readHolders(db, target, sids)') && picks.includes('holders: holders.get(r.stock_id) ?? null'))
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
-  assert.ok(app.includes('holdersTag(p.holders)') && app.includes('<StockHolders sid={sid} refresh={refresh} />'))
+  assert.ok(app.includes('holdersTag(p.holders)') && app.includes('<StockFacts sid={sid} refresh={refresh} />'))
 })

@@ -54,5 +54,6 @@ test('T-385 AC-3（靜態）：個股頁端點讀 warrant_summary_daily、只到
   const api = readFileSync(new URL('../functions/api/stocks/[sid]/warrants.ts', import.meta.url), 'utf8')
   assert.ok(api.includes('SID_RE.test(sid)') && api.includes('readWarrantDays(db, sid, today)'))
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
-  assert.ok(app.includes('<StockWarrants sid={sid} refresh={refresh} />'))
+  // 2026-10-18 使用者嫌個股頁太長：權證、千張大戶、停損基礎率併成一張「籌碼與風險」卡
+  assert.ok(app.includes('<StockFacts sid={sid} refresh={refresh} />'))
 })

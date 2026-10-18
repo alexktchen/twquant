@@ -52,9 +52,7 @@ export function StockCalendar({ sid, refresh }: { sid: string; refresh: number }
 
   return (
     <div className="cq-ref cq-stockcal">
-      <h3>
-        行事曆<small>除權息、法說會、分割減資、內部人申讓；過去一年到往後四個月</small>
-      </h3>
+      <h3>行事曆</h3>
       {upcoming.length === 0 && past.length === 0 && <p>這段期間沒有除權息、法說會或分割減資的紀錄。</p>}
       {upcoming.length > 0 && <ul>{upcoming.map((x) => row(x, true))}</ul>}
       {upcoming.length === 0 && past.length > 0 && <p>接下來沒有已公告的除權息或法說會。</p>}
@@ -68,10 +66,6 @@ export function StockCalendar({ sid, refresh }: { sid: string; refresh: number }
           )}
         </>
       )}
-      <p className="cq-ref-note">
-        除權息預告來自證交所與櫃買中心（有金額）；已經發生的只記日期與種類。法說會來自公開資訊觀測站，點一下看說明。
-        內部人申讓是董監事、經理人或大股東依法在轉讓前申報的紀錄（證交所、櫃買中心每日公告），記在申報公開那天；申報不一定會真的賣完。
-      </p>
     </div>
   )
 }

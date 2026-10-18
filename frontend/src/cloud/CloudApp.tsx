@@ -31,14 +31,11 @@ import { cardReasons, factorsNote, mark, primaryModel, whyLine, type Reason } fr
 import { dropNote, weakSummary, weakTags } from './weak'
 import { insiderTag } from './insider'
 import { holdersTag } from './holders'
-import { stopHitLine, stopHitTitle } from './stophit'
 import { riskTags } from './risks'
 import { downRiskTag } from './downrisk'
 import { TradesPanel } from './TradesPanel'
 import { boughtKeys, type Trade, type TradeList } from './trades'
-import { StockHolders } from './StockHolders'
-import { StockStopHit } from './StockStopHit'
-import { StockWarrants } from './StockWarrants'
+import { StockFacts } from './StockFacts'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
@@ -463,9 +460,10 @@ export default function CloudApp() {
                 )}
                 {guest && <Gate title="登入後查個股評分" text="輸入任何股號，看三個模型怎麼評它，並存成自己的追蹤股。" />}
               </div>
-              <p className="cq-note">
+              <details className="cq-note cq-fold">
+                <summary>說明</summary>
                 追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。非投資建議。
-              </p>
+              </details>
               {!guest && <TradesPanel trades={trades} err={tradesErr} lineName={lineName} onAdd={addTrade} onDelete={removeTrade} />}
             </aside>
           ) : (
@@ -551,9 +549,10 @@ export default function CloudApp() {
                 {guest && <Gate />}
               </div>
               {current?.note && <p className="cq-note cq-line-note">{current.note}</p>}
-              <p className="cq-note">
-                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。綠框＝破底提醒，不影響名單。盤中價格每 10 秒更新，小字是推薦當天的收盤；漲停、跌停的價格加框、漲跌幅整格填色。模型每日收盤後產生，非投資建議。
-              </p>
+              <details className="cq-note cq-fold">
+                <summary>說明</summary>
+                方格＝近 6 個交易日有沒有上榜（舊→新，空框＝那天沒打分）；6日＝近 6 日漲幅。綠框＝破底提醒、黃框＝處置／除權息等風險，都不影響名單；滑過或長按小標看細節。「＋買」記下你在這天買了這檔。盤中價格每 10 秒更新，小字是推薦當天的收盤。模型每日收盤後產生，非投資建議。
+              </details>
             </aside>
           )}
 
@@ -705,25 +704,21 @@ function Row({
               {downRiskTag(p.down_risk)!.text}
             </i>
           )}
+          {onBuy && (
+            <button
+              className={bought ? 'cq-buy on' : 'cq-buy'}
+              aria-label={bought ? '取消「我買了」' : '我買了'}
+              title={bought ? '已記下你在這天買了這檔；再按一次取消' : '記下你在這天買了這檔（追蹤分頁可以補價格張數）'}
+              onClick={(e) => {
+                e.stopPropagation()
+                onBuy(p.sid, !bought)
+              }}
+            >
+              {bought ? '✓買' : '＋買'}
+            </button>
+          )}
         </small>
         {whyLine(p.reasons) && <span className="cq-why">{whyLine(p.reasons)}</span>}
-        {stopHitLine(p.stop_hit) && (
-          <span className="cq-why cq-stophit" title={stopHitTitle(p.stop_hit)}>
-            {stopHitLine(p.stop_hit)}
-          </span>
-        )}
-        {onBuy && (
-          <button
-            className={bought ? 'cq-buy on' : 'cq-buy'}
-            title={bought ? '已記下你在這天買了這檔；再按一次取消' : '記下你在這天買了這檔（只記、不評；追蹤分頁可以補價格張數）'}
-            onClick={(e) => {
-              e.stopPropagation()
-              onBuy(p.sid, !bought)
-            }}
-          >
-            {bought ? '✓ 已記我買了' : '我買了'}
-          </button>
-        )}
       </div>
       <span className="cq-pxcol">
         <span className={`cq-px ${t}${px.limit ? ` limit-${px.limit}` : ''}`} title={px.limit === 'up' ? '漲停' : px.limit === 'down' ? '跌停' : undefined}>
@@ -1199,10 +1194,8 @@ function Detail({
         )}
       </div>
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
-      <StockStopHit sid={sid} refresh={refresh} />
+      <StockFacts sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
-      <StockHolders sid={sid} refresh={refresh} />
-      <StockWarrants sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <div className="cq-legend">
         {MA_LEGEND.map((m) => (

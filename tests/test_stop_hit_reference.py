@@ -97,7 +97,8 @@ def test_ac5_wired_into_picks_and_stock_page() -> None:
     )
     lib = (_ROOT / "frontend" / "functions" / "_lib" / "stop-hit.ts").read_text(encoding="utf-8")
     assert "date <= ${date}::date" in lib
+    # 2026-10-18 使用者嫌名單列太高、個股頁太長：名單列不再放這一行，個股頁併進「籌碼與風險」卡
     app = (_ROOT / "frontend" / "src" / "cloud" / "CloudApp.tsx").read_text(encoding="utf-8")
-    assert (
-        "stopHitLine(p.stop_hit)" in app and "<StockStopHit sid={sid} refresh={refresh} />" in app
-    )
+    assert "<StockFacts sid={sid} refresh={refresh} />" in app
+    facts = (_ROOT / "frontend" / "src" / "cloud" / "StockFacts.tsx").read_text(encoding="utf-8")
+    assert "fetchStockStopHit" in facts and "stopHitTitle" in facts

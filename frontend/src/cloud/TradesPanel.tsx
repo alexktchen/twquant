@@ -1,5 +1,5 @@
-// 追蹤分頁的「我的下單」（T-388／D-193 §一，使用者選 C）：名單上勾的「我買了」會出現在這裡；
-// 名單外的用下面的表單補（代號、日期、買或賣、價格、張數）。只記、不評。
+// 追蹤分頁的「我的下單」（T-388／D-193 §一，使用者選 C）：名單上按「＋買」會記在這；名單外的用表單補。只記、不評。
+// 使用者 2026-10-18 嫌頁面字太多：預設收起，只顯示「我的下單・N 筆」；說明只留一句。
 import { useState } from 'react'
 import { SIDE_TEXT, tradeFormError, tradeText, type Side, type Trade, type TradeList } from './trades'
 
@@ -46,10 +46,10 @@ export function TradesPanel({
   }
 
   return (
-    <div className="cq-ref cq-trades">
-      <h3>
-        我的下單<small>名單上按「我買了」會記在這；名單外的在下面補。只記、不評，累積三個月後對照名單</small>
-      </h3>
+    <details className="cq-trades">
+      <summary>
+        我的下單<em>{items.length} 筆</em>
+      </summary>
       <div className="cq-trade-form">
         <input aria-label="代號" placeholder="代號" value={form.sid} maxLength={6} onChange={(e) => setForm({ ...form, sid: e.target.value })} />
         <input aria-label="日期" type="date" value={form.date} max={today} onChange={(e) => setForm({ ...form, date: e.target.value })} />
@@ -64,12 +64,11 @@ export function TradesPanel({
         </button>
       </div>
       {(formErr || err) && <p className="cq-empty">{formErr || err}</p>}
-      {items.length === 0 && !err && <p className="cq-empty">還沒有紀錄。在名單上按「我買了」，或用上面的表單記一筆。</p>}
       {items.length > 0 && (
         <ul>
           {shown.map((t) => (
-            <li key={`${t.date}${t.sid}${t.side}`} className={t.side === 'buy' ? 'soon' : 'past'}>
-              <span className="cq-stockcal-detail">{tradeText(t, lineName)}</span>
+            <li key={`${t.date}${t.sid}${t.side}`}>
+              <span>{tradeText(t, lineName)}</span>
               <button className="cq-war-link" aria-label={`刪除 ${SIDE_TEXT[t.side]} ${t.sid} ${t.date}`} onClick={() => onDelete(t)}>
                 刪
               </button>
@@ -82,7 +81,7 @@ export function TradesPanel({
           {more ? '收起' : `看全部 ${items.length} 筆`}
         </button>
       )}
-      <p className="cq-ref-note">存在你的帳號（同追蹤股），沒有備份。這份紀錄之後只用來對照「名單說了什麼、你做了什麼」，不會改名單、不會推播。</p>
-    </div>
+      <p className="cq-trade-note">名單上按「＋買」也會記在這。只記不評，三個月後拿來對照名單。</p>
+    </details>
   )
 }
