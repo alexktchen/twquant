@@ -50,6 +50,8 @@ class MorningBrief(BaseModel):
     headline: str
     bullets: list[str]
     risk_note: str | None = None
+    stance: str  # 今天的立場：偏多／中性／偏空（T-396）；核對過才存成第一點【方向】。必填：選填時 qwen3 直接略過
+    strategy: str  # 今天的操作方向一句
 
 
 class PickBlurbItem(BaseModel):

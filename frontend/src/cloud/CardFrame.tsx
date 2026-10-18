@@ -13,6 +13,7 @@ import {
   LayoutGrid,
   ListChecks,
   Megaphone,
+  Navigation,
   Scale,
   Sunrise,
   Trophy,
@@ -42,6 +43,7 @@ const ICONS: Record<HomeIcon, LucideIcon> = {
   eye: Eye,
   flag: Flag,
   zap: Zap,
+  navigation: Navigation,
 }
 
 export function HomeIconSvg({ name, size = 18 }: { name: HomeIcon; size?: number }) {

@@ -21,6 +21,7 @@ export type HomeIcon =
   | 'eye'
   | 'flag'
   | 'zap'
+  | 'navigation'
 
 export const CARD_META: Record<CardId, { tone: CardTone; icon: HomeIcon; title: string }> = {
   brief: { tone: 'view', icon: 'sunrise', title: '今日一句話' },
@@ -49,6 +50,7 @@ export const BULLET_TAGS: Record<string, HomeIcon> = {
   資金: 'wallet',
   觀察: 'eye',
   風險: 'zap',
+  方向: 'navigation',
 }
 
 /** 「【研判】國際盤重挫…」→ { tag: '研判', icon, text: '國際盤重挫…' }；沒有標籤 → tag null。 */
@@ -56,6 +58,14 @@ export function parseBullet(s: string): { tag: string | null; icon: HomeIcon; te
   const m = /^\s*[【[]([^\]】]{1,6})[】\]]\s*(.*)$/s.exec(s)
   if (!m) return { tag: null, icon: 'flag', text: s.trim() }
   return { tag: m[1], icon: BULLET_TAGS[m[1]] ?? 'flag', text: m[2].trim() }
+}
+
+/** 晨報的【方向】那一點（T-396）：「偏空｜持股降低、開盤不追高…」→ { stance, text }；不是方向那一點 → null。 */
+export function parseDirection(bullet: string): { stance: string; text: string } | null {
+  const b = parseBullet(bullet)
+  if (b.tag !== '方向') return null
+  const i = b.text.indexOf('｜')
+  return i < 0 ? { stance: '', text: b.text } : { stance: b.text.slice(0, i).trim(), text: b.text.slice(i + 1).trim() }
 }
 
 /** 漲跌幅的一行小字：「▲ 1.23%」「▼ 0.50%」「— 0.00%」。 */

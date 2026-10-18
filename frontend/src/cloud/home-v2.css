@@ -168,3 +168,15 @@
   .cq-heads time { grid-column: 2; justify-self: end; }
   .cq-hc .cq-reel-slide .cq-heads li { padding: 2px 0; }
 }
+
+/* 晨報的今日方向（T-396）：標題下面一個色框——偏多紅、偏空綠、中性灰（台股紅漲綠跌） */
+.cq-brief-dir { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0 4px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--tile); font-size: 15.5px; line-height: 1.5; }
+.cq-brief-dir.up { border-color: rgba(246, 70, 93, .45); background: rgba(246, 70, 93, .08); }
+.cq-brief-dir.down { border-color: rgba(14, 203, 129, .45); background: rgba(14, 203, 129, .08); }
+.cq-brief-dir-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; font-weight: 700; color: var(--mute); }
+.cq-brief-dir > b { font-size: 16px; padding: 1px 8px; border-radius: 6px; }
+.cq-brief-dir.up > b { color: var(--up); background: rgba(246, 70, 93, .16); }
+.cq-brief-dir.down > b { color: var(--down); background: rgba(14, 203, 129, .16); }
+.cq-brief-dir.flat > b { color: var(--text); background: #2a2d36; }
+.cq-brief-dir-text { flex: 1 1 100%; color: var(--text); }

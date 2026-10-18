@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BULLET_TAGS, CARD_META, TONE_NAME, bigMoney, chgSub, headlineTone, lots, parseBullet, ptsSub, signedBig } from '../src/cloud/home.ts'
+import { BULLET_TAGS, CARD_META, TONE_NAME, bigMoney, chgSub, headlineTone, lots, parseBullet, parseDirection, ptsSub, signedBig } from '../src/cloud/home.ts'
 import { HOME_CARDS } from '../src/cloud/layout.ts'
 
 test('使用者 2026-10-18「像地鐵告示」：每張首頁卡一條路線色＋一個圖示＋短標題；五條路線都有名字', () => {
@@ -45,4 +45,11 @@ test('新聞頭條分類 → 路線色', () => {
   assert.equal(headlineTone('台股新聞'), 'list')
   assert.equal(headlineTone('國際政經'), 'quote')
   assert.equal(headlineTone(null), 'view')
+})
+
+test('T-396 晨報的今日方向：【方向】偏空｜… 拆成立場與一句；其他點不是方向', () => {
+  assert.deepEqual(parseDirection('【方向】偏空｜持股降低、開盤不追高'), { stance: '偏空', text: '持股降低、開盤不追高' })
+  assert.deepEqual(parseDirection('【方向】開盤不追高'), { stance: '', text: '開盤不追高' })
+  assert.equal(parseDirection('【研判】國際盤重挫'), null)
+  assert.equal(BULLET_TAGS['方向'], 'navigation')
 })

@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react'
 import { fetchBriefDay } from './api'
 import { CardFrame, HomeIconSvg } from './CardFrame'
 import { pct } from './format'
-import { chgSub, parseBullet, signedBig } from './home'
+import { chgSub, parseBullet, parseDirection, signedBig } from './home'
+import { stanceTone } from './pickreview'
 import type { Slide } from './Reel'
 import { Kpi } from './Section'
 import { briefNeighbors, dayLabel, tone, type Brief, type BriefActual } from './war'
@@ -83,7 +84,9 @@ export function BriefCard({
         ]
       : [{ key: 'rule', node: <p className="cq-reel-text">{b.rule_text}</p> }]
 
-  const bullets = (b?.bullets ?? []).map(parseBullet)
+  // 【方向】那一點（T-396）拿出來放在標題下面，其他照原樣列
+  const direction = (b?.bullets ?? []).map(parseDirection).find((x) => x !== null) ?? null
+  const bullets = (b?.bullets ?? []).filter((x) => parseDirection(x) === null).map(parseBullet)
 
   return (
     <CardFrame
@@ -125,6 +128,16 @@ export function BriefCard({
       {b && b.headline && b.bullets ? (
         <>
           <p className="cq-brief-headline">{b.headline}</p>
+          {direction && (
+            <p className={`cq-brief-dir ${stanceTone(direction.stance)}`} title="AI 依今天的事實給的操作方向；數字都核對過，不喊點位、不保證漲跌，請自行判斷">
+              <span className="cq-brief-dir-tag">
+                <HomeIconSvg name="navigation" size={15} />
+                今日方向
+              </span>
+              {direction.stance && <b>{direction.stance}</b>}
+              <span className="cq-brief-dir-text">{direction.text}</span>
+            </p>
+          )}
           <ul className="cq-brief-points" title="AI 依下面的數字整理，每句裡的數字都檢查過出自這些數字">
             {bullets.map((x, k) => (
               <li key={k}>

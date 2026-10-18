@@ -169,6 +169,10 @@ class MorningBriefConfig(BaseConfig):
     headline_limit: int = Field(default=8, ge=1)  # 晨報與首頁列幾則
     news_direction_subjects: list[str] = []  # 檢查晨報有沒有把頭條的漲跌方向寫反的標的
     news_direction_window: int = Field(default=4, ge=1)  # 標的後面幾個字內找方向字
+    stances: list[str] = []  # 今天的操作方向：立場三選一（T-396）
+    strategy_chars: int = Field(default=60, gt=0)  # 操作方向一句最多幾個字
+    stance_conflicts: dict[str, list[str]] = {}  # 立場與持股水位矛盾的字
+    forbidden_terms: list[str] = []  # 操作方向不准出現的字（喊價、保證）
     line_names: dict[
         str, str
     ] = {}  # 名單線代號 → 給人看的名字（網站 functions/_lib/picks.ts LINES 同名）
