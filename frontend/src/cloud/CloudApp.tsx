@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './cloud.css'
 import './cloud-v2.css'
 import './home-v2.css'
+import './score-v2.css'
 import {
   fetchBars,
   fetchMe,
