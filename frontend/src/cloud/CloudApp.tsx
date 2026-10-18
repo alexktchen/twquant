@@ -246,7 +246,8 @@ export default function CloudApp() {
       : deleteTrade({ sid: s, date: view.date, side: 'buy' })
     req.then(loadTrades).catch((e: Error) => setNotice(watchError(e)))
   }
-  const lineName = (code: string | null) => view?.lines.find((l) => l.code === code)?.name ?? null
+  // 追蹤分頁直接打開時還沒載過名單：用固定的線別名稱（同 K 線圖例），不顯示 CORE 這種代號
+  const lineName = (code: string | null) => (code ? (lineNames[code] ?? null) : null)
   const addTrade = (t: Omit<Trade, 'created_at'>) => saveTrade(t).then(loadTrades)
   const removeTrade = (t: Trade) => deleteTrade({ sid: t.sid, date: t.date, side: t.side }).then(loadTrades)
   // 存順序：畫面先照新順序排，再一筆一筆依序送出（連拖幾次也不會後送先到）；失敗就顯示原因並重抓伺服器上的順序
