@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsHealth, NewsKind, NewsRow } from './news'
+import type { NewsHealth, NewsKind, NewsRow, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
@@ -138,6 +138,11 @@ export function fetchNewsItems(q: { kind: NewsKind | null; limit: number; until?
 }
 /** 一則新聞的關係圖（T-402／T-404）：提到的實體往外三度；沒有這則 → 404。 */
 export const fetchNewsGraph = (id: string) => get<NewsGraphData>(`/api/news/graph?id=${encodeURIComponent(id)}`)
+/** 反向看圖：某一檔近 7 天連得到的新聞（個股頁「相關新聞」）。 */
+export const fetchStockNews = (sid: string) => get<StockNews>(`/api/news/stock?id=${encodeURIComponent(`tw:${sid}`)}`)
+/** 名單小標：一批股票近 3 天各有幾則相關新聞；鍵是 tw:代號。 */
+export const fetchStockNewsCounts = (sids: string[]) =>
+  get<StockNewsCounts>(`/api/news/stock-counts?ids=${encodeURIComponent(sids.map((s) => `tw:${s}`).join(','))}`)
 /** 新聞服務最後抓取時間與各來源狀態。 */
 export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
 /** 盤中大盤體檢（T-397）：排程每分鐘更新；今天還沒有 → live 是 null。 */

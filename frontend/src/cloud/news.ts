@@ -135,3 +135,43 @@ export function appendPage(rows: NewsRow[], more: NewsRow[]): NewsRow[] {
   const seen = new Set(rows.map((r) => r.id))
   return [...rows, ...more.filter((r) => !seen.has(r.id))]
 }
+
+// ── 反向看圖（使用者 2026-10-20：「那有反向看圖的地方嗎？像是每日推薦股有關的新聞」）────────────────
+export type StockNewsStep = { id: string; label: string; via: string; via_label?: string }
+export type StockNewsItem = {
+  id: string
+  source_name: string
+  url: string
+  first_seen_at: string
+  title: string
+  title_zh: string | null
+  /** 1＝新聞直接提到；2＝新聞提到的公司或族群再走一條線到這一檔 */
+  degree: number
+  score: number
+  /** 路徑上有 AI 草擬、還沒核可的線 */
+  draft: boolean
+  path: StockNewsStep[]
+}
+export type StockNews = { id: string; days: number; items: StockNewsItem[] }
+export type NewsCount = { direct: number; indirect: number }
+export type StockNewsCounts = { days: number; counts: Record<string, NewsCount> }
+
+/** 個股頁一開始列幾則（其餘收起） */
+export const STOCK_NEWS_SHOWN = 5
+
+const VIA_SHORT: Record<string, string> = { supplier: '供應商', belongs: '屬於族群', member: '族群成員', peer: '同族群', theme: '相關主題', mention: '提到' }
+
+/** 間接那則怎麼連過來的：「輝達 › 供應商」「伺服器 › 族群成員」（最後一步就是這一檔，不重複寫）；草擬的加「・草擬」。 */
+export function pathText(it: Pick<StockNewsItem, 'path' | 'draft'>): string {
+  if (it.path.length < 2) return ''
+  const first = it.path[0].label
+  const last = it.path[it.path.length - 1]
+  const via = last.via === 'peer' && last.via_label ? `同族群・${last.via_label}` : (VIA_SHORT[last.via] ?? last.via)
+  return `${first} › ${via}${it.draft ? '・草擬' : ''}`
+}
+
+/** 個股頁標題右邊那一句：「近 7 天・直接 1・間接 19」。 */
+export function stockNewsSummary(d: StockNews): string {
+  const direct = d.items.filter((x) => x.degree === 1).length
+  return `近 ${d.days} 天・直接 ${direct}・間接 ${d.items.length - direct}`
+}

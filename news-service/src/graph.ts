@@ -62,11 +62,25 @@ const better = (a: Link, b: Link | undefined): boolean =>
   !b || a.score > b.score + 1e-12 || (Math.abs(a.score - b.score) <= 1e-12 && (a.degree < b.degree || (a.degree === b.degree && pathKey(a) < pathKey(b))))
 const pathKey = (l: Link) => l.path.map((s) => s.entity).join('>')
 
+/** 出發點 → 從它出去的線（expandEdges 之後）；很多則新聞共用同一份（反向看圖一次算上百則）。 */
+export type Adjacency = Map<string, Edge[]>
+export function adjacency(edges: Edge[]): Adjacency {
+  const out: Adjacency = new Map()
+  for (const e of expandEdges(edges)) {
+    const l = out.get(e.src)
+    if (l) l.push(e)
+    else out.set(e.src, [e])
+  }
+  return out
+}
+
 /** 幾度關聯：mentions＝新聞直接提到的實體 id（一度）。回傳依分數高到低排好、截到 max_links 的關聯（樹）。 */
 export function propagate(mentions: string[], edges: Edge[], cfg: GraphConfig): Link[] {
-  const all = expandEdges(edges)
-  const out = new Map<string, Edge[]>()
-  for (const e of all) out.set(e.src, [...(out.get(e.src) ?? []), e])
+  return propagateWith(mentions, adjacency(edges), cfg)
+}
+
+/** 同 propagate，線已經整理成 adjacency。 */
+export function propagateWith(mentions: string[], out: Adjacency, cfg: GraphConfig): Link[] {
   const best = new Map<string, Link>()
   for (const m of [...new Set(mentions)].sort()) best.set(m, { entity: m, degree: 1, score: 1, path: [{ entity: m, via: 'mention', draft: false }], draft: false })
 
