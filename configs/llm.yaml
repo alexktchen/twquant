@@ -1,8 +1,9 @@
 # 洞悉層 LLM 設定（SPEC-008 §3 / MODEL-POLICY / D-185）。程式碼不得寫死模型字串，一律查此檔。
 usd_twd: 32.0                 # 匯率，估成本用
 daily_budget_twd: 300.0       # 日累計成本上限，超過當日停用洞悉層 + WARN
-# Cloudflare Workers AI 免費額度每日 10,000 Neurons（UTC 00:00 重置）；留 1,000 給其他用途（D-185 §4）
-daily_neuron_budget: 9000
+# Cloudflare Workers AI 免費額度每日 10,000 Neurons（UTC 00:00 重置）。D-200 §五 靜態分配：新聞服務的翻譯 2,500
+# （configs/news.yaml translate.daily_neurons，自己記帳）、這裡 Python 各任務合計 6,500、留 1,000 緩衝（原 D-185 §4 是 9,000）。
+daily_neuron_budget: 6500
 request_timeout_s: 120        # REST backend 單次請求逾時（秒）
 
 models:

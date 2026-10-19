@@ -1,0 +1,10 @@
+# 新聞服務（T-400／D-200）的 Supabase 專案設定。部署：見 news-service/README.md。
+# project_id 只是本機 CLI 用的名稱；真正的專案由 `supabase link --project-ref <代號>` 決定。
+project_id = "twquant-news"
+
+# 兩支函式都自己驗 x-news-key（各自的祕密），不用 Supabase 的 JWT
+[functions.ingest]
+verify_jwt = false
+
+[functions.api]
+verify_jwt = false

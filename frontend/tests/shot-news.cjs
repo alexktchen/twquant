@@ -1,0 +1,31 @@
+// 新聞分頁截圖（手動檢查用，T-400）：node tests/shot-news.cjs <baseUrl> <outDir> <items.json> <health.json>
+// 新聞服務還沒上線時，用錄好的回應代替 /api/news/*。
+const { chromium } = require('playwright')
+const fs = require('node:fs')
+const path = require('node:path')
+;(async () => {
+  const [base, out, itemsFile, healthFile] = process.argv.slice(2)
+  const items = JSON.parse(fs.readFileSync(itemsFile, 'utf8'))
+  const health = JSON.parse(fs.readFileSync(healthFile, 'utf8'))
+  const b = await chromium.launch()
+  for (const [w, h, m, name] of [[390, 844, true, 'm-news'], [1360, 900, false, 'd-news']]) {
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: m ? 2 : 1, isMobile: m, hasTouch: m })
+    const page = await ctx.newPage()
+    await page.setExtraHTTPHeaders({ 'cf-access-authenticated-user-email': 'cktalex@gmail.com' })
+    await page.route('**/api/layout', (r) => r.fulfill({ json: { layout: null } }))
+    await page.route('**/api/news/items**', (r) => r.fulfill({ json: items }))
+    await page.route('**/api/news/health', (r) => r.fulfill({ json: health }))
+    await page.goto(`${base}/?tab=news`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1500)
+    const btn = page.getByRole('button', { name: '同意並進入' })
+    if ((await btn.count()) > 0) { await page.locator('input[type="checkbox"]').first().check(); await btn.click() }
+    await page.waitForTimeout(2500)
+    await page.screenshot({ path: path.join(out, `${name}.png`) })
+    await page.locator('.cq-news-row').first().click()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: path.join(out, `${name}-open.png`) })
+    await ctx.close()
+  }
+  await b.close()
+  console.log('news ok')
+})().catch((e) => { console.error(e); process.exit(1) })

@@ -21,3 +21,10 @@ jobs:
         run: uv sync --dev --all-groups
       - name: Gate (ruff + mypy + pytest)
         run: uv run python -m twquant check
+      # 新聞服務（T-400）：純 TS、沒有套件，不用 npm install
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: news-service tests
+        working-directory: news-service
+        run: npm test

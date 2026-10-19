@@ -1,6 +1,6 @@
 // 首頁「新聞頭條」（使用者 2026-10-17：「國際大事要縮起來輪播」）：收起時一次一則、每 6 秒換下一則，展開看全部。
 // 2026-10-18 改版（地鐵告示）：每則＝分類色塊＋標題＋時間；標題連到鉅亨網原文。
-import { ExternalLink } from 'lucide-react'
+import { ArrowRight, ExternalLink } from 'lucide-react'
 import { CardFrame } from './CardFrame'
 import { headlineTone } from './home'
 import { headlineTime, type Headline } from './war'
@@ -8,11 +8,14 @@ import { headlineTime, type Headline } from './war'
 export function HeadlinesCard({
   items,
   until,
+  onNews,
   collapsed,
   onToggle,
 }: {
   items: Headline[]
   until: string | null
+  /** 「看全部 →」：切到新聞分頁（T-400） */
+  onNews: () => void
   collapsed: boolean
   onToggle: () => void
 }) {
@@ -32,6 +35,12 @@ export function HeadlinesCard({
       id="heads"
       className="cq-war-heads"
       when={`前一天 14:00 起${until ? `～${until}` : ''}`}
+      extra={
+        <button className="cq-heads-all" onClick={onNews} title="新聞分頁：國內外財經新聞，每 30 分鐘更新">
+          全部
+          <ArrowRight size={15} aria-hidden="true" />
+        </button>
+      }
       collapsed={collapsed}
       onToggle={onToggle}
       slides={items.map((h) => ({ key: String(h.news_id), node: <ul className="cq-heads cq-news-one">{row(h)}</ul> }))}
