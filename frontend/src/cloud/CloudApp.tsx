@@ -5,6 +5,7 @@ import './cloud.css'
 import './cloud-v2.css'
 import './home-v2.css'
 import './score-v2.css'
+import './news-v2.css'
 import {
   fetchBars,
   fetchMe,
@@ -46,6 +47,7 @@ import { StockFacts } from './StockFacts'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
+import { NewsPage } from './NewsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
@@ -325,6 +327,9 @@ export default function CloudApp() {
           <button className={tab === 'home' ? 'on' : ''} onClick={() => setTab('home')}>
             首頁
           </button>
+          <button className={tab === 'news' ? 'on' : ''} onClick={() => setTab('news')}>
+            新聞
+          </button>
           <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
             每日名單
           </button>
@@ -386,6 +391,7 @@ export default function CloudApp() {
               }
               setTab('picks')
             }}
+            onNews={() => setTab('news')}
             onScore={(code) => {
               setLine(code)
               savePref(LINE_KEY, code)
@@ -396,6 +402,19 @@ export default function CloudApp() {
               setTab('watch')
             }}
           />
+        )
+      ) : tab === 'news' ? (
+        guest ? (
+          <main className="cq-body">
+            <aside className="cq-list cq-list-guest">
+              <div className="cq-rows">
+                <Gate title="登入後看新聞" text="國內外財經新聞每 30 分鐘更新一次（含半夜），國外的會翻成中文，並連到相關的美股、台股與族群。" />
+              </div>
+            </aside>
+            <section className="cq-detail" />
+          </main>
+        ) : (
+          <NewsPage refresh={refresh} />
         )
       ) : tab === 'score' ? (
         guest ? (

@@ -66,6 +66,7 @@ export function WarRoom({
   watchSids,
   listed,
   onPicks,
+  onNews,
   onScore,
   onStock,
 }: {
@@ -75,6 +76,8 @@ export function WarRoom({
   /** 名單日期與各族群在名單上的股票（族群熱力圖標「在名單」用） */
   listed: { date: string; sids: Map<string, string[]> } | null
   onPicks: (line?: string) => void
+  /** 切到新聞分頁（T-400） */
+  onNews: () => void
   onScore: (line: string) => void
   onStock: (sid: string, name: string | null) => void
 }) {
@@ -137,7 +140,7 @@ export function WarRoom({
       />
     ),
     heads: () => (
-      <HeadlinesCard items={shownBrief?.headlines ?? []} until={shownBrief ? shownBrief.generated_at.slice(11, 16) : null} {...fold('heads')} />
+      <HeadlinesCard items={shownBrief?.headlines ?? []} until={shownBrief ? shownBrief.generated_at.slice(11, 16) : null} onNews={onNews} {...fold('heads')} />
     ),
     mood: () => <HomeMoodCard {...fold('mood')} />,
     intl: () => <IntlCard b={b} {...fold('intl')} />,

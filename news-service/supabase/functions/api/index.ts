@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
         ) v on true
         where true
           ${q.since ? sql`and i.first_seen_at >= ${q.since}` : sql``}
-          ${q.until ? sql`and i.first_seen_at < ${q.until}` : sql``}
+          ${q.until ? sql`and i.first_seen_at <= ${q.until}` : sql``}
           ${q.source ? sql`and i.source = ${q.source}` : sql``}
           ${kindSources ? sql`and i.source = any(${kindSources})` : sql``}
         order by i.first_seen_at desc, i.id

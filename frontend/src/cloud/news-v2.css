@@ -1,0 +1,42 @@
+/* 新聞分頁（T-400）：地鐵告示——國際＝藍、台灣＝青，一則一列，字 ≥15px。 */
+.cq-news { max-width: 920px; margin: 0 auto; padding: 12px 14px 48px; }
+.cq-news-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.cq-news-health { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 10px; border-radius: 999px; background: #1d2027; color: var(--mute); }
+.cq-news-health.warn { color: #ffc04d; background: rgba(255, 176, 32, .12); }
+.cq-news-health.bad { color: var(--up); background: rgba(246, 70, 93, .12); }
+.cq-news-empty { margin: 24px 4px; font-size: 15px; }
+
+.cq-news-day h2 { font-size: 15px; font-weight: 700; color: var(--mute); margin: 18px 4px 4px; }
+.cq-news-day ul { list-style: none; margin: 0; padding: 0; }
+.cq-news-day li { border-bottom: 1px solid var(--line); }
+.cq-news-day li:last-child { border-bottom: 0; }
+
+.cq .cq-news-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; width: 100%;
+  padding: 12px 4px; background: none; border: 0; color: var(--text); text-align: left; cursor: pointer;
+}
+.cq-news-kind {
+  grid-row: span 2; align-self: start; display: inline-flex; align-items: center; gap: 3px;
+  font-size: 13px; font-weight: 700; padding: 3px 7px; border-radius: 6px; white-space: nowrap;
+}
+.cq-news-kind.intl { color: #3d9bff; background: rgba(61, 155, 255, .14); }
+.cq-news-kind.tw { color: #2dd4bf; background: rgba(45, 212, 191, .14); }
+.cq-news-title { font-size: 16px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.cq-news-meta { display: flex; align-items: center; gap: 4px; font-size: 13.5px; color: var(--mute); }
+.cq-news-meta svg { margin-left: auto; flex: none; transition: transform .15s; }
+.cq-news-meta svg.flip { transform: rotate(180deg); }
+
+.cq-news-body { padding: 0 4px 14px; }
+.cq-news-body p { margin: 0 0 10px; font-size: 15px; line-height: 1.65; color: #c9ccd3; }
+.cq-news-body a { display: inline-flex; align-items: center; gap: 4px; font-size: 15px; color: var(--accent); text-decoration: none; }
+
+.cq .cq-news-more {
+  display: block; width: 100%; margin-top: 14px; padding: 12px; border-radius: 10px;
+  background: #1d2027; border: 1px solid var(--line); color: var(--text); font-size: 15px;
+}
+
+/* 首頁新聞頭條卡標題列右邊的「全部 →」（收起時也看得到） */
+.cq .cq-heads-all {
+  flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 5px 10px; border-radius: 999px;
+  background: rgba(61, 155, 255, .12); border: 0; color: #3d9bff; font-size: 14px; font-weight: 600; white-space: nowrap;
+}
