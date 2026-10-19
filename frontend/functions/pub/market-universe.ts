@@ -13,11 +13,13 @@ const handle = (env: Env) =>
   guarded(
     env,
     async (db) => {
-      // 交易日只在最近 RECENT_DAYS 個日曆日裡找，不掃整張表（2026-10-19 實測整張表 8 秒、這樣約 0.1 秒）
+      // 交易日只在最近 RECENT_DAYS 個日曆日裡找，不掃整張表（2026-10-19 實測整張表 8 秒、這樣約 0.1 秒）；
+      // 只看台北今天以前：盤中比的是「前 20 日」，今天的收盤（17:40 以後才進資料庫）不能算進視窗，否則新高新低永遠是 0
       const [row] = await db<{ j: string | null }[]>`
         WITH days AS (
           SELECT DISTINCT date FROM serving.prices_daily
           WHERE date >= (SELECT max(date) FROM serving.prices_daily) - ${RECENT_DAYS}::int
+            AND date < (now() AT TIME ZONE 'Asia/Taipei')::date
         ),
         hl_days AS (SELECT date FROM days ORDER BY date DESC LIMIT ${HIGH_LOW_WINDOW}),
         avg_days AS (SELECT date FROM days ORDER BY date DESC LIMIT ${AVG_SESSIONS}),
@@ -40,6 +42,18 @@ const handle = (env: Env) =>
               SELECT sum(amount) AS s FROM serving.prices_daily
               WHERE date IN (SELECT date FROM avg_days) AND stock_id ~ ${STOCK_PATTERN} GROUP BY date
             ) a
+            WHERE (SELECT count(*) FROM avg_days) = ${AVG_SESSIONS}
+          ),
+          -- 分上市、上櫃的 20 日均額（D-199：盤中「上市／上櫃」切換的量能比較用）
+          'amount_avg_by', (
+            SELECT json_object_agg(mk, a) FROM (
+              SELECT mk, avg(s) AS a FROM (
+                SELECT CASE m.market WHEN 'TPEX' THEN 'otc' ELSE 'tse' END AS mk, p.date, sum(p.amount) AS s
+                FROM serving.prices_daily p JOIN serving.stock_meta m USING (stock_id)
+                WHERE p.date IN (SELECT date FROM avg_days) AND p.stock_id ~ ${STOCK_PATTERN} AND m.market IN ('TWSE', 'TPEX')
+                GROUP BY 1, 2
+              ) d GROUP BY mk
+            ) x
             WHERE (SELECT count(*) FROM avg_days) = ${AVG_SESSIONS}
           ),
           'stocks', (

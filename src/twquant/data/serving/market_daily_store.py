@@ -11,9 +11,9 @@ from typing import Any
 
 import polars as pl
 
-from twquant.data.serving.schema import MARKET_DAILY_SPEC, ensure_tables
+from twquant.data.serving.schema import MARKET_BREADTH_SPEC, MARKET_DAILY_SPEC, ensure_tables
 from twquant.data.serving.sync import upsert
-from twquant.reporting.market_daily import MarketDaily
+from twquant.reporting.market_daily import MarketBreadth, MarketDaily
 
 
 def _sessions(cur: Any, schema: str, day: dt.date, n: int) -> list[dt.date]:
@@ -97,4 +97,32 @@ def write_market_daily(conn: Any, schema: str, row: MarketDaily, created_at: dt.
     df = pl.DataFrame([data]).select(list(MARKET_DAILY_SPEC.column_names))
     with conn.cursor() as cur:
         upsert(cur, schema, MARKET_DAILY_SPEC, df)
+    conn.commit()
+
+
+def read_markets(conn: Any, schema: str) -> pl.DataFrame:
+    """stock_meta 的市場別 → stock_id, market（tse＝上市 TWSE、otc＝上櫃 TPEX）；其他市場（興櫃等）不給。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT stock_id, CASE market WHEN 'TPEX' THEN 'otc' ELSE 'tse' END "
+            f'FROM "{schema}"."stock_meta" WHERE market IN (%s, %s)',
+            ("TWSE", "TPEX"),
+        )
+        return pl.DataFrame(
+            cur.fetchall(), schema={"stock_id": pl.String, "market": pl.String}, orient="row"
+        )
+
+
+def write_market_breadth(
+    conn: Any, schema: str, rows: list[MarketBreadth], created_at: dt.datetime
+) -> None:
+    """upsert 上市、上櫃各一列（重跑冪等）。"""
+    if created_at.tzinfo is None:
+        raise ValueError("created_at 必須帶時區")
+    ensure_tables(conn, (MARKET_BREADTH_SPEC,), schema)
+    df = pl.DataFrame([{**asdict(r), "created_at": created_at} for r in rows]).select(
+        list(MARKET_BREADTH_SPEC.column_names)
+    )
+    with conn.cursor() as cur:
+        upsert(cur, schema, MARKET_BREADTH_SPEC, df)
     conn.commit()

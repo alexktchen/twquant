@@ -11,8 +11,15 @@ export const STOCK_PATTERN = '^[1-9][0-9]{3}$'
 export const AVG_SESSIONS = 20
 export const HIGH_LOW_WINDOW = 20
 
-/** 全市場分幾份輪流問（每分鐘一份 → 每 SLICES 分鐘掃完一次）。 */
-export const SLICES = 3
+/**
+ * 全市場分幾份輪流問（每分鐘一份 → 每 SLICES 分鐘掃完一次）。2026-10-19 起 3 → 15（D-199）：三份時雲端實測每次 CPU 18～19ms，
+ * 超過免費方案 10ms；使用者選全部免費。本機分解：解析證交所回應約 0.8ms／150KB、讀整份股票清單 0.4ms、兩條走勢 0.26ms——
+ * 所以切到每份約 130 檔＝一個請求、每份只讀自己那段清單（universeKey）、加權／櫃買走勢隔分鐘輪流抓：本機約 1ms，估雲端 6～7ms。
+ * 家數 15 分鐘掃完一輪；指數、成交金額照樣每分鐘。
+ */
+export const SLICES = 15
+/** 網站讀 KV 時最多看幾份（Worker 改份數的過渡期：每份自己記 n，網站照最新那份的 n 判斷有沒有掃完） */
+export const MAX_SLICES = 16
 /**
  * 一次請求問幾檔（每檔只問它所在市場的頻道）。2026-10-19 盤中實測 120 檔 4.9 秒、150 檔 7.4 秒都正常；
  * 2026-10-13 實測 200 個頻道被拒（rtcode 9999）。
@@ -26,6 +33,8 @@ export const RUN_UNTIL = '13:36'
 
 export const UNIVERSE_KEY = 'universe'
 export const sliceKey = (k: number): string => `slice:${k}`
+/** 第 k 份的股票清單（Worker 每分鐘只讀自己那段，不解析整份；網站讀整份 UNIVERSE_KEY） */
+export const universeKey = (k: number): string => `universe:${k}`
 
 export const MIS_BASE = 'https://mis.twse.com.tw/stock'
 export const MIS_HEADERS = {
@@ -43,6 +52,8 @@ export type Universe = {
   asof: string
   /** 前 AVG_SESSIONS 個交易日四碼普通股每日成交金額的平均（TWD） */
   amount_avg: number | null
+  /** 同上，分上市、上櫃（D-199；舊 Worker 存的清單沒有 → undefined） */
+  amount_avg_by?: { tse: number | null; otc: number | null } | null
   stocks: UniverseStock[]
   /** Worker 哪一天（台北）抓的；不是今天就重抓 */
   fetched?: string
@@ -52,6 +63,8 @@ export type Universe = {
 export type SliceQuote = [sid: string, last: number | null, prev: number | null, lu: number | null, ld: number | null]
 export type Slice = {
   k: number
+  /** 這一份是全市場切成幾份裡的一份（D-199；舊 Worker 沒寫＝3） */
+  n?: number
   /** 證交所報價的日期（台北） */
   date: string
   /** 加權指數報價時間 HH:MM:SS */
@@ -64,9 +77,26 @@ export type Slice = {
   amt: { tse: number; otc: number }
   /** 加權指數每分鐘收盤：[HH:MM, 指數] */
   trend: [string, number][]
+  /** 櫃買指數每分鐘收盤（D-199；舊 Worker 沒抓 → undefined） */
+  trend_otc?: [string, number][]
 }
 
-/** 網站拿到的盤中大盤體檢。家數類在三份都是今天的才有（開盤頭幾分鐘還在掃 → null）。 */
+/** 一個範圍（全市場、上市、上櫃）的家數與成交金額；家數在全市場掃完一輪前是 null。 */
+export type LiveBreadth = {
+  up: number | null
+  down: number | null
+  flat: number | null
+  untraded: number | null
+  limit_up: number | null
+  limit_down: number | null
+  new_high: number | null
+  new_low: number | null
+  amount: number
+  amount_avg: number | null
+  amount_ratio: number | null
+}
+
+/** 網站拿到的盤中大盤體檢。家數類在每一份都是今天的才有（開盤頭幾分鐘還在掃 → null）。 */
 export type LiveMarket = {
   date: string
   /** 最新一份的報價時間 HH:MM:SS */
@@ -92,6 +122,11 @@ export type LiveMarket = {
   new_high: number | null
   new_low: number | null
   trend: [string, number][]
+  /** 櫃買分時；沒有（舊 Worker）→ [] */
+  trend_otc: [string, number][]
+  otc_prev: number | null
+  /** 分上市、上櫃（D-199） */
+  by_market: { tse: LiveBreadth; otc: LiveBreadth }
 }
 
 /** 第 k 份（共 SLICES 份）：依代號排好後切成連續的幾段。 */
@@ -118,7 +153,8 @@ export function stockUrls(stocks: UniverseStock[], batch: number = BATCH): strin
 }
 
 export const statisUrl = (m: Market, now: number): string => `${MIS_BASE}/api/getStatis.jsp?ex=${m}&delay=0&_=${now}`
-export const ohlcUrl = (now: number): string => `${MIS_BASE}/data/mis_ohlc_TSE.txt?_=${now}`
+/** 分時走勢：加權（TSE）或櫃買（OTC，D-199）。 */
+export const ohlcUrl = (now: number, market: 'TSE' | 'OTC' = 'TSE'): string => `${MIS_BASE}/data/mis_ohlc_${market}.txt?_=${now}`
 
 const num = (v: unknown): number | null => {
   if (typeof v !== 'string' && typeof v !== 'number') return null
@@ -157,6 +193,8 @@ export function buildSlice(
   amt: Slice['amt'],
   trend: [string, number][],
   at: number,
+  trendOtc: [string, number][] = [],
+  n: number = SLICES,
 ): Slice {
   const by = new Map(quotes.map((q) => [q.sid, q]))
   const t = by.get('t00')
@@ -164,6 +202,7 @@ export function buildSlice(
   const o = by.get('o00')
   return {
     k,
+    n,
     date: t.date,
     time: t.time,
     at,
@@ -171,6 +210,7 @@ export function buildSlice(
     idx: { taiex: t.last, taiex_prev: t.prev, otc: o?.last ?? null, otc_prev: o?.prev ?? null },
     amt,
     trend,
+    trend_otc: trendOtc,
   }
 }
 
@@ -185,16 +225,40 @@ export function readJson(text: string, what: string): unknown {
 
 const chg = (last: number | null, prev: number | null): number | null => (last !== null && prev !== null && prev > 0 ? last / prev - 1 : null)
 
+/** 最新一份「這條走勢不是空的」的走勢；都沒有 → []。 */
+function freshest(slices: Slice[], pick: (s: Slice) => [string, number][]): [string, number][] {
+  let best: Slice | null = null
+  for (const s of slices) if (pick(s).length > 0 && (!best || s.at > best.at)) best = s
+  return best ? pick(best) : []
+}
+
+/** 舊 Worker 寫的份沒有 n：當時切三份。 */
+const LEGACY_SLICES = 3
+
+type Tally = { up: number; down: number; flat: number; untraded: number; limit_up: number; limit_down: number; new_high: number; new_low: number }
+const zero = (): Tally => ({ up: 0, down: 0, flat: 0, untraded: 0, limit_up: 0, limit_down: 0, new_high: 0, new_low: 0 })
+const empty = { up: null, down: null, flat: null, untraded: null, limit_up: null, limit_down: null, new_high: null, new_low: null }
+
 /**
- * 三份 → 網站要的盤中大盤體檢。只用 `date` 那天的份；一份都沒有 → null。
- * 指數、成交金額、走勢用最新那一份；家數要三份都在（全市場都問過）才算，否則 null。
+ * 各份 → 網站要的盤中大盤體檢（全市場＋上市、上櫃）。只用 `date` 那天的份；一份都沒有 → null。
+ * 指數、成交金額、走勢用最新那一份；家數要「最新那份的切法」的每一份都是今天的（全市場都問過）才算，否則 null。
+ * 定義同 market_daily：對昨收、漲跌停價、前 20 日最高／最低收盤；沒成交的另計。
  */
-export function summarize(universe: Universe, slices: (Slice | null)[], date: string, n: number = SLICES): LiveMarket | null {
+export function summarize(universe: Universe, slices: (Slice | null)[], date: string): LiveMarket | null {
   const today = slices.filter((s): s is Slice => s !== null && s.date === date)
   if (today.length === 0) return null
   const latest = today.reduce((a, b) => (b.at > a.at ? b : a))
-  const complete = new Set(today.map((s) => s.k)).size === n
+  // 切法以最新那份為準；換切法的過渡期，舊切法的份不算（免得同一檔用到不同時間、或漏掉一段）
+  const n = latest.n ?? LEGACY_SLICES
+  const parts = today.filter((s) => (s.n ?? LEGACY_SLICES) === n)
+  const complete = new Set(parts.map((s) => s.k)).size === n
+  const avgBy = universe.amount_avg_by ?? null
+  const ratio = (amt: number, avg: number | null | undefined) => (avg ? amt / avg : null)
+  const scope = (amt: number, avg: number | null): LiveBreadth => ({ ...empty, amount: amt, amount_avg: avg, amount_ratio: ratio(amt, avg) })
   const amount = latest.amt.tse + latest.amt.otc
+  const all = scope(amount, universe.amount_avg)
+  const tse = scope(latest.amt.tse, avgBy?.tse ?? null)
+  const otc = scope(latest.amt.otc, avgBy?.otc ?? null)
   const base: LiveMarket = {
     date,
     time: latest.time,
@@ -204,51 +268,40 @@ export function summarize(universe: Universe, slices: (Slice | null)[], date: st
     taiex_prev: latest.idx.taiex_prev,
     otc_close: latest.idx.otc,
     otc_chg: chg(latest.idx.otc, latest.idx.otc_prev),
-    amount,
-    amount_avg: universe.amount_avg,
-    amount_ratio: universe.amount_avg ? amount / universe.amount_avg : null,
-    up: null,
-    down: null,
-    flat: null,
-    untraded: null,
-    limit_up: null,
-    limit_down: null,
-    new_high: null,
-    new_low: null,
-    trend: latest.trend,
+    otc_prev: latest.idx.otc_prev,
+    ...all,
+    // 走勢隔分鐘輪流抓（D-199）：各取最新一份「有抓這條」的
+    trend: freshest(today, (s) => s.trend),
+    trend_otc: freshest(today, (s) => s.trend_otc ?? []),
+    by_market: { tse, otc },
   }
   if (!complete) return base
 
   const quotes = new Map<string, SliceQuote>()
   // 同一檔出現在兩份（宇宙換日、切法變了）→ 用新的那份
-  for (const s of [...today].sort((a, b) => a.at - b.at)) for (const q of s.q) quotes.set(q[0], q)
-  let up = 0
-  let down = 0
-  let flat = 0
-  let untraded = 0
-  let lu = 0
-  let ld = 0
-  let hi = 0
-  let lo = 0
-  for (const [sid, , h, l] of universe.stocks) {
+  for (const s of [...parts].sort((a, b) => a.at - b.at)) for (const q of s.q) quotes.set(q[0], q)
+  const t = { all: zero(), tse: zero(), otc: zero() }
+  for (const [sid, mk, h, l] of universe.stocks) {
     const q = quotes.get(sid)
     if (!q) continue
     const [, last, prev, up_px, down_px] = q
-    if (last === null) {
-      untraded += 1
-      continue
+    for (const c of [t.all, t[mk]]) {
+      if (last === null) {
+        c.untraded += 1
+        continue
+      }
+      if (prev === null || prev <= 0) continue
+      if (last > prev) c.up += 1
+      else if (last < prev) c.down += 1
+      else c.flat += 1
+      if (up_px !== null && last >= up_px) c.limit_up += 1
+      if (down_px !== null && last <= down_px) c.limit_down += 1
+      if (h !== null && last > h) c.new_high += 1
+      if (l !== null && last < l) c.new_low += 1
     }
-    if (prev === null || prev <= 0) continue
-    if (last > prev) up += 1
-    else if (last < prev) down += 1
-    else flat += 1
-    if (up_px !== null && last >= up_px) lu += 1
-    if (down_px !== null && last <= down_px) ld += 1
-    if (h !== null && last > h) hi += 1
-    if (l !== null && last < l) lo += 1
   }
-  const since = today.reduce((a, b) => (b.time < a.time ? b : a)).time
-  return { ...base, since, up, down, flat, untraded, limit_up: lu, limit_down: ld, new_high: hi, new_low: lo }
+  const since = parts.reduce((a, b) => (b.time < a.time ? b : a)).time
+  return { ...base, ...t.all, since, by_market: { tse: { ...tse, ...t.tse }, otc: { ...otc, ...t.otc } } }
 }
 
 /** /pub/market-universe 的回應 → Universe；格式不對 → 丟錯（Worker 不能拿壞掉的宇宙去問）。 */
@@ -263,7 +316,14 @@ export function parseUniverse(body: unknown): Universe {
       throw new Error(`股票清單格式錯誤：${JSON.stringify(s)}`)
     }
   }
-  return { asof: b.asof, amount_avg: typeof b.amount_avg === 'number' ? b.amount_avg : null, stocks: b.stocks as UniverseStock[] }
+  const by = b.amount_avg_by as { tse?: unknown; otc?: unknown } | null | undefined
+  const avgOf = (v: unknown) => (typeof v === 'number' && v > 0 ? v : null)
+  return {
+    asof: b.asof,
+    amount_avg: typeof b.amount_avg === 'number' ? b.amount_avg : null,
+    amount_avg_by: by ? { tse: avgOf(by.tse), otc: avgOf(by.otc) } : null,
+    stocks: b.stocks as UniverseStock[],
+  }
 }
 
 /** 台北現在的日期 YYYY-MM-DD 與時間 HH:MM（台灣沒有日光節約，固定 +8）。 */
@@ -289,14 +349,18 @@ export async function runOnce(deps: {
   const { date, hhmm } = taipeiClock(now)
   if (hhmm < RUN_FROM || hhmm > RUN_UNTIL) return `略過：台北 ${hhmm} 不在 ${RUN_FROM}～${RUN_UNTIL}`
 
-  let universe = (await kv.get(UNIVERSE_KEY, 'json')) as Universe | null
-  if (!universe || universe.fetched !== date) {
-    universe = { ...parseUniverse(readJson(await fetchText(deps.universeUrl), '股票清單')), fetched: date }
+  const k = sliceFor(hhmm)
+  type Part = { fetched: string; stocks: UniverseStock[] }
+  let part = (await kv.get(universeKey(k), 'json')) as Part | null
+  if (!part || part.fetched !== date) {
+    // 每天第一次：抓整份清單，存一份完整的（網站加總用）＋每份一段（Worker 每分鐘只讀自己那段）
+    const universe = { ...parseUniverse(readJson(await fetchText(deps.universeUrl), '股票清單')), fetched: date }
     await kv.put(UNIVERSE_KEY, JSON.stringify(universe))
+    for (let i = 0; i < SLICES; i++) await kv.put(universeKey(i), JSON.stringify({ fetched: date, stocks: sliceOf(universe.stocks, i) }))
+    part = { fetched: date, stocks: sliceOf(universe.stocks, k) }
   }
 
-  const k = sliceFor(hhmm)
-  const urls = stockUrls(sliceOf(universe.stocks, k))
+  const urls = stockUrls(part.stocks)
   // 一個接一個問，兩個請求之間隔 MIN_GAP_MS
   const ask = async (url: string, i: number): Promise<string> => {
     if (i > 0) await sleep(MIN_GAP_MS)
@@ -313,8 +377,11 @@ export async function runOnce(deps: {
   const n = urls.length
   const tse = parseStatis(readJson(await ask(statisUrl('tse', now), n), '上市成交統計'))
   const otc = parseStatis(readJson(await ask(statisUrl('otc', now), n + 1), '上櫃成交統計'))
-  const trend = parseOhlc(readJson(await ask(ohlcUrl(now), n + 2), '分時走勢'))
-  const slice = buildSlice(k, quotes, { tse, otc }, trend, now)
+  // 走勢隔分鐘輪流抓（雙數分鐘加權、單數分鐘櫃買），每條兩分鐘更新一次，省一半解析
+  const minute = Number(hhmm.slice(3, 5))
+  const which = minute % 2 === 0 ? 'TSE' : 'OTC'
+  const trendNow = parseOhlc(readJson(await ask(ohlcUrl(now, which), n + 2), which === 'TSE' ? '加權分時走勢' : '櫃買分時走勢'))
+  const slice = buildSlice(k, quotes, { tse, otc }, which === 'TSE' ? trendNow : [], now, which === 'OTC' ? trendNow : [])
   await kv.put(sliceKey(k), JSON.stringify(slice))
   return `第 ${k} 份 ${slice.q.length} 檔，報價時間 ${slice.time}`
 }

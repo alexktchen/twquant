@@ -1,4 +1,4 @@
-# T-397／D-198：盤中大盤體檢。每分鐘問證交所三分之一的四碼普通股（每 3 分鐘掃完全市場），算漲跌家數要的報價存進 KV；
+# T-397／D-198、D-199：盤中大盤體檢。每分鐘問證交所十五分之一的四碼普通股（每 15 分鐘掃完全市場；免費方案 10ms CPU，見 D-199 §三），算漲跌家數要的報價存進 KV；
 # 網站（frontend/functions/api/warroom/live.ts）讀同一個 KV 加總。邏輯在 frontend/functions/_lib/market-live.ts（共用、有單元測試）。
 # 部署：cd market-live && npx wrangler deploy
 # 看紀錄：Cloudflare 後台 Workers → twquant-market-live → Logs（每次寫了哪一份、或為什麼略過、證交所擋下的錯誤）。

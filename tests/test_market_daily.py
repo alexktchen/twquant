@@ -12,7 +12,13 @@ import pytest
 from twquant.config import ServingConfig, SystemConfig, load_config
 from twquant.data.serving import schema as sch
 from twquant.errors import DataError
-from twquant.reporting.market_daily import MarketDaily, _streak, market_daily
+from twquant.reporting.market_daily import (
+    MarketBreadth,
+    MarketDaily,
+    _streak,
+    market_breadth,
+    market_daily,
+)
 
 _ROOT = Path(__file__).resolve().parent.parent
 D = [dt.date(2026, 10, 1) + dt.timedelta(days=k) for k in range(5)]  # 5 個「交易日」
@@ -168,3 +174,50 @@ def test_ac1_limit_prices_fall_back_to_prev_close_proxy() -> None:
         D[4], px, _index(), _inst(), _margin(), stock_pattern=PAT, avg_sessions=4, high_low_window=4
     )
     assert (r.limit_up, r.limit_down) == (1, 0)
+
+
+# ── T-398／D-199：分上市、上櫃 ─────────────────────────────────────────────
+def _markets() -> pl.DataFrame:
+    return pl.DataFrame(
+        [("2330", "tse"), ("1101", "tse"), ("2317", "otc"), ("0050", "tse")],
+        schema={"stock_id": pl.String, "market": pl.String},
+        orient="row",
+    )
+
+
+def test_ac4_breadth_by_market_splits_the_whole() -> None:
+    whole = _run()
+    rows = market_breadth(
+        D[4], _prices(), _markets(), stock_pattern=PAT, avg_sessions=4, high_low_window=4
+    )
+    by = {r.market: r for r in rows}
+    assert [r.market for r in rows] == ["tse", "otc"]
+    # 上市：2330 漲停創新高、1101 平盤；上櫃：2317 跌停創新低；0050 是 ETF 不算
+    tse, otc = by["tse"], by["otc"]
+    assert (tse.up, tse.down, tse.flat, tse.limit_up, tse.limit_down) == (1, 0, 1, 1, 0)
+    assert (tse.new_high, tse.new_low) == (1, 0)
+    assert (otc.up, otc.down, otc.flat, otc.limit_up, otc.limit_down) == (0, 1, 0, 0, 1)
+    assert (otc.new_high, otc.new_low) == (0, 1)
+    assert tse.amount == 1e9 + 5e8 and otc.amount == 2e9
+    for f in ("up", "down", "flat", "limit_up", "limit_down", "new_high", "new_low", "amount"):
+        assert getattr(tse, f) + getattr(otc, f) == getattr(whole, f), f
+    assert tse.amount_avg == 1e9 + 5e8 and tse.amount_ratio == 1.0
+
+
+def test_ac4_market_with_no_rows_raises_not_zero() -> None:
+    only_tse = _markets().filter(pl.col("market") == "tse")
+    with pytest.raises(DataError, match="otc"):
+        market_breadth(
+            D[4], _prices(), only_tse, stock_pattern=PAT, avg_sessions=4, high_low_window=4
+        )
+
+
+def test_ac4_breadth_spec_matches_dataclass_and_pipeline_writes_it() -> None:
+    names = [f.name for f in dataclasses.fields(MarketBreadth)]
+    assert list(sch.MARKET_BREADTH_SPEC.column_names) == [*names, "created_at"]
+    assert sch.MARKET_BREADTH_SPEC.pk == ("date", "market")
+    assert "market_breadth_daily" in sch.ALL_TABLES
+    source = (_ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
+    body = source[source.index("def _market_daily_for_day") :]
+    body = body[: body.index("\ndef ")]
+    assert "write_market_breadth(" in body
