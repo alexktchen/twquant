@@ -119,6 +119,10 @@ morning_brief:
   news_since_hour: 14
   # 盤後快訊（2026-10-19，使用者：「這邊台灣晚上時間也要跑一次」）：取今天 09:00（開盤）起到快訊當下的新聞
   evening_news_since_hour: 9
+  # 2026-10-20 使用者：「不要 21:45，換 17:45」、同日再改 18:00——每日 pipeline（17:33 開始、約 20 分鐘）有時 18:00 還沒寫好今天的大盤體檢，
+  # 所以先等：每 60 秒查一次 market_daily 有沒有今天那列，最多 60 分鐘；等不到（休市、pipeline 壞了）就不出，印原因。
+  evening_wait_minutes: 60
+  evening_poll_seconds: 60
   news_fetch_limit: 30
   headline_limit: 8
   # 頭條只有標題，數字檢查抓不到方向寫反（2026-10-17 實見：「美債殖利率急跌」被寫成「急升」）：

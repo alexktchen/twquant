@@ -166,6 +166,8 @@ class MorningBriefConfig(BaseConfig):
     news_feeds: list[NewsFeed] = []  # 晨報的新聞頭條來源（鉅亨網分類）
     news_since_hour: int = Field(default=14, ge=0, le=23)  # 從前一天幾點（台北）起的新聞
     evening_news_since_hour: int = Field(default=9, ge=0, le=23)  # 盤後快訊：從今天幾點起的新聞
+    evening_wait_minutes: int = Field(default=60, ge=0)  # 盤後快訊：最多等當天大盤體檢寫好幾分鐘
+    evening_poll_seconds: int = Field(default=60, gt=0)  # 等的時候每幾秒查一次
     news_fetch_limit: int = Field(default=30, ge=1)  # 每個分類抓幾則
     headline_limit: int = Field(default=8, ge=1)  # 晨報與首頁列幾則
     news_direction_subjects: list[str] = []  # 檢查晨報有沒有把頭條的漲跌方向寫反的標的

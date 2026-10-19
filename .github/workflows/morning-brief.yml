@@ -1,4 +1,4 @@
-# T-377（D-188）：晨報——台北 06:30 的第三班。T-409（2026-10-19）：盤後快訊——台北 21:45 再跑一次（--edition evening，寫 evening_brief）。美股 05:00 收、台指期夜盤 05:00 收，收齊昨晚到今早的數字寫進
+# T-377（D-188）：晨報——台北 06:30 的第三班。T-409（2026-10-19）：盤後快訊——台北 18:00 再跑一次（--edition evening，寫 evening_brief；2026-10-20 由 21:45 改 18:00），先等今天的大盤體檢（最多 60 分鐘）。美股 05:00 收、台指期夜盤 05:00 收，收齊昨晚到今早的數字寫進
 # serving.morning_brief，首頁戰情室早上打開才是新的。只有一個步驟、不碰名單；失敗只是首頁沒有今天的晨報。
 # D-175：準時由 Cloudflare Worker（cron-trigger/）06:30 以 workflow_dispatch 帶日期觸發；下面的 schedule 是備援
 # （GHA schedule 常態晚發車，晚個把小時也還在早上）。週六不跑（沒有夜盤、美股週五晚收盤的數字週一早上才用得到）。
@@ -7,7 +7,7 @@ name: morning-brief
 on:
   schedule:
     - cron: "40 22 * * 0-4" # 06:40 台北，週一到週五（UTC 週日到週四）
-    - cron: "55 13 * * 1-5" # 21:55 台北，週一到週五：盤後快訊的備援（T-409；每日 pipeline 21:13 那班約 20 分鐘跑完）
+    - cron: "10 10 * * 1-5" # 18:10 台北，週一到週五：盤後快訊的備援（T-409；GHA 排程常晚發車）
   workflow_dispatch:
     inputs:
       date:
@@ -15,7 +15,7 @@ on:
         required: false
         default: ""
       edition:
-        description: "morning＝盤前晨報；evening＝盤後快訊（留空＝依台北時間：12 點前 morning、之後 evening）"
+        description: "morning＝盤前晨報；evening＝盤後快訊（留空＝morning）"
         required: false
         default: ""
 
@@ -26,7 +26,7 @@ concurrency:
 jobs:
   brief:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 80 # 盤後快訊最多等 60 分鐘大盤體檢
     env:
       TWQUANT_PG_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
       TWQUANT_SUPABASE_DSN: ${{ secrets.TWQUANT_SUPABASE_DSN }}
@@ -44,16 +44,27 @@ jobs:
       - name: Sync deps
         run: uv sync --dev --all-groups
 
-      - name: Resolve day 與版本（台北今天；手動補跑可指定；版本留空＝12 點前盤前、之後盤後）
+      # 版本看是哪條排程觸發的，不看幾點跑（2026-10-20 實見：21:55 的備援晚了 5.5 小時、03:31 才跑，照「12 點前＝盤前」寫成了隔天的盤前晨報）。
+      # 盤後的備援：日期往回 8 小時算（晚到隔天凌晨還是算前一天），已經有那天的盤後快訊（Worker 那班做好了）就跳過。
+      - name: Resolve day 與版本
         run: |
           DAY="${{ inputs.date }}"
-          if [ -z "$DAY" ]; then DAY="$(TZ=Asia/Taipei date +%F)"; fi
           EDITION="${{ inputs.edition }}"
-          if [ -z "$EDITION" ]; then
-            if [ "$(TZ=Asia/Taipei date +%H)" -ge 12 ]; then EDITION=evening; else EDITION=morning; fi
+          SKIP=""
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            if [ "${{ github.event.schedule }}" = "10 10 * * 1-5" ]; then
+              EDITION=evening
+              DAY="$(TZ=Asia/Taipei date -d '-8 hours' +%F)"
+              SKIP="--skip-existing"
+            else
+              EDITION=morning
+            fi
           fi
+          if [ -z "$DAY" ]; then DAY="$(TZ=Asia/Taipei date +%F)"; fi
+          if [ -z "$EDITION" ]; then EDITION=morning; fi
           echo "DAY=$DAY" >> "$GITHUB_ENV"
           echo "EDITION=$EDITION" >> "$GITHUB_ENV"
+          echo "SKIP=$SKIP" >> "$GITHUB_ENV"
 
       - name: 晨報或盤後快訊（行情＋體檢、籌碼、公告、新聞 → 規則一句話＋模型五到六點）
-        run: uv run python -m twquant morning-brief --date "$DAY" --edition "$EDITION"
+        run: uv run python -m twquant morning-brief --date "$DAY" --edition "$EDITION" $SKIP

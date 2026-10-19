@@ -26,6 +26,7 @@ from twquant.insight.schemas import MorningBrief
 from twquant.reporting.morning_brief import (
     MorningInputs,
     check_brief,
+    check_prev_evening,
     classify,
     compose,
     facts,
@@ -366,8 +367,18 @@ def test_ac4_table_routing_workflow_and_cron() -> None:
     # T-409 盤後快訊：另一張表、21:45 那班帶 edition=evening、GHA 備援 21:55
     assert sch.spec_of("evening_brief").pk == ("date",)
     assert sch.spec_of("evening_brief").column_names == sch.spec_of("morning_brief").column_names
-    assert '"45 13 * * MON-FRI"' in toml and 'EVENING_CRON = "45 13 * * MON-FRI"' in toml
-    assert '--edition "$EDITION"' in wf and 'cron: "55 13 * * 1-5"' in wf and "edition:" in wf
+    assert (
+        '"0 10 * * MON-FRI"' in toml and 'EVENING_CRON = "0 10 * * MON-FRI"' in toml
+    )  # 18:00 台北
+    assert '--edition "$EDITION" $SKIP' in wf and 'cron: "10 10 * * 1-5"' in wf and "edition:" in wf
+    # 版本看是哪條排程，不看幾點跑（備援晚 5 小時跑也不會變成盤前）；盤後備援日期往回 8 小時、已有就跳過
+    assert (
+        'github.event.schedule }}" = "10 10 * * 1-5"' in wf
+        and "-d '-8 hours'" in wf
+        and "--skip-existing" in wf
+    )
+    assert "date +%H" not in wf
+    assert CFG.evening_wait_minutes >= 30, "18:00 觸發時 pipeline 有時還沒寫好大盤體檢，要等"
     assert isinstance(CFG, MorningBriefConfig) and [q.symbol for q in CFG.us_indices] == [
         "^GSPC",
         "^IXIC",
@@ -428,7 +439,8 @@ def test_ac5_prompt_asks_for_analyst_judgement() -> None:
     # 使用者 2026-10-17：「太白話了」→ v3 盤前快訊；「多一點分析師的角度」→ v4 先研判、再依據、最後觀察重點；數字規則照舊
     # 同日：「也加上昨晚國際金融大事、新聞頭條」「不用加上『我以分析師角度』」→ v5 加【大事】、禁止自報身分
     # 2026-10-18：「首頁的今日一句話也是要有推薦的方向」→ v6 加 stance＋strategy（今天的操作方向；不准喊點位或保證）
-    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-18.7"
+    # 2026-10-20：「凌晨那則要參考前一天下午那則」→ v8 【研判】對照昨天盤後快訊（延續或修正）
+    assert MORNING_BRIEF_PROMPT_VERSION == "2026-10-20.9"
     for word in ("stance", "strategy", "持股水位", "偏多", "偏空", "不保證漲跌"):
         assert word in MORNING_BRIEF_SYSTEM
     for word in (
@@ -807,3 +819,95 @@ def test_t409_evening_uses_evening_prompt_and_writes_its_own_table(tmp_path: Pat
         now=NOW,
     )
     assert '"serving"."morning_brief"' in "\n".join(conn_m.cur.seen)
+
+
+# ── 2026-10-20：盤前晨報參考前一個交易日的盤後快訊（使用者：「凌晨那則要參考前一天下午那則」）──
+def _conn_with_evening(ev_date: dt.date) -> _Conn:
+    conn = _conn()
+    conn.cur.answers.insert(
+        0,
+        (
+            '"evening_brief"',
+            ["date", "generated_at", "headline", "bullets", "risk_note"],
+            [
+                (
+                    ev_date,
+                    dt.datetime(2026, 10, 16, 17, 52, tzinfo=TZ),
+                    "外資賣壓未歇，台股收黑",
+                    json.dumps(
+                        ["【方向】偏空｜持股降低、明天不追高", "【研判】外資賣超 250 億"],
+                        ensure_ascii=False,
+                    ),
+                    "今晚美股波動",
+                )
+            ],
+        ),
+    )
+    return conn
+
+
+def test_morning_cites_previous_evening_brief() -> None:
+    inp = gather(
+        _conn_with_evening(MDATE), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night
+    )
+    assert (
+        inp.prev_evening is not None
+        and inp.prev_evening["direction"] == "偏空｜持股降低、明天不追高"
+    )
+    f = facts(inp)
+    assert "昨天盤後快訊（10/16 17:52）的研判：外資賣壓未歇，台股收黑" in f
+    assert "昨天盤後快訊給的今日方向：偏空｜持股降低、明天不追高" in f
+    assert "昨天盤後快訊的風險提醒：今晚美股波動" in f
+    assert "昨天盤後快訊" in MORNING_BRIEF_SYSTEM and "修正" in MORNING_BRIEF_SYSTEM
+    # 盤後快訊自己不讀前一份
+    ev = gather(
+        _conn_with_evening(MDATE),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        edition="evening",
+    )
+    assert ev.prev_evening is None
+
+
+def test_morning_ignores_evening_brief_from_another_day() -> None:
+    conn = _conn_with_evening(MDATE)
+    inp = gather(conn, "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    sql = [p for q, p in zip(conn.cur.seen, conn.cur.params, strict=True) if '"evening_brief"' in q]
+    assert sql == [(MDATE,)], "只讀前一個交易日（大盤體檢那天）那份"
+    assert inp.prev_evening is not None
+
+
+def test_morning_prev_evening_claims_must_match_stance() -> None:
+    inp = gather(
+        _conn_with_evening(MDATE), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night
+    )
+    notes: list[str] = []
+    ok_keep = "【研判】延續昨日盤後偏空看法，外資賣超 250 億"
+    ok_fix = "【研判】修正昨日盤後偏空看法，費半大漲"
+    assert check_prev_evening([ok_keep, "【國際】費半大漲"], "偏空", inp, notes) == [
+        ok_keep,
+        "【國際】費半大漲",
+    ]
+    assert check_prev_evening([ok_fix], "偏多", inp, notes) == [ok_fix]
+    assert notes == []
+    # 2026-10-20 實見：說延續偏空、立場給偏多 → 丟
+    assert (
+        check_prev_evening(["【研判】美股走強，延續昨日盤後偏空看法，夜盤續弱"], "偏多", inp, notes)
+        == []
+    )
+    assert "今天立場卻是「偏多」" in notes[-1]
+    assert check_prev_evening([ok_fix], "偏空", inp, notes) == [] and "說修正" in notes[-1]
+    assert check_prev_evening(["【研判】延續昨日盤後偏多看法"], "偏多", inp, notes) == []
+    assert "寫成「偏多」" in notes[-1]
+    assert check_prev_evening(["【研判】〈延續或修正〉昨日盤後偏空看法"], "偏空", inp, notes) == []
+    # 括號一起抄、但裡面是真內容 → 拿掉括號留下（2026-10-20 實測）
+    assert check_prev_evening(
+        ["【研判】修正昨日盤後〈偏空〉看法，〈資金轉向電路板〉"], "偏多", inp, notes
+    ) == ["【研判】修正昨日盤後偏空看法，資金轉向電路板"]
+    # 沒有昨天盤後快訊：提到昨日盤後就丟（不准編）
+    bare = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    assert check_prev_evening(["【研判】延續昨日盤後偏空看法"], "偏空", bare, notes) == []

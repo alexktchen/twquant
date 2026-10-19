@@ -79,6 +79,8 @@ class MorningInputs:
     edition: str = (
         "morning"  # morning＝盤前晨報（昨天的收盤）；evening＝盤後快訊（今天的收盤，T-409）
     )
+    # 盤前晨報參考前一個交易日的盤後快訊（使用者 2026-10-20：「凌晨那則要參考前一天下午那則」）：date, generated_at, headline, direction, risk_note
+    prev_evening: dict[str, Any] | None = None
 
 
 def _rows(conn: Any, schema: str, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -248,6 +250,26 @@ def gather(
         )
         out.tsmc_close = float(tsmc[0]["close"]) if tsmc else None
     cal_day = day + dt.timedelta(days=1) if evening else day  # 盤後快訊看明天的法說會、除權息
+    # 盤前晨報：前一個交易日（大盤體檢那天）的盤後快訊；不是那天的（那天沒出）就不參考，免得拿好幾天前的判斷
+    if not evening and mdate is not None and _exists(conn, schema, "evening_brief"):
+        ev = _rows(
+            conn,
+            schema,
+            'SELECT date, generated_at, headline, bullets, risk_note FROM "{schema}"."evening_brief" WHERE date = %s',
+            (mdate,),
+        )
+        if ev and ev[0].get("headline"):
+            bullets = ev[0].get("bullets") or []
+            if isinstance(bullets, str):
+                bullets = json.loads(bullets)
+            direction = next((b for b in bullets if b.startswith(f"【{DIRECTION_TAG}】")), None)
+            out.prev_evening = {
+                "date": ev[0]["date"],
+                "generated_at": ev[0]["generated_at"],
+                "headline": ev[0]["headline"],
+                "direction": direction[len(DIRECTION_TAG) + 2 :] if direction else None,
+                "risk_note": ev[0].get("risk_note"),
+            }
     if "conference_calendar" not in missing:
         out.conferences_today = _rows(
             conn,
@@ -480,6 +502,15 @@ def facts(inp: MorningInputs) -> list[str]:
         out.append(f"{when}除權息：" + "、".join(inp.dividends_today))
     if inp.revenue_deadline_in is not None:
         out.append(f"距離月營收申報截止還有 {inp.revenue_deadline_in} 天")
+    pe = inp.prev_evening
+    if pe:
+        at = pe["generated_at"]
+        stamp = at.strftime("%m/%d %H:%M") if isinstance(at, dt.datetime) else str(at)
+        out.append(f"昨天盤後快訊（{stamp}）的研判：{pe['headline']}")
+        if pe.get("direction"):
+            out.append(f"昨天盤後快訊給的今日方向：{pe['direction']}")
+        if pe.get("risk_note"):
+            out.append(f"昨天盤後快訊的風險提醒：{pe['risk_note']}")
     return out + signals(inp)
 
 
@@ -645,6 +676,9 @@ def check_brief(brief: MorningBrief, inp: MorningInputs) -> tuple[MorningBrief |
     if not kept:
         return None, [*notes, "每一點都有對不上的數字，整份不用"]
     direction = check_direction(brief, inp, known, notes)
+    kept = check_prev_evening(kept, brief.stance if direction else None, inp, notes)
+    if not kept:
+        return None, [*notes, "每一點都有對不上的地方，整份不用"]
     if direction:
         kept.insert(0, direction)
     return (
@@ -703,6 +737,46 @@ def check_direction(
         notes.append(f"丟掉方向（{'；'.join(problems)}）：{stance}｜{text}")
         return None
     return f"【{DIRECTION_TAG}】{stance}｜{text}"
+
+
+_STANCE_WORDS = ("偏多", "中性", "偏空")
+# 提示詞句型裡的佔位文字（prompts.py MORNING_BRIEF_SYSTEM 的【研判】句型）
+_PLACEHOLDERS = ("延續或修正", "昨天的立場", "今早最關鍵的變化")
+
+
+def check_prev_evening(
+    bullets: list[str], stance: str | None, inp: MorningInputs, notes: list[str]
+) -> list[str]:
+    """盤前晨報對照昨天盤後快訊（2026-10-20）：提到「昨日／昨天盤後」的那一點——寫的昨天立場要對、
+    「延續」要今天立場跟昨天一樣、「修正」要不一樣、不能留著句型佔位〈〉；對不上的那一點丟掉。"""
+    pe = inp.prev_evening
+    prev = (pe.get("direction") or "").split("｜", 1)[0].strip() if pe else ""
+    out: list[str] = []
+    for raw in bullets:
+        # qwen 常把句型的〈 〉一起抄、但裡面填的是真內容（2026-10-20 實測三次都這樣）→ 拿掉括號；裡面還是佔位文字才丟
+        if any(p in raw for p in _PLACEHOLDERS):
+            notes.append(f"丟掉一點（照抄了句型的佔位）：{raw}")
+            continue
+        b = raw.replace("〈", "").replace("〉", "")
+        if not re.search(r"昨[日天]盤後", b):
+            out.append(b)
+            continue
+        problems: list[str] = []
+        said = [w for w in _STANCE_WORDS if re.search(rf"昨[日天]盤後{w}", b)]
+        if not prev:
+            problems.append("事實裡沒有昨天盤後快訊的立場")
+        elif said and said[0] != prev:
+            problems.append(f"昨天盤後是「{prev}」，寫成「{said[0]}」")
+        if prev and stance:
+            if "延續" in b and stance != prev:
+                problems.append(f"說延續昨天的「{prev}」，今天立場卻是「{stance}」")
+            if "修正" in b and stance == prev:
+                problems.append(f"說修正，今天立場仍是「{stance}」")
+        if problems:
+            notes.append(f"丟掉一點（{'；'.join(problems)}）：{b}")
+        else:
+            out.append(b)
+    return out
 
 
 def write_brief(
