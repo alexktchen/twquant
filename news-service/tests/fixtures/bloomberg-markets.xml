@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+    <channel>
+        <title><![CDATA[Bloomberg Markets]]></title>
+        <description><![CDATA[Bloomberg Markets]]></description>
+        <link>http://bloomberg.com/markets/</link>
+        <image>
+            <url>http://www.bloomberg.com/feeds/static/images/bloomberg_logo_blue.png</url>
+            <title>Bloomberg Markets</title>
+            <link>http://bloomberg.com/markets/</link>
+        </image>
+        <generator>RSS for Node</generator>
+        <lastBuildDate>Mon, 19 Oct 2026 05:56:49 GMT</lastBuildDate>
+        <atom:link href="https://www.bloomberg.com/feeds/markets/news.rss" rel="self" type="application/rss+xml"/>
+        <copyright><![CDATA[Copyright 2026 BLOOMBERG L.P. ALL RIGHTS RESERVED]]></copyright>
+        <language><![CDATA[en]]></language>
+        <item>
+            <title><![CDATA[Nasdaq Futures Rebound From Tech Selloff, Oil Dips: Markets Wrap]]></title>
+            <description><![CDATA[US equity-index futures rebounded from last week’s chip rout, offering some respite ahead of key earnings that may set the market’s direction amid mounting pressure on the artificial intelligence trade. Oil fell.]]></description>
+            <link>https://www.bloomberg.com/news/articles/2026-10-18/stock-market-today-dow-s-p-live-updates</link>
+            <guid isPermaLink="false">TN4ANRKIJH8Z00</guid>
+            <dc:creator><![CDATA[Anand Krishnamoorthy]]></dc:creator>
+            <pubDate>Sun, 18 Oct 2026 22:07:25 GMT</pubDate>
+        </item>
+<item>
+            <title><![CDATA[Europe’s Unity on China Can Move the Needle: Eskelund]]></title>
+            <description><![CDATA[European Union Chamber of Commerce in China President, Jens Eskelund, says a more unified European approach to China could reshape trade relations. He joined Paul Allen on Bloomberg’s Insight with Haslinda Amin to discuss EU-China trade tensions and the outlook for European businesses in China. (Source: Bloomberg)]]></description>
+            <link>https://www.bloomberg.com/news/videos/2026-10-19/europe-s-unity-on-china-can-move-the-needle-eskelund-video</link>
+            <guid isPermaLink="false">TN542UKGZAJJ00</guid>
+            <pubDate>Mon, 19 Oct 2026 05:47:18 GMT</pubDate>
+        </item>
+<item>
+            <title><![CDATA[FTSE 100 Live: UK Stock Futures Hold Steady, Pound Stays Above $1.33]]></title>
+            <link>https://www.bloomberg.com/news/live-blog/2026-10-19/ftse-100-live-pound-gilts-bond-euro-tech-stocks-oil-prices-uk-budget-what-s-moving-uk-markets-right-now-markets-today</link>
+            <guid isPermaLink="false">TN53YCKGIFPC00</guid>
+            <dc:creator><![CDATA[Morwenna Coniam, Sam Unsted, Laura Avetisyan and Maya Thompson]]></dc:creator>
+            <pubDate>Mon, 19 Oct 2026 05:44:36 GMT</pubDate>
+        </item>
+
+    </channel>
+</rss>

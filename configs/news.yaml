@@ -1,0 +1,86 @@
+# T-400／D-200：新聞服務（news-service/）的來源與進料參數（SPEC-017 §3）。
+# Edge Function 讀不到 repo：改這裡要同步改 news-service/config/news.json（tests/test_news_config.py 核對兩者一致）。
+# 每個來源記條款網址與最後檢查日期；只存標題與摘要、連原文、網站登入後才看（D-200 §三）。
+# 2026-10-19 本機實測都抓得到；從雲端 IP（Supabase）抓不抓得到在 T-399 試驗重測。
+
+user_agent: "twquant-news/1.0 (+https://twquant.pages.dev/about)"
+# 每次每個來源最多收幾則（RSS 一份約 10～50 則，由新到舊）
+per_run_limit: 40
+# 全部來源都超過這麼多小時沒抓成功 → /v1/health 回停擺（每 30 分鐘排一次，2 小時＝連錯四次）
+stale_hours: 2
+
+sources:
+  - id: bloomberg-markets
+    name: Bloomberg
+    kind: intl
+    lang: en
+    format: rss
+    url: https://feeds.bloomberg.com/markets/news.rss
+    terms: https://www.bloomberg.com/notices/tos/
+    checked: "2026-10-19"
+  - id: bloomberg-tech
+    name: Bloomberg
+    kind: intl
+    lang: en
+    format: rss
+    url: https://feeds.bloomberg.com/technology/news.rss
+    terms: https://www.bloomberg.com/notices/tos/
+    checked: "2026-10-19"
+  - id: cnbc-top
+    name: CNBC
+    kind: intl
+    lang: en
+    format: rss
+    url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+    terms: https://www.cnbc.com/nbcuniversal-terms-of-service/
+    checked: "2026-10-19"
+  - id: cnbc-tech
+    name: CNBC
+    kind: intl
+    lang: en
+    format: rss
+    url: https://www.cnbc.com/id/19854910/device/rss/rss.html
+    terms: https://www.cnbc.com/nbcuniversal-terms-of-service/
+    checked: "2026-10-19"
+  - id: ft-markets
+    name: Financial Times
+    kind: intl
+    lang: en
+    format: rss
+    url: https://www.ft.com/markets?format=rss
+    terms: https://help.ft.com/legal-privacy/terms-and-conditions/
+    checked: "2026-10-19"
+  # RDF 格式、沒有發布時間 → 只用我們第一次抓到的時間
+  - id: nikkei-asia
+    name: Nikkei Asia
+    kind: intl
+    lang: en
+    format: rss
+    url: https://asia.nikkei.com/rss/feed/nar
+    terms: https://asia.nikkei.com/Terms-of-use
+    checked: "2026-10-19"
+  - id: digitimes
+    name: DigiTimes Asia
+    kind: intl
+    lang: en
+    format: rss
+    url: https://www.digitimes.com/rss/daily.xml
+    terms: https://www.digitimes.com/aboutus/terms.asp
+    checked: "2026-10-19"
+  - id: fed-press
+    name: Federal Reserve
+    kind: intl
+    lang: en
+    format: rss
+    url: https://www.federalreserve.gov/feeds/press_all.xml
+    terms: https://www.federalreserve.gov/disclaimer.htm
+    checked: "2026-10-19"
+  # 鉅亨網列表 API（同 src/twquant/data/sources/news_headlines.py；不是正式開放的介面）
+  - id: cnyes-headline
+    name: 鉅亨網
+    kind: tw
+    lang: zh
+    format: cnyes
+    url: https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30
+    terms: https://www.cnyes.com/tos
+    checked: "2026-10-19"

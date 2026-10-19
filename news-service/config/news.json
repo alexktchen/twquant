@@ -1,0 +1,97 @@
+{
+  "user_agent": "twquant-news/1.0 (+https://twquant.pages.dev/about)",
+  "per_run_limit": 40,
+  "stale_hours": 2,
+  "sources": [
+    {
+      "id": "bloomberg-markets",
+      "name": "Bloomberg",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "terms": "https://www.bloomberg.com/notices/tos/",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "bloomberg-tech",
+      "name": "Bloomberg",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://feeds.bloomberg.com/technology/news.rss",
+      "terms": "https://www.bloomberg.com/notices/tos/",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "cnbc-top",
+      "name": "CNBC",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "terms": "https://www.cnbc.com/nbcuniversal-terms-of-service/",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "cnbc-tech",
+      "name": "CNBC",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+      "terms": "https://www.cnbc.com/nbcuniversal-terms-of-service/",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "ft-markets",
+      "name": "Financial Times",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.ft.com/markets?format=rss",
+      "terms": "https://help.ft.com/legal-privacy/terms-and-conditions/",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "nikkei-asia",
+      "name": "Nikkei Asia",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://asia.nikkei.com/rss/feed/nar",
+      "terms": "https://asia.nikkei.com/Terms-of-use",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "digitimes",
+      "name": "DigiTimes Asia",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.digitimes.com/rss/daily.xml",
+      "terms": "https://www.digitimes.com/aboutus/terms.asp",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "fed-press",
+      "name": "Federal Reserve",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "terms": "https://www.federalreserve.gov/disclaimer.htm",
+      "checked": "2026-10-19"
+    },
+    {
+      "id": "cnyes-headline",
+      "name": "鉅亨網",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "cnyes",
+      "url": "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30",
+      "terms": "https://www.cnyes.com/tos",
+      "checked": "2026-10-19"
+    }
+  ]
+}

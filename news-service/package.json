@@ -1,0 +1,9 @@
+{
+  "name": "twquant-news-service",
+  "private": true,
+  "type": "module",
+  "description": "新聞洞悉層微服務（SPEC-017／D-200）：進料、翻譯、資訊關係圖；Supabase Edge Function 執行",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  }
+}
