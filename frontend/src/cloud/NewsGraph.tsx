@@ -1,55 +1,41 @@
-// 新聞關係圖（「心智爆炸圖」，使用者 2026-10-19：「有那種心智爆炸圖的方式嗎」；版面與顏色照 dataviz 方法：放射狀樹、
-// 三類顏色＋圖示＋文字、線灰色越粗越相關、AI 草擬的線畫虛線、點選亮路徑、另有清單看法）。
-// 全螢幕：打開時從新聞往外一圈一圈炸開；拖曳平移、雙指或滾輪縮放；點一個點亮出它跟新聞怎麼連上的，再點「看個股」。
-// 外觀照使用者給的 Gemini 截圖（2026-10-19）：純黑底、底部紫藍點陣漸層、乾淨細線、膠囊按鈕，只有圓心一圈柔光。
-import { CandlestickChart, ChevronLeft, List, Network, Newspaper, RotateCcw, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react'
-import { CLASS_LABEL, classOf, edgePath, hiddenKids, pathTo, radialLayout, showLabel, strokeOf, tableRows, topTw, viaText, type GClass, type GNode, type NewsGraph as Graph, type Placed } from './news-graph'
+// 新聞關係圖＝心智圖（使用者原話「心智爆炸圖」；2026-10-19 放射圖、HUD、Gemini 風、3D、地鐵路線圖都被退回後「你幫我想一個」）。
+// 新聞在正中間，分支像扇子往外張開：一度、二度、三度一層一層往外，字直接寫在分支末端、底下一條類別色的底線——沒有點、沒有球、
+// 沒有光暈。分支是由粗到細的彩帶，顏色＝到站的類別，越相關越粗，AI 草擬的畫虛線。手機只往右長、可往下捲；桌機左右都長。
+// 點一個名字：亮出它跟新聞的路徑（其他變淡）、底部出現「看個股」；二度點了會展開它的三度，右上角可一次全部展開。
+import { CandlestickChart, ChevronLeft, ChevronsDownUp, ChevronsUpDown, Newspaper, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CLASS_LABEL, classOf, mindBranches, mindLayout, pathTo, topTw, viaText, type GClass, type GNode, type MindOpts, type NewsGraph as Graph } from './news-graph'
 
-const RADII: [number, number, number] = [72, 128, 172]
-const NODE_R: Record<number, number> = { 1: 15, 2: 11, 3: 6 }
-const SCALE_MIN = 0.6
-const SCALE_MAX = 3
+/** 手機（窄）：只往右長、三度縮排在二度底下；桌機：左右都長、三度自己一欄 */
+const PHONE: MindOpts = { rowH: { 1: 42, 2: 44, 3: 40 }, slotW: { 1: 98, 2: 104, 3: 100 }, gap: 24, indent3: 16, twoSided: false, centerW: 104, centerH: 66, pad: 12 }
+const DESK: MindOpts = { rowH: { 1: 44, 2: 44, 3: 40 }, slotW: { 1: 112, 2: 116, 3: 128 }, gap: 30, indent3: null, twoSided: true, centerW: 150, centerH: 72, pad: 16 }
+const DESK_MIN_W = 900
 
 const chgText = (c: number | undefined) => (c === undefined ? '' : `${c > 0 ? '▲' : c < 0 ? '▼' : ''}${Math.abs(c).toFixed(2)}%`)
 
 export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: () => void; onStock: (sid: string, name: string) => void }) {
-  const [size, setSize] = useState({ w: 390, h: 560 })
-  // 直的螢幕把圈拉成直的橢圓（上下空間才用得到）；橫的螢幕維持正圓
-  const aspect = Math.max(1, Math.min(1.45, (size.h - 60) / size.w))
-  const placed = useMemo(() => radialLayout(graph.nodes, RADII, aspect), [graph, aspect])
-  const by = useMemo(() => new Map(placed.map((p) => [p.id, p])), [placed])
   const [selected, setSelected] = useState<string | null>(null)
   const [opened, setOpened] = useState<Set<string>>(new Set())
-  const [view, setView] = useState<'graph' | 'list'>('graph')
-  const [boom, setBoom] = useState(false)
-  const [tf, setTf] = useState({ s: 1, x: 0, y: 0 })
-  const box = useRef<HTMLDivElement>(null)
+  const [viewW, setViewW] = useState(390)
+  const map = useRef<HTMLDivElement>(null)
 
-  // 量畫布大小、算一開始的縮放（三圈的點都放得下）
   useEffect(() => {
-    const el = box.current
+    const el = map.current
     if (!el) return
-    const fit = () => {
-      const w = el.clientWidth
-      const h = el.clientHeight
-      setSize({ w, h })
-      const a = Math.max(1, Math.min(1.45, (h - 60) / w))
-      // 手機約 1 倍（字維持 13px 以上）、大螢幕最多 2.2 倍
-      const s = Math.max(0.9, Math.min(2.2, w / (2 * (RADII[2] + 22)), h / (2 * (RADII[2] * a + 40))))
-      setTf({ s, x: 0, y: 0 })
-    }
+    const fit = () => setViewW(el.clientWidth)
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [view])
-
-  // 打開時炸開（下一個畫格才加 class，才有過場）
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setBoom(true))
-    return () => cancelAnimationFrame(id)
   }, [])
+
+  const opts = viewW >= DESK_MIN_W ? DESK : PHONE
+  const lay = useMemo(() => mindLayout(graph.nodes, opened, opts, viewW), [graph, opened, opts, viewW])
+  const branches = useMemo(() => mindBranches(lay, opts), [lay, opts])
+  const onPath = useMemo(() => new Set(selected ? pathTo(graph.nodes, selected).map((n) => n.id) : []), [graph, selected])
+  // 有三度可展開的二度
+  const expandable = useMemo(() => graph.nodes.filter((n) => n.degree === 2 && graph.nodes.some((x) => x.parent === n.id)).map((n) => n.id), [graph])
+  const allOpen = expandable.every((id) => opened.has(id))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -57,51 +43,26 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const onPath = useMemo(() => new Set(selected ? pathTo(graph.nodes, selected).map((n) => n.id) : []), [graph, selected])
+  // 從底部面板點的名字可能在畫面外：捲到看得到
+  useEffect(() => {
+    if (!selected || !map.current) return
+    map.current.querySelector<HTMLElement>(`[data-id="${CSS.escape(selected)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [selected])
+
   const pick = (n: GNode) => {
     setSelected((cur) => (cur === n.id ? null : n.id))
     if (n.degree < 3) setOpened((o) => new Set(o).add(n.id))
   }
+  const toggleAll = () => setOpened(allOpen ? new Set() : new Set(expandable))
 
-  // ── 平移與縮放（一指拖、兩指捏、滾輪）─────────────────────────────
-  const pointers = useRef(new Map<number, { x: number; y: number }>())
-  const pinch = useRef<{ d: number; s: number } | null>(null)
-  const down = (e: RPointerEvent) => {
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()]
-      pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y), s: tf.s }
-    }
-  }
-  const move = (e: RPointerEvent) => {
-    const prev = pointers.current.get(e.pointerId)
-    if (!prev) return
-    const cur = { x: e.clientX, y: e.clientY }
-    pointers.current.set(e.pointerId, cur)
-    if (pointers.current.size === 2 && pinch.current) {
-      const [a, b] = [...pointers.current.values()]
-      const s = Math.max(SCALE_MIN, Math.min(SCALE_MAX, (pinch.current.s * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.current.d))
-      setTf((t) => ({ ...t, s }))
-    } else if (pointers.current.size === 1 && e.buttons) {
-      setTf((t) => ({ ...t, x: t.x + cur.x - prev.x, y: t.y + cur.y - prev.y }))
-    }
-  }
-  const up = (e: RPointerEvent) => {
-    pointers.current.delete(e.pointerId)
-    if (pointers.current.size < 2) pinch.current = null
-  }
-  const wheel = (e: RWheelEvent) => {
-    const s = Math.max(SCALE_MIN, Math.min(SCALE_MAX, tf.s * Math.exp(-e.deltaY * 0.0015)))
-    setTf((t) => ({ ...t, s }))
-  }
-
-  const sel = selected ? by.get(selected) ?? null : null
+  const sel = selected ? graph.nodes.find((n) => n.id === selected) ?? null : null
   const chain = sel ? pathTo(graph.nodes, sel.id) : []
   const counts = [1, 2, 3].map((d) => graph.nodes.filter((n) => n.degree === d).length)
-  const center = { x: 0, y: 0 }
+  // 進場順序：一層一層往外、同層由上到下
+  const order = new Map(lay.items.map((it, i) => [it.n.id, (it.depth - 1) * 160 + i * 18]))
 
   return (
-    <div className={view === 'list' ? 'cq-ng is-list' : 'cq-ng'} role="dialog" aria-modal="true" aria-label="新聞關係圖">
+    <div className="cq-ng" role="dialog" aria-modal="true" aria-label="新聞關係圖">
       <header className="cq-ng-head">
         <button className="cq-ng-icon" onClick={onClose} aria-label="返回">
           <ChevronLeft size={22} />
@@ -112,120 +73,70 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
             {graph.item.source_name}・一度 {counts[0]}・二度 {counts[1]}・三度 {counts[2]}
           </small>
         </div>
-        <button className="cq-ng-icon" onClick={() => setView(view === 'graph' ? 'list' : 'graph')} aria-label={view === 'graph' ? '看清單' : '看關係圖'}>
-          {view === 'graph' ? <List size={20} /> : <Network size={20} />}
-        </button>
+        {expandable.length > 0 && (
+          <button className="cq-ng-icon" onClick={toggleAll} aria-label={allOpen ? '全部收合' : '全部展開'} title={allOpen ? '收起所有三度' : '展開所有三度'}>
+            {allOpen ? <ChevronsDownUp size={20} /> : <ChevronsUpDown size={20} />}
+          </button>
+        )}
       </header>
 
-      <div className="cq-ng-legend" aria-hidden={view === 'list'}>
+      <div className="cq-ng-legend">
         {(['abroad', 'tw', 'cluster'] as GClass[]).map((c) => (
           <span key={c} className={`cq-ng-key ${c}`}>
             <i aria-hidden="true" />
             {CLASS_LABEL[c]}
           </span>
         ))}
-        <span className="cq-ng-key line" title="線越粗＝跟這則新聞越相關">粗＝較相關</span>
-        <span className="cq-ng-key draft" title="AI 依公開資訊草擬、還沒經過核可的關係">虛線＝草擬</span>
+        <span className="cq-ng-key line" title="分支越粗＝跟這則新聞越相關">
+          粗＝較相關
+        </span>
+        <span className="cq-ng-key draft" title="AI 依公開資訊草擬、還沒經過核可的關係">
+          虛線＝草擬
+        </span>
       </div>
 
-      {view === 'graph' ? (
-        <div
-          ref={box}
-          className={boom ? 'cq-ng-stage boom' : 'cq-ng-stage'}
-          onPointerDown={down}
-          onPointerMove={move}
-          onPointerUp={up}
-          onPointerCancel={up}
-          onWheel={wheel}
-          onClick={(e) => e.target === e.currentTarget && setSelected(null)}
-        >
-          <svg width={size.w} height={size.h} className={selected ? 'focus' : ''} onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
-            <g transform={`translate(${size.w / 2 + tf.x},${size.h / 2 + tf.y}) scale(${tf.s})`}>
-              <defs>
-                {/* 圓心細環的藍紫粉漸層，與全圖唯一一圈柔光 */}
-                <linearGradient id="ng-accent" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stopColor="#4f8cff" />
-                  <stop offset="0.55" stopColor="#9b72f2" />
-                  <stop offset="1" stopColor="#d96570" />
-                </linearGradient>
-                <filter id="ng-soft" x="-100%" y="-100%" width="300%" height="300%">
-                  <feGaussianBlur stdDeviation="9" />
-                </filter>
-              </defs>
-              {RADII.map((r) => (
-                <ellipse key={r} className="cq-ng-ring" rx={r} ry={r * aspect} />
-              ))}
-              {placed.map((p) => {
-                const from = p.parent ? by.get(p.parent) ?? center : center
-                const d = edgePath(from, p)
-                return (
-                  <g key={`e-${p.id}`} className={['cq-ng-link', `d${p.degree}`, onPath.has(p.id) ? 'hot' : ''].join(' ')}>
-                    <path className={p.draft ? 'cq-ng-edge draft' : 'cq-ng-edge'} d={d} strokeWidth={strokeOf(p.score)} pathLength={p.draft ? undefined : 1} />
-                    {/* 選到的路徑上有光點從新聞往外流 */}
-                    {onPath.has(p.id) && <path className="cq-ng-flow" d={d} />}
-                  </g>
-                )
-              })}
-              <g className="cq-ng-center" onClick={() => setSelected(null)}>
-                <circle className="halo" r={30} filter="url(#ng-soft)" />
-                <circle className="shock" r={24} />
-                <circle className="core" r={24} />
-                <Newspaper x={-10} y={-10} width={20} height={20} strokeWidth={1.6} className="glyph" />
-              </g>
-              {placed.map((p) => (
-                <Node key={p.id} p={p} label={showLabel(p, opened, selected)} more={hiddenKids(p, graph.nodes, opened)} hot={onPath.has(p.id)} on={selected === p.id} onPick={() => pick(p)} />
-              ))}
-            </g>
+      <div className={selected ? 'cq-ng-map focus' : 'cq-ng-map'} ref={map} onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
+        <div className="cq-ng-canvas" style={{ width: lay.width, height: lay.height }} onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
+          <svg className="cq-ng-branches" width={lay.width} height={lay.height} aria-hidden="true">
+            {branches.map((b) =>
+              b.draft ? (
+                <path key={b.to} className={['br', 'draft', b.cls, onPath.has(b.to) ? 'hot' : ''].join(' ')} d={b.d} strokeWidth={b.w} style={{ ['--d' as string]: order.get(b.to) ?? 0 }} />
+              ) : (
+                <path key={b.to} className={['br', b.cls, onPath.has(b.to) ? 'hot' : ''].join(' ')} d={b.d} style={{ ['--d' as string]: order.get(b.to) ?? 0 }} />
+              ),
+            )}
           </svg>
-          <div className="cq-ng-zoom">
-            <button onClick={() => setTf((t) => ({ ...t, s: Math.min(SCALE_MAX, t.s * 1.25) }))} aria-label="放大">
-              ＋
-            </button>
-            <button onClick={() => setTf((t) => ({ ...t, s: Math.max(SCALE_MIN, t.s / 1.25) }))} aria-label="縮小">
-              －
-            </button>
-            <button
-              onClick={() => {
-                setTf((t) => ({ ...t, x: 0, y: 0 }))
-                setSelected(null)
-              }}
-              aria-label="回到中間"
-            >
-              <RotateCcw size={16} />
-            </button>
+          <div className="cq-ng-center" style={{ left: lay.cx - opts.centerW / 2, top: lay.cy - opts.centerH / 2, width: opts.centerW, height: opts.centerH }}>
+            <Newspaper size={18} aria-hidden="true" />
+            <b>這則新聞</b>
+            <small>{graph.item.source_name}</small>
           </div>
-        </div>
-      ) : (
-        <ul className="cq-ng-list">
-          {tableRows(graph.nodes).map((n) => {
-            const c = classOf(n.type)
+          {lay.items.map((it) => {
+            const n = it.n
+            const c = it.cls
             return (
-              <li key={n.id}>
-                <span className="deg">{n.degree} 度</span>
-                <span className={`dot ${c}`} aria-hidden="true" />
+              <button
+                key={n.id}
+                data-id={n.id}
+                className={['cq-ng-node', `d${it.depth}`, c, it.side === 1 ? 'r' : 'l', onPath.has(n.id) ? 'hot' : '', selected === n.id ? 'on' : ''].join(' ')}
+                style={{ left: it.x, top: it.top, width: it.w, height: it.h, ['--d' as string]: order.get(n.id) ?? 0 }}
+                onClick={() => pick(n)}
+                aria-label={`${n.label}，${CLASS_LABEL[c]}，${n.degree} 度，${viaText(n)}${n.draft ? '，AI 草擬待核可' : ''}`}
+                aria-pressed={selected === n.id}
+              >
                 <span className="name">
-                  <b>{n.label}</b>
-                  <small>
-                    {CLASS_LABEL[c]}・{n.sub}
-                    {n.chg !== undefined && <em className={n.chg >= 0 ? 'up' : 'down'}> {chgText(n.chg)}</em>}
-                  </small>
+                  {n.label}
+                  {it.depth === 1 && n.chg !== undefined && <em className={n.chg >= 0 ? 'up' : 'down'}>{chgText(n.chg)}</em>}
                 </span>
-                <span className="via">
-                  {viaText(n)}
-                  {n.draft && <i>草擬</i>}
+                <span className="sub">
+                  <span>{it.depth === 1 ? n.sub : viaText(n)}</span>
+                  {it.more > 0 && <i className="more">＋{it.more}</i>}
                 </span>
-                {n.type === 'tw' ? (
-                  <button onClick={() => onStock(n.sub, n.label)} aria-label={`看 ${n.label} 個股頁`}>
-                    ›
-                  </button>
-                ) : (
-                  <span />
-                )}
-              </li>
+              </button>
             )
           })}
-        </ul>
-      )}
+        </div>
+      </div>
 
       <footer className="cq-ng-sheet" aria-live="polite">
         {sel ? (
@@ -247,7 +158,12 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
             <div className="cq-ng-act">
               <span>
                 {sel.degree} 度・關聯 {sel.score.toFixed(2)}
-                {sel.chg !== undefined && <em className={sel.chg >= 0 ? 'up' : 'down'}> {sel.sub} {chgText(sel.chg)}</em>}
+                {sel.chg !== undefined && (
+                  <em className={sel.chg >= 0 ? 'up' : 'down'}>
+                    {' '}
+                    {sel.sub} {chgText(sel.chg)}
+                  </em>
+                )}
               </span>
               {sel.type === 'tw' && (
                 <button onClick={() => onStock(sel.sub, sel.label)}>
@@ -277,49 +193,5 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
         )}
       </footer>
     </div>
-  )
-}
-
-function Node({ p, label, more, hot, on, onPick }: { p: Placed; label: boolean; more: number; hot: boolean; on: boolean; onPick: () => void }) {
-  const c = classOf(p.type)
-  const r = NODE_R[Math.min(p.degree, 3)]
-  // 下半圈名字放點下面、上半圈放上面（離圓心越遠越不擠）；一度的美股多一行昨晚漲跌（代號在底部面板，圖上放會壓到旁邊的點）
-  const below = p.y >= -4
-  const tag = p.degree === 1 && p.type === 'us' && p.chg !== undefined
-  const nameY = below ? r + 17 : -r - (tag ? 25 : 10)
-  const tagY = below ? r + 32 : -r - 10
-  return (
-    <g
-      className={['cq-ng-node', c, `d${p.degree}`, hot ? 'hot' : '', on ? 'on' : ''].join(' ')}
-      style={{ ['--x' as string]: `${p.x}px`, ['--y' as string]: `${p.y}px`, ['--delay' as string]: `${(p.degree - 1) * 170 + Math.round((p.angle + Math.PI) * 18)}ms` }}
-      tabIndex={0}
-      role="button"
-      aria-label={`${p.label}，${CLASS_LABEL[c]}，${p.degree} 度，${viaText(p)}${p.draft ? '，AI 草擬待核可' : ''}`}
-      onClick={(e) => {
-        e.stopPropagation()
-        onPick()
-      }}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onPick()}
-    >
-      <circle className="hit" r={Math.max(r + 8, 14)} />
-      {on && <circle className="sel" r={r + 5} />}
-      <circle className="dot" r={r} />
-      {/* 「+N」放在離圓心遠的那一側：靠內側會壓到一度美股的代號與漲跌 */}
-      {more > 0 && (
-        <text className="more" x={p.x < 0 ? -(r + 5) : r + 5} y={4} textAnchor={p.x < 0 ? 'end' : 'start'}>
-          +{more}
-        </text>
-      )}
-      {label && (
-        <text className="lbl" y={nameY} textAnchor="middle">
-          {p.label}
-        </text>
-      )}
-      {label && tag && p.chg !== undefined && (
-        <text className={`lbl tag ${p.chg >= 0 ? 'up' : 'down'}`} y={tagY} textAnchor="middle">
-          {chgText(p.chg)}
-        </text>
-      )}
-    </g>
   )
 }

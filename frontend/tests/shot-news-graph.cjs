@@ -1,4 +1,4 @@
-// 新聞關係圖（心智爆炸圖）截圖（手動檢查用）：node tests/shot-news-graph.cjs <baseUrl> <outDir> <items.json> <health.json>
+// 新聞關係圖（地鐵路線圖）截圖（手動檢查用）：node tests/shot-news-graph.cjs <baseUrl> <outDir> <items.json> <health.json>
 // 用 ?demo=graph 的示範資料；新聞服務還沒上線時 /api/news/* 用錄好的回應代替。
 const { chromium } = require('playwright')
 const fs = require('node:fs')
@@ -22,20 +22,19 @@ const path = require('node:path')
     await page.waitForTimeout(2500)
     await page.screenshot({ path: path.join(out, `${name}-entry.png`) })
     await page.locator('.cq-ng-demo button').first().click()
-    await page.waitForTimeout(900)
-    await page.screenshot({ path: path.join(out, `${name}-burst.png`) })
-    await page.waitForTimeout(1600)
+    await page.waitForTimeout(1400)
     await page.screenshot({ path: path.join(out, `${name}-open.png`) })
     // 點緯穎（二度）：展開它的三度、亮路徑
-    await page.locator('.cq-ng-node[aria-label^="緯穎"]').click({ force: true })
+    await page.locator('.cq-ng-node[aria-label^="緯穎"]').click()
     await page.waitForTimeout(600)
     await page.screenshot({ path: path.join(out, `${name}-pick.png`) })
-    await page.locator('.cq-ng-node[aria-label^="神達"]').click({ force: true })
+    await page.locator('.cq-ng-node[aria-label^="神達"]').click()
     await page.waitForTimeout(600)
     await page.screenshot({ path: path.join(out, `${name}-pick3.png`) })
-    await page.getByRole('button', { name: '看清單' }).click()
-    await page.waitForTimeout(400)
-    await page.screenshot({ path: path.join(out, `${name}-list.png`) })
+    await page.getByRole('button', { name: '取消選取' }).click()
+    await page.getByRole('button', { name: '全部展開' }).click()
+    await page.waitForTimeout(900)
+    await page.screenshot({ path: path.join(out, `${name}-all.png`) })
     await ctx.close()
   }
   await b.close()
