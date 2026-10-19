@@ -16,6 +16,29 @@ export type NewsRow = {
   first_seen_at: string
   /** 來源後來改過幾次標題或摘要 */
   versions: number
+  /** 英文新聞的翻譯（T-401）：ok 有譯文、failed 沒過檢查、pending 還沒翻；中文新聞 null。舊的服務沒有這欄 → undefined */
+  translation?: 'ok' | 'failed' | 'pending' | null
+  title_zh?: string | null
+  summary_zh?: string | null
+}
+
+export type Shown = {
+  title: string
+  summary: string | null
+  lang: 'en' | 'zh'
+  /** 標題旁的小標：譯＝AI 翻譯、未譯＝翻譯沒過檢查（顯示原文）、翻譯中＝還沒翻 */
+  tag: '譯' | '未譯' | '翻譯中' | null
+  /** 有譯文時，展開後附原文 */
+  original: { title: string; summary: string | null } | null
+}
+
+/** 這則要顯示的樣子：有過檢查的譯文就用譯文（附原文），否則顯示原文。 */
+export function shown(r: NewsRow): Shown {
+  if (r.translation === 'ok' && r.title_zh) {
+    return { title: r.title_zh, summary: r.summary_zh ?? null, lang: 'zh', tag: '譯', original: { title: r.title, summary: r.summary } }
+  }
+  const tag = r.translation === 'failed' ? '未譯' : r.translation === 'pending' ? '翻譯中' : null
+  return { title: r.title, summary: r.summary, lang: r.lang, tag, original: null }
 }
 export type NewsHealth = {
   now: string

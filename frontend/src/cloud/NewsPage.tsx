@@ -1,5 +1,5 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
-// 第一版只有原文；翻譯（「譯」）、關聯的美股／台股／族群、關係圖在後面的任務接上。
+// 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；關聯的美股／台股／族群、關係圖在後面的任務接上。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、來源與時間；點一下就地展開摘要與原文連結。
 import { ChevronDown, ExternalLink, Globe, MapPin, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -12,6 +12,7 @@ import {
   groupByDay,
   healthLine,
   nextUntil,
+  shown,
   taipeiDay,
   timeLabel,
   type NewsHealth,
@@ -20,6 +21,12 @@ import {
 } from './news'
 
 type Filter = 'all' | NewsKind
+
+const TAG_TITLE: Record<string, string> = {
+  譯: 'AI 翻譯（標題與摘要），數字與公司名都核對過；點開看英文原文',
+  未譯: '翻譯沒過檢查（數字或公司名對不上），先顯示英文原文',
+  翻譯中: '剛抓到，下一輪（30 分鐘內）翻譯',
+}
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -106,6 +113,8 @@ export function NewsPage({ refresh }: { refresh: number }) {
           <ul>
             {g.rows.map((r) => {
               const isOpen = open === r.id
+              const v = shown(r)
+              const lang = (l: 'en' | 'zh') => (l === 'en' ? 'en' : 'zh-Hant')
               return (
                 <li key={r.id} className={isOpen ? 'open' : ''}>
                   <button className="cq-news-row" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.id)}>
@@ -113,8 +122,13 @@ export function NewsPage({ refresh }: { refresh: number }) {
                       {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
                       {r.kind ? KIND_LABEL[r.kind] : '其他'}
                     </span>
-                    <span className="cq-news-title" lang={r.lang === 'en' ? 'en' : 'zh-Hant'}>
-                      {r.title}
+                    <span className="cq-news-title" lang={lang(v.lang)}>
+                      {v.tag && (
+                        <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
+                          {v.tag}
+                        </em>
+                      )}
+                      {v.title}
                     </span>
                     <span className="cq-news-meta">
                       {r.source_name}・{timeLabel(r, g.day)}
@@ -123,7 +137,14 @@ export function NewsPage({ refresh }: { refresh: number }) {
                   </button>
                   {isOpen && (
                     <div className="cq-news-body">
-                      {r.summary && <p lang={r.lang === 'en' ? 'en' : 'zh-Hant'}>{r.summary}</p>}
+                      {v.summary && <p lang={lang(v.lang)}>{v.summary}</p>}
+                      {v.original && (
+                        <div className="cq-news-orig" lang="en">
+                          <span>原文</span>
+                          <b>{v.original.title}</b>
+                          {v.original.summary && <p>{v.original.summary}</p>}
+                        </div>
+                      )}
                       <a href={r.url} target="_blank" rel="noopener noreferrer">
                         看原文（{r.source_name}）<ExternalLink size={13} aria-hidden="true" />
                       </a>

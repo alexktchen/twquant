@@ -1,8 +1,9 @@
-// POST /functions/v1/ingest（T-400）：pg_cron 每 30 分鐘呼叫（supabase/setup/schedule.sql）。
+// POST /functions/v1/ingest（T-400、T-401）：pg_cron 每 30 分鐘呼叫（supabase/setup/schedule.sql）——先進料、再翻譯。
 // 先回 202、工作放 EdgeRuntime.waitUntil：pg_net 只等 5 秒，九個來源一起抓要十幾秒。
 import config from '../../../config/news.json' with { type: 'json' }
 import { runIngest, validateConfig } from '../../../src/ingest.ts'
-import { authorized, db, fetchFeed, json, pgStore } from '../_shared/io.ts'
+import { translatePending } from '../../../src/translate.ts'
+import { authorized, db, fetchFeed, json, pgStore, translateDeps } from '../_shared/io.ts'
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void }
 
@@ -14,6 +15,9 @@ async function run(runId: string): Promise<void> {
     const runs = await runIngest(cfg, { now: () => new Date(), fetch: fetchFeed, store: pgStore(sql), runId })
     const bad = runs.filter((r) => !r.ok)
     console.log(`news ingest ${runId}：新增 ${runs.reduce((a, r) => a + r.new_items, 0)} 則；失敗 ${bad.map((r) => `${r.source}（${r.error}）`).join('、') || '無'}`)
+    // 進料先寫好（first_seen_at 是唯一補不回來的東西），再翻譯；翻譯壞了、額度用完都不影響進料（T-401）
+    const tr = await translatePending(cfg.translate, translateDeps(sql, cfg.translate.model))
+    console.log(`news translate ${runId}：${JSON.stringify(tr)}`)
   } finally {
     await sql.end({ timeout: 5 })
   }

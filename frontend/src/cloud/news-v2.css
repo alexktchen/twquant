@@ -40,3 +40,12 @@
   flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 5px 10px; border-radius: 999px;
   background: rgba(61, 155, 255, .12); border: 0; color: #3d9bff; font-size: 14px; font-weight: 600; white-space: nowrap;
 }
+
+/* 翻譯小標（T-401）：譯＝藍、未譯／翻譯中＝灰 */
+.cq-news-tag { font-style: normal; font-size: 12.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; margin-right: 6px; vertical-align: 2px; }
+.cq-news-tag.tr { color: #3d9bff; border: 1px solid rgba(61, 155, 255, .5); }
+.cq-news-tag.raw { color: var(--mute); border: 1px solid #3a3d45; }
+.cq-news-orig { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid #3a3d45; background: #15171c; border-radius: 0 8px 8px 0; }
+.cq-news-orig span { display: block; font-size: 12.5px; color: var(--mute); margin-bottom: 4px; }
+.cq-news-orig b { display: block; font-size: 15px; font-weight: 600; line-height: 1.45; color: #c9ccd3; }
+.cq-news-orig p { margin: 6px 0 0; font-size: 14px; }

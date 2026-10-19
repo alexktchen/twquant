@@ -2,6 +2,7 @@
 // 邏輯都在 news-service/src（純函式、有測試）；這裡只有 SQL 與 HTTP。
 import postgres from 'npm:postgres@3.4.5'
 import type { FetchResult, NewsStore, SourceState } from '../../../src/ingest.ts'
+import type { Pending, TranslateDeps } from '../../../src/translate.ts'
 
 export type Sql = ReturnType<typeof postgres>
 
@@ -57,6 +58,54 @@ export function pgStore(sql: Sql): NewsStore {
     },
     async recordRun(run) {
       await sql`insert into news.ingest_runs ${sql(run)}`
+    },
+  }
+}
+
+/** 翻譯要的資料庫與 Workers AI（T-401）。帳號與金鑰是 Edge Function 祕密 CLOUDFLARE_ACCOUNT_ID、CLOUDFLARE_AI_TOKEN。 */
+export function translateDeps(sql: Sql, model: string): TranslateDeps {
+  const account = Deno.env.get('CLOUDFLARE_ACCOUNT_ID')
+  const token = Deno.env.get('CLOUDFLARE_AI_TOKEN')
+  if (!account || !token) throw new Error('CLOUDFLARE_ACCOUNT_ID／CLOUDFLARE_AI_TOKEN 沒設定，不能翻譯')
+  return {
+    now: () => new Date(),
+    // 還沒翻過「目前這一版內容」的英文新聞，新的先
+    pending: (limit) => sql<Pending[]>`
+      select i.id, coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
+             coalesce(v.content_sha, i.content_sha) as content_sha
+      from news.raw_items i
+      left join lateral (
+        select title_orig, summary_orig, content_sha from news.raw_item_versions
+        where item_id = i.id order by seen_at desc limit 1
+      ) v on true
+      where i.lang = 'en'
+        and not exists (
+          select 1 from news.translations t where t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
+        )
+      order by i.first_seen_at desc, i.id
+      limit ${limit}`,
+    usedToday: async (day) => {
+      const [r] = await sql<{ n: number }[]>`
+        select coalesce(sum(neurons), 0)::float8 as n from news.llm_usage
+        where ts >= (${day}::date)::timestamp at time zone 'UTC' and ts < ((${day}::date) + 1)::timestamp at time zone 'UTC'`
+      return r.n
+    },
+    ai: async (body) => {
+      const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${model}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      })
+      // 錯誤時 Cloudflare 也回 JSON（success: false），交給 parseReply 丟出原因
+      return res.json()
+    },
+    save: async (rows, usage) => {
+      if (rows.length > 0) {
+        const data = rows.map((r) => ({ ...r, checks: sql.json(r.checks) }))
+        await sql`insert into news.translations ${sql(data)} on conflict (item_id, content_sha) do nothing`
+      }
+      if (usage.length > 0) await sql`insert into news.llm_usage ${sql(usage)}`
     },
   }
 }

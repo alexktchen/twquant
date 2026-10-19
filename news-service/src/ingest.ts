@@ -2,6 +2,7 @@
 // 資料只增不改（D-200 §四）：first_seen_at 是我們第一次抓到的時間（研究用的可得時間），之後不會再改。
 // 所有 IO（抓網頁、時鐘、資料庫）由呼叫端注入：Edge Function 給真的、測試給假的。一個來源壞掉不擋其他來源。
 import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
+import { validateTranslateConfig, type TranslateConfig } from './translate.ts'
 
 export type Source = {
   id: string
@@ -23,6 +24,7 @@ export type NewsConfig = {
   /** 超過幾小時沒抓到任何來源就算停擺（/v1/health） */
   stale_hours: number
   sources: Source[]
+  translate: TranslateConfig
 }
 
 const ID_RE = /^[a-z0-9-]{2,40}$/
@@ -44,6 +46,7 @@ export function validateConfig(x: unknown): NewsConfig {
     if (!['intl', 'tw'].includes(s.kind) || !['en', 'zh'].includes(s.lang) || !['rss', 'cnyes'].includes(s.format)) fail(`來源 ${s.id} 的 kind／lang／format`)
     if (!/^https:\/\//.test(s.url) || !/^https:\/\//.test(s.terms) || !/^\d{4}-\d{2}-\d{2}$/.test(s.checked) || !s.name) fail(`來源 ${s.id} 的網址、條款或檢查日期`)
   }
+  validateTranslateConfig(c!.translate)
   return c as NewsConfig
 }
 
