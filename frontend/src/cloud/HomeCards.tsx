@@ -12,7 +12,7 @@ import { bigMoney, chgSub, lots, signedBig } from './home'
 import type { Slide } from './Reel'
 import type { Scorecard } from './scorecard'
 import { Kpi } from './Section'
-import { breadth, dayLabel, firstLiveExit, signedYi, streakText, tone, type Brief, type WarRoomData } from './war'
+import { SESSION_MINUTES, breadth, dayLabel, firstLiveExit, signedYi, sparkPoints, streakText, tone, type Brief, type MarketView, type WarRoomData } from './war'
 
 type Fold = { collapsed: boolean; onToggle: () => void }
 type Market = NonNullable<WarRoomData['market']>
@@ -97,44 +97,91 @@ export function TaifexCard({ t, ...fold }: { t: Taifex | null } & Fold) {
   )
 }
 
-export function MarketCard({ m, ...fold }: { m: Market | null } & Fold) {
-  const br = m ? breadth(m.up, m.down, m.flat) : null
-  const slides = m
+/** 加權分時走勢小圖（盤中、今日收盤速報才有）：虛線＝昨收，紅漲綠跌。 */
+function Spark({ trend, prev }: { trend: [string, number][]; prev: number | null }) {
+  const H = 56
+  const p = sparkPoints(trend, prev, H)
+  if (!p) return null
+  const last = trend[trend.length - 1][1]
+  const cls = prev === null ? 'flat' : last > prev ? 'up' : last < prev ? 'down' : 'flat'
+  return (
+    <div className="cq-spark-wrap">
+      <svg className={`cq-spark ${cls}`} viewBox={`0 0 ${SESSION_MINUTES} ${H}`} preserveAspectRatio="none" role="img" aria-label="加權指數今天的分時走勢">
+        {p.base !== null && <line className="base" x1="0" x2={SESSION_MINUTES} y1={p.base} y2={p.base} vectorEffect="non-scaling-stroke" />}
+        <polyline points={p.line} vectorEffect="non-scaling-stroke" />
+      </svg>
+      {p.base !== null && (
+        <span className="cq-spark-tag" style={{ top: p.base }}>
+          昨收
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** 卡片標題旁：盤後體檢的日期；盤中、今日收盤速報一定是今天，只放橘色小框（窄卡片放不下日期）。 */
+function marketWhen(v: MarketView) {
+  if (v.kind === 'close') return dayLabel(v.date)
+  return (
+    <em className="cq-live cq-live-head" title="盤中每分鐘更新指數與成交金額；家數每 3 分鐘掃完全市場一次。盤後約 17:40 換成證交所正式收盤資料">
+      {v.kind === 'live' ? `盤中 ${v.time}` : '今日收盤速報'}
+    </em>
+  )
+}
+
+/** 成交金額的小字：盤中＝到目前已達 20 日平均一整天的幾成；收盤後（含速報）＝對 20 日平均的倍數。 */
+const amountSub = (v: MarketView) =>
+  v.amount_ratio === null ? '' : v.kind === 'live' ? `已達均量 ${Math.round(v.amount_ratio * 100)}%` : `20 日的 ${v.amount_ratio.toFixed(2)} 倍`
+
+export function MarketCard({ v, ...fold }: { v: MarketView | null } & Fold) {
+  const counted = v !== null && v.up !== null && v.down !== null && v.flat !== null
+  const br = v && counted ? breadth(v.up ?? 0, v.down ?? 0, v.flat ?? 0) : null
+  const slides = v
     ? [
-        kv('taiex', '加權', `${m.taiex_close?.toLocaleString('en-US', { maximumFractionDigits: 0 }) ?? '—'}　${pct(m.taiex_chg)}`, tone(m.taiex_chg)),
-        kv('otc', '櫃買', `${m.otc_close?.toFixed(2) ?? '—'}　${pct(m.otc_chg)}`, tone(m.otc_chg)),
-        kv('br', '漲跌家數', `${m.up} 漲／${m.flat} 平／${m.down} 跌`, tone(m.up - m.down)),
-        kv('lim', '漲停／跌停', `${m.limit_up} ／ ${m.limit_down} 家`),
-        kv('amt', '成交金額', `${Math.round(m.amount / 1e8).toLocaleString()} 億`, undefined, m.amount_ratio !== null ? `20 日平均的 ${m.amount_ratio.toFixed(2)} 倍` : null),
+        kv('taiex', '加權', `${v.taiex_close?.toLocaleString('en-US', { maximumFractionDigits: 0 }) ?? '—'}　${pct(v.taiex_chg)}`, tone(v.taiex_chg)),
+        kv('otc', '櫃買', `${v.otc_close?.toFixed(2) ?? '—'}　${pct(v.otc_chg)}`, tone(v.otc_chg)),
+        ...(counted
+          ? [
+              kv('br', '漲跌家數', `${v.up} 漲／${v.flat} 平／${v.down} 跌`, tone((v.up ?? 0) - (v.down ?? 0))),
+              kv('lim', '漲停／跌停', `${v.limit_up} ／ ${v.limit_down} 家`),
+            ]
+          : []),
+        kv('amt', '成交金額', `${Math.round(v.amount / 1e8).toLocaleString()} 億`, undefined, amountSub(v) || null),
       ]
     : []
+  const empty = '大盤體檢還沒有（盤中每分鐘更新，收盤後約 17:40 換成正式資料）。'
   return (
-    <CardFrame id="market" when={m ? dayLabel(m.date) : undefined} slides={slides} empty="大盤體檢還沒有（每個交易日收盤後約 17:40 算好）。" {...fold}>
-      {m && br ? (
-        <div title="家數與成交金額只算上市櫃普通股，不含 ETF、權證">
+    <CardFrame id="market" when={v ? marketWhen(v) : undefined} slides={slides} empty={empty} {...fold}>
+      {v ? (
+        <div className="cq-mkt" title="家數與成交金額只算上市櫃普通股，不含 ETF、權證">
           <div className="cq-tiles cq-tiles-2">
-            <Kpi label="加權" value={m.taiex_close?.toLocaleString('en-US', { maximumFractionDigits: 0 }) ?? '—'} sub={chgSub(m.taiex_chg)} tone={kt(m.taiex_chg)} />
-            <Kpi label="櫃買" value={m.otc_close?.toFixed(2) ?? '—'} sub={chgSub(m.otc_chg)} tone={kt(m.otc_chg)} />
+            <Kpi label="加權" value={v.taiex_close?.toLocaleString('en-US', { maximumFractionDigits: 0 }) ?? '—'} sub={chgSub(v.taiex_chg)} tone={kt(v.taiex_chg)} />
+            <Kpi label="櫃買" value={v.otc_close?.toFixed(2) ?? '—'} sub={chgSub(v.otc_chg)} tone={kt(v.otc_chg)} />
           </div>
-          <div className="cq-breadth" aria-label={`${m.up} 漲 ${m.down} 跌 ${m.flat} 平`}>
-            <span className="up" style={{ width: `${br.up}%` }}>
-              {m.up} 漲
-            </span>
-            <span className="flat" style={{ width: `${br.flat}%` }}>
-              {br.flat >= 12 ? `${m.flat} 平` : ''}
-            </span>
-            <span className="down" style={{ width: `${br.down}%` }}>
-              {m.down} 跌
-            </span>
-          </div>
+          {v.trend.length > 1 && <Spark trend={v.trend} prev={v.taiex_prev} />}
+          {br ? (
+            <div className="cq-breadth" aria-label={`${v.up} 漲 ${v.down} 跌 ${v.flat} 平`}>
+              <span className="up" style={{ width: `${br.up}%` }}>
+                {v.up} 漲
+              </span>
+              <span className="flat" style={{ width: `${br.flat}%` }}>
+                {br.flat >= 12 ? `${v.flat} 平` : ''}
+              </span>
+              <span className="down" style={{ width: `${br.down}%` }}>
+                {v.down} 跌
+              </span>
+            </div>
+          ) : (
+            <p className="cq-war-mute cq-breadth-wait">家數統計中（約 3 分鐘掃完全市場）</p>
+          )}
           <div className="cq-tiles cq-tiles-3">
-            <Kpi label="漲停 / 跌停" value={`${m.limit_up} / ${m.limit_down}`} sub="家" tone={kt(m.limit_up - m.limit_down)} />
-            <Kpi label="新高 / 新低" value={`${m.new_high ?? '—'} / ${m.new_low ?? '—'}`} sub="20 日・家" tone={kt((m.new_high ?? 0) - (m.new_low ?? 0))} />
-            <Kpi label="成交" value={bigMoney(m.amount)} sub={m.amount_ratio !== null ? `20 日的 ${m.amount_ratio.toFixed(2)} 倍` : ''} tone={m.amount_ratio !== null && m.amount_ratio >= 1.3 ? 'warn' : 'plain'} />
+            <Kpi label="漲停 / 跌停" value={counted ? `${v.limit_up} / ${v.limit_down}` : '—'} sub="家" tone={counted ? kt((v.limit_up ?? 0) - (v.limit_down ?? 0)) : 'plain'} />
+            <Kpi label="新高 / 新低" value={`${v.new_high ?? '—'} / ${v.new_low ?? '—'}`} sub="20 日・家" tone={kt((v.new_high ?? 0) - (v.new_low ?? 0))} />
+            <Kpi label="成交" value={bigMoney(v.amount)} sub={amountSub(v)} tone={v.kind === 'close' && v.amount_ratio !== null && v.amount_ratio >= 1.3 ? 'warn' : 'plain'} />
           </div>
         </div>
       ) : (
-        <p className="cq-war-mute">大盤體檢還沒有（每個交易日收盤後約 17:40 算好）。</p>
+        <p className="cq-war-mute">{empty}</p>
       )}
     </CardFrame>
   )

@@ -145,6 +145,135 @@ export function streakText(streak: number | null | undefined): string {
   return `連${streak > 0 ? '買' : '賣'} ${Math.abs(streak)} 天`
 }
 
+/**
+ * 盤中大盤體檢（/api/warroom/live，T-397／D-198；形狀同 functions/_lib/market-live.ts LiveMarket）。
+ * 家數類（up…new_low）在全市場掃完一輪前是 null；amount_ratio＝到目前累計 ÷ 前 20 日平均的一整天。
+ */
+export type LiveMarket = {
+  date: string
+  time: string
+  since: string | null
+  taiex_close: number | null
+  taiex_chg: number | null
+  taiex_prev: number | null
+  otc_close: number | null
+  otc_chg: number | null
+  amount: number
+  amount_avg: number | null
+  amount_ratio: number | null
+  up: number | null
+  down: number | null
+  flat: number | null
+  untraded: number | null
+  limit_up: number | null
+  limit_down: number | null
+  new_high: number | null
+  new_low: number | null
+  trend: [string, number][]
+}
+
+/** 盤中大盤體檢多久抓一次（伺服器端的排程每分鐘才寫一份）。 */
+export const MARKET_POLL_MS = 60_000
+
+/** 收盤時間：盤中報價的時間到這裡（含）以後＝今天的收盤價。 */
+const CLOSE_TIME = '13:30:00'
+
+/** 大盤體檢卡畫的那一份：close＝盤後體檢；live＝盤中；final＝今天已收盤、盤後體檢（約 17:40）還沒出來。 */
+export type MarketView = {
+  kind: 'close' | 'live' | 'final'
+  date: string
+  /** live／final 的報價時間 HH:MM；close → null */
+  time: string | null
+  taiex_close: number | null
+  taiex_chg: number | null
+  otc_close: number | null
+  otc_chg: number | null
+  up: number | null
+  down: number | null
+  flat: number | null
+  limit_up: number | null
+  limit_down: number | null
+  new_high: number | null
+  new_low: number | null
+  amount: number
+  amount_ratio: number | null
+  /** 加權分時走勢與昨收（live／final 才有） */
+  trend: [string, number][]
+  taiex_prev: number | null
+}
+
+/** 盤後體檢與盤中統計取比較新的那一天；同一天以盤後體檢為準（證交所正式收盤資料）。兩個都沒有 → null。 */
+export function marketView(m: Market | null, live: LiveMarket | null): MarketView | null {
+  if (live && (!m || live.date > m.date)) {
+    return {
+      kind: live.time >= CLOSE_TIME ? 'final' : 'live',
+      date: live.date,
+      time: live.time.slice(0, 5),
+      taiex_close: live.taiex_close,
+      taiex_chg: live.taiex_chg,
+      otc_close: live.otc_close,
+      otc_chg: live.otc_chg,
+      up: live.up,
+      down: live.down,
+      flat: live.flat,
+      limit_up: live.limit_up,
+      limit_down: live.limit_down,
+      new_high: live.new_high,
+      new_low: live.new_low,
+      amount: live.amount,
+      amount_ratio: live.amount_ratio,
+      trend: live.trend,
+      taiex_prev: live.taiex_prev,
+    }
+  }
+  if (!m) return null
+  return {
+    kind: 'close',
+    date: m.date,
+    time: null,
+    taiex_close: m.taiex_close,
+    taiex_chg: m.taiex_chg,
+    otc_close: m.otc_close,
+    otc_chg: m.otc_chg,
+    up: m.up,
+    down: m.down,
+    flat: m.flat,
+    limit_up: m.limit_up,
+    limit_down: m.limit_down,
+    new_high: m.new_high,
+    new_low: m.new_low,
+    amount: m.amount,
+    amount_ratio: m.amount_ratio,
+    trend: [],
+    taiex_prev: null,
+  }
+}
+
+/** 分時走勢的橫軸：9:00 開盤到 13:30 收盤（分鐘）。 */
+export const SESSION_MINUTES = 270
+const OPEN_MINUTE = 9 * 60
+
+/** 分時走勢 → SVG 折線的點（寬 SESSION_MINUTES、高 h，昨收也算進上下範圍）；不到兩點 → null。 */
+export function sparkPoints(
+  trend: [string, number][],
+  prev: number | null,
+  h: number,
+): { line: string; base: number | null; last: [number, number] } | null {
+  if (trend.length < 2) return null
+  const pts = trend.map(([t, c]): [number, number] => {
+    const [hh, mm] = t.split(':').map(Number)
+    return [Math.min(Math.max(hh * 60 + mm - OPEN_MINUTE, 0), SESSION_MINUTES), c]
+  })
+  const ys = pts.map(([, c]) => c).concat(prev !== null ? [prev] : [])
+  const lo = Math.min(...ys)
+  const hi = Math.max(...ys)
+  const span = hi - lo || 1
+  // 上下各留 2 單位，線不貼邊
+  const y = (c: number) => Number((2 + ((hi - c) / span) * (h - 4)).toFixed(2))
+  const xy = pts.map(([x, c]): [number, number] => [x, y(c)])
+  return { line: xy.map(([x, v]) => `${x},${v}`).join(' '), base: prev !== null ? y(prev) : null, last: xy[xy.length - 1] }
+}
+
 /** 漲跌平家數 → 百分比寬度（畫比例條）。 */
 export function breadth(up: number, down: number, flat: number): { up: number; down: number; flat: number } {
   const total = up + down + flat

@@ -7,7 +7,7 @@ import type { Scorecard, TradeRow } from './scorecard'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
-import type { Brief, BriefActual, NewsItem, WarRoomData } from './war'
+import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
@@ -127,6 +127,8 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
+/** 盤中大盤體檢（T-397）：排程每分鐘更新；今天還沒有 → live 是 null。 */
+export const fetchMarketLive = () => get<{ live: LiveMarket | null }>('/api/warroom/live')
 /** 首頁版面（使用者 2026-10-17：依帳號儲存卡片位置與收起）：沒存過 → layout 是 null。 */
 export const fetchLayout = () => get<{ layout: { order: string[]; collapsed: string[] } | null }>('/api/layout')
 export const saveLayout = (layout: { order: string[]; collapsed: string[] }) => get<{ ok: boolean }>('/api/layout', 'PUT', layout)
