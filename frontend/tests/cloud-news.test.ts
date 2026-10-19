@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ALLOWED, proxy, upstreamUrl } from '../functions/_lib/news-proxy.ts'
-import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, nextUntil, shownTime, taipeiHm, timeLabel, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
+import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, nextUntil, shown, shownTime, taipeiHm, timeLabel, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const BASE = 'https://abc.supabase.co/functions/v1/api/'
@@ -107,4 +107,20 @@ test('T-400：「更多」從最舊那則的時間（含）接著抓，重複的
 
 test('T-400：網址 ?tab=news 打開新聞分頁', () => {
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=news'), 'news')
+})
+
+test('T-401：有過檢查的譯文才顯示譯文（標「譯」、附原文）；沒過→原文標「未譯」；還沒翻→「翻譯中」；中文新聞不標', () => {
+  const en = row('e', '2026-10-19T02:00:00Z', { title: 'Nvidia jumps 4%', summary: 'Shares rose.' })
+  assert.deepEqual(shown({ ...en, translation: 'ok', title_zh: '輝達大漲4%', summary_zh: '股價上漲。' }), {
+    title: '輝達大漲4%',
+    summary: '股價上漲。',
+    lang: 'zh',
+    tag: '譯',
+    original: { title: 'Nvidia jumps 4%', summary: 'Shares rose.' },
+  })
+  assert.deepEqual([shown({ ...en, translation: 'failed' }).tag, shown({ ...en, translation: 'failed' }).title], ['未譯', 'Nvidia jumps 4%'])
+  assert.equal(shown({ ...en, translation: 'pending' }).tag, '翻譯中')
+  assert.equal(shown({ ...en, translation: 'ok', title_zh: null }).title, 'Nvidia jumps 4%', '狀態 ok 但沒有譯文字串：照原文顯示')
+  assert.equal(shown(row('z', '2026-10-19T02:00:00Z', { kind: 'tw', lang: 'zh', translation: null })).tag, null)
+  assert.equal(shown(en).tag, null, '舊服務沒有 translation 欄')
 })

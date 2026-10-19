@@ -5,11 +5,11 @@
 
 ```
 news-service/
-├── src/            純函式（解析、進料流程、API 參數與健康狀態）——唯一的一份新聞邏輯，node 測試
+├── src/            純函式（解析、進料、翻譯與檢查、API 參數與健康狀態）——唯一的一份新聞邏輯，node 測試
 ├── config/         configs/news.yaml 的 JSON 鏡像（Edge Function 讀不到 repo；tests/test_news_config.py 核對一致）
 ├── supabase/
 │   ├── migrations/ 資料表（只增不改，觸發器擋 UPDATE／DELETE）
-│   ├── functions/  ingest（排程進料）、api（/v1/items、/v1/health）、_shared（資料庫與 HTTP）
+│   ├── functions/  ingest（排程：進料→翻譯）、api（/v1/items、/v1/health）、_shared（資料庫、HTTP、Workers AI）
 │   └── setup/      排程 SQL（含金鑰，不放 migrations）
 └── tests/          npm test（錄好的真實回應，不連網）
 ```
@@ -31,6 +31,8 @@ npx supabase link --project-ref <專案代號>
 npx supabase db push                                 # 建表（migrations/）
 node -e "console.log(crypto.randomUUID())"           # 產生兩次，一把給排程、一把給 API
 npx supabase secrets set NEWS_INGEST_KEY=<第一把> NEWS_API_KEY=<第二把>
+# 翻譯（T-401）：同 .env 的 CLOUDFLARE_ACCOUNT_ID、CLOUDFLARE_AI_TOKEN（Workers AI）
+npx supabase secrets set CLOUDFLARE_ACCOUNT_ID=<帳號> CLOUDFLARE_AI_TOKEN=<token>
 npx supabase functions deploy ingest api
 ```
 

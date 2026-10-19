@@ -1,4 +1,4 @@
-// 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items、/v1/health。
+// 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
@@ -35,15 +35,31 @@ Deno.serve(async (req) => {
       }
       const kindSources = q.kind ? cfg.sources.filter((s) => s.kind === q.kind).map((s) => s.id) : null
       // 標題與摘要顯示最新一版（來源後來改過的話）；first_seen_at 永遠是第一次抓到的時間
-      const rows = await sql<{ id: string; source: string; lang: string; url: string; title: string; summary: string | null; published_at: Date | null; first_seen_at: Date; versions: number }[]>`
+      const rows = await sql<{
+        id: string
+        source: string
+        lang: string
+        url: string
+        title: string
+        summary: string | null
+        published_at: Date | null
+        first_seen_at: Date
+        versions: number
+        title_zh: string | null
+        summary_zh: string | null
+        tr_status: string | null
+      }[]>`
         select i.id, i.source, i.lang, i.url,
                coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
-               i.published_at, i.first_seen_at, coalesce(v.n, 0)::int as versions
+               i.published_at, i.first_seen_at, coalesce(v.n, 0)::int as versions,
+               t.title_zh, t.summary_zh, t.status as tr_status
         from news.raw_items i
         left join lateral (
-          select title_orig, summary_orig, count(*) over () as n from news.raw_item_versions
+          select title_orig, summary_orig, content_sha, count(*) over () as n from news.raw_item_versions
           where item_id = i.id order by seen_at desc limit 1
         ) v on true
+        -- 目前這一版內容的翻譯（T-401）；還沒翻 → null
+        left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
         where true
           ${q.since ? sql`and i.first_seen_at >= ${q.since}` : sql``}
           ${q.until ? sql`and i.first_seen_at <= ${q.until}` : sql``}
@@ -63,6 +79,10 @@ Deno.serve(async (req) => {
         published_at: iso(r.published_at),
         first_seen_at: iso(r.first_seen_at),
         versions: r.versions,
+        // 英文才有：ok＝有譯文、failed＝沒過檢查（網站顯示原文標「未譯」）、pending＝還沒翻；中文新聞 null
+        translation: r.lang === 'en' ? (r.tr_status ?? 'pending') : null,
+        title_zh: r.title_zh,
+        summary_zh: r.summary_zh,
       }))
       return json({ api_version: API_VERSION, items })
     }
