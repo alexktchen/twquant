@@ -3,6 +3,19 @@
 export type Edition = 'morning' | 'evening'
 export type Dated = { generated_at: string; edition: Edition }
 
+/** 歷史清單的一格：「2026-10-20|evening」（使用者 2026-10-20：「可以看歷史一天兩則」）。 */
+export const briefKey = (date: string, edition: Edition): string => `${date}|${edition}`
+export function parseBriefKey(key: string): { date: string; edition: Edition } {
+  const [date, ed] = key.split('|')
+  return { date, edition: ed === 'evening' ? 'evening' : 'morning' }
+}
+/** 兩張表的日期合成一條清單，新到舊；同一天盤後（17:45）在盤前（06:30）前面。 */
+export function mergeBriefKeys(morning: string[], evening: string[], limit: number): string[] {
+  const all = [...morning.map((d) => ({ d, e: 'morning' as Edition })), ...evening.map((d) => ({ d, e: 'evening' as Edition }))]
+  all.sort((a, b) => (a.d === b.d ? (a.e === 'evening' ? -1 : 1) : a.d < b.d ? 1 : -1))
+  return all.slice(0, limit).map((x) => briefKey(x.d, x.e))
+}
+
 /** 兩份裡 generated_at 較新的；只有一份就是那份；都沒有 → null。同時間（不該發生）取盤後。 */
 export function latestOf<T extends Dated>(morning: T | null, evening: T | null): T | null {
   if (!morning) return evening

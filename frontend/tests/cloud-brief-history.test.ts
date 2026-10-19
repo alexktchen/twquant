@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { latestOf } from '../functions/_lib/brief-latest.ts'
+import { briefKey, latestOf, mergeBriefKeys, parseBriefKey } from '../functions/_lib/brief-latest.ts'
 import { briefDates, selectActual, selectBrief } from '../functions/_lib/brief-db.ts'
 import { briefNeighbors } from '../src/cloud/war.ts'
 
@@ -51,10 +51,10 @@ test('使用者 2026-10-17：表還沒建 → 沒有晨報，不讓首頁壞掉'
 
 test('使用者 2026-10-17：首頁回日期清單、歷史端點驗日期格式且不呼叫模型', () => {
   const home = readFileSync(new URL('../functions/api/warroom/index.ts', import.meta.url), 'utf8')
-  assert.ok(home.includes('selectLatestBrief(db)') && home.includes('brief_dates: briefDays'), '首頁拿盤前、盤後裡最新的那份（T-409）')
+  assert.ok(home.includes('selectLatestBrief(db)') && home.includes('brief_dates: briefDays') && home.includes('briefKeys(db'), '首頁拿盤前、盤後裡最新的那份（T-409）')
   const api = readFileSync(new URL('../functions/api/warroom/brief.ts', import.meta.url), 'utf8')
   assert.ok(api.includes('DATE_RE.test(date)') && api.includes('fail(400'))
-  assert.ok(api.includes('selectBrief(db, date)') && api.includes('selectActual(db, date)'))
+  assert.ok(api.includes('selectEdition(db, ed, date)') && api.includes('selectActual(db, date)') && api.includes('selectActualAfter(db, date)'))
   assert.ok(!/ai\/run|workers-ai|insight/i.test(api), '歷史只讀存好的晨報')
 })
 
@@ -66,4 +66,15 @@ test('T-409：首頁拿盤前、盤後裡 generated_at 較新的那份；只有�
   assert.equal(latestOf(m, null), m)
   assert.equal(latestOf(null, e), e)
   assert.equal(latestOf(null, null), null)
+})
+
+test('2026-10-20：歷史一天兩格——盤後在盤前前面、新到舊；鍵可以拆回日期與版本', () => {
+  const keys = mergeBriefKeys(['2026-10-20', '2026-10-17'], ['2026-10-17', '2026-10-16'], 10)
+  assert.deepEqual(keys, ['2026-10-20|morning', '2026-10-17|evening', '2026-10-17|morning', '2026-10-16|evening'])
+  assert.deepEqual(mergeBriefKeys(['2026-10-20'], ['2026-10-20'], 1), ['2026-10-20|evening'], '截到 limit')
+  assert.deepEqual(parseBriefKey('2026-10-17|evening'), { date: '2026-10-17', edition: 'evening' })
+  assert.deepEqual(parseBriefKey('2026-10-17'), { date: '2026-10-17', edition: 'morning' }, '舊的只有日期＝盤前')
+  assert.equal(briefKey('2026-10-17', 'morning'), '2026-10-17|morning')
+  // 前一格／後一格照清單走：從 10/17 盤前往後一格是 10/17 盤後
+  assert.deepEqual(briefNeighbors(keys, '2026-10-17|morning'), { older: '2026-10-16|evening', newer: '2026-10-17|evening' })
 })

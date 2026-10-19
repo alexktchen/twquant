@@ -1,7 +1,8 @@
 // 「今日一句話」（晨報）的讀取：首頁讀最新一天，歷史頁（使用者 2026-10-17：「做一個可以選日期看歷史的頁面」）讀指定那天。
 // 晨報每天 06:30 寫一筆存在 serving.morning_brief，看網頁不會重叫模型；表還沒建 → 沒有（readRows）。
-// 盤後快訊（T-409，21:45）存 serving.evening_brief；首頁顯示兩張表裡 generated_at 最新的那份（latestOf），歷史頁仍以盤前晨報為準。
-import { latestOf, type Edition } from './brief-latest.ts'
+// 盤後快訊（T-409，17:45）存 serving.evening_brief；首頁顯示兩張表裡 generated_at 最新的那份（latestOf）；
+// 歷史清單一天兩格（盤前、盤後，使用者 2026-10-20：「可以看歷史一天兩則」）。
+import { latestOf, mergeBriefKeys, type Edition } from './brief-latest.ts'
 import type { sql } from './db.ts'
 import { readRows } from './scorecard.ts'
 
@@ -49,6 +50,26 @@ export async function briefDates(db: Db, limit: number): Promise<string[]> {
     () => db<{ d: string }[]>`SELECT date::text AS d FROM serving.morning_brief ORDER BY date DESC LIMIT ${limit}`,
   )
   return rows.map((r) => r.d)
+}
+
+/** 歷史清單：盤前與盤後各自的日期合成「日期|版本」，新到舊、最多 limit 格；哪張表還沒建就只有另一張的。 */
+export async function briefKeys(db: Db, limit: number): Promise<string[]> {
+  const morning = await briefDates(db, limit)
+  const evening = await readRows(
+    () => db<{ d: string }[]>`SELECT date::text AS d FROM serving.evening_brief ORDER BY date DESC LIMIT ${limit}`,
+  )
+  return mergeBriefKeys(morning, evening.map((r) => r.d), limit)
+}
+
+/** 盤後快訊（寫在收盤後，講的是下一個交易日）要對照的：那天之後第一個交易日的實際收盤；還沒有 → null。 */
+export async function selectActualAfter(db: Db, day: string): Promise<Row | null> {
+  const [row] = await readRows(
+    () => db<{ j: Row }[]>`
+      SELECT jsonb_build_object('date', date::text, 'taiex_close', taiex_close, 'taiex_chg', taiex_chg,
+                                'otc_close', otc_close, 'otc_chg', otc_chg, 'foreign_net', foreign_net) AS j
+      FROM serving.market_daily WHERE date > ${day}::date ORDER BY date LIMIT 1`,
+  )
+  return row?.j ?? null
 }
 
 /** 那天大盤實際收盤（晨報寫在開盤前，拿來對照）；假日或當天還沒收盤 → null。 */

@@ -148,8 +148,8 @@ export const saveLayout = (layout: { order: string[]; collapsed: string[] }) => 
 /** 恢復預設：刪掉帳號裡存的版面。 */
 export const resetLayout = () => get<{ ok: boolean }>('/api/layout', 'DELETE')
 /** 過去某天的「今日一句話」與那天大盤實際收盤（使用者 2026-10-17：選日期看歷史）。 */
-export const fetchBriefDay = (date: string) =>
-  get<{ date: string; brief: Brief | null; actual: BriefActual | null }>(`/api/warroom/brief?date=${date}`)
+export const fetchBriefDay = (date: string, edition: 'morning' | 'evening' = 'morning') =>
+  get<{ date: string; brief: Brief | null; actual: BriefActual | null }>(`/api/warroom/brief?date=${date}&edition=${edition}`)
 /** 追蹤股自 since 起的重大訊息（T-379）。 */
 export const fetchWarroomNews = (sids: string[], since: string) =>
   get<{ since: string; items: NewsItem[] }>(`/api/warroom/news?sids=${encodeURIComponent(sids.join(','))}&since=${since}`)

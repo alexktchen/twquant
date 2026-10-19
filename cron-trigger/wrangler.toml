@@ -11,15 +11,16 @@ workers_dev = false
 [triggers]
 # UTC；台北＝UTC+8。MON-FRI 用名稱，避免星期數字從 0 或 1 起算的歧義。平日國定假日交給品質閘門。
 # 06:30 台北（UTC 前一天 22:30）：晨報（T-377，morning-brief.yml）；週一早上＝UTC 週日 22:30。
-# 21:45 台北（UTC 13:45）：盤後快訊（T-409，同一個 morning-brief.yml 帶 edition=evening），排在 21:13 那班 pipeline 跑完之後。
-crons = ["33 9 * * MON-FRI", "13 13 * * MON-FRI", "30 22 * * SUN-THU", "45 13 * * MON-FRI"]
+# 17:45 台北（UTC 09:45）：盤後快訊（T-409，同一個 morning-brief.yml 帶 edition=evening；使用者 2026-10-20：「不要 21:45，換 17:45」）。
+# 17:33 那班 pipeline 約 20 分鐘才寫好大盤體檢，工作流程裡會等它（最多 60 分鐘）。
+crons = ["33 9 * * MON-FRI", "13 13 * * MON-FRI", "30 22 * * SUN-THU", "45 9 * * MON-FRI"]
 
 [vars]
 GITHUB_REPO = "alexktchen/twquant"
 WORKFLOW = "daily-pipeline.yml"
 MORNING_WORKFLOW = "morning-brief.yml"
 MORNING_CRON = "30 22 * * SUN-THU"
-EVENING_CRON = "45 13 * * MON-FRI"
+EVENING_CRON = "45 9 * * MON-FRI"
 
 # 保存執行紀錄（含錯誤訊息），Cloudflare 後台 Workers → twquant-cron-trigger → Logs 看得到；觸發失敗時才查得出原因。
 [observability]

@@ -967,12 +967,17 @@ def morning_brief_cmd(
         "", help="資料根目錄（洞悉用量紀錄）；空＝configs/system.yaml data_dir"
     ),
     edition: str = typer.Option(
-        "morning", help="morning＝盤前晨報（06:30）；evening＝盤後快訊（21:45，T-409）"
+        "morning",
+        help="morning＝盤前晨報（06:30）；evening＝盤後快訊（17:45 觸發、等今天收盤資料，T-409）",
+    ),
+    skip_existing: bool = typer.Option(
+        False, "--skip-existing", help="那天那個版本已經有了就不做（備援排程用，不重複叫模型）"
     ),
 ) -> None:
     """晨報（T-377）：收齊昨晚到今早的數字 → 規則一句話＋模型三到六點 → serving.morning_brief。06:30 排程呼叫。
 
-    --edition evening（T-409）：盤後快訊——今天的收盤與籌碼、今天的公告與新聞 → serving.evening_brief。21:45 排程呼叫。
+    --edition evening（T-409）：盤後快訊——今天的收盤與籌碼、今天的公告與新聞 → serving.evening_brief。17:45 排程呼叫；
+    先等今天的大盤體檢寫進 market_daily（system.yaml evening_wait_minutes），等不到（休市、pipeline 沒跑完）就不出、印原因。
     """
     import json
     import urllib.request
@@ -1010,6 +1015,23 @@ def morning_brief_cmd(
             return json.loads(resp.read().decode("utf-8"))  # type: ignore[no-any-return]
 
     conn = store.connect(scfg)
+    if skip_existing and _brief_exists(conn, scfg.pg_schema, edition, day):
+        conn.close()
+        typer.secho(
+            f"[SKIP] {day} 的{'盤後快訊' if edition == 'evening' else '晨報'}已經有了",
+            fg=typer.colors.YELLOW,
+        )
+        return
+    if edition == "evening" and not _wait_market_daily(
+        conn, scfg.pg_schema, day, cfg.morning_brief
+    ):
+        conn.close()
+        typer.secho(
+            f"[SKIP] 盤後快訊 @ {day}：等了 {cfg.morning_brief.evening_wait_minutes} 分鐘，"
+            "market_daily 還沒有今天那列（休市，或每日 pipeline 沒跑完／失敗）——今天不出盤後快訊",
+            fg=typer.colors.YELLOW,
+        )
+        return
     try:
         inputs = gather(
             conn,
@@ -3555,6 +3577,41 @@ def _group_flow_for_day(day: dt.date) -> str:
     return f"{len(flows)} 個族群，資金流入 {len(hot)} 個" + (
         f"：{'、'.join(hot[:5])}" if hot else ""
     )
+
+
+def _brief_exists(conn: Any, schema: str, edition: str, day: dt.date) -> bool:
+    """那天那個版本（morning_brief／evening_brief）是否已經有一列；表還沒建＝沒有。"""
+    table = "evening_brief" if edition == "evening" else "morning_brief"
+    with conn.cursor() as cur:
+        cur.execute(f'SELECT to_regclass(\'"{schema}"."{table}"\')')
+        if cur.fetchone()[0] is None:
+            conn.commit()
+            return False
+        cur.execute(f'SELECT 1 FROM "{schema}"."{table}" WHERE date = %s', (day,))
+        found = cur.fetchone() is not None
+    conn.commit()
+    return found
+
+
+def _wait_market_daily(conn: Any, schema: str, day: dt.date, mcfg: Any) -> bool:
+    """盤後快訊（T-409）：等 market_daily 有 day 那列；最多 evening_wait_minutes 分鐘，每 evening_poll_seconds 秒查一次。"""
+    import time
+
+    deadline = time.monotonic() + mcfg.evening_wait_minutes * 60
+    while True:
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT to_regclass(\'"{schema}"."market_daily"\')')
+            exists = cur.fetchone()[0] is not None
+            if exists:
+                cur.execute(f'SELECT 1 FROM "{schema}"."market_daily" WHERE date = %s', (day,))
+                if cur.fetchone() is not None:
+                    conn.commit()
+                    return True
+        conn.commit()
+        if time.monotonic() >= deadline:
+            return False
+        typer.echo(f"等 {day} 的大盤體檢（每日 pipeline）…")
+        time.sleep(mcfg.evening_poll_seconds)
 
 
 def _market_daily_for_day(day: dt.date) -> str:

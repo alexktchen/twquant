@@ -10,6 +10,7 @@ import { chgSub, parseBullet, parseDirection, signedBig } from './home'
 import { stanceTone } from './pickreview'
 import type { Slide } from './Reel'
 import { Kpi } from './Section'
+import { briefKey, parseBriefKey } from '../../functions/_lib/brief-latest'
 import { briefNeighbors, dayLabel, tone, type Brief, type BriefActual } from './war'
 
 const kt = (x: number | null | undefined): 'up' | 'down' | 'plain' => {
@@ -27,7 +28,7 @@ export function BriefCard({
   onToggle,
 }: {
   latest: Brief | null
-  /** 有晨報的日期，新到舊 */
+  /** 歷史清單「日期|版本」，新到舊（一天兩格：盤後在盤前前面）；舊的 API 只給日期＝盤前 */
   dates: string[]
   /** 最新那天若已收盤（首頁的大盤體檢同一天）就拿來對照 */
   latestActual: BriefActual | null
@@ -37,7 +38,7 @@ export function BriefCard({
   collapsed: boolean
   onToggle: () => void
 }) {
-  const [day, setDay] = useState<string | null>(null) // null＝最新
+  const [day, setDay] = useState<string | null>(null) // 「日期|版本」；null＝最新
   const [hist, setHist] = useState<{ date: string; brief: Brief | null; actual: BriefActual | null } | null>(null)
   const [err, setErr] = useState('')
   const [factsOpen, setFactsOpen] = useState(false)
@@ -49,15 +50,18 @@ export function BriefCard({
     }
     let stale = false
     setErr('')
-    fetchBriefDay(day)
-      .then((r) => !stale && setHist(r))
+    const k = parseBriefKey(day)
+    fetchBriefDay(k.date, k.edition)
+      .then((r) => !stale && setHist({ ...r, date: day }))
       .catch((e: Error) => !stale && setErr(e.message))
     return () => {
       stale = true
     }
   }, [day])
 
-  const viewing = day === null || day === latest?.date ? null : day
+  const keys = dates.map((d) => (d.includes('|') ? d : briefKey(d, 'morning')))
+  const latestKey = latest ? briefKey(latest.date, latest.edition ?? 'morning') : null
+  const viewing = day === null || day === latestKey ? null : day
   const b = viewing ? (hist?.date === viewing ? hist.brief : null) : latest
   const actual = viewing ? (hist?.date === viewing ? hist.actual : null) : latestActual
   const waiting = viewing !== null && hist?.date !== viewing && !err
@@ -66,11 +70,15 @@ export function BriefCard({
     onShown(viewing ? b : null)
   }, [viewing, b, onShown])
 
-  const current = viewing ?? latest?.date ?? null
-  const { older, newer } = current ? briefNeighbors(dates, current) : { older: null, newer: null }
+  const current = viewing ?? latestKey
+  const { older, newer } = current ? briefNeighbors(keys, current) : { older: null, newer: null }
   const go = (d: string | null) => {
     setFactsOpen(false)
-    setDay(d === latest?.date ? null : d)
+    setDay(d === latestKey ? null : d)
+  }
+  const keyLabel = (k: string) => {
+    const p = parseBriefKey(k)
+    return `${dayLabel(p.date)} ${p.edition === 'evening' ? '盤後' : '盤前'}`
   }
 
   // 收起時輪播：標題一則、每一點一則、風險一則；沒有模型版就輪播規則版那一句
@@ -96,21 +104,21 @@ export function BriefCard({
       collapsed={collapsed}
       onToggle={onToggle}
       slides={slides}
-      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30、晚上 21:45 整理）。'}
+      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30、傍晚約 17:45 整理）。'}
       when={b ? `${viewing ? '歷史・' : ''}${evening ? '盤後・' : ''}${b.generated_at.slice(5, 16).replace('-', '/')}` : undefined}
       extra={
         !collapsed &&
         current &&
-        dates.length > 1 && (
+        keys.length > 1 && (
           <div className="cq-brief-nav">
             <button aria-label="前一天" disabled={!older} onClick={() => go(older)}>
               <ChevronLeft size={18} aria-hidden="true" />
             </button>
             <select aria-label="選日期" value={current} onChange={(e) => go(e.target.value)}>
-              {dates.map((d) => (
+              {keys.map((d) => (
                 <option key={d} value={d}>
-                  {dayLabel(d)}
-                  {d === latest?.date ? ' 最新' : ''}
+                  {keyLabel(d)}
+                  {d === latestKey ? ' 最新' : ''}
                 </option>
               ))}
             </select>
@@ -121,10 +129,10 @@ export function BriefCard({
         )
       }
     >
-      {err && <p className="cq-war-mute">讀不到 {viewing} 的晨報：{err}</p>}
+      {err && <p className="cq-war-mute">讀不到 {viewing ? keyLabel(viewing) : ''} 的晨報：{err}</p>}
       {(loading || waiting) && <p className="cq-war-mute">讀取中…</p>}
       {!loading && !waiting && !err && !b && (
-        <p className="cq-war-mute">{viewing ? '這天沒有晨報。' : '今天的晨報還沒產生（每個交易日早上 6:30、晚上 21:45 整理）。'}</p>
+        <p className="cq-war-mute">{viewing ? '這天沒有晨報。' : '今天的晨報還沒產生（每個交易日早上 6:30、傍晚約 17:45 整理）。'}</p>
       )}
       {b && b.headline && b.bullets ? (
         <>
@@ -162,7 +170,10 @@ export function BriefCard({
       )}
 
       {viewing && b && (
-        <div className="cq-brief-actual" title="晨報寫在開盤前；這是那天收盤後的結果，拿來對照，不是晨報的一部分">
+        <div
+          className="cq-brief-actual"
+          title={evening ? '盤後快訊寫在收盤後、講下一個交易日；這是下一個交易日的收盤，拿來對照' : '晨報寫在開盤前；這是那天收盤後的結果，拿來對照，不是晨報的一部分'}
+        >
           {actual ? (
             <div className="cq-tiles cq-tiles-3">
               <Kpi label={`${dayLabel(actual.date)} 加權`} value={pct(actual.taiex_chg)} sub="實際收盤" tone={kt(actual.taiex_chg)} />
@@ -170,7 +181,7 @@ export function BriefCard({
               {actual.foreign_net !== null && <Kpi label="外資" value={signedBig(actual.foreign_net)} sub="實際買賣超" tone={kt(actual.foreign_net)} />}
             </div>
           ) : (
-            <p className="cq-war-mute">{dayLabel(viewing)} 休市或還沒收盤，沒有實際收盤可對照。</p>
+            <p className="cq-war-mute">{evening ? '下一個交易日還沒收盤' : `${dayLabel(parseBriefKey(viewing).date)} 休市或還沒收盤`}，沒有實際收盤可對照。</p>
           )}
         </div>
       )}
