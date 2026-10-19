@@ -49,3 +49,24 @@
 .cq-news-orig span { display: block; font-size: 12.5px; color: var(--mute); margin-bottom: 4px; }
 .cq-news-orig b { display: block; font-size: 15px; font-weight: 600; line-height: 1.45; color: #c9ccd3; }
 .cq-news-orig p { margin: 6px 0 0; font-size: 14px; }
+
+/* 這則提到的實體（T-402）：名字前一個類別色點（台股橘、國外藍、族群／主題青，同 news-graph.css），最多 3 個＋「+N」 */
+.cq-news-head { position: relative; }
+.cq-news-row .cq-news-ents, .cq-news-row .cq-news-meta { grid-column: 2; }
+.cq-news-ents { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; min-width: 0; }
+.cq-news-ent { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: #c9ccd3; white-space: nowrap; }
+.cq-news-ent::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #8a8f98; }
+.cq-news-ent.tw::before { background: #d95926; }
+.cq-news-ent.abroad::before { background: #3987e5; }
+.cq-news-ent.cluster::before { background: #199e70; }
+.cq-news-ent-more { font-size: 13px; color: var(--mute); }
+.cq-news-src { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「關係圖」按鈕疊在來源那一行的右邊（展開箭頭左邊）：不能放在整列的按鈕裡（按鈕不能包按鈕），來源字讓出位置 */
+.cq-news-row.has-graph .cq-news-meta { min-height: 30px; }
+.cq-news-row.has-graph .cq-news-src { margin-right: 96px; }
+.cq .cq-news-graph {
+  position: absolute; right: 26px; bottom: 11px; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 11px;
+  border-radius: 999px; border: 1px solid #3a3d45; background: #1d2027; color: var(--text); font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.cq .cq-news-graph:disabled { cursor: progress; opacity: .7; }
+.cq-news-gerr { margin: 0 4px 12px; font-size: 13.5px; color: var(--up); }

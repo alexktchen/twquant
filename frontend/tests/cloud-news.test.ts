@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ALLOWED, proxy, upstreamUrl } from '../functions/_lib/news-proxy.ts'
-import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, nextUntil, shown, shownTime, taipeiHm, timeLabel, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
+import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, nextUntil, shown, shownTime, taipeiHm, timeLabel, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const BASE = 'https://abc.supabase.co/functions/v1/api/'
@@ -123,4 +123,31 @@ test('T-401：有過檢查的譯文才顯示譯文（標「譯」、附原文）
   assert.equal(shown({ ...en, translation: 'ok', title_zh: null }).title, 'Nvidia jumps 4%', '狀態 ok 但沒有譯文字串：照原文顯示')
   assert.equal(shown(row('z', '2026-10-19T02:00:00Z', { kind: 'tw', lang: 'zh', translation: null })).tag, null)
   assert.equal(shown(en).tag, null, '舊服務沒有 translation 欄')
+})
+
+test('T-404：關係圖只轉 id（其餘參數丟掉）；沒有這則（404）照轉，不當成服務壞掉', async () => {
+  assert.equal(
+    upstreamUrl(BASE, '/v1/graph', 'https://x/api/news/graph?id=cnbc-top-0&limit=9&kind=tw'),
+    'https://abc.supabase.co/functions/v1/api/v1/graph?id=cnbc-top-0',
+  )
+  assert.deepEqual(ALLOWED['/v1/graph'], ['id'])
+  let seen = ''
+  const notFound = (async (url: string) => {
+    seen = url
+    return new Response('{"detail":"沒有這則新聞"}', { status: 404, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  const res = await proxy(env, '/v1/graph', 'https://x/api/news/graph?id=a%2Fb', notFound)
+  assert.equal(seen, 'https://abc.supabase.co/functions/v1/api/v1/graph?id=a%2Fb')
+  assert.equal(res.status, 404)
+  assert.equal(((await res.json()) as { detail: string }).detail, '沒有這則新聞')
+})
+
+test('T-402：列上的實體小標最多 3 個，其餘收成「+N」；沒有 mentions（舊服務）或空的 → 沒有小標', () => {
+  const m = (id: string) => ({ id, type: 'tw' as const, label: id })
+  const r = row('a', '2026-10-19T00:00:00Z', { mentions: ['tw:1', 'tw:2', 'tw:3', 'tw:4', 'tw:5'].map(m) })
+  assert.deepEqual(mentionChips(r).chips.map((x) => x.id), ['tw:1', 'tw:2', 'tw:3'])
+  assert.equal(mentionChips(r).more, 2)
+  assert.deepEqual(mentionChips({ ...r, mentions: [m('tw:1')] }), { chips: [m('tw:1')], more: 0 })
+  assert.deepEqual(mentionChips(row('b', '2026-10-19T00:00:00Z')), { chips: [], more: 0 })
+  assert.deepEqual(mentionChips({ ...r, mentions: [] }), { chips: [], more: 0 })
 })

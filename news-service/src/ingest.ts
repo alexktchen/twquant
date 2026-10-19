@@ -2,6 +2,8 @@
 // 資料只增不改（D-200 §四）：first_seen_at 是我們第一次抓到的時間（研究用的可得時間），之後不會再改。
 // 所有 IO（抓網頁、時鐘、資料庫）由呼叫端注入：Edge Function 給真的、測試給假的。一個來源壞掉不擋其他來源。
 import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
+import type { EdgeType, GraphConfig } from './graph.ts'
+import { validateMentionConfig, type MentionConfig } from './mention.ts'
 import { validateTranslateConfig, type TranslateConfig } from './translate.ts'
 
 export type Source = {
@@ -25,6 +27,33 @@ export type NewsConfig = {
   stale_hours: number
   sources: Source[]
   translate: TranslateConfig
+  /** T-402：別名比對（一度） */
+  mention: MentionConfig
+  /** T-404：關係圖（propagate 的參數＋同族群線、/v1/items 每則幾個實體） */
+  graph: NewsGraphConfig
+}
+
+export type NewsGraphConfig = GraphConfig & {
+  /** 同族群線：每檔連到族群裡成交金額前幾名 */
+  peers_per_group: number
+  /** /v1/items 每則最多回幾個一度實體（台股優先） */
+  mentions_per_item: number
+}
+
+const EDGE_TYPES: EdgeType[] = ['supplier', 'belongs', 'member', 'peer', 'theme']
+
+function validateGraphConfig(x: unknown): NewsGraphConfig {
+  const c = x as Partial<NewsGraphConfig> | null
+  const fail = (why: string): never => {
+    throw new Error(`news 設定錯誤：graph.${why}`)
+  }
+  if (!c || typeof c !== 'object') fail('（整段缺少）')
+  const w = c!.weights as Record<string, unknown> | undefined
+  if (!w || typeof w !== 'object') fail('weights')
+  for (const t of EDGE_TYPES) if (typeof w![t] !== 'number' || (w![t] as number) <= 0) fail(`weights.${t}`)
+  if (typeof c!.fanout_power !== 'number' || c!.fanout_power < 0) fail('fanout_power')
+  for (const k of ['max_degree', 'max_links', 'peers_per_group', 'mentions_per_item'] as const) if (!Number.isInteger(c![k]) || (c![k] as number) < 1) fail(k)
+  return c as NewsGraphConfig
 }
 
 const ID_RE = /^[a-z0-9-]{2,40}$/
@@ -47,6 +76,8 @@ export function validateConfig(x: unknown): NewsConfig {
     if (!/^https:\/\//.test(s.url) || !/^https:\/\//.test(s.terms) || !/^\d{4}-\d{2}-\d{2}$/.test(s.checked) || !s.name) fail(`來源 ${s.id} 的網址、條款或檢查日期`)
   }
   validateTranslateConfig(c!.translate)
+  validateMentionConfig(c!.mention)
+  validateGraphConfig(c!.graph)
   return c as NewsConfig
 }
 

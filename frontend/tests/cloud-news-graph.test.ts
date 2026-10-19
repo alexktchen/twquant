@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { branchCurve, childrenOf, classOf, hiddenKids, mindBranches, mindLayout, pathTo, relevance, tableRows, taperPath, topTw, viaText, type GNode, type MindOpts, type NewsGraph } from '../src/cloud/news-graph.ts'
+import { branchCurve, classOf, hiddenKids, mindBranches, mindLayout, pathTo, relevance, tableRows, taperPath, topTw, viaText, type GNode, type MindOpts } from '../src/cloud/news-graph.ts'
 
 const n = (id: string, degree: number, parent: string | null, extra: Partial<GNode> = {}): GNode => ({
   id,
@@ -131,22 +130,4 @@ test('關係圖：從新聞到某點的路徑、線的說明、類別、清單�
   assert.deepEqual(topTw(nodes).map((x) => x.id), ['tw:6669', 'tw:3706'])
   assert.equal(hiddenKids(nodes[1], nodes, new Set()), 1)
   assert.equal(hiddenKids(nodes[1], nodes, new Set(['tw:6669'])), 0)
-})
-
-test('關係圖示範資料：每個點的上一層都在圖上、度數連續、一度沒有上一層；草擬一路往下傳', () => {
-  const demo = JSON.parse(readFileSync(new URL('../src/cloud/news-graph-demo.json', import.meta.url), 'utf8')) as NewsGraph[]
-  assert.equal(demo.length, 3)
-  for (const g of demo) {
-    const by = new Map(g.nodes.map((x) => [x.id, x]))
-    for (const x of g.nodes) {
-      if (x.degree === 1) assert.equal(x.parent, null)
-      else {
-        const parent = by.get(x.parent ?? '')
-        assert.ok(parent, `${g.item.id} ${x.id} 的上一層 ${x.parent} 不在圖上`)
-        assert.equal(parent.degree, x.degree - 1)
-        if (parent.draft) assert.equal(x.draft, true, `${x.id} 的上一層是草擬的`)
-      }
-    }
-    assert.ok(childrenOf(g.nodes).get(null)!.length >= 3)
-  }
 })

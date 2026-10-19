@@ -9,6 +9,7 @@ import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
 import type { NewsHealth, NewsKind, NewsRow } from './news'
+import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
@@ -135,6 +136,8 @@ export function fetchNewsItems(q: { kind: NewsKind | null; limit: number; until?
   if (q.until) p.set('until', q.until)
   return get<{ items: NewsRow[] }>(`/api/news/items?${p}`)
 }
+/** 一則新聞的關係圖（T-402／T-404）：提到的實體往外三度；沒有這則 → 404。 */
+export const fetchNewsGraph = (id: string) => get<NewsGraphData>(`/api/news/graph?id=${encodeURIComponent(id)}`)
 /** 新聞服務最後抓取時間與各來源狀態。 */
 export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
 /** 盤中大盤體檢（T-397）：排程每分鐘更新；今天還沒有 → live 是 null。 */

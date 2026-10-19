@@ -97,20 +97,6 @@
 .cq-ng-top button b { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cq-ng-top button small { font-size: 12.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
 
-/* ── 新聞分頁上的示範入口：一般的卡片 ── */
-.cq-ng-demo { margin: 12px 0 4px; padding: 12px; border-radius: 12px; background: #15171c; border: 1px solid var(--line); }
-.cq-ng-demo h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 16px; font-weight: 600; }
-.cq-ng-demo > p { margin: 0 0 4px; font-size: 13.5px; color: var(--mute); line-height: 1.5; }
-.cq .cq-ng-demo button { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 11px 12px; border-radius: 10px; border: 0; background: #1d2027; color: var(--text); text-align: left; }
-.cq-ng-demo button b { flex: 1; font-size: 15px; line-height: 1.4; font-weight: 600; }
-.cq-ng-demo button small { flex: none; font-size: 12.5px; color: var(--mute); }
-.cq-ng-demo-key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
-.cq-ng-demo-key span { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text); }
-.cq-ng-demo-key span::before { content: ''; width: 18px; height: 4px; border-radius: 2px; background: #8a8f98; }
-.cq-ng-demo-key .abroad::before { background: #3987e5; }
-.cq-ng-demo-key .tw::before { background: #d95926; }
-.cq-ng-demo-key .cluster::before { background: #199e70; }
-
 @media (prefers-reduced-motion: reduce) {
   .cq-ng-branches .br, .cq .cq-ng-node { animation: none !important; }
 }

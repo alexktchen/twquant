@@ -1,0 +1,83 @@
+# D-200 §三：國外公司→台灣供應商、主題→族群／台股 由 AI 依公開資訊草擬，使用者核可前都是 draft（網站畫虛線）。
+# T-404：scripts/news_sync_entities.py 讀這份寫進新聞庫 news.graph_edges；同族群線（peer／belongs）由主庫
+# serving.stock_group 同步，不寫在這裡。src 必須是 configs/news_entities.yaml 有的實體（us:<ticker>／co:<id>／th:<id>）；
+# tw 是台股代號字串（保留前導零）；grp 是族群名，必須跟主庫 serving.stock_group 的 grp 一模一樣
+# （2026-10-19 查過：主庫沒有「半導體（記憶體）」，記憶體股分散在「半導體」「IC模組」）。
+# 只寫公開報導過、市場普遍知道的供應鏈關係；沒把握的不寫（寧可少一條線，不畫錯的線）。
+# 改了之後核可的線把 status 改成 approved。tests/test_news_entities.py 核對格式。
+
+# 國外公司 → 台灣供應商（代工、封測、零組件、組裝）
+supplier:
+  # AI 與晶片
+  - {src: "us:NVDA", tw: ["2330", "2317", "2382", "3231", "6669", "2308", "3017", "3711"], status: draft}
+  - {src: "us:AMD", tw: ["2330", "3711"], status: draft}
+  - {src: "us:AVGO", tw: ["2330", "3711", "3105"], status: draft}
+  - {src: "us:QCOM", tw: ["2330", "3711"], status: draft}
+  - {src: "us:MRVL", tw: ["2330", "3711"], status: draft}
+  - {src: "us:INTC", tw: ["2330", "3037", "8046"], status: draft}
+  - {src: "us:SWKS", tw: ["3105", "8086"], status: draft}
+  - {src: "us:AMAT", tw: ["3413"], status: draft}
+  - {src: "co:asml", tw: ["6196", "3680", "3178"], status: draft}
+  # 雲端業者（伺服器、交換器、自研晶片）
+  - {src: "us:MSFT", tw: ["6669", "2382"], status: draft}
+  - {src: "us:META", tw: ["6669", "2345"], status: draft}
+  - {src: "us:GOOGL", tw: ["2382", "2330"], status: draft}
+  - {src: "us:AMZN", tw: ["2382", "2345", "3661", "2330"], status: draft}
+  # 手機、電腦、遊戲機
+  - {src: "us:AAPL", tw: ["2330", "2317", "4938", "3008", "2474", "3406", "6269"], status: draft}
+  - {src: "us:DELL", tw: ["2324", "3231", "2356"], status: draft}
+  - {src: "us:HPQ", tw: ["2382", "2324", "2356"], status: draft}
+  - {src: "co:lenovo", tw: ["2324", "2382"], status: draft}
+  - {src: "co:nintendo", tw: ["2317", "4938"], status: draft}
+  # 電動車、航太、衛星
+  - {src: "us:TSLA", tw: ["1536", "3665", "2308", "3023", "2231"], status: draft}
+  - {src: "us:BA", tw: ["2634", "2645"], status: draft}
+  - {src: "co:spacex", tw: ["2313", "3491", "6285"], status: draft}
+  # 運動品牌
+  - {src: "us:NKE", tw: ["9910", "9904", "1476"], status: draft}
+
+# 主題 → 族群名（grp）或台股代號（tw）
+theme:
+  - {src: "th:memory", grp: ["IC模組"], tw: ["2408", "2344", "2337", "8299", "3260"], status: draft}
+  - {src: "th:ev", grp: ["電動車輛產業", "電池"], status: draft}
+  - {src: "th:ai", grp: ["伺服器", "散熱"], tw: ["2330", "2382", "6669", "2317", "3231"], status: draft}
+  - {src: "th:chips", grp: ["晶圓製造", "IC設計", "封測", "半導體設備"], status: draft}
+  - {src: "th:foundry", grp: ["晶圓製造"], tw: ["2330", "2303", "5347"], status: draft}
+  - {src: "th:packaging", grp: ["封測"], tw: ["3711", "2330", "3131", "3583", "6187", "6640"], status: draft}
+  - {src: "th:datacenter", grp: ["伺服器", "散熱", "電源供應器"], tw: ["2308", "2345"], status: draft}
+  - {src: "th:aiserver", grp: ["伺服器"], tw: ["2382", "3231", "6669", "2317", "2356"], status: draft}
+  - {src: "th:cooling", grp: ["散熱"], tw: ["3017", "3324", "2308"], status: draft}
+  - {src: "th:cpo", grp: ["光通訊"], tw: ["3363", "3081", "4979", "6442", "3450"], status: draft}
+  - {src: "th:pcb", grp: ["印刷電路板", "IC基板", "銅箔基板"], tw: ["3037", "8046"], status: draft}
+  - {src: "th:smartphone", grp: ["光學鏡頭"], tw: ["2454", "2317", "3008", "4938"], status: draft}
+  - {src: "th:robot", grp: ["自動化", "傳動元件"], tw: ["2049"], status: draft}
+  - {src: "th:satellite", tw: ["2313", "3491", "6285", "2314"], status: draft}
+  - {src: "th:drone", tw: ["8033", "2634"], status: draft}
+  - {src: "th:defense", tw: ["2634", "2208", "8033"], status: draft}
+  - {src: "th:power", grp: ["智慧電網"], tw: ["1519", "1503", "1513"], status: draft}
+  - {src: "th:solar", grp: ["太陽能產業"], status: draft}
+  - {src: "th:wind", grp: ["風力發電"], status: draft}
+  - {src: "th:shipping", grp: ["交通運輸及航運"], tw: ["2603", "2609", "2615"], status: draft}
+  - {src: "th:steel", grp: ["鋼鐵"], status: draft}
+  - {src: "th:oil", grp: ["油電燃氣", "石化及塑橡膠"], tw: ["6505"], status: draft}
+  - {src: "th:biotech", grp: ["製藥"], status: draft}
+  - {src: "th:fed", grp: ["金融"], status: draft}
+  - {src: "th:rates", grp: ["金融"], status: draft}
+
+# 國外公司 ↔ 台股（label：同業＝做同一種生意的競爭者；結盟＝合資、代理、長期合作）
+peer:
+  - {src: "co:samsung", tw: ["2408", "2330"], label: 同業, status: draft}
+  - {src: "co:skhynix", tw: ["2408"], label: 同業, status: draft}
+  - {src: "us:MU", tw: ["2408", "2344"], label: 同業, status: draft}
+  - {src: "co:mitsubishi", tw: ["2317"], label: 結盟, status: draft}
+  - {src: "co:smic", tw: ["2330", "2303"], label: 同業, status: draft}
+  - {src: "co:rapidus", tw: ["2330"], label: 同業, status: draft}
+  - {src: "us:GFS", tw: ["2303"], label: 同業, status: draft}
+  - {src: "us:NXPI", tw: ["5347"], label: 結盟, status: draft}
+  - {src: "co:sony", tw: ["2330"], label: 結盟, status: draft}
+  - {src: "co:kioxia", tw: ["8299"], label: 結盟, status: draft}
+  - {src: "co:sumco", tw: ["3532"], label: 結盟, status: draft}
+  - {src: "co:sumco", tw: ["6488"], label: 同業, status: draft}
+  - {src: "co:shinetsu", tw: ["6488"], label: 同業, status: draft}
+  - {src: "co:toyota", tw: ["2207"], label: 結盟, status: draft}
+  - {src: "co:nissan", tw: ["2201", "2227"], label: 結盟, status: draft}

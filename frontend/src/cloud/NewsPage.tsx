@@ -1,9 +1,10 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
-// 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；關聯的美股／台股／族群、關係圖在後面的任務接上。
-// 地鐵告示風格：每則＝國際／台灣色塊、標題、來源與時間；點一下就地展開摘要與原文連結。
+// 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；標題下面列這則提到的台股／國外公司／族群（T-402，最多 3 個＋「+N」），
+// 有提到的列多一顆「關係圖」：點了才向新聞服務要這則的圖（T-404），開心智圖。
+// 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
 import { ChevronDown, ExternalLink, Globe, MapPin, Network, RefreshCw } from 'lucide-react'
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { fetchNewsHealth, fetchNewsItems } from './api'
+import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems } from './api'
 import {
   KIND_LABEL,
   NEWS_PAGE,
@@ -11,6 +12,7 @@ import {
   dayTitle,
   groupByDay,
   healthLine,
+  mentionChips,
   nextUntil,
   shown,
   taipeiDay,
@@ -19,13 +21,12 @@ import {
   type NewsKind,
   type NewsRow,
 } from './news'
-import type { NewsGraph as NewsGraphData } from './news-graph'
+import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
 import './news-graph.css'
 
 type Filter = 'all' | NewsKind
 
-// 關係圖（心智圖）：示範區預設就顯示（使用者 2026-10-19：「心智圖在哪」——藏在 ?demo=graph 後面找不到）；圖與示範資料各自一個檔案，進分頁才下載。
-// 關聯資料（T-402、T-404）上線後改成每則新聞點開就有，這段示範拿掉。
+// 關係圖（心智圖）自己一個檔案：第一次按「關係圖」才下載。
 const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.NewsGraph })))
 
 const TAG_TITLE: Record<string, string> = {
@@ -49,12 +50,10 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   const [more, setMore] = useState<'idle' | 'loading' | 'done'>('idle')
   const [open, setOpen] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
-  const [demo, setDemo] = useState<NewsGraphData[] | null>(null)
   const [graph, setGraph] = useState<NewsGraphData | null>(null)
-
-  useEffect(() => {
-    import('./news-graph-demo.json').then((m) => setDemo(m.default as unknown as NewsGraphData[]))
-  }, [])
+  /** 正在抓哪一則的關係圖；抓壞了是哪一則、什麼原因（顯示在那一列） */
+  const [graphLoading, setGraphLoading] = useState<string | null>(null)
+  const [graphErr, setGraphErr] = useState<{ id: string; msg: string } | null>(null)
 
   useEffect(() => {
     let stale = false
@@ -95,6 +94,16 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       })
   }
 
+  const openGraph = (id: string) => {
+    if (graphLoading) return
+    setGraphLoading(id)
+    setGraphErr(null)
+    fetchNewsGraph(id)
+      .then(setGraph)
+      .catch((e: Error) => setGraphErr({ id, msg: `關係圖讀不到：${e.message}` }))
+      .finally(() => setGraphLoading(null))
+  }
+
   const groups = useMemo(() => groupByDay(rows), [rows])
   const today = taipeiDay(now.toISOString())
   const status = healthLine(health, now)
@@ -115,25 +124,6 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
         </span>
       </div>
 
-      {demo && (
-        <section className="cq-ng-demo">
-          <h2>
-            <Network size={18} aria-hidden="true" /> 關係圖（示範）
-          </h2>
-          <p className="cq-ng-demo-key">
-            <span className="abroad">國外</span>
-            <span className="tw">台股</span>
-            <span className="cluster">族群</span>
-            新聞怎麼牽動美股、台股、族群
-          </p>
-          {demo.map((g) => (
-            <button key={g.item.id} onClick={() => setGraph(g)}>
-              <b>{g.item.title_zh ?? g.item.title}</b>
-              <small>{g.nodes.length} 個關聯</small>
-            </button>
-          ))}
-        </section>
-      )}
       {graph && (
         <Suspense fallback={null}>
           <NewsGraph
@@ -158,26 +148,49 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
               const isOpen = open === r.id
               const v = shown(r)
               const lang = (l: 'en' | 'zh') => (l === 'en' ? 'en' : 'zh-Hant')
+              const ents = mentionChips(r)
+              const hasGraph = ents.chips.length > 0
               return (
                 <li key={r.id} className={isOpen ? 'open' : ''}>
-                  <button className="cq-news-row" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.id)}>
-                    <span className={`cq-news-kind ${r.kind ?? 'tw'}`}>
-                      {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
-                      {r.kind ? KIND_LABEL[r.kind] : '其他'}
-                    </span>
-                    <span className="cq-news-title" lang={lang(v.lang)}>
-                      {v.tag && (
-                        <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
-                          {v.tag}
-                        </em>
+                  <div className="cq-news-head">
+                    <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.id)}>
+                      <span className={`cq-news-kind ${r.kind ?? 'tw'}`}>
+                        {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
+                        {r.kind ? KIND_LABEL[r.kind] : '其他'}
+                      </span>
+                      <span className="cq-news-title" lang={lang(v.lang)}>
+                        {v.tag && (
+                          <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
+                            {v.tag}
+                          </em>
+                        )}
+                        {v.title}
+                      </span>
+                      {hasGraph && (
+                        <span className="cq-news-ents">
+                          {ents.chips.map((m) => (
+                            <span key={m.id} className={`cq-news-ent ${classOf(m.type)}`}>
+                              {m.label}
+                            </span>
+                          ))}
+                          {ents.more > 0 && <span className="cq-news-ent-more">+{ents.more}</span>}
+                        </span>
                       )}
-                      {v.title}
-                    </span>
-                    <span className="cq-news-meta">
-                      {r.source_name}・{timeLabel(r, g.day)}
-                      <ChevronDown size={15} className={isOpen ? 'flip' : ''} aria-hidden="true" />
-                    </span>
-                  </button>
+                      <span className="cq-news-meta">
+                        <span className="cq-news-src">
+                          {r.source_name}・{timeLabel(r, g.day)}
+                        </span>
+                        <ChevronDown size={15} className={isOpen ? 'flip' : ''} aria-hidden="true" />
+                      </span>
+                    </button>
+                    {hasGraph && (
+                      <button className="cq-news-graph" onClick={() => openGraph(r.id)} disabled={graphLoading !== null} title="這則新聞提到的公司、族群，往外牽動到哪些台股">
+                        <Network size={14} aria-hidden="true" />
+                        {graphLoading === r.id ? '讀取中…' : '關係圖'}
+                      </button>
+                    )}
+                  </div>
+                  {graphErr?.id === r.id && <p className="cq-news-gerr">{graphErr.msg}</p>}
                   {isOpen && (
                     <div className="cq-news-body">
                       {v.summary && <p lang={lang(v.lang)}>{v.summary}</p>}

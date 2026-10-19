@@ -20,6 +20,17 @@ export type NewsRow = {
   translation?: 'ok' | 'failed' | 'pending' | null
   title_zh?: string | null
   summary_zh?: string | null
+  /** 這則提到的實體（T-402，一度；台股在前、再國外、再族群／主題）。舊的服務沒有這欄 → undefined */
+  mentions?: NewsMention[]
+}
+export type NewsMention = { id: string; type: 'tw' | 'us' | 'company' | 'group' | 'theme'; label: string }
+
+/** 列上最多顯示幾個實體小標（其餘收成「+N」） */
+export const MENTION_CHIPS = 3
+/** 列上的實體小標：前 k 個＋剩下幾個。 */
+export function mentionChips(r: NewsRow, k: number = MENTION_CHIPS): { chips: NewsMention[]; more: number } {
+  const all = r.mentions ?? []
+  return { chips: all.slice(0, k), more: Math.max(0, all.length - k) }
 }
 
 export type Shown = {
