@@ -118,7 +118,7 @@ export function WarRoom({
 
   const m = data?.market ?? null
   const live = useMarketLive(refresh)
-  const mv = useMemo(() => marketView(m, live), [m, live])
+  const mv = useMemo(() => marketView(m, live, data?.market_split ?? null), [m, live, data])
   const b = data?.brief ?? null
   const shownBrief = shown ?? b
   const listedSids = useMemo(() => new Set(data?.picks?.sids ?? []), [data])

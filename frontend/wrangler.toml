@@ -17,7 +17,7 @@ binding = "HYPERDRIVE"
 id = "3cef1c1a4fcd4715ab0f34534895770f"
 
 # 盤中大盤體檢（T-397／D-198）：排程 Worker（market-live/）每分鐘寫、/api/warroom/live 讀。2026-10-19 建立。
-# 免費方案每天 1,000 次寫入：Worker 一天約 280 次（每分鐘一份＋每天一次股票清單）。
+# 免費方案每天 1,000 次寫入：Worker 一天約 293 次（每分鐘一份＋每天一次股票清單與它切成的 15 段）。
 [[kv_namespaces]]
 binding = "LIVE"
 id = "23ce8c2b93d44078bd9ef5f4de7476d3"
