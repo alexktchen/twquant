@@ -966,8 +966,14 @@ def morning_brief_cmd(
     out: str = typer.Option(
         "", help="資料根目錄（洞悉用量紀錄）；空＝configs/system.yaml data_dir"
     ),
+    edition: str = typer.Option(
+        "morning", help="morning＝盤前晨報（06:30）；evening＝盤後快訊（21:45，T-409）"
+    ),
 ) -> None:
-    """晨報（T-377）：收齊昨晚到今早的數字 → 規則一句話＋模型三到六點 → serving.morning_brief。06:30 排程呼叫。"""
+    """晨報（T-377）：收齊昨晚到今早的數字 → 規則一句話＋模型三到六點 → serving.morning_brief。06:30 排程呼叫。
+
+    --edition evening（T-409）：盤後快訊——今天的收盤與籌碼、今天的公告與新聞 → serving.evening_brief。21:45 排程呼叫。
+    """
     import json
     import urllib.request
 
@@ -980,6 +986,8 @@ def morning_brief_cmd(
     from twquant.insight.config import load_llm_config
     from twquant.reporting.morning_brief import compose, gather, rule_text, write_brief
 
+    if edition not in ("morning", "evening"):
+        raise typer.BadParameter(f"edition 只能是 morning 或 evening：{edition}")
     cfg = _load_system()
     scfg = _load_serving()
     now = now_tw()
@@ -1013,6 +1021,7 @@ def morning_brief_cmd(
             fetch_night=lambda: gq.fetch_taifex_night(post_json),
             fetch_news=lambda cat, n, label: news.fetch(cnyes, cat, n, label),
             now=now,
+            edition=edition,  # type: ignore[arg-type]  # 上面已限定兩個值
         )
         rule = rule_text(inputs)
         client = InsightClient(load_llm_config(_CONFIG_DIR / "llm.yaml"), data_dir)
@@ -1032,7 +1041,8 @@ def morning_brief_cmd(
         )
     finally:
         conn.close()
-    typer.secho(f"[OK] 晨報 @ {day}：{rule}", fg=typer.colors.GREEN)
+    kind = "盤後快訊" if edition == "evening" else "晨報"
+    typer.secho(f"[OK] {kind} @ {day}：{rule}", fg=typer.colors.GREEN)
     if brief is not None:
         typer.echo(f"標題：{brief.headline}")
         for b in brief.bullets:

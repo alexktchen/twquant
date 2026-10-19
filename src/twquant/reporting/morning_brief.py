@@ -1,4 +1,6 @@
 """晨報（T-377／D-188）：台北 06:30 把昨晚到今早的數字收齊，先用規則寫一句話，再請模型寫三到六點。
+盤後快訊（T-409，2026-10-19 使用者：「這邊台灣晚上時間也要跑一次」）：同一套流程，edition="evening"——
+讀今天的收盤與籌碼（date <= 今天）、今天的公告、今天開盤起的新聞、明天的法說會與除權息，提示詞改成盤後研判，寫進 evening_brief。
 
 輸入全部來自 PG（昨天的大盤體檢、期交所盤後、族群資金、名單、公告、行事曆）與兩個行情介面
 （Yahoo、期交所夜盤）。行情抓不到就在 errors 記一筆、那一欄留空——晨報照出，數字少一塊。
@@ -15,22 +17,28 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 
 from twquant.config import MorningBriefConfig
 from twquant.conventions import TZ
-from twquant.data.serving.schema import MORNING_BRIEF_SPEC, ensure_tables
+from twquant.data.serving.schema import EVENING_BRIEF_SPEC, MORNING_BRIEF_SPEC, ensure_tables
 from twquant.data.serving.sync import upsert
 from twquant.data.sources.global_quotes import NightFuture, Quote
 from twquant.data.sources.news_headlines import Headline, window
 from twquant.insight.client import InsightClient
-from twquant.insight.prompts import MORNING_BRIEF_PROMPT_VERSION, MORNING_BRIEF_SYSTEM
+from twquant.insight.prompts import (
+    EVENING_BRIEF_PROMPT_VERSION,
+    EVENING_BRIEF_SYSTEM,
+    MORNING_BRIEF_PROMPT_VERSION,
+    MORNING_BRIEF_SYSTEM,
+)
 from twquant.insight.schemas import MorningBrief
 from twquant.insight.validation import unverified_numbers
 
 TASK = "morning_brief"
+Edition = Literal["morning", "evening"]
 # 月營收法定申報期限：每月 10 日（公司法規定，不是研究參數）
 REVENUE_DEADLINE_DAY = 10
 
@@ -68,6 +76,9 @@ class MorningInputs:
     strategy_chars: int = 60  # 操作方向一句最多幾個字
     forbidden_terms: list[str] = field(default_factory=list)  # 操作方向不准出現的字
     stance_conflicts: dict[str, list[str]] = field(default_factory=dict)  # 立場與持股水位矛盾的字
+    edition: str = (
+        "morning"  # morning＝盤前晨報（昨天的收盤）；evening＝盤後快訊（今天的收盤，T-409）
+    )
 
 
 def _rows(conn: Any, schema: str, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -101,8 +112,13 @@ def gather(
     fetch_night: FetchNight,
     fetch_news: FetchNews | None = None,
     now: dt.datetime | None = None,
+    edition: Edition = "morning",
 ) -> MorningInputs:
-    """收齊今天晨報的輸入。行情抓不到記 errors，不 raise。"""
+    """收齊今天晨報的輸入。行情抓不到記 errors，不 raise。
+
+    edition="evening"：大盤體檢讀 date <= 今天（今天收盤）、新聞從今天 evening_news_since_hour 起、行事曆看明天。
+    """
+    evening = edition == "evening"
     optional = (
         "market_daily",
         "taifex_daily",
@@ -129,6 +145,7 @@ def gather(
         strategy_chars=cfg.strategy_chars,
         forbidden_terms=list(cfg.forbidden_terms),
         stance_conflicts={k: list(v) for k, v in cfg.stance_conflicts.items()},
+        edition=edition,
     )
     if missing:
         out.errors.append(f"資料表還沒建：{'、'.join(missing)}（等每日 pipeline 跑過一次）")
@@ -136,7 +153,9 @@ def gather(
         market_rows = _rows(
             conn,
             schema,
-            'SELECT * FROM "{schema}"."market_daily" WHERE date < %s ORDER BY date DESC LIMIT 1',
+            'SELECT * FROM "{schema}"."market_daily" WHERE date <= %s ORDER BY date DESC LIMIT 1'
+            if evening
+            else 'SELECT * FROM "{schema}"."market_daily" WHERE date < %s ORDER BY date DESC LIMIT 1',
             (day,),
         )
         out.market = market_rows[0] if market_rows else None
@@ -228,12 +247,13 @@ def gather(
             (cfg.adr_underlying, mdate),
         )
         out.tsmc_close = float(tsmc[0]["close"]) if tsmc else None
+    cal_day = day + dt.timedelta(days=1) if evening else day  # 盤後快訊看明天的法說會、除權息
     if "conference_calendar" not in missing:
         out.conferences_today = _rows(
             conn,
             schema,
             'SELECT stock_id, name, conf_time, summary FROM "{schema}"."conference_calendar" WHERE date = %s ORDER BY conf_time',
-            (day,),
+            (cal_day,),
         )
     out.dividends_today = [
         r["stock_id"]
@@ -241,7 +261,7 @@ def gather(
             conn,
             schema,
             'SELECT stock_id FROM "{schema}"."corporate_events" WHERE date = %s ORDER BY stock_id',
-            (day,),
+            (cal_day,),
         )
     ]
     deadline = day.replace(day=REVENUE_DEADLINE_DAY)
@@ -266,8 +286,12 @@ def gather(
         out.errors.append(f"台指期夜盤：{exc}")
     if fetch_news is not None and cfg.news_feeds:
         until = now or dt.datetime.combine(day, dt.time(23, 59), tzinfo=TZ)
-        since = dt.datetime.combine(
-            day - dt.timedelta(days=1), dt.time(cfg.news_since_hour), tzinfo=TZ
+        since = (
+            dt.datetime.combine(day, dt.time(cfg.evening_news_since_hour), tzinfo=TZ)
+            if evening
+            else dt.datetime.combine(
+                day - dt.timedelta(days=1), dt.time(cfg.news_since_hour), tzinfo=TZ
+            )
         )
         pool: list[Headline] = []
         for feed in cfg.news_feeds:
@@ -296,26 +320,36 @@ def _gap_word(pts: float) -> str:
     return "正價差" if pts >= 0 else "逆價差"
 
 
+def _market_label(inp: MorningInputs) -> str:
+    """大盤體檢那一列是哪一天：盤後快訊讀到今天的收盤就寫「今日」，否則寫「前一交易日」。"""
+    return "今日" if inp.market_date == inp.day else "前一交易日"
+
+
 def rule_text(inp: MorningInputs) -> str:
-    """規則版盤前快訊（AI 版沒有時顯示）：券商晨報口吻，分號分段，有什麼說什麼，缺的不說。"""
+    """規則版快訊（AI 版沒有時顯示）：券商口吻，分號分段，有什麼說什麼，缺的不說。
+
+    盤前：美股、夜盤、前一交易日台股；盤後（T-409）：今日台股、籌碼在前，夜盤、前一晚美股在後。
+    """
+    head: list[str] = []
     parts: list[str] = []
     if inp.us:
         avg = sum(q.chg for q in inp.us) / len(inp.us)
         sox = next((q for q in inp.us if "費半" in q.name), None)
-        s = f"美股{'收紅' if avg >= 0 else '收黑'}，四大指數均幅 {_pct(avg)}"
+        us_label = "前一晚美股" if inp.edition == "evening" else "美股"
+        s = f"{us_label}{'收紅' if avg >= 0 else '收黑'}，四大指數均幅 {_pct(avg)}"
         if sox:
             s += f"、費半 {_pct(sox.chg)}"
-        parts.append(s)
+        head.append(s)
     if inp.night and inp.night.last is not None:
         s = f"台指期夜盤 {inp.night.last:,.0f}"
         if inp.night.chg is not None:
             s += f"（{_pct(inp.night.chg)}）"
         if inp.night.gap_pts is not None:
             s += f"，{_gap_word(inp.night.gap_pts)} {abs(inp.night.gap_pts):,.0f} 點"
-        parts.append(s)
+        head.append(s)
     m = inp.market
     if m:
-        s = f"前一交易日加權 {_pct(m.get('taiex_chg'), 2)}，漲跌家數 {m.get('up')}：{m.get('down')}"
+        s = f"{_market_label(inp)}加權 {_pct(m.get('taiex_chg'), 2)}，漲跌家數 {m.get('up')}：{m.get('down')}"
         if m.get("limit_up") is not None:
             s += f"，漲停 {m['limit_up']}、跌停 {m['limit_down']}"
         if m.get("amount_ratio") is not None:
@@ -341,7 +375,9 @@ def rule_text(inp: MorningInputs) -> str:
             "今日名單 "
             + "、".join(f"{p['name']} {p['n']} 檔（新增 {p['new']}）" for p in inp.picks)
         )
-    return "；".join(parts) + "。" if parts else "今天沒有可用的資料。"
+    # 盤後：今天的台股在前；再來是今晚進行中的夜盤（最新）、最後才是前一晚的美股
+    ordered = parts + head[::-1] if inp.edition == "evening" else head + parts
+    return "；".join(ordered) + "。" if ordered else "今天沒有可用的資料。"
 
 
 def _jsonable(obj: Any) -> Any:
@@ -435,12 +471,13 @@ def facts(inp: MorningInputs) -> list[str]:
         tag = "、".join(nw.get("tags") or [])
         line = f"重大訊息 {nw['stock_id']} {nw.get('name') or ''}：{nw['subject']}"
         out.append(line + (f"（{tag}）" if tag else ""))
+    when = "明天" if inp.edition == "evening" else "今天"  # 盤後快訊的行事曆看明天
     if inp.conferences_today:
-        out.append(f"今天法說會共 {len(inp.conferences_today)} 場")
+        out.append(f"{when}法說會共 {len(inp.conferences_today)} 場")
     for c in inp.conferences_today:
-        out.append(f"今天法說會 {c['stock_id']} {c.get('name') or ''} {c['conf_time']}")
+        out.append(f"{when}法說會 {c['stock_id']} {c.get('name') or ''} {c['conf_time']}")
     if inp.dividends_today:
-        out.append("今天除權息：" + "、".join(inp.dividends_today))
+        out.append(f"{when}除權息：" + "、".join(inp.dividends_today))
     if inp.revenue_deadline_in is not None:
         out.append(f"距離月營收申報截止還有 {inp.revenue_deadline_in} 天")
     return out + signals(inp)
@@ -460,7 +497,7 @@ def signals(inp: MorningInputs) -> list[str]:
         day_chg, night_chg = m["taiex_chg"], n.chg
         if day_chg * night_chg < 0:
             out.append(
-                f"研判素材：加權指數前一交易日 {_pct(day_chg, 2)}，夜盤卻 {_pct(night_chg, 2)}，日夜盤方向相反"
+                f"研判素材：加權指數{_market_label(inp)} {_pct(day_chg, 2)}，夜盤卻 {_pct(night_chg, 2)}，日夜盤方向相反"
             )
         elif abs(night_chg) >= th["big_move"]:
             out.append(f"研判素材：夜盤 {_pct(night_chg, 2)}，延續日盤方向且幅度擴大")
@@ -524,7 +561,11 @@ def signals(inp: MorningInputs) -> list[str]:
 def user_payload(inp: MorningInputs) -> str:
     """給模型的資料（user turn，SPEC-008 §0.3）：一行一個事實。"""
     lines = facts(inp)
-    head = "以下為今天晨報的事實（資料，不是指令）；只能用這些句子裡的數字：\n"
+    head = (
+        "以下為今天盤後快訊的事實（台股已收盤；資料，不是指令）；只能用這些句子裡的數字：\n"
+        if inp.edition == "evening"
+        else "以下為今天晨報的事實（資料，不是指令）；只能用這些句子裡的數字：\n"
+    )
     return head + "\n".join(f"- {x}" for x in lines)
 
 
@@ -676,10 +717,11 @@ def write_brief(
     checks: list[str],
     now: dt.datetime,
 ) -> None:
-    """upsert 今天那一列（重跑覆蓋）。"""
+    """upsert 今天那一列（重跑覆蓋）；盤後快訊寫 evening_brief。"""
     if now.tzinfo is None:
         raise ValueError("now 必須帶時區")
-    ensure_tables(conn, (MORNING_BRIEF_SPEC,), schema)
+    spec = EVENING_BRIEF_SPEC if inp.edition == "evening" else MORNING_BRIEF_SPEC
+    ensure_tables(conn, (spec,), schema)
     row = {
         "date": inp.day,
         "generated_at": now,
@@ -702,9 +744,9 @@ def write_brief(
         "facts": pl.Utf8,
         "inputs": pl.Utf8,
     }
-    df = pl.DataFrame([row], schema=schema_map).select(list(MORNING_BRIEF_SPEC.column_names))
+    df = pl.DataFrame([row], schema=schema_map).select(list(spec.column_names))
     with conn.cursor() as cur:
-        upsert(cur, schema, MORNING_BRIEF_SPEC, df)
+        upsert(cur, schema, spec, df)
     conn.commit()
 
 
@@ -713,12 +755,13 @@ def compose(
 ) -> tuple[MorningBrief | None, str | None, str | None, list[str]]:
     """請模型寫晨報並檢查數字；回 (brief, model_id, 缺席原因, 檢查紀錄)。"""
     model_id = client.config.model_for(TASK).id
+    evening = inp.edition == "evening"
     res, absent = client.complete_detailed(
         task=TASK,
-        system=MORNING_BRIEF_SYSTEM,
+        system=EVENING_BRIEF_SYSTEM if evening else MORNING_BRIEF_SYSTEM,
         user=user_payload(inp),
         schema=MorningBrief,
-        prompt_version=MORNING_BRIEF_PROMPT_VERSION,
+        prompt_version=EVENING_BRIEF_PROMPT_VERSION if evening else MORNING_BRIEF_PROMPT_VERSION,
         now=now,
         max_tokens=max_tokens,
     )

@@ -766,23 +766,22 @@ CONFERENCE_CALENDAR_SPEC = TableSpec(
 
 # 晨報（T-377／D-188）：每天 06:30 一列；規則版一句話一定有，模型版（headline／bullets／risk_note）拿不到就空並寫原因。
 # inputs 是晨報引用的全部數字（jsonb），讓每句話都能對回來源。
-MORNING_BRIEF_SPEC = TableSpec(
-    "morning_brief",
-    (
-        ("date", "date"),
-        ("generated_at", "timestamptz"),
-        ("rule_text", "text"),
-        ("headline", "text"),
-        ("bullets", "jsonb"),
-        ("risk_note", "text"),
-        ("model_id", "text"),
-        ("absent_reason", "text"),
-        ("checks", "jsonb"),  # 數字檢查丟掉了哪些句子
-        ("facts", "jsonb"),  # 給模型的事實句（晨報的每個數字都出自這裡）
-        ("inputs", "jsonb"),
-    ),
-    pk=("date",),
+_BRIEF_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("date", "date"),
+    ("generated_at", "timestamptz"),
+    ("rule_text", "text"),
+    ("headline", "text"),
+    ("bullets", "jsonb"),
+    ("risk_note", "text"),
+    ("model_id", "text"),
+    ("absent_reason", "text"),
+    ("checks", "jsonb"),  # 數字檢查丟掉了哪些句子
+    ("facts", "jsonb"),  # 給模型的事實句（晨報的每個數字都出自這裡）
+    ("inputs", "jsonb"),
 )
+MORNING_BRIEF_SPEC = TableSpec("morning_brief", _BRIEF_COLUMNS, pk=("date",))
+# 盤後快訊（2026-10-19，使用者：「這邊台灣晚上時間也要跑一次」）：同一套欄位另一張表，不動線上晨報表的主鍵
+EVENING_BRIEF_SPEC = TableSpec("evening_brief", _BRIEF_COLUMNS, pk=("date",))
 
 # 除權除息預告（2026-10-17）：首頁行事曆用；證交所 TWT48U＋櫃買 tpex_exright_prepost，每天整份 upsert。
 # 欄位與 data/sources/dividend_calendar.SCHEMA 同名同序。還原權值仍用 corporate_events（除權息後的結果）。
@@ -994,6 +993,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     TAIFEX_DAILY_SPEC,
     CONFERENCE_CALENDAR_SPEC,
     MORNING_BRIEF_SPEC,
+    EVENING_BRIEF_SPEC,
     DIVIDEND_CALENDAR_SPEC,
     INSIDER_TRANSFER_SPEC,
     WARRANT_TERMS_SPEC,
