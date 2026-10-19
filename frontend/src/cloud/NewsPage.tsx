@@ -1,8 +1,8 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
 // 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；關聯的美股／台股／族群、關係圖在後面的任務接上。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、來源與時間；點一下就地展開摘要與原文連結。
-import { ChevronDown, ExternalLink, Globe, MapPin, RefreshCw } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ExternalLink, Globe, MapPin, Network, RefreshCw } from 'lucide-react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { fetchNewsHealth, fetchNewsItems } from './api'
 import {
   KIND_LABEL,
@@ -19,8 +19,15 @@ import {
   type NewsKind,
   type NewsRow,
 } from './news'
+import type { NewsGraph as NewsGraphData } from './news-graph'
+import './news-graph.css'
 
 type Filter = 'all' | NewsKind
+
+// 關係圖（心智爆炸圖）：只在網址帶 ?demo=graph 時載入（圖與示範資料各自一個檔案，平常不下載）。
+// 關聯資料（T-402、T-404）上線後改成每則新聞點開就有，這段示範拿掉。
+const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.NewsGraph })))
+const demoMode = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'graph'
 
 const TAG_TITLE: Record<string, string> = {
   譯: 'AI 翻譯（標題與摘要），數字與公司名都核對過；點開看英文原文',
@@ -34,7 +41,7 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'tw', label: '台灣' },
 ]
 
-export function NewsPage({ refresh }: { refresh: number }) {
+export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid: string, name: string) => void }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [rows, setRows] = useState<NewsRow[]>([])
   const [health, setHealth] = useState<NewsHealth | null>(null)
@@ -43,6 +50,13 @@ export function NewsPage({ refresh }: { refresh: number }) {
   const [more, setMore] = useState<'idle' | 'loading' | 'done'>('idle')
   const [open, setOpen] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
+  const [demo, setDemo] = useState<NewsGraphData[] | null>(null)
+  const [graph, setGraph] = useState<NewsGraphData | null>(null)
+
+  useEffect(() => {
+    if (!demoMode()) return
+    import('./news-graph-demo.json').then((m) => setDemo(m.default as unknown as NewsGraphData[]))
+  }, [])
 
   useEffect(() => {
     let stale = false
@@ -103,6 +117,37 @@ export function NewsPage({ refresh }: { refresh: number }) {
         </span>
       </div>
 
+      {demo && (
+        <section className="cq-ng-demo">
+          <h2>
+            <Network size={18} aria-hidden="true" /> 關係圖（示範）
+          </h2>
+          <p className="cq-ng-demo-key">
+            <span className="abroad">國外</span>
+            <span className="tw">台股</span>
+            <span className="cluster">族群</span>
+            新聞怎麼牽動美股、台股、族群
+          </p>
+          {demo.map((g) => (
+            <button key={g.item.id} onClick={() => setGraph(g)}>
+              <b>{g.item.title_zh ?? g.item.title}</b>
+              <small>{g.nodes.length} 個關聯</small>
+            </button>
+          ))}
+        </section>
+      )}
+      {graph && (
+        <Suspense fallback={null}>
+          <NewsGraph
+            graph={graph}
+            onClose={() => setGraph(null)}
+            onStock={(sid, name) => {
+              setGraph(null)
+              onStock(sid, name)
+            }}
+          />
+        </Suspense>
+      )}
       {err && <div className="cq-err">{err}</div>}
       {loading && rows.length === 0 && !err && <p className="cq-war-mute cq-news-empty">讀取中…</p>}
       {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
