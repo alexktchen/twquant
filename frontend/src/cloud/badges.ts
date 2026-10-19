@@ -10,6 +10,7 @@ import { insiderTag } from './insider.ts'
 import type { Risk } from './risks.ts'
 import { riskTag } from './risks.ts'
 import type { Weak } from './weak.ts'
+import type { NewsCount } from './news.ts'
 import { weakTags } from './weak.ts'
 
 /** 顏色類別：risk 紅（交易受限）、warn 黃（留意）、event 藍（日程）、chip 灰（籌碼／走勢）、good 橘（正面）。 */
@@ -30,6 +31,7 @@ export type BadgeIcon =
   | 'sparkles'
   | 'flame'
   | 'rocket'
+  | 'newspaper'
 
 export type Badge = {
   key: string
@@ -62,6 +64,7 @@ export const BADGE_LEGEND: { icon: BadgeIcon; tone: BadgeTone; label: string; me
   { icon: 'sparkles', tone: 'good', label: '新上榜', meaning: '今天才進這條線的名單' },
   { icon: 'flame', tone: 'good', label: '連續上榜', meaning: '連續在名單上的天數' },
   { icon: 'rocket', tone: 'good', label: '飆漲機率', meaning: '潛伏飆股模型估的 20 日內漲 +30% 機率' },
+  { icon: 'newspaper', tone: 'event', label: '相關新聞', meaning: '近 3 天提到它、或經供應商／族群連到它的新聞則數；個股頁「相關新聞」看是哪幾則' },
 ]
 
 const RISK_ICON: Record<Risk['kind'], BadgeIcon> = {
@@ -114,6 +117,8 @@ export function pickBadges(p: {
   holders?: HoldersFlag | null
   risks?: Risk[] | null
   down_risk?: DownRisk | null
+  /** 近 3 天的相關新聞則數（反向看圖）；新聞服務沒回 → 沒有這個標記 */
+  news?: NewsCount | null
 }): Badge[] {
   const out: Badge[] = []
   for (const r of p.risks ?? []) out.push(riskBadge(r))
@@ -137,6 +142,9 @@ export function pickBadges(p: {
       tone: 'chip',
     })
   }
+  const nn = p.news ? p.news.direct + p.news.indirect : 0
+  if (p.news && nn > 0)
+    out.push({ key: 'news', icon: 'newspaper', short: `${nn}`, label: '相關新聞', title: `近 3 天直接提到 ${p.news.direct} 則、經供應商或族群連到 ${p.news.indirect} 則`, tone: 'event' })
   if (p.new) out.push({ key: 'new', icon: 'sparkles', short: null, label: '新上榜', title: '今天才進這條線的名單', tone: 'good' })
   const streak = p.streak ?? 0
   if (streak > (p.recent?.length ?? 0)) out.push({ key: 'streak', icon: 'flame', short: `${streak}天`, label: '連續上榜', title: `連續 ${streak} 個交易日在名單上`, tone: 'good' })

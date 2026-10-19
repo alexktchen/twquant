@@ -60,3 +60,14 @@ test('名單列最多放 4 個標記，其餘收成 +N；圖示說明涵蓋每�
   const legendIcons = new Set(BADGE_LEGEND.map((l) => l.icon))
   for (const b of many) assert.ok(legendIcons.has(b.icon), `圖示說明要有 ${b.icon}`)
 })
+
+test('相關新聞小標（反向看圖，2026-10-20）：有幾則就顯示幾、藍色日程類；0 則或新聞服務沒回就沒有；圖示說明有這一條', () => {
+  const b = pickBadges({ news: { direct: 1, indirect: 4 } }).find((x) => x.key === 'news')
+  assert.ok(b)
+  assert.equal(b.short, '5')
+  assert.equal(b.tone, 'event')
+  assert.match(b.title, /直接提到 1 則.*連到 4 則/)
+  assert.equal(pickBadges({ news: { direct: 0, indirect: 0 } }).find((x) => x.key === 'news'), undefined)
+  assert.equal(pickBadges({ news: null }).find((x) => x.key === 'news'), undefined)
+  assert.ok(BADGE_LEGEND.some((x) => x.icon === 'newspaper' && x.label === '相關新聞'))
+})

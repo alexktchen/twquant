@@ -194,7 +194,8 @@ mention:
 
 # T-404：關係圖的幾度關聯（src/graph.ts 的 GraphConfig ＋ src/graphapi.ts）。
 graph:
-  weights: {supplier: 0.6, belongs: 0.5, member: 0.5, peer: 0.4, theme: 0.6}
+  # cooccur＝新聞常一起提到（從新聞學的關係，見下面 cooccur 段）：比族群、供應商低
+  weights: {supplier: 0.6, belongs: 0.5, member: 0.5, peer: 0.4, theme: 0.6, cooccur: 0.35}
   fanout_power: 0.5
   max_degree: 3
   max_links: 26
@@ -202,3 +203,23 @@ graph:
   peers_per_group: 5
   # /v1/items 每則最多回幾個一度實體（台股優先）
   mentions_per_item: 6
+
+# 反向看圖（使用者 2026-10-20：「那有反向看圖的地方嗎？像是每日推薦股有關的新聞」）：某一檔連得到哪些新聞（src/stocknews.ts）。
+# 跟單則關係圖同一套線與算法；個股頁與名單只算到二度（SPEC-017 §6）。
+stock_news:
+  stock_max_degree: 2
+  stock_days: 7          # 個股頁列近 7 天
+  stock_limit: 20        # 個股頁最多 20 則
+  counts_days: 3         # 名單小標算近 3 天
+  counts_max_ids: 60     # 一次最多問幾檔（三條線約 45 檔）
+  # 到處都提的實體不當「間接」的橋：同一段期間裡被超過這個比例的新聞提到（2026-10-20 實測：「AI」出現在 245 則裡約 90 則，
+  # 又直接連到廣達、台積電、緯創，害每檔都有上百則「間接關聯」）。直接提到照算；單則心智圖不受影響。
+  hub_share: 0.15
+
+# 從新聞學關係（使用者 2026-10-20：「新聞本身就會提到股票了，那些股票也要漸漸的建入關聯」，src/cooccur.ts）：
+# 兩個實體近 window_days 天在同一則新聞一起被提到達 min_items 則 → 一條「新聞常一起提到・N 則」的線（每次 ingest 重算，次數跟著變、
+# 掉到門檻以下就關掉）。至少一邊要是公司（台股、美股、國外公司）；到處都提的（超過 hub_share 的新聞都提到）不配對；已經有其他線的不重複。
+cooccur:
+  window_days: 90
+  min_items: 3
+  hub_share: 0.15

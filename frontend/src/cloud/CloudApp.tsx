@@ -11,6 +11,7 @@ import {
   fetchMe,
   fetchPickDates,
   fetchPicks,
+  fetchStockNewsCounts,
   fetchPublicDates,
   fetchQuotes,
   fetchScores,
@@ -56,6 +57,8 @@ import { LIVE_POLL_MS, limitPrices, liveBackoff, limitState, liveBar, liveLabel,
 import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 import { StockCalendar } from './StockCalendar'
+import { StockNews } from './StockNews'
+import type { NewsCount } from './news'
 
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
@@ -238,6 +241,19 @@ export default function CloudApp() {
   const current = view?.lines.find((l) => l.code === line) ?? view?.lines[0]
   const topPick = current ? topOf(current.picks) : null
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
+  // 名單小標「相關新聞」（反向看圖）：新聞在另一個資料庫，名單抓好後另外問；問不到就沒有這個小標
+  const [newsCounts, setNewsCounts] = useState<Record<string, NewsCount>>({})
+  const pickSids = useMemo(() => [...new Set((view?.lines ?? []).flatMap((l) => l.picks.map((p) => p.sid)))].sort(), [view])
+  useEffect(() => {
+    if (guest || pickSids.length === 0) return
+    let stale = false
+    fetchStockNewsCounts(pickSids)
+      .then((r) => !stale && setNewsCounts(Object.fromEntries(Object.entries(r.counts).map(([k, v]) => [k.replace(/^tw:/, ''), v]))))
+      .catch(() => !stale && setNewsCounts({}))
+    return () => {
+      stale = true
+    }
+  }, [guest, pickSids, refresh])
   // 每日名單的日期列（date＝undefined 是最新一天）；past＝正在看過去某天：K 線停在那天、不抓即時價
   const nav = dayNav(dates, date)
   const drop = dropNote(view?.drop, !nav.past)
@@ -587,6 +603,7 @@ export default function CloudApp() {
                       bought={view ? bought.has(`${view.date}|${p.sid}`) : false}
                       onBuy={!guest && view && trades ? toggleBuy : undefined}
                       line={current?.code ?? null}
+                      news={newsCounts[p.sid] ?? null}
                     />
                   ))}
                 </ul>
@@ -638,7 +655,7 @@ export default function CloudApp() {
                 tracked={tracked.has(selected.sid)}
                 onTrack={watch ? toggleTrack : undefined}
                 refresh={refresh}
-                badges={pickBadges({ ...selected, line: current?.code ?? null })}
+                badges={pickBadges({ ...selected, line: current?.code ?? null, news: newsCounts[selected.sid] ?? null })}
                 blurb={selected.blurb ?? null}
                 review={selected.review ?? null}
               />
@@ -691,6 +708,7 @@ function Row({
   bought,
   onBuy,
   line = null,
+  news = null,
 }: {
   p: Pick
   /** 要顯示的價格（pickPrice）：盤中是即時價、rec＝推薦當天的收盤；沒給（沒登入的假資料）就是名單那天的收盤 */
@@ -702,13 +720,15 @@ function Row({
   /** 「我買了」（T-388）：這檔在這天的名單有沒有被記下來；沒給（沒登入）就不顯示按鈕 */
   bought?: boolean
   onBuy?: (sid: string, on: boolean) => void
+  /** 近 3 天相關新聞則數（反向看圖） */
+  news?: NewsCount | null
 }) {
   px ??= pickPrice(p, undefined, undefined, '', true)
   const t = trend(px.chg)
   const h = hits(p.recent ?? [])
   // 2026-10-18 改版：每列兩行——上面代號名稱，下面「近 6 日上榜」方格＋圖示標記（最多 4 個，其餘 +N）。
   // 族群、選股理由、停損機率都搬到個股頁；名單只留掃一眼要知道的。
-  const { shown, more } = rowBadges(pickBadges({ ...p, line }))
+  const { shown, more } = rowBadges(pickBadges({ ...p, line, news }))
   return (
     <li className={on ? 'on cq-row' : 'cq-row'} onClick={onClick}>
       <div className="cq-name">
@@ -1279,6 +1299,7 @@ function Detail({
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
       <StockFacts sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
+      <StockNews sid={sid} refresh={refresh} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <Section
         icon={CandlestickChart}
