@@ -1,5 +1,6 @@
 /* 新聞關係圖（心智爆炸圖）。外觀照使用者 2026-10-19 給的 Gemini 截圖：純黑底、底部一片紫藍點陣漸層、乾淨細線、膠囊按鈕，
-   只有圓心一圈柔光（先前的 HUD 版被說「太多發亮的東西了」）。
+   只有圓心一圈柔光（先前的 HUD 版被說「太多發亮的東西了」）。3D（「可以有 3D 感嗎」）：座標、近大遠小、前後亮暗都由元件每格算好，
+   這裡不放位移動畫（CSS 的 transform 會蓋掉 SVG 的 transform 屬性）；點畫成左上打光的小球。
    身分色照 dataviz 驗證（純黑與紫色底都通過、色盲 ΔE ≥ 9.4）：國外＝#3987e5、台股＝#d95926、族群／主題＝#199e70；
    文字用文字色；線越粗越相關、虛線＝AI 草擬待核可。 */
 .cq-ng {
@@ -47,10 +48,10 @@
 /* ── 畫布 ── */
 .cq-ng-stage { flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; }
 .cq-ng-stage svg { display: block; }
-.cq-ng-ring { fill: none; stroke: rgba(255, 255, 255, .06); stroke-width: 1; }
+.cq-ng-ring { fill: none; stroke: rgba(255, 255, 255, .07); stroke-width: 1; }
 
 /* 線：打開時從中心畫出去（一度、二度、三度依序）；草擬的虛線改成淡入 */
-.cq-ng-edge { fill: none; stroke: rgba(255, 255, 255, .26); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .6s ease, stroke .2s, opacity .25s; }
+.cq-ng-edge { fill: none; stroke: rgba(255, 255, 255, .32); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .6s ease, stroke .2s; }
 .cq-ng-link.d2 .cq-ng-edge { transition-delay: .17s, 0s, 0s; }
 .cq-ng-link.d3 .cq-ng-edge { transition-delay: .34s, 0s, 0s; }
 .cq-ng-edge.draft { stroke: rgba(255, 255, 255, .3); stroke-dasharray: 4 4; stroke-dashoffset: 0; opacity: 0; transition: opacity .5s ease .25s, stroke .2s; }
@@ -69,17 +70,15 @@ svg.focus .cq-ng-link:not(.hot) { opacity: .15; }
 .boom .cq-ng-center .shock { animation: ng-shock 1.2s ease-out 1; }
 @keyframes ng-shock { from { transform: scale(1); opacity: .7; } to { transform: scale(8); opacity: 0; } }
 
-/* 點：實心色點＋黑邊；從中心炸開到自己的位置（--x、--y、--delay 由元件給） */
-.cq-ng-node { transform: translate(0, 0) scale(.15); opacity: 0; cursor: pointer; outline: none;
-  transition: transform .75s cubic-bezier(.2, .9, .25, 1.12) var(--delay), opacity .3s ease var(--delay); }
-.boom .cq-ng-node { transform: translate(var(--x), var(--y)) scale(1); opacity: 1; }
+/* 點：左上打光的小球＋黑邊（位置、大小、亮暗由元件每格算） */
+.cq-ng-node { cursor: pointer; outline: none; }
 svg.focus .cq-ng-node:not(.hot) { opacity: .3; }
 .cq-ng-node .hit { fill: transparent; }
 .cq-ng-node .dot { stroke: #000; stroke-width: 2; }
-.cq-ng-node.abroad .dot { fill: var(--ng-abroad); }
-.cq-ng-node.tw .dot { fill: var(--ng-tw); }
-.cq-ng-node.cluster .dot { fill: var(--ng-cluster); }
-.cq-ng-node .sel { fill: none; stroke: #fff; stroke-width: 2; animation: ng-sel .3s ease-out; }
+.cq-ng-node.abroad .dot { fill: url(#ng-ball-abroad); }
+.cq-ng-node.tw .dot { fill: url(#ng-ball-tw); }
+.cq-ng-node.cluster .dot { fill: url(#ng-ball-cluster); }
+.cq-ng-node .sel { fill: none; stroke: #fff; stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: ng-sel .3s ease-out; }
 @keyframes ng-sel { from { transform: scale(1.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .cq-ng-node:focus-visible .dot { stroke: #fff; }
 .cq-ng-node .more { font-size: 11.5px; font-weight: 600; fill: var(--ng-mute); pointer-events: none; }
@@ -159,6 +158,6 @@ svg.focus .cq-ng-node:not(.hot) { opacity: .3; }
 .cq-ng-demo-key .cluster::before { background: #199e70; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cq-ng-node, .cq-ng-edge { transition: none !important; }
+  .cq-ng-edge { transition: none !important; }
   .cq-ng-center .shock, .cq-ng-flow, .cq-ng-node .sel { animation: none !important; }
 }

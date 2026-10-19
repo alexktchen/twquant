@@ -134,3 +134,64 @@ export function hiddenKids(n: GNode, nodes: GNode[], opened: Set<string>): numbe
   if (n.degree !== 2 || opened.has(n.id)) return 0
   return nodes.filter((x) => x.parent === n.id).length
 }
+
+// ── 3D 版（使用者 2026-10-19：「可以有 3D 感嗎」）────────────────────────────
+// 放射狀樹的角度與半徑照舊，三圈放在一個斜著看的軌道盤上（各圈高度不同：內低外高的漏斗，側看時三圈仍分得開）；
+// 整盤繞垂直軸轉、再往下俯視，透視投影成畫面座標：近的大、遠的小。
+
+export type P3 = { x: number; y: number; z: number }
+/** 投影後的畫面座標（y 往下）；z 越大越靠近看的人；s＝近大遠小的倍率。 */
+export type Proj = { x: number; y: number; z: number; s: number }
+
+/** 每個點在 3D 的位置（y 往下為正）：heights[d-1]＝第 d 度那圈的高度。 */
+export function orbitLayout(placed: Placed[], heights: [number, number, number]): Map<string, P3> {
+  const out = new Map<string, P3>()
+  for (const p of placed) out.set(p.id, { x: p.r * Math.cos(p.angle), y: heights[Math.min(p.degree, 3) - 1], z: p.r * Math.sin(p.angle) })
+  return out
+}
+
+/** 透視投影：先繞垂直軸轉 yaw、再前後傾 pitch（負＝從上往下看），dist＝鏡頭到圓心的距離。 */
+export function project(p: P3, yaw: number, pitch: number, dist: number): Proj {
+  const x1 = p.x * Math.cos(yaw) - p.z * Math.sin(yaw)
+  const z1 = p.x * Math.sin(yaw) + p.z * Math.cos(yaw)
+  const y2 = p.y * Math.cos(pitch) - z1 * Math.sin(pitch)
+  const z2 = p.y * Math.sin(pitch) + z1 * Math.cos(pitch)
+  const s = dist / Math.max(1, dist - z2)
+  return { x: x1 * s, y: y2 * s, z: z2, s }
+}
+
+/** 3D 的線：從父點彎到子點（控制點＝子點往圓心縮，跟平面版一樣像從中心炸開），三點各自投影。 */
+export function edgePath3(from: Proj, ctrl: Proj, to: Proj): string {
+  const f = (n: number) => n.toFixed(1)
+  return `M${f(from.x)},${f(from.y)} Q${f(ctrl.x)},${f(ctrl.y)} ${f(to.x)},${f(to.y)}`
+}
+
+/** 高度 y、半徑 r 的水平軌道環投影成的路徑：繞著轉的時候形狀不變，是畫面上最明顯的立體線索。 */
+export function orbitPath(r: number, y: number, yaw: number, pitch: number, dist: number, steps = 64): string {
+  const pts: string[] = []
+  for (let i = 0; i <= steps; i++) {
+    const a = (2 * Math.PI * i) / steps
+    const q = project({ x: r * Math.cos(a), y, z: r * Math.sin(a) }, yaw, pitch, dist)
+    pts.push(`${i === 0 ? 'M' : 'L'}${q.x.toFixed(1)},${q.y.toFixed(1)}`)
+  }
+  return pts.join('')
+}
+
+/** 三圈投影後的外框（最外圈的最左／右／上／下），算「整盤放得下畫面」的縮放用。 */
+export function orbitBounds(radii: [number, number, number], heights: [number, number, number], yaw: number, pitch: number, dist: number): { w: number; top: number; bottom: number } {
+  let left = 0
+  let right = 0
+  let top = 0
+  let bottom = 0
+  radii.forEach((r, i) => {
+    for (let k = 0; k < 48; k++) {
+      const a = (2 * Math.PI * k) / 48
+      const q = project({ x: r * Math.cos(a), y: heights[i], z: r * Math.sin(a) }, yaw, pitch, dist)
+      left = Math.min(left, q.x)
+      right = Math.max(right, q.x)
+      top = Math.min(top, q.y)
+      bottom = Math.max(bottom, q.y)
+    }
+  })
+  return { w: right - left, top, bottom }
+}

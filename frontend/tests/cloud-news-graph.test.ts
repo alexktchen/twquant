@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { childrenOf, classOf, edgePath, pathTo, radialLayout, showLabel, strokeOf, tableRows, viaText, type GNode, type NewsGraph } from '../src/cloud/news-graph.ts'
+import { childrenOf, classOf, edgePath, orbitBounds, orbitLayout, orbitPath, pathTo, project, radialLayout, showLabel, strokeOf, tableRows, viaText, type GNode, type NewsGraph } from '../src/cloud/news-graph.ts'
 
 const n = (id: string, degree: number, parent: string | null, extra: Partial<GNode> = {}): GNode => ({
   id,
@@ -79,4 +79,27 @@ test('關係圖示範資料：每個點的上一層都在圖上、度數連續�
     }
     assert.ok(childrenOf(g.nodes).get(null)!.length >= 3)
   }
+})
+
+test('關係圖 3D：每個點在自己那一圈的高度與半徑上；透視近大遠小、俯視時近的在畫面下方；軌道環與外框同輸入同輸出', () => {
+  const nodes = [n('A', 1, null), n('B', 1, null, { score: 0.9 }), n('A1', 2, 'A'), n('A2', 2, 'A', { score: 0.4 }), n('B1', 2, 'B')]
+  const H: [number, number, number] = [20, 0, -20]
+  const pos = orbitLayout(radialLayout(nodes, R), H)
+  for (const x of nodes) {
+    const v = pos.get(x.id)!
+    assert.ok(Math.abs(Math.hypot(v.x, v.z) - R[x.degree - 1]) < 0.05, `${x.id} 在第 ${x.degree} 圈`)
+    assert.equal(v.y, H[x.degree - 1])
+  }
+  const near = project({ x: 100, y: 0, z: 100 }, 0, 0, 640)
+  const far = project({ x: 100, y: 0, z: -100 }, 0, 0, 640)
+  assert.ok(near.s > 1 && far.s < 1 && near.x > far.x, '靠近鏡頭的比較大')
+  assert.ok(Math.abs(project({ x: 0, y: 50, z: 0 }, 0, 0, 640).y - 50) < 1e-9, '正對著看、不傾斜 → 原樣')
+  // 從上往下看：靠近鏡頭的點在畫面下方（y 正）、遠的在上方（y 負）
+  assert.ok(project({ x: 0, y: 0, z: 100 }, 0, -0.5, 640).y > 0)
+  assert.ok(project({ x: 0, y: 0, z: -100 }, 0, -0.5, 640).y < 0)
+  const ring = orbitPath(100, 0, 0, -0.3, 640, 8)
+  assert.ok(ring.startsWith('M') && ring.split('L').length === 9, '八段的軌道環')
+  assert.equal(orbitPath(100, 0, 0, -0.3, 640, 8), ring, '同輸入同輸出')
+  const b = orbitBounds(R, H, 0.5, -0.6, 640)
+  assert.ok(b.w > 2 * R[2] * 0.95 && b.top < 0 && b.bottom > 0 && b.bottom > -b.top, '俯視：寬約兩倍半徑、近的那半邊比較大')
 })
