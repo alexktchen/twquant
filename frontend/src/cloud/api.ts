@@ -8,6 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
+import type { NewsHealth, NewsKind, NewsRow } from './news'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
@@ -127,6 +128,15 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
+/** 新聞分頁（T-400）：新聞流；until 含這個時間（翻頁用）。 */
+export function fetchNewsItems(q: { kind: NewsKind | null; limit: number; until?: string }) {
+  const p = new URLSearchParams({ limit: String(q.limit) })
+  if (q.kind) p.set('kind', q.kind)
+  if (q.until) p.set('until', q.until)
+  return get<{ items: NewsRow[] }>(`/api/news/items?${p}`)
+}
+/** 新聞服務最後抓取時間與各來源狀態。 */
+export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
 /** 盤中大盤體檢（T-397）：排程每分鐘更新；今天還沒有 → live 是 null。 */
 export const fetchMarketLive = () => get<{ live: LiveMarket | null }>('/api/warroom/live')
 /** 首頁版面（使用者 2026-10-17：依帳號儲存卡片位置與收起）：沒存過 → layout 是 null。 */

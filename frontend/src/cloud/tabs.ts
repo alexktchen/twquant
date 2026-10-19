@@ -1,8 +1,8 @@
 // 網站的分頁，與推播通知點開時要開哪一個。
 // T-379／D-188：首頁改成戰情室（home），原本的「盤勢」分頁併進首頁——族群資金通知帶的 ?tab=group（T-354）照樣認得，開首頁。
 
-export type Tab = 'home' | 'picks' | 'score' | 'watch'
-const TABS: readonly Tab[] = ['home', 'picks', 'score', 'watch']
+export type Tab = 'home' | 'news' | 'picks' | 'score' | 'watch'
+const TABS: readonly Tab[] = ['home', 'news', 'picks', 'score', 'watch']
 /** 舊網址的分頁名 → 現在的分頁 */
 const ALIASES: Record<string, Tab> = { group: 'home' }
 

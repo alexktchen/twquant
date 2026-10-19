@@ -9,6 +9,7 @@ export const ITEMS_DEFAULT = 100
 
 export type ItemsQuery = {
   since: string | null
+  /** 含（≤）：同一次進料的一批同一個時間，翻頁時不能跳過；重複的由網站去掉（每來源每次最多 per_run_limit 則 < 一頁） */
   until: string | null
   kind: 'intl' | 'tw' | null
   source: string | null
