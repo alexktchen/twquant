@@ -117,6 +117,8 @@ morning_brief:
     - {category: headline, label: 頭條}
     - {category: wd_stock, label: 國際股}
   news_since_hour: 14
+  # 盤後快訊（2026-10-19，使用者：「這邊台灣晚上時間也要跑一次」）：取今天 09:00（開盤）起到快訊當下的新聞
+  evening_news_since_hour: 9
   news_fetch_limit: 30
   headline_limit: 8
   # 頭條只有標題，數字檢查抓不到方向寫反（2026-10-17 實見：「美債殖利率急跌」被寫成「急升」）：

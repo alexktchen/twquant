@@ -5,7 +5,7 @@ import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { LINES } from '../../_lib/picks'
 import { readNewColumn, readRows } from '../../_lib/scorecard'
-import { briefDates, selectBrief } from '../../_lib/brief-db'
+import { briefDates, selectLatestBrief } from '../../_lib/brief-db'
 import { BRIEF_DATES_LIMIT, CALENDAR_DAYS, addDays, attachContent, pickNews, revenueDeadline, taipeiDay, type NewsRow } from '../../_lib/warroom'
 
 type Row = Record<string, unknown>
@@ -13,7 +13,7 @@ type Row = Record<string, unknown>
 const handle: PagesFunction<Env> = async ({ env }) =>
   guarded(env, async (db) => {
     const today = taipeiDay(Date.now())
-    const brief = await selectBrief(db, null)
+    const brief = await selectLatestBrief(db)
     const briefDays = await briefDates(db, BRIEF_DATES_LIMIT)
     // to_jsonb：日期變成 "YYYY-MM-DD"、數字照數字，不經過驅動程式的 Date
     const [m] = await readRows(

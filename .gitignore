@@ -21,3 +21,6 @@ dist/
 
 # 執行中腳本的快照副本（bash 會重讀檔案，所以一律跑副本）
 scripts/.run_*.running.sh
+
+# Supabase CLI link 的暫存（專案代號、pooler 網址）
+news-service/supabase/.temp/

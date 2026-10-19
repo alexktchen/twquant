@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { latestOf } from '../functions/_lib/brief-latest.ts'
 import { briefDates, selectActual, selectBrief } from '../functions/_lib/brief-db.ts'
 import { briefNeighbors } from '../src/cloud/war.ts'
 
@@ -25,7 +26,7 @@ test('使用者 2026-10-17：今日一句話選日期——前一天（較舊）
 test('使用者 2026-10-17：歷史晨報從存好的表讀——指定那天、最新一天、日期清單、當天實際收盤', async () => {
   const calls: string[] = []
   const row = { date: '2026-10-16', headline: '外資賣壓未歇' }
-  assert.deepEqual(await selectBrief(fakeDb([() => Promise.resolve([row])], calls), '2026-10-16'), row)
+  assert.deepEqual(await selectBrief(fakeDb([() => Promise.resolve([row])], calls), '2026-10-16'), { ...row, edition: 'morning' })
   assert.ok(calls[0].includes('serving.morning_brief') && calls[0].includes('"2026-10-16"'))
   assert.ok(calls[0].includes("inputs->'headlines'"), '歷史那天的新聞頭條一起回')
   assert.equal(await selectBrief(fakeDb([], calls), null), null)
@@ -50,9 +51,19 @@ test('使用者 2026-10-17：表還沒建 → 沒有晨報，不讓首頁壞掉'
 
 test('使用者 2026-10-17：首頁回日期清單、歷史端點驗日期格式且不呼叫模型', () => {
   const home = readFileSync(new URL('../functions/api/warroom/index.ts', import.meta.url), 'utf8')
-  assert.ok(home.includes('selectBrief(db, null)') && home.includes('brief_dates: briefDays'))
+  assert.ok(home.includes('selectLatestBrief(db)') && home.includes('brief_dates: briefDays'), '首頁拿盤前、盤後裡最新的那份（T-409）')
   const api = readFileSync(new URL('../functions/api/warroom/brief.ts', import.meta.url), 'utf8')
   assert.ok(api.includes('DATE_RE.test(date)') && api.includes('fail(400'))
   assert.ok(api.includes('selectBrief(db, date)') && api.includes('selectActual(db, date)'))
   assert.ok(!/ai\/run|workers-ai|insight/i.test(api), '歷史只讀存好的晨報')
+})
+
+test('T-409：首頁拿盤前、盤後裡 generated_at 較新的那份；只有一份就是那份', () => {
+  const m = { generated_at: '2026-10-20 06:31', edition: 'morning' as const }
+  const e = { generated_at: '2026-10-19 21:46', edition: 'evening' as const }
+  assert.equal(latestOf(m, e), m, '隔天早上換回盤前')
+  assert.equal(latestOf({ ...m, generated_at: '2026-10-19 06:31' }, e), e, '晚上看到盤後')
+  assert.equal(latestOf(m, null), m)
+  assert.equal(latestOf(null, e), e)
+  assert.equal(latestOf(null, null), null)
 })

@@ -1,7 +1,9 @@
-"""T-377／D-188：晨報——收資料（假 PG、假行情）、規則一句話、模型版、表與排程。不連網、不連 DB。"""
+"""T-377／D-188：晨報——收資料（假 PG、假行情）、規則一句話、模型版、表與排程。不連網、不連 DB。
+T-409（2026-10-19，使用者：「這邊台灣晚上時間也要跑一次」）：盤後快訊——同一套流程 edition="evening"。"""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 from pathlib import Path
@@ -14,7 +16,12 @@ from twquant.data.sources.global_quotes import NightFuture, Quote
 from twquant.data.sources.news_headlines import Headline
 from twquant.insight.client import InsightClient
 from twquant.insight.config import LlmConfig, load_llm_config
-from twquant.insight.prompts import MORNING_BRIEF_PROMPT_VERSION, MORNING_BRIEF_SYSTEM
+from twquant.insight.prompts import (
+    EVENING_BRIEF_PROMPT_VERSION,
+    EVENING_BRIEF_SYSTEM,
+    MORNING_BRIEF_PROMPT_VERSION,
+    MORNING_BRIEF_SYSTEM,
+)
 from twquant.insight.schemas import MorningBrief
 from twquant.reporting.morning_brief import (
     MorningInputs,
@@ -28,6 +35,7 @@ from twquant.reporting.morning_brief import (
     signals,
     strip_self_reference,
     user_payload,
+    write_brief,
 )
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -46,6 +54,8 @@ class _Cursor:
         self.description: list[tuple[str]] = [("x",)]
         self._rows: list[tuple[Any, ...]] = []
         self.seen: list[str] = []
+        self.params: list[tuple[Any, ...]] = []
+        self.copied: list[tuple[Any, ...]] = []
 
     def __enter__(self) -> _Cursor:
         return self
@@ -55,6 +65,7 @@ class _Cursor:
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         self.seen.append(sql)
+        self.params.append(params)
         for needle, cols, rows in self.answers:
             if needle in sql:
                 self.description = [(c,) for c in cols]
@@ -65,20 +76,31 @@ class _Cursor:
     def fetchall(self) -> list[tuple[Any, ...]]:
         return self._rows
 
+    def copy(self, sql: str) -> _Cursor:  # upsert 的 COPY … FROM STDIN
+        self.seen.append(sql)
+        return self
+
+    def write_row(self, row: tuple[Any, ...]) -> None:
+        self.copied.append(row)
+
 
 class _Conn:
     def __init__(self, answers: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
         self.cur = _Cursor(answers)
+        self.commits = 0
 
     def cursor(self) -> _Cursor:
         return self.cur
 
+    def commit(self) -> None:
+        self.commits += 1
 
-def _market_row() -> tuple[list[str], tuple[Any, ...]]:
+
+def _market_row(date: dt.date = MDATE) -> tuple[list[str], tuple[Any, ...]]:
     cols = list(sch.MARKET_DAILY_SPEC.column_names)
     vals: dict[str, Any] = {c: None for c in cols}
     vals.update(
-        date=MDATE,
+        date=date,
         taiex_close=27000.0,
         taiex_chg=-0.0123,
         up=543,
@@ -97,8 +119,8 @@ def _market_row() -> tuple[list[str], tuple[Any, ...]]:
     return cols, tuple(vals[c] for c in cols)
 
 
-def _conn(with_market: bool = True) -> _Conn:
-    mcols, mrow = _market_row()
+def _conn(with_market: bool = True, market_date: dt.date = MDATE) -> _Conn:
+    mcols, mrow = _market_row(market_date)
     tcols = list(sch.TAIFEX_DAILY_SPEC.column_names)
     trow = (MDATE, 3197, 82464, -93675, 9812, 103487, 88.75, 67.6, 55093, 81497, None)
     trow_prev = (
@@ -341,6 +363,11 @@ def test_ac4_table_routing_workflow_and_cron() -> None:
     )
     toml = (_ROOT / "cron-trigger" / "wrangler.toml").read_text(encoding="utf-8")
     assert '"30 22 * * SUN-THU"' in toml and 'MORNING_WORKFLOW = "morning-brief.yml"' in toml
+    # T-409 盤後快訊：另一張表、21:45 那班帶 edition=evening、GHA 備援 21:55
+    assert sch.spec_of("evening_brief").pk == ("date",)
+    assert sch.spec_of("evening_brief").column_names == sch.spec_of("morning_brief").column_names
+    assert '"45 13 * * MON-FRI"' in toml and 'EVENING_CRON = "45 13 * * MON-FRI"' in toml
+    assert '--edition "$EDITION"' in wf and 'cron: "55 13 * * 1-5"' in wf and "edition:" in wf
     assert isinstance(CFG, MorningBriefConfig) and [q.symbol for q in CFG.us_indices] == [
         "^GSPC",
         "^IXIC",
@@ -622,3 +649,161 @@ def test_ac8_direction_is_checked_and_put_first() -> None:
         assert any(why in n for n in notes2), (why, notes2)
     out3, notes3 = check_brief(brief("", ""), inp)  # 舊版模型沒寫方向：不加這一點、不算錯
     assert out3 is not None and out3.bullets == ["外資賣超 250 億"] and notes3 == []
+
+
+# ── T-409：盤後快訊——今天的收盤、今天開盤起的新聞、明天的行事曆、另一張表、盤後提示詞 ──────────
+EVENING_NOW = dt.datetime(2026, 10, 17, 21, 45, tzinfo=TZ)
+
+
+def _news_evening(category: str, limit: int, label: str) -> list[Headline]:
+    return [
+        _head(3, 5, "美股四大指數收黑", day=17),  # 今天 09:00 以前 → 盤後快訊不列
+        _head(5, 10, "台積電法說會上修資本支出", day=17),
+        _head(6, 20, "外資今日賣超 300 億", day=17),
+        _head(1, 22, "Fed 官員暗示 12 月降息"),  # 昨天
+    ]
+
+
+def test_t409_evening_reads_today_close_news_from_open_and_tomorrow_calendar() -> None:
+    conn = _conn(market_date=DAY)
+    inp = gather(
+        conn,
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        fetch_news=_news_evening,
+        now=EVENING_NOW,
+        edition="evening",
+    )
+    assert inp.edition == "evening" and inp.market_date == DAY and inp.market is not None
+    assert any('"market_daily" WHERE date <= %s' in q for q in conn.cur.seen), "盤後讀今天的收盤"
+    cal = [
+        prm
+        for q, prm in zip(conn.cur.seen, conn.cur.params, strict=True)
+        if '"conference_calendar"' in q
+    ]
+    assert cal == [(DAY + dt.timedelta(days=1),)], "行事曆看明天"
+    assert [h.news_id for h in inp.headlines] == [6, 5], "今天 09:00 起的新聞，新到舊"
+    f = facts(inp)
+    assert "明天法說會 2408 南亞科 15:00" in f and "明天除權息：2882" in f
+    assert "2026-10-17 加權指數 -1.23%，收 27,000 點" in f
+    assert user_payload(inp).startswith("以下為今天盤後快訊的事實")
+    # 盤前照舊：昨天的收盤、今天的行事曆
+    conn2 = _conn()
+    inp_m = gather(conn2, "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    assert inp_m.edition == "morning" and inp_m.market_date == MDATE
+    assert any('"market_daily" WHERE date < %s' in q for q in conn2.cur.seen)
+    assert "今天法說會 2408 南亞科 15:00" in facts(inp_m)
+
+
+def test_t409_evening_rule_text_leads_with_today_and_labels_us_as_last_night() -> None:
+    inp = gather(
+        _conn(market_date=DAY),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        edition="evening",
+    )
+    rule = rule_text(inp)
+    assert rule.startswith("今日加權 -1.23%，漲跌家數 543：1238")
+    assert "前一晚美股收紅" in rule and rule.index("今日加權") < rule.index("前一晚美股")
+    assert rule.index("外資賣超") < rule.index("台指期夜盤") < rule.index("前一晚美股")
+    # 日夜盤方向相反時，研判素材寫「今日」而不是「前一交易日」
+    assert inp.night is not None
+    up_night = dataclasses.replace(inp, night=dataclasses.replace(inp.night, chg=0.01))
+    assert any("加權指數今日 -1.23%，夜盤卻 +1.00%" in x for x in signals(up_night))
+    # 盤前的用詞不變
+    inp_m = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    rule_m = rule_text(inp_m)
+    assert rule_m.startswith("美股收紅") and "前一交易日加權 -1.23%" in rule_m
+    assert inp_m.night is not None
+    up_night_m = dataclasses.replace(inp_m, night=dataclasses.replace(inp_m.night, chg=0.01))
+    assert any("加權指數前一交易日 -1.23%，夜盤卻 +1.00%" in x for x in signals(up_night_m))
+
+
+def test_t409_evening_uses_evening_prompt_and_writes_its_own_table(tmp_path: Path) -> None:
+    inp = gather(
+        _conn(market_date=DAY),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        edition="evening",
+    )
+    seen: list[tuple[str, str, str]] = []
+
+    def backend(model_id: str, system: str, user: str, schema: type, max_tokens: int) -> Any:
+        seen.append((model_id, system, user))
+        return (
+            MorningBrief(
+                headline="外資賣壓未歇，台股收黑",
+                bullets=["【研判】外資賣超 250 億，連續賣超 4 天"],
+                risk_note="",
+                stance="",
+                strategy="",
+            ),
+            3000,
+            300,
+        )
+
+    cfg = LlmConfig.model_validate(
+        {
+            "models": {"m": {"id": "qwen-x", "input_usd_per_1m": 1.0, "output_usd_per_1m": 1.0}},
+            "tasks": {"morning_brief": "m"},
+        }
+    )
+    brief, model_id, absent, _ = compose(
+        InsightClient(cfg, tmp_path, api_key="k", backend=backend),
+        inp,
+        EVENING_NOW,
+        max_tokens=1200,
+    )
+    assert brief is not None and absent is None and model_id == "qwen-x"
+    _, system, user = seen[0]
+    assert system == EVENING_BRIEF_SYSTEM and system != MORNING_BRIEF_SYSTEM
+    assert "收盤後" in system and "明天" in system and "2026" not in system
+    assert user.startswith("以下為今天盤後快訊的事實")
+    assert EVENING_BRIEF_PROMPT_VERSION.startswith("2026-") and (
+        EVENING_BRIEF_PROMPT_VERSION != MORNING_BRIEF_PROMPT_VERSION
+    )
+
+    conn = _conn(market_date=DAY)
+    write_brief(
+        conn,
+        "serving",
+        inp,
+        rule_text(inp),
+        brief,
+        model_id=model_id,
+        absent_reason=None,
+        checks=[],
+        now=EVENING_NOW,
+    )
+    sql = "\n".join(conn.cur.seen)
+    assert '"serving"."evening_brief"' in sql and "morning_brief" not in sql
+    # 建表一次 commit、寫入一次 commit
+    assert len(conn.cur.copied) == 1 and conn.cur.copied[0][0] == DAY and conn.commits == 2
+
+    # 盤前寫原本的表
+    conn_m = _conn()
+    inp_m = gather(conn_m, "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
+    write_brief(
+        conn_m,
+        "serving",
+        inp_m,
+        rule_text(inp_m),
+        None,
+        model_id=None,
+        absent_reason="x",
+        checks=[],
+        now=NOW,
+    )
+    assert '"serving"."morning_brief"' in "\n".join(conn_m.cur.seen)

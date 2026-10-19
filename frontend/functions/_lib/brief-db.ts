@@ -1,15 +1,31 @@
 // 「今日一句話」（晨報）的讀取：首頁讀最新一天，歷史頁（使用者 2026-10-17：「做一個可以選日期看歷史的頁面」）讀指定那天。
 // 晨報每天 06:30 寫一筆存在 serving.morning_brief，看網頁不會重叫模型；表還沒建 → 沒有（readRows）。
+// 盤後快訊（T-409，21:45）存 serving.evening_brief；首頁顯示兩張表裡 generated_at 最新的那份（latestOf），歷史頁仍以盤前晨報為準。
+import { latestOf, type Edition } from './brief-latest.ts'
 import type { sql } from './db.ts'
 import { readRows } from './scorecard.ts'
 
 type Db = ReturnType<typeof sql>
 type Row = Record<string, unknown>
+type BriefRow = Row & { generated_at: string; edition: Edition }
 
 /** 那天的晨報；day 為 null → 最新一天。 */
 export async function selectBrief(db: Db, day: string | null): Promise<Row | null> {
-  const [row] = await readRows(
-    () => db<Row[]>`
+  return selectEdition(db, 'morning', day)
+}
+
+/** 某張表（盤前或盤後）那天的一份；day 為 null → 最新一天。表還沒建 → null（readRows）。兩張表欄位相同，查詢寫兩次是為了不用動態表名。 */
+export async function selectEdition(db: Db, edition: Edition, day: string | null): Promise<BriefRow | null> {
+  const rows = await readRows(() =>
+    edition === 'evening'
+      ? db<Row[]>`
+      SELECT date::text AS date, to_char(generated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS generated_at, rule_text, headline, bullets, risk_note,
+             model_id, absent_reason, facts, inputs->'extras' AS extras, inputs->'adr_premium' AS adr_premium,
+             inputs->'headlines' AS headlines
+      FROM serving.evening_brief
+      WHERE ${day}::date IS NULL OR date = ${day}::date
+      ORDER BY date DESC LIMIT 1`
+      : db<Row[]>`
       SELECT date::text AS date, to_char(generated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS generated_at, rule_text, headline, bullets, risk_note,
              model_id, absent_reason, facts, inputs->'extras' AS extras, inputs->'adr_premium' AS adr_premium,
              inputs->'headlines' AS headlines
@@ -17,7 +33,14 @@ export async function selectBrief(db: Db, day: string | null): Promise<Row | nul
       WHERE ${day}::date IS NULL OR date = ${day}::date
       ORDER BY date DESC LIMIT 1`,
   )
-  return row ?? null
+  const row = rows[0]
+  return row ? ({ ...row, edition } as BriefRow) : null
+}
+
+/** 首頁那份：盤前與盤後各取最新一天，再挑 generated_at 較新的（晚上看到盤後、隔天早上換成盤前）。 */
+export async function selectLatestBrief(db: Db): Promise<Row | null> {
+  const [m, e] = await Promise.all([selectEdition(db, 'morning', null), selectEdition(db, 'evening', null)])
+  return latestOf(m, e)
 }
 
 /** 有晨報的日期，新到舊，最多 limit 天。 */

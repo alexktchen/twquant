@@ -5,6 +5,8 @@ export type Quote = { symbol: string; name: string; date: string; last: number; 
 export type Brief = {
   date: string
   generated_at: string
+  /** 盤前晨報（06:30）或盤後快訊（21:45，T-409）；舊資料沒有這欄＝盤前 */
+  edition?: 'morning' | 'evening'
   rule_text: string
   headline: string | null
   bullets: string[] | null

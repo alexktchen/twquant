@@ -84,7 +84,8 @@ export function BriefCard({
         ]
       : [{ key: 'rule', node: <p className="cq-reel-text">{b.rule_text}</p> }]
 
-  // 【方向】那一點（T-396）拿出來放在標題下面，其他照原樣列
+  // 【方向】那一點（T-396）拿出來放在標題下面，其他照原樣列；盤後快訊（T-409）給的是明天的方向
+  const evening = b?.edition === 'evening'
   const direction = (b?.bullets ?? []).map(parseDirection).find((x) => x !== null) ?? null
   const bullets = (b?.bullets ?? []).filter((x) => parseDirection(x) === null).map(parseBullet)
 
@@ -95,8 +96,8 @@ export function BriefCard({
       collapsed={collapsed}
       onToggle={onToggle}
       slides={slides}
-      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30 整理）。'}
-      when={b ? `${viewing ? '歷史・' : ''}${b.generated_at.slice(5, 16).replace('-', '/')}` : undefined}
+      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30、晚上 21:45 整理）。'}
+      when={b ? `${viewing ? '歷史・' : ''}${evening ? '盤後・' : ''}${b.generated_at.slice(5, 16).replace('-', '/')}` : undefined}
       extra={
         !collapsed &&
         current &&
@@ -123,16 +124,16 @@ export function BriefCard({
       {err && <p className="cq-war-mute">讀不到 {viewing} 的晨報：{err}</p>}
       {(loading || waiting) && <p className="cq-war-mute">讀取中…</p>}
       {!loading && !waiting && !err && !b && (
-        <p className="cq-war-mute">{viewing ? '這天沒有晨報。' : '今天的晨報還沒產生（每個交易日早上 6:30 整理）。'}</p>
+        <p className="cq-war-mute">{viewing ? '這天沒有晨報。' : '今天的晨報還沒產生（每個交易日早上 6:30、晚上 21:45 整理）。'}</p>
       )}
       {b && b.headline && b.bullets ? (
         <>
           <p className="cq-brief-headline">{b.headline}</p>
           {direction && (
-            <p className={`cq-brief-dir ${stanceTone(direction.stance)}`} title="AI 依今天的事實給的操作方向；數字都核對過，不喊點位、不保證漲跌，請自行判斷">
+            <p className={`cq-brief-dir ${stanceTone(direction.stance)}`} title={`AI 依${evening ? '今天收盤後' : '今天'}的事實給的操作方向；數字都核對過，不喊點位、不保證漲跌，請自行判斷`}>
               <span className="cq-brief-dir-tag">
                 <HomeIconSvg name="navigation" size={15} />
-                今日方向
+                {evening ? '明日方向' : '今日方向'}
               </span>
               {direction.stance && <b>{direction.stance}</b>}
               <span className="cq-brief-dir-text">{direction.text}</span>
