@@ -414,7 +414,13 @@ export default function CloudApp() {
             <section className="cq-detail" />
           </main>
         ) : (
-          <NewsPage refresh={refresh} />
+          <NewsPage
+            refresh={refresh}
+            onStock={(sid, name) => {
+              setWatchSel({ sid, name })
+              setTab('watch')
+            }}
+          />
         )
       ) : tab === 'score' ? (
         guest ? (
