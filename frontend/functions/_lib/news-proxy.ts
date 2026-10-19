@@ -5,9 +5,11 @@
 export type NewsEnv = { NEWS_API_URL?: string; NEWS_API_KEY?: string }
 
 /** 每個端點准許轉過去的查詢參數（其餘丟掉，不讓瀏覽器亂帶）。 */
-export const ALLOWED: Record<'/v1/items' | '/v1/health', string[]> = {
+export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph', string[]> = {
   '/v1/items': ['since', 'until', 'kind', 'source', 'limit'],
   '/v1/health': [],
+  /** 一則新聞的關係圖（T-402／T-404）：id＝新聞 id；找不到 → 404 照轉 */
+  '/v1/graph': ['id'],
 }
 /** 等新聞服務多久（毫秒）：Edge Function 冷啟動約 1 秒，查詢通常 1 秒內 */
 export const UPSTREAM_TIMEOUT_MS = 8_000

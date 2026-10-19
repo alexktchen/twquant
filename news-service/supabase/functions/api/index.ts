@@ -1,13 +1,28 @@
-// 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh）、/v1/health。
+// 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
+import type { EntityType } from '../../../src/graph.ts'
+import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
 import { validateConfig } from '../../../src/ingest.ts'
 import { authorized, db, json } from '../_shared/io.ts'
 
 const cfg = validateConfig(config)
 const meta = new Map(cfg.sources.map((s) => [s.id, s]))
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null)
+
+const GRAPH_TABLES_TTL_MS = 10 * 60 * 1000
+let graphCache: { at: number; entities: Map<string, EntityRow>; edges: EdgeRow[] } | null = null
+async function graphTables(sql: ReturnType<typeof db>): Promise<{ entities: Map<string, EntityRow>; edges: EdgeRow[] }> {
+  if (graphCache && Date.now() - graphCache.at < GRAPH_TABLES_TTL_MS) return graphCache
+  const [ents, edges] = await Promise.all([
+    sql<EntityRow[]>`select id, type, label, sub from news.entities where valid_to is null`,
+    sql<EdgeRow[]>`select src, dst, type, status, label, rank from news.graph_edges where valid_to is null`,
+  ])
+  graphCache = { at: Date.now(), entities: new Map(ents.map((e) => [e.id, e])), edges }
+  return graphCache
+}
 
 Deno.serve(async (req) => {
   if (req.method !== 'GET') return json({ detail: 'method not allowed' }, 405)
@@ -25,6 +40,49 @@ Deno.serve(async (req) => {
         from news.ingest_runs where started_at > now() - interval '7 days' group by source`
       const runs = rows.map((r) => ({ source: r.source, last_run_at: iso(r.last_run_at), last_ok_at: iso(r.last_ok_at), last_error: r.last_error }))
       return json(health(cfg, runs, new Date()))
+    }
+    if (path === '/v1/graph') {
+      const id = url.searchParams.get('id')
+      if (!id) return json({ detail: '缺 id' }, 400)
+      // 顯示最新一版的標題；關係圖用「目前這一版內容」比對到的實體（一度）
+      const [it] = await sql<{ id: string; source: string; url: string; first_seen_at: Date; title: string; title_zh: string | null; sha: string }[]>`
+        select i.id, i.source, i.url, i.first_seen_at, coalesce(v.title_orig, i.title_orig) as title, t.title_zh,
+               coalesce(v.content_sha, i.content_sha) as sha
+        from news.raw_items i
+        left join lateral (
+          select title_orig, content_sha from news.raw_item_versions
+          where item_id = i.id order by seen_at desc limit 1
+        ) v on true
+        left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
+        where i.id = ${id}`
+      if (!it) return json({ detail: '沒有這則新聞' }, 404)
+      const mentioned = await sql<{ entity_id: string }[]>`
+        select entity_id from news.mentions where item_id = ${it.id} and content_sha = ${it.sha}
+          and rule_version = ${cfg.mention.rule_version} order by entity_id`
+      let nodes: GNode[] = []
+      if (mentioned.length > 0) {
+        // 整張有效的實體表與線表（幾千列）：同族群線要知道整個族群的名次，只抓鄰居算不出來。
+        // 兩張表一天才同步一次（scripts/news_sync_entities.py），同一個函式執行個體暫存 GRAPH_TABLES_TTL_MS（2026-10-20 實測每次重讀要 2.4～3.4 秒）
+        const t = await graphTables(sql)
+        nodes = buildNodes(
+          mentioned.map((m) => m.entity_id),
+          t.edges,
+          t.entities,
+          cfg.graph,
+        )
+      }
+      return json({
+        item: {
+          id: it.id,
+          source_name: meta.get(it.source)?.name ?? it.source,
+          url: it.url,
+          first_seen_at: iso(it.first_seen_at),
+          title: it.title,
+          title_zh: it.title_zh,
+        },
+        rule_version: cfg.mention.rule_version,
+        nodes,
+      })
     }
     if (path === '/v1/items') {
       let q
@@ -48,11 +106,12 @@ Deno.serve(async (req) => {
         title_zh: string | null
         summary_zh: string | null
         tr_status: string | null
+        sha: string
       }[]>`
         select i.id, i.source, i.lang, i.url,
                coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
                i.published_at, i.first_seen_at, coalesce(v.n, 0)::int as versions,
-               t.title_zh, t.summary_zh, t.status as tr_status
+               t.title_zh, t.summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha
         from news.raw_items i
         left join lateral (
           select title_orig, summary_orig, content_sha, count(*) over () as n from news.raw_item_versions
@@ -67,6 +126,21 @@ Deno.serve(async (req) => {
           ${kindSources ? sql`and i.source = any(${kindSources})` : sql``}
         order by i.first_seen_at desc, i.id
         limit ${q.limit}`
+      // 每則目前這一版內容比對到的實體（T-402，一度）；實體已停用（valid_to 有值）的不列
+      const ids = rows.map((r) => r.id)
+      const shaOf = new Map(rows.map((r) => [r.id, r.sha]))
+      const mrows =
+        ids.length === 0
+          ? []
+          : await sql<{ item_id: string; content_sha: string; id: string; type: EntityType; label: string }[]>`
+              select m.item_id, m.content_sha, e.id, e.type, e.label
+              from news.mentions m join news.entities e on e.id = m.entity_id and e.valid_to is null
+              where m.item_id = any(${ids}) and m.rule_version = ${cfg.mention.rule_version}`
+      const mentionsOf = new Map<string, ItemMention[]>()
+      for (const m of mrows) {
+        if (shaOf.get(m.item_id) !== m.content_sha) continue
+        mentionsOf.set(m.item_id, [...(mentionsOf.get(m.item_id) ?? []), { id: m.id, type: m.type, label: m.label }])
+      }
       const items = rows.map((r) => ({
         id: r.id,
         source: r.source,
@@ -83,6 +157,8 @@ Deno.serve(async (req) => {
         translation: r.lang === 'en' ? (r.tr_status ?? 'pending') : null,
         title_zh: r.title_zh,
         summary_zh: r.summary_zh,
+        // 台股在前、再國外、再族群／主題，最多 graph.mentions_per_item 個；沒有 → []
+        mentions: itemMentions(mentionsOf.get(r.id) ?? [], cfg.graph.mentions_per_item),
       }))
       return json({ api_version: API_VERSION, items })
     }

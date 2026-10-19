@@ -55,6 +55,15 @@ curl -H "x-news-key: <第二把>" https://<專案代號>.supabase.co/functions/v
 
 半小時內 `last_ok_at` 會有時間；`sources` 裡 `failing: true` 的來源看 `last_error`。
 
+## 關係圖的實體與線（T-402／T-404）
+
+```bash
+uv run --all-groups python scripts/news_sync_entities.py --dry-run   # 先看會改什麼
+uv run --all-groups python scripts/news_sync_entities.py             # 主庫 stock_meta／stock_group＋configs/news_entities.yaml、news_edges.yaml → news.entities／graph_edges
+```
+
+主庫族群表每 7 天重算，同步跟著跑就好（只改族群名次的線原地更新，其他變動關舊插新）。改了 `configs/news.yaml` 的 `mention`（停用詞、擋字）要把 `rule_version` 加一號，下一輪 ingest 自動重掃全部新聞。
+
 ## 之後改程式
 
 - 改 `configs/news.yaml` → 同步改 `config/news.json` → `npx supabase functions deploy ingest api`。

@@ -1,0 +1,241 @@
+# T-402／D-200：新聞會提到的美股、國外公司、主題（SPEC-017 §6）。台股與族群不寫在這裡，由主庫
+# serving.stock_meta／stock_group 同步（scripts/news_sync_entities.py）。
+# 別名比對規則（news-service/src/mention.ts）：
+#   - 含中文的別名：子字串比對，長的先比、命中的範圍不再給短的用（「美超微」吃掉後「超微」不會再命中）。
+#   - 拉丁別名：大小寫要一樣、前後要字界；全大寫 2～5 字當 ticker；其他拉丁別名至少 mention.latin_min 字元。
+#   - label 也算別名；configs/news.yaml 的 mention.stopwords 整條不建索引。
+# 寫別名的原則：只放新聞標題真的會出現的寫法；容易撞到普通字的不放（全大寫 ticker 是英文單字的如 NOW、COST、
+# TER、ON 不放；「日產」會撞到「日產量」所以寫「日產汽車」；「通用」「現代」「福斯」「聯想」都太常見）。
+# 主題的別名不要跟主庫族群名一模一樣（族群名本身就是別名，重複會讓同一個字命中兩個實體）：
+# 「人工智慧」「伺服器」「散熱」「鋼鐵」交給族群，主題用「AI」「AI伺服器」「液冷」「鋼價」。
+# tests/test_news_entities.py 核對：id／ticker 唯一、別名長度、沒有一條別名指到兩個實體。
+# 2026-10-19 AI 依公開資訊草擬，族群名照主庫 2026-10-19 的 stock_group。
+
+# 美股：ticker（"ON" 這類要加引號，YAML 1.1 會讀成布林）、中文名（台灣用語；沒有通行中文名的用原名）、別名
+us:
+  # 半導體與 IC 設計
+  - {ticker: NVDA, label: 輝達, aliases: [Nvidia, NVIDIA, NVDA, 英偉達]}
+  - {ticker: AMD, label: 超微, aliases: [AMD, Advanced Micro Devices]}
+  - {ticker: INTC, label: 英特爾, aliases: [Intel, INTC]}
+  - {ticker: AVGO, label: 博通, aliases: [Broadcom, AVGO]}
+  - {ticker: QCOM, label: 高通, aliases: [Qualcomm, QCOM]}
+  - {ticker: MU, label: 美光, aliases: [Micron, Micron Technology, 美光科技]}
+  - {ticker: TXN, label: 德州儀器, aliases: [Texas Instruments, TXN, 德儀]}
+  - {ticker: ADI, label: 亞德諾, aliases: [Analog Devices]}
+  - {ticker: MRVL, label: 邁威爾, aliases: [Marvell, Marvell Technology, MRVL]}
+  - {ticker: "ON", label: 安森美, aliases: [onsemi, ON Semiconductor]}
+  - {ticker: NXPI, label: 恩智浦, aliases: [NXP, NXP Semiconductors, NXPI]}
+  - {ticker: MCHP, label: 微芯, aliases: [Microchip Technology, MCHP, 微芯科技]}
+  - {ticker: ARM, label: 安謀, aliases: [Arm Holdings]}
+  - {ticker: MPWR, label: 芯源, aliases: [Monolithic Power, Monolithic Power Systems, MPWR]}
+  - {ticker: QRVO, label: Qorvo, aliases: [Qorvo, QRVO]}
+  - {ticker: SWKS, label: 思佳訊, aliases: [Skyworks, Skyworks Solutions, SWKS]}
+  - {ticker: CRUS, label: Cirrus Logic, aliases: [Cirrus Logic, CRUS]}
+  - {ticker: LSCC, label: 萊迪思, aliases: [Lattice Semiconductor, LSCC]}
+  - {ticker: GFS, label: 格芯, aliases: [GlobalFoundries, GFS, 格羅方德]}
+  - {ticker: ALAB, label: Astera Labs, aliases: [Astera Labs, ALAB]}
+  - {ticker: CRDO, label: Credo, aliases: [Credo Technology, CRDO]}
+  - {ticker: AMKR, label: 艾克爾, aliases: [Amkor, Amkor Technology, AMKR]}
+  - {ticker: SNPS, label: 新思科技, aliases: [Synopsys, SNPS]}
+  - {ticker: CDNS, label: 益華電腦, aliases: [Cadence, Cadence Design Systems, CDNS, 益華]}
+  # 記憶體與儲存
+  - {ticker: WDC, label: 威騰電子, aliases: [Western Digital, WDC, 威騰]}
+  - {ticker: STX, label: 希捷, aliases: [Seagate, Seagate Technology, STX]}
+  - {ticker: SNDK, label: 晟碟, aliases: [SanDisk, Sandisk, SNDK]}
+  # 半導體設備與材料
+  - {ticker: AMAT, label: 應用材料, aliases: [Applied Materials, AMAT, 應材]}
+  - {ticker: LRCX, label: 科林研發, aliases: [Lam Research, LRCX]}
+  - {ticker: KLAC, label: 科磊, aliases: [KLA, KLA Corp, KLAC]}
+  - {ticker: TER, label: 泰瑞達, aliases: [Teradyne]}
+  - {ticker: ENTG, label: Entegris, aliases: [Entegris, ENTG]}
+  # 硬體、網通、光通訊、零組件
+  - {ticker: AAPL, label: 蘋果, aliases: [Apple, AAPL, iPhone, 蘋果公司]}
+  - {ticker: DELL, label: 戴爾, aliases: [Dell, Dell Technologies, DELL]}
+  - {ticker: HPQ, label: 惠普, aliases: [HP Inc, HPQ]}
+  - {ticker: HPE, label: 慧與, aliases: [Hewlett Packard Enterprise, HP Enterprise, HPE]}
+  - {ticker: SMCI, label: 美超微, aliases: [Supermicro, Super Micro, Super Micro Computer, SMCI]}
+  - {ticker: CSCO, label: 思科, aliases: [Cisco, Cisco Systems, CSCO]}
+  - {ticker: ANET, label: Arista, aliases: [Arista, Arista Networks, ANET]}
+  - {ticker: GLW, label: 康寧, aliases: [Corning, GLW]}
+  - {ticker: APH, label: 安費諾, aliases: [Amphenol, APH]}
+  - {ticker: TEL, label: 泰科電子, aliases: [TE Connectivity]}
+  - {ticker: JBL, label: 捷普, aliases: [Jabil, JBL]}
+  - {ticker: FLEX, label: 偉創力, aliases: [Flextronics]}
+  - {ticker: CIEN, label: Ciena, aliases: [Ciena, CIEN]}
+  - {ticker: COHR, label: Coherent, aliases: [Coherent Corp, COHR]}
+  - {ticker: LITE, label: Lumentum, aliases: [Lumentum]}
+  - {ticker: FN, label: Fabrinet, aliases: [Fabrinet]}
+  - {ticker: KEYS, label: 是德科技, aliases: [Keysight, Keysight Technologies, 是德]}
+  - {ticker: LOGI, label: 羅技, aliases: [Logitech, LOGI]}
+  - {ticker: VRT, label: 維諦, aliases: [Vertiv, VRT]}
+  - {ticker: ETN, label: 伊頓, aliases: [Eaton, ETN]}
+  - {ticker: CRWV, label: CoreWeave, aliases: [CoreWeave, CRWV]}
+  # 雲端、網路、軟體
+  - {ticker: MSFT, label: 微軟, aliases: [Microsoft, MSFT]}
+  - {ticker: GOOGL, label: 谷歌, aliases: [Google, Alphabet, GOOGL, GOOG]}
+  - {ticker: AMZN, label: 亞馬遜, aliases: [Amazon, AMZN, AWS, Amazon Web Services]}
+  - {ticker: META, label: Meta, aliases: [Meta, Meta Platforms, Facebook, 臉書]}
+  - {ticker: NFLX, label: 網飛, aliases: [Netflix, NFLX]}
+  - {ticker: ORCL, label: 甲骨文, aliases: [Oracle, ORCL]}
+  - {ticker: CRM, label: 賽富時, aliases: [Salesforce]}
+  - {ticker: ADBE, label: Adobe, aliases: [Adobe, ADBE]}
+  - {ticker: IBM, label: IBM, aliases: [IBM]}
+  - {ticker: NOW, label: ServiceNow, aliases: [ServiceNow]}
+  - {ticker: SNOW, label: Snowflake, aliases: [Snowflake]}
+  - {ticker: PLTR, label: Palantir, aliases: [Palantir, PLTR]}
+  - {ticker: CRWD, label: CrowdStrike, aliases: [CrowdStrike, CRWD]}
+  - {ticker: PANW, label: Palo Alto Networks, aliases: [Palo Alto Networks, PANW]}
+  - {ticker: UBER, label: Uber, aliases: [Uber, UBER]}
+  # 電動車、汽車、工業、國防
+  - {ticker: TSLA, label: 特斯拉, aliases: [Tesla, TSLA]}
+  - {ticker: RIVN, label: Rivian, aliases: [Rivian, RIVN]}
+  - {ticker: LCID, label: Lucid, aliases: [Lucid Motors, Lucid Group, LCID]}
+  - {ticker: F, label: 福特, aliases: [Ford, Ford Motor]}
+  - {ticker: GM, label: 通用汽車, aliases: [General Motors, GM]}
+  - {ticker: GE, label: 奇異航太, aliases: [GE Aerospace, General Electric]}
+  - {ticker: GEV, label: GE Vernova, aliases: [GE Vernova, GEV]}
+  - {ticker: HON, label: 漢威聯合, aliases: [Honeywell]}
+  - {ticker: BA, label: 波音, aliases: [Boeing]}
+  - {ticker: LMT, label: 洛克希德馬丁, aliases: [Lockheed Martin, Lockheed, LMT, 洛克希德, 洛馬]}
+  - {ticker: RTX, label: 雷神, aliases: [RTX, Raytheon]}
+  - {ticker: CAT, label: 開拓重工, aliases: [Caterpillar]}
+  - {ticker: DE, label: 強鹿, aliases: [Deere, John Deere]}
+  - {ticker: FDX, label: 聯邦快遞, aliases: [FedEx, FDX]}
+  # 能源、電力
+  - {ticker: XOM, label: 埃克森美孚, aliases: [Exxon, ExxonMobil, Exxon Mobil, XOM, 艾克森美孚]}
+  - {ticker: CVX, label: 雪佛龍, aliases: [Chevron, CVX]}
+  - {ticker: CEG, label: Constellation Energy, aliases: [Constellation Energy, CEG]}
+  - {ticker: VST, label: Vistra, aliases: [Vistra]}
+  - {ticker: ENPH, label: Enphase, aliases: [Enphase, Enphase Energy, ENPH]}
+  - {ticker: FSLR, label: 第一太陽能, aliases: [First Solar, FSLR]}
+  # 零售、消費
+  - {ticker: WMT, label: 沃爾瑪, aliases: [Walmart, WMT]}
+  - {ticker: COST, label: 好市多, aliases: [Costco]}
+  - {ticker: HD, label: 家得寶, aliases: [Home Depot]}
+  - {ticker: NKE, label: 耐吉, aliases: [Nike, NKE]}
+  - {ticker: LULU, label: Lululemon, aliases: [Lululemon, lululemon, LULU]}
+  - {ticker: SBUX, label: 星巴克, aliases: [Starbucks, SBUX]}
+  - {ticker: MCD, label: 麥當勞, aliases: [McDonald's, McDonald’s]}
+  - {ticker: KO, label: 可口可樂, aliases: [Coca-Cola]}
+  - {ticker: PEP, label: 百事, aliases: [PepsiCo, Pepsi, 百事公司, 百事可樂]}
+  - {ticker: DIS, label: 迪士尼, aliases: [Disney, Walt Disney]}
+  # 金融
+  - {ticker: JPM, label: 摩根大通, aliases: [JPMorgan, JPMorgan Chase, J.P. Morgan, JPM, 小摩]}
+  - {ticker: GS, label: 高盛, aliases: [Goldman Sachs, Goldman]}
+  - {ticker: MS, label: 摩根士丹利, aliases: [Morgan Stanley, 大摩]}
+  - {ticker: BAC, label: 美國銀行, aliases: [Bank of America, BofA, 美銀]}
+  - {ticker: C, label: 花旗, aliases: [Citigroup, Citi, 花旗集團]}
+  - {ticker: WFC, label: 富國銀行, aliases: [Wells Fargo]}
+  - {ticker: BRK.B, label: 波克夏, aliases: [Berkshire Hathaway, Berkshire]}
+  - {ticker: BLK, label: 貝萊德, aliases: [BlackRock]}
+  - {ticker: V, label: Visa, aliases: [Visa]}
+  - {ticker: MA, label: 萬事達卡, aliases: [Mastercard, 萬事達]}
+  - {ticker: PYPL, label: PayPal, aliases: [PayPal, PYPL]}
+  - {ticker: COIN, label: Coinbase, aliases: [Coinbase]}
+  - {ticker: MSTR, label: 微策略, aliases: [MicroStrategy, MSTR]}
+  # 醫藥
+  - {ticker: LLY, label: 禮來, aliases: [Eli Lilly, Lilly]}
+  - {ticker: UNH, label: 聯合健康, aliases: [UnitedHealth, UNH]}
+  - {ticker: JNJ, label: 嬌生, aliases: [Johnson & Johnson, J&J]}
+  - {ticker: PFE, label: 輝瑞, aliases: [Pfizer, PFE]}
+  - {ticker: MRK, label: 默克, aliases: [Merck]}
+  # 電信
+  - {ticker: T, label: AT&T, aliases: [AT&T]}
+  - {ticker: VZ, label: Verizon, aliases: [Verizon, 威訊]}
+  - {ticker: TMUS, label: T-Mobile, aliases: [T-Mobile, TMUS]}
+
+# 非美股的國外公司（含未上市的 OpenAI、SpaceX）：id（小寫英文）、中文名、國家、別名
+companies:
+  # 韓國
+  - {id: samsung, label: 三星, country: 韓國, aliases: [Samsung, Samsung Electronics, 三星電子]}
+  - {id: skhynix, label: SK海力士, country: 韓國, aliases: [SK hynix, SK Hynix, 海力士]}
+  - {id: lgelec, label: LG電子, country: 韓國, aliases: [LG Electronics]}
+  - {id: lgdisplay, label: 樂金顯示, country: 韓國, aliases: [LG Display]}
+  - {id: lgensol, label: LG新能源, country: 韓國, aliases: [LG Energy Solution]}
+  - {id: hyundai, label: 現代汽車, country: 韓國, aliases: [Hyundai, Hyundai Motor]}
+  # 日本
+  - {id: sony, label: 索尼, country: 日本, aliases: [Sony, 新力]}
+  - {id: tokyoelectron, label: 東京威力科創, country: 日本, aliases: [Tokyo Electron, 東京電子]}
+  - {id: advantest, label: 愛德萬測試, country: 日本, aliases: [Advantest, 愛德萬]}
+  - {id: renesas, label: 瑞薩, country: 日本, aliases: [Renesas, Renesas Electronics, 瑞薩電子]}
+  - {id: kioxia, label: 鎧俠, country: 日本, aliases: [Kioxia]}
+  - {id: softbank, label: 軟銀, country: 日本, aliases: [SoftBank, Softbank, 軟銀集團]}
+  - {id: toyota, label: 豐田, country: 日本, aliases: [Toyota, 豐田汽車]}
+  - {id: honda, label: 本田, country: 日本, aliases: [Honda, 本田汽車]}
+  - {id: nissan, label: 日產汽車, country: 日本, aliases: [Nissan]}
+  - {id: mitsubishi, label: 三菱電機, country: 日本, aliases: [Mitsubishi Electric]}
+  - {id: panasonic, label: 松下, country: 日本, aliases: [Panasonic, 國際牌]}
+  - {id: nintendo, label: 任天堂, country: 日本, aliases: [Nintendo]}
+  - {id: rapidus, label: Rapidus, country: 日本, aliases: [Rapidus]}
+  - {id: murata, label: 村田製作所, country: 日本, aliases: [Murata, Murata Manufacturing]}
+  - {id: shinetsu, label: 信越化學, country: 日本, aliases: [Shin-Etsu, Shin-Etsu Chemical]}
+  - {id: sumco, label: SUMCO, country: 日本, aliases: [SUMCO, Sumco]}
+  # 歐洲
+  - {id: asml, label: 艾司摩爾, country: 荷蘭, aliases: [ASML]}
+  - {id: infineon, label: 英飛凌, country: 德國, aliases: [Infineon, Infineon Technologies]}
+  - {id: stmicro, label: 意法半導體, country: 瑞士, aliases: [STMicroelectronics, STMicro]}
+  - {id: bosch, label: 博世, country: 德國, aliases: [Bosch]}
+  - {id: siemens, label: 西門子, country: 德國, aliases: [Siemens]}
+  - {id: schneider, label: 施耐德電機, country: 法國, aliases: [Schneider Electric, 施耐德]}
+  - {id: abb, label: ABB, country: 瑞士, aliases: [ABB]}
+  - {id: volkswagen, label: 福斯汽車, country: 德國, aliases: [Volkswagen, VW]}
+  - {id: mercedes, label: 賓士, country: 德國, aliases: [Mercedes-Benz, Mercedes]}
+  - {id: bmw, label: BMW, country: 德國, aliases: [BMW, 寶馬]}
+  - {id: nokia, label: 諾基亞, country: 芬蘭, aliases: [Nokia]}
+  - {id: ericsson, label: 愛立信, country: 瑞典, aliases: [Ericsson]}
+  - {id: novonordisk, label: 諾和諾德, country: 丹麥, aliases: [Novo Nordisk]}
+  # 中國
+  - {id: smic, label: 中芯, country: 中國, aliases: [SMIC, 中芯國際]}
+  - {id: huawei, label: 華為, country: 中國, aliases: [Huawei]}
+  - {id: xiaomi, label: 小米, country: 中國, aliases: [Xiaomi]}
+  - {id: byd, label: 比亞迪, country: 中國, aliases: [BYD]}
+  - {id: catl, label: 寧德時代, country: 中國, aliases: [CATL]}
+  - {id: alibaba, label: 阿里巴巴, country: 中國, aliases: [Alibaba]}
+  - {id: tencent, label: 騰訊, country: 中國, aliases: [Tencent]}
+  - {id: baidu, label: 百度, country: 中國, aliases: [Baidu]}
+  - {id: deepseek, label: DeepSeek, country: 中國, aliases: [DeepSeek, 深度求索]}
+  - {id: lenovo, label: 聯想集團, country: 中國, aliases: [Lenovo]}
+  # 其他
+  - {id: celestica, label: 天弘, country: 加拿大, aliases: [Celestica]}
+  - {id: openai, label: OpenAI, country: 美國, aliases: [OpenAI]}
+  - {id: spacex, label: SpaceX, country: 美國, aliases: [SpaceX]}
+
+# 主題：id（小寫英文）、中文名、別名（會出現在標題裡的詞；英文標題有句首大寫與標題大寫兩種寫法）
+themes:
+  - {id: ai, label: AI, aliases: [生成式AI, 生成式 AI, artificial intelligence, Artificial intelligence, Artificial Intelligence, generative AI, Generative AI]}
+  - {id: memory, label: 記憶體, aliases: [DRAM, NAND, HBM, memory chip, memory chips, Memory chip, Memory chips, memory stocks, Memory stocks]}
+  - {id: chips, label: 晶片股, aliases: [半導體股, chip stocks, Chip stocks, chipmaker, chipmakers, Chipmaker, Chipmakers, semiconductor stocks, Semiconductor stocks]}
+  - {id: foundry, label: 晶圓代工, aliases: [foundry, Foundry, 先進製程, 2奈米]}
+  - {id: packaging, label: 先進封裝, aliases: [CoWoS, SoIC, advanced packaging, Advanced packaging]}
+  - {id: datacenter, label: 資料中心, aliases: [數據中心, data center, data centers, Data center, Data centers, data centre, data centres, hyperscaler, hyperscalers]}
+  - {id: aiserver, label: AI伺服器, aliases: [AI 伺服器, AI server, AI servers]}
+  - {id: cooling, label: 液冷, aliases: [液冷散熱, liquid cooling, Liquid cooling]}
+  - {id: cpo, label: 矽光子, aliases: [CPO, 共同封裝光學, silicon photonics, Silicon photonics, co-packaged optics]}
+  - {id: pcb, label: PCB, aliases: [ABF, ABF載板]}
+  - {id: smartphone, label: 智慧型手機, aliases: [智慧手機, smartphone, smartphones, Smartphone, Smartphones]}
+  - {id: robot, label: 機器人, aliases: [人形機器人, humanoid, humanoids, Humanoid, robotics, Robotics, robot, robots, Robot, Robots]}
+  - {id: ev, label: 電動車, aliases: [EV, EVs, electric vehicle, electric vehicles, Electric vehicle, Electric vehicles]}
+  - {id: satellite, label: 低軌衛星, aliases: [衛星, Starlink, 星鏈, satellite, satellites, Satellite]}
+  - {id: drone, label: 無人機, aliases: [drone, drones, Drone, Drones]}
+  - {id: defense, label: 國防, aliases: [軍工, 國防預算, defense stocks, Defense stocks, defense spending, Defense spending]}
+  - {id: power, label: 電網, aliases: [缺電, 重電, 電力需求, power grid, Power grid, power demand, electricity demand]}
+  - {id: solar, label: 太陽能, aliases: [solar, Solar]}
+  - {id: wind, label: 風電, aliases: [離岸風電, offshore wind, Offshore wind]}
+  - {id: shipping, label: 航運, aliases: [貨櫃航運, 運價, shipping, Shipping, freight rates, Red Sea, 紅海]}
+  - {id: steel, label: 鋼價, aliases: [steel, Steel, steel prices]}
+  - {id: oil, label: 油價, aliases: [原油, 國際油價, oil prices, Oil prices, oil price, Oil price, crude, Crude, Brent, WTI, OPEC]}
+  - {id: gold, label: 金價, aliases: [黃金, gold prices, Gold prices, gold price, Gold price]}
+  - {id: crypto, label: 加密貨幣, aliases: [比特幣, Bitcoin, bitcoin, crypto, Crypto, cryptocurrency]}
+  - {id: biotech, label: 生技, aliases: [新藥, 減肥藥, biotech, Biotech, GLP-1, weight-loss drug, weight-loss drugs, obesity drug, obesity drugs]}
+  - {id: quantum, label: 量子運算, aliases: [量子電腦, quantum computing, Quantum computing, quantum computer, quantum computers]}
+  - {id: tariff, label: 關稅, aliases: [tariff, tariffs, Tariff, Tariffs]}
+  - {id: uschina, label: 美中關係, aliases: [美中, 中美, 貿易戰, US-China, U.S.-China, trade war, Trade war]}
+  - {id: exportcontrol, label: 出口管制, aliases: [晶片禁令, 實體清單, export controls, Export controls, export control, Entity List]}
+  - {id: taiwanstrait, label: 台海, aliases: [兩岸, 台海情勢, Taiwan Strait]}
+  - {id: geopolitics, label: 地緣政治, aliases: [geopolitical, Geopolitical, geopolitics, Geopolitics]}
+  - {id: fed, label: 聯準會, aliases: [美聯儲, Fed, Federal Reserve, FOMC]}
+  - {id: rates, label: 利率, aliases: [降息, 升息, rate cut, rate cuts, Rate cut, Rate cuts, rate hike, rate hikes, interest rates, Interest rates]}
+  - {id: inflation, label: 通膨, aliases: [通貨膨脹, CPI, PCE, inflation, Inflation]}
+  - {id: jobs, label: 非農就業, aliases: [非農, 就業報告, jobs report, Jobs report, payrolls, Payrolls, nonfarm payrolls]}
+  - {id: recession, label: 經濟衰退, aliases: [recession, Recession]}
+  - {id: fx, label: 匯率, aliases: [美元指數, 新台幣升值, 新台幣貶值, 台幣升值, 台幣貶值, dollar index, Dollar index]}

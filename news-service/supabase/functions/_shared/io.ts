@@ -2,6 +2,7 @@
 // 邏輯都在 news-service/src（純函式、有測試）；這裡只有 SQL 與 HTTP。
 import postgres from 'npm:postgres@3.4.5'
 import type { FetchResult, NewsStore, SourceState } from '../../../src/ingest.ts'
+import type { EntityAliases, MentionDeps, PendingItem } from '../../../src/mention.ts'
 import type { Pending, TranslateDeps } from '../../../src/translate.ts'
 
 export type Sql = ReturnType<typeof postgres>
@@ -106,6 +107,55 @@ export function translateDeps(sql: Sql, model: string): TranslateDeps {
         await sql`insert into news.translations ${sql(data)} on conflict (item_id, content_sha) do nothing`
       }
       if (usage.length > 0) await sql`insert into news.llm_usage ${sql(usage)}`
+    },
+  }
+}
+
+/** 比對新聞提到哪些實體要的資料庫（T-402）。 */
+export function mentionDeps(sql: Sql, ruleVersion: string): MentionDeps {
+  return {
+    now: () => new Date(),
+    entities: () => sql<EntityAliases[]>`
+      select id, label, aliases from news.entities where valid_to is null order by id`,
+    // 「目前這一版內容」還沒比對過的，新的先。英文新聞要等這一版翻過（ok 或 failed 都算翻過）才比：
+    // 台股的別名只有中文名，先用英文比完記進 mention_runs 就不會再比譯文了；中文新聞直接比
+    pending: (limit) => sql<PendingItem[]>`
+      select i.id as item_id, coalesce(v.content_sha, i.content_sha) as content_sha,
+             coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
+             t.title_zh, t.summary_zh
+      from news.raw_items i
+      left join lateral (
+        select title_orig, summary_orig, content_sha from news.raw_item_versions
+        where item_id = i.id order by seen_at desc limit 1
+      ) v on true
+      left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
+      where (i.lang <> 'en' or t.item_id is not null)
+        and not exists (
+          select 1 from news.mention_runs r where r.item_id = i.id and r.content_sha = coalesce(v.content_sha, i.content_sha)
+            and r.rule_version = ${ruleVersion}
+        )
+      order by i.first_seen_at desc, i.id
+      limit ${limit}`,
+    save: async (hits, runs, ruleVersion) => {
+      if (hits.length === 0 && runs.length === 0) return
+      await sql.begin(async (tx) => {
+        // 命中與「比對過了」同一個交易寫：不會命中寫了、紀錄沒寫（下次重比），也不會紀錄寫了、命中沒寫（漏掉）
+        if (hits.length > 0) {
+          const rows = hits.map((h) => ({
+            item_id: h.item_id,
+            entity_id: h.entity,
+            content_sha: h.content_sha,
+            method: 'alias',
+            evidence: h.evidence,
+            rule_version: ruleVersion,
+          }))
+          await tx`insert into news.mentions ${tx(rows)} on conflict do nothing`
+        }
+        if (runs.length > 0) {
+          const rows = runs.map((r) => ({ item_id: r.item_id, content_sha: r.content_sha, n: r.n, rule_version: ruleVersion }))
+          await tx`insert into news.mention_runs ${tx(rows)} on conflict do nothing`
+        }
+      })
     },
   }
 }
