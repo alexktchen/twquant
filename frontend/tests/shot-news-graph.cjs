@@ -1,5 +1,5 @@
 // 新聞關係圖（地鐵路線圖）截圖（手動檢查用）：node tests/shot-news-graph.cjs <baseUrl> <outDir> <items.json> <health.json>
-// 用 ?demo=graph 的示範資料；新聞服務還沒上線時 /api/news/* 用錄好的回應代替。
+// 示範資料在新聞分頁預設就顯示；新聞服務還沒上線時 /api/news/* 用錄好的回應代替。
 const { chromium } = require('playwright')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -15,7 +15,7 @@ const path = require('node:path')
     await page.route('**/api/layout', (r) => r.fulfill({ json: { layout: null } }))
     await page.route('**/api/news/items**', (r) => r.fulfill({ json: items }))
     await page.route('**/api/news/health', (r) => r.fulfill({ json: health }))
-    await page.goto(`${base}/?tab=news&demo=graph`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${base}/?tab=news`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1500)
     const btn = page.getByRole('button', { name: '同意並進入' })
     if ((await btn.count()) > 0) { await page.locator('input[type="checkbox"]').first().check(); await btn.click() }

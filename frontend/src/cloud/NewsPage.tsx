@@ -24,10 +24,9 @@ import './news-graph.css'
 
 type Filter = 'all' | NewsKind
 
-// 關係圖（心智爆炸圖）：只在網址帶 ?demo=graph 時載入（圖與示範資料各自一個檔案，平常不下載）。
+// 關係圖（心智圖）：示範區預設就顯示（使用者 2026-10-19：「心智圖在哪」——藏在 ?demo=graph 後面找不到）；圖與示範資料各自一個檔案，進分頁才下載。
 // 關聯資料（T-402、T-404）上線後改成每則新聞點開就有，這段示範拿掉。
 const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.NewsGraph })))
-const demoMode = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'graph'
 
 const TAG_TITLE: Record<string, string> = {
   譯: 'AI 翻譯（標題與摘要），數字與公司名都核對過；點開看英文原文',
@@ -54,7 +53,6 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   const [graph, setGraph] = useState<NewsGraphData | null>(null)
 
   useEffect(() => {
-    if (!demoMode()) return
     import('./news-graph-demo.json').then((m) => setDemo(m.default as unknown as NewsGraphData[]))
   }, [])
 
