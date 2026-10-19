@@ -1,13 +1,14 @@
 // 新聞關係圖＝心智圖（使用者原話「心智爆炸圖」；2026-10-19 放射圖、HUD、Gemini 風、3D、地鐵路線圖都被退回後「你幫我想一個」）。
 // 新聞在正中間，分支像扇子往外張開：一度、二度、三度一層一層往外，字直接寫在分支末端、底下一條類別色的底線——沒有點、沒有球、
-// 沒有光暈。分支是由粗到細的彩帶，顏色＝到站的類別，越相關越粗，AI 草擬的畫虛線。手機只往右長、可往下捲；桌機左右都長。
+// 沒有光暈。分支是由粗到細的彩帶，顏色＝到站的類別，越相關越粗，AI 草擬的畫虛線。手機只往右長，每一度一欄、一直往右延伸
+// （使用者 2026-10-19：「這個畫面還不錯，就保留這個吧，只是要一直往右邊延伸才對」），超出螢幕就左右、上下捲；桌機左右都長。
 // 點一個名字：亮出它跟新聞的路徑（其他變淡）、底部出現「看個股」；二度點了會展開它的三度，右上角可一次全部展開。
 import { CandlestickChart, ChevronLeft, ChevronsDownUp, ChevronsUpDown, Newspaper, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CLASS_LABEL, classOf, mindBranches, mindLayout, pathTo, topTw, viaText, type GClass, type GNode, type MindOpts, type NewsGraph as Graph } from './news-graph'
 
-/** 手機（窄）：只往右長、三度縮排在二度底下；桌機：左右都長、三度自己一欄 */
-const PHONE: MindOpts = { rowH: { 1: 42, 2: 44, 3: 40 }, slotW: { 1: 98, 2: 104, 3: 100 }, gap: 24, indent3: 16, twoSided: false, centerW: 104, centerH: 66, pad: 12 }
+/** 手機（窄）：只往右長、每一度一欄（三度不再縮排在二度底下），比螢幕寬就往右捲；桌機：左右都長 */
+const PHONE: MindOpts = { rowH: { 1: 42, 2: 44, 3: 40 }, slotW: { 1: 98, 2: 104, 3: 108 }, gap: 26, indent3: null, twoSided: false, centerW: 104, centerH: 66, pad: 12 }
 const DESK: MindOpts = { rowH: { 1: 44, 2: 44, 3: 40 }, slotW: { 1: 112, 2: 116, 3: 128 }, gap: 30, indent3: null, twoSided: true, centerW: 150, centerH: 72, pad: 16 }
 const DESK_MIN_W = 900
 

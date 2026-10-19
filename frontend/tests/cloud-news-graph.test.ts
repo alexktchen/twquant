@@ -54,6 +54,23 @@ test('心智圖（手機、只往右）：一度在自己子樹的正中間、�
   assert.deepEqual(mindLayout(nodes, new Set(['A1']), PHONE, 390), open, '同輸入同輸出')
 })
 
+test('心智圖（手機現行設定：只往右、每一度一欄）：三度在二度右邊一欄、跟二度同高置中；畫布比 390 寬＝往右捲（使用者 2026-10-19：「要一直往右邊延伸」）', () => {
+  const RIGHT: MindOpts = { ...PHONE, indent3: null, slotW: { 1: 98, 2: 104, 3: 108 }, gap: 26 }
+  const nodes = [n('A', 1, null), n('A1', 2, 'A'), n('A1x', 3, 'A1'), n('A1y', 3, 'A1'), n('B', 1, null, { score: 0.9 }), n('B1', 2, 'B')]
+  const lay = mindLayout(nodes, new Set(['A1']), RIGHT, 390)
+  const by = new Map(lay.items.map((i) => [i.n.id, i]))
+  for (const i of lay.items) assert.equal(i.side, 1, '只往右')
+  assert.equal(by.get('A1x')!.x, by.get('A1')!.x + 104 + 26, '三度在二度右邊一欄')
+  assert.equal(by.get('A1y')!.x, by.get('A1x')!.x)
+  const mid = (id: string) => by.get(id)!.top + by.get(id)!.h / 2
+  assert.equal(mid('A1'), (mid('A1x') + mid('A1y')) / 2, '二度在它的三度中間')
+  assert.equal(lay.width, 12 + 104 + 26 + 98 + 26 + 104 + 26 + 108 + 12, '三欄排開的寬度')
+  assert.ok(lay.width > 390, '比手機螢幕寬 → 往右捲')
+  const br = new Map(mindBranches(lay, RIGHT).map((b) => [b.to, b]))
+  const a1 = by.get('A1')!
+  assert.ok(br.get('A1x')!.d.startsWith(`M${(a1.x + a1.w).toFixed(1)},`), '三度的分支從二度底線的末端往右長')
+})
+
 test('心智圖（桌機、左右都長）：高的那棵先放、往比較矮的那邊放；左邊的字格在中心左邊、三度自己一欄', () => {
   const nodes = [n('A', 1, null), n('B', 1, null, { score: 0.9 }), n('C', 1, null, { score: 0.8 }), n('A1', 2, 'A'), n('A2', 2, 'A'), n('A3', 2, 'A'), n('B1', 2, 'B'), n('C1', 2, 'C'), n('C1x', 3, 'C1')]
   const lay = mindLayout(nodes, new Set(['C1']), DESK, 1200)
