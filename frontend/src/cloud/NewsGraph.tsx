@@ -1,30 +1,39 @@
-// 新聞關係圖＝地鐵路線圖（使用者 2026-10-19 在三個方向裡選的，呼應「像地鐵告示一樣」；之前的放射圖、HUD、Gemini 風、3D 都被退回）。
-// 全螢幕、往下捲：起點站是這則新聞，主幹往下一站一站是新聞直接提到的公司（一度）；每一站往右岔出台灣供應商或同業（二度），
-// 點二度的站再岔出同族群的其他台股（三度）。站＝白圓＋類別色邊，線＝類別色、越粗越相關、AI 草擬畫虛線。
-// 點一站：亮出它跟新聞的路徑（其他變淡）、底部出現「看個股」。純深色底，沒有光暈、漸層、透明。
+// 新聞關係圖＝心智圖（使用者原話「心智爆炸圖」；2026-10-19 放射圖、HUD、Gemini 風、3D、地鐵路線圖都被退回後「你幫我想一個」）。
+// 新聞在正中間，分支像扇子往外張開：一度、二度、三度一層一層往外，字直接寫在分支末端、底下一條類別色的底線——沒有點、沒有球、
+// 沒有光暈。分支是由粗到細的彩帶，顏色＝到站的類別，越相關越粗，AI 草擬的畫虛線。手機只往右長、可往下捲；桌機左右都長。
+// 點一個名字：亮出它跟新聞的路徑（其他變淡）、底部出現「看個股」；二度點了會展開它的三度，右上角可一次全部展開。
 import { CandlestickChart, ChevronLeft, ChevronsDownUp, ChevronsUpDown, Newspaper, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CLASS_LABEL, classOf, pathTo, routeLines, routeRows, topTw, viaText, type Depth, type GClass, type GNode, type NewsGraph as Graph, type RowH } from './news-graph'
+import { CLASS_LABEL, classOf, mindBranches, mindLayout, pathTo, topTw, viaText, type GClass, type GNode, type MindOpts, type NewsGraph as Graph } from './news-graph'
 
-/** 三欄的 x（一度在主幹、二度、三度各往右一欄）、線圖的寬 */
-const COLS: [number, number, number] = [30, 74, 118]
-const LINES_W = 150
-const ROW_H: RowH = { 1: 56, 2: 48, 3: 40 }
-const ORIGIN_H = 62
-const STATION_R: Record<Depth, number> = { 1: 11, 2: 8, 3: 5 }
+/** 手機（窄）：只往右長、三度縮排在二度底下；桌機：左右都長、三度自己一欄 */
+const PHONE: MindOpts = { rowH: { 1: 42, 2: 44, 3: 40 }, slotW: { 1: 98, 2: 104, 3: 100 }, gap: 24, indent3: 16, twoSided: false, centerW: 104, centerH: 66, pad: 12 }
+const DESK: MindOpts = { rowH: { 1: 44, 2: 44, 3: 40 }, slotW: { 1: 112, 2: 116, 3: 128 }, gap: 30, indent3: null, twoSided: true, centerW: 150, centerH: 72, pad: 16 }
+const DESK_MIN_W = 900
 
 const chgText = (c: number | undefined) => (c === undefined ? '' : `${c > 0 ? '▲' : c < 0 ? '▼' : ''}${Math.abs(c).toFixed(2)}%`)
 
 export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: () => void; onStock: (sid: string, name: string) => void }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [opened, setOpened] = useState<Set<string>>(new Set())
+  const [viewW, setViewW] = useState(390)
   const map = useRef<HTMLDivElement>(null)
 
-  const rows = useMemo(() => routeRows(graph.nodes, opened, ROW_H, ORIGIN_H), [graph, opened])
-  const segs = useMemo(() => routeLines(rows, COLS, ORIGIN_H / 2), [rows])
-  const total = (rows.length ? rows[rows.length - 1].y + rows[rows.length - 1].h : ORIGIN_H) + 12
+  useEffect(() => {
+    const el = map.current
+    if (!el) return
+    const fit = () => setViewW(el.clientWidth)
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const opts = viewW >= DESK_MIN_W ? DESK : PHONE
+  const lay = useMemo(() => mindLayout(graph.nodes, opened, opts, viewW), [graph, opened, opts, viewW])
+  const branches = useMemo(() => mindBranches(lay, opts), [lay, opts])
   const onPath = useMemo(() => new Set(selected ? pathTo(graph.nodes, selected).map((n) => n.id) : []), [graph, selected])
-  // 有三度可展開的二度站
+  // 有三度可展開的二度
   const expandable = useMemo(() => graph.nodes.filter((n) => n.degree === 2 && graph.nodes.some((x) => x.parent === n.id)).map((n) => n.id), [graph])
   const allOpen = expandable.every((id) => opened.has(id))
 
@@ -34,11 +43,10 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // 從底部面板點的站可能在畫面外：捲到看得到
+  // 從底部面板點的名字可能在畫面外：捲到看得到
   useEffect(() => {
     if (!selected || !map.current) return
-    const el = map.current.querySelector<HTMLElement>(`[data-id="${CSS.escape(selected)}"]`)
-    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    map.current.querySelector<HTMLElement>(`[data-id="${CSS.escape(selected)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
   }, [selected])
 
   const pick = (n: GNode) => {
@@ -50,6 +58,8 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
   const sel = selected ? graph.nodes.find((n) => n.id === selected) ?? null : null
   const chain = sel ? pathTo(graph.nodes, sel.id) : []
   const counts = [1, 2, 3].map((d) => graph.nodes.filter((n) => n.degree === d).length)
+  // 進場順序：一層一層往外、同層由上到下
+  const order = new Map(lay.items.map((it, i) => [it.n.id, (it.depth - 1) * 160 + i * 18]))
 
   return (
     <div className="cq-ng" role="dialog" aria-modal="true" aria-label="新聞關係圖">
@@ -77,7 +87,7 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
             {CLASS_LABEL[c]}
           </span>
         ))}
-        <span className="cq-ng-key line" title="線越粗＝跟這則新聞越相關">
+        <span className="cq-ng-key line" title="分支越粗＝跟這則新聞越相關">
           粗＝較相關
         </span>
         <span className="cq-ng-key draft" title="AI 依公開資訊草擬、還沒經過核可的關係">
@@ -86,58 +96,41 @@ export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: 
       </div>
 
       <div className={selected ? 'cq-ng-map focus' : 'cq-ng-map'} ref={map} onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
-        <div className="cq-ng-route" style={{ height: total }}>
-          <svg className="cq-ng-lines" width={LINES_W} height={total} aria-hidden="true">
-            {segs.map((s, i) => (
-              <path
-                key={s.to}
-                className={['seg', s.cls, s.draft ? 'draft' : '', onPath.has(s.to) ? 'hot' : ''].join(' ')}
-                d={s.d}
-                strokeWidth={s.w}
-                pathLength={s.draft ? undefined : 1}
-                style={{ ['--i' as string]: i }}
-              />
-            ))}
-            <g className="origin" transform={`translate(${COLS[0]},${ORIGIN_H / 2})`}>
-              <circle r={14} />
-              <Newspaper x={-8} y={-8} width={16} height={16} strokeWidth={2} />
-            </g>
-            {rows.map((r, i) => (
-              <g
-                key={r.n.id}
-                className={['st', `d${r.depth}`, r.cls, onPath.has(r.n.id) ? 'hot' : '', selected === r.n.id ? 'on' : ''].join(' ')}
-                transform={`translate(${COLS[r.depth - 1]},${r.cy})`}
-                style={{ ['--i' as string]: i }}
-              >
-                {selected === r.n.id && <circle className="sel" r={STATION_R[r.depth] + 5} />}
-                <circle className="dot" r={STATION_R[r.depth]} />
-              </g>
-            ))}
+        <div className="cq-ng-canvas" style={{ width: lay.width, height: lay.height }} onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
+          <svg className="cq-ng-branches" width={lay.width} height={lay.height} aria-hidden="true">
+            {branches.map((b) =>
+              b.draft ? (
+                <path key={b.to} className={['br', 'draft', b.cls, onPath.has(b.to) ? 'hot' : ''].join(' ')} d={b.d} strokeWidth={b.w} style={{ ['--d' as string]: order.get(b.to) ?? 0 }} />
+              ) : (
+                <path key={b.to} className={['br', b.cls, onPath.has(b.to) ? 'hot' : ''].join(' ')} d={b.d} style={{ ['--d' as string]: order.get(b.to) ?? 0 }} />
+              ),
+            )}
           </svg>
-          <div className="cq-ng-origin" style={{ height: ORIGIN_H, paddingLeft: COLS[0] + 26 }}>
+          <div className="cq-ng-center" style={{ left: lay.cx - opts.centerW / 2, top: lay.cy - opts.centerH / 2, width: opts.centerW, height: opts.centerH }}>
+            <Newspaper size={18} aria-hidden="true" />
             <b>這則新聞</b>
             <small>{graph.item.source_name}</small>
           </div>
-          {rows.map((r, i) => {
-            const n = r.n
-            const c = classOf(n.type)
+          {lay.items.map((it) => {
+            const n = it.n
+            const c = it.cls
             return (
               <button
                 key={n.id}
                 data-id={n.id}
-                className={['cq-ng-row', `d${r.depth}`, c, onPath.has(n.id) ? 'hot' : '', selected === n.id ? 'on' : ''].join(' ')}
-                style={{ top: r.y, height: r.h, paddingLeft: COLS[r.depth - 1] + 26, ['--i' as string]: i }}
+                className={['cq-ng-node', `d${it.depth}`, c, it.side === 1 ? 'r' : 'l', onPath.has(n.id) ? 'hot' : '', selected === n.id ? 'on' : ''].join(' ')}
+                style={{ left: it.x, top: it.top, width: it.w, height: it.h, ['--d' as string]: order.get(n.id) ?? 0 }}
                 onClick={() => pick(n)}
                 aria-label={`${n.label}，${CLASS_LABEL[c]}，${n.degree} 度，${viaText(n)}${n.draft ? '，AI 草擬待核可' : ''}`}
                 aria-pressed={selected === n.id}
               >
                 <span className="name">
                   {n.label}
-                  {r.depth === 1 && n.chg !== undefined && <em className={n.chg >= 0 ? 'up' : 'down'}>{chgText(n.chg)}</em>}
+                  {it.depth === 1 && n.chg !== undefined && <em className={n.chg >= 0 ? 'up' : 'down'}>{chgText(n.chg)}</em>}
                 </span>
                 <span className="sub">
-                  {r.depth === 1 ? n.sub : `${viaText(n)}${n.draft && n.via !== 'mention' ? '・草擬' : ''}`}
-                  {r.more > 0 && <i className="more">＋{r.more} 站</i>}
+                  <span>{it.depth === 1 ? n.sub : viaText(n)}</span>
+                  {it.more > 0 && <i className="more">＋{it.more}</i>}
                 </span>
               </button>
             )

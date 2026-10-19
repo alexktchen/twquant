@@ -1,8 +1,8 @@
-/* 新聞關係圖＝地鐵路線圖（使用者 2026-10-19 選的；純深色底，沒有光暈、漸層、透明）。
-   類別色照 dataviz 驗證（深色底兩兩通過、色盲 ΔE ≥ 9.4）：國外＝#3987e5、台股＝#d95926、族群／主題＝#199e70；
-   站＝白圓＋類別色邊（三度是小實心點），線＝類別色、越粗越相關、草擬畫虛線；主幹（新聞→一度）是淺灰白。文字一律用文字色。 */
+/* 新聞關係圖＝心智圖（2026-10-19，使用者退回五版後「你幫我想一個」）。純深色底，沒有點、球、光暈、漸層、透明；
+   字直接寫在分支末端、底下一條類別色的底線；分支是由粗到細的彩帶。
+   類別色照 dataviz 驗證（深色底兩兩通過、色盲 ΔE ≥ 9.4）：國外＝#3987e5、台股＝#d95926、族群／主題＝#199e70；文字一律用文字色。 */
 .cq-ng {
-  --ng-abroad: #3987e5; --ng-tw: #d95926; --ng-cluster: #199e70; --ng-trunk: #c9ccd3; --ng-panel: #15171c; --ng-tile: #1d2027;
+  --ng-abroad: #3987e5; --ng-tw: #d95926; --ng-cluster: #199e70; --ng-panel: #15171c; --ng-tile: #1d2027;
   position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg, #0e0f14); color: var(--text);
   padding-top: env(safe-area-inset-top);
 }
@@ -16,71 +16,67 @@
 
 .cq-ng-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 4px 14px 8px; font-size: 13px; color: var(--mute); border-bottom: 1px solid var(--line); }
 .cq-ng-key { display: inline-flex; align-items: center; gap: 6px; }
-.cq-ng-key i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: #fff; border: 2.5px solid currentColor; box-sizing: border-box; }
+.cq-ng-key i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; background: currentColor; }
 .cq-ng-key.abroad i { color: var(--ng-abroad); }
 .cq-ng-key.tw i { color: var(--ng-tw); }
 .cq-ng-key.cluster i { color: var(--ng-cluster); }
-.cq-ng-key.line::before, .cq-ng-key.draft::before { content: ''; display: inline-block; width: 22px; height: 5px; border-radius: 3px; background: var(--ng-trunk); }
-.cq-ng-key.draft::before { height: 4px; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ng-trunk) 0 6px, transparent 6px 10px); }
+.cq-ng-key.line::before, .cq-ng-key.draft::before { content: ''; display: inline-block; width: 22px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #8a8f98, #8a8f98); clip-path: polygon(0 0, 100% 30%, 100% 70%, 0 100%); }
+.cq-ng-key.draft::before { height: 3px; clip-path: none; background: repeating-linear-gradient(90deg, #8a8f98 0 6px, transparent 6px 10px); }
 
-/* ── 路線圖（往下捲） ── */
+/* ── 畫布（可捲） ── */
 .cq-ng-map { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
-.cq-ng-route { position: relative; width: 100%; max-width: 720px; margin: 0 auto; }
-.cq-ng-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.cq-ng-canvas { position: relative; }
+.cq-ng-branches { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.cq-ng-branches .br { animation: ng-in .45s ease both; animation-delay: calc(var(--d) * 1ms); transition: opacity .2s; }
+.cq-ng-branches .br.abroad { fill: var(--ng-abroad); }
+.cq-ng-branches .br.tw { fill: var(--ng-tw); }
+.cq-ng-branches .br.cluster { fill: var(--ng-cluster); }
+.cq-ng-branches .br.draft { fill: none; stroke-linecap: round; stroke-dasharray: 6 5; }
+.cq-ng-branches .br.draft.abroad { stroke: var(--ng-abroad); }
+.cq-ng-branches .br.draft.tw { stroke: var(--ng-tw); }
+.cq-ng-branches .br.draft.cluster { stroke: var(--ng-cluster); }
+@keyframes ng-in { from { opacity: 0; } }
 
-/* 線：打開時由上往下一段一段畫出來（--i＝第幾列）；草擬的虛線改成淡入 */
-.cq-ng-lines .seg { fill: none; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: ng-draw .35s ease forwards; animation-delay: calc(var(--i) * 28ms); transition: opacity .2s; }
-.cq-ng-lines .seg.trunk { stroke: var(--ng-trunk); }
-.cq-ng-lines .seg.abroad { stroke: var(--ng-abroad); }
-.cq-ng-lines .seg.tw { stroke: var(--ng-tw); }
-.cq-ng-lines .seg.cluster { stroke: var(--ng-cluster); }
-.cq-ng-lines .seg.draft { stroke-dasharray: 7 6; stroke-dashoffset: 0; opacity: 0; animation-name: ng-fade; }
-@keyframes ng-draw { to { stroke-dashoffset: 0; } }
-@keyframes ng-fade { to { opacity: 1; } }
+/* 中心＝這則新聞 */
+.cq-ng-center { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 12px; background: #e6e7eb; color: #0e0f14; }
+.cq-ng-center b { font-size: 14px; font-weight: 700; }
+.cq-ng-center small { font-size: 12px; color: #4b5260; }
 
-/* 站：白圓＋類別色邊；三度是小實心點；起點站是淺灰白大圓加報紙圖示 */
-.cq-ng-lines .st { animation: ng-pop .3s ease both; animation-delay: calc(var(--i) * 28ms); transition: opacity .2s; }
-.cq-ng-lines .st .dot { fill: #fff; stroke-width: 3.5px; }
-.cq-ng-lines .st.d2 .dot { stroke-width: 3px; }
-.cq-ng-lines .st.abroad .dot { stroke: var(--ng-abroad); }
-.cq-ng-lines .st.tw .dot { stroke: var(--ng-tw); }
-.cq-ng-lines .st.cluster .dot { stroke: var(--ng-cluster); }
-.cq-ng-lines .st.d3 .dot { stroke: var(--bg, #0e0f14); stroke-width: 2px; }
-.cq-ng-lines .st.d3.abroad .dot { fill: var(--ng-abroad); }
-.cq-ng-lines .st.d3.tw .dot { fill: var(--ng-tw); }
-.cq-ng-lines .st.d3.cluster .dot { fill: var(--ng-cluster); }
-.cq-ng-lines .st .sel { fill: none; stroke: #fff; stroke-width: 2px; }
-.cq-ng-lines .origin circle { fill: var(--ng-trunk); }
-.cq-ng-lines .origin svg { color: #0e0f14; }
-@keyframes ng-pop { from { opacity: 0; } }
-
-/* 列（整列都能點）：名字＋說明；一度最大 */
-.cq-ng-origin { display: flex; flex-direction: column; justify-content: center; gap: 2px; }
-.cq-ng-origin b { font-size: 15px; font-weight: 600; }
-.cq-ng-origin small { font-size: 12.5px; color: var(--mute); }
-.cq .cq-ng-row { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding-right: 12px;
-  border: 0; border-radius: 0; background: none; color: var(--text); text-align: left; font-family: inherit; cursor: pointer;
-  animation: ng-row .3s ease both; animation-delay: calc(var(--i) * 28ms); transition: opacity .2s, background .15s; }
-@keyframes ng-row { from { opacity: 0; transform: translateX(-6px); } }
-.cq .cq-ng-row.on { background: rgba(255, 255, 255, .06); }
-.cq .cq-ng-row:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
-.cq-ng-row .name { display: flex; align-items: baseline; gap: 8px; font-size: 15px; font-weight: 600; line-height: 1.25; }
-.cq-ng-row.d1 .name { font-size: 16.5px; font-weight: 700; }
-.cq-ng-row.d3 .name { font-size: 14.5px; font-weight: 500; }
-.cq-ng-row .name em { font-style: normal; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.cq-ng-row .name em.up { color: var(--up); }
-.cq-ng-row .name em.down { color: var(--down); }
-.cq-ng-row .sub { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--mute); }
-.cq-ng-row .more { font-style: normal; padding: 1px 8px; border-radius: 999px; background: var(--ng-tile); color: var(--text); font-size: 12px; font-weight: 600; }
-/* 點了一站：不在路徑上的站、線、列變淡 */
-.cq-ng-map.focus .cq-ng-row:not(.hot), .cq-ng-map.focus .st:not(.hot), .cq-ng-map.focus .seg:not(.hot) { opacity: .3; }
+/* 字格：名字＋第二行，底下一條類別色底線（分支接在底線的頭）；左邊的靠右對齊 */
+.cq .cq-ng-node { position: absolute; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; padding: 0 2px 4px; box-sizing: border-box;
+  border: 0; border-radius: 0; background: none; color: var(--text); text-align: left; font-family: inherit; cursor: pointer; white-space: nowrap;
+  border-bottom: 2.5px solid currentColor; animation: ng-node .4s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--d) * 1ms); transition: opacity .2s; }
+.cq .cq-ng-node.l { text-align: right; align-items: flex-end; }
+.cq .cq-ng-node.d1 { border-bottom-width: 3px; }
+.cq .cq-ng-node.d3 { border-bottom-width: 2px; }
+.cq .cq-ng-node.abroad { color: var(--ng-abroad); }
+.cq .cq-ng-node.tw { color: var(--ng-tw); }
+.cq .cq-ng-node.cluster { color: var(--ng-cluster); }
+.cq .cq-ng-node.on { background: rgba(255, 255, 255, .07); border-radius: 8px 8px 0 0; }
+.cq .cq-ng-node:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@keyframes ng-node { from { opacity: 0; transform: translateX(-8px); } }
+.cq .cq-ng-node.l { animation-name: ng-node-l; }
+@keyframes ng-node-l { from { opacity: 0; transform: translateX(8px); } }
+.cq-ng-node .name { display: flex; align-items: baseline; gap: 6px; font-size: 15px; font-weight: 600; line-height: 1.25; color: var(--text); }
+.cq-ng-node.l .name { flex-direction: row-reverse; }
+.cq-ng-node.d1 .name { font-size: 16.5px; font-weight: 700; color: #fff; }
+.cq-ng-node.d3 .name { font-size: 14px; font-weight: 500; }
+.cq-ng-node .name em { font-style: normal; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cq-ng-node .name em.up { color: var(--up); }
+.cq-ng-node .name em.down { color: var(--down); }
+.cq-ng-node .sub { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--mute); max-width: 100%; }
+.cq-ng-node .sub > span { overflow: hidden; text-overflow: ellipsis; }
+.cq-ng-node.l .sub { flex-direction: row-reverse; }
+.cq-ng-node .more { font-style: normal; padding: 0 6px; border-radius: 999px; background: var(--ng-tile); color: var(--text); font-size: 11.5px; font-weight: 700; line-height: 16px; }
+/* 點了一個名字：不在路徑上的分支與名字變淡 */
+.cq-ng-map.focus .cq-ng-node:not(.hot), .cq-ng-map.focus .br:not(.hot) { opacity: .28; }
 
 /* ── 底部面板：路徑與「看個股」；固定高度，點選後內容變多也不會讓上面跳動 ── */
 .cq-ng-sheet { flex: none; height: calc(118px + env(safe-area-inset-bottom)); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); overflow: hidden; border-top: 1px solid var(--line); background: var(--ng-panel); }
 .cq-ng-path { list-style: none; display: flex; flex-wrap: nowrap; align-items: stretch; margin: 0 0 8px; padding: 0 0 2px; overflow-x: auto; scrollbar-width: none; }
 .cq-ng-path li { flex: none; position: relative; display: flex; flex-direction: column; justify-content: center; margin-right: 18px; padding: 4px 10px; border-radius: 10px; background: var(--ng-tile); border-left: 3px solid var(--mute); }
 .cq-ng-path li + li::before { content: '›'; position: absolute; left: -13px; top: 50%; transform: translateY(-50%); color: var(--mute); font-size: 15px; }
-.cq-ng-path li.news { flex-direction: row; align-items: center; gap: 4px; font-size: 14px; border-left-color: var(--ng-trunk); }
+.cq-ng-path li.news { flex-direction: row; align-items: center; gap: 4px; font-size: 14px; border-left-color: #e6e7eb; }
 .cq-ng-path li.abroad { border-left-color: var(--ng-abroad); }
 .cq-ng-path li.tw { border-left-color: var(--ng-tw); }
 .cq-ng-path li.cluster { border-left-color: var(--ng-cluster); }
@@ -110,13 +106,11 @@
 .cq-ng-demo button small { flex: none; font-size: 12.5px; color: var(--mute); }
 .cq-ng-demo-key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .cq-ng-demo-key span { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text); }
-.cq-ng-demo-key span::before { content: ''; width: 11px; height: 11px; border-radius: 50%; background: #fff; border: 2.5px solid #8a8f98; box-sizing: border-box; }
-.cq-ng-demo-key .abroad::before { border-color: #3987e5; }
-.cq-ng-demo-key .tw::before { border-color: #d95926; }
-.cq-ng-demo-key .cluster::before { border-color: #199e70; }
+.cq-ng-demo-key span::before { content: ''; width: 18px; height: 4px; border-radius: 2px; background: #8a8f98; }
+.cq-ng-demo-key .abroad::before { background: #3987e5; }
+.cq-ng-demo-key .tw::before { background: #d95926; }
+.cq-ng-demo-key .cluster::before { background: #199e70; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cq-ng-lines .seg, .cq-ng-lines .st, .cq .cq-ng-row { animation: none !important; }
-  .cq-ng-lines .seg { stroke-dashoffset: 0; }
-  .cq-ng-lines .seg.draft { opacity: 1; }
+  .cq-ng-branches .br, .cq .cq-ng-node { animation: none !important; }
 }
