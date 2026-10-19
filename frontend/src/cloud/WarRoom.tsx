@@ -5,7 +5,7 @@
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
 import { Pencil } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
+import { fetchMarketLive, fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
 import { CalendarCard } from './CalendarCard'
 import { HeadlinesCard } from './HeadlinesCard'
@@ -15,11 +15,51 @@ import { HomeMoodCard } from './MoodCard'
 import { NewsCard } from './NewsCard'
 import { cardDef, type CardId } from './layout'
 import type { Scorecard } from './scorecard'
+import { liveBackoff, shouldPoll, taipeiNow } from './live'
 import { useHomeLayout } from './useHomeLayout'
-import type { Brief, NewsItem, WarRoomData } from './war'
+import { MARKET_POLL_MS, marketView, type Brief, type LiveMarket, type NewsItem, type WarRoomData } from './war'
 
 /** 名單成績卡列哪幾條線（大盤精選、潛伏飆股；高分爆量還在驗證、筆數太少不列）。 */
 const SCORE_LINES = ['CORE', 'QUIET']
+
+/**
+ * 盤中大盤體檢（T-397）：進首頁抓一次；週一到五 9:00～13:35 頁面看得到時每分鐘再抓（伺服器端每分鐘才更新一份）。
+ * 取不到就留著手上那份，30 秒起加倍再試。
+ */
+function useMarketLive(refresh: number): LiveMarket | null {
+  const [live, setLive] = useState<LiveMarket | null>(null)
+  useEffect(() => {
+    let gone = false
+    let failures = 0
+    let pauseUntil = 0
+    let dates: string[] = []
+    const load = () =>
+      fetchMarketLive()
+        .then((r) => {
+          if (gone) return
+          failures = 0
+          dates = r.live ? [r.live.date] : []
+          setLive(r.live)
+        })
+        .catch(() => {
+          failures += 1
+          pauseUntil = Date.now() + liveBackoff(failures, null)
+        })
+    const tick = () => {
+      if (document.visibilityState === 'visible' && Date.now() >= pauseUntil && shouldPoll(taipeiNow(), dates)) load()
+    }
+    load()
+    const t = setInterval(tick, MARKET_POLL_MS)
+    // 手機解鎖回到頁面時馬上更新一次，不用等下一分鐘
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      gone = true
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [refresh])
+  return live
+}
 
 export function WarRoom({
   refresh,
@@ -77,6 +117,8 @@ export function WarRoom({
   }, [data, sidsKey])
 
   const m = data?.market ?? null
+  const live = useMarketLive(refresh)
+  const mv = useMemo(() => marketView(m, live), [m, live])
   const b = data?.brief ?? null
   const shownBrief = shown ?? b
   const listedSids = useMemo(() => new Set(data?.picks?.sids ?? []), [data])
@@ -100,7 +142,7 @@ export function WarRoom({
     mood: () => <HomeMoodCard {...fold('mood')} />,
     intl: () => <IntlCard b={b} {...fold('intl')} />,
     taifex: () => <TaifexCard t={data?.taifex ?? null} {...fold('taifex')} />,
-    market: () => <MarketCard m={m} {...fold('market')} />,
+    market: () => <MarketCard v={mv} {...fold('market')} />,
     chips: () => <ChipsCard m={m} {...fold('chips')} />,
     news: () => (
       <NewsCard

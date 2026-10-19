@@ -102,6 +102,30 @@
 .cq-breadth .up { background: var(--up); }
 .cq-breadth .down { background: var(--down); }
 .cq-breadth .flat { background: #4a4e57; }
+/* 家數字要白色：.cq .up（紅漲文字色）比 .cq-breadth span 優先，字跟底色一樣紅而看不見（2026-10-19 發現） */
+.cq .cq-breadth span { color: #fff; }
+.cq-breadth-wait { margin: 8px 0; font-size: 15px; }
+
+/* 盤中加權分時走勢（T-397）：虛線＝昨收 */
+.cq-spark-wrap { position: relative; margin: 8px 0 2px; }
+.cq-spark { display: block; width: 100%; height: 56px; }
+.cq-live.cq-live-head { margin-left: 0; }
+/* 大盤體檢在窄卡片（桌機一排三四張、約 300px）時三格數字縮小，「7,119 億」「68 / 381」才放得下。
+   只設在這張卡：container-type 會讓裡面 position: fixed 的彈出層被關在卡片裡，別的卡有彈出層 */
+.cq-mkt { container-type: inline-size; }
+@container (max-width: 400px) {
+  .cq-mkt .cq-tiles-3 .cq-kpi { padding: 8px; }
+  .cq-mkt .cq-tiles-3 .cq-kpi-value { font-size: 20px; }
+}
+@container (max-width: 340px) {
+  .cq-mkt .cq-tiles-3 .cq-kpi-value { font-size: 17px; }
+  .cq-mkt .cq-tiles-3 .cq-kpi-sub { font-size: 12px; white-space: normal; }
+}
+.cq-spark-tag { position: absolute; right: 0; transform: translateY(-50%); font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; background: #262830; color: var(--mute); }
+.cq-spark polyline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; stroke: var(--mute); }
+.cq-spark.up polyline { stroke: var(--up); }
+.cq-spark.down polyline { stroke: var(--down); }
+.cq-spark .base { stroke: #4a4e57; stroke-width: 1; stroke-dasharray: 4 4; }
 
 /* ── 名單成績 ── */
 .cq-score-lines { display: grid; gap: 10px; }

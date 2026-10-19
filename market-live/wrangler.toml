@@ -1,0 +1,24 @@
+# T-397／D-198：盤中大盤體檢。每分鐘問證交所三分之一的四碼普通股（每 3 分鐘掃完全市場），算漲跌家數要的報價存進 KV；
+# 網站（frontend/functions/api/warroom/live.ts）讀同一個 KV 加總。邏輯在 frontend/functions/_lib/market-live.ts（共用、有單元測試）。
+# 部署：cd market-live && npx wrangler deploy
+# 看紀錄：Cloudflare 後台 Workers → twquant-market-live → Logs（每次寫了哪一份、或為什麼略過、證交所擋下的錯誤）。
+name = "twquant-market-live"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+[triggers]
+# UTC 01:00–05:59＝台北 09:00–13:59；程式只在 09:00～13:36 抓（RUN_FROM／RUN_UNTIL），國定假日看證交所報價日期自己略過。
+crons = ["* 1-5 * * MON-FRI"]
+
+[vars]
+# 股票清單與前 20 日最高／最低收盤（網站從資料庫算好，每天第一次執行抓一次）
+UNIVERSE_URL = "https://twquant.pages.dev/pub/market-universe"
+
+# 與 frontend/wrangler.toml 的 LIVE 是同一個 KV（2026-10-19 建立）
+[[kv_namespaces]]
+binding = "LIVE"
+id = "23ce8c2b93d44078bd9ef5f4de7476d3"
+
+[observability]
+enabled = true
