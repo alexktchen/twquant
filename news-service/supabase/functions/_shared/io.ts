@@ -4,6 +4,8 @@ import postgres from 'npm:postgres@3.4.5'
 import type { FetchResult, NewsStore, SourceState } from '../../../src/ingest.ts'
 import type { EntityAliases, MentionDeps, PendingItem } from '../../../src/mention.ts'
 import type { Pending, TranslateDeps } from '../../../src/translate.ts'
+import type { CooccurDeps, CooccurEdge, PairCount } from '../../../src/cooccur.ts'
+import type { EntityType } from '../../../src/graph.ts'
 
 export type Sql = ReturnType<typeof postgres>
 
@@ -167,4 +169,47 @@ export const json = (body: unknown, status = 200): Response =>
 export function authorized(req: Request, envName: string): boolean {
   const want = Deno.env.get(envName)
   return Boolean(want) && req.headers.get('x-news-key') === want
+}
+
+/** 從新聞學關係（ingest 第四步，src/cooccur.ts）：同一則新聞一起被提到的配對與次數、現役 cooccur 線的增刪改。 */
+export function cooccurDeps(sql: Sql, ruleVersion: string): CooccurDeps {
+  return {
+    counts: async (windowDays) => {
+      const recent = sql`
+        select distinct m.item_id, m.entity_id from news.mentions m join news.raw_items i on i.id = m.item_id
+        where i.first_seen_at > now() - make_interval(days => ${windowDays}) and m.rule_version = ${ruleVersion}`
+      const [pairs, ents, tot] = await Promise.all([
+        sql<PairCount[]>`
+          with r as (${recent})
+          select x.entity_id as a, y.entity_id as b, count(*)::int as n
+          from r x join r y on x.item_id = y.item_id and x.entity_id < y.entity_id
+          group by 1, 2 having count(*) >= 2`,
+        sql<{ id: string; n: number }[]>`with r as (${recent}) select entity_id as id, count(*)::int as n from r group by 1`,
+        sql<{ n: number }[]>`with r as (${recent}) select count(distinct item_id)::int as n from r`,
+      ])
+      return { pairs, mentionsOf: new Map(ents.map((e) => [e.id, e.n])), total: tot[0]?.n ?? 0 }
+    },
+    types: async () => {
+      const rows = await sql<{ id: string; type: EntityType }[]>`select id, type from news.entities where valid_to is null`
+      return new Map(rows.map((r) => [r.id, r.type]))
+    },
+    linked: async () => {
+      const rows = await sql<{ k: string }[]>`
+        select distinct least(src, dst) || '|' || greatest(src, dst) as k from news.graph_edges
+        where valid_to is null and type <> 'cooccur'`
+      return new Set(rows.map((r) => r.k))
+    },
+    existing: () => sql<CooccurEdge[]>`
+      select src, dst, coalesce(label, '') as label from news.graph_edges where valid_to is null and type = 'cooccur'`,
+    apply: async ({ close, insert, relabel }) => {
+      await sql.begin(async (tx) => {
+        for (const e of close)
+          await tx`update news.graph_edges set valid_to = now() where valid_to is null and type = 'cooccur' and src = ${e.src} and dst = ${e.dst}`
+        for (const e of relabel)
+          await tx`update news.graph_edges set label = ${e.label} where valid_to is null and type = 'cooccur' and src = ${e.src} and dst = ${e.dst}`
+        if (insert.length)
+          await tx`insert into news.graph_edges ${tx(insert.map((e) => ({ src: e.src, dst: e.dst, type: 'cooccur', status: 'approved', label: e.label, source: 'news_cooccur' })))}`
+      })
+    },
+  }
 }

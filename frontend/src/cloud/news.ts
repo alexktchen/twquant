@@ -159,14 +159,14 @@ export type StockNewsCounts = { days: number; counts: Record<string, NewsCount> 
 /** 個股頁一開始列幾則（其餘收起） */
 export const STOCK_NEWS_SHOWN = 5
 
-const VIA_SHORT: Record<string, string> = { supplier: '供應商', belongs: '屬於族群', member: '族群成員', peer: '同族群', theme: '相關主題', mention: '提到' }
+const VIA_SHORT: Record<string, string> = { supplier: '供應商', belongs: '屬於族群', member: '族群成員', peer: '同族群', theme: '相關主題', mention: '提到', cooccur: '新聞常一起提到' }
 
 /** 間接那則怎麼連過來的：「輝達 › 供應商」「伺服器 › 族群成員」（最後一步就是這一檔，不重複寫）；草擬的加「・草擬」。 */
 export function pathText(it: Pick<StockNewsItem, 'path' | 'draft'>): string {
   if (it.path.length < 2) return ''
   const first = it.path[0].label
   const last = it.path[it.path.length - 1]
-  const via = last.via === 'peer' && last.via_label ? `同族群・${last.via_label}` : (VIA_SHORT[last.via] ?? last.via)
+  const via = last.via === 'peer' && last.via_label ? `同族群・${last.via_label}` : last.via === 'cooccur' && last.via_label ? last.via_label : (VIA_SHORT[last.via] ?? last.via)
   return `${first} › ${via}${it.draft ? '・草擬' : ''}`
 }
 

@@ -7,7 +7,8 @@ export type EntityType = 'tw' | 'us' | 'company' | 'group' | 'theme'
 /** id 帶前綴：tw:2330、us:NVDA、co:samsung、grp:晶圓製造、th:AI晶片 */
 export type Entity = { id: string; type: EntityType; label: string }
 /** supplier＝國外公司→台灣供應商；belongs＝台股→族群；member＝族群→成員（由 belongs 反推）；peer＝同業（雙向）；theme＝主題→族群 */
-export type EdgeType = 'supplier' | 'belongs' | 'member' | 'peer' | 'theme'
+/** cooccur＝新聞常一起提到（從新聞學的關係，src/cooccur.ts；雙向） */
+export type EdgeType = 'supplier' | 'belongs' | 'member' | 'peer' | 'theme' | 'cooccur'
 export type Edge = {
   src: string
   dst: string
@@ -53,7 +54,7 @@ export function expandEdges(edges: Edge[]): Edge[] {
   for (const e of edges) {
     add(e)
     if (e.type === 'belongs') add({ src: e.dst, dst: e.src, type: 'member', draft: e.draft, label: e.label })
-    if (e.type === 'peer') add({ src: e.dst, dst: e.src, type: 'peer', draft: e.draft, label: e.label })
+    if (e.type === 'peer' || e.type === 'cooccur') add({ src: e.dst, dst: e.src, type: e.type, draft: e.draft, label: e.label })
   }
   return out
 }
