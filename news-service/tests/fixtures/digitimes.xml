@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+<channel>
+<atom:link href="https://www.digitimes.com/rss/daily.xml" rel="self" type="application/rss+xml" />
+<title>DIGITIMES: News and Insight of the Global Supply Chain</title>
+<link>https://www.digitimes.com</link>
+<description>A platform bridging customers and suppliers</description>
+<language>en-us</language>
+<copyright>Copyright 2026 DIGITIMES Inc.</copyright>
+<lastBuildDate>Mon, 19 Oct 2026 05:00:06 GMT</lastBuildDate>
+<ttl>240</ttl>
+<image>
+<title>DIGITIMES</title>
+<width>131</width>
+<height>62</height>
+<link>https://www.digitimes.com</link>
+<url>https://www.digitimes.com/images/rss_logo.jpg</url>
+</image>
+<item>
+<title>Exclusive: Wooptix targets leading chipmakers with wafer metrology technology, eyes production adoption within 3-5 years</title>
+<pubDate>Mon, 19 Oct 2026 04:42:23 GMT</pubDate>
+<link>https://www.digitimes.com/news/a20261019PD220/interview-wafer-metrology-startup-adoption-spain.html</link>
+<description>Spanish semiconductor metrology startup Wooptix, whose technology originated in astronomical observation, is accelerating efforts to enter the supply chains of leading semiconductor foundries.</description>
+<dc:creator>Scarlett Yu</dc:creator>
+<category>Semiconductors</category>
+<guid isPermaLink="true">https://www.digitimes.com/news/a20261019PD220/interview-wafer-metrology-startup-adoption-spain.html</guid>
+<media:content url="https://img.digitimes.com/newsshow/20261019pd220_files/4_b.jpg" type="image/jpeg" expression="full">
+<media:description type="plain"><![CDATA[Wooptix co-founder and COO Javier Elizalde. Credit: Wooptix]]></media:description>
+</media:content></item>
+<item>
+<title>Toyota to deploy gigacasting in China as Shanghai Lexus plant targets 2027</title>
+<pubDate>Mon, 19 Oct 2026 04:25:45 GMT</pubDate>
+<link>https://www.digitimes.com/news/a20261019PD230/toyota-plant-shanghai-technology-2027.html?chid=10</link>
+<description>Toyota Motor will introduce its proprietary gigacasting technology in China to produce premium vehicles, while it has not disclosed whether it will use equipment from local Chinese suppliers. The automaker also plans to produce the next-generation Corolla in China from 2028 using a common platform compatible with multiple powertrain systems.</description>
+<dc:creator>DIGITIMES</dc:creator>
+<category>East Asia</category>
+<guid isPermaLink="true">https://www.digitimes.com/news/a20261019PD230/toyota-plant-shanghai-technology-2027.html?chid=10</guid>
+<media:content url="https://img.digitimes.com/newsshow/20261019pd230_files/2_b.jpg" type="image/jpeg" expression="full">
+<media:description type="plain"><![CDATA[Credit: AFP]]></media:description>
+</media:content></item>
+<item>
+<title>China probes Huawei-JAC Maextro V800 over brake pedal failure</title>
+<pubDate>Mon, 19 Oct 2026 04:24:20 GMT</pubDate>
+<link>https://www.digitimes.com/news/a20261019PD226/vehicle-market-huawei-brand-testing.html</link>
+<description>China's premium electric vehicle (EV) market is facing renewed safety scrutiny following product defect concerns. Maextro, an ultra-luxury automotive brand jointly developed by Huawei and JAC Motors, has sparked widespread public debate over vehicle safety and testing standards after its V800 MPV suffered consecutive brake pedal bracket fractures during dynamic braking tests.</description>
+<dc:creator>Yunnie Cheng</dc:creator>
+<category>Electric Vehicles</category>
+<guid isPermaLink="true">https://www.digitimes.com/news/a20261019PD226/vehicle-market-huawei-brand-testing.html</guid>
+<media:content url="https://img.digitimes.com/newsshow/20261019pd226_files/2_2b.jpg" type="image/jpeg" expression="full">
+<media:description type="plain"><![CDATA[Credit: Huawei]]></media:description>
+</media:content></item>
+
+</channel>
+</rss>
+

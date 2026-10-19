@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns="http://purl.org/rss/1.0/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <channel rdf:about="https://asia.nikkei.com/rss/feed/nar" xml:lang="en-GB">
+    <title>Nikkei Asia</title>
+    <link>https://asia.nikkei.com/</link>
+    <description/>
+    <items>
+      <rdf:Seq>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/environment/indonesian-wildfires-threaten-forest-carbon-projects"/>
+        <rdf:li resource="https://asia.nikkei.com/business/automobiles/foxconn-mitsubishi-electric-join-forces-for-global-ev-push"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/china-s-q3-gdp-narrowly-beats-forecasts-as-strong-exports-buoy-growth"/>
+        <rdf:li resource="https://asia.nikkei.com/editor-s-picks/interview/russia-wants-something-in-return-for-japan-journalist-ex-detainee-says"/>
+        <rdf:li resource="https://asia.nikkei.com/politics/international-relations/taiwan-tensions/taiwan-philippines-kindle-maritime-cooperation-in-face-of-chinese-pressure"/>
+        <rdf:li resource="https://asia.nikkei.com/business/companies/oasis-may-seek-extraordinary-general-meeting-to-revamp-nidec-board"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/natural-disasters/flooding-tests-ho-chi-minh-city-s-growth-ambitions"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/my-personal-history/edgcomb-stephen-schwarzman-18"/>
+        <rdf:li resource="https://asia.nikkei.com/business/finance/japan-s-regional-banks-log-record-growth-in-property-lending"/>
+        <rdf:li resource="https://asia.nikkei.com/business/markets/trading-asia/japan-s-investors-gear-up-for-23-hour-us-trading"/>
+        <rdf:li resource="https://asia.nikkei.com/opinion/takaichi-s-diy-governance-could-be-her-achilles-heel"/>
+        <rdf:li resource="https://asia.nikkei.com/politics/international-relations/japan-to-allow-taiwan-as-place-of-origin-in-some-national-records"/>
+        <rdf:li resource="https://asia.nikkei.com/business/automobiles/subaru-to-launch-software-defined-vehicles-in-late-2020s"/>
+        <rdf:li resource="https://asia.nikkei.com/business/aerospace-defense-industries/mitsubishi-heavy-to-revive-shipbuilding-line-for-japan-resupply-vessel"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/comment/the-us-china-grand-bargain-remains-out-of-reach"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/ai-climate-and-private-capital-reveal-asia-s-diverging-fortunes"/>
+        <rdf:li resource="https://asia.nikkei.com/editor-s-picks/interview/ai-and-us-china-rivalry-put-universities-to-the-test-vanderbilt-head"/>
+        <rdf:li resource="https://asia.nikkei.com/life-arts/life/destinations/on-the-ganges-the-river-sets-the-itinerary"/>
+        <rdf:li resource="https://asia.nikkei.com/business/markets/property/australian-home-prices-tumble-as-tax-rules-rate-hikes-bite"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/my-personal-history/the-entrepreneurial-spirit-stephen-schwarzman-17"/>
+        <rdf:li resource="https://asia.nikkei.com/opinion/us-and-china-must-ensure-ai-dialogue-is-more-than-just-hot-air"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/trade/japan-to-prohibit-untraced-gold-exports-clamping-down-on-tax-evasion"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/trade/japan-set-to-move-forward-with-bangladesh-s-first-economic-pact"/>
+        <rdf:li resource="https://asia.nikkei.com/business/automobiles/toyota-to-build-next-gen-corolla-in-china-from-2028"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/saudi-finance-minister-says-middle-east-economies-divided-by-crisis"/>
+        <rdf:li resource="https://asia.nikkei.com/business/food-beverage/taiwan-bulks-up-on-protein-packed-bentos-as-obesity-rates-rise"/>
+        <rdf:li resource="https://asia.nikkei.com/politics/delhi-crackdown-fosters-gen-z-defenders-of-indian-democracy"/>
+        <rdf:li resource="https://asia.nikkei.com/business/technology/artificial-intelligence/southeast-asia-caught-amid-competing-us-and-chinese-ai-blocs"/>
+        <rdf:li resource="https://asia.nikkei.com/business/tech/semiconductors/intel-chief-says-contract-chip-business-needs-strong-government-support"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/my-personal-history/mr.-abe-stephen-schwarzman-16"/>
+        <rdf:li resource="https://asia.nikkei.com/business/transportation/japan-s-sumitomo-hankyu-to-test-philippine-power-saving-rail-system"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/big-in-asia/south-korea-s-cj-cgv-is-putting-motion-back-into-motion-pictures"/>
+        <rdf:li resource="https://asia.nikkei.com/politics/international-relations/japan-s-icc-rift-with-us-limits-options-in-handling-china-russia-pressure"/>
+        <rdf:li resource="https://asia.nikkei.com/business/electronics/sony-walkman-is-coming-back-pricier-but-with-better-sound-quality"/>
+        <rdf:li resource="https://asia.nikkei.com/editor-s-picks/interview/us-has-full-confidence-in-takaichi-s-fiscal-discipline-treasury-official"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/cybersecurity/japan-s-power-grid-at-risk-to-hackers-through-100m-home-devices"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/trade/eu-seeks-faster-china-de-risking-with-new-diversification-tool"/>
+        <rdf:li resource="https://asia.nikkei.com/business/technology/artificial-intelligence/calpers-other-institutional-investors-step-up-scrutiny-of-ai-governance"/>
+        <rdf:li resource="https://asia.nikkei.com/business/automobiles/toyota-to-turn-all-50-models-into-software-defined-vehicles-by-2030"/>
+        <rdf:li resource="https://asia.nikkei.com/business/technology/artificial-intelligence/china-s-deepseek-hit-by-5-hour-ai-service-outage"/>
+        <rdf:li resource="https://asia.nikkei.com/business/energy/japan-s-toho-gas-to-generate-solar-power-in-us-with-texas-investment"/>
+        <rdf:li resource="https://asia.nikkei.com/economy/bank-of-japan/boj-s-ueda-says-inflation-can-t-be-allowed-to-rise-further"/>
+        <rdf:li resource="https://asia.nikkei.com/business/technology/artificial-intelligence/anthropic-co-founder-backs-common-sense-standards-for-ai-regulation"/>
+        <rdf:li resource="https://asia.nikkei.com/business/markets/indonesia-stocks-post-largest-drop-in-28-years-after-msci-warns-of-downgrade"/>
+        <rdf:li resource="https://asia.nikkei.com/business/markets/ipo/gcash-parent-prices-philippine-ipo-at-record-966m"/>
+        <rdf:li resource="https://asia.nikkei.com/business/technology/artificial-intelligence/china-to-add-ai-biopharma-and-solar-tech-to-export-control-list"/>
+        <rdf:li resource="https://asia.nikkei.com/opinion/asian-countries-should-consider-sanctions-on-the-houthis"/>
+        <rdf:li resource="https://asia.nikkei.com/business/markets/fed-s-warsh-warns-of-financial-stability-risk-as-investment-rises"/>
+        <rdf:li resource="https://asia.nikkei.com/business/transportation/japan-bullet-trains-to-raise-super-express-fares-in-2027"/>
+        <rdf:li resource="https://asia.nikkei.com/spotlight/supply-chain/optical-parts-maker-to-triple-malaysian-capacity-to-tackle-ai-supply-crunch"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://asia.nikkei.com/spotlight/environment/indonesian-wildfires-threaten-forest-carbon-projects">
+    <title><![CDATA[Indonesian wildfires threaten forest carbon projects]]></title>
+    <link>https://asia.nikkei.com/spotlight/environment/indonesian-wildfires-threaten-forest-carbon-projects</link>
+  </item>
+<item rdf:about="https://asia.nikkei.com/business/automobiles/foxconn-mitsubishi-electric-join-forces-for-global-ev-push">
+    <title><![CDATA[Foxconn, Mitsubishi Electric join forces for global EV push]]></title>
+    <link>https://asia.nikkei.com/business/automobiles/foxconn-mitsubishi-electric-join-forces-for-global-ev-push</link>
+  </item>
+<item rdf:about="https://asia.nikkei.com/economy/china-s-q3-gdp-narrowly-beats-forecasts-as-strong-exports-buoy-growth">
+    <title><![CDATA[China's Q3 GDP narrowly beats forecasts as strong exports buoy growth]]></title>
+    <link>https://asia.nikkei.com/economy/china-s-q3-gdp-narrowly-beats-forecasts-as-strong-exports-buoy-growth</link>
+  </item>
+
+</rdf:RDF>
