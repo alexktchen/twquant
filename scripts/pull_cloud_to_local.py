@@ -41,6 +41,7 @@ TABLES: tuple[str, ...] = (
     "pick_similar",
     "ml_scores",
     "market_daily",
+    "market_breadth_daily",  # T-398
     "taifex_daily",
     "mops_announcements",
     "conference_calendar",

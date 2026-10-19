@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import re
 from dataclasses import dataclass
@@ -53,6 +54,40 @@ class MarketDaily:
     short_balance: float | None  # 融券餘額 TWD 估算
 
 
+@dataclass(frozen=True)
+class Breadth:
+    """One scope's breadth and turnover for a day (whole market or one exchange)."""
+
+    up: int
+    down: int
+    flat: int
+    limit_up: int
+    limit_down: int
+    new_high: int | None
+    new_low: int | None
+    amount: float
+    amount_avg: float | None
+    amount_ratio: float | None
+
+
+@dataclass(frozen=True)
+class MarketBreadth:
+    """The same breadth for one exchange (tse＝上市, otc＝上櫃); one row of `market_breadth_daily`."""
+
+    date: dt.date
+    market: str
+    up: int
+    down: int
+    flat: int
+    limit_up: int
+    limit_down: int
+    new_high: int | None
+    new_low: int | None
+    amount: float
+    amount_avg: float | None
+    amount_ratio: float | None
+
+
 def _chg(
     index_rows: pl.DataFrame, index_id: str, day: dt.date
 ) -> tuple[float | None, float | None]:
@@ -78,30 +113,15 @@ def _streak(values: list[float]) -> int:
     return n * sign
 
 
-def market_daily(
+def _breadth(
+    px: pl.DataFrame,
     day: dt.date,
-    prices: pl.DataFrame,
-    index_rows: pl.DataFrame,
-    institutional: pl.DataFrame,
-    margin: pl.DataFrame,
+    sessions: list[dt.date],
     *,
-    stock_pattern: str,
     avg_sessions: int,
     high_low_window: int,
-) -> MarketDaily:
-    """從 `day`（含）往前的視窗算當天那一列。
-
-    `prices`：date, stock_id, close, amount, limit_up_price, limit_down_price（含 `day` 與之前至少 high_low_window 個交易日）；
-    `index_rows`：date, index_id, close；`institutional`：date, stock_id, foreign_net, trust_net, dealer_net（股）；
-    `margin`：date, stock_id, margin_balance, short_balance。`day` 沒有行情 → DataError。
-    """
-    pat = re.compile(stock_pattern)
-    px = prices.filter(
-        pl.col("stock_id").map_elements(lambda s: bool(pat.match(s)), return_dtype=pl.Boolean)
-    )
-    sessions = sorted(px["date"].unique().to_list(), reverse=True)
-    if not sessions or sessions[0] != day:
-        raise DataError(TABLE, day, f"{day} 沒有行情（最新 {sessions[0] if sessions else '無'}）")
+) -> Breadth:
+    """`px`（已篩好範圍：全市場或單一市場）在 `day` 的家數、漲跌停、新高新低、成交金額；`sessions` 新到舊、[0] 是 `day`。"""
     today = px.filter(pl.col("date") == day)
     prior = sessions[1 : 1 + high_low_window]
     prev_day = sessions[1] if len(sessions) > 1 else None
@@ -159,6 +179,46 @@ def market_daily(
     else:
         amount_avg = amount_ratio = None
 
+    return Breadth(
+        up=up,
+        down=down,
+        flat=flat,
+        limit_up=limit_up,
+        limit_down=limit_down,
+        new_high=new_high,
+        new_low=new_low,
+        amount=amount,
+        amount_avg=amount_avg,
+        amount_ratio=amount_ratio,
+    )
+
+
+def market_daily(
+    day: dt.date,
+    prices: pl.DataFrame,
+    index_rows: pl.DataFrame,
+    institutional: pl.DataFrame,
+    margin: pl.DataFrame,
+    *,
+    stock_pattern: str,
+    avg_sessions: int,
+    high_low_window: int,
+) -> MarketDaily:
+    """從 `day`（含）往前的視窗算當天那一列。
+
+    `prices`：date, stock_id, close, amount, limit_up_price, limit_down_price（含 `day` 與之前至少 high_low_window 個交易日）；
+    `index_rows`：date, index_id, close；`institutional`：date, stock_id, foreign_net, trust_net, dealer_net（股）；
+    `margin`：date, stock_id, margin_balance, short_balance。`day` 沒有行情 → DataError。
+    """
+    pat = re.compile(stock_pattern)
+    px = prices.filter(
+        pl.col("stock_id").map_elements(lambda s: bool(pat.match(s)), return_dtype=pl.Boolean)
+    )
+    sessions = sorted(px["date"].unique().to_list(), reverse=True)
+    if not sessions or sessions[0] != day:
+        raise DataError(TABLE, day, f"{day} 沒有行情（最新 {sessions[0] if sessions else '無'}）")
+    b = _breadth(px, day, sessions, avg_sessions=avg_sessions, high_low_window=high_low_window)
+
     # 三大法人：股數 × 當天收盤 → TWD；外資連續天數看每天的合計金額符號
     inst = institutional.join(
         px.select("date", "stock_id", "close"), on=["date", "stock_id"], how="inner"
@@ -211,16 +271,16 @@ def market_daily(
         taiex_chg=taiex_chg,
         otc_close=otc_close,
         otc_chg=otc_chg,
-        amount=amount,
-        amount_avg=amount_avg,
-        amount_ratio=amount_ratio,
-        up=up,
-        down=down,
-        flat=flat,
-        limit_up=limit_up,
-        limit_down=limit_down,
-        new_high=new_high,
-        new_low=new_low,
+        amount=b.amount,
+        amount_avg=b.amount_avg,
+        amount_ratio=b.amount_ratio,
+        up=b.up,
+        down=b.down,
+        flat=b.flat,
+        limit_up=b.limit_up,
+        limit_down=b.limit_down,
+        new_high=b.new_high,
+        new_low=b.new_low,
         foreign_net=foreign_net,
         trust_net=trust_net,
         dealer_net=dealer_net,
@@ -229,3 +289,38 @@ def market_daily(
         margin_delta=margin_delta,
         short_balance=short_balance,
     )
+
+
+MARKETS = ("tse", "otc")  # 上市、上櫃（stock_meta.market 的 TWSE／TPEX）
+
+
+def market_breadth(
+    day: dt.date,
+    prices: pl.DataFrame,
+    markets: pl.DataFrame,
+    *,
+    stock_pattern: str,
+    avg_sessions: int,
+    high_low_window: int,
+) -> list[MarketBreadth]:
+    """上市、上櫃各一列（T-398／D-199）：家數、漲跌停、新高新低、成交金額，定義同 `market_daily`。
+
+    `prices` 同 `market_daily`；`markets`：stock_id, market（tse／otc）。不在 `markets` 裡的股票兩邊都不算。
+    `day` 沒有行情、或某個市場當天一檔都沒有 → DataError（不寫一列 0 進去）。
+    """
+    pat = re.compile(stock_pattern)
+    px = prices.filter(
+        pl.col("stock_id").map_elements(lambda s: bool(pat.match(s)), return_dtype=pl.Boolean)
+    )
+    sessions = sorted(px["date"].unique().to_list(), reverse=True)
+    if not sessions or sessions[0] != day:
+        raise DataError(TABLE, day, f"{day} 沒有行情（最新 {sessions[0] if sessions else '無'}）")
+    out: list[MarketBreadth] = []
+    for m in MARKETS:
+        ids = markets.filter(pl.col("market") == m)["stock_id"].implode()
+        sub = px.filter(pl.col("stock_id").is_in(ids))
+        if sub.filter(pl.col("date") == day).is_empty():
+            raise DataError(TABLE, day, f"{day} 沒有 {m} 市場的行情（stock_meta 沒有市場別？）")
+        b = _breadth(sub, day, sessions, avg_sessions=avg_sessions, high_low_window=high_low_window)
+        out.append(MarketBreadth(date=day, market=m, **dataclasses.asdict(b)))
+    return out

@@ -3551,8 +3551,13 @@ def _market_daily_for_day(day: dt.date) -> str:
     """大盤體檢（T-374）：`day` 與之前的視窗 → `market_daily` 一列。"""
     from twquant.conventions import now_tw
     from twquant.data.serving import store
-    from twquant.data.serving.market_daily_store import read_inputs, write_market_daily
-    from twquant.reporting.market_daily import market_daily
+    from twquant.data.serving.market_daily_store import (
+        read_inputs,
+        read_markets,
+        write_market_breadth,
+        write_market_daily,
+    )
+    from twquant.reporting.market_daily import market_breadth, market_daily
 
     cfg = _load_system().market_daily
     scfg = _load_serving()
@@ -3569,11 +3574,22 @@ def _market_daily_for_day(day: dt.date) -> str:
             high_low_window=cfg.high_low_window,
         )
         write_market_daily(conn, scfg.pg_schema, row, now_tw())
+        # 分上市、上櫃（T-398／D-199）：首頁大盤體檢的「上市／上櫃」切換
+        split = market_breadth(
+            day,
+            inputs["prices"],
+            read_markets(conn, scfg.pg_schema),
+            stock_pattern=scfg.cloud.stock_pattern,
+            avg_sessions=cfg.avg_sessions,
+            high_low_window=cfg.high_low_window,
+        )
+        write_market_breadth(conn, scfg.pg_schema, split, now_tw())
     finally:
         conn.close()
     taiex = f"{row.taiex_chg * 100:+.2f}%" if row.taiex_chg is not None else "—"
+    parts = "；".join(f"{b.market} {b.up} 漲 {b.down} 跌" for b in split)
     return (
-        f"加權 {taiex}，{row.up} 漲 {row.down} 跌，漲停 {row.limit_up} 跌停 {row.limit_down}，"
+        f"加權 {taiex}，{row.up} 漲 {row.down} 跌（{parts}），漲停 {row.limit_up} 跌停 {row.limit_down}，"
         f"新高 {row.new_high} 新低 {row.new_low}，外資 {row.foreign_net / 1e8:+.1f} 億（連 {row.foreign_streak} 天）"
     )
 

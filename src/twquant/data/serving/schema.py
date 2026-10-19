@@ -704,6 +704,28 @@ MARKET_DAILY_SPEC = TableSpec(
     pk=("date",),
 )
 
+# 大盤體檢分上市、上櫃（T-398／D-199）：每個交易日每個市場（tse／otc）一列，家數與成交金額的定義同 market_daily；
+# 欄位與 reporting/market_daily.MarketBreadth 同名（tests/test_market_daily.py 守著）。另開一張表，不在 market_daily 後面加欄。
+MARKET_BREADTH_SPEC = TableSpec(
+    "market_breadth_daily",
+    (
+        ("date", "date"),
+        ("market", "text"),
+        ("up", "bigint"),
+        ("down", "bigint"),
+        ("flat", "bigint"),
+        ("limit_up", "bigint"),
+        ("limit_down", "bigint"),
+        ("new_high", "bigint"),
+        ("new_low", "bigint"),
+        ("amount", "double precision"),
+        ("amount_avg", "double precision"),
+        ("amount_ratio", "double precision"),
+        ("created_at", "timestamptz"),
+    ),
+    pk=("date", "market"),
+)
+
 # 期交所盤後統計（T-375／D-188）：三大法人臺股期貨未平倉淨額、選擇權買賣權比；每個交易日一列。
 # 欄位與 data/sources/taifex_daily.SCHEMA 同名同序（tests/test_taifex_daily.py 守著）。
 TAIFEX_DAILY_SPEC = TableSpec(
@@ -968,6 +990,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     MOPS_ANNOUNCEMENTS_SPEC,
     INSIGHT_PACKS_SPEC,
     MARKET_DAILY_SPEC,
+    MARKET_BREADTH_SPEC,
     TAIFEX_DAILY_SPEC,
     CONFERENCE_CALENDAR_SPEC,
     MORNING_BRIEF_SPEC,
