@@ -14,8 +14,19 @@ const DESK_MIN_W = 900
 
 const chgText = (c: number | undefined) => (c === undefined ? '' : `${c > 0 ? '▲' : c < 0 ? '▼' : ''}${Math.abs(c).toFixed(2)}%`)
 
-export function NewsGraph({ graph, onClose, onStock }: { graph: Graph; onClose: () => void; onStock: (sid: string, name: string) => void }) {
-  const [selected, setSelected] = useState<string | null>(null)
+export function NewsGraph({
+  graph,
+  onClose,
+  onStock,
+  focus = null,
+}: {
+  graph: Graph
+  onClose: () => void
+  onStock: (sid: string, name: string) => void
+  /** 打開時先選到這個實體、亮出路徑（從個股頁「相關新聞」點進來：tw:代號）；圖上沒有就不選 */
+  focus?: string | null
+}) {
+  const [selected, setSelected] = useState<string | null>(focus && graph.nodes.some((n) => n.id === focus) ? focus : null)
   const [opened, setOpened] = useState<Set<string>>(new Set())
   const [viewW, setViewW] = useState(390)
   const map = useRef<HTMLDivElement>(null)

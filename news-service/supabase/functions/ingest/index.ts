@@ -1,10 +1,11 @@
-// POST /functions/v1/ingest（T-400、T-401、T-402）：pg_cron 每 30 分鐘呼叫（supabase/setup/schedule.sql）——先進料、再翻譯、再比對提到哪些實體。
+// POST /functions/v1/ingest（T-400、T-401、T-402）：pg_cron 每 30 分鐘呼叫（supabase/setup/schedule.sql）——先進料、再翻譯、再比對提到哪些實體、再從新聞學關係（cooccur）。
 // 先回 202、工作放 EdgeRuntime.waitUntil：pg_net 只等 5 秒，九個來源一起抓要十幾秒。
 import config from '../../../config/news.json' with { type: 'json' }
 import { runIngest, validateConfig } from '../../../src/ingest.ts'
+import { learnCooccur } from '../../../src/cooccur.ts'
 import { detectPending } from '../../../src/mention.ts'
 import { translatePending } from '../../../src/translate.ts'
-import { authorized, db, fetchFeed, json, mentionDeps, pgStore, translateDeps } from '../_shared/io.ts'
+import { authorized, cooccurDeps, db, fetchFeed, json, mentionDeps, pgStore, translateDeps } from '../_shared/io.ts'
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void }
 
@@ -28,6 +29,9 @@ async function run(runId: string): Promise<void> {
     // 第三步（T-402）：新聞提到哪些實體（一度）；英文新聞等翻過才比（見 mentionDeps 的 pending）
     const mn = await detectPending(cfg.mention, mentionDeps(sql, cfg.mention.rule_version))
     console.log(`news mention ${runId}：${JSON.stringify(mn)}`)
+    // 第四步（2026-10-20）：從新聞學關係——一起被提到夠多次的兩方長出「新聞常一起提到」的線
+    const co = await learnCooccur(cfg.cooccur, cooccurDeps(sql, cfg.mention.rule_version))
+    console.log(`news cooccur ${runId}：${JSON.stringify(co)}`)
     if (trError !== null) throw trError
   } finally {
     await sql.end({ timeout: 5 })

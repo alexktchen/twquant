@@ -193,9 +193,10 @@ def edge_insert_sql(edges: Sequence[Edge]) -> str:
 
 
 EXISTING_ENTITIES_SQL = "select id from news.entities where valid_to is null"
+# 新聞學出來的 cooccur 線由 ingest 第四步維護（source＝news_cooccur），這支同步不管、也不會把它們關掉
 EXISTING_EDGES_SQL = (
     "select src, dst, type, status, label, rank, source from news.graph_edges "
-    "where valid_to is null"
+    "where valid_to is null and type <> 'cooccur'"
 )
 
 

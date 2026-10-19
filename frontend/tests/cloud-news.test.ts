@@ -151,3 +151,19 @@ test('T-402：列上的實體小標最多 3 個，其餘收成「+N」；沒有 
   assert.deepEqual(mentionChips(row('b', '2026-10-19T00:00:00Z')), { chips: [], more: 0 })
   assert.deepEqual(mentionChips({ ...r, mentions: [] }), { chips: [], more: 0 })
 })
+
+test('反向看圖（2026-10-20）：proxy 只轉 id／ids；間接那則的路徑說明；個股頁標題右邊的計數', async () => {
+  assert.deepEqual(ALLOWED['/v1/stock-news'], ['id'])
+  assert.deepEqual(ALLOWED['/v1/stock-news-counts'], ['ids'])
+  assert.equal(
+    upstreamUrl(BASE, '/v1/stock-news-counts', 'https://x/api/news/stock-counts?ids=tw%3A2330%2Ctw%3A2382&days=99'),
+    "https://abc.supabase.co/functions/v1/api/v1/stock-news-counts?ids=tw%3A2330%2Ctw%3A2382",
+  )
+  const { pathText, stockNewsSummary } = await import('../src/cloud/news.ts')
+  const step = (label: string, via: string, via_label?: string) => ({ id: label, label, via, ...(via_label ? { via_label } : {}) })
+  assert.equal(pathText({ path: [step('輝達', 'mention'), step('廣達', 'supplier')], draft: true }), '輝達 › 供應商・草擬')
+  assert.equal(pathText({ path: [step('緯創', 'mention'), step('廣達', 'peer', '伺服器')], draft: false }), '緯創 › 同族群・伺服器')
+  assert.equal(pathText({ path: [step('廣達', 'mention')], draft: false }), '', '直接提到不用說明')
+  const item = (degree: number) => ({ id: String(degree), source_name: 'CNBC', url: 'https://x', first_seen_at: '2026-10-20T01:00:00Z', title: 't', title_zh: null, degree, score: 1, draft: false, path: [] })
+  assert.equal(stockNewsSummary({ id: 'tw:2382', days: 7, items: [item(1), item(2), item(2)] }), '近 7 天・直接 1・間接 2')
+})

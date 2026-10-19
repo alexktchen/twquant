@@ -224,12 +224,26 @@
       "belongs": 0.5,
       "member": 0.5,
       "peer": 0.4,
-      "theme": 0.6
+      "theme": 0.6,
+      "cooccur": 0.35
     },
     "fanout_power": 0.5,
     "max_degree": 3,
     "max_links": 26,
     "peers_per_group": 5,
     "mentions_per_item": 6
+  },
+  "stock_news": {
+    "stock_max_degree": 2,
+    "stock_days": 7,
+    "stock_limit": 20,
+    "counts_days": 3,
+    "counts_max_ids": 60,
+    "hub_share": 0.15
+  },
+  "cooccur": {
+    "window_days": 90,
+    "min_items": 3,
+    "hub_share": 0.15
   }
 }

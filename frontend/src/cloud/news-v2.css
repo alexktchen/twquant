@@ -70,3 +70,18 @@
 }
 .cq .cq-news-graph:disabled { cursor: progress; opacity: .7; }
 .cq-news-gerr { margin: 0 4px 12px; font-size: 13.5px; color: var(--up); }
+
+/* 個股頁「相關新聞」（反向看圖，2026-10-20）：直接／間接一個小色塊、標題、出處時間、怎麼連過來的，右邊「關係圖」 */
+.cq-sn { list-style: none; margin: 0; padding: 0; }
+.cq-sn li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 9px 0; border-top: 1px solid var(--line); }
+.cq-sn li:first-child { border-top: 0; }
+.cq-sn-tag { margin-top: 2px; padding: 1px 7px; border-radius: 6px; font-size: 12.5px; font-weight: 700; background: #1d2027; color: var(--mute); white-space: nowrap; }
+.cq-sn-tag.direct { background: rgba(217, 89, 38, .18); color: #ff9b6a; }
+.cq-sn-body { min-width: 0; }
+.cq-sn-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-size: 15px; line-height: 1.4; text-decoration: none; }
+.cq-sn-body small { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px; font-size: 12.5px; color: var(--mute); }
+.cq-sn-path { color: #c9ccd3; }
+.cq-sn-path.draft { color: var(--mute); }
+.cq .cq-sn-graph { display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: #1d2027; color: var(--text); font-size: 13px; white-space: nowrap; }
+.cq-sn-empty { margin: 0; font-size: 14px; color: var(--mute); }
+.cq-sn-more { margin-top: 6px; }

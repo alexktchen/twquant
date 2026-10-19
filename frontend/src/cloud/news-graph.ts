@@ -5,7 +5,7 @@
 // 分支＝由粗到細的彩帶（根部粗、末端細），顏色＝到達那一站的類別；越相關越粗；AI 草擬的畫虛線。
 
 export type GType = 'tw' | 'us' | 'company' | 'group' | 'theme'
-export type GVia = 'mention' | 'supplier' | 'belongs' | 'member' | 'peer' | 'theme'
+export type GVia = 'mention' | 'supplier' | 'belongs' | 'member' | 'peer' | 'theme' | 'cooccur'
 export type GNode = {
   id: string
   type: GType
@@ -41,9 +41,11 @@ export const VIA_LABEL: Record<GVia, string> = {
   member: '族群成員',
   peer: '同族群',
   theme: '相關主題',
+  /** 從新聞學的關係（2026-10-20）：via_label 寫「新聞常一起提到・N 則」 */
+  cooccur: '新聞常一起提到',
 }
 /** 線的說明：同業線寫族群名（「同族群・伺服器」）；其他用通稱。 */
-export const viaText = (n: GNode): string => (n.via === 'peer' && n.via_label ? (n.via_label === '同業' || n.via_label === '結盟' ? n.via_label : `同族群・${n.via_label}`) : VIA_LABEL[n.via])
+export const viaText = (n: GNode): string => n.via === 'cooccur' && n.via_label ? n.via_label : (n.via === 'peer' && n.via_label ? (n.via_label === '同業' || n.via_label === '結盟' ? n.via_label : `同族群・${n.via_label}`) : VIA_LABEL[n.via])
 
 /** 一棵樹的子點表（依分數高到低、再依名稱，結果穩定）。 */
 export function childrenOf(nodes: GNode[]): Map<string | null, GNode[]> {

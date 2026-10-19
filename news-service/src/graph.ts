@@ -7,7 +7,8 @@ export type EntityType = 'tw' | 'us' | 'company' | 'group' | 'theme'
 /** id 帶前綴：tw:2330、us:NVDA、co:samsung、grp:晶圓製造、th:AI晶片 */
 export type Entity = { id: string; type: EntityType; label: string }
 /** supplier＝國外公司→台灣供應商；belongs＝台股→族群；member＝族群→成員（由 belongs 反推）；peer＝同業（雙向）；theme＝主題→族群 */
-export type EdgeType = 'supplier' | 'belongs' | 'member' | 'peer' | 'theme'
+/** cooccur＝新聞常一起提到（從新聞學的關係，src/cooccur.ts；雙向） */
+export type EdgeType = 'supplier' | 'belongs' | 'member' | 'peer' | 'theme' | 'cooccur'
 export type Edge = {
   src: string
   dst: string
@@ -53,7 +54,7 @@ export function expandEdges(edges: Edge[]): Edge[] {
   for (const e of edges) {
     add(e)
     if (e.type === 'belongs') add({ src: e.dst, dst: e.src, type: 'member', draft: e.draft, label: e.label })
-    if (e.type === 'peer') add({ src: e.dst, dst: e.src, type: 'peer', draft: e.draft, label: e.label })
+    if (e.type === 'peer' || e.type === 'cooccur') add({ src: e.dst, dst: e.src, type: e.type, draft: e.draft, label: e.label })
   }
   return out
 }
@@ -62,11 +63,25 @@ const better = (a: Link, b: Link | undefined): boolean =>
   !b || a.score > b.score + 1e-12 || (Math.abs(a.score - b.score) <= 1e-12 && (a.degree < b.degree || (a.degree === b.degree && pathKey(a) < pathKey(b))))
 const pathKey = (l: Link) => l.path.map((s) => s.entity).join('>')
 
+/** 出發點 → 從它出去的線（expandEdges 之後）；很多則新聞共用同一份（反向看圖一次算上百則）。 */
+export type Adjacency = Map<string, Edge[]>
+export function adjacency(edges: Edge[]): Adjacency {
+  const out: Adjacency = new Map()
+  for (const e of expandEdges(edges)) {
+    const l = out.get(e.src)
+    if (l) l.push(e)
+    else out.set(e.src, [e])
+  }
+  return out
+}
+
 /** 幾度關聯：mentions＝新聞直接提到的實體 id（一度）。回傳依分數高到低排好、截到 max_links 的關聯（樹）。 */
 export function propagate(mentions: string[], edges: Edge[], cfg: GraphConfig): Link[] {
-  const all = expandEdges(edges)
-  const out = new Map<string, Edge[]>()
-  for (const e of all) out.set(e.src, [...(out.get(e.src) ?? []), e])
+  return propagateWith(mentions, adjacency(edges), cfg)
+}
+
+/** 同 propagate，線已經整理成 adjacency。 */
+export function propagateWith(mentions: string[], out: Adjacency, cfg: GraphConfig): Link[] {
   const best = new Map<string, Link>()
   for (const m of [...new Set(mentions)].sort()) best.set(m, { entity: m, degree: 1, score: 1, path: [{ entity: m, via: 'mention', draft: false }], draft: false })
 

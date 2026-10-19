@@ -1,6 +1,8 @@
 // 新聞服務的進料（T-400／SPEC-017 §3）：每個來源抓一次 → 解析 → 新的寫一列、內容變了加一版、每次都記一列執行紀錄。
 // 資料只增不改（D-200 §四）：first_seen_at 是我們第一次抓到的時間（研究用的可得時間），之後不會再改。
 // 所有 IO（抓網頁、時鐘、資料庫）由呼叫端注入：Edge Function 給真的、測試給假的。一個來源壞掉不擋其他來源。
+import { validateCooccurConfig, type CooccurConfig } from './cooccur.ts'
+import { validateStockNewsConfig, type StockNewsConfig } from './stocknews.ts'
 import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
 import type { EdgeType, GraphConfig } from './graph.ts'
 import { validateMentionConfig, type MentionConfig } from './mention.ts'
@@ -31,6 +33,8 @@ export type NewsConfig = {
   mention: MentionConfig
   /** T-404：關係圖（propagate 的參數＋同族群線、/v1/items 每則幾個實體） */
   graph: NewsGraphConfig
+  stock_news: StockNewsConfig
+  cooccur: CooccurConfig
 }
 
 export type NewsGraphConfig = GraphConfig & {
@@ -40,7 +44,7 @@ export type NewsGraphConfig = GraphConfig & {
   mentions_per_item: number
 }
 
-const EDGE_TYPES: EdgeType[] = ['supplier', 'belongs', 'member', 'peer', 'theme']
+const EDGE_TYPES: EdgeType[] = ['supplier', 'belongs', 'member', 'peer', 'theme', 'cooccur']
 
 function validateGraphConfig(x: unknown): NewsGraphConfig {
   const c = x as Partial<NewsGraphConfig> | null
@@ -78,6 +82,8 @@ export function validateConfig(x: unknown): NewsConfig {
   validateTranslateConfig(c!.translate)
   validateMentionConfig(c!.mention)
   validateGraphConfig(c!.graph)
+  validateStockNewsConfig(c!.stock_news)
+  validateCooccurConfig(c!.cooccur)
   return c as NewsConfig
 }
 
