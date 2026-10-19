@@ -1,5 +1,5 @@
 // twquant-cron-trigger（D-175）：Cloudflare Cron Trigger → GitHub workflow_dispatch。
-// 17:33／21:13 → daily-pipeline；06:30（T-377）→ morning-brief；17:45（T-409）→ morning-brief 帶 edition=evening。
+// 17:33／21:13 → daily-pipeline；06:30（T-377）→ morning-brief；18:00（T-409）→ morning-brief 帶 edition=evening。
 // 哪條 cron 對哪個工作流程見 dispatch.ts workflowFor／inputsFor。
 import { dispatchRequest, inputsFor, taipeiDate, workflowFor, type DispatchEnv } from './dispatch'
 

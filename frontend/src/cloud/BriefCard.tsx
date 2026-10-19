@@ -104,7 +104,7 @@ export function BriefCard({
       collapsed={collapsed}
       onToggle={onToggle}
       slides={slides}
-      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30、傍晚約 17:45 整理）。'}
+      empty={loading || waiting ? '讀取中…' : '今天的晨報還沒產生（每個交易日早上 6:30、傍晚約 18:00 整理）。'}
       when={b ? `${viewing ? '歷史・' : ''}${evening ? '盤後・' : ''}${b.generated_at.slice(5, 16).replace('-', '/')}` : undefined}
       extra={
         !collapsed &&
@@ -132,7 +132,7 @@ export function BriefCard({
       {err && <p className="cq-war-mute">讀不到 {viewing ? keyLabel(viewing) : ''} 的晨報：{err}</p>}
       {(loading || waiting) && <p className="cq-war-mute">讀取中…</p>}
       {!loading && !waiting && !err && !b && (
-        <p className="cq-war-mute">{viewing ? '這天沒有晨報。' : '今天的晨報還沒產生（每個交易日早上 6:30、傍晚約 17:45 整理）。'}</p>
+        <p className="cq-war-mute">{viewing ? '這天沒有晨報。' : '今天的晨報還沒產生（每個交易日早上 6:30、傍晚約 18:00 整理）。'}</p>
       )}
       {b && b.headline && b.bullets ? (
         <>

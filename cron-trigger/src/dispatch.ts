@@ -7,7 +7,7 @@ export interface DispatchEnv {
   /** 06:30 那班要觸發的工作流程（T-377 晨報）；沒設就全部走 WORKFLOW */
   MORNING_WORKFLOW?: string
   MORNING_CRON?: string
-  /** 17:45 那班（T-409 盤後快訊）：同一個晨報工作流程、多帶 edition=evening */
+  /** 18:00 那班（T-409 盤後快訊）：同一個晨報工作流程、多帶 edition=evening */
   EVENING_CRON?: string
 }
 

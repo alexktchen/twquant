@@ -368,17 +368,17 @@ def test_ac4_table_routing_workflow_and_cron() -> None:
     assert sch.spec_of("evening_brief").pk == ("date",)
     assert sch.spec_of("evening_brief").column_names == sch.spec_of("morning_brief").column_names
     assert (
-        '"45 9 * * MON-FRI"' in toml and 'EVENING_CRON = "45 9 * * MON-FRI"' in toml
-    )  # 17:45 台北
-    assert '--edition "$EDITION" $SKIP' in wf and 'cron: "55 9 * * 1-5"' in wf and "edition:" in wf
+        '"0 10 * * MON-FRI"' in toml and 'EVENING_CRON = "0 10 * * MON-FRI"' in toml
+    )  # 18:00 台北
+    assert '--edition "$EDITION" $SKIP' in wf and 'cron: "10 10 * * 1-5"' in wf and "edition:" in wf
     # 版本看是哪條排程，不看幾點跑（備援晚 5 小時跑也不會變成盤前）；盤後備援日期往回 8 小時、已有就跳過
     assert (
-        'github.event.schedule }}" = "55 9 * * 1-5"' in wf
+        'github.event.schedule }}" = "10 10 * * 1-5"' in wf
         and "-d '-8 hours'" in wf
         and "--skip-existing" in wf
     )
     assert "date +%H" not in wf
-    assert CFG.evening_wait_minutes >= 30, "17:45 觸發時 pipeline 通常還沒寫好大盤體檢，要等"
+    assert CFG.evening_wait_minutes >= 30, "18:00 觸發時 pipeline 有時還沒寫好大盤體檢，要等"
     assert isinstance(CFG, MorningBriefConfig) and [q.symbol for q in CFG.us_indices] == [
         "^GSPC",
         "^IXIC",

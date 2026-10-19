@@ -9,7 +9,7 @@ export function parseBriefKey(key: string): { date: string; edition: Edition } {
   const [date, ed] = key.split('|')
   return { date, edition: ed === 'evening' ? 'evening' : 'morning' }
 }
-/** 兩張表的日期合成一條清單，新到舊；同一天盤後（17:45）在盤前（06:30）前面。 */
+/** 兩張表的日期合成一條清單，新到舊；同一天盤後（18:00）在盤前（06:30）前面。 */
 export function mergeBriefKeys(morning: string[], evening: string[], limit: number): string[] {
   const all = [...morning.map((d) => ({ d, e: 'morning' as Edition })), ...evening.map((d) => ({ d, e: 'evening' as Edition }))]
   all.sort((a, b) => (a.d === b.d ? (a.e === 'evening' ? -1 : 1) : a.d < b.d ? 1 : -1))

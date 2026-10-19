@@ -968,7 +968,7 @@ def morning_brief_cmd(
     ),
     edition: str = typer.Option(
         "morning",
-        help="morning＝盤前晨報（06:30）；evening＝盤後快訊（17:45 觸發、等今天收盤資料，T-409）",
+        help="morning＝盤前晨報（06:30）；evening＝盤後快訊（18:00 觸發、等今天收盤資料，T-409）",
     ),
     skip_existing: bool = typer.Option(
         False, "--skip-existing", help="那天那個版本已經有了就不做（備援排程用，不重複叫模型）"
@@ -976,7 +976,7 @@ def morning_brief_cmd(
 ) -> None:
     """晨報（T-377）：收齊昨晚到今早的數字 → 規則一句話＋模型三到六點 → serving.morning_brief。06:30 排程呼叫。
 
-    --edition evening（T-409）：盤後快訊——今天的收盤與籌碼、今天的公告與新聞 → serving.evening_brief。17:45 排程呼叫；
+    --edition evening（T-409）：盤後快訊——今天的收盤與籌碼、今天的公告與新聞 → serving.evening_brief。18:00 排程呼叫；
     先等今天的大盤體檢寫進 market_daily（system.yaml evening_wait_minutes），等不到（休市、pipeline 沒跑完）就不出、印原因。
     """
     import json

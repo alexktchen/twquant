@@ -1,6 +1,6 @@
 // 「今日一句話」（晨報）的讀取：首頁讀最新一天，歷史頁（使用者 2026-10-17：「做一個可以選日期看歷史的頁面」）讀指定那天。
 // 晨報每天 06:30 寫一筆存在 serving.morning_brief，看網頁不會重叫模型；表還沒建 → 沒有（readRows）。
-// 盤後快訊（T-409，17:45）存 serving.evening_brief；首頁顯示兩張表裡 generated_at 最新的那份（latestOf）；
+// 盤後快訊（T-409，18:00）存 serving.evening_brief；首頁顯示兩張表裡 generated_at 最新的那份（latestOf）；
 // 歷史清單一天兩格（盤前、盤後，使用者 2026-10-20：「可以看歷史一天兩則」）。
 import { latestOf, mergeBriefKeys, type Edition } from './brief-latest.ts'
 import type { sql } from './db.ts'
