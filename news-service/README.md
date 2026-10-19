@@ -33,10 +33,19 @@ node -e "console.log(crypto.randomUUID())"           # 產生兩次，一把給�
 npx supabase secrets set NEWS_INGEST_KEY=<第一把> NEWS_API_KEY=<第二把>
 # 翻譯（T-401）：同 .env 的 CLOUDFLARE_ACCOUNT_ID、CLOUDFLARE_AI_TOKEN（Workers AI）
 npx supabase secrets set CLOUDFLARE_ACCOUNT_ID=<帳號> CLOUDFLARE_AI_TOKEN=<token>
-npx supabase functions deploy ingest api
+npx supabase functions deploy ingest api --use-api        # 沒有 Docker 就加 --use-api
 ```
 
 接著在 Supabase 後台 SQL Editor：先執行 `supabase/setup/schedule.sql` 檔頭那兩行 `vault.create_secret`（專案網址、第一把金鑰），再執行整個檔案。
+
+不想開後台的話，用 Management API 跑 SQL（2026-10-19 實際這樣部署的；token 放 `.env` 的 `SUPABASE_NEWS_ACCESS_TOKEN`，CLI 也吃 `SUPABASE_ACCESS_TOKEN` 環境變數）：
+
+```bash
+curl -X POST https://api.supabase.com/v1/projects/<專案代號>/database/query \n  -H "authorization: Bearer $SUPABASE_NEWS_ACCESS_TOKEN" -H 'content-type: application/json' \n  -d '{"query":"select vault.create_secret(...); ..."}'
+```
+
+部署函式沒有 Docker 時加 `--use-api`；`config.toml` 已把兩個函式設成 `verify_jwt = false`（只認 `x-news-key`）。
+**陷阱**：往 `.env` 追加時，上一行若沒有換行，新的一行會黏在上一行後面（2026-10-19 金鑰黏到密碼後面、Vault 存成空字串、ingest 回 403）——追加前先補換行、追加後核對每個值的長度。
 
 確認：
 
