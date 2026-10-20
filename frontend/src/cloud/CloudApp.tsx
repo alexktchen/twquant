@@ -243,6 +243,8 @@ export default function CloudApp() {
   const selected = current?.picks.find((p) => p.sid === sid) ?? null
   // 名單小標「相關新聞」（反向看圖）：新聞在另一個資料庫，名單抓好後另外問；問不到就沒有這個小標
   const [newsCounts, setNewsCounts] = useState<Record<string, NewsCount>>({})
+  /** 「相關新聞」小標被點幾次（個股頁收到就捲到相關新聞那一塊；使用者 2026-10-20：「推薦股有新聞，但是點了沒反應」） */
+  const [newsFocus, setNewsFocus] = useState(0)
   const pickSids = useMemo(() => [...new Set((view?.lines ?? []).flatMap((l) => l.picks.map((p) => p.sid)))].sort(), [view])
   useEffect(() => {
     if (guest || pickSids.length === 0) return
@@ -604,6 +606,10 @@ export default function CloudApp() {
                       onBuy={!guest && view && trades ? toggleBuy : undefined}
                       line={current?.code ?? null}
                       news={newsCounts[p.sid] ?? null}
+                      onNews={() => {
+                        setSid(p.sid)
+                        setNewsFocus((n) => n + 1)
+                      }}
                     />
                   ))}
                 </ul>
@@ -656,6 +662,8 @@ export default function CloudApp() {
                 onTrack={watch ? toggleTrack : undefined}
                 refresh={refresh}
                 badges={pickBadges({ ...selected, line: current?.code ?? null, news: newsCounts[selected.sid] ?? null })}
+                newsFocus={newsFocus}
+                onNews={() => setNewsFocus((n) => n + 1)}
                 blurb={selected.blurb ?? null}
                 review={selected.review ?? null}
               />
@@ -709,6 +717,7 @@ function Row({
   onBuy,
   line = null,
   news = null,
+  onNews,
 }: {
   p: Pick
   /** 要顯示的價格（pickPrice）：盤中是即時價、rec＝推薦當天的收盤；沒給（沒登入的假資料）就是名單那天的收盤 */
@@ -722,6 +731,8 @@ function Row({
   onBuy?: (sid: string, on: boolean) => void
   /** 近 3 天相關新聞則數（反向看圖） */
   news?: NewsCount | null
+  /** 點「相關新聞」小標：選這一檔並跳到個股頁的相關新聞 */
+  onNews?: () => void
 }) {
   px ??= pickPrice(p, undefined, undefined, '', true)
   const t = trend(px.chg)
@@ -744,7 +755,7 @@ function Row({
           </span>
           {p.review && <ScoreBars r={p.review} />}
           {shown.map((b) => (
-            <BadgeChip key={b.key} b={b} compact />
+            <BadgeChip key={b.key} b={b} compact onClick={b.key === 'news' ? onNews : undefined} />
           ))}
           {more > 0 && (
             <span className="cq-b cq-b-more" title="點進個股頁看全部">
@@ -1127,6 +1138,8 @@ function Detail({
   badges = [],
   blurb = null,
   review = null,
+  newsFocus = 0,
+  onNews,
 }: {
   sid: string
   name: string | null
@@ -1158,6 +1171,9 @@ function Detail({
   blurb?: Blurb | null
   /** 名單上這一檔的四面向評分（T-394）；不是從名單點進來就沒有 */
   review?: Review | null
+  /** 「相關新聞」小標被點的次數（變了就捲到相關新聞） */
+  newsFocus?: number
+  onNews?: () => void
 }) {
   // K 線資料記著是哪一檔：換股時舊圖先留著（不閃白），但報價列只用這一檔自己的資料
   const [chart, setChart] = useState<{ sid: string; bars: Bar[]; days: Record<string, string[]> }>({ sid: '', bars: [], days: {} })
@@ -1292,14 +1308,14 @@ function Detail({
       {badges.length > 0 && (
         <div className="cq-badges" aria-label="提醒">
           {badges.map((b) => (
-            <BadgeChip key={b.key} b={b} />
+            <BadgeChip key={b.key} b={b} onClick={b.key === 'news' ? onNews : undefined} />
           ))}
         </div>
       )}
       <ModelPanel scores={sc} err={scoreErr} reasons={reasons} line={line} />
       <StockFacts sid={sid} refresh={refresh} />
       <StockCalendar sid={sid} refresh={refresh} />
-      <StockNews sid={sid} refresh={refresh} />
+      <StockNews sid={sid} refresh={refresh} focus={newsFocus} />
       {similar ? <SimilarBlock s={similar} /> : <Reference rows={refFor(reference, score)} />}
       <Section
         icon={CandlestickChart}

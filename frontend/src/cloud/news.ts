@@ -170,6 +170,13 @@ export function pathText(it: Pick<StockNewsItem, 'path' | 'draft'>): string {
   return `${first} › ${via}${it.draft ? '・草擬' : ''}`
 }
 
+/**
+ * 名單上的「相關新聞」小標被點了（focus 加一）→ 這一檔的相關新聞讀到後要不要捲過去（使用者 2026-10-20：「推薦股有新聞，但是點了沒反應」）。
+ * done＝上次已經捲過的 focus；loadedId＝目前讀到的是哪一檔（換股時舊的那檔還在，要等新的讀完）。
+ */
+export const shouldJumpToNews = (focus: number, done: number, loadedId: string | null, sid: string): boolean =>
+  focus > 0 && focus !== done && loadedId === `tw:${sid}`
+
 /** 個股頁標題右邊那一句：「近 7 天・直接 1・間接 19」。 */
 export function stockNewsSummary(d: StockNews): string {
   const direct = d.items.filter((x) => x.degree === 1).length
