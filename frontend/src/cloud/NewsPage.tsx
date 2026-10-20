@@ -1,7 +1,7 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
 // 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；標題下面列這則提到的台股／國外公司／族群（T-402，最多 3 個＋「+N」），
 // 有提到的列多一顆「關係圖」：點了才向新聞服務要這則的圖（T-404），開心智圖。
-// 搜尋框下面三張卡（T-417）：熱門主題、多家同報、股票熱度。
+// 搜尋框下面三張卡（T-417）：熱門主題、多家同報、股票熱度。「清單／全景」切換（T-418）：全景＝星雲圖，切過去才載入。
 // 擁有者多一顆「待核可 N」（T-403）：點了換成核可頁（AI 草擬的關係線）。
 // 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
@@ -38,6 +38,8 @@ type Filter = 'all' | NewsKind
 
 // 關係圖（心智圖）自己一個檔案：第一次按「關係圖」才下載。
 const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.NewsGraph })))
+// 全景星雲圖（T-418）：切到「全景」才下載
+const NewsGalaxy = lazy(() => import('./NewsGalaxy').then((m) => ({ default: m.NewsGalaxy })))
 
 const TAG_TITLE: Record<string, string> = {
   譯: 'AI 翻譯（標題與摘要），數字與公司名都核對過；點開看英文原文',
@@ -53,6 +55,8 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid: string, name: string) => void }) {
   const [filter, setFilter] = useState<Filter>('all')
+  /** 清單（讀新聞）或全景（星雲圖，看全貌） */
+  const [mode, setMode] = useState<'list' | 'galaxy'>('list')
   const [rows, setRows] = useState<NewsRow[]>([])
   const [health, setHealth] = useState<NewsHealth | null>(null)
   const [err, setErr] = useState('')
@@ -167,10 +171,18 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       <div className="cq-news-bar">
         <div className="cq-seg cq-seg-small">
           {FILTERS.map((f) => (
-            <button key={f.key} className={filter === f.key ? 'on' : ''} onClick={() => setFilter(f.key)}>
+            <button key={f.key} className={filter === f.key && mode === 'list' ? 'on' : ''} onClick={() => { setFilter(f.key); setMode('list') }}>
               {f.label}
             </button>
           ))}
+        </div>
+        <div className="cq-seg cq-seg-small cq-news-mode" role="group" aria-label="看法">
+          <button className={mode === 'list' ? 'on' : ''} onClick={() => setMode('list')} aria-pressed={mode === 'list'}>
+            清單
+          </button>
+          <button className={mode === 'galaxy' ? 'on' : ''} onClick={() => setMode('galaxy')} aria-pressed={mode === 'galaxy'}>
+            全景
+          </button>
         </div>
         {review && reviewLeft(review) > 0 && (
           <button className="cq-news-review-btn" onClick={() => setReviewOpen(true)} title="AI 草擬的關係線，核可後才算數">
@@ -224,7 +236,12 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       {loading && rows.length === 0 && !err && <p className="cq-war-mute cq-news-empty">讀取中…</p>}
       {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
 
-      {!search && !reviewOpen && groups.map((g) => (
+      {!search && !reviewOpen && mode === 'galaxy' && (
+        <Suspense fallback={<p className="cq-war-mute cq-news-empty">全景讀取中…</p>}>
+          <NewsGalaxy onStock={onStock} />
+        </Suspense>
+      )}
+      {!search && !reviewOpen && mode === 'list' && groups.map((g) => (
         <section key={g.day} className="cq-news-day">
           <h2>{dayTitle(g.day, today)}</h2>
           <ul>
@@ -298,7 +315,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
         </section>
       ))}
 
-      {!search && !reviewOpen && rows.length > 0 && more !== 'done' && (
+      {!search && !reviewOpen && mode === 'list' && rows.length > 0 && more !== 'done' && (
         <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>
           {more === 'loading' ? '讀取中…' : '更多'}
         </button>

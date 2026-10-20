@@ -125,3 +125,11 @@ jobs:
       - name: 滾動窗口修剪（Supabase 500 MB 防線）
         if: ${{ !cancelled() }} # 前面任何一步失敗都要修剪，免得超過免費額度
         run: uv run python -m twquant serving prune
+
+      # T-418：新聞全景（星雲圖）快照 → 新聞庫 news.galaxy_snapshots；網站「全景」讀最新一筆。約 1 分鐘；失敗不影響名單（網站顯示上一份）
+      - name: 新聞全景快照
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          TWQUANT_NEWS_DSN: ${{ secrets.TWQUANT_NEWS_DSN }}
+        run: uv run python scripts/news_galaxy.py
