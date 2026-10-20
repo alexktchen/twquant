@@ -33,7 +33,7 @@ async function run(runId: string): Promise<void> {
     // 第四步（2026-10-20）：從新聞學關係——一起被提到夠多次的兩方長出「新聞常一起提到」的線
     const co = await learnCooccur(cfg.cooccur, cooccurDeps(sql, cfg.mention.rule_version))
     console.log(`news cooccur ${runId}：${JSON.stringify(co)}`)
-    // 第五步（T-410）：向量與同事件合併；英文等翻譯完才算（見 embedDeps 的 pending），額度跟翻譯共用
+    // 第五步（T-410）：向量與同事件合併；英文等翻譯完才算（見 embedDeps 的 pending），額度跟翻譯共用，翻譯會留 translate.reserve_for_embed 給這一步
     const em = await embedPending(cfg.embed, cfg.translate.daily_neurons, embedDeps(sql, cfg.embed))
     console.log(`news embed ${runId}：${JSON.stringify(em)}`)
     if (trError !== null) throw trError
