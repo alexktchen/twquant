@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import pathlib
 import shutil
 import subprocess
@@ -6335,7 +6336,7 @@ def news_backfill_cnyes(
                 if max_days and n_days >= max_days:
                     break
                 try:
-                    items, total = ca.fetch_day(
+                    items, total, skipped = ca.fetch_day(
                         client, cat, day, content_chars=int(h["content_chars"])
                     )
                     rows = [
@@ -6356,7 +6357,13 @@ def news_backfill_cnyes(
                     ]
                     n_items += news_hist.upsert_items(conn, rows)
                     news_hist.record_run(
-                        conn, source, day, total=total, fetched=len(items), ok=True, error=None
+                        conn,
+                        source,
+                        day,
+                        total=total,
+                        fetched=len(items),
+                        ok=True,
+                        error=f"略過 {skipped} 則沒有標題" if skipped else None,
                     )
                 except (TwquantError, OSError) as exc:  # 一天失敗記下來、繼續（之後重跑會補）
                     n_err += 1
@@ -6606,7 +6613,11 @@ def news_sentiment_probe(
         n_train=len(tr),
     )
     day = now_tw().date().isoformat()
-    out = Path(report) if report else _CONFIG_DIR.parent / "docs" / "reports" / f"news-sentiment-probe-{day}.md"
+    out = (
+        Path(report)
+        if report
+        else _CONFIG_DIR.parent / "docs" / "reports" / f"news-sentiment-probe-{day}.md"
+    )
     dist = {int(k): int(v) for k, v in zip(*np.unique(y, return_counts=True), strict=True)}
     lines = [
         f"# 新聞情緒探針（T-413／D-201 §四）— {day}",
@@ -6636,6 +6647,105 @@ def news_sentiment_probe(
     typer.secho(
         f"[{'OK' if ev.passed else 'FAIL'}] macro-F1 {ev.macro_f1:.3f}、AUC {ev.pos_neg_auc:.3f}；報告 {out}",
         fg=typer.colors.GREEN if ev.passed else typer.colors.YELLOW,
+    )
+
+
+# ── 新聞類型（T-421）：Ollama 貼標 → 探針 → 權重給雲端 ──
+@news_app.command("types-label")
+def news_types_label(
+    limit: int = typer.Option(1500, help="這次最多貼幾則"),
+    origins: str = typer.Option("cloud", help="貼哪些來源（逗號分隔）；線上新聞跟雲端同一種文字"),
+) -> None:
+    """本機 Ollama 對線上新聞貼類型（可續跑）。"""
+    import yaml
+
+    from twquant.data import news_types as nt
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    doc = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    classes = nt.load_classes(doc)
+    sc = doc["hist"]["sentiment"]
+    ids = [c.id for c in classes]
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = bad = 0
+    try:
+        nt.ensure_tables(conn)
+        from twquant.data import news_sentiment as ns
+
+        while True:
+            batch = nt.pending_items(
+                conn, min(200, limit - done), [o.strip() for o in origins.split(",")]
+            )
+            if not batch:
+                break
+            for item_id, title, body in batch:
+                try:
+                    raw = ns.ollama_chat(
+                        nt.build_prompt(classes, title, body, int(sc["max_body_chars"])),
+                        model=str(sc["model"]),
+                        url=str(sc["ollama_url"]),
+                    )
+                    t = nt.parse_type(raw, ids)
+                except (DataError, OSError) as exc:
+                    bad += 1
+                    typer.secho(f"  [!] {item_id}：{str(exc)[:100]}", fg=typer.colors.YELLOW)
+                    continue
+                nt.save_label(conn, item_id, t, model=str(sc["model"]), raw=raw)
+                done += 1
+                if done % 100 == 0:
+                    typer.echo(f"  {done} 則、失敗 {bad}；{time.monotonic() - t0:.0f} 秒")
+            if done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 類型貼標 {done} 則、失敗 {bad}；{time.monotonic() - t0:.0f} 秒",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("types-train")
+def news_types_train(
+    out: str = typer.Option("", help="權重寫到哪（空＝news-service/config/news_types.json）"),
+) -> None:
+    """標籤＋bge-m3 向量 → softmax 探針；驗證集 macro-F1 與各類準確率印出來、寫進權重檔的 metrics；權重給雲端 ingest 用。"""
+    import yaml
+
+    from twquant.data import linear_probe as lp
+    from twquant.data import news_types as nt
+    from twquant.data.serving import store
+
+    doc = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    classes = nt.load_classes(doc)
+    ids = [c.id for c in classes]
+    conn = store.connect(_load_serving())
+    try:
+        _, x, labels = nt.labeled_vectors(conn)
+    finally:
+        conn.close()
+    import numpy as np
+
+    yi = np.array([ids.index(t) for t in labels])
+    tr, va = lp.split(len(x), 0.2, 7)
+    probe = lp.train_softmax(x[tr], yi[tr], len(ids))
+    pred = probe.proba(x[va]).argmax(axis=1)
+    f1 = lp.macro_f1(yi[va], pred, len(ids))
+    acc = float((pred == yi[va]).mean())
+    dist = {ids[i]: int(n) for i, n in enumerate(np.bincount(yi, minlength=len(ids)))}
+    weights = nt.export_weights(
+        lp.train_softmax(x, yi, len(ids)),  # 正式權重用全部標籤訓
+        classes,
+        version=str(doc["types"]["version"]),
+        min_confidence=float(doc["types"]["min_confidence"]),
+        metrics={"n": len(x), "valid_macro_f1": round(f1, 3), "valid_accuracy": round(acc, 3)},
+    )
+    path = Path(out) if out else _CONFIG_DIR.parent / "news-service" / "config" / "news_types.json"
+    path.write_text(json.dumps(weights, ensure_ascii=False), encoding="utf-8")
+    typer.secho(
+        f"[OK] 標籤 {len(x)} 則 {dist}；驗證 macro-F1 {f1:.3f}、準確率 {acc:.3f}；權重 {path}（{path.stat().st_size // 1024} KB）",
+        fg=typer.colors.GREEN,
     )
 
 

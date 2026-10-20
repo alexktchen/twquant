@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 
+from twquant.data.linear_probe import Softmax, train_softmax
 from twquant.errors import DataError
 
 SCHEMA = "news_hist"
@@ -213,18 +214,18 @@ def save_label(conn: Any, item_id: str, stock_id: str, label: int, *, model: str
     conn.commit()
 
 
-# ── 線性探針（numpy softmax 迴歸）：輸入 bge-m3 向量，輸出三類 ──
+# ── 線性探針：共用 linear_probe（softmax 迴歸）；這裡只把 −1／0／+1 對到索引 ──
+_CLASSES = (-1, 0, 1)
+
+
 @dataclass(frozen=True)
 class Probe:
     w: np.ndarray  # (d, 3)
     b: np.ndarray  # (3,)
-    classes: tuple[int, ...] = (-1, 0, 1)
+    classes: tuple[int, ...] = _CLASSES
 
     def predict_proba(self, x: np.ndarray) -> np.ndarray:
-        z = x @ self.w + self.b
-        z -= z.max(axis=1, keepdims=True)
-        e = np.exp(z)
-        return np.asarray(e / e.sum(axis=1, keepdims=True))
+        return Softmax(self.w, self.b).proba(x)
 
 
 def train_probe(
@@ -236,27 +237,10 @@ def train_probe(
     lr: float = 0.5,
     seed: int = 7,
 ) -> Probe:
-    """softmax 迴歸（全批次梯度下降＋L2）；y ∈ {−1,0,1}。類別不平衡用反頻率加權。決定性。"""
-    if len(x) != len(y) or len(x) == 0:
-        raise ValueError("x、y 長度要一樣且不為空")
-    classes = (-1, 0, 1)
-    yi = np.array([classes.index(int(v)) for v in y])
-    n, d = x.shape
-    counts = np.bincount(yi, minlength=3).astype(float)
-    cw = (n / (3 * np.maximum(counts, 1)))[yi]
-    rng = np.random.default_rng(seed)
-    w = rng.normal(0, 0.01, (d, 3))
-    b = np.zeros(3)
-    onehot = np.eye(3)[yi]
-    for _ in range(epochs):
-        z = x @ w + b
-        z -= z.max(axis=1, keepdims=True)
-        p = np.exp(z)
-        p /= p.sum(axis=1, keepdims=True)
-        g = (p - onehot) * cw[:, None] / n
-        w -= lr * (x.T @ g + l2 * w)
-        b -= lr * g.sum(axis=0)
-    return Probe(w=w, b=b)
+    """y ∈ {−1,0,1}；類別不平衡用反頻率加權。決定性。"""
+    yi = np.array([_CLASSES.index(int(v)) for v in y]) if len(y) else np.zeros(0, dtype=int)
+    m = train_softmax(x, yi, 3, l2=l2, epochs=epochs, lr=lr, seed=seed)
+    return Probe(w=m.w, b=m.b)
 
 
 def macro_f1(y_true: np.ndarray, y_pred: np.ndarray, classes: Sequence[int] = (-1, 0, 1)) -> float:

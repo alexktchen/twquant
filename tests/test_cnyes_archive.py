@@ -44,10 +44,10 @@ def _body(
 
 
 def test_parse_page_cleans_text_and_keeps_tw_codes_only() -> None:
-    rows, last_page, total = ca.parse_page(
+    rows, last_page, total, skipped = ca.parse_page(
         _body([_item(5, 1609765936)], last_page=3, total=76), "x", content_chars=12
     )
-    assert (last_page, total) == (3, 76)
+    assert (last_page, total, skipped) == (3, 76, 0)
     it = rows[0]
     assert it.news_id == 5 and it.title == "標題 5 測試" and it.summary == "摘要 有 空白"
     assert it.content == "第一段 第二段 & 第三"  # 去標籤、解實體、截 12 字
@@ -65,12 +65,21 @@ def test_parse_page_cleans_text_and_keeps_tw_codes_only() -> None:
         ({"statusCode": 500, "message": "boom"}, "回應異常"),
         ({"statusCode": 200, "items": {}}, "items.data"),
         (_body([_item(1, 1609765936, newsId=None)]), "缺編號或時間"),
-        (_body([_item(1, 1609765936, title="<p></p>")]), "沒有標題"),
     ],
 )
 def test_parse_page_rejects_bad_bodies(body: dict[str, Any], msg: str) -> None:
     with pytest.raises(DataError, match=msg):
         ca.parse_page(body, "x", content_chars=100)
+
+
+def test_parse_page_skips_untitled_items_and_counts_them() -> None:
+    """鉅亨網下架的文章標題是空的（2026-02-28 實見）：略過、計數，其餘照常。"""
+    rows, _, _, skipped = ca.parse_page(
+        _body([_item(1, 1609765936, title="<p></p>"), _item(2, 1609765900)]),
+        "x",
+        content_chars=100,
+    )
+    assert skipped == 1 and [r.news_id for r in rows] == [2]
 
 
 def test_day_bounds_is_taipei_day() -> None:
@@ -103,10 +112,10 @@ def test_fetch_day_pages_to_last_page_and_dedups() -> None:
         2: _body([_item(2, 1609765900), _item(3, 1609765800)], last_page=2, total=3),
     }
     client = _Client(pages)
-    items, total = ca.fetch_day(
+    items, total, skipped = ca.fetch_day(
         cast(HttpClient, client), "tw_stock", dt.date(2021, 1, 4), content_chars=50
     )
-    assert total == 3 and [i.news_id for i in items] == [1, 2, 3]
+    assert total == 3 and skipped == 0 and [i.news_id for i in items] == [1, 2, 3]
     a, b = ca.day_bounds(dt.date(2021, 1, 4))
     assert [c["page"] for c in client.calls] == ["1", "2"]
     assert client.calls[0] == {"startAt": str(a), "endAt": str(b), "limit": "30", "page": "1"}
@@ -121,7 +130,7 @@ def test_fetch_day_raises_on_http_error_and_stops_on_empty_page() -> None:
             content_chars=50,
         )
     client = _Client({1: _body([], last_page=5)})
-    items, total = ca.fetch_day(
+    items, total, _ = ca.fetch_day(
         cast(HttpClient, client), "tw_stock", dt.date(2021, 1, 4), content_chars=50
     )
     assert items == [] and total == 0 and len(client.calls) == 1

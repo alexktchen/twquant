@@ -53,8 +53,11 @@ def strip_html(raw: Any, max_chars: int) -> str | None:
     return text[:max_chars]
 
 
-def parse_page(body: Any, label: str, content_chars: int) -> tuple[list[ArchiveItem], int, int]:
-    """列表回應 → (這一頁的新聞, last_page, total)。格式不對 → DataError（不吞）。"""
+def parse_page(
+    body: Any, label: str, content_chars: int
+) -> tuple[list[ArchiveItem], int, int, int]:
+    """列表回應 → (這一頁的新聞, last_page, total, 略過幾則)。整頁格式不對 → DataError（不吞）；
+    單則沒有標題（鉅亨網下架的文章，2026-02-28 實見）→ 略過並計數，呼叫端記進 backfill_runs.error。"""
     if not isinstance(body, dict) or body.get("statusCode") != 200:
         why = body.get("message") if isinstance(body, dict) else type(body).__name__
         raise DataError("cnyes_archive", None, f"鉅亨網 {label} 回應異常：{why!r}")
@@ -62,6 +65,7 @@ def parse_page(body: Any, label: str, content_chars: int) -> tuple[list[ArchiveI
     if not isinstance(items, dict) or not isinstance(items.get("data"), list):
         raise DataError("cnyes_archive", None, f"鉅亨網 {label} 沒有 items.data")
     out: list[ArchiveItem] = []
+    skipped = 0
     for it in items["data"]:
         nid, title, ts = it.get("newsId"), strip_html(it.get("title"), 300), it.get("publishAt")
         try:
@@ -71,7 +75,8 @@ def parse_page(body: Any, label: str, content_chars: int) -> tuple[list[ArchiveI
                 "cnyes_archive", None, f"鉅亨網 {label} 有一則缺編號或時間：{str(it)[:120]}"
             ) from e
         if not title:
-            raise DataError("cnyes_archive", None, f"鉅亨網 {label} 第 {nid_i} 則沒有標題")
+            skipped += 1
+            continue
         stocks = tuple(
             dict.fromkeys(str(s) for s in (it.get("stock") or []) if _TW_CODE.match(str(s)))
         )
@@ -91,7 +96,7 @@ def parse_page(body: Any, label: str, content_chars: int) -> tuple[list[ArchiveI
         )
     last_page = int(items.get("last_page") or 1)
     total = int(items.get("total") or len(out))
-    return out, last_page, total
+    return out, last_page, total, skipped
 
 
 def day_bounds(day: dt.date) -> tuple[int, int]:
@@ -107,11 +112,12 @@ def fetch_day(
     *,
     content_chars: int,
     max_pages: int = MAX_PAGES,
-) -> tuple[list[ArchiveItem], int]:
-    """抓一個分類一天的全部（翻頁到 last_page）；回 (新聞, total)。同一則在不同頁重複出現只留一次。"""
+) -> tuple[list[ArchiveItem], int, int]:
+    """抓一個分類一天的全部（翻頁到 last_page）；回 (新聞, total, 略過幾則)。同一則在不同頁重複出現只留一次。"""
     start, end = day_bounds(day)
     seen: dict[int, ArchiveItem] = {}
     total = 0
+    skipped = 0
     page = 1
     while page <= max_pages:
         resp = client.get(
@@ -129,13 +135,16 @@ def fetch_day(
                 None,
                 f"鉅亨網 {category} {day} 第 {page} 頁 HTTP {resp.status_code}",
             )
-        items, last_page, total = parse_page(_json(resp.text), f"{category} {day}", content_chars)
+        items, last_page, total, sk = parse_page(
+            _json(resp.text), f"{category} {day}", content_chars
+        )
+        skipped += sk
         for it in items:
             seen.setdefault(it.news_id, it)
         if page >= last_page or not items:
             break
         page += 1
-    return list(seen.values()), total
+    return list(seen.values()), total, skipped
 
 
 def _json(text: str) -> Any:

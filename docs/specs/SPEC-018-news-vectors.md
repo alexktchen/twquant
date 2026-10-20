@@ -110,6 +110,10 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 - **先 `pg_dump` 再換**（記憶 2026-09-10：Docker 重設曾把整顆 PG 磁碟刪掉；大型 PG 工作前後都要 dump；Git Bash 下 `pg_dump` 路徑會被 MSYS 轉壞，照 WHERE-IS-EVERYTHING ⑬）。
 - 官方 pgvector 映像是 Debian（glibc），現在的 `postgres:16-alpine` 是 musl：**文字欄位的排序規則版本會不同**。切換後必做
   `ALTER DATABASE twquant REFRESH COLLATION VERSION` 並 `REINDEX DATABASE twquant`（否則 PG 會一直警告、B-tree 索引可能壞）。REINDEX 時間要先在 dump 還原的副本上量，寫進 T-412 完成註記。
+  - **實做紀錄（2026-10-20，T-412）**：`REFRESH COLLATION VERSION` 回「invalid collation version change」——alpine 映像沒記過版本，略過無害。
+    `REINDEX DATABASE` 跑到一半後端 segfault（平行維護工人），PG 自動進復原、沒掉資料；改成只重建 114 個索引欄含文字的索引、
+    每條前 `SET max_parallel_maintenance_workers = 0`（`scripts/pg_reindex_collatable.sh`），約 2 小時，資料庫 70 → 57 GB。
+    切換前的 dump：`data/backup/twquant_serving_20261020-2333_pre-pgvector.dump`（11.2 GB）。
 - `CREATE EXTENSION vector` 一次；`twquant serving migrate` 檢查擴充存在，沒有就 raise（不靜默退回無向量模式）。
 - 切換當天不跑任何回測、訓練或 pipeline（記憶：不要同時跑重工作）。
 
