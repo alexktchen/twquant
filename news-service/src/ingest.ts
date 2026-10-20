@@ -2,6 +2,7 @@
 // 資料只增不改（D-200 §四）：first_seen_at 是我們第一次抓到的時間（研究用的可得時間），之後不會再改。
 // 所有 IO（抓網頁、時鐘、資料庫）由呼叫端注入：Edge Function 給真的、測試給假的。一個來源壞掉不擋其他來源。
 import { validateCooccurConfig, type CooccurConfig } from './cooccur.ts'
+import { validateEmbedConfig, type EmbedConfig } from './embed.ts'
 import { validateStockNewsConfig, type StockNewsConfig } from './stocknews.ts'
 import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
 import type { EdgeType, GraphConfig } from './graph.ts'
@@ -35,6 +36,7 @@ export type NewsConfig = {
   graph: NewsGraphConfig
   stock_news: StockNewsConfig
   cooccur: CooccurConfig
+  embed: EmbedConfig
 }
 
 export type NewsGraphConfig = GraphConfig & {
@@ -84,6 +86,7 @@ export function validateConfig(x: unknown): NewsConfig {
   validateGraphConfig(c!.graph)
   validateStockNewsConfig(c!.stock_news)
   validateCooccurConfig(c!.cooccur)
+  validateEmbedConfig(c!.embed)
   return c as NewsConfig
 }
 

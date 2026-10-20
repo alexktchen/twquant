@@ -5,7 +5,7 @@
 export type NewsEnv = { NEWS_API_URL?: string; NEWS_API_KEY?: string }
 
 /** 每個端點准許轉過去的查詢參數（其餘丟掉，不讓瀏覽器亂帶）。 */
-export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts', string[]> = {
+export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search', string[]> = {
   '/v1/items': ['since', 'until', 'kind', 'source', 'limit'],
   '/v1/health': [],
   /** 一則新聞的關係圖（T-402／T-404）：id＝新聞 id；找不到 → 404 照轉 */
@@ -14,7 +14,16 @@ export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/sto
   '/v1/stock-news': ['id'],
   /** 名單小標：一批股票各有幾則（ids＝tw:代號,…） */
   '/v1/stock-news-counts': ['ids'],
+  /** 一則新聞的相似新聞（T-410）：id＝新聞 id */
+  '/v1/similar': ['id'],
+  /** 語意搜尋（T-410）：q＝要找的字 */
+  '/v1/search': ['q'],
 }
+/**
+ * 指定新聞服務在哪個區域執行（Supabase 的 x-region）：資料庫在新加坡，不指定的話從台灣打過去會在東京跑，
+ * 每個查詢都要跨區來回——2026-10-20 實測相似新聞 2.3 秒 → 0.6 秒、健康檢查 1.1 → 0.45 秒。
+ */
+export const UPSTREAM_REGION = 'ap-southeast-1'
 /** 等新聞服務多久（毫秒）：Edge Function 冷啟動約 1 秒，查詢通常 1 秒內 */
 export const UPSTREAM_TIMEOUT_MS = 8_000
 
@@ -38,7 +47,7 @@ export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl
   let res: Response
   try {
     res = await fetchFn(upstreamUrl(env.NEWS_API_URL, path, requestUrl), {
-      headers: { 'x-news-key': env.NEWS_API_KEY, accept: 'application/json' },
+      headers: { 'x-news-key': env.NEWS_API_KEY, 'x-region': UPSTREAM_REGION, accept: 'application/json' },
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     })
   } catch {

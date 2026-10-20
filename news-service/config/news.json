@@ -245,5 +245,29 @@
     "window_days": 90,
     "min_items": 3,
     "hub_share": 0.15
+  },
+  "embed": {
+    "model": "@cf/baai/bge-m3",
+    "dim": 1024,
+    "batch": 50,
+    "per_run_limit": 100,
+    "max_chars": 1500,
+    "input_neurons_per_1m": 1075,
+    "cluster": {
+      "min_score": 0.85,
+      "window_hours": 72,
+      "exclude_sources": [
+        "fed-press"
+      ]
+    },
+    "similar": {
+      "limit": 8,
+      "min_score": 0.6
+    },
+    "search": {
+      "limit": 10,
+      "max_query_chars": 60,
+      "min_score": 0.45
+    }
   }
 }

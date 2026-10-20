@@ -64,6 +64,12 @@ uv run --all-groups python scripts/news_sync_entities.py             # 主庫 st
 
 主庫族群表每 7 天重算，同步跟著跑就好（只改族群名次的線原地更新，其他變動關舊插新）。改了 `configs/news.yaml` 的 `mention`（停用詞、擋字）要把 `rule_version` 加一號，下一輪 ingest 自動重掃全部新聞。
 
+## 向量（T-410）
+
+ingest 第五步用 Workers AI bge-m3 算向量（`news.embeddings`）、同事件合併（`news.clusters`，只新併舊）；英文新聞翻譯完才算。端點 `/v1/similar?id=`、`/v1/search?q=`。設定在 `configs/news.yaml` 的 `embed`。
+
+**一律指定區域**：呼叫函式時帶 `x-region: ap-southeast-1`（資料庫在新加坡；不帶會在東京跑、每個查詢跨區，慢 3～4 倍）。`supabase/setup/schedule.sql` 已帶；改過排程要 `cron.unschedule` 再重跑。量測見 `docs/reports/news-vectors-t410-2026-10-20.md`。
+
 ## 之後改程式
 
 - 改 `configs/news.yaml` → 同步改 `config/news.json` → `npx supabase functions deploy ingest api`。

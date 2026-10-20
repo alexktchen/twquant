@@ -64,6 +64,8 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 
 - 雲端算向量：ingest 多第五步 `embed`，每次最多 `embed.batch`（50）則；文字＝`title_zh ?? title` ＋ `summary_zh ?? summary`（翻譯沒好先用原文，翻譯好了**不重算**——
   bge-m3 是多語模型，中英向量落在同一空間，T-410 驗收要量「原文向量 vs 譯文向量」的 cosine 中位數 ≥ 0.85，不達就改成等翻譯）。
+- **2026-10-20 實測（T-410，[報告](../reports/news-vectors-t410-2026-10-20.md)）**：原文 vs 自己的譯文 cosine 中位數 **0.805 < 0.85** → 照上面的規則改成**英文新聞等翻譯完才算**（ok 用譯文、翻譯沒過用原文）。同事件門檻 0.85、聯準會新聞稿（`fed-press`，同範本換名字）不合併；上線合併 15 則人工看全對。
+- **新聞服務一律指定在新加坡執行**（`x-region: ap-southeast-1`，網站轉接與排程都帶）：不指定會被派到東京、每個查詢跨區，實測相似新聞 2.25 → 0.60 秒、搜尋 1.90 → 0.62 秒、關係圖 2.58 → 0.68 秒。
 - 雲端查詢：`/v1/similar?id=`（同事件群＋最近 10 則）、`/v1/search?q=`（問句算向量 → HNSW 最近 20 則，當天額度內）、`/v1/graph` 的草稿提及走同一條線。
 - 本機算向量：`twquant news embed`（CLI，資料層），sentence-transformers `BAAI/bge-m3`，fp16，批次 128，只算還沒有向量的列；可重跑、冪等。
 - 兩邊同一個模型但不同執行環境（Workers AI vs 本機 torch），向量會有微小差異。T-412 驗收：抽 200 則兩邊都算，cosine 中位數 ≥ 0.99；
