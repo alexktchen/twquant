@@ -2160,6 +2160,14 @@ def _run_daily_pipeline(
             return "沒有 TWQUANT_NEWS_DSN，略過"
         return _news_pull_run("", True)
 
+    def _news_features_step() -> str:
+        # T-414 新聞因子特徵：語料拉回之後算今天那列（截點 19:00 沒過就只到前一天）。best-effort。
+        import os
+
+        if not os.environ.get("TWQUANT_NEWS_DSN", "").strip():
+            return "沒有 TWQUANT_NEWS_DSN（語料不在這台），略過"
+        return _news_features_run("", "")
+
     def _conferences_step() -> str:
         # T-376 法說會行事曆：MOPS 月表整月覆蓋，休市日照跑。best-effort。
         from twquant.data.serving import store
@@ -2289,6 +2297,7 @@ def _run_daily_pipeline(
         PipelineStep("除權息預告", _dividend_calendar_step),
         PipelineStep("內部人申讓", _insider_transfers_step),
         PipelineStep("新聞語料拉回", _news_pull_step),
+        PipelineStep("新聞因子特徵", _news_features_step),
         PipelineStep("名單一句話", _pick_blurbs_step),
         PipelineStep("名單評分", _pick_review_step),
         PipelineStep("紙上交易", _paper_trading_step),
@@ -6925,6 +6934,194 @@ def news_mentions_report(
     Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")
     typer.echo("\n".join(lines[:5]))
     typer.secho(f"[OK] 報告 {out}", fg=typer.colors.GREEN)
+
+
+# ── 新聞因子特徵（T-414／SPEC-018 §5）：主題中心一次性擬合；每日逐股特徵 → 主庫 news_features ──
+def _news_factors_cfg() -> Any:
+    from twquant.config import NewsFactorsConfig, load_config
+
+    return load_config(_CONFIG_DIR / "news_factors.yaml", NewsFactorsConfig)
+
+
+def _news_models_dir(data_dir: str) -> Path:
+    """主題中心放哪：<data_dir>/models。system.yaml 的 data_dir 是相對路徑，在 worktree 裡要用 --data-dir 給絕對路徑（§0.2）。"""
+    return (Path(data_dir) if data_dir else Path(_load_system().data_dir)).resolve() / "models"
+
+
+@news_app.command("topics-fit")
+def news_topics_fit(
+    data_dir: str = typer.Option("", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"),
+) -> None:
+    """主題中心（T-414）：只用 fit_until 以前的新聞向量（固定 seed 抽樣）跑 k-means，存 <data_dir>/models/<centers_file>。一次性、凍結。"""
+    import numpy as np
+
+    from twquant.conventions import TZ
+    from twquant.data import news_features as nfe
+    from twquant.data.serving import store
+
+    cfg = _news_factors_cfg()
+    until = dt.datetime.combine(cfg.topics.fit_until, dt.time(23, 59, 59), tzinfo=TZ)
+    conn = store.connect(_load_serving())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select e.item_id from news_hist.embeddings e join news_hist.items i on i.id = e.item_id "
+                "where i.origin <> 'mops' and i.available_at <= %s order by e.item_id",
+                (until,),
+            )
+            ids = [str(r[0]) for r in cur.fetchall()]
+        if len(ids) > cfg.topics.fit_sample:
+            rng = np.random.default_rng(cfg.topics.seed)
+            ids = sorted(rng.choice(np.array(ids), cfg.topics.fit_sample, replace=False).tolist())
+        _, vecs = nfe.load_vectors(conn, ids)
+    finally:
+        conn.close()
+    centers = nfe.fit_topics(vecs, cfg.topics.k, cfg.topics.seed)
+    path = _news_models_dir(data_dir) / cfg.topics.centers_file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        path,
+        centers=centers,
+        version=cfg.topics.version,
+        fit_until=str(cfg.topics.fit_until),
+        n=len(vecs),
+    )
+    typer.secho(
+        f"[OK] 主題中心 {cfg.topics.k} 個，用 {len(vecs)} 則 ≤ {cfg.topics.fit_until} 的新聞；{path}",
+        fg=typer.colors.GREEN,
+    )
+
+
+def _news_features_run(start: str, end: str, data_dir: str = "") -> str:
+    """每日逐股新聞特徵 → 主庫 news_features；回一行摘要。`news features` 指令與每日 pipeline 共用。"""
+    import numpy as np
+    import polars as pl
+
+    from twquant.conventions import TZ, now_tw
+    from twquant.data import news_features as nfe
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+
+    cfg = _news_factors_cfg()
+    w = cfg.topics
+    win = cfg.windows
+    scfg = _load_serving()
+    schema = scfg.pg_schema
+    centers_path = _news_models_dir(data_dir) / w.centers_file
+    if not centers_path.exists():
+        raise typer.BadParameter(f"沒有主題中心 {centers_path}：先跑 twquant news topics-fit")
+    centers = np.load(centers_path)["centers"]
+    now = now_tw()
+    conn = store.connect(scfg)
+    try:
+        nfe.ensure_sim_table(conn)
+        sch.ensure_tables(conn, tuple(t for t in sch.FACTOR_SPECS if t.name == nfe.TABLE), schema)
+        end_d = dt.date.fromisoformat(end) if end else now.date()
+        if start:
+            start_d = dt.date.fromisoformat(start)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(f'select max(date) from "{schema}".news_features')
+                last = cur.fetchone()[0]
+                if last is None:
+                    cur.execute(
+                        "select min(available_at at time zone 'Asia/Taipei')::date from news_hist.items"
+                    )
+                    last = cur.fetchone()[0] - dt.timedelta(days=1)
+            start_d = last + dt.timedelta(days=1)
+        dates = [
+            d
+            for d in nfe.load_trading_days(conn, schema, start_d, end_d)
+            if nfe.cutoff_passed(d, cfg.cutoff_hour, now)
+        ]
+        if not dates:
+            return f"{start_d}～{end_d} 沒有截點已過的交易日，略過"
+        until = dt.datetime(
+            dates[-1].year, dates[-1].month, dates[-1].day, cfg.cutoff_hour, tzinfo=TZ
+        )
+        lookback = (
+            max(
+                win.attention_base,
+                win.sector_base,
+                win.sent_mid + win.sent_shift_base,
+                win.novelty_base + win.novelty_recent,
+                win.mops_novelty_base + win.mops_latest_max_age,
+            )
+            + 1
+        )
+        grid_start = dates[0] - dt.timedelta(days=lookback)
+        mentions = nfe.load_mentions(conn, until)
+        universe = sorted(
+            set(nfe.load_universe(conn, schema)) | set(mentions["stock_id"].to_list())
+        )
+        grid = nfe.dense_grid(universe, grid_start, dates[-1])
+        counts = nfe.daily_counts(mentions, cfg.cutoff_hour)
+        cf = nfe.count_features(
+            grid,
+            counts,
+            short=win.attention_short,
+            mid=win.attention_mid,
+            base=win.attention_base,
+            mops=win.mops_count,
+        )
+        sf = nfe.sentiment_features(
+            grid,
+            nfe.load_scores(conn, cfg.sentiment_version, until),
+            cutoff_hour=cfg.cutoff_hour,
+            short=win.sent_short,
+            mid=win.sent_mid,
+            shift_base=win.sent_shift_base,
+        )
+        hf = nfe.sector_heat(
+            cf.select("day", "stock_id", "n"),
+            nfe.load_groups(conn, schema),
+            short=win.sector_short,
+            base=win.sector_base,
+            min_base=win.sector_min_base,
+        )
+        items = (
+            mentions.with_columns(
+                nfe.news_day(pl.col("available_at"), cfg.cutoff_hour).alias("day")
+            )
+            .filter(pl.col("day") >= grid_start)
+            .select("item_id", "stock_id", "day", "is_mops")
+            .sort(["stock_id", "day", "item_id"])
+        )
+        sims_news, sims_mops, tf = nfe.compute_item_sims_and_topics(
+            conn,
+            items,
+            centers,
+            news_base=win.novelty_base,
+            mops_base=win.mops_novelty_base,
+            recent=win.novelty_recent,
+        )
+        nov = nfe.novelty_features(grid, sims_news, recent=win.novelty_recent)
+        mn = nfe.mops_novelty_features(grid, sims_mops, max_age=win.mops_latest_max_age)
+        out = nfe.assemble(
+            dates,
+            [cf, sf, hf, nov, mn, tf],
+            cutoff_hour=cfg.cutoff_hour,
+            topic_k=w.k,
+            topic_version=w.version,
+        )
+        n = nfe.write_features(conn, schema, out)
+    finally:
+        conn.close()
+    return f"news_features {n} 列（{dates[0]}～{dates[-1]}，{len(dates)} 個交易日；情緒版本 {cfg.sentiment_version or '無'}）"
+
+
+@news_app.command("features")
+def news_features_cmd(
+    start: str = typer.Option(
+        "", help="從哪天（空＝主庫 news_features 最後一天的隔天；第一次＝語料最早一天）"
+    ),
+    end: str = typer.Option("", help="到哪天（空＝今天）；歷史回填建議一年一段"),
+    data_dir: str = typer.Option("", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"),
+) -> None:
+    """每日逐股新聞特徵（T-414）→ 主庫 news_features。只算截點已過的日子；可重跑（同日覆蓋）。"""
+    t0 = time.monotonic()
+    msg = _news_features_run(start, end, data_dir)
+    typer.secho(f"[OK] {msg}；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ cloud:
     broker_trades: 1               # 只供當日聚合與 Drive 歸檔（歸檔在修剪之前）；三支分點因子雲端不算
     fubon_fetch_log: 10
     factor_values: 2               # 模型只讀當日因子；網站不再顯示因子走勢
+    news_features: 30              # T-414：模型只讀當日；雲端其實不算（步驟略過），留窗給未來同步
     composite_daily: 2
     screener_daily: 5              # 選股池不上雲（它要 166 天分點明細，雲端本來就算不對）
     broker_flow_daily: 5
@@ -90,3 +91,4 @@ cloud:
     - ETF 持股        # 同上
     - 月營收          # workflow 在 pipeline 之前已抓上個月與當月（daily-pipeline.yml），不重複打 MOPS
     - 新聞語料拉回    # T-412：歷史語料只在地端 PG（news_hist）；雲端 runner 的主庫不放
+    - 新聞因子特徵    # T-414：同上，特徵從地端 news_hist 算
