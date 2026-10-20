@@ -1,11 +1,12 @@
 // 網站 → 新聞服務（T-400／D-200）：/api/news/* 只是把請求轉給新聞服務的 API v1（news-service/supabase/functions/api），
 // 服務金鑰放 Pages 祕密（NEWS_API_URL、NEWS_API_KEY），不給瀏覽器。/api 在 Cloudflare Access 後面：沒登入讀不到。
 // 新聞服務掛了 → 503，網站只有新聞分頁顯示暫停，其他分頁照常（SPEC-017 §10）。純函式＋注入 fetch，供 node 單元測試。
+import { sameOrigin } from './watchlist.ts'
 
 export type NewsEnv = { NEWS_API_URL?: string; NEWS_API_KEY?: string }
 
 /** 每個端點准許轉過去的查詢參數（其餘丟掉，不讓瀏覽器亂帶）。 */
-export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search', string[]> = {
+export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search' | '/v1/review', string[]> = {
   '/v1/items': ['since', 'until', 'kind', 'source', 'limit'],
   '/v1/health': [],
   /** 一則新聞的關係圖（T-402／T-404）：id＝新聞 id；找不到 → 404 照轉 */
@@ -18,6 +19,8 @@ export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/sto
   '/v1/similar': ['id'],
   /** 語意搜尋（T-410）：q＝要找的字 */
   '/v1/search': ['q'],
+  /** 核可頁（T-403）：GET 列草稿、POST 送決定；登入者身分另外放 x-news-user */
+  '/v1/review': [],
 }
 /**
  * 指定新聞服務在哪個區域執行（Supabase 的 x-region）：資料庫在新加坡，不指定的話從台灣打過去會在東京跑，
@@ -41,13 +44,24 @@ export function upstreamUrl(base: string, path: keyof typeof ALLOWED, requestUrl
 const reply = (body: string, status: number) =>
   new Response(body, { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store' } })
 
+/** POST 的內容與登入者（核可頁）。user＝驗過 Cloudflare Access 權杖的 email，新聞服務拿它比對擁有者名單。 */
+export type ProxyOpts = { method?: 'GET' | 'POST'; body?: string; user?: string | null }
+
 /** 轉一次。沒設定、連不上、逾時、回的不是 JSON → 503（不外洩上游網址）；400／404 照轉（參數錯是使用者看得懂的訊息）。 */
-export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl: string, fetchFn: typeof fetch = fetch): Promise<Response> {
+export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl: string, fetchFn: typeof fetch = fetch, opts: ProxyOpts = {}): Promise<Response> {
   if (!env.NEWS_API_URL || !env.NEWS_API_KEY) return reply(JSON.stringify({ detail: '新聞服務還沒設定' }), 503)
   let res: Response
   try {
     res = await fetchFn(upstreamUrl(env.NEWS_API_URL, path, requestUrl), {
-      headers: { 'x-news-key': env.NEWS_API_KEY, 'x-region': UPSTREAM_REGION, accept: 'application/json' },
+      method: opts.method ?? 'GET',
+      headers: {
+        'x-news-key': env.NEWS_API_KEY,
+        'x-region': UPSTREAM_REGION,
+        accept: 'application/json',
+        ...(opts.user ? { 'x-news-user': opts.user } : {}),
+        ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(opts.body !== undefined ? { body: opts.body } : {}),
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     })
   } catch {
@@ -57,4 +71,20 @@ export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl
   if (!(res.headers.get('content-type') ?? '').includes('json')) return reply(JSON.stringify({ detail: '新聞服務暫時無法取得資料' }), 503)
   if (res.status === 200 || res.status === 400 || res.status === 404) return reply(body, res.status)
   return reply(JSON.stringify({ detail: '新聞服務暫時無法取得資料' }), 503)
+}
+
+/** 核可頁一次送出的內容上限（100 個決定綽綽有餘） */
+export const REVIEW_BODY_MAX = 20_000
+
+/**
+ * POST /api/news/review（T-403）：別站送來的不收、沒登入不收、太長不收，其餘連同登入者轉給新聞服務。
+ * 是不是擁有者由新聞服務比對祕密名單決定（擁有者 email 不進版控）。email＝驗過 Cloudflare Access 權杖的登入者（呼叫端注入）。
+ */
+export async function reviewPost(request: Request, env: NewsEnv, email: (r: Request) => Promise<string | null>, fetchFn: typeof fetch = fetch): Promise<Response> {
+  if (!sameOrigin(request)) return reply(JSON.stringify({ detail: '只接受本站送出的變更' }), 403)
+  const user = await email(request)
+  if (user === null) return reply(JSON.stringify({ detail: '登入身分驗證失敗，請重新登入' }), 401)
+  const text = await request.text()
+  if (text.length > REVIEW_BODY_MAX) return reply(JSON.stringify({ detail: '內容太長' }), 413)
+  return proxy(env, '/v1/review', request.url, fetchFn, { method: 'POST', body: text, user })
 }

@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
@@ -7,6 +7,7 @@ import type { EntityType } from '../../../src/graph.ts'
 import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
 import { validateConfig } from '../../../src/ingest.ts'
 import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
+import { REVIEW_TYPES, edgeKey, groupDrafts, isOwner, parseReviewBody, planReview, type DecisionIn, type DraftEdge, type EntityInfo } from '../../../src/review.ts'
 import { countsFor, linksTo, parseStockIds, prepare, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
 import { authorized, db, embedQuery, json } from '../_shared/io.ts'
 
@@ -69,11 +70,12 @@ async function withMeta(sql: ReturnType<typeof db>, rows: Scored[]) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== 'GET') return json({ detail: 'method not allowed' }, 405)
-  if (!authorized(req, 'NEWS_API_KEY')) return json({ detail: 'forbidden' }, 403)
   const url = new URL(req.url)
   // Supabase 轉進來的路徑是 /api/v1/...（函式名稱在前）
   const path = url.pathname.replace(/^\/api/, '')
+  // 只有核可頁收 POST
+  if (req.method !== 'GET' && !(req.method === 'POST' && path === '/v1/review')) return json({ detail: 'method not allowed' }, 405)
+  if (!authorized(req, 'NEWS_API_KEY')) return json({ detail: 'forbidden' }, 403)
   const sql = db()
   try {
     if (path === '/v1/health') {
@@ -133,6 +135,49 @@ Deno.serve(async (req) => {
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
         .slice(0, sn.stock_limit)
       return json({ id: ids[0], days, items })
+    }
+    if (path === '/v1/review') {
+      // 登入者 email 由網站驗過 Cloudflare Access 權杖後放在 x-news-user（只有帶服務金鑰的呼叫端送得進來）；擁有者名單是祕密 NEWS_OWNER_EMAILS
+      const user = req.headers.get('x-news-user')
+      const owner = isOwner(user, Deno.env.get('NEWS_OWNER_EMAILS'))
+      if (req.method === 'GET') {
+        if (!owner) return json({ can_review: false, total: 0, groups: [] })
+        const [drafts, ents] = await Promise.all([
+          sql<DraftEdge[]>`
+            select src, dst, type, label, rank, source from news.graph_edges
+            where valid_to is null and status = 'draft' and type = any(${[...REVIEW_TYPES]})`,
+          sql<EntityInfo[]>`select id, type, label, sub from news.entities where valid_to is null`,
+        ])
+        return json({ can_review: true, total: drafts.length, groups: groupDrafts(drafts, new Map(ents.map((e) => [e.id, e]))) })
+      }
+      // 不回 403：網站把 403 當成「要重新登入」（frontend/functions/_lib/news-proxy.ts 也不轉 403）
+      if (!owner) return json({ detail: '只有擁有者能核可' }, 400)
+      let decisions: DecisionIn[]
+      try {
+        decisions = parseReviewBody(await req.json())
+      } catch (e) {
+        return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
+      }
+      const plan = await sql.begin(async (tx) => {
+        // 鎖住要處理的草稿：兩個分頁同時按，後到的那個看到已經不是草稿 → 略過
+        const rows = await tx<DraftEdge[]>`
+          select src, dst, type, label, rank, source from news.graph_edges
+          where valid_to is null and status = 'draft' and (src || '|' || dst || '|' || type) = any(${decisions.map(edgeKey)})
+          for update`
+        const p = planReview(decisions, new Map(rows.map((r) => [edgeKey(r), r])), user!, new Date())
+        const at = p.reviews[0]?.reviewed_at
+        for (const c of p.close)
+          await tx`update news.graph_edges set valid_to = ${at} where valid_to is null and status = 'draft' and src = ${c.src} and dst = ${c.dst} and type = ${c.type}`
+        if (p.insert.length) await tx`insert into news.graph_edges ${tx(p.insert)}`
+        if (p.reviews.length) await tx`insert into news.reviews ${tx(p.reviews)}`
+        return p
+      })
+      graphCache = null // 這個執行個體馬上看到新的線；其他執行個體最多 GRAPH_TABLES_TTL_MS 後跟上
+      return json({
+        approved: plan.insert.length,
+        rejected: plan.reviews.length - plan.insert.length,
+        skipped: plan.skipped,
+      })
     }
     if (path === '/v1/similar') {
       const id = url.searchParams.get('id')

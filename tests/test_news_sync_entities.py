@@ -522,3 +522,29 @@ def test_rank_only_change_updates_in_place() -> None:
     changed = [m.Edge("tw:2330", "grp:半導體", "belongs", "draft", None, 2, "stock_group")]
     close2, insert2, rerank2 = m.diff_edges_rerank(old, changed)
     assert close2 == [("tw:2330", "grp:半導體", "belongs")] and insert2 == changed and rerank2 == []
+
+
+def test_apply_reviews_follows_latest_decision_for_drafts_only() -> None:
+    """T-403：核可頁核可的草稿同步後維持 approved、退回的不再長回來；設定檔本來就 approved 的線不受影響。"""
+    e = m.Edge
+    edges = [
+        e("us:NVDA", "tw:2330", "supplier", "draft", None, None, "config"),
+        e("us:NVDA", "tw:2382", "supplier", "draft", None, None, "config"),
+        e("us:NVDA", "tw:3231", "supplier", "draft", None, None, "config"),
+        e("tw:2330", "grp:半導體", "belongs", "approved", None, 1, "stock_group"),
+    ]
+    decisions = {
+        "us:NVDA|tw:2330|supplier": "approved",
+        "us:NVDA|tw:2382|supplier": "rejected",
+        "tw:2330|grp:半導體|belongs": "rejected",
+    }
+    got = m.apply_reviews(edges, decisions)
+    assert [(x.dst, x.status) for x in got] == [
+        ("tw:2330", "approved"),
+        ("tw:3231", "draft"),
+        ("grp:半導體", "approved"),
+    ]
+    # 核可後同步：跟新聞庫裡核可頁插的那條（approved、同說明同來源）沒有差異 → 不關不插
+    existing = [e("us:NVDA", "tw:2330", "supplier", "approved", None, None, "config")]
+    close, insert, _ = m.diff_edges_rerank(existing, got[:1])
+    assert close == [] and insert == []

@@ -138,7 +138,7 @@
 | `GET /v1/links` | 依實體查相關資訊（個股頁、名單小標、晨報、名單分析） | entity（tw:2330／us:NVDA／grp:半導體）、max_degree（預設 2）、since、as_of |
 | `GET /v1/heat` | 今日影響地圖（族群熱度） | date |
 | `GET /v1/flows` | 美股→台股傳導 | date |
-| `GET /v1/review` ／ `POST /v1/review/:id` | 核可頁（草擬的別名、線） | 只收擁有者（由網站 Access 身分轉送） |
+| `GET /v1/review` ／ `POST /v1/review` | 核可頁（草擬的線；POST 內容 `{decisions:[{src,dst,type,decision}]}`，T-403 實作時改成一次送多個） | 只收擁有者（由網站 Access 身分轉送 `x-news-user`；名單是祕密 `NEWS_OWNER_EMAILS`） |
 | `GET /v1/health` | 最後抓取時間、各來源狀態、今日用量 | — |
 
 - `as_of` 參數：只回「可得時間 ≤ as_of」的資料（證據包與研究用；§0 第 5 點）。
