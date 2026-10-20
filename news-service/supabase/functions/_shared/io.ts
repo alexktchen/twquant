@@ -252,6 +252,7 @@ export function embedDeps(sql: Sql, cfg: EmbedConfig): EmbedDeps {
       ) v on true
       left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
       where (i.lang <> 'en' or t.item_id is not null)
+        and i.first_seen_at > now() - make_interval(days => ${cfg.retention_days})
         and not exists (select 1 from news.embeddings e where e.item_id = i.id)
       order by i.first_seen_at, i.id
       limit ${limit}`,
@@ -280,6 +281,12 @@ export function embedDeps(sql: Sql, cfg: EmbedConfig): EmbedDeps {
     },
     saveUsage: async (u) => {
       await sql`insert into news.llm_usage ${sql(u)}`
+    },
+    prune: async (days) => {
+      const r = await sql`
+        delete from news.embeddings e using news.raw_items i
+        where i.id = e.item_id and i.first_seen_at < now() - make_interval(days => ${days})`
+      return r.count
     },
   }
 }

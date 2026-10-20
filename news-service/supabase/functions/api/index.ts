@@ -85,7 +85,8 @@ Deno.serve(async (req) => {
                (array_agg(error order by started_at desc))[1] as last_error
         from news.ingest_runs where started_at > now() - interval '7 days' group by source`
       const runs = rows.map((r) => ({ source: r.source, last_run_at: iso(r.last_run_at), last_ok_at: iso(r.last_ok_at), last_error: r.last_error }))
-      return json(health(cfg, runs, new Date()))
+      const [db] = await sql<{ b: string }[]>`select pg_database_size(current_database())::text as b`
+      return json(health(cfg, runs, new Date(), Number(db.b)))
     }
     if (path === '/v1/stock-news' || path === '/v1/stock-news-counts') {
       const sn = cfg.stock_news
@@ -185,8 +186,12 @@ Deno.serve(async (req) => {
       const sc = cfg.embed.similar
       const [me] = await sql<{ cluster_id: string | null }[]>`
         select c.cluster_id from news.embeddings e left join news.clusters c on c.item_id = e.item_id where e.item_id = ${id}`
-      // 還沒算向量（英文等翻譯、或剛抓到）→ 空的，網站顯示「還在算」
-      if (!me) return json({ id, ready: false, items: [] })
+      // 沒有向量：超過保留期（雲端只留近 retention_days 天）→ expired；否則是還沒算（英文等翻譯、或剛抓到）
+      if (!me) {
+        const [old] = await sql<{ old: boolean }[]>`
+          select first_seen_at < now() - make_interval(days => ${cfg.embed.retention_days}) as old from news.raw_items where id = ${id}`
+        return json({ id, ready: false, expired: old?.old ?? false, retention_days: cfg.embed.retention_days, items: [] })
+      }
       const q = sql`(select vec from news.embeddings where item_id = ${id})`
       const [same, near] = await Promise.all([
         sql<{ item_id: string; score: number }[]>`

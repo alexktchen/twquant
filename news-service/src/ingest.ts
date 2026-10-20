@@ -3,6 +3,7 @@
 // 所有 IO（抓網頁、時鐘、資料庫）由呼叫端注入：Edge Function 給真的、測試給假的。一個來源壞掉不擋其他來源。
 import { validateCooccurConfig, type CooccurConfig } from './cooccur.ts'
 import { validateEmbedConfig, type EmbedConfig } from './embed.ts'
+import { validateStorageConfig, type StorageConfig } from './api.ts'
 import { validateStockNewsConfig, type StockNewsConfig } from './stocknews.ts'
 import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
 import type { EdgeType, GraphConfig } from './graph.ts'
@@ -37,6 +38,7 @@ export type NewsConfig = {
   stock_news: StockNewsConfig
   cooccur: CooccurConfig
   embed: EmbedConfig
+  storage: StorageConfig
 }
 
 export type NewsGraphConfig = GraphConfig & {
@@ -87,6 +89,7 @@ export function validateConfig(x: unknown): NewsConfig {
   validateStockNewsConfig(c!.stock_news)
   validateCooccurConfig(c!.cooccur)
   validateEmbedConfig(c!.embed)
+  validateStorageConfig(c!.storage)
   return c as NewsConfig
 }
 

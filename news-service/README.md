@@ -77,6 +77,8 @@ AI 草擬的線（`graph_edges.status = draft`，來自 `configs/news_edges.yaml
 
 ## 向量（T-410）
 
+雲端只留近 `embed.retention_days`（45）天的向量（一則向量＋索引約 5.6 KB，免費 500 MB）：第五步先刪過期的、也不再補算。`/v1/health` 的 `storage` 回報資料庫用量。
+
 ingest 第五步用 Workers AI bge-m3 算向量（`news.embeddings`）、同事件合併（`news.clusters`，只新併舊）；英文新聞翻譯完才算。端點 `/v1/similar?id=`、`/v1/search?q=`。設定在 `configs/news.yaml` 的 `embed`。
 
 **一律指定區域**：呼叫函式時帶 `x-region: ap-southeast-1`（資料庫在新加坡；不帶會在東京跑、每個查詢跨區，慢 3～4 倍）。`supabase/setup/schedule.sql` 已帶；改過排程要 `cron.unschedule` 再重跑。量測見 `docs/reports/news-vectors-t410-2026-10-20.md`。

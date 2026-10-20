@@ -56,6 +56,8 @@ export type NewsHealth = {
   last_ok_at: string | null
   stale: boolean
   sources: { source: string; name: string; failing: boolean; last_error: string | null }[]
+  /** 新聞庫用量（2026-10-20 起；免費方案 500 MB），warn＝超過七成 */
+  storage?: { used_mb: number; limit_mb: number; warn: boolean }
 }
 
 export const KIND_LABEL: Record<NewsKind, string> = { intl: '國際', tw: '台灣' }
@@ -124,6 +126,7 @@ export function healthLine(h: NewsHealth | null, now: Date): { text: string; ton
   const base = `最後抓取 ${ageLabel(h.last_ok_at, now)}`
   if (h.stale) return { text: `${base}・已停擺`, tone: 'bad' }
   if (failing.length > 0) return { text: `${base}・${failing.map((s) => s.name).join('、')} 暫停`, tone: 'warn' }
+  if (h.storage?.warn) return { text: `${base}・資料庫已用 ${Math.round((h.storage.used_mb / h.storage.limit_mb) * 100)}%`, tone: 'warn' }
   return { text: base, tone: 'ok' }
 }
 
@@ -196,8 +199,8 @@ export type SimilarItem = {
   /** 同一事件（不同媒體報同一件事，或同一則被兩個頻道刊） */
   same_event: boolean
 }
-/** ready＝這則已經算好向量（英文新聞要翻譯完才算，通常 30 分鐘內） */
-export type SimilarNews = { id: string; ready: boolean; items: SimilarItem[] }
+/** ready＝這則已經算好向量（英文新聞要翻譯完才算，通常 30 分鐘內）；expired＝超過雲端保留的天數，向量已刪 */
+export type SimilarNews = { id: string; ready: boolean; expired?: boolean; retention_days?: number; items: SimilarItem[] }
 export type NewsSearch = { q: string; budget_stop: boolean; items: SimilarItem[] }
 
 /** 短時間：今天 → 「22:05」，其他天 → 「10/18」。 */
@@ -209,6 +212,7 @@ export function shortWhen(iso: string, today: string): string {
 
 /** 展開那則底下「相似新聞」的說明（沒有清單時才顯示）。 */
 export function similarNote(d: SimilarNews): string | null {
+  if (!d.ready && d.expired) return `這則比較舊，相似新聞只找近 ${d.retention_days ?? '幾十'} 天的`
   if (!d.ready) return '這則還在算（英文新聞翻譯完才算，通常 30 分鐘內）'
   if (d.items.length === 0) return '沒有內容相近的新聞'
   return null
