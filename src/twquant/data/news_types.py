@@ -138,7 +138,7 @@ def export_weights(
     *,
     version: str,
     min_confidence: float,
-    metrics: dict[str, float],
+    metrics: dict[str, Any],
 ) -> dict[str, Any]:
     """給 news-service 的 JSON：權重四捨五入到 4 位（1024×12 約 90 KB），同一條公式在 Edge Function 算（src/types.ts）。"""
     return {
