@@ -182,3 +182,41 @@ export function stockNewsSummary(d: StockNews): string {
   const direct = d.items.filter((x) => x.degree === 1).length
   return `近 ${d.days} 天・直接 ${direct}・間接 ${d.items.length - direct}`
 }
+
+// ── 相似新聞與語意搜尋（T-410／SPEC-018）：新聞服務用 bge-m3 向量找出來的 ────────────────────────
+export type SimilarItem = {
+  id: string
+  source_name: string
+  kind: NewsKind | null
+  url: string
+  first_seen_at: string
+  title: string
+  title_zh: string | null
+  score: number
+  /** 同一事件（不同媒體報同一件事，或同一則被兩個頻道刊） */
+  same_event: boolean
+}
+/** ready＝這則已經算好向量（英文新聞要翻譯完才算，通常 30 分鐘內） */
+export type SimilarNews = { id: string; ready: boolean; items: SimilarItem[] }
+export type NewsSearch = { q: string; budget_stop: boolean; items: SimilarItem[] }
+
+/** 短時間：今天 → 「22:05」，其他天 → 「10/18」。 */
+export function shortWhen(iso: string, today: string): string {
+  if (taipeiDay(iso) === today) return taipeiHm(iso)
+  const d = taipei(iso)
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}
+
+/** 展開那則底下「相似新聞」的說明（沒有清單時才顯示）。 */
+export function similarNote(d: SimilarNews): string | null {
+  if (!d.ready) return '這則還在算（英文新聞翻譯完才算，通常 30 分鐘內）'
+  if (d.items.length === 0) return '沒有內容相近的新聞'
+  return null
+}
+
+/** 搜尋結果上面那一句。 */
+export function searchLine(d: NewsSearch): string {
+  if (d.budget_stop) return '今天新聞的 AI 額度用完了，明天早上 8 點恢復'
+  if (d.items.length === 0) return `找不到跟「${d.q}」相關的新聞`
+  return `跟「${d.q}」相關的新聞 ${d.items.length} 則，越相關越前面`
+}

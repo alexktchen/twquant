@@ -223,3 +223,31 @@ cooccur:
   window_days: 90
   min_items: 3
   hub_share: 0.15
+
+# 新聞向量（T-410／SPEC-018 §2、§3.1／D-201）：ingest 第五步，Workers AI bge-m3（1024 維），額度跟翻譯共用 translate.daily_neurons。
+# 英文新聞等翻譯完才算：2026-10-20 實測原文 vs 自己的譯文 cosine 中位數 0.805 < 事前門檻 0.85（docs/reports/news-vectors-t410-2026-10-20.md）。
+embed:
+  model: "@cf/baai/bge-m3"
+  dim: 1024
+  batch: 50
+  # 第一次上線要補 436 則：100 則一輪，約 5 輪補完
+  per_run_limit: 100
+  max_chars: 1500
+  # 回應沒附 Neurons 時才用（bge-m3 官方價 0.012 美元／百萬 token ≈ 1,075 Neurons）
+  input_neurons_per_1m: 1075
+  # 同事件合併（只新併舊）：2026-10-20 用 436 則校準——≥ 0.85 幾乎都是同一件事（同一則被兩個頻道刊、或不同媒體報同一事件），
+  # 0.80～0.85 一半是、一半是同範本的不同事；聯準會新聞稿換個銀行名字就 0.86，不合併
+  cluster:
+    min_score: 0.85
+    window_hours: 72
+    exclude_sources: [fed-press]
+  # 每則的「相似新聞」：同事件全列，再補最像的（隨便兩則中位數約 0.37）
+  similar:
+    limit: 8
+    min_score: 0.6
+  # 新聞頁的搜尋框：問句算向量找最近的；一次約 0.01 Neurons。2026-10-20 試五個問句（輝達財測、美債殖利率、台積電、記憶體漲價、川普關稅）：
+  # 前 5 則幾乎都對、後面開始混進無關的（分數 0.45～0.5 對錯都有）→ 只列前 10、低於 0.45 不列
+  search:
+    limit: 10
+    max_query_chars: 60
+    min_score: 0.45

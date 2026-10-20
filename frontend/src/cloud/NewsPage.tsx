@@ -1,10 +1,11 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
 // 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；標題下面列這則提到的台股／國外公司／族群（T-402，最多 3 個＋「+N」），
 // 有提到的列多一顆「關係圖」：點了才向新聞服務要這則的圖（T-404），開心智圖。
+// 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
-import { ChevronDown, ExternalLink, Globe, MapPin, Network, RefreshCw } from 'lucide-react'
+import { ChevronDown, ExternalLink, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems } from './api'
+import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsSearch } from './api'
 import {
   KIND_LABEL,
   NEWS_PAGE,
@@ -14,14 +15,17 @@ import {
   healthLine,
   mentionChips,
   nextUntil,
+  searchLine,
   shown,
   taipeiDay,
   timeLabel,
   type NewsHealth,
   type NewsKind,
+  type NewsSearch,
   type NewsRow,
 } from './news'
 import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
+import { NewsSearchResults, SimilarNews } from './NewsSimilar'
 import './news-graph.css'
 
 type Filter = 'all' | NewsKind
@@ -54,6 +58,28 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   /** 正在抓哪一則的關係圖；抓壞了是哪一則、什麼原因（顯示在那一列） */
   const [graphLoading, setGraphLoading] = useState<string | null>(null)
   const [graphErr, setGraphErr] = useState<{ id: string; msg: string } | null>(null)
+  /** 搜尋框：輸入中的字、送出後的結果（null＝沒在搜尋，顯示新聞流） */
+  const [q, setQ] = useState('')
+  const [search, setSearch] = useState<NewsSearch | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [searchErr, setSearchErr] = useState('')
+
+  const runSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    const text = q.trim()
+    if (!text || searching) return
+    setSearching(true)
+    setSearchErr('')
+    fetchNewsSearch(text)
+      .then(setSearch)
+      .catch((x: Error) => setSearchErr(`搜尋失敗：${x.message}`))
+      .finally(() => setSearching(false))
+  }
+  const clearSearch = () => {
+    setQ('')
+    setSearch(null)
+    setSearchErr('')
+  }
 
   useEffect(() => {
     let stale = false
@@ -123,6 +149,28 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
           {status.text}
         </span>
       </div>
+      <form className="cq-news-search" role="search" onSubmit={runSearch}>
+        <Search size={16} aria-hidden="true" />
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="照意思找新聞，例：輝達財測、美債殖利率" maxLength={60} aria-label="搜尋新聞" enterKeyHint="search" />
+        {(q || search) && (
+          <button type="button" className="cq-news-search-x" onClick={clearSearch} aria-label="清除搜尋">
+            <X size={16} aria-hidden="true" />
+          </button>
+        )}
+        <button type="submit" disabled={!q.trim() || searching}>
+          {searching ? '找…' : '找'}
+        </button>
+      </form>
+      {searchErr && <div className="cq-err">{searchErr}</div>}
+      {search && (
+        <section className="cq-news-found">
+          <h2>{searchLine(search)}</h2>
+          <NewsSearchResults items={search.items} />
+          <button className="cq-news-more" onClick={clearSearch}>
+            回到全部新聞
+          </button>
+        </section>
+      )}
 
       {graph && (
         <Suspense fallback={null}>
@@ -140,7 +188,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       {loading && rows.length === 0 && !err && <p className="cq-war-mute cq-news-empty">讀取中…</p>}
       {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
 
-      {groups.map((g) => (
+      {!search && groups.map((g) => (
         <section key={g.day} className="cq-news-day">
           <h2>{dayTitle(g.day, today)}</h2>
           <ul>
@@ -204,6 +252,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
                       <a href={r.url} target="_blank" rel="noopener noreferrer">
                         看原文（{r.source_name}）<ExternalLink size={13} aria-hidden="true" />
                       </a>
+                      <SimilarNews id={r.id} />
                     </div>
                   )}
                 </li>
@@ -213,7 +262,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
         </section>
       ))}
 
-      {rows.length > 0 && more !== 'done' && (
+      {!search && rows.length > 0 && more !== 'done' && (
         <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>
           {more === 'loading' ? '讀取中…' : '更多'}
         </button>

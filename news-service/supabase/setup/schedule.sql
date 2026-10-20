@@ -17,6 +17,8 @@ select cron.schedule(
     url := (select decrypted_secret from vault.decrypted_secrets where name = 'news_project_url') || '/functions/v1/ingest',
     headers := jsonb_build_object(
       'content-type', 'application/json',
+      -- 在資料庫同一區（新加坡）執行：不指定會被派到別區，每個查詢都跨區來回（2026-10-20 實測慢 3～4 倍）
+      'x-region', 'ap-southeast-1',
       'x-news-key', (select decrypted_secret from vault.decrypted_secrets where name = 'news_ingest_key')
     ),
     body := '{}'::jsonb,

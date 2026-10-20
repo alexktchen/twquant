@@ -14,15 +14,16 @@ test('T-400：轉給新聞服務只帶准許的參數（照字母排）；服務
   )
   assert.equal(upstreamUrl(BASE, '/v1/health', 'https://x/api/news/health?limit=1'), 'https://abc.supabase.co/functions/v1/api/v1/health')
   assert.deepEqual(ALLOWED['/v1/health'], [])
-  let seen: { url: string; key: string | null } | null = null
+  let seen: { url: string; key: string | null; region: string | null } | null = null
   const fake = (async (url: string, init?: RequestInit) => {
-    seen = { url, key: new Headers(init?.headers).get('x-news-key') }
+    seen = { url, key: new Headers(init?.headers).get('x-news-key'), region: new Headers(init?.headers).get('x-region') }
     return new Response('{"items":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
   }) as typeof fetch
   const res = await proxy(env, '/v1/items', 'https://x/api/news/items?kind=tw', fake)
   assert.equal(res.status, 200)
   assert.equal(await res.text(), '{"items":[]}')
-  assert.deepEqual(seen, { url: 'https://abc.supabase.co/functions/v1/api/v1/items?kind=tw', key: 'k3y' })
+  // 指定在資料庫那一區（新加坡）執行（T-410 實測：不指定會在東京跑，每個查詢跨區）
+  assert.deepEqual(seen, { url: 'https://abc.supabase.co/functions/v1/api/v1/items?kind=tw', key: 'k3y', region: 'ap-southeast-1' })
 })
 
 test('T-400：新聞服務沒設定、連不上、壞掉、回的不是 JSON → 503 不外洩上游；參數錯（400）照轉', async () => {
@@ -166,4 +167,23 @@ test('反向看圖（2026-10-20）：proxy 只轉 id／ids；間接那則的路�
   assert.equal(pathText({ path: [step('廣達', 'mention')], draft: false }), '', '直接提到不用說明')
   const item = (degree: number) => ({ id: String(degree), source_name: 'CNBC', url: 'https://x', first_seen_at: '2026-10-20T01:00:00Z', title: 't', title_zh: null, degree, score: 1, draft: false, path: [] })
   assert.equal(stockNewsSummary({ id: 'tw:2382', days: 7, items: [item(1), item(2), item(2)] }), '近 7 天・直接 1・間接 2')
+})
+
+test('T-410 相似新聞與語意搜尋：proxy 只轉 id／q；說明句；短時間', async () => {
+  assert.deepEqual(ALLOWED['/v1/similar'], ['id'])
+  assert.deepEqual(ALLOWED['/v1/search'], ['q'])
+  assert.equal(
+    upstreamUrl(BASE, '/v1/search', 'https://x/api/news/search?q=%E8%BC%9D%E9%81%94&limit=99'),
+    'https://abc.supabase.co/functions/v1/api/v1/search?q=%E8%BC%9D%E9%81%94',
+  )
+  const { searchLine, shortWhen, similarNote } = await import('../src/cloud/news.ts')
+  const it = { id: 'a', source_name: 'CNBC', kind: 'intl' as const, url: 'https://x', first_seen_at: '2026-10-20T02:00:00Z', title: 't', title_zh: null, score: 0.9, same_event: true }
+  assert.equal(similarNote({ id: 'x', ready: false, items: [] }), '這則還在算（英文新聞翻譯完才算，通常 30 分鐘內）')
+  assert.equal(similarNote({ id: 'x', ready: true, items: [] }), '沒有內容相近的新聞')
+  assert.equal(similarNote({ id: 'x', ready: true, items: [it] }), null)
+  assert.equal(searchLine({ q: '輝達', budget_stop: false, items: [it, it] }), '跟「輝達」相關的新聞 2 則，越相關越前面')
+  assert.equal(searchLine({ q: '輝達', budget_stop: false, items: [] }), '找不到跟「輝達」相關的新聞')
+  assert.equal(searchLine({ q: '輝達', budget_stop: true, items: [] }), '今天新聞的 AI 額度用完了，明天早上 8 點恢復')
+  assert.equal(shortWhen('2026-10-20T02:00:00Z', '2026-10-20'), '10:00')
+  assert.equal(shortWhen('2026-10-18T02:00:00Z', '2026-10-20'), '10/18')
 })

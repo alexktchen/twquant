@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsHealth, NewsKind, NewsRow, StockNews, StockNewsCounts } from './news'
+import type { NewsHealth, NewsKind, NewsRow, NewsSearch, SimilarNews, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
@@ -145,6 +145,10 @@ export const fetchStockNewsCounts = (sids: string[]) =>
   get<StockNewsCounts>(`/api/news/stock-counts?ids=${encodeURIComponent(sids.map((s) => `tw:${s}`).join(','))}`)
 /** 新聞服務最後抓取時間與各來源狀態。 */
 export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
+/** 一則新聞的相似新聞（T-410） */
+export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
+/** 新聞語意搜尋（T-410） */
+export const fetchNewsSearch = (q: string) => get<NewsSearch>(`/api/news/search?q=${encodeURIComponent(q)}`)
 /** 盤中大盤體檢（T-397）：排程每分鐘更新；今天還沒有 → live 是 null。 */
 export const fetchMarketLive = () => get<{ live: LiveMarket | null }>('/api/warroom/live')
 /** 首頁版面（使用者 2026-10-17：依帳號儲存卡片位置與收起）：沒存過 → layout 是 null。 */

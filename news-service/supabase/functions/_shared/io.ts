@@ -6,6 +6,8 @@ import type { EntityAliases, MentionDeps, PendingItem } from '../../../src/menti
 import type { Pending, TranslateDeps } from '../../../src/translate.ts'
 import type { CooccurDeps, CooccurEdge, PairCount } from '../../../src/cooccur.ts'
 import type { EntityType } from '../../../src/graph.ts'
+import { embedText, parseEmbedReply, vecLiteral, type EmbedConfig, type EmbedDeps, type EmbedSource, type Neighbor } from '../../../src/embed.ts'
+import { sha256Hex } from '../../../src/ingest.ts'
 
 export type Sql = ReturnType<typeof postgres>
 
@@ -65,6 +67,14 @@ export function pgStore(sql: Sql): NewsStore {
   }
 }
 
+/** 這個 UTC 日（Workers AI 免費額度的日界）新聞這邊已用的 Neurons：翻譯、向量、搜尋共用（D-200 §五）。 */
+export const usedNeurons = (sql: Sql) => async (day: string): Promise<number> => {
+  const [r] = await sql<{ n: number }[]>`
+    select coalesce(sum(neurons), 0)::float8 as n from news.llm_usage
+    where ts >= (${day}::date)::timestamp at time zone 'UTC' and ts < ((${day}::date) + 1)::timestamp at time zone 'UTC'`
+  return r.n
+}
+
 /** 翻譯要的資料庫與 Workers AI（T-401）。帳號與金鑰是 Edge Function 祕密 CLOUDFLARE_ACCOUNT_ID、CLOUDFLARE_AI_TOKEN。 */
 export function translateDeps(sql: Sql, model: string): TranslateDeps {
   const account = Deno.env.get('CLOUDFLARE_ACCOUNT_ID')
@@ -87,12 +97,7 @@ export function translateDeps(sql: Sql, model: string): TranslateDeps {
         )
       order by i.first_seen_at desc, i.id
       limit ${limit}`,
-    usedToday: async (day) => {
-      const [r] = await sql<{ n: number }[]>`
-        select coalesce(sum(neurons), 0)::float8 as n from news.llm_usage
-        where ts >= (${day}::date)::timestamp at time zone 'UTC' and ts < ((${day}::date) + 1)::timestamp at time zone 'UTC'`
-      return r.n
-    },
+    usedToday: usedNeurons(sql),
     ai: async (body) => {
       const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${model}`, {
         method: 'POST',
@@ -212,4 +217,78 @@ export function cooccurDeps(sql: Sql, ruleVersion: string): CooccurDeps {
       })
     },
   }
+}
+
+/** Workers AI 的帳號與金鑰（Edge Function 祕密）；向量、翻譯共用。 */
+function workersAi(model: string): (body: unknown) => Promise<unknown> {
+  const account = Deno.env.get('CLOUDFLARE_ACCOUNT_ID')
+  const token = Deno.env.get('CLOUDFLARE_AI_TOKEN')
+  if (!account || !token) throw new Error('CLOUDFLARE_ACCOUNT_ID／CLOUDFLARE_AI_TOKEN 沒設定，不能呼叫 Workers AI')
+  return async (body) => {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${model}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    })
+    return res.json() // 錯誤時也是 JSON（success: false），交給 parseEmbedReply 丟出原因
+  }
+}
+
+/** 新聞向量（ingest 第五步，src/embed.ts）。 */
+export function embedDeps(sql: Sql, cfg: EmbedConfig): EmbedDeps {
+  const ai = workersAi(cfg.model)
+  return {
+    now: () => new Date(),
+    // 還沒有向量的；英文要「目前這一版」翻譯完（ok 或 failed）才算，ok 才給譯文；舊的先（同事件只新併舊）
+    pending: (limit) => sql<EmbedSource[]>`
+      select i.id as item_id, i.source, i.first_seen_at::text as first_seen_at,
+             coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
+             case when t.status = 'ok' then t.title_zh end as title_zh, case when t.status = 'ok' then t.summary_zh end as summary_zh
+      from news.raw_items i
+      left join lateral (
+        select title_orig, summary_orig, content_sha from news.raw_item_versions
+        where item_id = i.id order by seen_at desc limit 1
+      ) v on true
+      left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
+      where (i.lang <> 'en' or t.item_id is not null)
+        and not exists (select 1 from news.embeddings e where e.item_id = i.id)
+      order by i.first_seen_at, i.id
+      limit ${limit}`,
+    usedToday: usedNeurons(sql),
+    ai: (texts) => ai({ text: texts }),
+    sha: sha256Hex,
+    neighbors: (vec, before, windowHours) => sql<Neighbor[]>`
+      select e.item_id, c.cluster_id, (1 - (e.vec <=> ${vec}::extensions.halfvec))::float8 as score
+      from news.embeddings e
+      join news.clusters c on c.item_id = e.item_id
+      join news.raw_items i on i.id = e.item_id
+      where i.first_seen_at <= ${before}::timestamptz and i.first_seen_at > ${before}::timestamptz - make_interval(hours => ${windowHours})
+      order by e.vec <=> ${vec}::extensions.halfvec
+      limit 5`,
+    // 向量與事件群一個語句寫完（原子、一趟來回）：向量已經有了（兩輪同時跑）就兩個都不寫
+    save: async (e, c) => {
+      await sql`
+        with e as (
+          insert into news.embeddings (item_id, model, text_sha, vec)
+          values (${e.item_id}, ${e.model}, ${e.text_sha}, ${e.vec}::extensions.halfvec)
+          on conflict do nothing returning item_id
+        )
+        insert into news.clusters (item_id, cluster_id, seed_item_id, score)
+        select item_id, ${c.cluster_id}, ${c.seed_item_id}, ${c.score}::float8 from e
+        on conflict do nothing`
+    },
+    saveUsage: async (u) => {
+      await sql`insert into news.llm_usage ${sql(u)}`
+    },
+  }
+}
+
+/** 搜尋框的問句 → 向量（/v1/search）。額度用完 → null（端點回 503 說明）；用量記 news_search。 */
+export async function embedQuery(sql: Sql, cfg: EmbedConfig, dailyNeurons: number, q: string): Promise<string | null> {
+  const now = new Date()
+  if ((await usedNeurons(sql)(now.toISOString().slice(0, 10))) >= dailyNeurons) return null
+  const r = parseEmbedReply(await workersAi(cfg.model)({ text: [q] }), 1, cfg)
+  await sql`insert into news.llm_usage ${sql({ ts: now.toISOString(), task: 'news_search', model_id: cfg.model, input_tokens: r.tokens, output_tokens: 0, neurons: r.neurons })}`
+  return vecLiteral(r.vecs[0])
 }

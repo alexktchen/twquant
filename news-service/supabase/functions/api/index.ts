@@ -1,13 +1,14 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
 import type { EntityType } from '../../../src/graph.ts'
 import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
 import { validateConfig } from '../../../src/ingest.ts'
+import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
 import { countsFor, linksTo, parseStockIds, prepare, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
-import { authorized, db, json } from '../_shared/io.ts'
+import { authorized, db, embedQuery, json } from '../_shared/io.ts'
 
 const cfg = validateConfig(config)
 const meta = new Map(cfg.sources.map((s) => [s.id, s]))
@@ -34,6 +35,37 @@ async function recentMentions(sql: ReturnType<typeof db>, days: number): Promise
   const by = new Map<string, string[]>()
   for (const r of rows) by.set(r.item_id, [...(by.get(r.item_id) ?? []), r.entity_id])
   return [...by].map(([item_id, entities]) => ({ item_id, entities: entities.sort() }))
+}
+
+type Scored = { item_id: string; score: number; same_event?: boolean }
+/** 一批新聞的顯示欄位（最新一版標題、翻譯 ok 的譯文），依 rows 的順序、附上分數；找不到的略過。 */
+async function withMeta(sql: ReturnType<typeof db>, rows: Scored[]) {
+  if (rows.length === 0) return []
+  const meta_ = await sql<{ id: string; source: string; url: string; first_seen_at: Date; title: string; title_zh: string | null }[]>`
+    select i.id, i.source, i.url, i.first_seen_at, coalesce(v.title_orig, i.title_orig) as title, t.title_zh
+    from news.raw_items i
+    left join lateral (
+      select title_orig, content_sha from news.raw_item_versions where item_id = i.id order by seen_at desc limit 1
+    ) v on true
+    left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha) and t.status = 'ok'
+    where i.id = any(${rows.map((r) => r.item_id)})`
+  const byId = new Map(meta_.map((r) => [r.id, r]))
+  return rows
+    .filter((r) => byId.has(r.item_id))
+    .map((r) => {
+      const m = byId.get(r.item_id)!
+      return {
+        id: m.id,
+        source_name: meta.get(m.source)?.name ?? m.source,
+        kind: meta.get(m.source)?.kind ?? null,
+        url: m.url,
+        first_seen_at: iso(m.first_seen_at),
+        title: m.title,
+        title_zh: m.title_zh,
+        score: Number(r.score.toFixed(4)),
+        same_event: r.same_event ?? false,
+      }
+    })
 }
 
 Deno.serve(async (req) => {
@@ -101,6 +133,41 @@ Deno.serve(async (req) => {
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
         .slice(0, sn.stock_limit)
       return json({ id: ids[0], days, items })
+    }
+    if (path === '/v1/similar') {
+      const id = url.searchParams.get('id')
+      if (!id) return json({ detail: '缺 id' }, 400)
+      const sc = cfg.embed.similar
+      const [me] = await sql<{ cluster_id: string | null }[]>`
+        select c.cluster_id from news.embeddings e left join news.clusters c on c.item_id = e.item_id where e.item_id = ${id}`
+      // 還沒算向量（英文等翻譯、或剛抓到）→ 空的，網站顯示「還在算」
+      if (!me) return json({ id, ready: false, items: [] })
+      const q = sql`(select vec from news.embeddings where item_id = ${id})`
+      const [same, near] = await Promise.all([
+        sql<{ item_id: string; score: number }[]>`
+          select c.item_id, (1 - (e.vec <=> ${q}))::float8 as score
+          from news.clusters c join news.embeddings e on e.item_id = c.item_id
+          where c.cluster_id = ${me.cluster_id} and c.item_id <> ${id}`,
+        sql<{ item_id: string; score: number }[]>`
+          select item_id, (1 - (vec <=> ${q}))::float8 as score from news.embeddings
+          where item_id <> ${id} order by vec <=> ${q} limit ${sc.limit * 2}`,
+      ])
+      return json({ id, ready: true, items: await withMeta(sql, mergeSimilar(id, same, near, sc)) })
+    }
+    if (path === '/v1/search') {
+      let q: string
+      try {
+        q = parseSearchQuery(url.searchParams, cfg.embed.search)
+      } catch (e) {
+        return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
+      }
+      const vec = await embedQuery(sql, cfg.embed, cfg.translate.daily_neurons, q)
+      // 今天新聞這邊的 AI 額度用完（台北早上 8 點重算）：回空的、標出原因
+      if (vec === null) return json({ q, budget_stop: true, items: [] })
+      const rows = await sql<{ item_id: string; score: number }[]>`
+        select item_id, (1 - (vec <=> ${vec}::extensions.halfvec))::float8 as score from news.embeddings
+        order by vec <=> ${vec}::extensions.halfvec limit ${cfg.embed.search.limit}`
+      return json({ q, budget_stop: false, items: await withMeta(sql, rows.filter((r) => r.score >= cfg.embed.search.min_score)) })
     }
     if (path === '/v1/graph') {
       const id = url.searchParams.get('id')

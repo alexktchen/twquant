@@ -85,3 +85,35 @@
 .cq .cq-sn-graph { display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: #1d2027; color: var(--text); font-size: 13px; white-space: nowrap; }
 .cq-sn-empty { margin: 0; font-size: 14px; color: var(--mute); }
 .cq-sn-more { margin-top: 6px; }
+
+/* 語意搜尋框（T-410）：一整列，放大鏡＋輸入＋「找」；結果取代新聞流，底下「回到全部新聞」 */
+.cq-news-search {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 4px 4px 4px 12px;
+  border: 1px solid #3a3d45; border-radius: 12px; background: #15171c; color: var(--mute);
+}
+.cq-news-search:focus-within { border-color: #3d9bff; }
+.cq-news-search input { flex: 1; min-width: 0; height: 38px; border: 0; outline: 0; background: none; color: var(--text); font-size: 16px; }
+.cq-news-search input::-webkit-search-cancel-button { display: none; }
+.cq .cq-news-search button { flex: none; height: 36px; border: 0; border-radius: 9px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.cq .cq-news-search button[type='submit'] { padding: 0 16px; background: #3d9bff; color: #0b1220; }
+.cq .cq-news-search button[type='submit']:disabled { background: #2a2d35; color: var(--mute); cursor: default; }
+.cq .cq-news-search .cq-news-search-x { width: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; color: var(--mute); }
+.cq-news-found h2 { font-size: 15px; font-weight: 700; color: var(--mute); margin: 16px 4px 6px; }
+
+/* 相似新聞（T-410）：展開那則底下；同一事件＝紫色塊（跟國際藍、台灣青分開），其他照國際／台灣色塊 */
+.cq-sim-box { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.cq-sim-box h3 { margin: 0 0 4px; font-size: 14px; font-weight: 700; color: var(--mute); }
+.cq-sim-note { margin: 4px 0 0; font-size: 14px; color: var(--mute); }
+.cq-sim { list-style: none; margin: 0; padding: 0; }
+.cq-sim li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; padding: 9px 0; border-top: 1px solid var(--line); }
+.cq-sim li:first-child { border-top: 0; }
+.cq-sim-tag {
+  margin-top: 2px; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 6px;
+  font-size: 12.5px; font-weight: 700; white-space: nowrap;
+}
+.cq-sim-tag.same { color: #c4a5ff; background: rgba(160, 120, 255, .16); }
+.cq-sim-tag.intl { color: #3d9bff; background: rgba(61, 155, 255, .14); }
+.cq-sim-tag.tw { color: #2dd4bf; background: rgba(45, 212, 191, .14); }
+.cq-sim-body { min-width: 0; }
+.cq-sim-body a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-size: 15px; line-height: 1.4; text-decoration: none; }
+.cq-sim-body small { display: block; margin-top: 3px; font-size: 12.5px; color: var(--mute); }
