@@ -204,3 +204,19 @@ def test_pull_cloud_requires_tz_and_writes_three_tables() -> None:
             since=dt.datetime(2026, 10, 19),
             with_embeddings=False,
         )
+
+
+def test_daily_pipeline_has_news_pull_step_and_cloud_skips_it() -> None:
+    """T-412：每日 pipeline 地端有「新聞語料拉回」（排在內部人申讓之後）；雲端 runner 的主庫不放語料，
+    列在 cloud.skip_pipeline_steps；pull 回看天數在 configs/news.yaml。"""
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
+    assert source.index('PipelineStep("內部人申讓"') < source.index('PipelineStep("新聞語料拉回"')
+    scfg = yaml.safe_load((root / "configs" / "serving.yaml").read_text(encoding="utf-8"))
+    assert "新聞語料拉回" in scfg["cloud"]["skip_pipeline_steps"]
+    news = yaml.safe_load((root / "configs" / "news.yaml").read_text(encoding="utf-8"))
+    assert int(news["hist"]["pull_lookback_days"]) >= 1

@@ -89,3 +89,4 @@ cloud:
     - ETF 單位數      # SPEC-016 資金流研究只在地端（D-170：雲端只放推薦需要的資料）
     - ETF 持股        # 同上
     - 月營收          # workflow 在 pipeline 之前已抓上個月與當月（daily-pipeline.yml），不重複打 MOPS
+    - 新聞語料拉回    # T-412：歷史語料只在地端 PG（news_hist）；雲端 runner 的主庫不放

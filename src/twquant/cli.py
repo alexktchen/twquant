@@ -2152,6 +2152,14 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _insider_transfers_for_day(day)
 
+    def _news_pull_step() -> str:
+        # T-412 新聞語料：雲端新聞服務是每日資料權威，拉新聞、提及、向量回本機 news_hist（回看兩天，覆蓋晚到的翻譯）。best-effort。
+        import os
+
+        if not os.environ.get("TWQUANT_NEWS_DSN", "").strip():
+            return "沒有 TWQUANT_NEWS_DSN，略過"
+        return _news_pull_run("", True)
+
     def _conferences_step() -> str:
         # T-376 法說會行事曆：MOPS 月表整月覆蓋，休市日照跑。best-effort。
         from twquant.data.serving import store
@@ -2280,6 +2288,7 @@ def _run_daily_pipeline(
         PipelineStep("法說會", _conferences_step),
         PipelineStep("除權息預告", _dividend_calendar_step),
         PipelineStep("內部人申讓", _insider_transfers_step),
+        PipelineStep("新聞語料拉回", _news_pull_step),
         PipelineStep("名單一句話", _pick_blurbs_step),
         PipelineStep("名單評分", _pick_review_step),
         PipelineStep("紙上交易", _paper_trading_step),
@@ -6405,17 +6414,9 @@ def news_import_mops() -> None:
     typer.secho(f"[OK] MOPS 公告新增 {n} 則", fg=typer.colors.GREEN)
 
 
-@news_app.command("pull")
-def news_pull(
-    since: str = typer.Option(
-        "",
-        help="拉 first_seen_at 晚於這個時間的（ISO，帶時區；空＝上次拉到哪或 hist.pull_since_default）",
-    ),
-    no_embeddings: bool = typer.Option(
-        False, "--no-embeddings", help="不拉雲端向量（本機 PG 還沒有 pgvector 時）"
-    ),
-) -> None:
-    """雲端新聞服務 → 本機 news_hist（D-201 §二：雲端是每日資料權威，只拉不反向）。需要 TWQUANT_NEWS_DSN。"""
+def _news_pull_run(since: str, with_embeddings: bool) -> str:
+    """雲端新聞服務 → 本機 news_hist（D-201 §二：雲端是每日資料權威，只拉不反向）；回一行摘要。
+    `news pull` 指令與每日 pipeline「新聞語料拉回」共用。需要 TWQUANT_NEWS_DSN。"""
     import os
 
     import psycopg
@@ -6430,24 +6431,38 @@ def news_pull(
     local = store.connect(_load_serving())
     try:
         news_hist.ensure_schema(local)
-        if not no_embeddings:
+        if with_embeddings:
             news_hist.ensure_embeddings_table(local)
         s = since or news_hist.get_state(local, "cloud_pull_since") or str(h["pull_since_default"])
         since_dt = dt.datetime.fromisoformat(s)
+        if not since:
+            # 回看幾天：翻譯晚到的英文新聞要重拉（文字欄與向量以雲端為準）
+            since_dt -= dt.timedelta(days=int(h["pull_lookback_days"]))
         with psycopg.connect(dsn, connect_timeout=30, prepare_threshold=None) as cloud:
             n = news_hist.pull_cloud(
                 local,
                 cloud,
                 rule_version=h["rule_version"],
                 since=since_dt,
-                with_embeddings=not no_embeddings,
+                with_embeddings=with_embeddings,
             )
     finally:
         local.close()
-    typer.secho(
-        f"[OK] 從 {s} 起拉下：新聞 {n['items']}、提及 {n['mentions']}、向量 {n['embeddings']}",
-        fg=typer.colors.GREEN,
-    )
+    return f"從 {since_dt.isoformat()} 起拉下：新聞 {n['items']}、提及 {n['mentions']}、向量 {n['embeddings']}"
+
+
+@news_app.command("pull")
+def news_pull(
+    since: str = typer.Option(
+        "",
+        help="拉 first_seen_at 晚於這個時間的（ISO，帶時區；空＝上次拉到哪再回看 hist.pull_lookback_days 天，或 hist.pull_since_default）",
+    ),
+    no_embeddings: bool = typer.Option(
+        False, "--no-embeddings", help="不拉雲端向量（本機 PG 還沒有 pgvector 時）"
+    ),
+) -> None:
+    """雲端新聞服務 → 本機 news_hist（D-201 §二：雲端是每日資料權威，只拉不反向）。需要 TWQUANT_NEWS_DSN。"""
+    typer.secho("[OK] " + _news_pull_run(since, not no_embeddings), fg=typer.colors.GREEN)
 
 
 @news_app.command("embed")
@@ -6737,19 +6752,38 @@ def news_types_train(
     pred = probe.proba(x[va]).argmax(axis=1)
     f1 = lp.macro_f1(yi[va], pred, len(ids))
     acc = float((pred == yi[va]).mean())
+    recall = dict(zip(ids, lp.per_class_recall(yi[va], pred, len(ids)), strict=True))
     dist = {ids[i]: int(n) for i, n in enumerate(np.bincount(yi, minlength=len(ids)))}
+    tcfg = doc["types"]
+    gate_f1, gate_other = float(tcfg["gate_f1"]), float(tcfg["gate_other_recall"])
+    passed = f1 >= gate_f1 and recall["other"] >= gate_other
+    typer.echo(f"標籤 {len(x)} 則 {dist}")
+    typer.echo(
+        f"驗證 macro-F1 {f1:.3f}、準確率 {acc:.3f}；各類召回 "
+        + "、".join(f"{k} {v:.2f}" for k, v in recall.items())
+    )
+    if not passed:
+        typer.secho(
+            f"[X] 門檻沒過（macro-F1 ≥ {gate_f1}、other 召回 ≥ {gate_other}）：不寫權重。合併類別或換標籤方式再試，不調門檻。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
     weights = nt.export_weights(
         lp.train_softmax(x, yi, len(ids)),  # 正式權重用全部標籤訓
         classes,
-        version=str(doc["types"]["version"]),
-        min_confidence=float(doc["types"]["min_confidence"]),
-        metrics={"n": len(x), "valid_macro_f1": round(f1, 3), "valid_accuracy": round(acc, 3)},
+        version=str(tcfg["version"]),
+        min_confidence=float(tcfg["min_confidence"]),
+        metrics={
+            "n": len(x),
+            "valid_macro_f1": round(f1, 3),
+            "valid_accuracy": round(acc, 3),
+            "valid_recall": {k: round(v, 3) for k, v in recall.items()},
+        },
     )
     path = Path(out) if out else _CONFIG_DIR.parent / "news-service" / "config" / "news_types.json"
     path.write_text(json.dumps(weights, ensure_ascii=False), encoding="utf-8")
     typer.secho(
-        f"[OK] 標籤 {len(x)} 則 {dist}；驗證 macro-F1 {f1:.3f}、準確率 {acc:.3f}；權重 {path}（{path.stat().st_size // 1024} KB）",
-        fg=typer.colors.GREEN,
+        f"[OK] 門檻過；權重 {path}（{path.stat().st_size // 1024} KB）", fg=typer.colors.GREEN
     )
 
 

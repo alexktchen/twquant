@@ -482,6 +482,7 @@
     "embed_model": "BAAI/bge-m3",
     "embed_batch": 128,
     "pull_since_default": "2026-10-19T00:00:00+08:00",
+    "pull_lookback_days": 2,
     "research_until": "2026-08-31",
     "sentiment": {
       "model": "qwen3:8b",
@@ -498,6 +499,8 @@
   "types": {
     "version": "2026-10-21.1",
     "min_confidence": 0.45,
+    "gate_f1": 0.6,
+    "gate_other_recall": 0.3,
     "classes": [
       {
         "id": "earnings",

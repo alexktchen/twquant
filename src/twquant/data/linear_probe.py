@@ -68,6 +68,15 @@ def macro_f1(y_true: np.ndarray, y_pred: np.ndarray, k: int) -> float:
     return float(np.mean(f1s)) if f1s else 0.0
 
 
+def per_class_recall(y_true: np.ndarray, y_pred: np.ndarray, k: int) -> list[float]:
+    """各類召回率（真實是這類的裡面猜中幾成）；真實沒出現的類別記 0。"""
+    out = []
+    for c in range(k):
+        n = float((y_true == c).sum())
+        out.append(0.0 if n == 0 else float(((y_true == c) & (y_pred == c)).sum()) / n)
+    return out
+
+
 def split(n: int, valid_share: float, seed: int) -> tuple[np.ndarray, np.ndarray]:
     """固定 seed 的訓練／驗證切分（索引）。"""
     rng = np.random.default_rng(seed)

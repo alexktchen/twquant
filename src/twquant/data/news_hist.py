@@ -277,7 +277,9 @@ def set_state(conn: Any, key: str, value: str) -> None:
 def pull_cloud(
     local: Any, cloud: Any, *, rule_version: str, since: dt.datetime, with_embeddings: bool
 ) -> dict[str, int]:
-    """雲端 first_seen_at > since 的新聞、提及、向量 → 本機。回各寫了幾列。since 要帶時區。"""
+    """雲端 first_seen_at > since 的新聞、提及、向量 → 本機。回各寫了幾列。since 要帶時區。
+    同 id 再拉一次會覆蓋文字欄與向量（雲端是權威）：英文新聞拉下來時可能還沒翻譯、還沒有向量，
+    呼叫端要回看幾天（hist.pull_lookback_days）；2026-10-21 驗收實見 3.6% 的向量因此對不上。"""
     if since.tzinfo is None:
         raise ValueError("since 必須帶時區")
     with cloud.cursor() as cur:
@@ -299,7 +301,7 @@ def pull_cloud(
         n_emb = 0
         if embeds:
             cur.executemany(
-                f"insert into {SCHEMA}.embeddings (item_id, model, vec) values (%s, %s, %s::halfvec) on conflict (item_id) do nothing",
+                f"insert into {SCHEMA}.embeddings (item_id, model, vec) values (%s, %s, %s::halfvec) on conflict (item_id) do update set model = excluded.model, vec = excluded.vec",
                 [(f"cloud:{e[0]}", e[1], e[2]) for e in embeds],
             )
             n_emb = len(embeds)

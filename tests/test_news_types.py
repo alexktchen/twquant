@@ -72,3 +72,13 @@ def test_export_and_classify_match_training_probe() -> None:
     assert agree >= 396
     # 信心不到門檻 → other
     assert nt.classify({**w, "min_confidence": 1.01}, x[0]) == ("other", nt.classify(w, x[0])[1])
+
+
+def test_per_class_recall_counts_hits_per_true_class() -> None:
+    import numpy as np
+
+    from twquant.data.linear_probe import per_class_recall
+
+    y = np.array([0, 0, 1, 1, 1, 2])
+    p = np.array([0, 1, 1, 1, 0, 0])
+    assert per_class_recall(y, p, 4) == [0.5, 2 / 3, 0.0, 0.0]
