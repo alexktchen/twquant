@@ -18,6 +18,13 @@ dependencies = [
     "lightgbm>=4.7.0",
 ]
 
+[project.optional-dependencies]
+# T-412：本機算 bge-m3 向量（RTX 4070）。extras 不進 `--all-groups`，CI 與一般閘門不裝（torch CUDA 約 2.5 GB）：`uv sync --extra embed`
+embed = [
+    "torch>=2.5",
+    "sentence-transformers>=3.0",
+]
+
 [project.scripts]
 twquant = "twquant.cli:app"
 
@@ -41,6 +48,14 @@ serving = [  # 供應層 PG（SPEC-009）；唯 data/serving 與 monitoring/pg_s
 push = [
     "pywebpush>=2.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'win32'" }]
 
 [build-system]
 requires = ["hatchling"]
@@ -79,7 +94,7 @@ warn_unused_configs = true
 # 第三方庫缺型別 stub 時不擋（polars/duckdb/pandera 自帶或部分缺）
 [[tool.mypy.overrides]]
 # psycopg 未列於 CI 預設群組（serving 為選用）；缺套件時不擋型別檢查（同 anthropic）。pywebpush 等推播套件沒有型別 stub（T-348）。
-module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*", "psycopg", "psycopg.*", "pywebpush", "http_ece"]
+module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*", "sentence_transformers.*", "psycopg", "psycopg.*", "pywebpush", "http_ece"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

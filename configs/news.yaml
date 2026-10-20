@@ -400,3 +400,29 @@ galaxy:
   # 新聞庫只留最近幾筆快照
   keep: 3
   seed: 7
+
+# 本機歷史語料（T-412／SPEC-018 §3.2、§4；使用者 2026-10-20：「歷史語料的訓練也一起做」）：`python -m twquant news …`
+hist:
+  cnyes_categories: [headline, tw_stock]
+  cnyes_from: "2021-01-04"
+  # 鉅亨網全文截短到幾字（情緒標籤要看得到內文；研究只存本機）
+  content_chars: 2000
+  mops_content_chars: 1500
+  # 本機向量：跟雲端同一個模型；文字規則同 news-service/src/embed.ts（有譯文用譯文，標題＋摘要，截 1500 字）
+  embed_model: BAAI/bge-m3
+  embed_batch: 128
+  # 第一次 news pull 從哪裡拉（線上新聞 2026-10-19 起）
+  pull_since_default: "2026-10-19T00:00:00+08:00"
+  # 研究上限（D-109 第二保留期：2026-09-09 起封存；開發期照 SPEC-010 ≤ 2026-08-31）：抽樣、探針、因子、訓練都只用這天（含）以前的新聞
+  research_until: "2026-08-31"
+  # 情緒（T-413／D-201 §四）：Ollama qwen3 對分層抽樣貼標；探針門檻事前寫死
+  sentiment:
+    model: qwen3:8b
+    ollama_url: http://localhost:11434
+    sample_n: 20000
+    seed: 7
+    max_body_chars: 800
+    valid_share: 0.2
+    probe_min_labels: 2000
+    gate_f1: 0.70
+    gate_auc: 0.85

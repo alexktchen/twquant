@@ -470,5 +470,29 @@
     "hub_min": 3,
     "keep": 3,
     "seed": 7
+  },
+  "hist": {
+    "cnyes_categories": [
+      "headline",
+      "tw_stock"
+    ],
+    "cnyes_from": "2021-01-04",
+    "content_chars": 2000,
+    "mops_content_chars": 1500,
+    "embed_model": "BAAI/bge-m3",
+    "embed_batch": 128,
+    "pull_since_default": "2026-10-19T00:00:00+08:00",
+    "research_until": "2026-08-31",
+    "sentiment": {
+      "model": "qwen3:8b",
+      "ollama_url": "http://localhost:11434",
+      "sample_n": 20000,
+      "seed": 7,
+      "max_body_chars": 800,
+      "valid_share": 0.2,
+      "probe_min_labels": 2000,
+      "gate_f1": 0.7,
+      "gate_auc": 0.85
+    }
   }
 }

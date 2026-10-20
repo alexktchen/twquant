@@ -10,6 +10,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -6254,6 +6255,388 @@ def pl_config() -> pl.Config:
     import polars as pl
 
     return pl.Config(tbl_rows=30, tbl_cols=20, fmt_str_lengths=40)
+
+
+# ── 新聞歷史語料（T-412／SPEC-018 第二階段；使用者 2026-10-20：「歷史語料的訓練也一起做」）：本機 news_hist ──
+news_app = typer.Typer(
+    help="新聞歷史語料（SPEC-018 第二階段）：鉅亨網回補、MOPS 搬運、雲端拉取、本機向量"
+)
+app.add_typer(news_app, name="news")
+
+
+def _news_hist_cfg() -> dict[str, Any]:
+    import yaml
+
+    doc = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    h = doc.get("hist")
+    if not isinstance(h, dict):
+        raise typer.BadParameter("configs/news.yaml 缺 hist 段")
+    return {**h, "rule_version": str(doc["mention"]["rule_version"])}
+
+
+@news_app.command("init-schema")
+def news_init_schema(
+    vectors: bool = typer.Option(
+        False, "--vectors", help="同時建向量表（本機 PG 要已換 pgvector 映像）"
+    ),
+) -> None:
+    """建 news_hist schema（冪等）。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    conn = store.connect(_load_serving())
+    try:
+        news_hist.ensure_schema(conn)
+        if vectors:
+            news_hist.ensure_embeddings_table(conn)
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] news_hist schema 就緒{'（含向量表）' if vectors else ''}", fg=typer.colors.GREEN
+    )
+
+
+@news_app.command("backfill-cnyes")
+def news_backfill_cnyes(
+    start: str = typer.Option(
+        "", "--from", help="起日 YYYY-MM-DD（空＝configs/news.yaml hist.cnyes_from）"
+    ),
+    end: str = typer.Option("", "--to", help="迄日（空＝昨天，台北）"),
+    categories: str = typer.Option("", help="逗號分隔（空＝hist.cnyes_categories）"),
+    max_days: int = typer.Option(0, help="這次最多補幾天（0＝全部）；按天可續跑、重跑略過已成功的"),
+) -> None:
+    """鉅亨網歷史回補（D-201 §五：只做研究、只存本機、不對外重發）。一天一個分類一筆紀錄；失敗記下來、繼續下一天。"""
+    from twquant.conventions import now_tw
+    from twquant.data import news_hist
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import store
+    from twquant.data.sources import cnyes_archive as ca
+    from twquant.errors import TwquantError
+
+    cfg = _load_system()
+    h = _news_hist_cfg()
+    day0 = dt.date.fromisoformat(start or str(h["cnyes_from"]))
+    day1 = dt.date.fromisoformat(end) if end else now_tw().date() - dt.timedelta(days=1)
+    cats = [
+        c.strip() for c in (categories or ",".join(h["cnyes_categories"])).split(",") if c.strip()
+    ]
+    client = HttpClient(source="cnyes_archive", rate=cfg.source_rates["cnyes_archive"])
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    n_days = n_items = n_err = 0
+    try:
+        news_hist.ensure_schema(conn)
+        for cat in cats:
+            source = f"cnyes-{cat.replace('_', '-')}"
+            done = news_hist.done_days(conn, source)
+            todo = [d for d in news_hist.days_between(day0, day1) if d not in done]
+            typer.echo(f"{source}：{day0}～{day1} 共 {len(todo)} 天要補（已有 {len(done)} 天）")
+            for day in todo:
+                if max_days and n_days >= max_days:
+                    break
+                try:
+                    items, total = ca.fetch_day(
+                        client, cat, day, content_chars=int(h["content_chars"])
+                    )
+                    rows = [
+                        news_hist.ItemRow(
+                            id=f"cnyes:{it.news_id}",
+                            origin="cnyes",
+                            source=source,
+                            published_at=it.published_at,
+                            available_at=it.published_at,
+                            title=it.title,
+                            summary=it.summary,
+                            content=it.content,
+                            stocks=it.stocks,
+                            keywords=it.keywords,
+                            url=it.url,
+                        )
+                        for it in items
+                    ]
+                    n_items += news_hist.upsert_items(conn, rows)
+                    news_hist.record_run(
+                        conn, source, day, total=total, fetched=len(items), ok=True, error=None
+                    )
+                except (TwquantError, OSError) as exc:  # 一天失敗記下來、繼續（之後重跑會補）
+                    n_err += 1
+                    conn.rollback()
+                    news_hist.record_run(
+                        conn, source, day, total=None, fetched=None, ok=False, error=str(exc)[:300]
+                    )
+                    typer.secho(f"  [!] {source} {day}：{exc}", fg=typer.colors.YELLOW)
+                n_days += 1
+                if n_days % 25 == 0:
+                    typer.echo(
+                        f"  {n_days} 天、{n_items} 則、失敗 {n_err}；{time.monotonic() - t0:.0f} 秒"
+                    )
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 回補 {n_days} 天、{n_items} 則、失敗 {n_err}；{time.monotonic() - t0:.0f} 秒",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("import-mops")
+def news_import_mops() -> None:
+    """本機 serving.material_news（9/28 研究全文快照）的主旨與截短內容 → news_hist（冪等）。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    conn = store.connect(_load_serving())
+    try:
+        news_hist.ensure_schema(conn)
+        n = news_hist.import_mops(conn, int(h["mops_content_chars"]))
+    finally:
+        conn.close()
+    typer.secho(f"[OK] MOPS 公告新增 {n} 則", fg=typer.colors.GREEN)
+
+
+@news_app.command("pull")
+def news_pull(
+    since: str = typer.Option(
+        "",
+        help="拉 first_seen_at 晚於這個時間的（ISO，帶時區；空＝上次拉到哪或 hist.pull_since_default）",
+    ),
+    no_embeddings: bool = typer.Option(
+        False, "--no-embeddings", help="不拉雲端向量（本機 PG 還沒有 pgvector 時）"
+    ),
+) -> None:
+    """雲端新聞服務 → 本機 news_hist（D-201 §二：雲端是每日資料權威，只拉不反向）。需要 TWQUANT_NEWS_DSN。"""
+    import os
+
+    import psycopg
+
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    dsn = os.environ.get("TWQUANT_NEWS_DSN", "").strip()
+    if not dsn:
+        raise typer.BadParameter("沒有 TWQUANT_NEWS_DSN（新聞專案的連線字串，放 .env）")
+    local = store.connect(_load_serving())
+    try:
+        news_hist.ensure_schema(local)
+        if not no_embeddings:
+            news_hist.ensure_embeddings_table(local)
+        s = since or news_hist.get_state(local, "cloud_pull_since") or str(h["pull_since_default"])
+        since_dt = dt.datetime.fromisoformat(s)
+        with psycopg.connect(dsn, connect_timeout=30, prepare_threshold=None) as cloud:
+            n = news_hist.pull_cloud(
+                local,
+                cloud,
+                rule_version=h["rule_version"],
+                since=since_dt,
+                with_embeddings=not no_embeddings,
+            )
+    finally:
+        local.close()
+    typer.secho(
+        f"[OK] 從 {s} 起拉下：新聞 {n['items']}、提及 {n['mentions']}、向量 {n['embeddings']}",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("embed")
+def news_embed(
+    limit: int = typer.Option(0, help="這次最多算幾則（0＝全部）"),
+    batch: int = typer.Option(0, help="一批幾則（0＝hist.embed_batch）"),
+    device: str = typer.Option("cuda", help="cuda 或 cpu"),
+) -> None:
+    """本機向量：sentence-transformers bge-m3（fp16、GPU），只算還沒有向量的；可重跑。要 `uv sync --extra embed`。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise typer.BadParameter(
+            "沒裝 sentence-transformers：uv sync --extra embed（torch CUDA 約 2.5 GB）"
+        ) from exc
+    h = _news_hist_cfg()
+    bs = batch or int(h["embed_batch"])
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = 0
+    try:
+        news_hist.ensure_embeddings_table(conn)
+        model = SentenceTransformer(str(h["embed_model"]), device=device)
+        if device.startswith("cuda"):
+            model.half()
+        while True:
+            chunk = news_hist.pending_for_embedding(
+                conn, min(2000, limit - done) if limit else 2000
+            )
+            if not chunk:
+                break
+            vecs = model.encode(
+                [t for _, t in chunk],
+                batch_size=bs,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            done += news_hist.save_embeddings(
+                conn, str(h["embed_model"]), zip((i for i, _ in chunk), vecs.tolist(), strict=True)
+            )
+            typer.echo(f"  {done} 則；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(f"[OK] 向量 {done} 則；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN)
+
+
+# ── 情緒（T-413／D-201 §四）：Ollama 抽樣貼標 → 探針 → 全語料打分 ──
+@news_app.command("sentiment-sample")
+def news_sentiment_sample(
+    n: int = typer.Option(0, help="抽幾對（0＝hist.sentiment.sample_n）"),
+) -> None:
+    """分層抽樣（年 × 來源）要貼標的 (新聞, 台股) 對；只用研究上限之前的新聞（D-109）。冪等。"""
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    sc = h["sentiment"]
+    conn = store.connect(_load_serving())
+    try:
+        ns.ensure_tables(conn)
+        pairs = ns.candidate_pairs(
+            conn, dt.date.fromisoformat(str(h["research_until"])) + dt.timedelta(days=1)
+        )
+        sample = ns.stratified_sample(pairs, n or int(sc["sample_n"]), int(sc["seed"]))
+        k = ns.save_sample(conn, sample)
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 候選 {len(pairs)} 對，抽 {k} 對（{len({p.stratum for p in sample})} 層）",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("sentiment-label")
+def news_sentiment_label(
+    limit: int = typer.Option(0, help="這次最多貼幾對（0＝全部沒貼的）"),
+) -> None:
+    """本機 Ollama 對抽樣貼三類標籤；可中斷續跑。失敗的那對印出來、跳過（不猜）。"""
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    h = _news_hist_cfg()
+    sc = h["sentiment"]
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = bad = 0
+    try:
+        ns.ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("select stock_id, name from serving.stock_meta")
+            names = {str(a): str(b) for a, b in cur.fetchall() if b}
+        while True:
+            batch = ns.pending_pairs(conn, min(200, limit - done) if limit else 200, names)
+            if not batch:
+                break
+            for item_id, stock_id, name, title, body in batch:
+                prompt = ns.build_prompt(name, stock_id, title, body, int(sc["max_body_chars"]))
+                try:
+                    raw = ns.ollama_chat(prompt, model=str(sc["model"]), url=str(sc["ollama_url"]))
+                    label = ns.parse_label(raw)
+                except (DataError, OSError) as exc:
+                    bad += 1
+                    typer.secho(
+                        f"  [!] {item_id} {stock_id}：{str(exc)[:100]}", fg=typer.colors.YELLOW
+                    )
+                    continue
+                ns.save_label(conn, item_id, stock_id, label, model=str(sc["model"]), raw=raw)
+                done += 1
+                if done % 100 == 0:
+                    typer.echo(f"  {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 貼標 {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN
+    )
+
+
+@news_app.command("sentiment-probe")
+def news_sentiment_probe(
+    report: str = typer.Option(
+        "", help="報告寫到哪（空＝docs/reports/news-sentiment-probe-<日期>.md）"
+    ),
+) -> None:
+    """在 bge-m3 向量上訓線性探針複製標籤，驗證集算 macro-F1 與正負 AUC，對事前門檻；過了才存探針、打全語料。"""
+    import json as _json
+
+    import numpy as np
+
+    from twquant.conventions import now_tw
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    sc = h["sentiment"]
+    conn = store.connect(_load_serving())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """select l.item_id, l.stock_id, l.label, e.vec::text from news_hist.sentiment_labels l
+                   join news_hist.embeddings e on e.item_id = l.item_id order by l.item_id, l.stock_id"""
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    if len(rows) < int(sc["probe_min_labels"]):
+        raise typer.BadParameter(
+            f"標籤只有 {len(rows)} 對（有向量的），探針至少要 {sc['probe_min_labels']}"
+        )
+    x = np.array([_json.loads(r[3]) for r in rows], dtype=np.float64)
+    y = np.array([int(r[2]) for r in rows])
+    tr, va = ns.split_train_valid(len(x), float(sc["valid_share"]), int(sc["seed"]))
+    probe = ns.train_probe(x[tr], y[tr])
+    ev = ns.evaluate_probe(
+        probe,
+        x[va],
+        y[va],
+        f1_min=float(sc["gate_f1"]),
+        auc_min=float(sc["gate_auc"]),
+        n_train=len(tr),
+    )
+    day = now_tw().date().isoformat()
+    out = Path(report) if report else _CONFIG_DIR.parent / "docs" / "reports" / f"news-sentiment-probe-{day}.md"
+    dist = {int(k): int(v) for k, v in zip(*np.unique(y, return_counts=True), strict=True)}
+    lines = [
+        f"# 新聞情緒探針（T-413／D-201 §四）— {day}",
+        "",
+        f"標籤 {len(y)} 對（分布 {dist}）；訓練 {ev.n_train}、驗證 {ev.n_valid}；探針＝softmax 迴歸（L2、類別加權）在 bge-m3 1024 維向量上。",
+        "",
+        "| 指標 | 事前門檻 | 實測 | 結果 |",
+        "|---|---|---|---|",
+        f"| 驗證 macro-F1 | ≥ {sc['gate_f1']} | {ev.macro_f1:.3f} | {'過' if ev.macro_f1 >= float(sc['gate_f1']) else '沒過'} |",
+        f"| 正負二分 AUC | ≥ {sc['gate_auc']} | {ev.pos_neg_auc:.3f} | {'過' if ev.pos_neg_auc >= float(sc['gate_auc']) else '沒過'} |",
+        "",
+        "**判定："
+        + (
+            "過，探針可用來打全語料（`news sentiment-score`）。**"
+            if ev.passed
+            else "沒過，探針棄用，改全語料用 Ollama 貼完（D-201 §四）。**"
+        ),
+    ]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if ev.passed:
+        np.savez(
+            _CONFIG_DIR.parent / "data" / "models" / "news_sentiment_probe.npz",
+            w=probe.w,
+            b=probe.b,
+            version=np.array([ns.PROMPT_VERSION]),
+        )
+    typer.secho(
+        f"[{'OK' if ev.passed else 'FAIL'}] macro-F1 {ev.macro_f1:.3f}、AUC {ev.pos_neg_auc:.3f}；報告 {out}",
+        fg=typer.colors.GREEN if ev.passed else typer.colors.YELLOW,
+    )
 
 
 if __name__ == "__main__":
