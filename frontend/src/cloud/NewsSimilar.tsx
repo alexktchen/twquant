@@ -1,10 +1,11 @@
 // 相似新聞與語意搜尋（T-410／SPEC-018）：新聞服務用 bge-m3 向量找出來的。相似≠因果，只是「內容相近」。
 // SimilarNews：展開一則時才向服務要（不展開不花查詢）；同一事件的標「同一事件」、排前面。
 // NewsSearchResults：新聞頁搜尋框的結果，越相關越前面。兩者共用同一種列（色塊、標題連原文、出處・時間）。
-import { Globe, Layers, MapPin } from 'lucide-react'
+// 事件追蹤（T-420）：同一件事連續幾天的報導串成一條線，列在相似新聞上面（「這件事的來龍去脈」），現在這一步標亮。
+import { Globe, Layers, MapPin, Route } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { fetchSimilarNews } from './api'
-import { KIND_LABEL, shortWhen, similarNote, taipeiDay, type SimilarItem, type SimilarNews as SimilarData } from './news'
+import { fetchNewsThread, fetchSimilarNews } from './api'
+import { KIND_LABEL, shortWhen, similarNote, stepDay, taipeiDay, threadShown, type NewsThread, type SimilarItem, type SimilarNews as SimilarData } from './news'
 
 function SimilarList({ items }: { items: SimilarItem[] }) {
   const today = taipeiDay(new Date().toISOString())
@@ -39,14 +40,19 @@ function SimilarList({ items }: { items: SimilarItem[] }) {
 
 export function SimilarNews({ id }: { id: string }) {
   const [data, setData] = useState<SimilarData | null>(null)
+  const [thread, setThread] = useState<NewsThread | null>(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
     let stale = false
     setData(null)
+    setThread(null)
     setErr(false)
     fetchSimilarNews(id)
       .then((d) => !stale && setData(d))
       .catch(() => !stale && setErr(true))
+    fetchNewsThread(id)
+      .then((t) => !stale && setThread(t))
+      .catch(() => !stale && setThread(null)) // 來龍去脈是附帶的：讀不到就不顯示
     return () => {
       stale = true
     }
@@ -54,10 +60,36 @@ export function SimilarNews({ id }: { id: string }) {
   if (err) return null // 相似新聞是附帶的：讀不到就不顯示，不擋這則
   const note = data ? similarNote(data) : '讀取中…'
   return (
-    <div className="cq-sim-box">
-      <h3>相似新聞</h3>
-      {note ? <p className="cq-sim-note">{note}</p> : <SimilarList items={data!.items} />}
-    </div>
+    <>
+      {threadShown(thread) && (
+        <div className="cq-sim-box cq-thread">
+          <h3>
+            <Route size={14} aria-hidden="true" />
+            這件事的來龍去脈<small>{thread!.steps.length} 步</small>
+          </h3>
+          <ol>
+            {thread!.steps.map((s) => (
+              <li key={s.cluster_id} className={s.current ? 'now' : ''}>
+                <i>{stepDay(s)}</i>
+                <div>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer">
+                    {s.title}
+                  </a>
+                  <small>
+                    {s.n} 則・{s.outlets.join('・')}
+                    {s.current && <b>這一則</b>}
+                  </small>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      <div className="cq-sim-box">
+        <h3>相似新聞</h3>
+        {note ? <p className="cq-sim-note">{note}</p> : <SimilarList items={data!.items} />}
+      </div>
+    </>
   )
 }
 

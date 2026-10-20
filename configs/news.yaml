@@ -358,6 +358,11 @@ embed:
     min_score: 0.85
     window_hours: 72
     exclude_sources: [fed-press]
+  # 事件追蹤（T-420；使用者 2026-10-20 選「事件追蹤」）：新的事件群開出來時，找近 window_days 天內最像的舊事件群（群中心向量），
+  # cosine ≥ min_score 就串成同一條線（thread），例：動土 → 簽約率 → 加入營運。只新串舊、不回頭重串。
+  thread:
+    min_score: 0.78
+    window_days: 14
   # 每則的「相似新聞」：同事件全列，再補最像的（隨便兩則中位數約 0.37）
   similar:
     limit: 8

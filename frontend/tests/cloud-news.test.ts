@@ -266,3 +266,13 @@ test('T-419 新聞時間軸與久違的消息：K 線標記只標範圍內的日
   assert.equal(stockNewsSummary(sn), '近 7 天・直接 0・間接 0')
   assert.equal(stockNewsSummary({ ...sn, quiet: { days: 21, at_least: false } }), '近 7 天・直接 0・間接 0・21 天沒消息後第一次')
 })
+
+test('T-420 事件追蹤：proxy 只轉 id；至少兩步才顯示；每步的日期', async () => {
+  assert.deepEqual(ALLOWED['/v1/thread'], ['id'])
+  const { stepDay, threadShown } = await import('../src/cloud/news.ts')
+  const step = (c: string, t: string, current = false) => ({ cluster_id: c, current, n: 3, first_seen_at: t, last_seen_at: t, item_id: 'x', title: 'T', url: 'u', outlets: ['鉅亨網'] })
+  assert.equal(threadShown(null), false)
+  assert.equal(threadShown({ id: 'x', cluster_id: 'a', steps: [step('a', '2026-10-18T01:00:00Z', true)] }), false, '只有自己那一群不畫')
+  assert.equal(threadShown({ id: 'x', cluster_id: 'b', steps: [step('a', '2026-10-18T01:00:00Z'), step('b', '2026-10-20T01:00:00Z', true)] }), true)
+  assert.equal(stepDay(step('a', '2026-10-18T17:00:00Z')), '10/19', '台北日期')
+})

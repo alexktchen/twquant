@@ -303,3 +303,16 @@ export function quietNote(q: Quiet | null | undefined): string | null {
   if (!q) return null
   return `${q.at_least ? '至少 ' : ''}${q.days} 天沒消息後第一次`
 }
+
+// ── 事件追蹤（T-420；使用者 2026-10-20 選「事件追蹤」）：同一件事連續幾天的報導串成一條線 ───────────
+export type ThreadStep = { cluster_id: string; current: boolean; n: number; first_seen_at: string; last_seen_at: string; item_id: string; title: string; url: string; outlets: string[] }
+export type NewsThread = { id: string; cluster_id: string | null; steps: ThreadStep[] }
+
+/** 這條線值得顯示嗎：至少兩個事件群（只有自己那一群就不用畫） */
+export const threadShown = (t: NewsThread | null): boolean => !!t && t.steps.length >= 2
+
+/** 線上每一步的日期：「10/18」；同一天多步照樣寫日期（時間在 title 旁） */
+export const stepDay = (s: ThreadStep): string => {
+  const d = new Date(Date.parse(s.first_seen_at) + 8 * 3600_000)
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}

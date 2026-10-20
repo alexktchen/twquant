@@ -196,3 +196,16 @@
 .cq-daynews li a { color: var(--text); text-decoration: none; }
 .cq-daynews li small { margin-left: 8px; color: var(--mute); font-size: 12.5px; white-space: nowrap; }
 .cq-daynews-more { color: var(--mute); font-size: 13px; }
+
+/* 事件追蹤（T-420）：左邊一條線、每步一個日期點；現在這一步亮橘 */
+.cq-thread h3 { display: flex; align-items: center; gap: 5px; }
+.cq-thread h3 small { margin-left: auto; font-weight: 500; }
+.cq-thread ol { list-style: none; margin: 4px 0 0; padding: 0 0 0 4px; border-left: 2px solid #3a3d45; }
+.cq-thread li { position: relative; display: flex; gap: 10px; padding: 6px 0 6px 12px; }
+.cq-thread li::before { content: ''; position: absolute; left: -7px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: #3a3d45; border: 2px solid var(--bg); }
+.cq-thread li.now::before { background: var(--accent); }
+.cq-thread li i { flex: none; width: 44px; font-style: normal; font-size: 13px; color: var(--mute); padding-top: 1px; }
+.cq-thread li.now i { color: var(--accent); font-weight: 700; }
+.cq-thread li a { color: var(--text); text-decoration: none; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cq-thread li small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--mute); }
+.cq-thread li small b { margin-left: 6px; color: var(--accent); font-weight: 700; }
