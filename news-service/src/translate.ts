@@ -3,7 +3,7 @@
 // 只「記錄」的（漲跌方向詞相反、中文數字、對岸用語、多出原文沒有的數字）→ 照用，結果存在 checks，兩週後看誤擋率再決定。
 // 指令在 system、資料在 user（SPEC-008 §0.3）。純函式；呼叫模型與資料庫由呼叫端注入。
 
-export const PROMPT_VERSION = '2026-10-19.2'
+export const PROMPT_VERSION = '2026-10-20.1' // 2026-10-20：詞彙表加 Canon（保留英文）
 
 export type TranslateConfig = {
   model: string

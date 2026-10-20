@@ -196,3 +196,33 @@ test('T-402：擋字先佔掉那段字、不算提到任何實體（2026-10-20 �
   assert.deepEqual(got('製造商需維持生產力成長'), [])
   assert.deepEqual(got('南亞塑膠調漲報價、力成擴產'), ['tw:1303', 'tw:6239'], '真的提到照樣命中')
 })
+
+test('2026-10-20 二次抽查的錯命中都擋掉，真的提到照樣命中（巨大、佳能、和成、國產、綠電、懷特、惠特）', () => {
+  const tw = [
+    { id: 'tw:9921', label: '巨大', aliases: ['巨大'] },
+    { id: 'tw:2374', label: '佳能', aliases: ['佳能'] },
+    { id: 'tw:1810', label: '和成', aliases: ['和成'] },
+    { id: 'tw:2504', label: '國產', aliases: ['國產'] },
+    { id: 'tw:8440', label: '綠電', aliases: ['綠電'] },
+    { id: 'tw:4108', label: '懷特', aliases: ['懷特'] },
+    { id: 'tw:6706', label: '惠特', aliases: ['惠特'] },
+  ]
+  const idx = buildIndex(tw, cfg)
+  const hit = (s: string) => detectMentions([s], idx).map((h) => h.entity)
+  for (const wrong of [
+    '的1% Anthropic 股權即將帶來巨大收益',
+    '半導體製造需要巨大的前期資本',
+    '這份報告上周在市場上引起巨大震撼',
+    '佳能台灣看好2026年相機需求',
+    '佳能行銷台灣董事長胡大剛表示，全球相機市場在',
+    'Anthropic的風險投資和成長關係',
+    '中國國產模型Flash賽道爭霸戰',
+    '台灣啟動首個綠電時移概念驗證計畫',
+    '懷特表示歐洲應釋出更多柴油',
+    '梅里迪思·惠特尼稱零售商將面臨困難',
+  ])
+    assert.deepEqual(hit(wrong), [], wrong)
+  assert.deepEqual(hit('自行車雙雄巨大、美利達9月營收同步走弱'), ['tw:9921'])
+  assert.deepEqual(hit('巨大9月營收年減'), ['tw:9921'])
+  assert.deepEqual(hit('惠特獲大廠訂單'), ['tw:6706'])
+})
