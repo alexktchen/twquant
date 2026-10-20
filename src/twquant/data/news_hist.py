@@ -429,7 +429,8 @@ def save_mentions(
 
 
 _AGREE_CTE = f"""
-with s as (select item_id from {SCHEMA}.mention_scans where rule_version = %(rv)s),
+with s as (select s.item_id from {SCHEMA}.mention_scans s join {SCHEMA}.items i on i.id = s.item_id
+           where s.rule_version = %(rv)s and i.origin = 'cnyes'),
 t as (select m.item_id, m.entity_id from {SCHEMA}.mentions m join s using (item_id) where m.method = 'tag'),
 a as (select m.item_id, m.entity_id, m.evidence from {SCHEMA}.mentions m join s using (item_id)
       where m.method = 'alias' and m.rule_version = %(rv)s and m.entity_id like 'tw:%%'),
@@ -457,7 +458,7 @@ where t.item_id is null group by a.entity_id order by n desc, a.entity_id limit 
 
 def mention_agreement(conn: Any, rule_version: str, top: int) -> dict[str, Any]:
     """T-412 驗收 ②：鉅亨網自帶股票 tag vs 別名命中（台股）——tag 被別名找到的比率、別名命中但來源沒標的比率，
-    與沒標的前幾個實體（看誤判）。只算有 tag 的新聞。"""
+    與沒標的前幾個實體（看誤判）。只算鉅亨網、有 tag 的新聞（MOPS 的 tag 是公告公司本身，不比）。"""
     with conn.cursor() as cur:
         cur.execute(AGREEMENT_SQL, {"rv": rule_version})
         row = cur.fetchone()

@@ -344,12 +344,14 @@ def ensure_sim_table(conn: Any) -> None:
 
 
 def load_mentions(conn: Any, until: dt.datetime) -> pl.DataFrame:
-    """台股提及（alias／tag，任何規則版本）＋ 新聞可得時間：(item_id, stock_id, available_at, is_mops)。"""
+    """台股提及＋新聞可得時間：(item_id, stock_id, available_at, is_mops)。一般新聞取 alias／tag（任何規則版本）；
+    公告只取 tag（公告公司本身），內文提到的對手方不算它的公告。"""
     with conn.cursor() as cur:
         cur.execute(
             f"""select distinct m.item_id, substr(m.entity_id, 4), i.available_at, i.origin = 'mops'
                 from {HIST}.mentions m join {HIST}.items i on i.id = m.item_id
-                where m.entity_id like 'tw:%%' and m.method in ('alias', 'tag') and i.available_at <= %s""",
+                where m.entity_id like 'tw:%%' and m.method in ('alias', 'tag') and i.available_at <= %s
+                  and (i.origin <> 'mops' or m.method = 'tag')""",
             (until,),
         )
         rows = cur.fetchall()

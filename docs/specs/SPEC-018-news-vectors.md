@@ -152,6 +152,16 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 - 每個因子的測試檔必須呼叫 `assert_no_lookahead`，並加一條「把截點往前移，值只能變少或不變」的性質測試（則數類）。
 - 缺值規則：沒有新聞＝null（LightGBM 原生處理），**不補 0**；但 `count_1d` 沒新聞＝0 是真值不是缺值（唯一例外，在 schema 註明）。
 - 標準化：同既有因子，逐日橫斷面 z（`standardize`）。
+- **實做紀錄（2026-10-21，T-414）**：特徵由資料層 `data/news_features.py` 先算進主庫 `news_features`（含 `available_at`），
+  `factors/news.py` 只讀表（跟 ml_scores 同套路）。跟上表的差異：
+  （a）`cutoff_hour` 是 **19:00** 不是 21:00——本機排程 19:00 跑，截點要 ≤ 排程時間；只算截點已過的日子，不蓋未來時間；
+  PitView 的訊號截點 20:00，19:00 的列當天看得到；
+  （b）novelty 的「過去 60 日」以每則新聞自己的日期往回算（先算每則對舊聞的最大 cosine、存 `news_hist.item_stock_sim`，再對近 5 日取最大）；
+  （c）族群成員用現在的 `stock_group` 快照（主庫沒有歷史，D-177）；
+  （d）attention 的分母在語料開頭用「已有天數」不是 60；
+  （e）MOPS 只算公告公司本身（tag），內文提到的對手方不算它的公告；
+  （f）mops_novelty 只看最近 20 天內的最新公告，更久沒公告＝null。
+  主題中心：≤ 2021-12-31 的 36,478 則、k-means 16、seed 7、版本 2026-10-21.1，寫在每列的 `topic_version`。
 
 ## 6. 情緒（T-413）
 
