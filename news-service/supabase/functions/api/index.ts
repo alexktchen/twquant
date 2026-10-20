@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
@@ -137,6 +137,12 @@ Deno.serve(async (req) => {
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
         .slice(0, sn.stock_limit)
       return json({ id: ids[0], days, items })
+    }
+    if (path === '/v1/galaxy') {
+      // 排程（scripts/news_galaxy.py）算好的整包；原樣送出文字，不在這裡 parse 再 stringify（約 700 KB，省 CPU）
+      const [row] = await sql<{ d: string }[]>`select data::text as d from news.galaxy_snapshots order by built_at desc limit 1`
+      if (!row) return json({ detail: '全景還沒算好（排程每天跑幾次）' }, 404)
+      return new Response(row.d, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
     }
     if (path === '/v1/digest') {
       const rv = cfg.mention.rule_version

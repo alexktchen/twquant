@@ -83,6 +83,10 @@ ingest 第五步用 Workers AI bge-m3 算向量（`news.embeddings`）、同事�
 
 **一律指定區域**：呼叫函式時帶 `x-region: ap-southeast-1`（資料庫在新加坡；不帶會在東京跑、每個查詢跨區，慢 3～4 倍）。`supabase/setup/schedule.sql` 已帶；改過排程要 `cron.unschedule` 再重跑。量測見 `docs/reports/news-vectors-t410-2026-10-20.md`。
 
+## 全景星雲圖（T-418）
+
+`scripts/news_galaxy.py` 算近 7 天、最多 1,500 則的 3D 座標、主題群與名稱、亮點，寫進 `news.galaxy_snapshots`（只留 3 筆），`/v1/galaxy` 原樣送出最新一筆。排程在 daily-pipeline 與 morning-brief 最後一步（GitHub 祕密 `TWQUANT_NEWS_DSN`＝新聞專案 pooler 的連線字串；本機 `.env` 同名）。手動：`uv run --all-groups python scripts/news_galaxy.py [--dry-run]`。
+
 ## 之後改程式
 
 - 改 `configs/news.yaml` → 同步改 `config/news.json` → `npx supabase functions deploy ingest api`。

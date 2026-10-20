@@ -459,5 +459,16 @@
     "hot_min_today": 3,
     "base_days": 6,
     "everywhere_share": 0.15
+  },
+  "galaxy": {
+    "days": 7,
+    "max_items": 1500,
+    "k": 16,
+    "island": 0.35,
+    "perplexity": 30,
+    "iters": 700,
+    "hub_min": 3,
+    "keep": 3,
+    "seed": 7
   }
 }

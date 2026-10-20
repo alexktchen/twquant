@@ -383,3 +383,20 @@ digest:
   base_days: 6
   # 超過 15% 的新聞都提到的主題不列（「AI」佔近一半，列了等於沒說），卡片底下註明；同 stock_news.hub_share
   everywhere_share: 0.15
+
+# 新聞全景（星雲圖）快照（T-418；使用者 2026-10-20：「星雲圖當成可以切換的一個視角就好」）：scripts/news_galaxy.py 在排程裡算
+# （晨報 06:30／18:00、每日排程 17:33／22:43 各跑一次），寫進 news.galaxy_snapshots，網站「全景」讀最新一筆。
+galaxy:
+  days: 7
+  # 最多畫幾則（新的先）：t-SNE 是 n² 的，1,500 則在 GitHub Actions 約 2～3 分鐘；手機畫 1,500 顆也順
+  max_items: 1500
+  k: 16
+  # 排版時同一群拉近的力道（只影響位置，不影響分群）
+  island: 0.35
+  perplexity: 30
+  iters: 700
+  # 被提到幾次以上的股票、公司、主題當亮點
+  hub_min: 3
+  # 新聞庫只留最近幾筆快照
+  keep: 3
+  seed: 7

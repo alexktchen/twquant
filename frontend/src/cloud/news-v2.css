@@ -178,3 +178,6 @@
   .cq-dg { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; width: 0; min-width: 100%; }
   .cq-dg-card { flex: 0 0 86%; scroll-snap-align: center; }
 }
+
+/* 清單／全景切換（T-418）：跟國際／台灣同一種分段按鈕，放在它右邊 */
+.cq-news-mode { margin-right: auto; }
