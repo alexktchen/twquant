@@ -1,6 +1,7 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
 // 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；標題下面列這則提到的台股／國外公司／族群（T-402，最多 3 個＋「+N」），
 // 有提到的列多一顆「關係圖」：點了才向新聞服務要這則的圖（T-404），開心智圖。
+// 搜尋框下面三張卡（T-417）：熱門主題、多家同報、股票熱度。
 // 擁有者多一顆「待核可 N」（T-403）：點了換成核可頁（AI 草擬的關係線）。
 // 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
@@ -28,6 +29,7 @@ import {
   type NewsRow,
 } from './news'
 import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
+import { NewsDigest } from './NewsDigest'
 import { NewsReview } from './NewsReview'
 import { NewsSearchResults, SimilarNews } from './NewsSimilar'
 import './news-graph.css'
@@ -81,9 +83,8 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
     }
   }, [refresh])
 
-  const runSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    const text = q.trim()
+  const searchText = (raw: string) => {
+    const text = raw.trim()
     if (!text || searching) return
     setSearching(true)
     setSearchErr('')
@@ -91,6 +92,16 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       .then(setSearch)
       .catch((x: Error) => setSearchErr(`搜尋失敗：${x.message}`))
       .finally(() => setSearching(false))
+  }
+  const runSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    searchText(q)
+  }
+  /** 熱門主題卡點了：把字放進搜尋框、搜尋、捲到頂端看結果 */
+  const searchTopic = (text: string) => {
+    setQ(text)
+    searchText(text)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const clearSearch = () => {
     setQ('')
@@ -186,6 +197,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
         </button>
       </form>
       {searchErr && <div className="cq-err">{searchErr}</div>}
+      {!search && !reviewOpen && <NewsDigest refresh={refresh} onSearch={searchTopic} onStock={onStock} />}
       {search && !reviewOpen && (
         <section className="cq-news-found">
           <h2>{searchLine(search)}</h2>

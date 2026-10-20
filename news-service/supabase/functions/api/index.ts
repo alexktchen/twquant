@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
@@ -7,6 +7,7 @@ import type { EntityType } from '../../../src/graph.ts'
 import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
 import { validateConfig } from '../../../src/ingest.ts'
 import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
+import { baseDaysOf, hotStocks, multiOutlet, topTopics, type CoRow, type EvRow, type HotRow, type TopicRow } from '../../../src/digest.ts'
 import { REVIEW_TYPES, edgeKey, groupDrafts, isOwner, parseReviewBody, planReview, type DecisionIn, type DraftEdge, type EntityInfo } from '../../../src/review.ts'
 import { countsFor, linksTo, parseStockIds, prepare, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
 import { authorized, db, embedQuery, json } from '../_shared/io.ts'
@@ -136,6 +137,66 @@ Deno.serve(async (req) => {
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
         .slice(0, sn.stock_limit)
       return json({ id: ids[0], days, items })
+    }
+    if (path === '/v1/digest') {
+      const rv = cfg.mention.rule_version
+      const dg = cfg.digest
+      // 近 48 小時每則提到哪些實體（同一則不同版本只算一次）
+      const recent = (hours: number) => sql`
+        select distinct m.item_id, m.entity_id, i.first_seen_at from news.mentions m join news.raw_items i on i.id = m.item_id
+        where m.rule_version = ${rv} and i.first_seen_at > now() - make_interval(hours => ${hours})`
+      const [topicRows, evRows, first, totalRows] = await Promise.all([
+        sql<TopicRow[]>`
+          with m as (${recent(48)})
+          select e.id, e.label, e.type,
+                 count(*) filter (where m.first_seen_at > now() - interval '24 hours')::int as n_now,
+                 count(*) filter (where m.first_seen_at <= now() - interval '24 hours')::int as n_prev
+          from m join news.entities e on e.id = m.entity_id and e.valid_to is null
+          where e.type in ('theme', 'group') group by 1, 2, 3`,
+        // 近 24 小時有新進成員的事件群（至少兩則），整群拿出來（含 24 小時前的舊成員）
+        sql<(Omit<EvRow, 'first_seen_at'> & { first_seen_at: Date })[]>`
+          with live as (
+            select c.cluster_id from news.clusters c join news.raw_items i on i.id = c.item_id
+            group by 1 having count(*) >= 2 and max(i.first_seen_at) > now() - interval '24 hours'
+          )
+          select c.cluster_id as ev, i.id as item_id, i.source, coalesce(v.title_orig, i.title_orig) as title, tr.title_zh, i.url, i.first_seen_at,
+                 coalesce((select array_agg(distinct e.label order by e.label) from news.mentions m join news.entities e on e.id = m.entity_id
+                           where m.item_id = i.id and m.rule_version = ${rv} and e.type = 'tw'), '{}') as stocks
+          from live join news.clusters c using (cluster_id) join news.raw_items i on i.id = c.item_id
+          left join lateral (select title_orig, content_sha from news.raw_item_versions where item_id = i.id order by seen_at desc limit 1) v on true
+          left join news.translations tr on tr.item_id = i.id and tr.content_sha = coalesce(v.content_sha, i.content_sha) and tr.status = 'ok'`,
+        sql<{ t: Date | null }[]>`select min(first_seen_at) as t from news.raw_items`,
+        sql<{ n: number }[]>`with m as (${recent(24)}) select count(distinct item_id)::int as n from m`,
+      ])
+      const total = totalRows[0]?.n ?? 0
+      const ids = topTopics(topicRows, [], total, dg).items.map((t) => t.id)
+      const now = new Date()
+      const baseDays = baseDaysOf(iso(first[0]?.t ?? null), now, dg)
+      const [coRows, hotRows] = await Promise.all([
+        ids.length === 0
+          ? Promise.resolve([] as CoRow[])
+          : sql<CoRow[]>`
+              with m as (${recent(24)})
+              select t.entity_id as topic, s.entity_id as stock, e.label, count(*)::int as n
+              from m t join m s on s.item_id = t.item_id join news.entities e on e.id = s.entity_id and e.type = 'tw'
+              where t.entity_id = any(${ids}) group by 1, 2, 3`,
+        sql<HotRow[]>`
+          with m as (${recent(24 * (dg.base_days + 1))})
+          select e.id, e.label, e.sub,
+                 count(*) filter (where m.first_seen_at > now() - interval '24 hours')::int as n_now,
+                 count(*) filter (where m.first_seen_at <= now() - interval '24 hours'
+                                    and m.first_seen_at > now() - make_interval(hours => ${24 * (baseDays + 1)}))::int as n_base
+          from m join news.entities e on e.id = m.entity_id and e.valid_to is null and e.type = 'tw'
+          group by 1, 2, 3`,
+      ])
+      return json({
+        api_version: API_VERSION,
+        as_of: now.toISOString(),
+        base_days: baseDays,
+        topics: topTopics(topicRows, coRows, total, dg),
+        multi: multiOutlet(evRows.map((r) => ({ ...r, first_seen_at: iso(r.first_seen_at)! })), (s) => meta.get(s)?.name ?? s, dg),
+        hot: hotStocks(hotRows, baseDays, dg),
+      })
     }
     if (path === '/v1/review') {
       // 登入者 email 由網站驗過 Cloudflare Access 權杖後放在 x-news-user（只有帶服務金鑰的呼叫端送得進來）；擁有者名單是祕密 NEWS_OWNER_EMAILS

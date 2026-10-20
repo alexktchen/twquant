@@ -251,3 +251,37 @@ export const groupDecisions = (g: ReviewGroup, decision: ReviewDecision['decisio
 
 /** 還剩幾條。 */
 export const reviewLeft = (groups: ReviewGroup[]): number => groups.reduce((a, g) => a + g.items.length, 0)
+
+// ── 新聞三張卡（T-417；使用者 2026-10-20：「要快速閱讀可以三張卡片」）──────────────────────────
+export type DigestTopic = { id: string; label: string; type: string; n: number; prev: number; stocks: { id: string; label: string; n: number }[] }
+export type DigestMulti = { ev: string; outlets: string[]; items: number; title: string; url: string; first_seen_at: string; last_seen_at: string; stocks: string[] }
+export type DigestHot = { id: string; label: string; sub: string | null; n: number; base: number | null; ratio: number | null }
+export type NewsDigest = {
+  as_of: string
+  /** 平常值用了幾天的資料（0＝還不到一天，股票熱度只排則數、主題不比前一天） */
+  base_days: number
+  topics: { items: DigestTopic[]; everywhere: { label: string; share: number }[] }
+  multi: DigestMulti[]
+  hot: DigestHot[]
+}
+
+/** 主題比前一天多幾則：「+12」「−5」「持平」；還沒有前一天的資料 → null（不顯示）。 */
+export function topicDelta(t: DigestTopic, baseDays: number): string | null {
+  if (baseDays < 1) return null
+  const d = t.n - t.prev
+  return d === 0 ? '持平' : d > 0 ? `+${d}` : `−${-d}`
+}
+
+/** 卡片底下那句：「AI」到處都提（45%），不列。 */
+export function everywhereNote(list: { label: string; share: number }[]): string | null {
+  if (list.length === 0) return null
+  return `${list.map((x) => `「${x.label}」`).join('')}幾乎每則都提（${list.map((x) => `${Math.round(x.share * 100)}%`).join('、')}），不列`
+}
+
+/** 股票熱度那列的小字：「今 12 則・平常 2／天」；還沒有平常值 → 「今 12 則」。 */
+export function hotLine(h: DigestHot): string {
+  return h.base === null ? `近 24 小時 ${h.n} 則` : `近 24 小時 ${h.n} 則・平常 ${h.base}／天`
+}
+
+/** 倍數小標：至少 2 倍才標（×2.5）；沒有平常值 → null。 */
+export const hotBadge = (h: DigestHot): string | null => (h.ratio !== null && h.ratio >= 2 ? `×${h.ratio}` : null)

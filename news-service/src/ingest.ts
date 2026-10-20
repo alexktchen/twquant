@@ -4,6 +4,7 @@
 import { validateCooccurConfig, type CooccurConfig } from './cooccur.ts'
 import { validateEmbedConfig, type EmbedConfig } from './embed.ts'
 import { validateStorageConfig, type StorageConfig } from './api.ts'
+import { validateDigestConfig, type DigestConfig } from './digest.ts'
 import { validateStockNewsConfig, type StockNewsConfig } from './stocknews.ts'
 import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
 import type { EdgeType, GraphConfig } from './graph.ts'
@@ -39,6 +40,7 @@ export type NewsConfig = {
   cooccur: CooccurConfig
   embed: EmbedConfig
   storage: StorageConfig
+  digest: DigestConfig
 }
 
 export type NewsGraphConfig = GraphConfig & {
@@ -90,6 +92,7 @@ export function validateConfig(x: unknown): NewsConfig {
   validateCooccurConfig(c!.cooccur)
   validateEmbedConfig(c!.embed)
   validateStorageConfig(c!.storage)
+  validateDigestConfig(c!.digest)
   return c as NewsConfig
 }
 
