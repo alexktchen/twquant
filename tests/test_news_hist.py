@@ -69,7 +69,7 @@ def _row(i: str = "a", **over: Any) -> nh.ItemRow:
 
 
 def test_ddl_mentions_every_table_and_available_at() -> None:
-    for t in ("items", "backfill_runs", "mentions", "pull_state"):
+    for t in ("items", "backfill_runs", "mentions", "mention_scans", "pull_state"):
         assert f"{nh.SCHEMA}.{t}" in nh.DDL
     assert "available_at" in nh.DDL and "halfvec(1024)" in nh.EMBEDDINGS_DDL
 
@@ -220,3 +220,26 @@ def test_daily_pipeline_has_news_pull_step_and_cloud_skips_it() -> None:
     assert "新聞語料拉回" in scfg["cloud"]["skip_pipeline_steps"]
     news = yaml.safe_load((root / "configs" / "news.yaml").read_text(encoding="utf-8"))
     assert int(news["hist"]["pull_lookback_days"]) >= 1
+
+
+def test_mention_texts_and_tag_mentions() -> None:
+    """T-412：離線比對的文字依來源；來源自帶股票代號記 method='tag'、去重。"""
+    assert nh.mention_texts("cnyes", "t", "s", "c") == ["t", "s", "c"]
+    assert nh.mention_texts("mops", "t", None, "c") == ["t", "c"]
+    with pytest.raises(ValueError, match="cloud"):
+        nh.mention_texts("cloud", "t", None, None)
+    assert nh.tag_mentions("x", ["2330", "0050", "2330"], "v1") == [
+        ("x", "tw:2330", "tag", None, "v1"),
+        ("x", "tw:0050", "tag", None, "v1"),
+    ]
+
+
+def test_save_mentions_and_pending_pass_rule_version() -> None:
+    cur = _Cur()
+    conn = _Conn(cur)
+    assert nh.save_mentions(conn, [("x", "tw:2330", "alias", "ev", "v1")], [("x", "v1", 1)]) == 1
+    assert [p for _, p in cur.many] == [[("x", "tw:2330", "alias", "ev", "v1")], [("x", "v1", 1)]]
+    assert nh.save_mentions(conn, [], []) == 0
+    cur2 = _Cur()
+    nh.pending_for_mentions(_Conn(cur2), "v1", ["cnyes"], 10)
+    assert cur2.sql[-1][1] == ("v1", ["cnyes"], 10)

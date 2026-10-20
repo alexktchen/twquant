@@ -6787,5 +6787,145 @@ def news_types_train(
     )
 
 
+# ── 提及回補（T-412）：本機語料用雲端同一套 mention.ts 規則離線比；驗收 ② 鉅亨 tag vs 別名 ──
+@news_app.command("mentions-backfill")
+def news_mentions_backfill(
+    limit: int = typer.Option(0, help="這次最多比幾則（0＝全部沒比過的）"),
+    batch: int = typer.Option(5000, help="一次交給 node 幾則"),
+    origins: str = typer.Option(
+        "cnyes", help="哪些來源（逗號分隔）；cloud 的提及由 news pull 拉回，不在這裡比"
+    ),
+    entities: str = typer.Option(
+        "", help="實體清單 JSON（空＝<data_dir>/news_entities.json；沒有就從雲端拉）"
+    ),
+    refresh_entities: bool = typer.Option(False, "--refresh-entities", help="重新從雲端拉實體清單"),
+) -> None:
+    """本機語料的提及（T-412）：雲端同一套 mention.ts 規則離線跑（node），來源自帶股票代號記 method='tag'。可中斷續跑。"""
+    import os
+    import shutil
+    import subprocess
+
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    h = _news_hist_cfg()
+    root = _CONFIG_DIR.parent
+    node = shutil.which("node")
+    if not node:
+        raise typer.BadParameter("找不到 node（news-service 的提及規則要用 node 跑）")
+    ent_path = Path(entities) if entities else Path(_load_system().data_dir) / "news_entities.json"
+    if refresh_entities or not ent_path.exists():
+        import psycopg
+
+        dsn = os.environ.get("TWQUANT_NEWS_DSN", "").strip()
+        if not dsn:
+            raise typer.BadParameter("沒有實體清單也沒有 TWQUANT_NEWS_DSN，拉不到雲端實體")
+        with psycopg.connect(dsn, connect_timeout=30, prepare_threshold=None) as cloud:
+            ents = news_hist.export_entities(cloud)
+        ent_path.parent.mkdir(parents=True, exist_ok=True)
+        ent_path.write_text(json.dumps(ents, ensure_ascii=False), encoding="utf-8")
+        typer.echo(f"實體 {len(ents)} 個 → {ent_path}")
+    cmd = [
+        node,
+        "--experimental-strip-types",
+        str(root / "news-service" / "scripts" / "mentions_offline.ts"),
+        str(ent_path),
+        str(root / "news-service" / "config" / "news.json"),
+    ]
+    rv = str(h["rule_version"])
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = hits = 0
+    try:
+        news_hist.ensure_schema(conn)
+        while True:
+            items = news_hist.pending_for_mentions(
+                conn, rv, origins.split(","), min(batch, limit - done) if limit else batch
+            )
+            if not items:
+                break
+            payload = "\n".join(
+                json.dumps(
+                    {"id": i[0], "texts": news_hist.mention_texts(i[1], i[2], i[3], i[4])},
+                    ensure_ascii=False,
+                )
+                for i in items
+            )
+            res = subprocess.run(
+                cmd,
+                input=(payload + "\n").encode("utf-8"),
+                capture_output=True,
+                cwd=str(root),
+                check=False,
+            )
+            if res.returncode != 0:
+                raise DataError(
+                    "news_mentions",
+                    None,
+                    f"node 離線比對失敗：{res.stderr.decode('utf-8', 'replace')[:300]}",
+                )
+            found: dict[str, list[dict[str, str]]] = {}
+            for line in res.stdout.decode("utf-8").splitlines():
+                if line.strip():
+                    o = json.loads(line)
+                    found[o["id"]] = o["hits"]
+            rows: list[tuple[str, str, str, str | None, str]] = []
+            scans: list[tuple[str, str, int]] = []
+            for i in items:
+                hs = found.get(i[0])
+                if hs is None:
+                    raise DataError("news_mentions", None, f"{i[0]}：node 沒回結果")
+                rows += [(i[0], x["entity"], "alias", x["evidence"], rv) for x in hs]
+                rows += news_hist.tag_mentions(i[0], i[5], rv)
+                scans.append((i[0], rv, len(hs)))
+            hits += news_hist.save_mentions(conn, rows, scans)
+            done += len(items)
+            typer.echo(f"  {done} 則、提及 {hits}；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 比對 {done} 則、提及 {hits}（含 tag）；規則 {rv}；{time.monotonic() - t0:.0f} 秒",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("mentions-report")
+def news_mentions_report(
+    out: str = typer.Option(
+        ..., help="markdown 報告路徑（docs/reports/news-mention-parity-<日期>.md）"
+    ),
+    top: int = typer.Option(30, help="列幾個「別名命中但來源沒標」的實體"),
+) -> None:
+    """T-412 驗收 ②：鉅亨網自帶股票 tag vs 別名命中一致率（只算有 tag 的新聞），附沒標的實體看誤判。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    conn = store.connect(_load_serving())
+    try:
+        r = news_hist.mention_agreement(conn, str(h["rule_version"]), top)
+    finally:
+        conn.close()
+    lines = [
+        f"# 鉅亨網自帶股票 tag vs 別名命中（T-412 驗收 ②，{dt.date.today().isoformat()}）",
+        "",
+        f"- 規則版本 {h['rule_version']}；已比對 {r['scanned']:,} 則，其中來源有標股票的 {r['items_with_tag']:,} 則",
+        f"- 來源的 tag 共 {r['tags']:,} 個，別名也找到的 {r['tags_found']:,} 個 → **tag 召回 {r['tag_recall']:.1%}**（沒找到的多半是內文沒出現公司名、只在圖表或標的清單）",
+        f"- 有標股票的新聞上，別名命中台股 {r['alias_hits_on_tagged']:,} 個，其中來源沒標的 {r['alias_not_tagged']:,} 個 → **{r['alias_untagged_share']:.1%}**（含正確的「順帶提到」與誤判，要人工看下表）",
+        "",
+        "| 實體 | 沒標次數 | 一段證據 |",
+        "|---|---|---|",
+    ]
+    lines += [
+        f"| {e} | {n} | {(s or '')[:60].replace('|', '｜')} |" for e, n, s in r["top_untagged"]
+    ]
+    Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    typer.echo("\n".join(lines[:5]))
+    typer.secho(f"[OK] 報告 {out}", fg=typer.colors.GREEN)
+
+
 if __name__ == "__main__":
     app()

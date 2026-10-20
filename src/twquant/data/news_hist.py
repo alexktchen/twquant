@@ -59,6 +59,13 @@ create table if not exists {SCHEMA}.mentions (
   primary key (item_id, entity_id, method)
 );
 create index if not exists mentions_entity on {SCHEMA}.mentions (entity_id);
+create table if not exists {SCHEMA}.mention_scans (
+  item_id      text not null references {SCHEMA}.items (id),
+  rule_version text not null,
+  n            int not null,
+  scanned_at   timestamptz not null default now(),
+  primary key (item_id, rule_version)
+);
 create table if not exists {SCHEMA}.pull_state (key text primary key, value text not null, updated_at timestamptz not null default now());
 """
 
@@ -350,3 +357,119 @@ def save_embeddings(conn: Any, model: str, rows: Iterable[tuple[str, Sequence[fl
         )
     conn.commit()
     return len(data)
+
+
+# ── 提及回補（T-412）：本機語料用雲端同一套 mention.ts 規則（node 離線跑 news-service/scripts/mentions_offline.ts）；
+#    來源自帶的股票代號記 method='tag'；0 命中也記 mention_scans，下次不再掃 ──
+CLOUD_ENTITIES_SQL = (
+    "select id, label, aliases from news.entities where valid_to is null order by id"
+)
+
+
+def export_entities(cloud: Any) -> list[dict[str, Any]]:
+    """雲端實體與別名（valid_to is null）→ 給 node 離線比對的清單 [{id, label, aliases}]。"""
+    with cloud.cursor() as cur:
+        cur.execute(CLOUD_ENTITIES_SQL)
+        return [{"id": r[0], "label": r[1], "aliases": list(r[2] or [])} for r in cur.fetchall()]
+
+
+def mention_texts(
+    origin: str, title: str, summary: str | None, content: str | None
+) -> list[str | None]:
+    """給別名比對的文字：鉅亨網 標題／摘要／內文，MOPS 主旨／內文。雲端新聞的提及由 news pull 拉回，不在本機比。"""
+    if origin == "cnyes":
+        return [title, summary, content]
+    if origin == "mops":
+        return [title, content]
+    raise ValueError(f"{origin}：這個來源的提及不在本機比（雲端新聞用 news pull 拉回）")
+
+
+def tag_mentions(
+    item_id: str, stocks: Sequence[str], rule_version: str
+) -> list[tuple[str, str, str, str | None, str]]:
+    """來源自帶的股票代號 → method='tag' 的提及（鉅亨網 stock[] 解析時只留台股；MOPS 是公告公司本身）。"""
+    return [(item_id, f"tw:{s}", "tag", None, rule_version) for s in dict.fromkeys(stocks)]
+
+
+def pending_for_mentions(
+    conn: Any, rule_version: str, origins: Sequence[str], limit: int
+) -> list[tuple[str, str, str, str | None, str | None, list[str]]]:
+    """還沒用這版規則比過的本機新聞：(id, origin, title, summary, content, stocks)，舊的先。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""select i.id, i.origin, i.title, i.summary, i.content, i.stocks from {SCHEMA}.items i
+                left join {SCHEMA}.mention_scans s on s.item_id = i.id and s.rule_version = %s
+                where s.item_id is null and i.origin = any(%s) order by i.published_at, i.id limit %s""",
+            (rule_version, list(origins), limit),
+        )
+        return [
+            (str(r[0]), str(r[1]), str(r[2]), r[3], r[4], list(r[5] or [])) for r in cur.fetchall()
+        ]
+
+
+def save_mentions(
+    conn: Any,
+    rows: Sequence[tuple[str, str, str, str | None, str]],
+    scans: Sequence[tuple[str, str, int]],
+) -> int:
+    """寫提及（同 (item, entity, method) 不重複）與掃描紀錄。回寫了幾列提及。"""
+    with conn.cursor() as cur:
+        if rows:
+            cur.executemany(
+                f"insert into {SCHEMA}.mentions (item_id, entity_id, method, evidence, rule_version) values (%s, %s, %s, %s, %s) on conflict do nothing",
+                list(rows),
+            )
+        if scans:
+            cur.executemany(
+                f"insert into {SCHEMA}.mention_scans (item_id, rule_version, n) values (%s, %s, %s) on conflict do nothing",
+                list(scans),
+            )
+    conn.commit()
+    return len(rows)
+
+
+_AGREE_CTE = f"""
+with s as (select item_id from {SCHEMA}.mention_scans where rule_version = %(rv)s),
+t as (select m.item_id, m.entity_id from {SCHEMA}.mentions m join s using (item_id) where m.method = 'tag'),
+a as (select m.item_id, m.entity_id, m.evidence from {SCHEMA}.mentions m join s using (item_id)
+      where m.method = 'alias' and m.rule_version = %(rv)s and m.entity_id like 'tw:%%'),
+tagged as (select distinct item_id from t)
+"""
+AGREEMENT_SQL = (
+    _AGREE_CTE
+    + """select
+  (select count(*) from s) as scanned,
+  (select count(*) from tagged) as items_with_tag,
+  (select count(*) from t) as tags,
+  (select count(*) from t join a using (item_id, entity_id)) as tags_found,
+  (select count(*) from a join tagged using (item_id)) as alias_hits_on_tagged,
+  (select count(*) from a join tagged using (item_id) left join t using (item_id, entity_id) where t.item_id is null) as alias_not_tagged
+"""
+)
+DISAGREE_TOP_SQL = (
+    _AGREE_CTE
+    + """select a.entity_id, count(*) as n, min(a.evidence) as sample
+from a join tagged using (item_id) left join t using (item_id, entity_id)
+where t.item_id is null group by a.entity_id order by n desc, a.entity_id limit %(top)s
+"""
+)
+
+
+def mention_agreement(conn: Any, rule_version: str, top: int) -> dict[str, Any]:
+    """T-412 驗收 ②：鉅亨網自帶股票 tag vs 別名命中（台股）——tag 被別名找到的比率、別名命中但來源沒標的比率，
+    與沒標的前幾個實體（看誤判）。只算有 tag 的新聞。"""
+    with conn.cursor() as cur:
+        cur.execute(AGREEMENT_SQL, {"rv": rule_version})
+        row = cur.fetchone()
+        cols = [d[0] for d in cur.description]
+        cur.execute(DISAGREE_TOP_SQL, {"rv": rule_version, "top": top})
+        tops = [(str(r[0]), int(r[1]), r[2]) for r in cur.fetchall()]
+    out: dict[str, Any] = dict(zip(cols, (int(v) for v in row), strict=True))
+    out["tag_recall"] = out["tags_found"] / out["tags"] if out["tags"] else 0.0
+    out["alias_untagged_share"] = (
+        out["alias_not_tagged"] / out["alias_hits_on_tagged"]
+        if out["alias_hits_on_tagged"]
+        else 0.0
+    )
+    out["top_untagged"] = tops
+    return out
