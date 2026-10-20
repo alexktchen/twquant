@@ -51,6 +51,11 @@ def test_parse_page_cleans_text_and_keeps_tw_codes_only() -> None:
     it = rows[0]
     assert it.news_id == 5 and it.title == "標題 5 測試" and it.summary == "摘要 有 空白"
     assert it.content == "第一段 第二段 & 第三"  # 去標籤、解實體、截 12 字
+    escaped = _item(
+        6, 1609765936, content="&lt;p&gt;西門子&lt;/p&gt; &lt;p&gt;奈克 &amp;amp; 輝達&lt;/p&gt;"
+    )
+    rows2, *_ = ca.parse_page(_body([escaped]), "x", content_chars=100)
+    assert rows2[0].content == "西門子 奈克 & 輝達"  # 鉅亨網內文是轉義過的 HTML
     assert (
         it.published_at == dt.datetime.fromtimestamp(1609765936, TZ)
         and it.published_at.tzinfo is not None

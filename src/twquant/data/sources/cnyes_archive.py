@@ -46,8 +46,10 @@ class ArchiveItem:
 
 
 def strip_html(raw: Any, max_chars: int) -> str | None:
-    """HTML／文字 → 純文字（去標籤、解實體、壓空白），截到 max_chars 字；空的 → None。"""
-    text = _SPACES.sub(" ", html.unescape(_TAG.sub(" ", str(raw or "")))).strip()
+    """HTML／文字 → 純文字（去標籤、解實體、壓空白），截到 max_chars 字；空的 → None。
+    鉅亨網的 content 是「轉義過的 HTML」（&lt;p&gt;…），所以先解實體再去標籤、最後再解一次實體；
+    2026-10-21 實見：原本先去標籤再解實體，23.6 萬則內文全部留著 <p>。"""
+    text = _SPACES.sub(" ", html.unescape(_TAG.sub(" ", html.unescape(str(raw or ""))))).strip()
     if not text:
         return None
     return text[:max_chars]
