@@ -324,8 +324,8 @@ def vec_literal(v: Sequence[float]) -> str:
     return "[" + ",".join("0" if abs(x) < 5e-7 else f"{x:.6f}" for x in v) + "]"
 
 
-def pending_for_embedding(conn: Any, limit: int) -> list[tuple[str, str]]:
-    """還沒有向量的 (id, 文字)，舊的先。"""
+def pending_for_embedding(conn: Any, limit: int, max_chars: int) -> list[tuple[str, str]]:
+    """還沒有向量的 (id, 文字)，舊的先。max_chars 用 configs/news.yaml embed.max_chars（跟雲端同一個數字，向量才能對得上）。"""
     with conn.cursor() as cur:
         cur.execute(
             f"""select i.id, i.title, i.title_zh, i.summary, i.summary_zh from {SCHEMA}.items i
@@ -334,7 +334,7 @@ def pending_for_embedding(conn: Any, limit: int) -> list[tuple[str, str]]:
             (limit,),
         )
         rows = cur.fetchall()
-    return [(r[0], embed_text(r[1], r[2], r[3], r[4], 1500)) for r in rows]
+    return [(r[0], embed_text(r[1], r[2], r[3], r[4], max_chars)) for r in rows]
 
 
 def save_embeddings(conn: Any, model: str, rows: Iterable[tuple[str, Sequence[float]]]) -> int:

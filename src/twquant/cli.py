@@ -6272,7 +6272,11 @@ def _news_hist_cfg() -> dict[str, Any]:
     h = doc.get("hist")
     if not isinstance(h, dict):
         raise typer.BadParameter("configs/news.yaml 缺 hist 段")
-    return {**h, "rule_version": str(doc["mention"]["rule_version"])}
+    return {
+        **h,
+        "rule_version": str(doc["mention"]["rule_version"]),
+        "embed_max_chars": int(doc["embed"]["max_chars"]),
+    }
 
 
 @news_app.command("init-schema")
@@ -6474,7 +6478,7 @@ def news_embed(
             model.half()
         while True:
             chunk = news_hist.pending_for_embedding(
-                conn, min(2000, limit - done) if limit else 2000
+                conn, min(2000, limit - done) if limit else 2000, int(h["embed_max_chars"])
             )
             if not chunk:
                 break
