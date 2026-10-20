@@ -26,14 +26,37 @@ export function Icon({ name, size = 14 }: { name: BadgeIcon; size?: number }) {
 }
 
 /** 一個標記：compact＝名單列（圖示＋極短字）；否則個股頁（圖示＋名稱＋極短字）。 */
-export function BadgeChip({ b, compact = false }: { b: Badge; compact?: boolean }) {
+export function BadgeChip({ b, compact = false, onClick }: { b: Badge; compact?: boolean; onClick?: () => void }) {
   const dir = b.icon === 'usersUp' ? '↑' : b.icon === 'usersDown' ? '↓' : ''
-  return (
-    <span className={`cq-b cq-b-${b.tone}${compact ? ' cq-b-compact' : ''}`} title={b.title} aria-label={`${b.label}${b.short ? ` ${b.short}` : ''}`}>
+  const cls = `cq-b cq-b-${b.tone}${compact ? ' cq-b-compact' : ''}`
+  const label = `${b.label}${b.short ? ` ${b.short}` : ''}`
+  const inner = (
+    <>
       <Icon name={b.icon} size={compact ? 13 : 14} />
       {dir}
       {!compact && <span className="cq-b-label">{b.label}</span>}
       {b.short && <span className="cq-b-short">{b.short}</span>}
+    </>
+  )
+  // 點得動的標記（目前只有「相關新聞」：跳到個股頁那一塊）。名單列整列可點，所以要擋住冒泡，不然點小標＝點整列
+  if (onClick)
+    return (
+      <button
+        type="button"
+        className={`${cls} cq-b-tap`}
+        title={b.title}
+        aria-label={label}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }}
+      >
+        {inner}
+      </button>
+    )
+  return (
+    <span className={cls} title={b.title} aria-label={label}>
+      {inner}
     </span>
   )
 }

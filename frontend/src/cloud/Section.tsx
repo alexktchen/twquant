@@ -9,6 +9,7 @@ export function Section({
   meta,
   fold = false,
   summary,
+  id,
   children,
 }: {
   icon: LucideIcon
@@ -17,6 +18,8 @@ export function Section({
   fold?: boolean
   /** 收起時標題右邊那一句 */
   summary?: ReactNode
+  /** 錨點（例：名單上的「相關新聞」小標點了跳到這塊） */
+  id?: string
   children: ReactNode
 }) {
   const head = (
@@ -28,13 +31,13 @@ export function Section({
   )
   if (fold)
     return (
-      <details className="cq-sec cq-sec-fold">
+      <details className="cq-sec cq-sec-fold" id={id}>
         <summary className="cq-sec-head">{head}</summary>
         <div className="cq-sec-body">{children}</div>
       </details>
     )
   return (
-    <section className="cq-sec">
+    <section className="cq-sec" id={id}>
       <div className="cq-sec-head">{head}</div>
       <div className="cq-sec-body">{children}</div>
     </section>

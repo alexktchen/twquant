@@ -71,3 +71,16 @@ test('相關新聞小標（反向看圖，2026-10-20）：有幾則就顯示幾�
   assert.equal(pickBadges({ news: null }).find((x) => x.key === 'news'), undefined)
   assert.ok(BADGE_LEGEND.some((x) => x.icon === 'newspaper' && x.label === '相關新聞'))
 })
+
+test('相關新聞小標點得動（使用者 2026-10-20：「推薦股有新聞，但是點了沒反應」）：說明寫「點一下」；換股時等新的那檔讀完才捲、同一次點擊只捲一次', async () => {
+  const b = pickBadges({ news: { direct: 1, indirect: 0 } }).find((x) => x.key === 'news')
+  assert.match(b!.title, /點一下/)
+  assert.match(BADGE_LEGEND.find((x) => x.icon === 'newspaper')!.meaning, /點一下跳到個股頁/)
+  const { shouldJumpToNews } = await import('../src/cloud/news.ts')
+  assert.equal(shouldJumpToNews(0, 0, 'tw:1815', '1815'), false, '沒點過不捲')
+  assert.equal(shouldJumpToNews(1, 0, 'tw:1815', '1815'), true)
+  assert.equal(shouldJumpToNews(1, 1, 'tw:1815', '1815'), false, '同一次點擊捲過了，重抓資料不再捲')
+  assert.equal(shouldJumpToNews(2, 1, 'tw:2330', '1815'), false, '還是上一檔的資料：等 1815 讀完')
+  assert.equal(shouldJumpToNews(2, 1, null, '1815'), false)
+  assert.equal(shouldJumpToNews(2, 1, 'tw:1815', '1815'), true)
+})

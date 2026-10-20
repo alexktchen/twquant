@@ -2,20 +2,25 @@
 // 近 7 天連得到這一檔的新聞：直接提到的在前，其次是二度（例：新聞講輝達 → 供應商 → 廣達），每則附上怎麼連過來的；
 // 點「關係圖」打開那則的心智圖，直接選到這一檔、亮出路徑。新聞服務沒設定或連不上 → 這一塊不顯示（不擋個股頁）。
 import { Network, Newspaper } from 'lucide-react'
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { fetchNewsGraph, fetchStockNews } from './api'
 import type { NewsGraph as NewsGraphData } from './news-graph'
-import { STOCK_NEWS_SHOWN, pathText, stockNewsSummary, taipeiHm, taipeiDay, type StockNews as StockNewsData } from './news'
+import { STOCK_NEWS_SHOWN, pathText, shouldJumpToNews, stockNewsSummary, taipeiHm, taipeiDay, type StockNews as StockNewsData } from './news'
 import { Section } from './Section'
 
 const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.NewsGraph })))
 
-export function StockNews({ sid, refresh, onStock }: { sid: string; refresh: number; onStock?: (sid: string, name: string) => void }) {
+/** 個股頁「相關新聞」那一塊的錨點 */
+export const STOCK_NEWS_ANCHOR = 'cq-stock-news'
+
+/** focus：每次名單上的「相關新聞」小標被點就加一 → 這一檔的新聞讀到後捲到這一塊（同一個值只捲一次） */
+export function StockNews({ sid, refresh, onStock, focus = 0 }: { sid: string; refresh: number; onStock?: (sid: string, name: string) => void; focus?: number }) {
   const [data, setData] = useState<StockNewsData | null>(null)
   const [all, setAll] = useState(false)
   const [graph, setGraph] = useState<NewsGraphData | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  const scrolled = useRef(0)
 
   useEffect(() => {
     let stale = false
@@ -28,6 +33,12 @@ export function StockNews({ sid, refresh, onStock }: { sid: string; refresh: num
       stale = true
     }
   }, [sid, refresh])
+
+  useEffect(() => {
+    if (!shouldJumpToNews(focus, scrolled.current, data?.id ?? null, sid)) return
+    scrolled.current = focus
+    document.getElementById(STOCK_NEWS_ANCHOR)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [data, sid, focus])
 
   if (!data) return null
   const items = all ? data.items : data.items.slice(0, STOCK_NEWS_SHOWN)
@@ -43,7 +54,7 @@ export function StockNews({ sid, refresh, onStock }: { sid: string; refresh: num
   }
 
   return (
-    <Section icon={Newspaper} title="相關新聞" meta={stockNewsSummary(data)}>
+    <Section icon={Newspaper} title="相關新聞" meta={stockNewsSummary(data)} id={STOCK_NEWS_ANCHOR}>
       {data.items.length === 0 ? (
         <p className="cq-sn-empty">近 {data.days} 天沒有提到它、也沒有經過供應商或族群連到它的新聞。</p>
       ) : (
