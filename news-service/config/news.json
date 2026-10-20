@@ -92,6 +92,116 @@
       "url": "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30",
       "terms": "https://www.cnyes.com/tos",
       "checked": "2026-10-19"
+    },
+    {
+      "id": "cnyes-tw-stock",
+      "name": "鉅亨網",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "cnyes",
+      "url": "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30",
+      "terms": "https://www.cnyes.com/tos",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "cna-finance",
+      "name": "中央社",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://feeds.feedburner.com/rsscna/finance",
+      "terms": "https://www.cna.com.tw/about/rss.aspx",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "cna-tech",
+      "name": "中央社",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://feeds.feedburner.com/rsscna/technology",
+      "terms": "https://www.cna.com.tw/about/rss.aspx",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "ltn-business",
+      "name": "自由財經",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://news.ltn.com.tw/rss/business.xml",
+      "terms": "https://www.ltn.com.tw/copyright",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "udn-money-stock",
+      "name": "經濟日報",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://money.udn.com/rssfeed/news/1001/5590?ch=money",
+      "terms": "https://www.udngroup.com/members/service",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "udn-money-industry",
+      "name": "經濟日報",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://money.udn.com/rssfeed/news/1001/5591?ch=money",
+      "terms": "https://www.udngroup.com/members/service",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "moneydj-news",
+      "name": "MoneyDJ",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://www.moneydj.com/KMDJ/RssCenter.aspx?svc=NR&fno=1&arg=MB010000",
+      "terms": "https://www.moneydj.com/KMDJ/RssCenter.aspx",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "technews",
+      "name": "科技新報",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://technews.tw/feed/",
+      "terms": "https://technews.tw/copyright/",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "technews-finance",
+      "name": "科技新報",
+      "kind": "tw",
+      "lang": "zh",
+      "format": "rss",
+      "url": "https://finance.technews.tw/feed/",
+      "terms": "https://technews.tw/copyright/",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "scmp-business",
+      "name": "SCMP",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.scmp.com/rss/92/feed",
+      "terms": "https://www.scmp.com/terms-conditions",
+      "checked": "2026-10-20"
+    },
+    {
+      "id": "ecb-press",
+      "name": "European Central Bank",
+      "kind": "intl",
+      "lang": "en",
+      "format": "rss",
+      "url": "https://www.ecb.europa.eu/rss/press.html",
+      "terms": "https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html",
+      "checked": "2026-10-20"
     }
   ],
   "translate": {
@@ -317,6 +427,7 @@
     "batch": 50,
     "per_run_limit": 100,
     "max_chars": 1500,
+    "retention_days": 45,
     "input_neurons_per_1m": 1075,
     "cluster": {
       "min_score": 0.85,
@@ -334,5 +445,9 @@
       "max_query_chars": 60,
       "min_score": 0.45
     }
+  },
+  "storage": {
+    "limit_mb": 500,
+    "warn_share": 0.7
   }
 }

@@ -83,8 +83,11 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 | `clusters` | `cluster_id`、`item_id`、`seed_item_id`、`score`、`created_at` | 同事件群；只新併舊，不回頭重分 |
 | `llm_usage`（既有） | 多 `kind='embed'` | 向量的 Neurons 帳，含在新聞 2,500／天內 |
 
-索引：`embeddings` 建 HNSW（`vector_cosine_ops`，m 16、ef_construction 64；14 MB 的庫幾秒建完）。容量：一年約 9 萬則 × 2 KB ≈ 180 MB 含索引
-（SPEC-017 估過）；超過一年的向量刪掉（原文與提及保留），由 pg_cron 每月做。
+索引：`embeddings` 建 HNSW（`vector_cosine_ops`，m 16、ef_construction 64；14 MB 的庫幾秒建完）。
+**容量（2026-10-20 實測改正）**：一則向量約 2.9 KB（資料）＋2.7 KB（HNSW 索引）＝5.6 KB，原本估的「一則 2 KB 含索引」低估將近三倍；
+加上原文、譯文、提及、事件群，一則約 9 KB。來源加到 20 個後一天約 700 則 → 不設上限約兩個半月就滿 500 MB。
+所以雲端只留近 `embed.retention_days`（45）天的向量：ingest 第五步先刪過期的、也不再補算（原文、提及、事件群都留）；
+健康檢查回報資料庫用量，超過七成網站狀態列變黃。原文與提及的長期存放（雲端只留一段、舊的歸檔到別處）還沒決定。
 
 ### 3.2 本機（schema `news_hist`；本機 PG 映像換成 pgvector）
 
@@ -184,7 +187,7 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 |---|---|---|
 | 雲端向量 | 250 則／天 × 約 150 token ≈ 40 Neurons／天 | bge-m3 約 1,100 Neurons／百萬 token |
 | 雲端情緒 | 約 750 Neurons／天 | 翻譯實測 113／35 則推 |
-| 雲端資料庫 | 一年向量約 180 MB；現在 14 MB；免費 500 MB | 超過一年的向量刪除 |
+| 雲端資料庫 | 一則約 9 KB（向量＋索引 5.6 KB）；一天約 700 則；向量只留 45 天約 180 MB，原文提及一天約 2 MB；免費 500 MB | 2026-10-20 實測；原文長期存放待決定 |
 | 本機 GPU | 歷史向量約 1 小時；Ollama 貼標 6～10 小時（抽樣）或 2～3 天（全貼） | 4070 12 GB |
 | 本機磁碟 | 向量＋索引約 4 GB；items 約 1 GB | |
 | 鉅亨網請求 | 約 18,000 次、6～8 小時 | 1 秒一次 |

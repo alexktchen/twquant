@@ -94,6 +94,9 @@ test('T-400：最後抓取時間的說法；有來源壞掉、停擺、從沒抓
     tone: 'warn',
   })
   assert.equal(healthLine(h({ stale: true }), now).tone, 'bad')
+  // 容量（2026-10-20）：超過七成狀態列變黃、寫用了幾成；沒超過或舊服務沒這欄照常
+  assert.deepEqual(healthLine(h({ storage: { used_mb: 360, limit_mb: 500, warn: true } }), now), { text: '最後抓取 12 分鐘前・資料庫已用 72%', tone: 'warn' })
+  assert.deepEqual(healthLine(h({ storage: { used_mb: 19, limit_mb: 500, warn: false } }), now), { text: '最後抓取 12 分鐘前', tone: 'ok' })
   assert.equal(healthLine(h({ last_ok_at: null }), now).text, '還沒抓到任何新聞')
   assert.equal(healthLine(null, now).tone, 'bad')
 })
@@ -180,6 +183,7 @@ test('T-410 相似新聞與語意搜尋：proxy 只轉 id／q；說明句；短�
   const it = { id: 'a', source_name: 'CNBC', kind: 'intl' as const, url: 'https://x', first_seen_at: '2026-10-20T02:00:00Z', title: 't', title_zh: null, score: 0.9, same_event: true }
   assert.equal(similarNote({ id: 'x', ready: false, items: [] }), '這則還在算（英文新聞翻譯完才算，通常 30 分鐘內）')
   assert.equal(similarNote({ id: 'x', ready: true, items: [] }), '沒有內容相近的新聞')
+  assert.equal(similarNote({ id: 'x', ready: false, expired: true, retention_days: 45, items: [] }), '這則比較舊，相似新聞只找近 45 天的')
   assert.equal(similarNote({ id: 'x', ready: true, items: [it] }), null)
   assert.equal(searchLine({ q: '輝達', budget_stop: false, items: [it, it] }), '跟「輝達」相關的新聞 2 則，越相關越前面')
   assert.equal(searchLine({ q: '輝達', budget_stop: false, items: [] }), '找不到跟「輝達」相關的新聞')

@@ -15,6 +15,8 @@ export type EmbedConfig = {
   max_chars: number
   /** 模型回應沒附 Neurons 時，用輸入 token 估 */
   input_neurons_per_1m: number
+  /** 雲端只留近幾天的向量：更舊的刪掉、也不再補算（免費資料庫 500 MB；原文、提及、事件群都留） */
+  retention_days: number
   cluster: {
     /** 跟最像的較舊一則 cosine ≥ 這個 → 同一事件 */
     min_score: number
@@ -34,7 +36,7 @@ export function validateEmbedConfig(x: unknown): EmbedConfig {
   }
   if (!c || typeof c !== 'object') fail('（整段缺少）')
   if (typeof c!.model !== 'string' || !c!.model.startsWith('@cf/')) fail('model')
-  for (const k of ['dim', 'batch', 'per_run_limit', 'max_chars'] as const) if (!Number.isInteger(c![k]) || (c![k] as number) < 1) fail(k)
+  for (const k of ['dim', 'batch', 'per_run_limit', 'max_chars', 'retention_days'] as const) if (!Number.isInteger(c![k]) || (c![k] as number) < 1) fail(k)
   if (typeof c!.input_neurons_per_1m !== 'number' || c!.input_neurons_per_1m <= 0) fail('input_neurons_per_1m')
   const score = (v: unknown) => typeof v === 'number' && v > 0 && v < 1
   const cl = c!.cluster
@@ -103,7 +105,7 @@ export type EmbedUsage = { ts: string; task: string; model_id: string; input_tok
 
 export type EmbedDeps = {
   now: () => Date
-  /** 還沒有向量的新聞（英文要翻譯完），舊的先（同事件合併要「新併舊」） */
+  /** 保留期（retention_days 天）內還沒有向量的新聞（英文要翻譯完），舊的先（同事件合併要「新併舊」）；保留期外的不再補算 */
   pending: (limit: number) => Promise<EmbedSource[]>
   /** 這個 UTC 日新聞這邊已用的 Neurons（跟翻譯共用每天的額度） */
   usedToday: (utcDay: string) => Promise<number>
@@ -115,16 +117,20 @@ export type EmbedDeps = {
   /** 寫一則的向量與事件群（同一個交易）；用量另外記 */
   save: (e: EmbeddingRow, c: ClusterRow) => Promise<void>
   saveUsage: (u: EmbedUsage) => Promise<void>
+  /** 刪掉超過保留期的向量，回刪了幾筆 */
+  prune: (retentionDays: number) => Promise<number>
 }
 
-export type EmbedResult = { embedded: number; clusters_joined: number; budget_stop: boolean }
+export type EmbedResult = { embedded: number; clusters_joined: number; budget_stop: boolean; pruned: number }
 
 /** 一批一批算；額度（跟翻譯共用的每日 Neurons）用完就停。一則一則依時間先後寫，後面的才找得到前面的當同事件。 */
 export async function embedPending(cfg: EmbedConfig, dailyNeurons: number, deps: EmbedDeps): Promise<EmbedResult> {
   const day = deps.now().toISOString().slice(0, 10)
   let used = await deps.usedToday(day)
+  // 先刪過期的（不花額度），再算新的
+  const pruned = await deps.prune(cfg.retention_days)
   const todo = await deps.pending(cfg.per_run_limit)
-  const res: EmbedResult = { embedded: 0, clusters_joined: 0, budget_stop: false }
+  const res: EmbedResult = { embedded: 0, clusters_joined: 0, budget_stop: false, pruned }
   for (let i = 0; i < todo.length; i += cfg.batch) {
     if (used >= dailyNeurons) {
       res.budget_stop = true

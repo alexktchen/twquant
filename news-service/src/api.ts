@@ -35,6 +35,21 @@ export function parseItemsQuery(params: URLSearchParams, cfg: NewsConfig): Items
   return { since: isoOrNull(params.get('since'), 'since'), until: isoOrNull(params.get('until'), 'until'), kind, source, limit }
 }
 
+/** 新聞庫容量（Supabase 免費方案）：健康檢查回報用量，超過 warn_share 網站狀態列變黃 */
+export type StorageConfig = { limit_mb: number; warn_share: number }
+export function validateStorageConfig(x: unknown): StorageConfig {
+  const c = x as Partial<StorageConfig> | null
+  if (!c || typeof c.limit_mb !== 'number' || c.limit_mb <= 0 || typeof c.warn_share !== 'number' || c.warn_share <= 0 || c.warn_share >= 1)
+    throw new Error('news 設定錯誤：storage（limit_mb > 0、0 < warn_share < 1）')
+  return c as StorageConfig
+}
+export type Storage = { used_mb: number; limit_mb: number; warn: boolean }
+/** 資料庫用量（位元組）→ 健康檢查的容量欄。 */
+export const storageOf = (cfg: StorageConfig, bytes: number): Storage => {
+  const used = Math.round((bytes / 1024 / 1024) * 10) / 10
+  return { used_mb: used, limit_mb: cfg.limit_mb, warn: used >= cfg.limit_mb * cfg.warn_share }
+}
+
 export type SourceRun = { source: string; last_run_at: string | null; last_ok_at: string | null; last_error: string | null }
 export type Health = {
   api_version: number
@@ -44,10 +59,12 @@ export type Health = {
   /** 超過 stale_hours 小時沒有任何來源成功（或從沒成功） */
   stale: boolean
   sources: (SourceRun & { name: string; failing: boolean })[]
+  /** 新聞庫用量（2026-10-20 起；呼叫端沒給 → 沒有這欄） */
+  storage?: Storage
 }
 
 /** 各來源最後一次執行與成功的時間 → 健康狀態。設定裡有、資料庫還沒有紀錄的來源也列出來（從沒跑過）。 */
-export function health(cfg: NewsConfig, runs: SourceRun[], now: Date): Health {
+export function health(cfg: NewsConfig, runs: SourceRun[], now: Date, dbBytes?: number): Health {
   const by = new Map(runs.map((r) => [r.source, r]))
   const sources = cfg.sources.map((s) => {
     const r = by.get(s.id) ?? { source: s.id, last_run_at: null, last_ok_at: null, last_error: null }
@@ -58,5 +75,7 @@ export function health(cfg: NewsConfig, runs: SourceRun[], now: Date): Health {
   const oks = sources.map((s) => s.last_ok_at).filter((t): t is string => t !== null)
   const lastOk = oks.length > 0 ? oks.reduce((a, b) => (a > b ? a : b)) : null
   const stale = lastOk === null || now.getTime() - Date.parse(lastOk) > cfg.stale_hours * 3600_000
-  return { api_version: API_VERSION, now: now.toISOString(), last_ok_at: lastOk, stale, sources }
+  const out: Health = { api_version: API_VERSION, now: now.toISOString(), last_ok_at: lastOk, stale, sources }
+  if (dbBytes !== undefined) out.storage = storageOf(cfg.storage, dbBytes)
+  return out
 }
