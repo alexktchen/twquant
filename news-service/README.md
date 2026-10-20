@@ -62,6 +62,8 @@ uv run --all-groups python scripts/news_sync_entities.py --dry-run   # 先看會
 uv run --all-groups python scripts/news_sync_entities.py             # 主庫 stock_meta／stock_group＋configs/news_entities.yaml、news_edges.yaml → news.entities／graph_edges
 ```
 
+台股英文名在 `configs/news_tw_en.yaml`（照股名對，同步時對不到就停下來）；股名的 -KY、*、-創 後綴同步時自動去掉另加一條別名。改了別名要把 `mention.rule_version` 加一號才會重掃。
+
 主庫族群表每 7 天重算，同步跟著跑就好（只改族群名次的線原地更新，其他變動關舊插新）。改了 `configs/news.yaml` 的 `mention`（停用詞、擋字）要把 `rule_version` 加一號，下一輪 ingest 自動重掃全部新聞。
 
 ## 核可頁（T-403）

@@ -548,3 +548,63 @@ def test_apply_reviews_follows_latest_decision_for_drafts_only() -> None:
     existing = [e("us:NVDA", "tw:2330", "supplier", "approved", None, None, "config")]
     close, insert, _ = m.diff_edges_rerank(existing, got[:1])
     assert close == [] and insert == []
+
+
+def test_tw_en_adds_english_aliases_by_stock_name() -> None:
+    """台股英文名（2026-10-20）：照主庫股名加進別名；股名對不到或重名就停下來。"""
+    tw = m.stock_entities([("2409", "友達"), ("3008", "大立光"), ("2330", "台積電")])
+    got = m.apply_tw_en(
+        tw, m.config_tw_en({"友達": ["AUO", "AU Optronics", "AUO"], "大立光": ["Largan"]})
+    )
+    assert [(e.id, e.aliases) for e in got] == [
+        ("tw:2409", ("友達", "AUO", "AU Optronics")),
+        ("tw:3008", ("大立光", "Largan")),
+        ("tw:2330", ("台積電",)),
+    ]
+    with pytest.raises(m.ConfigError, match="國巨"):
+        m.apply_tw_en(tw, {"國巨": ("Yageo",)})
+    dup = m.stock_entities([("1111", "同名"), ("2222", "同名")])
+    with pytest.raises(m.ConfigError, match="同名"):
+        m.apply_tw_en(dup, {"同名": ("Same",)})
+    bads: list[dict[str, Any]] = [{"友達": []}, {"友達": "AUO"}, {"友達": [" AUO"]}, {"": ["X"]}]
+    for bad in bads:
+        with pytest.raises(m.ConfigError):
+            m.config_tw_en(bad)
+
+
+def test_build_new_uses_tw_en_when_given() -> None:
+    meta = [("2409", "友達")]
+    ents, _, _ = m.build_new(meta, [], {}, ENTITIES_DOC, EDGES_DOC, {"友達": ["AUO"]})
+    assert next(e for e in ents if e.id == "tw:2409").aliases == ("友達", "AUO")
+
+
+def test_add_base_names_strips_suffixes_but_keeps_real_names() -> None:
+    """股名後綴（2026-10-20）：國巨*、臻鼎-KY、奧義賽博-KY創、鴻華先進-創 → 加去掉後綴的名字；矽創、群創的「創」是名字不動；
+    拉丁字、單字、撞到別人、兩檔同名的不加。"""
+    tw = m.stock_entities(
+        [
+            ("2327", "國巨*"),
+            ("4958", "臻鼎-KY"),
+            ("7823", "奧義賽博-KY創"),
+            ("2258", "鴻華先進-創"),
+            ("8016", "矽創"),
+            ("3481", "群創"),
+            ("6706", "TPK-KY"),
+            ("1111", "台南-KY"),
+            ("2222", "同名-KY"),
+            ("3333", "同名*"),
+            ("4444", "鑫-KY"),
+        ]
+    )
+    got = {
+        e.id: e.aliases for e in m.add_base_names(tw, {"台南"} | {a for e in tw for a in e.aliases})
+    }
+    assert got["tw:2327"] == ("國巨*", "國巨")
+    assert got["tw:4958"] == ("臻鼎-KY", "臻鼎")
+    assert got["tw:7823"] == ("奧義賽博-KY創", "奧義賽博")
+    assert got["tw:2258"] == ("鴻華先進-創", "鴻華先進")
+    assert got["tw:8016"] == ("矽創",) and got["tw:3481"] == ("群創",)
+    assert got["tw:6706"] == ("TPK-KY",), "拉丁字的交給 news_tw_en.yaml"
+    assert got["tw:1111"] == ("台南-KY",), "撞到別的實體不加"
+    assert got["tw:2222"] == ("同名-KY",) and got["tw:3333"] == ("同名*",), "兩檔去掉後綴同名都不加"
+    assert got["tw:4444"] == ("鑫-KY",), "只剩一個字不加"
