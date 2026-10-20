@@ -5148,6 +5148,11 @@ def serving_materialize(
     trim_lookback: bool = typer.Option(
         False, "--trim-lookback", help="依各因子宣告的 lookback_days 裁切歷史（T-083）"
     ),
+    cache: bool = typer.Option(
+        False,
+        "--cache",
+        help="--from/--to 整段每張表只讀 PG 一次（從 --from 減最長回看起）；補算少數薄因子的長歷史用（T-414：26 個 news.* 補 2021 起），記憶體要裝得下",
+    ),
 ) -> None:
     """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。
 
@@ -5168,12 +5173,21 @@ def serving_materialize(
     cfg = _load_serving()
     conn = store.connect(cfg)
     try:
-        source = PgTableSource(conn, cfg.pg_schema)
         names = [f.strip() for f in factors.split(",") if f.strip()] or None
         if names:
             unknown = sorted(set(names) - set(list_factors()))
             if unknown:
                 raise TwquantError(f"未註冊的因子：{', '.join(unknown)}")
+        if cache and from_ and to:
+            # 不給 since 的 PgTableSource 是整張表全掃；逐日 × 逐因子各掃一次，長歷史根本跑不完
+            source = PgTableSource(
+                conn,
+                cfg.pg_schema,
+                cache=True,
+                since=smat.read_since(dt.date.fromisoformat(from_), names or list_factors()),
+            )
+        else:
+            source = PgTableSource(conn, cfg.pg_schema)
         if from_ and to:
             results = smat.materialize_range(
                 source,
@@ -6950,7 +6964,9 @@ def _news_models_dir(data_dir: str) -> Path:
 
 @news_app.command("topics-fit")
 def news_topics_fit(
-    data_dir: str = typer.Option("", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"),
+    data_dir: str = typer.Option(
+        "", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"
+    ),
 ) -> None:
     """主題中心（T-414）：只用 fit_until 以前的新聞向量（固定 seed 抽樣）跑 k-means，存 <data_dir>/models/<centers_file>。一次性、凍結。"""
     import numpy as np
@@ -7116,7 +7132,9 @@ def news_features_cmd(
         "", help="從哪天（空＝主庫 news_features 最後一天的隔天；第一次＝語料最早一天）"
     ),
     end: str = typer.Option("", help="到哪天（空＝今天）；歷史回填建議一年一段"),
-    data_dir: str = typer.Option("", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"),
+    data_dir: str = typer.Option(
+        "", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"
+    ),
 ) -> None:
     """每日逐股新聞特徵（T-414）→ 主庫 news_features。只算截點已過的日子；可重跑（同日覆蓋）。"""
     t0 = time.monotonic()
