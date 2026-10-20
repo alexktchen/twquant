@@ -35,6 +35,7 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ENTITIES_CFG = ROOT / "configs" / "news_entities.yaml"
 EDGES_CFG = ROOT / "configs" / "news_edges.yaml"
+TW_EN_CFG = ROOT / "configs" / "news_tw_en.yaml"
 # 0.2 兩個 data/ 的陷阱同理：.env 只有主 checkout 那份，worktree 裡沒有
 DEFAULT_ENV = pathlib.Path("D:/project/twquant/.env")
 ENV_KEYS = ("TWQUANT_SUPABASE_DSN", "SUPABASE_NEWS_ACCESS_TOKEN", "TWQUANT_NEWS_PROJECT_REF")
@@ -618,18 +619,81 @@ def read_main(
 # ── 主流程 ───────────────────────────────────────────────────────────────────
 
 
+def config_tw_en(doc: dict[str, Any], where: str = "news_tw_en.yaml") -> dict[str, tuple[str, ...]]:
+    """台股英文名：{主庫股名: (英文別名…)}；值要是非空字串清單、前後不能有空白。"""
+    out: dict[str, tuple[str, ...]] = {}
+    for name, aliases in doc.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"{where}：股名要是字串，拿到 {name!r}")
+        if not isinstance(aliases, list) or not aliases:
+            raise ConfigError(f"{where}：{name} 的英文名要是非空清單")
+        for a in aliases:
+            if not isinstance(a, str) or not a or a != a.strip():
+                raise ConfigError(f"{where}：{name} 的英文名 {a!r} 不是乾淨的字串")
+        out[name] = _dedup(aliases)
+    return out
+
+
+# 股名後綴（KY 外國企業、* 有特別說明、-創 創新板、-DR 存託憑證）：新聞寫「臻鼎」「國巨」「亞德客」，不會寫後綴。
+# 沒有連字號的「創」是名字的一部分（矽創、緯創、群創），不算後綴。
+_NAME_SUFFIX = re.compile(r"(?:-KY創|-KY|-DR|-創|[*＊])+$")
+_CJK_CHAR = re.compile(r"[㐀-鿿]")
+
+
+def add_base_names(tw: Sequence[Entity], taken: set[str]) -> list[Entity]:
+    """股名去掉後綴的那個名字也當別名（2026-10-20：173 檔帶後綴，新聞寫的「國巨」「臻鼎」原本一個都對不到）。
+
+    只加含中文、至少兩個字的；跟別的實體的名字或別名撞到（taken）、或兩檔去掉後綴同名的，都不加。
+    是一般用詞的（動力、美食、再生…）交給 configs/news.yaml 的 mention.stopwords 擋。
+    """
+    cand = {e.id: b for e in tw if (b := _NAME_SUFFIX.sub("", e.label)) != e.label}
+    count = Counter(cand.values())
+    out: list[Entity] = []
+    for e in tw:
+        base = cand.get(e.id)
+        if (
+            base is not None
+            and len(base) >= 2
+            and _CJK_CHAR.search(base)
+            and base not in taken
+            and count[base] == 1
+        ):
+            out.append(replace(e, aliases=_dedup((*e.aliases, base))))
+        else:
+            out.append(e)
+    return out
+
+
+def apply_tw_en(tw: Sequence[Entity], tw_en: dict[str, tuple[str, ...]]) -> list[Entity]:
+    """把英文名加進對應台股的別名（照股名對）。對不到或對到兩檔 → 停下來（股名改了或下市，要回頭改設定檔）。"""
+    by: dict[str, list[Entity]] = {}
+    for e in tw:
+        by.setdefault(e.label, []).append(e)
+    bad = sorted(n for n in tw_en if len(by.get(n, [])) != 1)
+    if bad:
+        raise ConfigError(f"news_tw_en.yaml：這些股名在主庫未下市台股裡對不到或不只一檔：{bad}")
+    extra = {by[n][0].id: a for n, a in tw_en.items()}
+    return [
+        replace(e, aliases=_dedup((*e.aliases, *extra[e.id]))) if e.id in extra else e for e in tw
+    ]
+
+
 def build_new(
     meta: Sequence[tuple[str, str | None]],
     groups: Sequence[tuple[str, str]],
     amounts: dict[str, float | None],
     entities_doc: dict[str, Any],
     edges_doc: dict[str, Any],
+    tw_en_doc: dict[str, Any] | None = None,
 ) -> tuple[list[Entity], list[Edge], int]:
     """主庫資料＋兩份設定 → (實體, 線, 族群表裡不是未下市台股而略過的列數)。"""
     config = config_entities(entities_doc)
     # 跟國外公司或主題同名的台股（例：5007 三星、8424 惠普）不進實體表：不然「三星電子」的新聞會連到鋼鐵股
     reserved = {a for e in config for a in (e.label, *e.aliases)}
     tw = [e for e in stock_entities(meta) if e.label not in reserved]
+    tw = add_base_names(tw, reserved | {a for e in tw for a in e.aliases})
+    if tw_en_doc:
+        tw = apply_tw_en(tw, config_tw_en(tw_en_doc))
     active = {e.sub for e in tw}
     kept = [(sid, g) for sid, g in groups if sid in active]
     belongs = rank_groups(kept, amounts)
@@ -690,7 +754,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     entities_doc = load_yaml(ENTITIES_CFG)
     edges_doc = load_yaml(EDGES_CFG)
     meta, groups, amounts, day = read_main(env["TWQUANT_SUPABASE_DSN"])
-    new_entities, new_edges, skipped = build_new(meta, groups, amounts, entities_doc, edges_doc)
+    new_entities, new_edges, skipped = build_new(
+        meta, groups, amounts, entities_doc, edges_doc, load_yaml(TW_EN_CFG)
+    )
     print(
         f"主庫：未下市 {len(meta)} 檔、族群表 {len(groups)} 列（略過非未下市 {skipped}）、成交金額取 {day}"
     )
@@ -704,7 +770,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     existing_edges = [edge_from_row(r) for r in query(EXISTING_EDGES_SQL)]
     decisions = {str(r["key"]): str(r["decision"]) for r in query(REVIEWS_SQL)}
     new_edges = apply_reviews(new_edges, decisions)
-    print(f"新聞庫現役：實體 {len(existing_ids)}、線 {len(existing_edges)}；核可頁決定 {len(decisions)} 條")
+    print(
+        f"新聞庫現役：實體 {len(existing_ids)}、線 {len(existing_edges)}；核可頁決定 {len(decisions)} 條"
+    )
 
     plan = make_plan(new_entities, new_edges, existing_ids, existing_edges)
     for line in summary(plan, new_entities, new_edges):
