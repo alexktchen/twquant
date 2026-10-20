@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsHealth, NewsKind, NewsReview, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
+import type { NewsDigest, NewsHealth, NewsKind, NewsReview, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { StockCalItem } from './stockcal'
 import type { HoldersWeek } from './holders'
@@ -147,6 +147,8 @@ export const fetchStockNewsCounts = (sids: string[]) =>
 export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
 /** 一則新聞的相似新聞（T-410） */
 export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
+/** 新聞三張卡（T-417） */
+export const fetchNewsDigest = () => get<NewsDigest>('/api/news/digest')
 /** 核可頁（T-403）：擁有者才有 can_review 與草稿清單 */
 export const fetchNewsReview = () => get<NewsReview>('/api/news/review')
 export const postNewsReview = (decisions: ReviewDecision[]) => get<ReviewResult>('/api/news/review', 'POST', { decisions })

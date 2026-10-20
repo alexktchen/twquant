@@ -449,5 +449,15 @@
   "storage": {
     "limit_mb": 500,
     "warn_share": 0.7
+  },
+  "digest": {
+    "topics_n": 6,
+    "topic_stocks": 3,
+    "multi_min_outlets": 3,
+    "multi_n": 6,
+    "hot_n": 6,
+    "hot_min_today": 3,
+    "base_days": 6,
+    "everywhere_share": 0.15
   }
 }

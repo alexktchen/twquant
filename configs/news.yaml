@@ -368,3 +368,18 @@ embed:
 storage:
   limit_mb: 500
   warn_share: 0.7
+
+# 新聞三張卡（T-417；使用者 2026-10-20：「要快速閱讀可以三張卡片」）：熱門主題、多家同報、股票熱度。都看近 24 小時。
+digest:
+  topics_n: 6
+  topic_stocks: 3
+  # 至少三家不同媒體報同一件事（同一家的兩個頻道算一家）
+  multi_min_outlets: 3
+  multi_n: 6
+  hot_n: 6
+  # 近 24 小時至少被提到 3 則才列
+  hot_min_today: 3
+  # 平常＝之前最多 6 天的日平均
+  base_days: 6
+  # 超過 15% 的新聞都提到的主題不列（「AI」佔近一半，列了等於沒說），卡片底下註明；同 stock_news.hub_share
+  everywhere_share: 0.15
