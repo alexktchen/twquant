@@ -181,3 +181,18 @@
 
 /* 清單／全景切換（T-418）：跟國際／台灣同一種分段按鈕，放在它右邊 */
 .cq-news-mode { margin-right: auto; }
+
+/* 久違的消息（T-419）：熱度卡上的小標 */
+.cq-dg-main i.q { color: #ffd23f; background: rgba(255, 210, 63, .14); }
+
+/* K 線上點了某一天的新聞（T-419） */
+.cq-daynews { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--tile, #1c1e26); border: 1px solid var(--tile-line, #2a2c36); }
+.cq-daynews-h { display: flex; align-items: center; gap: 8px; }
+.cq-daynews-h b { font-size: 14.5px; }
+.cq-daynews-h small { color: var(--mute); font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq .cq-daynews-h button { width: 28px; height: 28px; color: var(--mute); font-size: 18px; }
+.cq-daynews ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.cq-daynews li { padding: 5px 0; border-top: 1px solid var(--line); font-size: 14.5px; line-height: 1.4; }
+.cq-daynews li a { color: var(--text); text-decoration: none; }
+.cq-daynews li small { margin-left: 8px; color: var(--mute); font-size: 12.5px; white-space: nowrap; }
+.cq-daynews-more { color: var(--mute); font-size: 13px; }

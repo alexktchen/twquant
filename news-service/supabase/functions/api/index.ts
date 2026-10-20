@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
@@ -9,7 +9,7 @@ import { validateConfig } from '../../../src/ingest.ts'
 import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
 import { baseDaysOf, hotStocks, multiOutlet, topTopics, type CoRow, type EvRow, type HotRow, type TopicRow } from '../../../src/digest.ts'
 import { REVIEW_TYPES, edgeKey, groupDrafts, isOwner, parseReviewBody, planReview, type DecisionIn, type DraftEdge, type EntityInfo } from '../../../src/review.ts'
-import { countsFor, linksTo, parseStockIds, prepare, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
+import { countsFor, coverageDaysOf, linksTo, newsDays, parseStockIds, prepare, quietGap, type DayRow, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
 import { authorized, db, embedQuery, json } from '../_shared/io.ts'
 
 const cfg = validateConfig(config)
@@ -37,6 +37,31 @@ async function recentMentions(sql: ReturnType<typeof db>, days: number): Promise
   const by = new Map<string, string[]>()
   for (const r of rows) by.set(r.item_id, [...(by.get(r.item_id) ?? []), r.entity_id])
   return [...by].map(([item_id, entities]) => ({ item_id, entities: entities.sort() }))
+}
+
+/** 直接提到這檔的新聞，近 days 天（台北日期）。 */
+async function dayRows(sql: ReturnType<typeof db>, id: string, days: number): Promise<DayRow[]> {
+  return sql<DayRow[]>`
+    select (i.first_seen_at at time zone 'Asia/Taipei')::date::text as day, i.id, i.source,
+           coalesce(v.title_orig, i.title_orig) as title, tr.title_zh, i.url, i.first_seen_at::text as first_seen_at
+    from news.mentions m join news.raw_items i on i.id = m.item_id
+    left join lateral (select title_orig, content_sha from news.raw_item_versions where item_id = i.id order by seen_at desc limit 1) v on true
+    left join news.translations tr on tr.item_id = i.id and tr.content_sha = coalesce(v.content_sha, i.content_sha) and tr.status = 'ok'
+    where m.entity_id = ${id} and m.rule_version = ${cfg.mention.rule_version}
+      and i.first_seen_at > now() - make_interval(days => ${days})`
+}
+
+/** 久違的消息（T-419）：這檔最近一次被提到之前隔了多久；要我們收新聞夠久才說得出口。 */
+async function quietOf(sql: ReturnType<typeof db>, id: string) {
+  const sn = cfg.stock_news
+  const [days, first] = await Promise.all([
+    sql<{ day: string }[]>`
+      select distinct (i.first_seen_at at time zone 'Asia/Taipei')::date::text as day
+      from news.mentions m join news.raw_items i on i.id = m.item_id
+      where m.entity_id = ${id} and m.rule_version = ${cfg.mention.rule_version} and i.first_seen_at > now() - make_interval(days => ${sn.timeline_days})`,
+    sql<{ t: Date | null }[]>`select min(first_seen_at) as t from news.raw_items`,
+  ])
+  return quietGap(days.map((d) => d.day), coverageDaysOf(iso(first[0]?.t ?? null), new Date()), sn.timeline_days, sn.quiet_min_days)
 }
 
 type Scored = { item_id: string; score: number; same_event?: boolean }
@@ -136,7 +161,18 @@ Deno.serve(async (req) => {
         })
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
         .slice(0, sn.stock_limit)
-      return json({ id: ids[0], days, items })
+      return json({ id: ids[0], days, items, quiet: await quietOf(sql, ids[0]) })
+    }
+    if (path === '/v1/stock-news-days') {
+      let ids: string[]
+      try {
+        ids = parseStockIds(url.searchParams.get('id'), 1)
+      } catch (e) {
+        return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
+      }
+      const sn = cfg.stock_news
+      const rows = await dayRows(sql, ids[0], sn.timeline_days)
+      return json({ id: ids[0], timeline_days: sn.timeline_days, days: newsDays(rows, (s) => meta.get(s)?.name ?? s, sn.timeline_per_day) })
     }
     if (path === '/v1/galaxy') {
       // 排程（scripts/news_galaxy.py）算好的整包；原樣送出文字，不在這裡 parse 再 stringify（約 700 KB，省 CPU）
@@ -195,13 +231,16 @@ Deno.serve(async (req) => {
           from m join news.entities e on e.id = m.entity_id and e.valid_to is null and e.type = 'tw'
           group by 1, 2, 3`,
       ])
+      const hot = hotStocks(hotRows, baseDays, dg)
+      // 久違的消息（T-419）：熱度榜上的台股，上一次被提到是多久以前
+      const quiet = await Promise.all(hot.map((h) => quietOf(sql, h.id)))
       return json({
         api_version: API_VERSION,
         as_of: now.toISOString(),
         base_days: baseDays,
         topics: topTopics(topicRows, coRows, total, dg),
         multi: multiOutlet(evRows.map((r) => ({ ...r, first_seen_at: iso(r.first_seen_at)! })), (s) => meta.get(s)?.name ?? s, dg),
-        hot: hotStocks(hotRows, baseDays, dg),
+        hot: hot.map((h, i) => ({ ...h, quiet: quiet[i] })),
       })
     }
     if (path === '/v1/review') {

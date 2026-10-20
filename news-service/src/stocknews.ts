@@ -17,6 +17,12 @@ export type StockNewsConfig = {
   counts_max_ids: number
   /** 被超過這個比例的新聞提到的實體不當「間接」的橋（「AI」這種到處都提的主題） */
   hub_share: number
+  /** 個股頁 K 線上的新聞標記看近幾天（T-419） */
+  timeline_days: number
+  /** 每一天最多帶幾則標題 */
+  timeline_per_day: number
+  /** 「久違的消息」：這檔上一次被提到距今至少幾天（而且我們收新聞至少也這麼多天）才標 */
+  quiet_min_days: number
 }
 
 /** 一則新聞提到的實體（一度）。 */
@@ -146,9 +152,53 @@ export function validateStockNewsConfig(x: unknown): StockNewsConfig {
     throw new Error(`news 設定錯誤：stock_news.${why}`)
   }
   if (!c || typeof c !== 'object') fail('（整段缺少）')
-  for (const k of ['stock_max_degree', 'stock_days', 'stock_limit', 'counts_days', 'counts_max_ids'] as const)
+  for (const k of ['stock_max_degree', 'stock_days', 'stock_limit', 'counts_days', 'counts_max_ids', 'timeline_days', 'timeline_per_day', 'quiet_min_days'] as const)
     if (!Number.isInteger(c![k]) || (c![k] as number) < 1) fail(k)
   if (c!.stock_max_degree! > 2) fail('stock_max_degree（最多 2）')
   if (typeof c!.hub_share !== 'number' || c!.hub_share <= 0 || c!.hub_share > 1) fail('hub_share')
   return c as StockNewsConfig
 }
+
+// ── 個股頁新聞時間軸與「久違的消息」（T-419；使用者 2026-10-20 選的 2、4）──────────────────────────
+/** 直接提到這檔的一則（day＝台北日期） */
+export type DayRow = { day: string; id: string; source: string; title: string; title_zh: string | null; url: string; first_seen_at: string }
+export type NewsDay = { day: string; n: number; outlets: string[]; items: { id: string; title: string; src: string; url: string }[] }
+
+/** 每天幾則、哪幾家、前幾則標題（新的先）；日期由舊到新。outletOf 把來源代號換成媒體名。 */
+export function newsDays(rows: DayRow[], outletOf: (source: string) => string, perDay: number): NewsDay[] {
+  const by = new Map<string, DayRow[]>()
+  for (const r of rows) by.set(r.day, [...(by.get(r.day) ?? []), r])
+  return [...by]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([day, rs]) => {
+      const sorted = [...rs].sort((a, b) => (a.first_seen_at < b.first_seen_at ? 1 : a.first_seen_at > b.first_seen_at ? -1 : a.id.localeCompare(b.id)))
+      return {
+        day,
+        n: rs.length,
+        outlets: [...new Set(rs.map((r) => outletOf(r.source)))].sort(),
+        items: sorted.slice(0, perDay).map((r) => ({ id: r.id, title: r.title_zh ?? r.title, src: outletOf(r.source), url: r.url })),
+      }
+    })
+}
+
+export type Quiet = { days: number; at_least: boolean }
+
+/**
+ * 久違的消息：最近一次被提到之前，隔了多久沒消息。days＝有消息的台北日期（由舊到新，時間軸範圍內）；
+ * coverageDays＝我們收新聞到最近那天共幾天；windowDays＝時間軸看幾天。
+ * 有前一次 → 隔的天數；時間軸裡沒有前一次 → 至少「收新聞以來」或「時間軸那麼久」（取小的），at_least 標 true。
+ * 隔不到 minQuiet 天、或我們收新聞還不到 minQuiet 天（沒資格說「久違」）→ null。
+ */
+export function quietGap(days: string[], coverageDays: number, windowDays: number, minQuiet: number): Quiet | null {
+  if (days.length === 0 || coverageDays < minQuiet) return null
+  const sorted = [...days].sort()
+  const latest = sorted[sorted.length - 1]
+  const prev = sorted.length >= 2 ? sorted[sorted.length - 2] : null
+  const gap = prev ? Math.round((Date.parse(latest) - Date.parse(prev)) / 86_400_000) : Math.min(coverageDays, windowDays)
+  if (gap < minQuiet) return null
+  return { days: gap, at_least: prev === null }
+}
+
+/** 收新聞到 at 為止共幾天（第一則的日期到 at，至少 1）。 */
+export const coverageDaysOf = (firstSeenAt: string | null, at: Date): number =>
+  firstSeenAt ? Math.max(1, Math.floor((at.getTime() - Date.parse(firstSeenAt)) / 86_400_000) + 1) : 0

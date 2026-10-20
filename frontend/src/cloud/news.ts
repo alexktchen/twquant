@@ -155,7 +155,7 @@ export type StockNewsItem = {
   draft: boolean
   path: StockNewsStep[]
 }
-export type StockNews = { id: string; days: number; items: StockNewsItem[] }
+export type StockNews = { id: string; days: number; items: StockNewsItem[]; quiet?: Quiet | null }
 export type NewsCount = { direct: number; indirect: number }
 export type StockNewsCounts = { days: number; counts: Record<string, NewsCount> }
 
@@ -180,10 +180,11 @@ export function pathText(it: Pick<StockNewsItem, 'path' | 'draft'>): string {
 export const shouldJumpToNews = (focus: number, done: number, loadedId: string | null, sid: string): boolean =>
   focus > 0 && focus !== done && loadedId === `tw:${sid}`
 
-/** 個股頁標題右邊那一句：「近 7 天・直接 1・間接 19」。 */
+/** 個股頁標題右邊那一句：「近 7 天・直接 1・間接 19」；久違的消息再加一句。 */
 export function stockNewsSummary(d: StockNews): string {
   const direct = d.items.filter((x) => x.degree === 1).length
-  return `近 ${d.days} 天・直接 ${direct}・間接 ${d.items.length - direct}`
+  const q = quietNote(d.quiet)
+  return `近 ${d.days} 天・直接 ${direct}・間接 ${d.items.length - direct}${q ? `・${q}` : ''}`
 }
 
 // ── 相似新聞與語意搜尋（T-410／SPEC-018）：新聞服務用 bge-m3 向量找出來的 ────────────────────────
@@ -255,7 +256,7 @@ export const reviewLeft = (groups: ReviewGroup[]): number => groups.reduce((a, g
 // ── 新聞三張卡（T-417；使用者 2026-10-20：「要快速閱讀可以三張卡片」）──────────────────────────
 export type DigestTopic = { id: string; label: string; type: string; n: number; prev: number; stocks: { id: string; label: string; n: number }[] }
 export type DigestMulti = { ev: string; outlets: string[]; items: number; title: string; url: string; first_seen_at: string; last_seen_at: string; stocks: string[] }
-export type DigestHot = { id: string; label: string; sub: string | null; n: number; base: number | null; ratio: number | null }
+export type DigestHot = { id: string; label: string; sub: string | null; n: number; base: number | null; ratio: number | null; quiet?: Quiet | null }
 export type NewsDigest = {
   as_of: string
   /** 平常值用了幾天的資料（0＝還不到一天，股票熱度只排則數、主題不比前一天） */
@@ -285,3 +286,20 @@ export function hotLine(h: DigestHot): string {
 
 /** 倍數小標：至少 2 倍才標（×2.5）；沒有平常值 → null。 */
 export const hotBadge = (h: DigestHot): string | null => (h.ratio !== null && h.ratio >= 2 ? `×${h.ratio}` : null)
+
+// ── 個股頁新聞時間軸與久違的消息（T-419；使用者 2026-10-20 選的 2、4）──────────────────────────
+export type Quiet = { days: number; at_least: boolean }
+export type StockNewsDay = { day: string; n: number; outlets: string[]; items: { id: string; title: string; src: string; url: string }[] }
+export type StockNewsDays = { id: string; timeline_days: number; days: StockNewsDay[] }
+
+/** K 線上的新聞標記：只標 K 線範圍內的日子，附當天幾則。 */
+export function newsMarkers(days: StockNewsDay[], barDates: string[]): { time: string; n: number }[] {
+  const inRange = new Set(barDates)
+  return days.filter((d) => inRange.has(d.day)).map((d) => ({ time: d.day, n: d.n })).sort((a, b) => (a.time < b.time ? -1 : 1))
+}
+
+/** 「30 天沒消息後第一次」「至少 60 天沒消息後第一次」；null → 不顯示。 */
+export function quietNote(q: Quiet | null | undefined): string | null {
+  if (!q) return null
+  return `${q.at_least ? '至少 ' : ''}${q.days} 天沒消息後第一次`
+}
