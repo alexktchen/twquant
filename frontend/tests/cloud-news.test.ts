@@ -187,3 +187,44 @@ test('T-410 相似新聞與語意搜尋：proxy 只轉 id／q；說明句；短�
   assert.equal(shortWhen('2026-10-20T02:00:00Z', '2026-10-20'), '10:00')
   assert.equal(shortWhen('2026-10-18T02:00:00Z', '2026-10-20'), '10/18')
 })
+
+test('T-403 核可頁：proxy 送 POST 內容與登入者；網站端擋別站送來的、沒登入的；送出後拿掉處理過的線', async () => {
+  assert.deepEqual(ALLOWED['/v1/review'], [])
+  let seen: { method: string; user: string | null; body: string | null; ctype: string | null } | null = null
+  const fake = (async (_url: string, init?: RequestInit) => {
+    const h = new Headers(init?.headers)
+    seen = { method: init?.method ?? 'GET', user: h.get('x-news-user'), body: (init?.body as string) ?? null, ctype: h.get('content-type') }
+    return new Response('{"approved":1,"rejected":0,"skipped":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  const body = '{"decisions":[{"src":"us:NVDA","dst":"tw:2330","type":"supplier","decision":"approved"}]}'
+  const res = await proxy(env, '/v1/review', 'https://x/api/news/review', fake, { method: 'POST', body, user: 'owner@example.com' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(seen, { method: 'POST', user: 'owner@example.com', body, ctype: 'application/json' })
+  await proxy(env, '/v1/review', 'https://x/api/news/review', fake, { user: null })
+  assert.deepEqual(seen, { method: 'GET', user: null, body: null, ctype: null }, '沒登入身分就不帶 x-news-user（服務那邊回 can_review false）')
+
+  const { reviewPost, REVIEW_BODY_MAX } = await import('../functions/_lib/news-proxy.ts')
+  const req = (headers: Record<string, string>, text = body) => new Request('https://twquant.pages.dev/api/news/review', { method: 'POST', headers, body: text })
+  const who = (e: string | null) => async () => e
+  assert.equal((await reviewPost(req({ origin: 'https://evil.example' }), env, who('owner@example.com'), fake)).status, 403, '別站送來的不收')
+  assert.equal((await reviewPost(req({ origin: 'https://twquant.pages.dev' }), env, who(null), fake)).status, 401, '沒登入不收')
+  assert.equal((await reviewPost(req({}, 'x'.repeat(REVIEW_BODY_MAX + 1)), env, who('owner@example.com'), fake)).status, 413)
+  const okRes = await reviewPost(req({ origin: 'https://twquant.pages.dev' }), env, who('owner@example.com'), fake)
+  assert.equal(okRes.status, 200)
+  assert.equal(seen!.user, 'owner@example.com')
+  assert.equal(seen!.method, 'POST')
+
+  const { dropDecided, groupDecisions, reviewLeft } = await import('../src/cloud/news.ts')
+  const item = (dst: string) => ({ dst, dst_label: dst, dst_type: 'tw' as const, dst_sub: dst, label: null })
+  const groups = [
+    { src: 'us:NVDA', src_label: '輝達', src_type: 'us' as const, type: 'supplier' as const, items: [item('tw:2330'), item('tw:2382')] },
+    { src: 'th:ai', src_label: 'AI', src_type: 'theme' as const, type: 'theme' as const, items: [item('tw:2330')] },
+  ]
+  assert.equal(reviewLeft(groups), 3)
+  assert.deepEqual(groupDecisions(groups[0], 'approved'), [
+    { src: 'us:NVDA', dst: 'tw:2330', type: 'supplier', decision: 'approved' },
+    { src: 'us:NVDA', dst: 'tw:2382', type: 'supplier', decision: 'approved' },
+  ])
+  const after = dropDecided(groups, [{ src: 'th:ai', dst: 'tw:2330', type: 'theme' }, { src: 'us:NVDA', dst: 'tw:2330', type: 'supplier' }])
+  assert.deepEqual(after.map((g) => [g.src, g.items.map((i) => i.dst)]), [['us:NVDA', ['tw:2382']]], '同一檔在別組的不受影響；空掉的組拿掉')
+})

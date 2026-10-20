@@ -117,3 +117,34 @@
 .cq-sim-body { min-width: 0; }
 .cq-sim-body a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-size: 15px; line-height: 1.4; text-decoration: none; }
 .cq-sim-body small { display: block; margin-top: 3px; font-size: 12.5px; color: var(--mute); }
+
+/* 核可頁（T-403）：擁有者才有的「待核可 N」（黃＝留意）；一組一張卡，每條退回（灰框）／核可（藍底），按鈕高 36px 好按 */
+.cq .cq-news-review-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border-radius: 999px;
+  color: #ffc04d; background: rgba(255, 176, 32, .15); font-size: 14px; font-weight: 700; white-space: nowrap;
+}
+.cq-rv { margin-top: 12px; }
+.cq-rv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cq-rv-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.cq .cq-rv-back { height: 34px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: #1d2027; font-size: 14.5px; }
+.cq-rv-note { margin: 8px 0 12px; font-size: 14.5px; line-height: 1.6; color: var(--mute); }
+.cq-rv-done { margin: 0 0 10px; font-size: 14.5px; color: #79b8ff; }
+.cq-rv-card { margin-bottom: 12px; padding: 12px; border: 1px solid var(--tile-line, #2a2c36); border-radius: 12px; background: var(--tile, #1c1e26); }
+.cq-rv-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 16px; font-weight: 700; color: var(--text); }
+.cq-rv-title .cq-news-ent { font-size: 16px; color: var(--text); }
+.cq-rv-title svg { color: var(--mute); }
+.cq-rv-title small { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--mute); }
+.cq-rv-card ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.cq-rv-card li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.cq-rv-dst { min-width: 0; }
+.cq-rv-dst b { display: block; font-size: 15.5px; font-weight: 600; }
+.cq-rv-dst em { font-style: normal; color: var(--mute); margin-right: 6px; font-weight: 500; }
+.cq-rv-dst small { display: block; margin-top: 2px; font-size: 13px; color: var(--mute); }
+.cq .cq-rv-ok, .cq .cq-rv-no {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px; height: 36px; padding: 0 12px; border-radius: 9px;
+  font-size: 14.5px; font-weight: 700; white-space: nowrap;
+}
+.cq .cq-rv-ok { background: #3d9bff; color: #0b1220; }
+.cq .cq-rv-no { border: 1px solid #3a3d45; color: var(--mute); }
+.cq .cq-rv-ok:disabled, .cq .cq-rv-no:disabled { opacity: .5; cursor: progress; }
+.cq-rv-all { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--line); }

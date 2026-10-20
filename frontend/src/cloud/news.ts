@@ -220,3 +220,30 @@ export function searchLine(d: NewsSearch): string {
   if (d.items.length === 0) return `找不到跟「${d.q}」相關的新聞`
   return `跟「${d.q}」相關的新聞 ${d.items.length} 則，越相關越前面`
 }
+
+// ── 核可頁（T-403）：AI 草擬的線，擁有者核可才算數 ──────────────────────────────────────────
+export type ReviewType = 'supplier' | 'theme' | 'peer'
+export type ReviewItem = { dst: string; dst_label: string; dst_type: NewsMention['type'] | null; dst_sub: string | null; label: string | null }
+export type ReviewGroup = { src: string; src_label: string; src_type: NewsMention['type'] | null; type: ReviewType; items: ReviewItem[] }
+export type NewsReview = { can_review: boolean; total: number; groups: ReviewGroup[] }
+export type ReviewDecision = { src: string; dst: string; type: ReviewType; decision: 'approved' | 'rejected' }
+export type ReviewResult = { approved: number; rejected: number; skipped: string[] }
+
+/** 一組卡片的標題後半：「輝達 → 台灣供應商」 */
+export const REVIEW_TYPE_LABEL: Record<ReviewType, string> = { supplier: '台灣供應商', theme: '相關族群與個股', peer: '同業' }
+
+/** 送出後把處理掉的線拿掉（空掉的組也拿掉）；略過的（別處已處理）一樣拿掉。 */
+export function dropDecided(groups: ReviewGroup[], done: { src: string; dst: string; type: ReviewType }[]): ReviewGroup[] {
+  const k = (x: { src: string; dst: string; type: string }) => `${x.src}|${x.dst}|${x.type}`
+  const gone = new Set(done.map(k))
+  return groups
+    .map((g) => ({ ...g, items: g.items.filter((i) => !gone.has(k({ src: g.src, dst: i.dst, type: g.type }))) }))
+    .filter((g) => g.items.length > 0)
+}
+
+/** 一組全部核可或退回要送的決定。 */
+export const groupDecisions = (g: ReviewGroup, decision: ReviewDecision['decision']): ReviewDecision[] =>
+  g.items.map((i) => ({ src: g.src, dst: i.dst, type: g.type, decision }))
+
+/** 還剩幾條。 */
+export const reviewLeft = (groups: ReviewGroup[]): number => groups.reduce((a, g) => a + g.items.length, 0)

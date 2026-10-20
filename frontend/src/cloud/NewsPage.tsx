@@ -1,11 +1,12 @@
 // 「新聞」分頁（T-400／D-200／SPEC-017 §7）：新聞流，國內外財經新聞由新到舊。
 // 國外新聞顯示 AI 譯文標「譯」（T-401），點開附原文；標題下面列這則提到的台股／國外公司／族群（T-402，最多 3 個＋「+N」），
 // 有提到的列多一顆「關係圖」：點了才向新聞服務要這則的圖（T-404），開心智圖。
+// 擁有者多一顆「待核可 N」（T-403）：點了換成核可頁（AI 草擬的關係線）。
 // 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
-import { ChevronDown, ExternalLink, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronDown, ClipboardCheck, ExternalLink, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsSearch } from './api'
+import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsReview, fetchNewsSearch } from './api'
 import {
   KIND_LABEL,
   NEWS_PAGE,
@@ -15,6 +16,7 @@ import {
   healthLine,
   mentionChips,
   nextUntil,
+  reviewLeft,
   searchLine,
   shown,
   taipeiDay,
@@ -22,9 +24,11 @@ import {
   type NewsHealth,
   type NewsKind,
   type NewsSearch,
+  type ReviewGroup,
   type NewsRow,
 } from './news'
 import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
+import { NewsReview } from './NewsReview'
 import { NewsSearchResults, SimilarNews } from './NewsSimilar'
 import './news-graph.css'
 
@@ -63,6 +67,19 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   const [search, setSearch] = useState<NewsSearch | null>(null)
   const [searching, setSearching] = useState(false)
   const [searchErr, setSearchErr] = useState('')
+  /** 核可頁（T-403）：擁有者才有草稿清單（null＝不是擁有者或讀不到，不顯示按鈕） */
+  const [review, setReview] = useState<ReviewGroup[] | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+
+  useEffect(() => {
+    let stale = false
+    fetchNewsReview()
+      .then((r) => !stale && setReview(r.can_review ? r.groups : null))
+      .catch(() => !stale && setReview(null)) // 讀不到就不顯示按鈕，新聞照常
+    return () => {
+      stale = true
+    }
+  }, [refresh])
 
   const runSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -144,12 +161,19 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
             </button>
           ))}
         </div>
+        {review && reviewLeft(review) > 0 && (
+          <button className="cq-news-review-btn" onClick={() => setReviewOpen(true)} title="AI 草擬的關係線，核可後才算數">
+            <ClipboardCheck size={15} aria-hidden="true" />
+            待核可 {reviewLeft(review)}
+          </button>
+        )}
         <span className={`cq-news-health ${status.tone}`} title={health?.sources.filter((s) => s.failing).map((s) => `${s.name}：${s.last_error ?? ''}`).join('\n') || undefined}>
           <RefreshCw size={14} aria-hidden="true" />
           {status.text}
         </span>
       </div>
-      <form className="cq-news-search" role="search" onSubmit={runSearch}>
+      {reviewOpen && review && <NewsReview groups={review} onChange={setReview} onClose={() => setReviewOpen(false)} />}
+      <form className="cq-news-search" role="search" onSubmit={runSearch} hidden={reviewOpen}>
         <Search size={16} aria-hidden="true" />
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="照意思找新聞，例：輝達財測、美債殖利率" maxLength={60} aria-label="搜尋新聞" enterKeyHint="search" />
         {(q || search) && (
@@ -162,7 +186,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
         </button>
       </form>
       {searchErr && <div className="cq-err">{searchErr}</div>}
-      {search && (
+      {search && !reviewOpen && (
         <section className="cq-news-found">
           <h2>{searchLine(search)}</h2>
           <NewsSearchResults items={search.items} />
@@ -188,7 +212,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       {loading && rows.length === 0 && !err && <p className="cq-war-mute cq-news-empty">讀取中…</p>}
       {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
 
-      {!search && groups.map((g) => (
+      {!search && !reviewOpen && groups.map((g) => (
         <section key={g.day} className="cq-news-day">
           <h2>{dayTitle(g.day, today)}</h2>
           <ul>
@@ -262,7 +286,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
         </section>
       ))}
 
-      {!search && rows.length > 0 && more !== 'done' && (
+      {!search && !reviewOpen && rows.length > 0 && more !== 'done' && (
         <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>
           {more === 'loading' ? '讀取中…' : '更多'}
         </button>

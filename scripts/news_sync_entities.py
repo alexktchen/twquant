@@ -198,6 +198,11 @@ EXISTING_EDGES_SQL = (
     "select src, dst, type, status, label, rank, source from news.graph_edges "
     "where valid_to is null and type <> 'cooccur'"
 )
+# 核可頁（T-403）每條線最新一筆決定：src|dst|type → approved／rejected
+REVIEWS_SQL = (
+    "select distinct on (key) key, decision from news.reviews where target = 'edge' "
+    "order by key, reviewed_at desc, id desc"
+)
 
 
 def batched[T](items: Sequence[T], size: int) -> Iterator[list[T]]:
@@ -633,6 +638,20 @@ def build_new(
     return entities, edges, len(groups) - len(kept)
 
 
+def apply_reviews(edges: Sequence[Edge], decisions: dict[str, str]) -> list[Edge]:
+    """設定檔裡的草稿線照核可頁的最新決定（T-403）：核可過 → approved；退回過 → 不要這條。其他照舊。
+
+    不這樣做的話，同步會把核可頁核可的線（approved）當成「狀態變了」關掉、再插回草稿，退回的又長回來。
+    """
+    out: list[Edge] = []
+    for e in edges:
+        d = decisions.get(f"{e.src}|{e.dst}|{e.type}") if e.status == "draft" else None
+        if d == "rejected":
+            continue
+        out.append(replace(e, status="approved") if d == "approved" else e)
+    return out
+
+
 def summary(plan: Plan, new_entities: Sequence[Entity], new_edges: Sequence[Edge]) -> list[str]:
     """要印的統計行（不含任何金鑰）。"""
 
@@ -683,7 +702,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     existing_ids = [str(r["id"]) for r in query(EXISTING_ENTITIES_SQL)]
     existing_edges = [edge_from_row(r) for r in query(EXISTING_EDGES_SQL)]
-    print(f"新聞庫現役：實體 {len(existing_ids)}、線 {len(existing_edges)}")
+    decisions = {str(r["key"]): str(r["decision"]) for r in query(REVIEWS_SQL)}
+    new_edges = apply_reviews(new_edges, decisions)
+    print(f"新聞庫現役：實體 {len(existing_ids)}、線 {len(existing_edges)}；核可頁決定 {len(decisions)} 條")
 
     plan = make_plan(new_entities, new_edges, existing_ids, existing_edges)
     for line in summary(plan, new_entities, new_edges):

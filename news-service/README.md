@@ -64,6 +64,15 @@ uv run --all-groups python scripts/news_sync_entities.py             # 主庫 st
 
 主庫族群表每 7 天重算，同步跟著跑就好（只改族群名次的線原地更新，其他變動關舊插新）。改了 `configs/news.yaml` 的 `mention`（停用詞、擋字）要把 `rule_version` 加一號，下一輪 ingest 自動重掃全部新聞。
 
+## 核可頁（T-403）
+
+AI 草擬的線（`graph_edges.status = draft`，來自 `configs/news_edges.yaml`）要擁有者核可：`GET／POST /v1/review`。核可＝草稿補 `valid_to`、插一條 approved（`valid_from`＝核可時間）；退回＝只補 `valid_to`；每個決定記在 `news.reviews`（只增）。
+
+- 擁有者名單是 Edge Function 祕密 `NEWS_OWNER_EMAILS`（逗號分隔，不進版控）：`npx supabase secrets set NEWS_OWNER_EMAILS=<email>`。
+- 登入者由網站驗過 Cloudflare Access 權杖後放在 `x-news-user` 轉來；其他呼叫端不帶 → `can_review: false`。
+- 同步腳本（`scripts/news_sync_entities.py`）讀 `news.reviews` 最新決定：核可過的維持 approved、退回的不再插回去。
+- 非擁有者送出回 400（不回 403：網站把 403 當成要重新登入）。
+
 ## 向量（T-410）
 
 ingest 第五步用 Workers AI bge-m3 算向量（`news.embeddings`）、同事件合併（`news.clusters`，只新併舊）；英文新聞翻譯完才算。端點 `/v1/similar?id=`、`/v1/search?q=`。設定在 `configs/news.yaml` 的 `embed`。
