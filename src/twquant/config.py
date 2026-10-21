@@ -170,6 +170,10 @@ class MorningBriefConfig(BaseConfig):
     evening_poll_seconds: int = Field(default=60, gt=0)  # 等的時候每幾秒查一次
     news_fetch_limit: int = Field(default=30, ge=1)  # 每個分類抓幾則
     headline_limit: int = Field(default=8, ge=1)  # 晨報與首頁列幾則
+    # 晨報接新聞（2026-10-20）：新聞服務裡同一段時間被至少幾家不同媒體報的事，最多列幾件；新聞庫 DSN 的環境變數名
+    events_min_outlets: int = Field(default=3, ge=2)
+    events_limit: int = Field(default=5, ge=1)
+    news_dsn_env: str = "TWQUANT_NEWS_DSN"
     news_direction_subjects: list[str] = []  # 檢查晨報有沒有把頭條的漲跌方向寫反的標的
     news_direction_window: int = Field(default=4, ge=1)  # 標的後面幾個字內找方向字
     stances: list[str] = []  # 今天的操作方向：立場三選一（T-396）

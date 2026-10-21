@@ -24,3 +24,19 @@ export function withoutTab(href: string): string {
   u.searchParams.delete('tab')
   return u.pathname + u.search + u.hash
 }
+
+/** 新聞頁一打開就是星雲圖（?view=galaxy；舊網址 /api/prototype/galaxy 轉到這裡）。 */
+export function galaxyFromUrl(href: string): boolean {
+  try {
+    return new URL(href).searchParams.get('view') === 'galaxy'
+  } catch {
+    return false
+  }
+}
+
+/** 用過的 ?view= 從網址拿掉（重新整理回清單）；其他參數與 hash 保留。 */
+export function withoutView(href: string): string {
+  const u = new URL(href)
+  u.searchParams.delete('view')
+  return u.pathname + u.search + u.hash
+}
