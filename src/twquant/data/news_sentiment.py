@@ -353,3 +353,110 @@ def split_train_valid(n: int, valid_share: float, seed: int) -> tuple[np.ndarray
     idx = rng.permutation(n)
     k = round(n * valid_share)
     return idx[k:], idx[:k]
+
+
+# ── 雲端可用的情緒小模型（T-424／D-205）：「股名：證據片段」向量與訓練資料 ──
+PAIR_EMB_DDL = f"""
+create table if not exists {SCHEMA}.pair_embeddings (
+  item_id    text not null references {SCHEMA}.items (id),
+  stock_id   text not null,
+  model      text not null,
+  text       text not null,
+  vec        halfvec(1024) not null,
+  created_at timestamptz not null default now(),
+  primary key (item_id, stock_id)
+);
+"""
+
+
+def ensure_pair_table(conn: Any) -> None:
+    with conn.cursor() as cur:
+        cur.execute(PAIR_EMB_DDL)
+    conn.commit()
+
+
+def pending_pair_texts(conn: Any, limit: int, names: dict[str, str]) -> list[tuple[str, str, str]]:
+    """有標籤、還沒有 v_pair 的配對：(item_id, stock_id, 「股名：證據片段」)。證據片段取提及比對記下的（alias 優先）。"""
+    from twquant.data.sentiment_mlp import pair_text
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""select l.item_id, l.stock_id, coalesce(i.title_zh, i.title),
+                  (select m.evidence from {SCHEMA}.mentions m
+                    where m.item_id = l.item_id and m.entity_id = 'tw:' || l.stock_id and m.evidence is not null
+                    order by m.method limit 1)
+                from {SCHEMA}.sentiment_labels l join {SCHEMA}.items i on i.id = l.item_id
+                left join {SCHEMA}.pair_embeddings p on p.item_id = l.item_id and p.stock_id = l.stock_id
+                where p.item_id is null order by l.item_id, l.stock_id limit %s""",
+            (limit,),
+        )
+        rows = cur.fetchall()
+    return [
+        (str(r[0]), str(r[1]), pair_text(names.get(str(r[1]), str(r[1])), r[3], str(r[2])))
+        for r in rows
+    ]
+
+
+def save_pair_embeddings(
+    conn: Any, model: str, rows: Sequence[tuple[str, str, str, Sequence[float]]]
+) -> int:
+    from twquant.data.news_hist import vec_literal
+
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            f"""insert into {SCHEMA}.pair_embeddings (item_id, stock_id, model, text, vec)
+                values (%s, %s, %s, %s, %s::halfvec) on conflict (item_id, stock_id) do nothing""",
+            [(i, s, model, t, vec_literal(v)) for i, s, t, v in rows],
+        )
+    conn.commit()
+    return len(rows)
+
+
+def _halfvec(raw: Any) -> np.ndarray:
+    """pgvector halfvec 二進位：2 bytes 維度、2 bytes 保留、big-endian fp16。"""
+    b = bytes(raw)
+    return np.frombuffer(b[4:], dtype=">f2").astype(np.float16)
+
+
+def load_mlp_data(conn: Any) -> dict[str, Any]:
+    """訓練／驗證資料：有標籤、有新聞向量、有 v_pair 的配對。向量用半精度（float16）存，省一半記憶體。"""
+    with conn.cursor(binary=True) as cur:
+        cur.execute(
+            f"""select l.item_id, l.stock_id, l.label, (s.item_id is not null) as in_sample, e.vec, p.vec
+                from {SCHEMA}.sentiment_labels l
+                join {SCHEMA}.pair_embeddings p on p.item_id = l.item_id and p.stock_id = l.stock_id
+                join {SCHEMA}.embeddings e on e.item_id = l.item_id
+                left join {SCHEMA}.sentiment_sample s on s.item_id = l.item_id and s.stock_id = l.stock_id
+                order by l.item_id, l.stock_id"""
+        )
+        items: list[str] = []
+        stocks: list[str] = []
+        labels: list[int] = []
+        sample: list[bool] = []
+        vn: list[np.ndarray] = []
+        vp: list[np.ndarray] = []
+        while True:
+            chunk = cur.fetchmany(20000)
+            if not chunk:
+                break
+            for r in chunk:
+                items.append(str(r[0]))
+                stocks.append(str(r[1]))
+                labels.append(int(r[2]))
+                sample.append(bool(r[3]))
+                vn.append(_halfvec(r[4]))
+                vp.append(_halfvec(r[5]))
+    if not items:
+        raise DataError(
+            "news_sentiment", None, "沒有可訓練的配對（先跑 news sentiment-pair-embed）"
+        )
+    return {
+        "item_id": items,
+        "stock_id": stocks,
+        "label": np.array(labels, dtype=np.int8),
+        "in_sample": np.array(sample, dtype=bool),
+        "v_news": np.stack(vn),
+        "v_pair": np.stack(vp),
+    }
