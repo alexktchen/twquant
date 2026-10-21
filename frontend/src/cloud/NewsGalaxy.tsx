@@ -2,9 +2,11 @@
 // 光點＝一則新聞（台灣橘、國際藍），靠在一起＝內容相近；亮點＝被很多則提到的股票、公司、主題；線＝這則提到它。
 // 3D、預設慢慢自轉（使用者：「可以旋轉嗎」）；一指拖曳旋轉、兩指或滾輪縮放、⟳ 開關自轉；點光點或亮點浮出檢視框（點了就停住）。
 // 亮度跟著畫面密度調（使用者：「手機看好像太亮」）。資料是排程算好的快照（一天幾次）。
-import { ExternalLink, Minus, Plus, RotateCw, Undo2, X } from 'lucide-react'
+// 亮點的檢視框有「單獨看」：把提到它的新聞拎出來照主題讀、看常一起出現的（GalaxyFocus.tsx）。
+import { ExternalLink, Maximize2, Minus, Plus, RotateCw, Undo2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { fetchNewsGalaxy } from './api'
+import { GalaxyFocus } from './GalaxyFocus'
 import {
   REF_S,
   clusterLabelAt,
@@ -49,6 +51,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const [err, setErr] = useState('')
   const [sel, setSel] = useState<Sel>(null)
   const [auto, setAuto] = useState(true)
+  const [focus, setFocus] = useState<string | null>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
@@ -405,11 +408,17 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                       {shortWhen(x.t, today)}　{x.title}
                     </p>
                   ))}
-                {hub.type === 'tw' && hub.sub && (
-                  <button className="gx-go" onClick={() => onStock(hub.sub!, hub.label)}>
-                    開個股頁
+                <div className="gx-acts">
+                  <button className="gx-focus" onClick={() => setFocus(hub.id)}>
+                    <Maximize2 size={14} aria-hidden="true" />
+                    單獨看 {hub.n} 則
                   </button>
-                )}
+                  {hub.type === 'tw' && hub.sub && (
+                    <button className="gx-go" onClick={() => onStock(hub.sub!, hub.label)}>
+                      開個股頁
+                    </button>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -434,6 +443,18 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
         </div>
       </div>
+      {focus && (
+        <GalaxyFocus
+          data={data}
+          hubId={focus}
+          onRecenter={(id) => {
+            setFocus(id)
+            setSel({ kind: 'hub', id })
+          }}
+          onClose={() => setFocus(null)}
+          onStock={onStock}
+        />
+      )}
       <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放，點一顆看細節。要快速讀新聞用上面三張卡或「清單」。</p>
     </section>
   )
