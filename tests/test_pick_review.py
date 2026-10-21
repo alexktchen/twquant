@@ -23,6 +23,7 @@ from twquant.reporting.pick_review import (
     check_reason,
     chip_facts,
     compose_line,
+    conclusion_gaps,
     fund_facts,
     news_facts,
     rule_reason,
@@ -132,7 +133,7 @@ def _item(**kw: str) -> PickReviewItem:
         "tech_view": "創 52 週新高、量能放大，多頭排列",
         "chips_view": "外資買超，籌碼往法人集中",
         "fund_view": "9 月營收年增 63.7%，成長強勁",
-        "conclusion": "技術與籌碼同步走強，可列入觀察、逢回再評估",
+        "conclusion": "技術與籌碼同步走強：創 52 週新高、外資近 5 日買超 28,867 張，9 月營收年增 63.7% 撐住基本面，消息面無干擾，可逢回分批、量能轉弱再減碼",
     }
     base.update(kw)
     return PickReviewItem(**base)
@@ -190,7 +191,9 @@ def test_ac2_one_call_per_stock_then_one_for_top(tmp_path: Path) -> None:
         "fund": "9 月營收年增 63.7%，成長強勁",
     }
     assert (
-        a.stance == "偏多" and a.conclusion == "技術與籌碼同步走強，可列入觀察、逢回再評估"
+        a.stance == "偏多"
+        and a.conclusion
+        == "技術與籌碼同步走強：創 52 週新高、外資近 5 日買超 28,867 張，9 月營收年增 63.7% 撐住基本面，消息面無干擾，可逢回分批、量能轉弱再減碼"
     )  # 可以給建議（D-196 §二）
     assert by["2027"].scores == {"news": 4, "tech": 8, "chips": 6, "fund": 6}
     assert (
@@ -339,3 +342,42 @@ def test_t427_ac2_stance_comes_from_rules_not_model(tmp_path: Path) -> None:
     assert out[0].stance == "中性" and out[0].split is True
     assert "立場：中性（多空分歧）" in seen[0][1]
     assert "stance" not in PickReviewItem.model_fields
+
+
+def test_t428_ac1_conclusion_covers_four_dims_with_numbers() -> None:
+    """T-428：結論四個面向都要講到、至少 2 個數字；短的一句話不收。"""
+    assert conclusion_gaps("技術與籌碼同步走強，可列入觀察、逢回再評估", CFG) == [
+        "結論沒講到 ['消息', '基本']",
+        "結論只有 0 個數字（至少 2 個）",
+    ]
+    full = "技術與籌碼同步走強：創 52 週新高、外資近 5 日買超 28,867 張，9 月營收年增 63.7% 撐住基本面，消息面無干擾"
+    assert conclusion_gaps(full, CFG) == []
+    assert CFG.conclusion_chars >= 140 and CFG.view_chars >= 40
+    assert "四個面向都要講到" in PICK_REVIEW_SYSTEM
+
+
+def test_t428_ac2_conclusion_retried_once_with_reason(tmp_path: Path) -> None:
+    """結論沒過 → 告訴模型原因重寫一次；只換結論。"""
+    d = _dims_with_stance("2603", 1)
+    first = _item(conclusion="技術與籌碼同步走強，可列入觀察")
+    calls: list[str] = []
+
+    def backend(model_id: str, system: str, user: str, schema: type, max_tokens: int) -> Any:
+        calls.append(user)
+        if schema is PickTop:
+            return PickTop(top_sid="2603", top_reason="創 52 週新高"), 100, 10
+        return (first if len(calls) == 1 else _item()), 100, 10
+
+    out, _ = compose_line(
+        InsightClient(_llm(), tmp_path, api_key="k", backend=backend),
+        [d],
+        "大盤精選",
+        DAY,
+        NOW,
+        CFG,
+        BCFG,
+    )
+    r = out[0]
+    assert "上一版的結論沒過核對" in calls[1] and "消息" in calls[1]
+    assert r.conclusion is not None and r.conclusion.startswith("技術與籌碼同步走強：")
+    assert any("重寫一次後通過" in c for c in r.checks)

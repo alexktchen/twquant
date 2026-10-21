@@ -225,6 +225,9 @@ class PickReviewConfig(BaseConfig):
     forbidden_terms: list[str]
     interpretive_terms: list[str]
     conclusion_allow: list[str]
+    conclusion_min_numbers: int = Field(ge=0)
+    conclusion_retries: int = Field(default=1, ge=0, le=2)
+    conclusion_dims: dict[str, list[str]]
     dim_words: dict[str, list[str]]
     top_max_tokens: int = Field(gt=0)
     reason_chars: int = Field(gt=0)

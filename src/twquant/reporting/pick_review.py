@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -443,7 +444,7 @@ def check_reason(
     unsupported = [
         w
         for w, need in blurb_cfg.evidence_terms.items()
-        if w in t and not any(n in f for n in need for f in known)
+        if w in t and w not in (allow or []) and not any(n in f for n in need for f in known)
     ]
     if unsupported:
         problems.append(f"說法在事實裡找不到根據 {unsupported}")
@@ -496,10 +497,26 @@ def check_item(
         forbidden=cfg.forbidden_terms,
         allow=[*cfg.interpretive_terms, *cfg.conclusion_allow],
     )
+    problems.extend(conclusion_gaps(text, cfg))
     if problems:
         r.checks.append(f"結論不用：{'；'.join(problems)}；原句：{got.conclusion}")
     else:
         r.conclusion = text
+
+
+_NUM = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def conclusion_gaps(text: str, cfg: PickReviewConfig) -> list[str]:
+    """T-428：結論要四個面向都講到、至少 conclusion_min_numbers 個數字（數字是否出自事實由 check_reason 管）。"""
+    out = []
+    missing = [dim for dim, ws in cfg.conclusion_dims.items() if not any(w in text for w in ws)]
+    if missing:
+        out.append(f"結論沒講到 {missing}")
+    n = len(_NUM.findall(text))
+    if n < cfg.conclusion_min_numbers:
+        out.append(f"結論只有 {n} 個數字（至少 {cfg.conclusion_min_numbers} 個）")
+    return out
 
 
 def rule_reason(scores: dict[str, int]) -> str:
@@ -572,7 +589,45 @@ def review_stock(
         r.checks.append(reason)
         return r, reason
     check_item(got, d, cfg, blurb_cfg, r)
+    if r.conclusion is None and cfg.conclusion_retries > 0:
+        retry_conclusion(client, d, line_name, day, now, cfg, blurb_cfg, r)
     return r, None
+
+
+def retry_conclusion(
+    client: InsightClient,
+    d: Dimensions,
+    line_name: str,
+    day: dt.date,
+    now: dt.datetime,
+    cfg: PickReviewConfig,
+    blurb_cfg: PickBlurbsConfig,
+    r: Review,
+) -> None:
+    """T-428：結論沒過 → 把沒過的原因告訴模型再寫一次（最多 conclusion_retries 次）；只換結論，觀點用第一次的。"""
+    for _ in range(cfg.conclusion_retries):
+        why = next((c for c in reversed(r.checks) if c.startswith("結論不用")), "結論不用")
+        res, _absent = client.complete_detailed(
+            task=TASK,
+            system=PICK_REVIEW_SYSTEM,
+            user=stock_payload(line_name, day, d)
+            + f"\n\n上一版的結論沒過核對（{why.split('；原句')[0]}），請改正後重寫，四個面向都要講到。",
+            schema=PickReviewItem,
+            prompt_version=PICK_REVIEW_PROMPT_VERSION,
+            now=now,
+            max_tokens=cfg.max_tokens,
+        )
+        got = res.parsed if res is not None else None
+        if not isinstance(got, PickReviewItem):
+            r.checks.append("結論重寫：模型缺席")
+            return
+        trial = Review(d.line, d.stock_id, None)
+        check_item(got, d, cfg, blurb_cfg, trial)
+        r.checks.extend(f"重寫 {c}" for c in trial.checks if c.startswith("結論"))
+        if trial.conclusion is not None:
+            r.conclusion = trial.conclusion
+            r.checks.append("結論重寫一次後通過")
+            return
 
 
 def choose_top(
