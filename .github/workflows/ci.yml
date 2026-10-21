@@ -28,3 +28,7 @@ jobs:
       - name: news-service tests
         working-directory: news-service
         run: npm test
+      # LINE 群組貼文轉接器（T-423）：測的是純函式，不 import linejs，不用 npm install
+      - name: line-poster tests
+        working-directory: line-poster
+        run: npm test

@@ -16,6 +16,7 @@ import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
 import type { WarrantDay } from './warrants'
 import type { Trade, TradeList } from './trades'
+import type { Feature, LineGroupRow, LineStatus } from './linegroup'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
@@ -51,6 +52,16 @@ export async function logoutTarget(): Promise<string> {
 
 /** 目前登入的 email；沒登入時丟 LoginRequired。 */
 export const fetchMe = () => get<{ email: string }>('/api/me')
+
+/** 登入者能用哪些功能（T-423；決定要不要顯示「LINE 群組」分頁）。 */
+export const fetchAccess = () => get<{ features: Feature[] }>('/api/access')
+
+/** 「LINE 群組」分頁的資料（只有 line 功能的角色拿得到）。 */
+export const fetchLineStatus = () => get<LineStatus>('/api/line')
+
+/** 勾／取消要發的群組。 */
+export const setLineGroup = (homeId: string, enabled: boolean) =>
+  get<LineGroupRow>(`/api/line/groups/${encodeURIComponent(homeId)}`, 'PUT', { enabled })
 
 export const fetchPicks = (date?: string) =>
   get<PicksDay>(date ? `/api/picks?date=${encodeURIComponent(date)}` : '/api/picks')

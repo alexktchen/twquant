@@ -1,0 +1,63 @@
+// T-423：「LINE 群組」分頁——角色權限、輸入檢查、顯示小函式；憑證永遠不出資料庫。
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+import { CARD_TOKEN_RE, HOME_ID_RE, parseToggle } from '../functions/_lib/line-admin.ts'
+import { FEATURE_ROLES, ROLE_MEMBERS, can, featuresOf, rolesOf } from '../functions/_lib/roles.ts'
+import { groupsMeta, shortTime, statusView } from '../src/cloud/linegroup.ts'
+import { tabFromUrl } from '../src/cloud/tabs.ts'
+
+test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 LINE 群組，大小寫不分', () => {
+  assert.deepEqual(ROLE_MEMBERS.line_admin, ['cktalex@gmail.com'])
+  assert.deepEqual(FEATURE_ROLES.line, ['line_admin'])
+  assert.deepEqual(rolesOf('CKTalex@gmail.com '), ['line_admin'])
+  assert.deepEqual(featuresOf('cktalex@gmail.com'), ['line'])
+  assert.ok(can('cktalex@gmail.com', 'line'))
+  assert.ok(!can('someone@example.com', 'line'))
+  assert.deepEqual(featuresOf(null), [])
+  assert.deepEqual(featuresOf(''), [])
+  for (const members of Object.values(ROLE_MEMBERS)) {
+    for (const e of members) assert.equal(e, e.trim().toLowerCase()) // 名單一律小寫，比對才準
+  }
+})
+
+test('T-423 AC9 權限：每個 LINE 端點都自己擋（不只靠前端藏分頁）', () => {
+  for (const f of ['../functions/api/line/index.ts', '../functions/api/line/groups/[id].ts']) {
+    const src = readFileSync(new URL(f, import.meta.url), 'utf8')
+    assert.match(src, /accessEmail\(request\)/, f) // 身分來自驗過的權杖，不信標頭
+    assert.match(src, /can\(email, 'line'\)/, f)
+    assert.match(src, /fail\(403, '沒有權限'\)/, f)
+  }
+  const put = readFileSync(new URL('../functions/api/line/groups/[id].ts', import.meta.url), 'utf8')
+  assert.match(put, /sameOrigin\(request\)/)
+})
+
+test('T-423 AC10 安全：網站讀帳號表只選要顯示的欄位，登入憑證不出資料庫', () => {
+  const src = readFileSync(new URL('../functions/_lib/line-admin.ts', import.meta.url), 'utf8')
+  const sql = src.replace(/\/\/.*$/gm, '') // 註解裡提到「憑證」不算
+  assert.doesNotMatch(sql, /access_token|refresh_token|token_expire|SELECT \*/)
+})
+
+test('T-423 AC10 輸入檢查：群組 id、圖卡 token、勾選內容', () => {
+  assert.ok(HOME_ID_RE.test(`c${'0'.repeat(32)}`))
+  assert.ok(!HOME_ID_RE.test(`C${'0'.repeat(32)}`) && !HOME_ID_RE.test("c1';--") && !HOME_ID_RE.test(`s${'0'.repeat(32)}`))
+  assert.ok(CARD_TOKEN_RE.test('ab'.repeat(16)) && !CARD_TOKEN_RE.test('../etc/passwd') && !CARD_TOKEN_RE.test('ab'.repeat(15)))
+  assert.deepEqual(parseToggle('{"enabled":true}'), { enabled: true })
+  assert.deepEqual(parseToggle('{"enabled":false}'), { enabled: false })
+  for (const bad of ['', 'null', '[]', '{"enabled":"true"}', '{"enabled":true,"name":"x"}', '{', ' '.repeat(300)]) {
+    assert.equal(parseToggle(bad), null, bad)
+  }
+})
+
+test('T-423 分頁與顯示：?tab=line 認得；狀態、時間、群組摘要', () => {
+  assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=line'), 'line')
+  assert.deepEqual(statusView({ status: 'sent', via: 'flex' }), { text: '已發', tone: 'ok' })
+  assert.deepEqual(statusView({ status: 'sent', via: 'text' }), { text: '已發（改發文字）', tone: 'wait' })
+  assert.equal(statusView({ status: 'unknown', via: null }).tone, 'bad')
+  assert.equal(statusView({ status: 'queued', via: null }).text, '排隊中')
+  assert.equal(shortTime('2026-10-21 17:40'), '10/21 17:40')
+  assert.equal(shortTime(null), '')
+  const g = (home_id: string, enabled: boolean, present: boolean) => ({ home_id, name: home_id, enabled, present, synced_at: '' })
+  assert.equal(groupsMeta([g('a', true, true), g('b', false, true), g('c', true, false)]), '發 1／在 2 個群組')
+  assert.equal(groupsMeta([]), '還沒有群組')
+})

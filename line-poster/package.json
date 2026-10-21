@@ -1,0 +1,17 @@
+{
+  "name": "twquant-line-poster",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@evex/linejs": "npm:@jsr/evex__linejs@3.4.2",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "description": "LINE 群組聊天發圖卡（T-423）：非官方客戶端協定（linejs），只能用備用帳號。由 twquant line-group 呼叫。",
+  "scripts": {
+    "test": "node --test src/*.test.mjs"
+  }
+}

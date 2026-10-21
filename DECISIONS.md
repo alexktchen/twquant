@@ -7803,6 +7803,37 @@ D-085 重跑後，A 軌由 +15.90% 跳到 **+26.30%（+10.40pp）**，遠大於�
 
 ## 已裁決
 
+### D-204（2026-10-21，使用者：「可以幫我用跟這個repo一樣的方式發文到line 群組上面 https://github.com/lt-foods/new_erp」；同日修訂：「我要用備用帳號發圖」「我沒有要發記事本 我要發到群組對話列」「只有有權限的角色才能看到這功能，目前設定為cktalex@gmail.com」）LINE 群組每日圖卡：備用帳號、群組聊天、點圖開網站、網站上依角色管理
+
+任務 T-423。使用者決定（AskUserQuestion，兩輪）：內容＝**每日名單、族群資金流入、盤前晨報、盤後快訊四種都發，都做成圖**；
+發到＝**一般群組的聊天**（不是記事本）；用＝**備用帳號**（不是官方帳號）；在哪跑＝**GitHub Actions 加一步**；名單圖＝**三欄名單卡**
+（每條線前幾名：代號、股名、族群、NEW）。
+
+- **§一 做法**：照 new_erp 用 linejs（非官方客戶端協定）登入一支備用帳號；new_erp 的登入與憑證處理（`_shared/lineNote.ts`）搬到
+  `line-poster/`（Node，只跟 LINE 講話）。發到群組聊天用 LIFF 分享（`api.line.me/message/v3/share`）送 **Flex 訊息**：整則是一張圖，
+  點圖打開網站；Flex 不通時改發「摘要＋網址」的文字（`talk.sendMessage`，new_erp 對群組發結單提醒用的就是它）。
+  圖卡由 Python 用 Pillow 畫（`monitoring/line_card.py`，配色同網站、字型 Noto Sans CJK），存雲端 `web.line_cards`，
+  網站 `/pub/line-card/<32 位亂數>` 公開給 LINE 抓（`/pub` 不經 Cloudflare Access；網址猜不到；內容就是發到群組的那張圖）。
+  排隊、去重、叫停處理在 Python（`monitoring/line_group.py`、`twquant line-group`）：同天同種同群組只發一次；
+  LINE 叫停（限制使用 10 分鐘／701 兩分鐘）就停帳號不硬打；送到一半中斷的標 unknown **不自動重送**（不重複發同一張圖）。
+- **§二 權限**：網站多一個「LINE 群組」分頁（發文帳號狀態、勾要發的群組、最近發的圖卡），**只有能用 `line` 功能的角色看得到**：
+  `frontend/functions/_lib/roles.ts`，角色 `line_admin`＝cktalex@gmail.com（repo 公開，但這個 email 本來就在提交紀錄裡）。
+  分頁按鈕由 `/api/access` 決定；`/api/line`、`/api/line/groups/:id` 每支自己用 Cloudflare 簽過的權杖驗身分再查角色（不信標頭、
+  不只靠前端藏分頁）。網站讀帳號表只選顯示用欄位，**登入憑證不出資料庫**（測試守著）。要發哪些群組改在網站勾（`web.line_groups`，
+  新群組預設不發），取代原本的 secret `TWQUANT_LINE_GROUP_MIDS`；沒登入、沒勾群組時排程這幾步自己略過。
+- **§三 官方帳號為什麼沒用**：使用者問過「可以透過我的官方帳號來做這個發文嗎」。官方 Messaging API 能發 Flex 到群組，但
+  [推播額度按收到的人數算](https://developers.line.biz/en/docs/messaging-api/pricing/)（30 人的群發一則＝30 則），台灣免費方案一個月 200 則；
+  四種天天發要付費方案，而且要另做 webhook 才拿得到群組 id。說明後使用者選備用帳號。
+- **§四 風險（使用者知情）**：違反 LINE 使用條款，帳號可能被停權 → **只用備用帳號**。GitHub Actions 機器在美國，new_erp 的經驗是國外 IP
+  上線容易被鎖；被鎖時把 `line-group send` 改到台灣的機器跑。LIFF 預設用 linejs 內建的 LIFF app（別人的）；建議使用者建自己的、填
+  `configs/line_group.yaml` 的 `liff_id`。憑證存雲端 `web.line_account`（refresh token 會輪替，GitHub secret 寫不回去；黃金規則 9 管的是
+  程式碼、配置、測試、文件，資料庫不在其內，同 `web.push_subscriptions`）。Supabase 預設只把 `public` 開給 PostgREST，`web` 沒加進
+  Exposed schemas 就讀不到（這個專案的設定沒實際查過，之後加 schema 要記得這張表）。
+- **§五 範圍**：只發一般群組（c…）；社群（OpenChat）路徑不同，沒做。一天最多四則，遠低於 new_erp 被擋的量（分享爆量 ~43 則／97 秒）。
+  圖卡附「僅供參考」。名單圖只列名單本身（名次、代號、股名、族群、新進），**不列任何報酬**——第二保留期（D-109）內不在群組裡算績效。
+- **§六 同日改向的紀錄**：第一版（同一天寫好、沒部署）是 new_erp 的主流程「記事本發文＋分享卡片」、純文字、群組 id 放 secret；
+  使用者看過後改成聊天裡發圖、網站上依角色管理，第一版的記事本程式已拿掉（new_erp 那份還在，要回頭用就從那裡搬）。
+
 ### D-201（2026-10-20，使用者：「再來規劃新聞用向量資料庫來關聯股票的功能，這些用向量資料庫做應該很適合，要完整規劃，之後可以用來訓練新的模型 基於新聞因子」）新聞向量層與新聞因子：免費歷史語料、本機 pgvector、情緒第一階段、事前登記
 
 規格：[SPEC-018](docs/specs/SPEC-018-news-vectors.md)；任務 T-410～T-416（取代原 T-406）。規劃時使用者決定（AskUserQuestion）：
