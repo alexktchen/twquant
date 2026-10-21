@@ -30,7 +30,8 @@ export type Vec3 = { x: number; y: number; z: number }
 /** 投影後：畫面 x、y、深度（越大越近）、透視倍率 */
 export type Proj = [number, number, number, number]
 export type View = { s: number; x: number; y: number }
-export type Rot = { yaw: number; pitch: number }
+/** 目前的轉向（單位四元數 w,x,y,z）：用四元數而不是兩個角度，上下左右都能一直轉，不會卡在頭頂 */
+export type Quat = [number, number, number, number]
 
 export const FOV = 3.4
 /** 電腦版一開的比例（每單位約 300px）＝亮度 1 */
@@ -38,33 +39,59 @@ export const REF_S = 300
 
 export const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 }
 
-/** 繞直軸轉 yaw、再繞橫軸轉 pitch，透視投影到畫面。c＝轉動中心（放在畫面中央）：預設整團的中心，選了東西就換成它。 */
-export function project(o: Vec3, r: Rot, v: View, c: Vec3 = ORIGIN): Proj {
-  const cy = Math.cos(r.yaw), sy = Math.sin(r.yaw), cp = Math.cos(r.pitch), sp = Math.sin(r.pitch)
-  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z
-  const x1 = ox * cy + oz * sy
-  const z1 = -ox * sy + oz * cy
-  const y1 = oy * cp - z1 * sp
-  const z2 = oy * sp + z1 * cp
-  const f = FOV / (FOV - z2)
-  return [v.x + x1 * v.s * f, v.y + y1 * v.s * f, z2, f]
+export const qMul = (a: Quat, b: Quat): Quat => [
+  a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+  a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+  a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+  a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+]
+/** 繞 (ax, ay, az)（單位向量）轉 rad */
+export function qAxis(ax: number, ay: number, az: number, rad: number): Quat {
+  const s = Math.sin(rad / 2)
+  return [Math.cos(rad / 2), ax * s, ay * s, az * s]
+}
+export function qNorm(q: Quat): Quat {
+  const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1
+  return [q[0] / n, q[1] / n, q[2] / n, q[3] / n]
+}
+/** 先繞直軸轉 yaw、再繞橫軸轉 pitch（一開始的角度用這兩個數字講比較好懂） */
+export const qFromYawPitch = (yaw: number, pitch: number): Quat => qMul(qAxis(1, 0, 0, pitch), qAxis(0, 1, 0, yaw))
+/** 兩個轉向有多像：1＝一樣（q 與 −q 是同一個轉向） */
+export const qSame = (a: Quat, b: Quat): number => Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])
+/** 從 a 往 b 轉 t（0～1），走短的那邊 */
+export function qSlerp(a: Quat, b: Quat, t: number): Quat {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+  const bb: Quat = d < 0 ? [-b[0], -b[1], -b[2], -b[3]] : b
+  d = Math.abs(d)
+  if (d > 0.9995) return qNorm([a[0] + (bb[0] - a[0]) * t, a[1] + (bb[1] - a[1]) * t, a[2] + (bb[2] - a[2]) * t, a[3] + (bb[3] - a[3]) * t])
+  const th = Math.acos(d), s = Math.sin(th), ka = Math.sin((1 - t) * th) / s, kb = Math.sin(t * th) / s
+  return [a[0] * ka + bb[0] * kb, a[1] * ka + bb[1] * kb, a[2] * ka + bb[2] * kb, a[3] * ka + bb[3] * kb]
 }
 
 /**
- * 轉起來不迷航（使用者 2026-10-21：「有時候再旋轉很容易迷航」）：拖曳每 px 轉幾弧度（原 0.008，手機滑 200px 就轉 92°；現在 57°）、
- * 上下最多翻幾弧度（原 1.3≈75°，翻過頭分不清上下；0.75≈43°）。
+ * 拖曳轉動（使用者 2026-10-21：「應該要可以上下左右一直旋轉 現在好像會卡住180度」）：照「畫面上」的方向轉，
+ * 往右拖＝前面的往右、往下拖＝前面的往下，不管現在轉成什麼樣子都一樣，上下左右都沒有盡頭。dx、dy 是弧度。
  */
+export const dragRotate = (q: Quat, dx: number, dy: number): Quat => qNorm(qMul(qMul(qAxis(0, 1, 0, dx), qAxis(1, 0, 0, -dy)), q))
+
+/** 依轉向 q 轉、透視投影到畫面。c＝轉動中心（放在畫面中央）：預設整團的中心，選了東西就換成它。 */
+export function project(o: Vec3, q: Quat, v: View, c: Vec3 = ORIGIN): Proj {
+  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z
+  const [w, qx, qy, qz] = q
+  // v' = v + 2w(u×v) + 2u×(u×v)，u＝(qx,qy,qz)
+  const tx = 2 * (qy * oz - qz * oy), ty = 2 * (qz * ox - qx * oz), tz = 2 * (qx * oy - qy * ox)
+  const x1 = ox + w * tx + (qy * tz - qz * ty)
+  const y1 = oy + w * ty + (qz * tx - qx * tz)
+  const z1 = oz + w * tz + (qx * ty - qy * tx)
+  const f = FOV / (FOV - z1)
+  return [v.x + x1 * v.s * f, v.y + y1 * v.s * f, z1, f]
+}
+
+/** 轉起來不迷航（使用者 2026-10-21：「有時候再旋轉很容易迷航」）：拖曳每 px 轉幾弧度（原 0.008，手機滑 200px 就轉 92°；現在 57°） */
 export const DRAG_RAD = 0.005
-export const PITCH_MAX = 0.75
 
 /** 往目標靠：每過 1 秒剩下的距離乘 e^−rate（跟幀率無關；rate 8 ≈ 0.3 秒走完九成） */
 export const ease = (a: number, b: number, dt: number, rate = 8): number => b + (a - b) * Math.exp(-rate * dt)
-
-/** 從 from 轉到 to 走短的那邊（−π～π）：自轉累積了好幾圈，回到一開始不要倒著轉好幾圈 */
-export function angleDiff(from: number, to: number): number {
-  const d = (to - from) % (2 * Math.PI)
-  return d > Math.PI ? d - 2 * Math.PI : d < -Math.PI ? d + 2 * Math.PI : d
-}
 
 /**
  * 選取那顆移到中央後，檢視框放它右邊；窄畫面（手機）右邊放不下 → 框貼在圖的下緣（按鈕上面），
