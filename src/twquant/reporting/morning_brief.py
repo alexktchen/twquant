@@ -36,6 +36,7 @@ from twquant.insight.prompts import (
 )
 from twquant.insight.schemas import MorningBrief
 from twquant.insight.validation import unverified_numbers
+from twquant.reporting.news_events import NewsEvent, event_line
 
 TASK = "morning_brief"
 Edition = Literal["morning", "evening"]
@@ -45,6 +46,8 @@ REVENUE_DEADLINE_DAY = 10
 FetchQuote = Callable[[str, str], Quote]
 FetchNight = Callable[[], NightFuture]
 FetchNews = Callable[[str, int, str], list[Headline]]  # (分類, 則數, 標籤) → 頭條
+# 新聞服務的多家同報事件（晨報接新聞，2026-10-20）：(since, until) → 事件；沒接新聞庫就不給
+FetchEvents = Callable[[dt.datetime, dt.datetime], list[NewsEvent]]
 
 
 @dataclass
@@ -71,6 +74,7 @@ class MorningInputs:
     errors: list[str] = field(default_factory=list)
     thresholds: dict[str, float] = field(default_factory=dict)  # 研判素材的門檻（system.yaml）
     headlines: list[Headline] = field(default_factory=list)  # 昨晚到今早的新聞頭條
+    events: list[NewsEvent] = field(default_factory=list)  # 新聞服務：同一段時間被多家媒體報的事
     news_subjects: list[str] = field(default_factory=list)  # 檢查方向寫反的標的（system.yaml）
     stances: list[str] = field(default_factory=list)  # 今天的操作方向：立場三選一（T-396）
     strategy_chars: int = 60  # 操作方向一句最多幾個字
@@ -113,6 +117,7 @@ def gather(
     fetch_quote: FetchQuote,
     fetch_night: FetchNight,
     fetch_news: FetchNews | None = None,
+    fetch_events: FetchEvents | None = None,
     now: dt.datetime | None = None,
     edition: Edition = "morning",
 ) -> MorningInputs:
@@ -306,15 +311,21 @@ def gather(
         out.night = fetch_night()
     except Exception as exc:  # noqa: BLE001
         out.errors.append(f"台指期夜盤：{exc}")
-    if fetch_news is not None and cfg.news_feeds:
-        until = now or dt.datetime.combine(day, dt.time(23, 59), tzinfo=TZ)
-        since = (
-            dt.datetime.combine(day, dt.time(cfg.evening_news_since_hour), tzinfo=TZ)
-            if evening
-            else dt.datetime.combine(
-                day - dt.timedelta(days=1), dt.time(cfg.news_since_hour), tzinfo=TZ
-            )
+    # 新聞的時間窗：盤前＝前一天收盤後到現在；盤後＝今天開盤到現在（頭條與多家同報共用）
+    until = now or dt.datetime.combine(day, dt.time(23, 59), tzinfo=TZ)
+    since = (
+        dt.datetime.combine(day, dt.time(cfg.evening_news_since_hour), tzinfo=TZ)
+        if evening
+        else dt.datetime.combine(
+            day - dt.timedelta(days=1), dt.time(cfg.news_since_hour), tzinfo=TZ
         )
+    )
+    if fetch_events is not None:
+        try:
+            out.events = fetch_events(since, until)
+        except Exception as exc:  # noqa: BLE001  # 新聞庫連不上不擋晨報；原因留在 errors
+            out.errors.append(f"多家同報：{exc}")
+    if fetch_news is not None and cfg.news_feeds:
         pool: list[Headline] = []
         for feed in cfg.news_feeds:
             try:
@@ -484,6 +495,8 @@ def facts(inp: MorningInputs) -> list[str]:
         out.append(
             "成交比重比 20 日平均減少最多的族群：" + "、".join(x["grp"] for x in inp.outflow)
         )
+    for e in inp.events:
+        out.append(event_line(e))
     for h in inp.headlines:
         stamp = h.published_at.strftime("%m/%d %H:%M")
         out.append(f"新聞頭條（{h.source} {stamp}）：{h.title}")
@@ -633,8 +646,8 @@ def reversed_directions(text: str, inp: MorningInputs) -> list[str]:
     """句子裡跟新聞頭條方向相反的標的。頭條之間自己方向不一的標的不檢查。"""
     window = int(inp.thresholds.get("direction_window", 4))
     head: dict[str, int] = {}
-    for h in inp.headlines:
-        for s, d in directions(h.title, inp.news_subjects, window).items():
+    for title in [e.title for e in inp.events] + [h.title for h in inp.headlines]:
+        for s, d in directions(title, inp.news_subjects, window).items():
             head[s] = d if head.get(s, d) == d else 0
     said = directions(text, inp.news_subjects, window)
     return [s for s, d in said.items() if d and head.get(s, 0) == -d]

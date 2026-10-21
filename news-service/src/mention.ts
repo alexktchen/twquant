@@ -12,6 +12,9 @@ export type MentionConfig = {
   latin_min: number
   /** 中文別名至少幾個字 */
   cjk_min: number
+  /** 這麼短（含）的中文別名要「站得住」：前後至少一邊不是中文字（2026-10-20 抽查：122 個兩字股名有 30 個被一般用詞咬到——
+   *  「全新產品」「達新台幣」「紐約時報」「截至上午」「兆元晶片」；「鴻海、緯穎」「富喬（1815）」「焦點股》台虹：」照樣命中） */
+  cjk_bound_len: number
   /** 整條別名等於這些字串就不建索引 */
   stopwords: string[]
   /** 擋字：照樣比對、先佔掉那段字，但不算提到任何實體（擋掉股名被長詞咬到，例：東南亞 → 南亞） */
@@ -22,6 +25,8 @@ type AliasEntry = {
   alias: string
   /** 拉丁別名（要字界）；含 CJK 的是 false */
   latin: boolean
+  /** 短的中文別名（cjk_bound_len 以內）：前後至少一邊不是中文字才算命中 */
+  short: boolean
   /** 同一條別名可能屬於好幾個實體（依代號排） */
   entities: string[]
 }
@@ -50,6 +55,7 @@ export function validateMentionConfig(x: unknown): MentionConfig {
   if (!c || typeof c !== 'object') fail('（整段缺少）')
   if (typeof c!.rule_version !== 'string' || !c!.rule_version) fail('rule_version')
   for (const k of ['per_run_limit', 'latin_min', 'cjk_min'] as const) if (!Number.isInteger(c![k]) || (c![k] as number) < 1) fail(k)
+  if (!Number.isInteger(c!.cjk_bound_len) || (c!.cjk_bound_len as number) < 0) fail('cjk_bound_len')
   if (!Array.isArray(c!.stopwords) || c!.stopwords.some((w) => typeof w !== 'string' || !w)) fail('stopwords')
   if (c!.blockers !== undefined && (!Array.isArray(c!.blockers) || c!.blockers.some((w) => typeof w !== 'string' || !w))) fail('blockers')
   return c as MentionConfig
@@ -73,7 +79,12 @@ export function buildIndex(entities: EntityAliases[], cfg: MentionConfig): Alias
   }
   // 擋字：沒有實體的別名——長的先佔位置，所以裡面的短股名不會再命中
   for (const b of cfg.blockers ?? []) if (!byAlias.has(b)) byAlias.set(b, new Set())
-  const entries: AliasEntry[] = [...byAlias].map(([alias, ids]) => ({ alias, latin: !CJK_RE.test(alias), entities: [...ids].sort() }))
+  const entries: AliasEntry[] = [...byAlias].map(([alias, ids]) => ({
+    alias,
+    latin: !CJK_RE.test(alias),
+    short: CJK_RE.test(alias) && cpLen(alias) <= cfg.cjk_bound_len,
+    entities: [...ids].sort(),
+  }))
   entries.sort((a, b) => cpLen(b.alias) - cpLen(a.alias) || (a.alias < b.alias ? -1 : a.alias > b.alias ? 1 : 0))
   const byFirst = new Map<string, AliasEntry[]>()
   for (const en of entries) {
@@ -88,6 +99,7 @@ export function buildIndex(entities: EntityAliases[], cfg: MentionConfig): Alias
 type Cand = { start: number; end: number; entry: AliasEntry }
 
 const isWord = (ch: string | undefined): boolean => ch !== undefined && WORD_RE.test(ch)
+const isCjk = (ch: string | undefined): boolean => ch !== undefined && CJK_RE.test(ch)
 
 /** 一段文字裡所有可能的命中（還沒處理重疊）。 */
 function candidates(text: string, index: AliasIndex): Cand[] {
@@ -99,6 +111,8 @@ function candidates(text: string, index: AliasIndex): Cand[] {
       if (!text.startsWith(entry.alias, i)) continue
       const end = i + entry.alias.length
       if (entry.latin && (isWord(text[i - 1]) || isWord(text[end]))) continue
+      // 短的中文股名夾在兩個中文字中間（「全新產品」「達新台幣」）多半是一般用詞，不算；旁邊有標點、數字、括號、空白或開頭結尾才算
+      if (entry.short && isCjk(text[i - 1]) && isCjk(text[end])) continue
       out.push({ start: i, end, entry })
     }
   }
