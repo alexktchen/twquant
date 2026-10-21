@@ -6,7 +6,7 @@ import { sameOrigin } from './watchlist.ts'
 export type NewsEnv = { NEWS_API_URL?: string; NEWS_API_KEY?: string }
 
 /** 每個端點准許轉過去的查詢參數（其餘丟掉，不讓瀏覽器亂帶）。 */
-export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search' | '/v1/review' | '/v1/digest' | '/v1/galaxy', string[]> = {
+export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search' | '/v1/review' | '/v1/digest' | '/v1/galaxy' | '/v1/stock-news-days', string[]> = {
   '/v1/items': ['since', 'until', 'kind', 'source', 'limit'],
   '/v1/health': [],
   /** 一則新聞的關係圖（T-402／T-404）：id＝新聞 id；找不到 → 404 照轉 */
@@ -25,6 +25,8 @@ export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/sto
   '/v1/digest': [],
   /** 全景星雲圖（T-418）：排程算好的最新一筆 */
   '/v1/galaxy': [],
+  /** 個股頁 K 線上的新聞標記（T-419）：id＝tw:代號 */
+  '/v1/stock-news-days': ['id'],
 }
 /**
  * 指定新聞服務在哪個區域執行（Supabase 的 x-region）：資料庫在新加坡，不指定的話從台灣打過去會在東京跑，

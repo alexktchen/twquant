@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildNodes, type EdgeRow, type EntityRow, type GraphApiConfig } from '../src/graphapi.ts'
-import { countsFor, hubsOf, linksTo, parseStockIds, prepare, validateStockNewsConfig } from '../src/stocknews.ts'
+import { countsFor, coverageDaysOf, hubsOf, linksTo, newsDays, parseStockIds, prepare, quietGap, validateStockNewsConfig } from '../src/stocknews.ts'
 
 const cfg: GraphApiConfig = {
   weights: { supplier: 0.6, belongs: 0.5, member: 0.5, peer: 0.4, theme: 0.6 },
@@ -80,7 +80,7 @@ test('名單小標：每檔直接幾則、間接幾則；參數檢查', () => {
   assert.throws(() => parseStockIds('', 10), /缺 ids/)
   assert.throws(() => parseStockIds('tw:2330,us:NVDA', 10), /tw:2330/)
   assert.throws(() => parseStockIds('tw:1101,tw:1102,tw:1103', 2), /最多 2/)
-  assert.throws(() => validateStockNewsConfig({ stock_max_degree: 3, stock_days: 7, stock_limit: 20, counts_days: 3, counts_max_ids: 60, hub_share: 0.15 }), /最多 2/)
+  assert.throws(() => validateStockNewsConfig({ stock_max_degree: 3, stock_days: 7, stock_limit: 20, counts_days: 3, counts_max_ids: 60, hub_share: 0.15, timeline_days: 120, timeline_per_day: 3, quiet_min_days: 14 }), /最多 2/)
   assert.throws(() => validateStockNewsConfig(undefined), /stock_news/)
 })
 
@@ -101,4 +101,33 @@ test('到處都提的實體不當間接的橋（2026-10-20：「AI」害每檔�
   )
   assert.equal(linksTo('tw:2382', many, prep, entities, cfg, 2).length, 3, '不設門檻就三則都算')
   assert.deepEqual(countsFor(['tw:2382'], many, prep, entities, cfg, 2, 0.5), { 'tw:2382': { direct: 1, indirect: 0 } })
+})
+
+test('T-419 時間軸：每天幾則、哪幾家（同一家兩個頻道算一家）、前幾則標題（新的先）；日期由舊到新', () => {
+  const outlet = (s: string) => ({ 'cnyes-headline': '鉅亨網', 'cnyes-tw-stock': '鉅亨網', 'udn-money-stock': '經濟日報' })[s] ?? s
+  const row = (day: string, id: string, source: string, t: string, zh: string | null = null) => ({ day, id, source, title: `T${id}`, title_zh: zh, url: `https://x/${id}`, first_seen_at: t })
+  const got = newsDays(
+    [
+      row('2026-10-20', 'b', 'cnyes-headline', '2026-10-20T02:00:00Z', '譯b'),
+      row('2026-10-18', 'a', 'udn-money-stock', '2026-10-18T01:00:00Z'),
+      row('2026-10-20', 'c', 'cnyes-tw-stock', '2026-10-20T03:00:00Z'),
+      row('2026-10-20', 'd', 'udn-money-stock', '2026-10-20T01:00:00Z'),
+    ],
+    outlet,
+    2,
+  )
+  assert.deepEqual(got.map((d) => [d.day, d.n, d.outlets]), [['2026-10-18', 1, ['經濟日報']], ['2026-10-20', 3, ['經濟日報', '鉅亨網']]])
+  assert.deepEqual(got[1].items.map((i) => [i.id, i.title, i.src]), [['c', 'Tc', '鉅亨網'], ['b', '譯b', '鉅亨網']], '每天最多 perDay 則，新的先，有譯文用譯文')
+})
+
+test('T-419 久違的消息：隔的天數、沒有前一次就是「至少」、收新聞不夠久或隔不夠久都不標', () => {
+  assert.deepEqual(quietGap(['2026-09-01', '2026-10-20'], 60, 120, 14), { days: 49, at_least: false })
+  assert.equal(quietGap(['2026-10-18', '2026-10-20'], 60, 120, 14), null, '隔 2 天不算')
+  assert.deepEqual(quietGap(['2026-10-20'], 30, 120, 14), { days: 30, at_least: true }, '時間軸裡沒有前一次：至少收新聞以來的天數')
+  assert.deepEqual(quietGap(['2026-10-20'], 400, 120, 14), { days: 120, at_least: true }, '超過時間軸就說至少 120 天')
+  assert.equal(quietGap(['2026-10-20'], 2, 120, 14), null, '我們才收 2 天新聞，沒資格說久違')
+  assert.equal(quietGap([], 60, 120, 14), null)
+  assert.equal(coverageDaysOf('2026-10-19T12:54:00Z', new Date('2026-10-20T13:00:00Z')), 2)
+  assert.equal(coverageDaysOf(null, new Date()), 0)
+  assert.throws(() => validateStockNewsConfig({ stock_max_degree: 2, stock_days: 7, stock_limit: 20, counts_days: 3, counts_max_ids: 60, hub_share: 0.15, timeline_days: 120, timeline_per_day: 3 }), /quiet_min_days/)
 })
