@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { itemsOf, reviewOf } from '../functions/_lib/reviews.ts'
-import { DIMS, itemNote, REVIEW_NOTE, reviewNote, scoreText, stanceTone, topOf } from '../src/cloud/pickreview.ts'
+import { DIMS, itemNote, REVIEW_NOTE, reviewNote, scoreText, stanceStrong, stanceTone, topOf } from '../src/cloud/pickreview.ts'
 
 test('T-394 四面向評分（舊資料，scale 空）：四個分數都在 1～5 才顯示；首選才帶理由', () => {
   const base = {
@@ -12,7 +12,7 @@ test('T-394 四面向評分（舊資料，scale 空）：四個分數都在 1～
   assert.deepEqual(reviewOf(base), {
     news: 3, tech: 5, chips: 5, fund: 5, total: 18, max: 5, items: [], top: true, reason: '創 52 週新高', ai: true,
     views: { news: '近期無重大消息', tech: '創 52 週新高，均線多頭排列', chips: null, fund: null },
-    stance: '偏多', conclusion: '技術與基本面雙雙走強，可觀察回檔機會',
+    stance: '偏多', split: false, conclusion: '技術與基本面雙雙走強，可觀察回檔機會',
   })
   assert.equal(reviewOf({ ...base, tech: null }), null)
   assert.equal(reviewOf({ ...base, fund: 6 }), null)
@@ -69,4 +69,16 @@ test('T-426 10 分制（D-206）：scale＝10 收 0～10、帶 20 個小項；�
   assert.match(api, /to_jsonb\(r\) ->> 'scale'/)  // 舊表還沒加欄也讀得到
   const ui = readFileSync(new URL('../src/cloud/Review.tsx', import.meta.url), 'utf8')
   assert.match(ui, /看 \{items\.length\} 項怎麼算/)
+})
+
+test('T-427 立場五級＋多空分歧（D-206 §六）：顏色看偏多／偏空、強烈的實心；split 從 API 帶出來', () => {
+  assert.deepEqual(['強烈偏多', '偏多', '中性', '偏空', '強烈偏空'].map(stanceTone), ['up', 'up', 'flat', 'down', 'down'])
+  assert.deepEqual(['強烈偏多', '偏多', '強烈偏空'].map(stanceStrong), [true, false, true])
+  const row = { news: 5, tech: 8, chips: 3, fund: 6, is_top: false, top_reason: null, source: 'model', scale: '10', items: '[]', split: 'true', stance: '中性' }
+  assert.equal(reviewOf(row)?.split, true)
+  assert.equal(reviewOf({ ...row, split: null })?.split, false)
+  const api = readFileSync(new URL('../functions/_lib/reviews.ts', import.meta.url), 'utf8')
+  assert.match(api, /to_jsonb\(r\) ->> 'split'/)
+  const ui = readFileSync(new URL('../src/cloud/Review.tsx', import.meta.url), 'utf8')
+  assert.match(ui, /多空分歧/)
 })

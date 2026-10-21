@@ -787,7 +787,7 @@ function Row({
         </small>
         {p.review?.conclusion ? (
           <small className="cq-blurb" title={REVIEW_NOTE}>
-            <StanceChip s={p.review.stance} />
+            <StanceChip s={p.review.stance} split={p.review.split} />
             <span>{p.review.conclusion}</span>
           </small>
         ) : p.blurb && (

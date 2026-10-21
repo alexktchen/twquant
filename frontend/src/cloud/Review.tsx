@@ -1,7 +1,7 @@
 // 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的畫面：名單列的四根小直條、名單上方的首選卡、
 // 個股頁的四張分數卡（10 分制可以點開看 5 個小項怎麼加減分）。
 import { Trophy } from 'lucide-react'
-import { DIMS, itemNote, reviewNote, scoreText, stanceTone, type Review, type ReviewItem } from './pickreview'
+import { DIMS, itemNote, reviewNote, scoreText, stanceStrong, stanceTone, type Review, type ReviewItem } from './pickreview'
 
 /** 四根小直條：顏色＝面向、高度＝分數。名單列用，滑過看數字。 */
 export function ScoreBars({ r, size = 'sm' }: { r: Review; size?: 'sm' | 'md' }) {
@@ -48,9 +48,18 @@ export function TopPickCard({
 }
 
 /** 立場小標：偏多／中性／偏空。 */
-export function StanceChip({ s }: { s: string | null }) {
+export function StanceChip({ s, split = false }: { s: string | null; split?: boolean }) {
   if (!s) return null
-  return <i className={`cq-stance ${stanceTone(s)}`}>{s}</i>
+  return (
+    <>
+      <i className={`cq-stance ${stanceTone(s)}${stanceStrong(s) ? ' strong' : ''}`}>{s}</i>
+      {split && (
+        <i className="cq-stance split" title="四個面向裡有的很強、有的很弱（某面向 ≥ 7 分、另一面向 ≤ 3 分）">
+          多空分歧
+        </i>
+      )}
+    </>
+  )
 }
 
 /** 一個小項的徽章：+1 紅、−1 綠、0 灰（台股紅漲綠跌）。 */
@@ -74,7 +83,7 @@ export function ReviewTiles({ r }: { r: Review }) {
     <div className="cq-rv">
       {r.conclusion && (
         <p className="cq-rv-concl">
-          <StanceChip s={r.stance} />
+          <StanceChip s={r.stance} split={r.split} />
           <span>{r.conclusion}</span>
         </p>
       )}

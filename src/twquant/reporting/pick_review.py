@@ -67,6 +67,8 @@ class Dimensions:
     facts: dict[str, list[str]] = field(default_factory=dict)
     items: dict[str, list[Item]] = field(default_factory=dict)  # 面向 → 5 個小項（D-206）
     scores: dict[str, int] = field(default_factory=dict)  # news／tech／chips／fund → 0～10
+    stance: str | None = None  # 五級立場（程式依總分定，D-206 §六）
+    split: bool = False  # 多空分歧
 
     def all_facts(self) -> list[str]:
         return [f for d in DIMS for f in self.facts.get(d, [])]
@@ -366,6 +368,17 @@ def score_dims(d: Dimensions, p: PickFacts, x: Inputs, m: Market, cfg: PickRevie
         d.scores[key] = total(its, r)
         extra = [i.text for i in its if i.text != NO_DATA and i.text not in d.facts[dim]]
         d.facts[dim] = [*d.facts[dim], *extra]
+    d.stance, d.split = stance_of(d.scores, cfg)
+
+
+def stance_of(scores: dict[str, int], cfg: PickReviewConfig) -> tuple[str, bool]:
+    """總分 → 五級立場；某面向 ≥ split_hi 且另一面向 ≤ split_lo＝多空分歧（D-206 §六）。"""
+    total_ = sum(scores.values())
+    levels = sorted(cfg.stance_levels, key=lambda lv: -lv.min)
+    label = next((lv.label for lv in levels if total_ >= lv.min), levels[-1].label)
+    vals = list(scores.values())
+    split = max(vals) >= cfg.split_hi and min(vals) <= cfg.split_lo
+    return label, split
 
 
 @dataclass
@@ -375,6 +388,7 @@ class Review:
     scores: dict[str, int] | None  # news／tech／chips／fund，0～10（規則算，D-206）；模型缺席＝None
     views: dict[str, str | None] = field(default_factory=dict)  # 每個面向一句觀點；沒過核對＝None
     stance: str | None = None
+    split: bool = False
     conclusion: str | None = None
     is_top: bool = False
     reason: str | None = None
@@ -473,16 +487,7 @@ def check_item(
             r.checks.append(f"{dim}觀點不用：{'；'.join(problems)}；原句：{getattr(got, vk)}")
         else:
             r.views[k] = text
-    total = sum(sc.values())
-    stance = str(got.stance).strip()
-    if stance not in cfg.stances:
-        r.checks.append(f"立場不是 {cfg.stances}：{stance}")
-    elif (stance == cfg.stances[0] and total < cfg.bull_min) or (
-        stance == cfg.stances[-1] and total > cfg.bear_max
-    ):
-        r.checks.append(f"立場「{stance}」跟總分 {total} 不一致")
-    else:
-        r.stance = stance
+    r.stance, r.split = d.stance, d.split
     text, problems = check_reason(
         got.conclusion,
         d,
@@ -515,6 +520,8 @@ def stock_payload(line_name: str, day: dt.date, d: Dimensions) -> str:
     parts = [
         _head(k, key, d) + "；".join(d.facts.get(k, [])) for k, key in zip(DIMS, KEYS, strict=True)
     ]
+    if d.stance:
+        parts.append(f"立場：{d.stance}" + ("（多空分歧）" if d.split else ""))
     return (
         f"名單：{line_name}（{day.isoformat()} 收盤後）\n[{d.stock_id} {d.name or ''}]\n"
         + "\n".join(parts)
@@ -678,6 +685,7 @@ def write(conn: Any, schema: str, day: dt.date, reviews: list[Review], now: dt.d
                 "total": sum(r.scores.values()) if r.scores else None,
                 **{f"{k}_view": r.views.get(k) for k in KEYS},
                 "stance": r.stance,
+                "split": r.split,
                 "conclusion": r.conclusion,
                 "is_top": r.is_top,
                 "top_reason": r.reason,
@@ -700,6 +708,7 @@ def write(conn: Any, schema: str, day: dt.date, reviews: list[Review], now: dt.d
             "total": pl.Int32,
             **dict.fromkeys(VIEW_KEYS, pl.Utf8),
             "stance": pl.Utf8,
+            "split": pl.Boolean,
             "conclusion": pl.Utf8,
             "is_top": pl.Boolean,
             "top_reason": pl.Utf8,

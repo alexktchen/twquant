@@ -240,6 +240,10 @@
 .cq .cq-stance.up { color: var(--up); background: rgba(246, 70, 93, .14); }
 .cq .cq-stance.down { color: var(--down); background: rgba(14, 203, 129, .14); }
 .cq .cq-stance.flat { color: var(--mute); background: var(--tile); }
+/* 五級立場（D-206 §六）：強烈＝實心底；多空分歧＝黃框 */
+.cq .cq-stance.up.strong { color: #fff; background: var(--up); }
+.cq .cq-stance.down.strong { color: #0b0e11; background: var(--down); }
+.cq .cq-stance.split { color: #ffc04d; background: transparent; box-shadow: inset 0 0 0 1px #ffc04d; }
 .cq-row .cq-name small.cq-blurb .cq-stance { margin-top: 0; }
 .cq-rv-concl { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; font-size: 16px; line-height: 1.5; }
 .cq-rv-concl .cq-stance { margin-top: 3px; height: 22px; font-size: 13px; }

@@ -16,6 +16,8 @@ export type Review = {
   ai: boolean
   views: { news: string | null; tech: string | null; chips: string | null; fund: string | null }
   stance: string | null
+  /** 多空分歧（D-206 §六） */
+  split?: boolean
   conclusion: string | null
 }
 
@@ -51,10 +53,13 @@ export function itemNote(i: ReviewItem): string | null {
     : null
 }
 
-/** 立場的顏色：偏多紅、偏空綠、中性灰（台股紅漲綠跌）。 */
+/** 立場的顏色：偏多紅、偏空綠、中性灰（台股紅漲綠跌）。五級（D-206 §六）的「強烈偏多／偏空」同色。 */
 export function stanceTone(s: string | null): 'up' | 'down' | 'flat' {
-  return s === '偏多' ? 'up' : s === '偏空' ? 'down' : 'flat'
+  return s?.endsWith('偏多') ? 'up' : s?.endsWith('偏空') ? 'down' : 'flat'
 }
+
+/** 「強烈偏多／強烈偏空」用實心底色強調。 */
+export const stanceStrong = (s: string | null): boolean => !!s?.startsWith('強烈')
 
 /** 這條線當天的首選（沒有就 null）。 */
 export function topOf<T extends { review?: Review | null }>(picks: T[]): T | null {

@@ -25,6 +25,8 @@ export type Review = {
   ai: boolean
   views: { news: string | null; tech: string | null; chips: string | null; fund: string | null }
   stance: string | null
+  /** 多空分歧：某面向 ≥ 7 且另一面向 ≤ 3（D-206 §六；舊資料一律 false） */
+  split: boolean
   conclusion: string | null
 }
 
@@ -46,6 +48,7 @@ type Raw = {
   conclusion?: string | null
   scale?: unknown
   items?: unknown
+  split?: unknown
 }
 
 const text = (v: string | null | undefined): string | null => (v && v.trim() ? v.trim() : null)
@@ -100,6 +103,7 @@ export function reviewOf(r: Omit<Raw, 'line' | 'stock_id'>): Review | null {
     ai: r.source === 'model',
     views: { news: text(r.news_view), tech: text(r.tech_view), chips: text(r.chips_view), fund: text(r.fund_view) },
     stance: text(r.stance),
+    split: r.split === true || r.split === 'true',
     conclusion: text(r.conclusion),
   }
 }
@@ -111,7 +115,8 @@ export async function readReviews(db: ReturnType<typeof sql>, date: string): Pro
     () => db<Raw[]>`
       SELECT line, stock_id, news, tech, chips, fund, is_top, top_reason, source,
              news_view, tech_view, chips_view, fund_view, stance, conclusion,
-             to_jsonb(r) ->> 'scale' AS scale, to_jsonb(r) -> 'items' AS items
+             to_jsonb(r) ->> 'scale' AS scale, to_jsonb(r) -> 'items' AS items,
+             to_jsonb(r) ->> 'split' AS split
       FROM serving.pick_reviews r WHERE date = ${date}::date`,
   )
   const out = new Map<string, Review>()
