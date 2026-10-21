@@ -6616,6 +6616,7 @@ def news_sentiment_label(
     n_workers = workers or int(sc["workers"])
     max_body = int(sc["max_body_chars"])
     per_batch = int(sc["batch"])
+    max_fail = int(sc["max_consecutive_failures"])
     model, url = str(sc["model"]), str(sc["ollama_url"])
     pending = ns.pending_corpus if scope == "corpus" else ns.pending_pairs
 
@@ -6631,7 +6632,7 @@ def news_sentiment_label(
 
     conn = store.connect(_load_serving())
     t0 = time.monotonic()
-    done = bad = 0
+    done = bad = streak = 0
     seen: set[tuple[str, str]] = set()
     try:
         ns.ensure_tables(conn)
@@ -6653,8 +6654,18 @@ def news_sentiment_label(
                     seen.add((p[0], p[1]))  # 失敗的這一輪不再重試（下次執行才會再撿起來）
                     if isinstance(r, str):
                         bad += 1
+                        streak += 1
                         typer.secho(f"  [!] {p[0]} {p[1]}：{r}", fg=typer.colors.YELLOW)
+                        if streak >= max_fail:
+                            # Ollama 掛了（2026-10-21 電腦重開後實見：連不上就一路把整個語料刷成「失敗、跳過」）：停下來，不白跑
+                            ex.shutdown(wait=False, cancel_futures=True)
+                            typer.secho(
+                                f"[X] 連續 {streak} 對失敗（最後一個：{r}），Ollama 可能沒在跑；已貼 {done} 對，修好後重跑會接著貼",
+                                fg=typer.colors.RED,
+                            )
+                            raise typer.Exit(1)
                         continue
+                    streak = 0
                     ns.save_label(conn, p[0], p[1], r[0], model=model, raw=r[1])
                     done += 1
                     if done % 1000 == 0:

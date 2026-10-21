@@ -452,6 +452,8 @@ hist:
     workers: 16
     # 一次撈幾對沒貼的來貼：全語料的「還沒貼」查詢一次約 12 秒（顯示卡這段時間閒著），500 一批空轉約一成，5,000 一批約 1%
     batch: 5000
+    # 連續失敗幾對就停（Ollama 沒在跑時不要一路刷過整個語料）
+    max_consecutive_failures: 50
 
 # 新聞類型（T-421；使用者 2026-10-20 選「新聞類型標籤」）：本機 Ollama 貼標 → 探針權重 news-service/config/news_types.json → 雲端 ingest 算內積。
 # 最後一類一定是 other；信心不到 min_confidence 也放 other。
