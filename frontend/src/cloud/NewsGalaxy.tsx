@@ -2,7 +2,9 @@
 // 光點＝一則新聞（台灣橘、國際藍），靠在一起＝內容相近；亮點＝被很多則提到的股票、公司、主題；線＝這則提到它。
 // 3D、預設慢慢自轉（使用者：「可以旋轉嗎」）；一指拖曳旋轉、兩指或滾輪縮放、⟳ 開關自轉；點光點或亮點浮出檢視框（點了就停住）。
 // 不迷航（使用者 2026-10-21：「有時候再旋轉很容易迷航」）：點了的那顆慢慢移到中央、之後繞著它轉、縮放也朝它；
-// 一動手（拖、縮放）就關掉自轉；拖曳轉得慢一點、上下最多翻約 43°；「回到一開始」滑回去而不是跳回去。
+// 一動手（拖、縮放）就關掉自轉；拖曳轉得慢一點；「回到一開始」滑回去而不是跳回去。
+// 上下左右都能一直轉（使用者：「應該要可以上下左右一直旋轉 現在好像會卡住180度」）：轉向存成四元數、照畫面方向轉，
+// 翻過頭頂也不會左右顛倒；往下拖＝前面的往下（跟往右拖＝前面的往右同一個手感）。
 // 亮度跟著畫面密度調（使用者：「手機看好像太亮」）。資料是排程算好的快照（一天幾次）。
 // 亮點的檢視框有「單獨看」：把提到它的新聞拎出來照主題讀、看常一起出現的（GalaxyFocus.tsx）。
 import { ExternalLink, Maximize2, Minus, Plus, RotateCw, Undo2, X } from 'lucide-react'
@@ -12,13 +14,12 @@ import { GalaxyFocus } from './GalaxyFocus'
 import {
   DRAG_RAD,
   ORIGIN,
-  PITCH_MAX,
   REF_S,
-  angleDiff,
   clusterLabelAt,
   density,
   depthAlpha,
   dockInspector,
+  dragRotate,
   ease,
   galaxySummary,
   hubClass,
@@ -28,9 +29,12 @@ import {
   pivotScreenY,
   placeLabels,
   project,
+  qFromYawPitch,
+  qSame,
+  qSlerp,
   type GalaxyData,
   type Proj,
-  type Rot,
+  type Quat,
   type Vec3,
   type View,
 } from './news-galaxy'
@@ -39,7 +43,7 @@ import './news-galaxy.css'
 
 type Sel = { kind: 'item' | 'hub'; id: string } | null
 const COL: Record<string, string> = { tw: '255,122,89', intl: '127,178,255', hubtw: '255,150,110', abroad: '140,185,255', cluster: '45,212,191', sel: '255,210,63' }
-const HOME_ROT: Rot = { yaw: 0.5, pitch: -0.3 }
+const HOME_ROT: Quat = qFromYawPitch(0.5, -0.3)
 
 /** 發光圓點：先畫好一張放射漸層，每顆用 drawImage（手機也順） */
 function sprite(rgb: string): HTMLCanvasElement {
@@ -91,11 +95,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     const seed = items.map((_, i) => [Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1, Math.abs(Math.sin(i * 78.233) * 12345.678) % 1])
     let W = 0, H = 0, dpr = 1
     let view: View = { s: 1, x: 0, y: 0 }, home: View = { s: 1, x: 0, y: 0 }
-    const rot: Rot = { ...HOME_ROT }
+    let rot: Quat = HOME_ROT
     // 轉動中心：選了東西就慢慢移到它身上；取消選取後留在原地，回到一開始才回整團的中心
     const pivot: Vec3 = { ...ORIGIN }
     let pivotGoal: Vec3 = ORIGIN
-    let goal: { yaw: number; pitch: number; s: number } | null = null
+    let goal: { q: Quat; s: number } | null = null
     let raf = 0, last = 0, t0 = performance.now(), resetSeen = 0
 
     // 標籤（DOM 比較好排版）：主題依則數、亮點台股優先；大小量一次
@@ -141,7 +145,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       const lv = live.current
       if (lv.reset !== resetSeen) {
         resetSeen = lv.reset
-        goal = { yaw: rot.yaw + angleDiff(rot.yaw, HOME_ROT.yaw), pitch: HOME_ROT.pitch, s: home.s }
+        goal = { q: HOME_ROT, s: home.s }
         pivotGoal = ORIGIN
       }
       if (lv.zoom !== 1) {
@@ -151,12 +155,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       }
       const dt = Math.min(0.05, (now - (last || now)) / 1000)
       last = now
-      if (lv.auto && !lv.sel && !drag && !goal) rot.yaw += dt * 0.12
+      if (lv.auto && !lv.sel && !drag && !goal) rot = dragRotate(rot, dt * 0.12, 0)
       if (goal) {
-        rot.yaw = ease(rot.yaw, goal.yaw, dt)
-        rot.pitch = ease(rot.pitch, goal.pitch, dt)
+        rot = qSlerp(rot, goal.q, 1 - Math.exp(-8 * dt))
         view.s = ease(view.s, goal.s, dt)
-        if (Math.abs(rot.yaw - goal.yaw) + Math.abs(rot.pitch - goal.pitch) < 1e-3 && Math.abs(view.s - goal.s) < 0.5) goal = null
+        if (qSame(rot, goal.q) > 1 - 1e-7 && Math.abs(view.s - goal.s) < 0.5) goal = null
       }
       if (lv.sel) {
         const o = lv.sel.kind === 'item' ? items[itemIdx.get(lv.sel.id) ?? -1] : hubs[hubIdx.get(lv.sel.id) ?? -1]
@@ -292,7 +295,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
 
     // 拖曳＝旋轉；兩指＝縮放；點一下＝選
     const pts = new Map<number, [number, number]>()
-    let drag: { yaw: number; pitch: number; sx: number; sy: number; d: number; s: number } | null = null
+    let drag: { sx: number; sy: number; lx: number; ly: number; d: number; s: number } | null = null
     let moved = 0
     const xy = (e: PointerEvent): [number, number] => {
       const r = stage.getBoundingClientRect()
@@ -314,7 +317,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       stage.setPointerCapture(e.pointerId)
       pts.set(e.pointerId, xy(e))
       const [x, y] = xy(e)
-      drag = { yaw: rot.yaw, pitch: rot.pitch, sx: x, sy: y, d: pinch(), s: view.s }
+      drag = { sx: x, sy: y, lx: x, ly: y, d: pinch(), s: view.s }
       moved = 0
     }
     const onMove = (e: PointerEvent) => {
@@ -327,8 +330,9 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         stopAuto()
         return
       }
-      rot.yaw = drag.yaw + (x - drag.sx) * DRAG_RAD
-      rot.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, drag.pitch + (y - drag.sy) * DRAG_RAD))
+      rot = dragRotate(rot, (x - drag.lx) * DRAG_RAD, (y - drag.ly) * DRAG_RAD)
+      drag.lx = x
+      drag.ly = y
       moved = Math.max(moved, Math.hypot(x - drag.sx, y - drag.sy))
       if (moved >= 6) stopAuto()
     }
@@ -337,7 +341,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       pts.delete(e.pointerId)
       if (pts.size) {
         const [p] = pts.values()
-        drag = { yaw: rot.yaw, pitch: rot.pitch, sx: p[0], sy: p[1], d: 0, s: view.s }
+        drag = { sx: p[0], sy: p[1], lx: p[0], ly: p[1], d: 0, s: view.s }
         return
       }
       drag = null
