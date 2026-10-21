@@ -181,3 +181,5 @@
 
 /* 清單／全景切換（T-418）：跟國際／台灣同一種分段按鈕，放在它右邊 */
 .cq-news-mode { margin-right: auto; }
+/* 直接連結捲到星雲圖時，留出上方黏住的分頁列 */
+.cq-news-galaxy-anchor { scroll-margin-top: 72px; }
