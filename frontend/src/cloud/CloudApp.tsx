@@ -7,6 +7,7 @@ import './home-v2.css'
 import './score-v2.css'
 import './news-v2.css'
 import {
+  fetchAccess,
   fetchBars,
   fetchMe,
   fetchPickDates,
@@ -51,6 +52,8 @@ import { exampleText, similarBar, similarText, spanText, type Similar } from './
 import { WarRoom } from './WarRoom'
 import { NewsPage } from './NewsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
+import { LineGroupPage } from './LineGroupPage'
+import type { Feature } from './linegroup'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
@@ -97,6 +100,8 @@ export default function CloudApp() {
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
+  // 這個帳號能用哪些功能（T-423：有 line 才顯示「LINE 群組」分頁）
+  const [features, setFeatures] = useState<Feature[]>([])
   // 追蹤股：存在帳號裡（伺服器），手機和電腦同一份
   const [watch, setWatch] = useState<WatchList | null>(null)
   const [watchErr, setWatchErr] = useState('')
@@ -141,6 +146,9 @@ export default function CloudApp() {
     fetchMe()
       .then((m) => {
         setEmail(m.email)
+        fetchAccess()
+          .then((r) => setFeatures(r.features))
+          .catch((e: Error) => console.warn('權限讀取失敗', e))
         currentPushState()
           .then(setPush)
           .catch((e: Error) => console.warn('通知狀態讀取失敗', e))
@@ -358,6 +366,11 @@ export default function CloudApp() {
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
             追蹤
           </button>
+          {features.includes('line') && (
+            <button className={tab === 'line' ? 'on' : ''} onClick={() => setTab('line')}>
+              LINE 群組
+            </button>
+          )}
         </nav>
         <div className="cq-date">
           {tab === 'watch' && (
@@ -440,6 +453,14 @@ export default function CloudApp() {
               setTab('watch')
             }}
           />
+        )
+      ) : tab === 'line' ? (
+        features.includes('line') ? (
+          <LineGroupPage refresh={refresh} />
+        ) : (
+          <main className="cq-body">
+            <p className="cq-empty">{guest ? '登入後才看得到' : '這個帳號沒有「LINE 群組」的權限'}</p>
+          </main>
         )
       ) : tab === 'score' ? (
         guest ? (

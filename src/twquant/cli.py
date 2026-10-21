@@ -7234,5 +7234,260 @@ def news_features_cmd(
     typer.secho(f"[OK] {msg}；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN)
 
 
+line_group_app = typer.Typer(
+    help="LINE 群組每日圖卡（T-423／D-204）：備用帳號（linejs，非官方）在群組聊天發名單、族群資金、晨報、盤後快訊的圖卡"
+)
+app.add_typer(line_group_app, name="line-group")
+
+
+def _line_group_cfg() -> Any:
+    from twquant.config import LineGroupConfig, load_config
+
+    return load_config(_CONFIG_DIR / "line_group.yaml", LineGroupConfig)
+
+
+def _line_group_runner(cfg: Any) -> Any:
+    from twquant.monitoring import line_group as lg
+
+    return lg.node_runner(cfg, _CONFIG_DIR.parent)
+
+
+def _line_relogin_hint(errors: Sequence[str]) -> None:
+    from twquant.monitoring import line_group as lg
+
+    if any(lg.needs_login(e) for e in errors):
+        typer.secho(
+            "憑證失效（掉線或 refresh token 用不了）：本機重跑 `twquant line-group login` 掃 QR",
+            fg=typer.colors.YELLOW,
+        )
+
+
+@line_group_app.command("login")
+def line_group_login() -> None:
+    """掃 QR 登入發文帳號（本機跑；用備用帳號的手機掃、輸入 PIN）→ 憑證存雲端 web.line_account。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.errors import ExecutionError
+    from twquant.monitoring import line_group as lg
+
+    cfg = _line_group_cfg()
+    out = _line_group_runner(cfg)("login", {}, None)
+    if out.fatal is not None or out.credential is None:
+        raise ExecutionError(f"LINE 登入失敗：{out.fatal or '轉接器沒有回憑證'}")
+    conn = store.connect_cloud(_load_serving())
+    try:
+        lg.ensure_tables(conn, cfg.web_schema)
+        lg.save_account(conn, cfg.web_schema, out.credential, now=now_tw(), profile=out.profile)
+        lg.set_account_status(conn, cfg.web_schema, paused_until=None, last_error=None)
+    finally:
+        conn.close()
+    who = out.profile.get("displayName") or out.profile.get("mid") or "?"
+    typer.secho(
+        f"[OK] 已登入「{who}」，憑證存在雲端 {cfg.web_schema}.line_account", fg=typer.colors.GREEN
+    )
+    typer.echo(
+        "下一步：把這個帳號拉進群組，跑 `twquant line-group groups`，再到網站「LINE 群組」分頁勾要發的群組"
+    )
+
+
+@line_group_app.command("groups")
+def line_group_groups() -> None:
+    """同步發文帳號加入的群組到 web.line_groups（順便接受邀請）；要發哪些在網站「LINE 群組」分頁勾。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.monitoring import line_group as lg
+
+    cfg = _line_group_cfg()
+    conn = store.connect_cloud(_load_serving())
+    try:
+        out = lg.sync_groups(conn, cfg, _line_group_runner(cfg), now_fn=now_tw)
+        enabled = set(lg.enabled_groups(conn, cfg.web_schema)) if out else set()
+    finally:
+        conn.close()
+    if out is None:
+        typer.echo("還沒登入發文帳號（twquant line-group login），或帳號正被另一班占著；略過同步")
+        return
+    if out.fatal is not None:
+        typer.secho(f"[FAIL] 列群組失敗：{out.fatal}", fg=typer.colors.RED)
+        _line_relogin_hint([out.fatal])
+        raise typer.Exit(1)
+    typer.echo(f"帳號：{out.profile.get('displayName', '?')}（{out.profile.get('mid', '?')}）")
+    if not out.groups:
+        typer.echo("沒有加入任何群組：先用手機把這個帳號拉進群組")
+    for g in out.groups:
+        mark = "發" if g["homeId"] in enabled else "不發"
+        typer.echo(f"  [{mark}] {g['name']}  {g['homeId']}")
+
+
+@line_group_app.command("enqueue")
+def line_group_enqueue(
+    kind: str = typer.Option(..., "--kind", help="picks｜groups｜morning｜evening"),
+    date: str = typer.Option(..., "--date", help="交易日／晨報日 YYYY-MM-DD"),
+    preview: str = typer.Option(
+        "", "--preview", help="只畫圖存到這個 PNG 路徑（絕對路徑），不排隊、不管有沒有勾群組"
+    ),
+) -> None:
+    """畫好圖卡排進 web.line_posts（同一天同一種同一群組只排一次）；沒勾群組、還沒好或沒東西可發就略過。"""
+    from twquant.config import PushConfig, load_config
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.monitoring import line_card as lc
+    from twquant.monitoring import line_group as lg
+    from twquant.monitoring import push_notify as pn
+    from twquant.monitoring.line_card import CardSection
+    from twquant.reporting.pick_board import PickBoardConfig
+
+    if kind not in lg.KINDS:
+        raise typer.BadParameter(f"--kind 只能是 {'｜'.join(lg.KINDS)}，拿到 {kind}")
+    cfg = _line_group_cfg()
+    if not cfg.kinds[kind].enabled and not preview:
+        typer.echo(f"{kind} 在 configs/line_group.yaml 關著，不發")
+        return
+    day = dt.date.fromisoformat(date)
+    scfg = _load_serving()
+    schema = cfg.web_schema
+    conn = store.connect_cloud(scfg)
+    try:
+        homes: list[str] = []
+        if not preview:
+            lg.ensure_tables(conn, schema)
+            enabled = lg.enabled_groups(conn, schema)
+            done = lg.already_queued(conn, schema, day, kind, enabled)
+            homes = [h for h in enabled if h not in done]
+            if not homes:
+                why = "這天已經排過" if enabled else "網站上沒有勾要發的群組"
+                typer.echo(f"{day} {kind}：{why}，不排")
+                return
+        sections: tuple[CardSection, ...]
+        if kind == "picks":
+            board = load_config(_CONFIG_DIR / "pick_board.yaml", PickBoardConfig)
+            lines = [(s.code, s.name) for s in board.strategies]
+            loaded = lg.load_picks(conn, scfg.pg_schema, day, lines)
+            if loaded is None:
+                typer.echo(f"{day} 還沒有名單，不發")
+                return
+            sections = lg.picks_sections(
+                lines, loaded[0], loaded[1], rows_per_line=cfg.picks_rows_per_line
+            )
+        elif kind == "groups":
+            push = load_config(_CONFIG_DIR / "push.yaml", PushConfig)
+            hot = pn.load_hot_groups(conn, scfg.pg_schema, day, push.group_min_picks)
+            if not hot:
+                typer.echo(f"{day} 名單或族群資金還沒算好、或沒有符合條件的族群，不發")
+                return
+            sections = lg.groups_sections(hot, max_listed=push.group_max_listed)
+        else:
+            brief = lg.load_brief(conn, scfg.pg_schema, day, kind)
+            if brief is None:
+                typer.echo(f"{day} 還沒有{lg.BRIEF_KINDS[kind][1]}，不發")
+                return
+            sections = lg.brief_sections(day, kind, brief)
+        card = lg.make_card(lg.card_title(day, kind), sections, cfg)
+        png, width, height = lc.render_card(card, cfg.card, lc.pick_fonts(cfg.card))
+        alt = lg.alt_text(card)
+        if preview:
+            Path(preview).write_bytes(png)
+            typer.echo(f"{alt}\n→ {preview}（{width}×{height}，{len(png) // 1024} KB）")
+            return
+        now = now_tw()
+        token = lg.save_card(conn, schema, day, kind, png, (width, height), now)
+        added = lg.enqueue(
+            conn,
+            schema,
+            day,
+            kind,
+            homes,
+            card_token=token,
+            alt=alt,
+            link=cfg.kinds[kind].link,
+            now=now,
+            stale_hours=cfg.kinds[kind].stale_hours,
+        )
+        pruned = lg.prune_cards(conn, schema, now.date(), cfg.card_keep_days)
+    finally:
+        conn.close()
+    typer.echo(
+        f"{day} {kind}：排進 {added} 則（圖卡 {len(png) // 1024} KB）"
+        + (f"；清掉 {pruned} 張舊圖卡" if pruned else "")
+    )
+
+
+@line_group_app.command("send")
+def line_group_send() -> None:
+    """撿 web.line_posts 到期的貼文送出（排程在 enqueue 之後呼叫；要先 `npm ci --prefix line-poster`）。"""
+    import time as _time
+
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.monitoring import line_group as lg
+
+    cfg = _line_group_cfg()
+    conn = store.connect_cloud(_load_serving())
+    try:
+        res = lg.send_due(conn, cfg, _line_group_runner(cfg), now_fn=now_tw, sleep=_time.sleep)
+    finally:
+        conn.close()
+    typer.echo(
+        f"送出 {res.sent}（其中改發文字 {res.as_text}）、還在排隊 {res.left}"
+        + (f"（{res.note}）" if res.note else "")
+    )
+    if res.failed:
+        typer.secho("[FAIL] " + "；".join(res.failed), fg=typer.colors.RED)
+        _line_relogin_hint(res.failed)
+        raise typer.Exit(1)
+
+
+@line_group_app.command("status")
+def line_group_status(
+    limit: int = typer.Option(10, help="列最近幾則"),
+) -> None:
+    """發文帳號狀態、群組與最近的貼文（排隊／已送／失敗）。網站「LINE 群組」分頁看的是同一份。"""
+    from twquant.conventions import TZ
+    from twquant.data.serving import store
+    from twquant.monitoring import line_group as lg
+
+    cfg = _line_group_cfg()
+    conn = store.connect_cloud(_load_serving())
+    try:
+        lg.ensure_tables(conn, cfg.web_schema)
+        acct = lg.account_state(conn, cfg.web_schema)
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT name, enabled, present FROM "{cfg.web_schema}".line_groups ORDER BY name'
+            )
+            groups = cur.fetchall()
+            cur.execute(
+                "SELECT id, date, kind, home_id, status, via, attempts, last_error "
+                f'FROM "{cfg.web_schema}".line_posts ORDER BY id DESC LIMIT %s',
+                (limit,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    if not acct:
+        typer.echo("還沒登入發文帳號（twquant line-group login）")
+    else:
+        typer.echo(
+            f"帳號 {acct['display_name']}（{acct['mid']}）"
+            f"憑證更新 {acct['updated_at'].astimezone(TZ):%Y-%m-%d %H:%M}"
+            + (
+                f"；停到 {acct['paused_until'].astimezone(TZ):%m-%d %H:%M}"
+                if acct["paused_until"]
+                else ""
+            )
+            + (f"；上次失敗：{acct['last_error']}" if acct["last_error"] else "")
+        )
+    for name, enabled, present in groups:
+        typer.echo(
+            f"  群組 [{'發' if enabled else '不發'}] {name}"
+            + ("" if present else "（帳號已不在群組）")
+        )
+    for r in rows:
+        err = f"  {r[7]}" if r[7] else ""
+        typer.echo(
+            f"  #{r[0]} {r[1]} {r[2]:<8} {r[3][:10]}… {r[4]}{'/' + r[5] if r[5] else ''} 試{r[6]}次{err}"
+        )
+
+
 if __name__ == "__main__":
     app()

@@ -49,6 +49,9 @@ serving = [  # 供應層 PG（SPEC-009）；唯 data/serving 與 monitoring/pg_s
 push = [
     "pywebpush>=2.0",
 ]
+line = [  # LINE 群組每日圖卡（T-423）；只有 monitoring/line_card 用
+    "pillow>=11.0",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu124"
