@@ -198,6 +198,8 @@ button.cq-news-type.on { border-color: currentColor; box-shadow: inset 0 0 0 1px
 .cq-news-mode { margin-right: auto; }
 /* 直接連結捲到星雲圖時，留出上方黏住的分頁列 */
 .cq-news-galaxy-anchor { scroll-margin-top: 72px; }
+/* 星雲圖滿版時它接在新聞欄後面（不在欄內），欄底的留白改由星雲圖自己留 */
+.cq-news.cq-news-gx { padding-bottom: 0; }
 
 /* 久違的消息（T-419）：熱度卡上的小標 */
 .cq-dg-main i.q { color: #ffd23f; background: rgba(255, 210, 63, .14); }
