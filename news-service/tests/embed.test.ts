@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   assignCluster,
+  assignThread,
   embedPending,
   embedText,
   mergeSimilar,
@@ -14,6 +15,7 @@ import {
   type EmbedSource,
   type EmbeddingRow,
   type Neighbor,
+  type ThreadRow,
 } from '../src/embed.ts'
 
 const cfg: EmbedConfig = {
@@ -25,6 +27,7 @@ const cfg: EmbedConfig = {
   input_neurons_per_1m: 1075,
   retention_days: 45,
   cluster: { min_score: 0.85, window_hours: 72, exclude_sources: ['fed-press'] },
+  thread: { min_score: 0.78, window_days: 14 },
   similar: { limit: 3, min_score: 0.6 },
   search: { limit: 20, max_query_chars: 10, min_score: 0.4 },
 }
@@ -84,6 +87,8 @@ test('AC5 同事件合併只新併舊：達門檻併進最像那則的群、未�
 test('ingest 第五步：依時間先後一則一則寫（後面的找得到前面的當同事件）、記用量、額度用完就停', async () => {
   const saved: { e: EmbeddingRow; c: ClusterRow }[] = []
   const usage: unknown[] = []
+  const centroids: string[] = []
+  const threads: ThreadRow[] = []
   const texts: string[][] = []
   const deps = {
     now: () => new Date('2026-10-20T10:00:00Z'),
@@ -99,9 +104,14 @@ test('ingest 第五步：依時間先後一則一則寫（後面的找得到前�
     save: async (e: EmbeddingRow, c: ClusterRow) => void saved.push({ e, c }),
     saveUsage: async (u: unknown) => void usage.push(u),
     prune: async (days: number) => (days === 45 ? 7 : -1),
+    upsertCentroid: async (cid: string) => void centroids.push(cid),
+    nearestCluster: async () => null,
+    saveThread: async (t: ThreadRow) => void threads.push(t),
   }
   const r = await embedPending(cfg, 2500, deps)
-  assert.deepEqual(r, { embedded: 3, clusters_joined: 2, budget_stop: false, pruned: 7 }, '先刪超過保留期的向量（照設定的天數）')
+  assert.deepEqual(r, { embedded: 3, clusters_joined: 2, threads_joined: 0, budget_stop: false, pruned: 7 }, '先刪超過保留期的向量（照設定的天數）')
+  assert.deepEqual(centroids, ['a', 'a', 'a'], '每則都更新它那群的中心')
+  assert.deepEqual(threads, [{ cluster_id: 'a', thread_id: 'a', seed_cluster_id: null, score: null }], '只有新開的群才算線；沒有舊群就自己一條')
   assert.deepEqual(texts.map((t) => t.length), [2, 1], '一批 batch 則')
   assert.deepEqual(saved.map((s) => s.c.cluster_id), ['a', 'a', 'a'], '第一則開群，後面兩則併進去')
   assert.equal(saved[0].e.vec, '[1.000000,0,0,0]')
@@ -109,7 +119,7 @@ test('ingest 第五步：依時間先後一則一則寫（後面的找得到前�
   assert.deepEqual(usage[0], { ts: '2026-10-20T10:00:00.000Z', task: 'news_embed', model_id: '@cf/baai/bge-m3', input_tokens: 100, output_tokens: 0, neurons: 0.11 })
 
   const stop = await embedPending(cfg, 2500, { ...deps, usedToday: async () => 2500 })
-  assert.deepEqual(stop, { embedded: 0, clusters_joined: 0, budget_stop: true, pruned: 7 }, '額度用完照樣刪過期的（不花額度）')
+  assert.deepEqual(stop, { embedded: 0, clusters_joined: 0, threads_joined: 0, budget_stop: true, pruned: 7 }, '額度用完照樣刪過期的（不花額度）')
 })
 
 test('AC5 相似新聞：同事件在前、再補向量最近的；去重、去掉自己、低於門檻不列、最多 limit', () => {
@@ -150,4 +160,13 @@ test('設定檢查', () => {
   assert.throws(() => validateEmbedConfig({ ...cfg, cluster: { ...cfg.cluster, min_score: 1.2 } }), /cluster/)
   assert.throws(() => validateEmbedConfig({ ...cfg, similar: { limit: 0, min_score: 0.5 } }), /similar/)
   assert.throws(() => validateEmbedConfig({ ...cfg, search: { ...cfg.search, max_query_chars: 0 } }), /search/)
+})
+
+test('T-420 事件追蹤：新開的群接上近期最像的舊群那條線（≥ min_score）；不夠像或沒有舊群就自己一條；不會接到自己', () => {
+  const th = cfg.thread
+  assert.deepEqual(assignThread('c9', { cluster_id: 'c1', thread_id: 't1', score: 0.81 }, th), { cluster_id: 'c9', thread_id: 't1', seed_cluster_id: 'c1', score: 0.81 })
+  assert.deepEqual(assignThread('c9', { cluster_id: 'c1', thread_id: 't1', score: 0.7 }, th), { cluster_id: 'c9', thread_id: 'c9', seed_cluster_id: null, score: null })
+  assert.deepEqual(assignThread('c9', null, th).thread_id, 'c9')
+  assert.deepEqual(assignThread('c9', { cluster_id: 'c9', thread_id: 't1', score: 0.99 }, th).thread_id, 'c9')
+  assert.throws(() => validateEmbedConfig({ ...cfg, thread: { min_score: 0.78, window_days: 0 } }), /thread/)
 })

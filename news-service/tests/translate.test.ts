@@ -202,3 +202,14 @@ test('T-401 AC4：今天的額度用完就停、不呼叫模型、不寫任何�
   assert.equal(w.calls.length, 0)
   assert.equal(w.saved.length, 0)
 })
+
+test('2026-10-21：翻譯只能用到 daily_neurons − reserve_for_embed，剩下的留給向量', async () => {
+  const cap = cfg.daily_neurons - cfg.reserve_for_embed
+  const ok = reply([{ id: 'a1', title_zh: '輝達大漲4%', summary_zh: '35億美元交易後晶片廠創新高' }])
+  const stop = world([ok], { pending: [src], used: cap })
+  assert.deepEqual(await translatePending(cfg, stop.deps), { translated: 0, failed: 0, budget_stop: true })
+  assert.equal(stop.calls.length, 0)
+  const go = world([ok], { pending: [src], used: cap - 1 })
+  assert.deepEqual(await translatePending(cfg, go.deps), { translated: 1, failed: 0, budget_stop: false })
+  assert.equal(go.calls.length, 1)
+})

@@ -15,6 +15,9 @@ export type TranslateConfig = {
   max_tokens: number
   /** 新聞這邊每天（UTC 日，Workers AI 免費額度的日界）最多用多少 Neurons（D-200 §五） */
   daily_neurons: number
+  /** 留給向量（ingest 第五步）的額度：翻譯用到 daily_neurons − reserve_for_embed 就停。2026-10-20 實見：新聞多的日子翻譯 13:30 UTC
+   *  就把 2,500 用完，向量、同事件、事件追蹤全停到隔天；向量一天只要約 300 Neurons。 */
+  reserve_for_embed: number
   input_neurons_per_1m: number
   output_neurons_per_1m: number
   /** 英文 → 台灣慣用譯名 */
@@ -37,6 +40,7 @@ export function validateTranslateConfig(x: unknown): TranslateConfig {
   if (!c || typeof c.model !== 'string' || !c.model.startsWith('@cf/')) fail('model')
   for (const k of ['batch', 'per_run_limit', 'max_tokens'] as const) if (!Number.isInteger(c![k]) || (c![k] as number) < 1) fail(k)
   for (const k of ['daily_neurons', 'input_neurons_per_1m', 'output_neurons_per_1m'] as const) if (typeof c![k] !== 'number' || (c![k] as number) <= 0) fail(k)
+  if (typeof c!.reserve_for_embed !== 'number' || c!.reserve_for_embed < 0 || c!.reserve_for_embed >= c!.daily_neurons!) fail('reserve_for_embed')
   if (typeof c!.system_suffix !== 'string') fail('system_suffix')
   if (typeof c!.s2t_pairs !== 'string' || [...c!.s2t_pairs].length < 100 || [...c!.s2t_pairs].length % 2 !== 0) fail('s2t_pairs')
   for (const k of ['glossary', 'mainland_terms'] as const) {
@@ -355,7 +359,7 @@ export async function translatePending(cfg: TranslateConfig, deps: TranslateDeps
   const res: TranslateResult = { translated: 0, failed: 0, budget_stop: false }
 
   const call = async (items: Pending[]): Promise<Map<string, Translated> | null> => {
-    if (used >= cfg.daily_neurons) {
+    if (used >= cfg.daily_neurons - cfg.reserve_for_embed) {
       res.budget_stop = true
       return null
     }
