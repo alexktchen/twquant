@@ -1,15 +1,19 @@
 // 「LINE 群組」分頁（T-423／D-204）：發文帳號狀態、勾要發的群組、最近發出去的圖卡。
 // 只有能用 line 功能的角色看得到（分頁按鈕由 /api/access 決定，資料端點自己再擋一次）。
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Images, UserRound, Users } from 'lucide-react'
 import './line-group.css'
-import { fetchLineStatus, setLineGroup, startLineLogin } from './api'
+import { fetchLineStatus, setLineGroup, startLineLogin, syncLineGroups } from './api'
 import { Section } from './Section'
 import {
   KIND_LABEL,
   LOGIN_POLL_MS,
+  GROUP_FIND_MIN,
+  SYNC_WAIT_MS,
   cardUrl,
+  findGroups,
   groupsMeta,
+  latestSync,
   loginActive,
   loginStep,
   shortTime,
@@ -24,6 +28,10 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [loginErr, setLoginErr] = useState('')
   const [tick, setTick] = useState(0)
+  // 等群組同步：按下去時的「上次同步時間」（清單的同步時間變了就是同步好了）；null＝沒在等
+  const [syncing, setSyncing] = useState<string | null>(null)
+  const [syncNote, setSyncNote] = useState('')
+  const [find, setFind] = useState('')
 
   useEffect(() => {
     let stale = false
@@ -39,8 +47,43 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
     }
   }, [refresh, tick])
 
-  // 登入進行中：每幾秒重抓一次，QR 與 PIN 一出來就顯示
-  const polling = loginActive(data?.login ?? null)
+  const lastSync = latestSync(data?.groups ?? [])
+  useEffect(() => {
+    if (syncing !== null && lastSync !== syncing) {
+      setSyncing(null)
+      setSyncNote(`已更新（${shortTime(lastSync)}）`)
+    }
+  }, [lastSync, syncing])
+  useEffect(() => {
+    if (syncing === null) return
+    const t = window.setTimeout(() => {
+      setSyncing(null)
+      setSyncNote('等了 3 分鐘還沒更新：到 GitHub Actions 看 line-login 的執行紀錄')
+    }, SYNC_WAIT_MS)
+    return () => window.clearTimeout(t)
+  }, [syncing])
+  // 登入成功後工作流程會接著同步群組：跟著等，清單出來就顯示
+  const loggingIn = loginActive(data?.login ?? null)
+  const wasLoggingIn = useRef(false)
+  useEffect(() => {
+    if (wasLoggingIn.current && !loggingIn && data?.login?.status === 'done') setSyncing(lastSync)
+    wasLoggingIn.current = loggingIn
+  }, [loggingIn, data?.login?.status, lastSync])
+
+  const sync = () => {
+    setSyncNote('')
+    setBusy('sync')
+    syncLineGroups()
+      .then(() => {
+        setSyncing(lastSync)
+        setSyncNote('已送出，約 1 分鐘後更新…')
+      })
+      .catch((e: Error) => setSyncNote(e.message))
+      .finally(() => setBusy(null))
+  }
+
+  // 登入或同步進行中：每幾秒重抓一次，QR、PIN、群組清單一出來就顯示
+  const polling = loggingIn || syncing !== null
   useEffect(() => {
     if (!polling) return
     const id = window.setInterval(() => setTick((n) => n + 1), LOGIN_POLL_MS)
@@ -86,32 +129,47 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
               )}
               <LoginPanel login={data.login} />
               {loginErr && <p className="cq-lg-bad">{loginErr}</p>}
-              <button className="cq-lg-btn" onClick={login} disabled={busy !== null || polling}>
-                {polling ? '登入中…' : a ? '重新登入' : '登入'}
+              <button className="cq-lg-btn" onClick={login} disabled={busy !== null || loggingIn}>
+                {loggingIn ? '登入中…' : a ? '重新登入' : '登入'}
               </button>
             </Section>
             <Section icon={Users} title="要發的群組" meta={groupsMeta(data.groups)}>
               {data.groups.length === 0 ? (
-                <p className="cq-lg-hint">
-                  把發文帳號拉進群組，下一班排程（或本機 <code>twquant line-group groups</code>）就會列在這裡；新群組預設不發。
-                </p>
+                <p className="cq-lg-hint">把發文帳號拉進群組，再按「同步群組」就會列在這裡（每一班排程也會自動同步）；新群組預設不發。</p>
               ) : (
-                <ul className="cq-lg-groups">
-                  {data.groups.map((g) => (
-                    <li key={g.home_id} className={g.present ? '' : 'gone'}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={g.enabled}
-                          disabled={busy !== null || !g.present}
-                          onChange={(e) => toggle(g.home_id, e.target.checked)}
-                        />
-                        <span>{g.name}</span>
-                      </label>
-                      {!g.present && <em>帳號已不在群組</em>}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {data.groups.length > GROUP_FIND_MIN && (
+                    <input
+                      className="cq-lg-find"
+                      type="search"
+                      placeholder="找群組（勾了的一直留著）"
+                      value={find}
+                      onChange={(e) => setFind(e.target.value)}
+                    />
+                  )}
+                  <ul className="cq-lg-groups">
+                    {findGroups(data.groups, find).map((g) => (
+                      <li key={g.home_id} className={g.present ? '' : 'gone'}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={g.enabled}
+                            disabled={busy !== null || !g.present}
+                            onChange={(e) => toggle(g.home_id, e.target.checked)}
+                          />
+                          <span>{g.name}</span>
+                        </label>
+                        {!g.present && <em>帳號已不在群組</em>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {syncNote && <p className="cq-lg-hint">{syncNote}</p>}
+              {a && (
+                <button className="cq-lg-btn" onClick={sync} disabled={busy !== null || syncing !== null}>
+                  {syncing !== null ? '同步中…' : '同步群組'}
+                </button>
               )}
             </Section>
           </>

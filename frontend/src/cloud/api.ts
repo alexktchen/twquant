@@ -62,6 +62,9 @@ export const fetchLineStatus = () => get<LineStatus>('/api/line')
 /** 從網站登入 LINE 發文帳號：觸發 GitHub Actions，QR 與 PIN 之後從 fetchLineStatus 的 login 讀。 */
 export const startLineLogin = () => get<LineLogin | null>('/api/line/login', 'POST', {})
 
+/** 同步群組清單（觸發 GitHub Actions，約 1 分鐘後 fetchLineStatus 的 groups 才會更新）。 */
+export const syncLineGroups = () => get<{ ok: boolean }>('/api/line/sync', 'POST', {})
+
 /** 勾／取消要發的群組。 */
 export const setLineGroup = (homeId: string, enabled: boolean) =>
   get<LineGroupRow>(`/api/line/groups/${encodeURIComponent(homeId)}`, 'PUT', { enabled })

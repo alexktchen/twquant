@@ -1,5 +1,9 @@
 /* 「LINE 群組」分頁（T-423） */
-.cq-lg .cq-lg-side { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+/* 左欄自己捲（群組可能幾十個）；.cq-list 預設不捲、靠裡面的 ul 捲，這裡的 ul 沒有固定高度 */
+.cq-lg .cq-lg-side { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow-y: auto; }
+.cq-lg .cq-lg-side > * { flex: none; }
+.cq-lg .cq-lg-groups { overflow: visible; flex: none; }
+.cq-lg-find { width: 100%; box-sizing: border-box; margin: 4px 0 6px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 13.5px; }
 .cq-lg-acct b { font-size: 15px; }
 .cq-lg-hint { color: var(--mute); font-size: 13px; line-height: 1.6; margin: 4px 0 0; }
 .cq-lg-hint code { color: var(--text); }
