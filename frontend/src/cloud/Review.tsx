@@ -1,13 +1,14 @@
-// 名單四面向評分與 AI 首選（T-394／D-196）的畫面：名單列的四根小直條、名單上方的首選卡、個股頁的四張分數卡。
+// 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-205）的畫面：名單列的四根小直條、名單上方的首選卡、
+// 個股頁的四張分數卡（10 分制可以點開看 5 個小項怎麼加減分）。
 import { Trophy } from 'lucide-react'
-import { DIMS, MAX_SCORE, REVIEW_NOTE, scoreText, stanceTone, type Review } from './pickreview'
+import { DIMS, itemNote, reviewNote, scoreText, stanceTone, type Review, type ReviewItem } from './pickreview'
 
 /** 四根小直條：顏色＝面向、高度＝分數。名單列用，滑過看數字。 */
 export function ScoreBars({ r, size = 'sm' }: { r: Review; size?: 'sm' | 'md' }) {
   return (
     <span className={`cq-s4 cq-s4-${size}`} title={`AI 評分：${scoreText(r)}`} aria-label={`AI 評分 ${scoreText(r)}`}>
       {DIMS.map((d) => (
-        <i key={d.key} style={{ height: `${(r[d.key] / MAX_SCORE) * 100}%`, background: d.color }} />
+        <i key={d.key} style={{ height: `${(r[d.key] / r.max) * 100}%`, background: d.color }} />
       ))}
     </span>
   )
@@ -28,7 +29,7 @@ export function TopPickCard({
   onClick: () => void
 }) {
   return (
-    <button className={`cq-toppick${on ? ' on' : ''}`} onClick={onClick} title={REVIEW_NOTE}>
+    <button className={`cq-toppick${on ? ' on' : ''}`} onClick={onClick} title={reviewNote(r)}>
       <span className="cq-toppick-icon">
         <Trophy size={18} strokeWidth={2.2} aria-hidden="true" />
       </span>
@@ -52,7 +53,22 @@ export function StanceChip({ s }: { s: string | null }) {
   return <i className={`cq-stance ${stanceTone(s)}`}>{s}</i>
 }
 
-/** 個股頁：結論（含立場）＋四張分數卡（分數、5 格量表、一句觀點）。 */
+/** 一個小項的徽章：+1 紅、−1 綠、0 灰（台股紅漲綠跌）。 */
+function ItemRow({ i }: { i: ReviewItem }) {
+  const tone = i.points > 0 ? 'up' : i.points < 0 ? 'down' : 'flat'
+  const note = itemNote(i)
+  return (
+    <li className="cq-rv-item">
+      <i className={`cq-rv-pt ${tone}`}>{i.points > 0 ? '+1' : i.points < 0 ? '−1' : '0'}</i>
+      <span>
+        <b>{i.name}</b> {i.text}
+        {note && <small className="cq-rv-itemnote">{note}</small>}
+      </span>
+    </li>
+  )
+}
+
+/** 個股頁：結論（含立場）＋四張分數卡（分數、量表、一句觀點；10 分制可點開看 5 個小項）。 */
 export function ReviewTiles({ r }: { r: Review }) {
   return (
     <div className="cq-rv">
@@ -63,21 +79,34 @@ export function ReviewTiles({ r }: { r: Review }) {
         </p>
       )}
       <div className="cq-rv-tiles">
-        {DIMS.map((d) => (
-          <div key={d.key} className="cq-rv-tile" style={{ ['--c' as string]: d.color }}>
-            <span className="cq-rv-name">{d.name}</span>
-            <b>
-              {r[d.key]}
-              <small>／{MAX_SCORE}</small>
-            </b>
-            <span className="cq-rv-meter" aria-hidden="true">
-              {Array.from({ length: MAX_SCORE }, (_, i) => (
-                <i key={i} className={i < r[d.key] ? 'on' : ''} />
-              ))}
-            </span>
-            {r.views[d.key] && <span className="cq-rv-view">{r.views[d.key]}</span>}
-          </div>
-        ))}
+        {DIMS.map((d) => {
+          const items = r.items.filter((i) => i.dim === d.key)
+          return (
+            <div key={d.key} className="cq-rv-tile" style={{ ['--c' as string]: d.color }}>
+              <span className="cq-rv-name">{d.name}</span>
+              <b>
+                {r[d.key]}
+                <small>／{r.max}</small>
+              </b>
+              <span className="cq-rv-meter" aria-hidden="true">
+                {Array.from({ length: r.max }, (_, i) => (
+                  <i key={i} className={`${i < r[d.key] ? 'on' : ''}${r.max === 10 && i === 4 ? ' mid' : ''}`} />
+                ))}
+              </span>
+              {r.views[d.key] && <span className="cq-rv-view">{r.views[d.key]}</span>}
+              {items.length > 0 && (
+                <details className="cq-rv-items">
+                  <summary>看 {items.length} 項怎麼算</summary>
+                  <ul>
+                    {items.map((i) => (
+                      <ItemRow key={i.name} i={i} />
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )
+        })}
       </div>
       {r.top && r.reason && (
         <p className="cq-rv-top">
@@ -87,7 +116,7 @@ export function ReviewTiles({ r }: { r: Review }) {
           </span>
         </p>
       )}
-      <p className="cq-rv-note">{REVIEW_NOTE}</p>
+      <p className="cq-rv-note">{reviewNote(r)}</p>
     </div>
   )
 }

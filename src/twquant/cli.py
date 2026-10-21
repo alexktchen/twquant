@@ -1930,6 +1930,16 @@ def _run_daily_pipeline(
         # 續傳冪等；PG 未啟用/不可達或來源失敗不擋主線（見 _run_fubon_day）。
         return _run_fubon_day(day)
 
+    def _main_force_step() -> str:
+        # T-424／D-205：當天分點 → 隔日沖事件累加 ＋ 每檔主力淨買超（名單評分的籌碼「主力」項讀它）。
+        # 排在「券商買賣超」之後；沒有當天分點就略過。非關鍵步驟。
+        from twquant.data.serving import store
+
+        scfg = _load_serving()
+        if not scfg.enabled or not store.ping(scfg):
+            return "PG 不可達，略過"
+        return _main_force_for_day(day)
+
     def _etf_units_step() -> str:
         # T-335／SPEC-016：ETF 已發行單位數（資金流研究）。不依賴當天行情，非關鍵步驟。
         return _run_etf_units_day(day)
@@ -2302,6 +2312,7 @@ def _run_daily_pipeline(
         PipelineStep("ETF 單位數", _etf_units_step),
         PipelineStep("ETF 持股", _etf_holdings_step),
         PipelineStep("券商買賣超", _broker_step),
+        PipelineStep("主力買賣超", _main_force_step),
         PipelineStep("訊號生成", _signal_step, skip_if_degraded=True),
         PipelineStep("指數", _index_step),
         PipelineStep("月營收", _revenue_step),
@@ -3597,6 +3608,28 @@ def _stock_groups_refresh(force: bool) -> str:
         f"{len(groups)} 檔、{len({g.group for g in groups})} 個族群"
         f"（{named} 檔對上產業鏈，{len(chains)} 條鏈）"
     )
+
+
+def _main_force_params() -> dict[str, object]:
+    """隔日沖門檻：沿用分點因子登記的預設值（同 D-203）。"""
+    import twquant.factors.builtins  # noqa: F401  # 匯入觸發因子註冊
+    from twquant.factors.registry import get
+
+    return dict(get("chip.broker_concentration_20d").params)
+
+
+def _main_force_for_day(day: dt.date) -> str:
+    """T-424：`day` 的隔日沖事件與主力淨買超 → broker_daytrade_events／main_force_daily。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.main_force import refresh_day
+
+    scfg = _load_serving()
+    conn = store.connect(scfg)
+    try:
+        return refresh_day(conn, scfg.pg_schema, day, _main_force_params(), now_tw())
+    finally:
+        conn.close()
 
 
 def _group_flow_for_day(day: dt.date) -> str:
@@ -5259,6 +5292,43 @@ def serving_broker_flow(
     finally:
         conn.close()
     typer.secho(f"[OK] broker_flow_daily：{from_}~{to} 共 {n} 列", fg=typer.colors.GREEN)
+
+
+@serving_app.command("main-force-seed")
+def serving_main_force_seed(
+    as_of: str = typer.Option(
+        ..., "--as-of", help="種子日（含）YYYY-MM-DD：通常是地端分點最新一天"
+    ),
+    sessions: int = typer.Option(10, help="另寫最近幾個交易日的主力淨買超"),
+    cloud: bool = typer.Option(False, "--cloud", help="寫到雲端（Supabase）；讀的永遠是地端全歷史"),
+    copy_trades: int = typer.Option(
+        0, help="另抄最近幾個交易日的分點明細過去（雲端第一天算隔日沖要前一天的明細）"
+    ),
+) -> None:
+    """T-424／D-205：用地端 broker_trades 全歷史寫隔日沖累計種子與最近幾天的主力淨買超。"""
+    from twquant.conventions import now_tw
+    from twquant.data.serving import store
+    from twquant.data.serving.main_force import seed
+
+    cfg = _load_serving()
+    src = store.connect(cfg)
+    dst = store.connect_cloud(cfg) if cloud else src
+    try:
+        msg = seed(
+            src,
+            dst,
+            cfg.pg_schema,
+            dt.date.fromisoformat(as_of),
+            sessions,
+            _main_force_params(),
+            now_tw(),
+            copy_trades=copy_trades,
+        )
+    finally:
+        if dst is not src:
+            dst.close()
+        src.close()
+    typer.secho(f"[OK] {msg}", fg=typer.colors.GREEN)
 
 
 @serving_app.command("prune")

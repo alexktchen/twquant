@@ -72,14 +72,10 @@ class PickBlurbs(BaseModel):
 
 
 class PickReviewItem(BaseModel):
-    """名單一檔的四面向分數、觀點、立場、結論（T-394／D-196）；範圍與文字由程式核對（不在結構層擋，免得一個欄位錯整檔重試）。"""
+    """名單一檔的四面向觀點、立場、結論（T-394／D-196）；分數由規則算（D-205），模型不打分。文字由程式核對。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    news: int
-    tech: int
-    chips: int
-    fund: int
     news_view: str
     tech_view: str
     chips_view: str

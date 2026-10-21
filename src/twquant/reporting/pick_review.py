@@ -1,8 +1,9 @@
-"""名單四面向評分與 AI 首選（T-394／D-196）。
+"""名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 T-425／D-205）。
 
 使用者 2026-10-18：「15 檔你最推哪一檔，每檔依照消息、技術、籌碼、基本四個面向來評分…兩個模型各 15 檔都要給，
-然後兩個模型給我一檔最推薦的」。做法同一句話（T-393）：規則先把每檔四個面向的資料寫成事實句，模型只照事實打 1～5 分、
-從名單裡挑一檔首選並寫理由；程式核對（分數在範圍內、每檔都有、首選在名單上、理由的數字與說法出自事實、不准建議）。
+然後兩個模型給我一檔最推薦的」。做法同一句話（T-393）：規則先把每檔四個面向的資料寫成事實句；
+**分數由規則算**（`pick_score`：每面向 5 個小項 ±1，0～10、5＝中性，D-205），模型只寫觀點、立場、結論，
+從名單裡挑一檔首選並寫理由；程式核對（首選在名單上、理由的數字與說法出自事實、不准建議）。
 首選理由沒過 → 改用四面向加總最高的那檔（source=rule）。**AI 評分與首選都沒有驗證過能預測報酬**；事後怎麼檢驗在 D-196 事前登記。
 只顯示，不改名單、不進模型。
 """
@@ -18,7 +19,7 @@ import polars as pl
 
 from twquant.config import PickBlurbsConfig, PickReviewConfig
 from twquant.conventions import TZ
-from twquant.data.serving.schema import PICK_REVIEWS_SPEC, ensure_tables
+from twquant.data.serving.schema import PICK_REVIEWS_SPEC, add_trailing_columns, ensure_tables
 from twquant.data.serving.sync import upsert
 from twquant.insight.client import InsightClient
 from twquant.insight.prompts import PICK_REVIEW_PROMPT_VERSION, PICK_REVIEW_SYSTEM, PICK_TOP_SYSTEM
@@ -34,14 +35,25 @@ from twquant.reporting.pick_blurbs import (
     move_text,
     unit_mismatch,
 )
+from twquant.reporting.pick_score import (
+    NO_DATA,
+    Item,
+    Market,
+    chip_items,
+    fund_items,
+    items_json,
+    load_market,
+    news_items,
+    tech_items,
+    total,
+)
 
 TASK = "pick_review"
 DIMS = ("消息", "技術", "籌碼", "基本")
 KEYS = ("news", "tech", "chips", "fund")
 SHARES_PER_LOT = 1000  # 台股一張＝1,000 股（制度，不是參數）
 NO_NEWS = "近期沒有公告、處置、注意、除權息或法說會"
-# 沒有任何消息＝中性。2026-10-18 實測：模型對這句給 1 分（跟提示詞的規則不一致）→ 程式直接定成這個分數
-NO_NEWS_SCORE = 3
+SCALE = 10  # 每個面向滿分（D-205）；舊資料是 1～5（AI 自評），網站依 pick_reviews.scale 分開畫
 
 
 @dataclass
@@ -53,6 +65,8 @@ class Dimensions:
     line: str
     rank: int
     facts: dict[str, list[str]] = field(default_factory=dict)
+    items: dict[str, list[Item]] = field(default_factory=dict)  # 面向 → 5 個小項（D-205）
+    scores: dict[str, int] = field(default_factory=dict)  # news／tech／chips／fund → 0～10
 
     def all_facts(self) -> list[str]:
         return [f for d in DIMS for f in self.facts.get(d, [])]
@@ -282,36 +296,83 @@ def gather_dimensions(
                 None if pbr is None else float(pbr),
                 None if dy is None else float(dy),
             )
+    market, m_errors = load_market(conn, schema, day, cfg.rules)
+    errors.extend(m_errors)
     out: list[Dimensions] = []
     for p in picks:
         cs, vs = px.get(p.stock_id, ([], []))
-        out.append(
-            Dimensions(
-                stock_id=p.stock_id,
-                name=p.name,
-                line=p.line,
-                rank=p.rank,
-                facts={
-                    "消息": news_facts(p),
-                    "技術": tech_facts(cs, vs, cfg, p.down_risk, blurb_cfg.near_high),
-                    "籌碼": chip_facts(
-                        inst.get(p.stock_id, []),
-                        margin.get(p.stock_id, []),
-                        holders.get(p.stock_id, []),
-                        cfg,
-                    ),
-                    "基本": fund_facts(revenue.get(p.stock_id, []), val.get(p.stock_id)),
-                },
-            )
+        d = Dimensions(
+            stock_id=p.stock_id,
+            name=p.name,
+            line=p.line,
+            rank=p.rank,
+            facts={
+                "消息": news_facts(p),
+                "技術": tech_facts(cs, vs, cfg, p.down_risk, blurb_cfg.near_high),
+                "籌碼": chip_facts(
+                    inst.get(p.stock_id, []),
+                    margin.get(p.stock_id, []),
+                    holders.get(p.stock_id, []),
+                    cfg,
+                ),
+                "基本": fund_facts(revenue.get(p.stock_id, []), val.get(p.stock_id)),
+            },
         )
+        score_dims(
+            d,
+            p,
+            Inputs(
+                closes=cs,
+                volumes=vs,
+                trust=[r[1] for r in inst.get(p.stock_id, [])],
+                margin=margin.get(p.stock_id, []),
+                holders=holders.get(p.stock_id, []),
+                revenue=revenue.get(p.stock_id, []),
+                val=val.get(p.stock_id),
+            ),
+            market,
+            cfg,
+        )
+        out.append(d)
     return out, errors
+
+
+@dataclass
+class Inputs:
+    """一檔算 20 個小項要的個股資料（舊到新，營收新到舊）。"""
+
+    closes: list[float]
+    volumes: list[float]
+    trust: list[float]
+    margin: list[float]
+    holders: list[tuple[dt.date, float]]
+    revenue: list[tuple[str, float | None]]
+    val: tuple[float | None, float | None, float | None] | None
+
+
+def score_dims(d: Dimensions, p: PickFacts, x: Inputs, m: Market, cfg: PickReviewConfig) -> None:
+    """D-205：四面向 20 個小項 → d.items／d.scores；小項理由併進事實（模型寫觀點時可以引用）。"""
+    r = cfg.rules
+    d.items = {
+        "消息": news_items(
+            p.disposition, p.attention, p.insider, p.insider_days, p.announcements, p.events, r
+        ),
+        "技術": tech_items(p.stock_id, x.closes, x.volumes, m, r, cfg.high_days),
+        "籌碼": chip_items(p.stock_id, x.trust, x.margin, x.closes, x.holders, m, r),
+        "基本": fund_items(p.stock_id, x.revenue, x.val, m, r),
+    }
+    for dim, key in zip(DIMS, KEYS, strict=True):
+        its = d.items[dim]
+        d.scores[key] = total(its, r)
+        extra = [i.text for i in its if i.text != NO_DATA and i.text not in d.facts[dim]]
+        d.facts[dim] = [*d.facts[dim], *extra]
 
 
 @dataclass
 class Review:
     line: str
     stock_id: str
-    scores: dict[str, int] | None  # news／tech／chips／fund；沒過＝None
+    scores: dict[str, int] | None  # news／tech／chips／fund，0～10（規則算，D-205）；模型缺席＝None
     views: dict[str, str | None] = field(default_factory=dict)  # 每個面向一句觀點；沒過核對＝None
     stance: str | None = None
     conclusion: str | None = None
@@ -321,6 +382,9 @@ class Review:
     model_id: str | None = None
     facts: list[str] = field(default_factory=list)
     checks: list[str] = field(default_factory=list)
+    items: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # 20 個小項（存進 pick_reviews.items）
 
 
 def check_reason(
@@ -389,15 +453,8 @@ VIEW_KEYS = tuple(f"{k}_view" for k in KEYS)
 def check_item(
     got: Any, d: Dimensions, cfg: PickReviewConfig, blurb_cfg: PickBlurbsConfig, r: Review
 ) -> None:
-    """一檔的分數、四句觀點、立場、結論；不合格的那一項設成 None 並記原因（不連坐整檔）。"""
-    sc = {k: getattr(got, k) for k in KEYS}
-    bad = [k for k, v in sc.items() if not isinstance(v, int) or not 1 <= v <= 5]
-    if bad:
-        r.checks.append(f"分數不在 1～5 {bad}：{sc}")
-        return
-    if d.facts.get("消息") == [NO_NEWS] and sc["news"] != NO_NEWS_SCORE:
-        r.checks.append(f"沒有消息卻給消息 {sc['news']} 分，改成 {NO_NEWS_SCORE}")
-        sc["news"] = NO_NEWS_SCORE
+    """一檔的四句觀點、立場、結論；不合格的那一項設成 None 並記原因（不連坐整檔）。分數是規則算的（d.scores）。"""
+    sc = dict(d.scores)
     r.scores = sc
     for k, dim, vk in zip(KEYS, DIMS, VIEW_KEYS, strict=True):
         others = [w for o, ws in cfg.dim_words.items() if o != dim for w in ws]
@@ -449,8 +506,15 @@ def rule_reason(scores: dict[str, int]) -> str:
     )
 
 
+def _head(dim: str, key: str, d: Dimensions) -> str:
+    """「【籌碼 4 分】」：分數是規則算的，模型照著寫觀點。"""
+    return f"【{dim} {d.scores[key]} 分】" if key in d.scores else f"【{dim}】"
+
+
 def stock_payload(line_name: str, day: dt.date, d: Dimensions) -> str:
-    parts = [f"【{k}】" + "；".join(d.facts.get(k, [])) for k in DIMS]
+    parts = [
+        _head(k, key, d) + "；".join(d.facts.get(k, [])) for k, key in zip(DIMS, KEYS, strict=True)
+    ]
     return (
         f"名單：{line_name}（{day.isoformat()} 收盤後）\n[{d.stock_id} {d.name or ''}]\n"
         + "\n".join(parts)
@@ -463,7 +527,7 @@ def top_payload(
     blocks = [f"名單：{line_name}（{day.isoformat()} 收盤後），有分數的 {len(reviews)} 檔"]
     for r in reviews:
         sc = r.scores or {}
-        head = " ".join(f"{n}{sc[k]}" for n, k in zip(DIMS, KEYS, strict=True))
+        head = " ".join(f"{n}{sc[k]}／{SCALE}" for n, k in zip(DIMS, KEYS, strict=True))
         d = dims[r.stock_id]
         facts = "\n".join(f"【{k}】" + "；".join(d.facts.get(k, [])) for k in DIMS)
         blocks.append(
@@ -483,7 +547,9 @@ def review_stock(
 ) -> tuple[Review, str | None]:
     """一檔一次呼叫；回 (評分, 缺席原因)。"""
     model_id = client.config.model_for(TASK).id
-    r = Review(d.line, d.stock_id, None, model_id=model_id, facts=d.all_facts())
+    r = Review(
+        d.line, d.stock_id, None, model_id=model_id, facts=d.all_facts(), items=items_json(d.items)
+    )
     res, absent = client.complete_detailed(
         task=TASK,
         system=PICK_REVIEW_SYSTEM,
@@ -601,6 +667,7 @@ def write(conn: Any, schema: str, day: dt.date, reviews: list[Review], now: dt.d
     if not reviews:
         return
     ensure_tables(conn, (PICK_REVIEWS_SPEC,), schema)
+    add_trailing_columns(conn, PICK_REVIEWS_SPEC, schema)  # scale／items（D-205）加在最後
     df = pl.DataFrame(
         [
             {
@@ -620,6 +687,8 @@ def write(conn: Any, schema: str, day: dt.date, reviews: list[Review], now: dt.d
                 "facts": json.dumps(r.facts, ensure_ascii=False),
                 "checks": json.dumps(r.checks, ensure_ascii=False),
                 "created_at": now,
+                "scale": SCALE,
+                "items": json.dumps(r.items, ensure_ascii=False),
             }
             for r in reviews
         ],
@@ -640,6 +709,8 @@ def write(conn: Any, schema: str, day: dt.date, reviews: list[Review], now: dt.d
             "facts": pl.Utf8,
             "checks": pl.Utf8,
             "created_at": pl.Datetime("us", "Asia/Taipei"),
+            "scale": pl.Int32,
+            "items": pl.Utf8,
         },
     ).select(list(PICK_REVIEWS_SPEC.column_names))
     with conn.cursor() as cur:

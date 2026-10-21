@@ -35,10 +35,10 @@ export function BadgeLegend({ onClose }: { onClose: () => void }) {
         </div>
         <div className="cq-legend-dots">
           <ScoreBars
-            r={{ news: 3, tech: 5, chips: 4, fund: 2, total: 14, top: false, reason: null, ai: true, views: { news: null, tech: null, chips: null, fund: null }, stance: null, conclusion: null }}
+            r={{ news: 5, tech: 8, chips: 4, fund: 6, total: 23, max: 10, items: [], top: false, reason: null, ai: true, views: { news: null, tech: null, chips: null, fund: null }, stance: null, conclusion: null }}
           />
           <span>
-            AI 四面向評分（高＝分數高，滿分 5）：
+            四面向評分（高＝分數高，滿分 10、一半是中性）：
             {DIMS.map((d) => (
               <b key={d.key} style={{ color: d.color, marginLeft: 6 }}>
                 {d.name}

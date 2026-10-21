@@ -1001,8 +1001,41 @@ PICK_REVIEWS_SPEC = TableSpec(
         ("facts", "jsonb"),
         ("checks", "jsonb"),
         ("created_at", "timestamptz"),
+        # 每面向滿分：NULL＝AI 自評 1～5（D-196），10＝規則算 0～10（D-205）；加在最後，舊表 ADD COLUMN 對齊
+        ("scale", "integer"),
+        ("items", "jsonb"),  # 20 個小項 [{dim, name, points, text}]（D-205）
     ),
     pk=("date", "line", "stock_id"),
+)
+
+# 主力買賣超（T-424／D-205）：雲端不可能留 broker_trades 全歷史，隔日沖排除要的全期累計改成逐日事件表。
+# 地端用全歷史寫一列「截至種子日的累計」當底（resolve_date＝種子日），之後每天加當天那一列；
+# 某天的累計＝resolve_date ≤ 那天的列加總（數學同 factors/broker.py daytrade_events → cumulate_events）。
+BROKER_DAYTRADE_EVENTS_SPEC = TableSpec(
+    "broker_daytrade_events",
+    (
+        ("broker_id", "text"),
+        (
+            "resolve_date",
+            "date",
+        ),  # 「今買明賣」記在賣出日（前一交易日的買超到這天才知道有沒有倒出來）
+        ("n_buys", "bigint"),  # 買超事件數
+        ("n_flip", "bigint"),  # 其中隔日沖（下一交易日同檔賣超）
+        ("created_at", "timestamptz"),
+    ),
+    pk=("broker_id", "resolve_date"),
+)
+
+# 每檔每天的主力淨買超（股）：前 15 大券商、排除隔日沖分點（同 chip.broker_* 的 clean_daily）。
+MAIN_FORCE_DAILY_SPEC = TableSpec(
+    "main_force_daily",
+    (
+        ("date", "date"),
+        ("stock_id", "text"),
+        ("net_shares", "bigint"),
+        ("available_at", "timestamptz"),
+    ),
+    pk=("date", "stock_id"),
 )
 
 _ALL_SPECS: tuple[TableSpec, ...] = (
@@ -1039,6 +1072,8 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     WARRANT_DAILY_SPEC,
     WARRANT_SUMMARY_SPEC,
     PICK_DOWN_RISK_SPEC,
+    BROKER_DAYTRADE_EVENTS_SPEC,
+    MAIN_FORCE_DAILY_SPEC,
 )
 
 MIRROR_TABLES: tuple[str, ...] = tuple(s.name for s in MIRROR_SPECS)

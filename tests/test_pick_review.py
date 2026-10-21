@@ -1,4 +1,7 @@
-"""T-394／D-196：名單四面向評分與 AI 首選——事實句、分數核對、首選核對與後備、接進每日 pipeline。"""
+"""T-394／D-196：名單四面向評分與 AI 首選——事實句、觀點核對、首選核對與後備、接進每日 pipeline。
+
+T-425／D-205 起分數由規則算（tests/test_pick_score.py），模型只寫觀點；本檔改成檢查「分數照規則、模型不再打分」。
+"""
 
 from __future__ import annotations
 
@@ -16,7 +19,6 @@ from twquant.insight.schemas import PickReviewItem, PickTop
 from twquant.reporting.pick_blurbs import PickFacts
 from twquant.reporting.pick_review import (
     NO_NEWS,
-    NO_NEWS_SCORE,
     Dimensions,
     check_reason,
     chip_facts,
@@ -90,7 +92,9 @@ def test_ac1_fund_facts_revenue_and_valuation() -> None:
 
 
 # ── AC-2：分數與首選的核對、後備 ─────────────────────────────────────────────
-def _dims(sid: str, rank: int, news: list[str] | None = None) -> Dimensions:
+def _dims(
+    sid: str, rank: int, news: list[str] | None = None, scores: dict[str, int] | None = None
+) -> Dimensions:
     return Dimensions(
         stock_id=sid,
         name=f"股{sid}",
@@ -102,6 +106,7 @@ def _dims(sid: str, rank: int, news: list[str] | None = None) -> Dimensions:
             "籌碼": ["外資近 5 日買超 28,867 張"],
             "基本": ["9 月營收年增 63.7%"],
         },
+        scores=scores or {"news": 5, "tech": 8, "chips": 7, "fund": 6},
     )
 
 
@@ -114,7 +119,7 @@ def _llm() -> LlmConfig:
     )
 
 
-def _item(news: int, tech: int, chips: int, fund: int, **kw: str) -> PickReviewItem:
+def _item(**kw: str) -> PickReviewItem:
     base = {
         "news_view": "近期沒有重大消息",
         "tech_view": "創 52 週新高、量能放大，多頭排列",
@@ -124,7 +129,7 @@ def _item(news: int, tech: int, chips: int, fund: int, **kw: str) -> PickReviewI
         "conclusion": "技術與籌碼同步走強，可列入觀察、逢回再評估",
     }
     base.update(kw)
-    return PickReviewItem(news=news, tech=tech, chips=chips, fund=fund, **base)
+    return PickReviewItem(**base)
 
 
 def _run(
@@ -152,23 +157,26 @@ def _run(
 
 
 def test_ac2_one_call_per_stock_then_one_for_top(tmp_path: Path) -> None:
-    items = [_dims("2603", 1), _dims("2027", 2, ["今天是注意股"]), _dims("3010", 3)]
+    items = [
+        _dims("2603", 1),
+        _dims("2027", 2, ["今天是注意股"], {"news": 4, "tech": 8, "chips": 6, "fund": 6}),
+        _dims("3010", 3),
+    ]
     replies = {
-        "2603": _item(1, 5, 5, 5),  # 沒消息給 1 → 改 3
+        "2603": _item(),
         "2027": _item(
-            2, 5, 4, 5, news_view="注意股，留意交易限制", tech_view="技術面創新高"
+            news_view="注意股，留意交易限制", tech_view="技術面創新高"
         ),  # 技術觀點寫「技術面」→ 談到自己的面向可以；新高有事實
-        "3010": _item(3, 7, 4, 5),  # 7 不在範圍 → 這檔沒有分數
+        "3010": _item(),
     }
     top = PickTop(top_sid="2603 長榮", top_reason="創 52 週新高、外資近 5 日買超 28,867 張")
     out, seen = _run(tmp_path, replies, top, items)
     assert len(seen) == 4 and seen[-1][0] == PICK_TOP_SYSTEM  # 三檔各一次＋首選一次
     assert seen[0] == (PICK_REVIEW_SYSTEM, stock_payload("大盤精選", DAY, items[0]))
+    assert "【籌碼 7 分】" in seen[0][1]  # 規則分數給模型看，模型照著寫
     by = {r.stock_id: r for r in out}
     a = by["2603"]
-    assert a.scores == {"news": NO_NEWS_SCORE, "tech": 5, "chips": 5, "fund": 5} and any(
-        "沒有消息" in c for c in a.checks
-    )
+    assert a.scores == {"news": 5, "tech": 8, "chips": 7, "fund": 6}  # 分數照規則，不是模型打的
     assert a.views == {
         "news": "近期沒有重大消息",
         "tech": "創 52 週新高、量能放大，多頭排列",
@@ -178,30 +186,26 @@ def test_ac2_one_call_per_stock_then_one_for_top(tmp_path: Path) -> None:
     assert (
         a.stance == "偏多" and a.conclusion == "技術與籌碼同步走強，可列入觀察、逢回再評估"
     )  # 可以給建議（D-196 §二）
-    assert by["2027"].scores == {"news": 2, "tech": 5, "chips": 4, "fund": 5}
-    assert by["3010"].scores is None and any("1～5" in c for c in by["3010"].checks)
+    assert by["2027"].scores == {"news": 4, "tech": 8, "chips": 6, "fund": 6}
     assert (
         a.is_top and a.source == "model" and a.reason == "創 52 週新高、外資近 5 日買超 28,867 張"
     )
     assert sum(r.is_top for r in out) == 1
     assert (
-        "1～5" in PICK_REVIEW_SYSTEM
+        "0～10" in PICK_REVIEW_SYSTEM
+        and "不用打分" in PICK_REVIEW_SYSTEM
         and "目標價" in PICK_REVIEW_SYSTEM
         and PICK_REVIEW_PROMPT_VERSION.startswith("2026-")
     )
 
 
 def test_ac2_views_stance_and_conclusion_checked_one_by_one(tmp_path: Path) -> None:
-    items = [_dims("2603", 1)]
+    items = [_dims("2603", 1, scores={"news": 5, "tech": 3, "chips": 3, "fund": 4})]
     bad = _item(
-        3,
-        2,
-        2,
-        2,
         news_view="無重大消息，技術面偏多",  # 消息觀點談到技術
         chips_view="外資連買，籌碼集中",  # 事實沒有連續買超
         fund_view="營收年增逾 60%",  # 數字不在事實
-        stance="偏多",  # 總分 9 偏多 → 不一致
+        stance="偏多",  # 總分 15（中性 20）偏多 → 不一致
         conclusion="技術面創新高，目標價上看 300 元",  # 喊價
     )
     out, _ = _run(
@@ -217,17 +221,20 @@ def test_ac2_views_stance_and_conclusion_checked_one_by_one(tmp_path: Path) -> N
 
 
 def test_ac2_bad_reason_or_inconsistent_top_falls_back_to_highest_total(tmp_path: Path) -> None:
-    items = [_dims("2603", 1), _dims("2027", 2)]
+    items = [
+        _dims("2603", 1, scores={"news": 5, "tech": 9, "chips": 8, "fund": 7}),
+        _dims("2027", 2, scores={"news": 5, "tech": 3, "chips": 3, "fund": 4}),
+    ]
     replies = {
-        "2603": _item(3, 5, 5, 5),
-        "2027": _item(3, 2, 2, 2, stance="偏空", conclusion="技術與籌碼偏弱，宜觀望"),
+        "2603": _item(),
+        "2027": _item(stance="偏空", conclusion="技術與籌碼偏弱，宜觀望"),
     }
     # 理由有事實沒有的數字 → 後備
     out, _ = _run(tmp_path, replies, PickTop(top_sid="2603", top_reason="營收年增 80%"), items)
     top = next(r for r in out if r.is_top)
     assert top.stock_id == "2603" and top.source == "rule" and top.reason == rule_reason(top.scores)
     assert any("數字不在事實裡" in c for c in top.checks)
-    # 挑了自己打低分的那檔（9 分，最高 18）→ 後備成最高分
+    # 挑了規則總分低的那檔（15 分，最高 29）→ 後備成最高分
     out2, _ = _run(tmp_path, replies, PickTop(top_sid="2027", top_reason="創 52 週新高"), items)
     top2 = next(r for r in out2 if r.is_top)
     assert (
