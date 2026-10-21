@@ -7803,6 +7803,28 @@ D-085 重跑後，A 軌由 +15.90% 跳到 **+26.30%（+10.40pp）**，遠大於�
 
 ## 已裁決
 
+### D-204（2026-10-21，使用者：「可以幫我用跟這個repo一樣的方式發文到line 群組上面 https://github.com/lt-foods/new_erp」）LINE 群組記事本貼文：照 new_erp、備用帳號、GitHub Actions
+
+任務 T-423。規劃時使用者決定（AskUserQuestion）：內容＝**每日名單、族群資金流入、盤前晨報、盤後快訊四種都發**；
+目標＝**一般群組，記事本發文＋分享卡片到群組聊天**（new_erp 的主流程）；在哪跑＝**GitHub Actions 加一步**。
+
+- **§一 做法跟 new_erp 一樣**：new_erp 不用 LINE 官方 API，而是 linejs（非官方客戶端協定）登入一支備用帳號，
+  打 LINE 內部的記事本 JSON REST（`/mh/api/v57/post/create.json`、`sendPostToTalk.json`）。這裡把它的
+  `_shared/lineNote.ts`／`tools/line-note-scraper/src/line.mjs` 只搬「登入、列群組、發文、分享」到 `line-poster/`（Node），
+  排隊與組文字放 Python（`monitoring/line_group.py`、`twquant line-group`），兩邊用 stdin／stdout NDJSON 溝通。
+  new_erp 踩過的坑照搬：憑證三個都存（access 7 天、refresh 一年且會輪替）、不帶 textStyle（code=118）、
+  create 回應撿不到 id 時用 list 對回來、發文前先找同內文的貼文（不重發）、被 LINE 叫停（限制使用 10 分鐘／701 兩分鐘）就停帳號不硬打。
+- **§二 風險（使用者知情）**：違反 LINE 使用條款，帳號可能被停權 → **只用備用帳號**。官方路線（Messaging API bot）
+  能進一般群組但推播按人數算額度、而且進不了社群；LINE Notify 已在 2025-03 停止服務。GitHub Actions 機器在美國，
+  new_erp 的經驗是國外 IP 上線容易被鎖；被鎖時改在台灣的機器跑 `line-group send` 或搬到 Edge Function（只動「送出」那一步）。
+- **§三 憑證與群組 id 放哪**：憑證存雲端 `web.line_account`（refresh token 每次換新都會輪替，GitHub secret 寫不回去）；
+  黃金規則 9 管的是程式碼、配置、測試、文件，資料庫不在其內（同 `web.push_subscriptions`）。
+  Supabase 預設只把 `public` 開給 PostgREST；`web` 沒加進 Exposed schemas 就讀不到（這個專案的設定沒有實際查過，加 schema 前要記得這張表）。
+  群組 id 不進版控，放 GitHub secret／`.env` 的 `TWQUANT_LINE_GROUP_MIDS`；**沒設＝排程整段略過**（這就是開關）。
+- **§四 範圍**：只發一般群組（c…）；社群（OpenChat，s…／m…）要另外找主聊天室、路徑也不同，沒做。只發純文字（不帶圖）。
+  一天最多四篇，遠低於 new_erp 被擋的量（分享爆量 ~43 則／97 秒）。貼文附網站連結與「僅供參考」。
+  名單貼文只列名單本身（名次、代號、股名、族群、新進、名單一句話），**不列任何報酬**——第二保留期（D-109）內不在群組裡算績效。
+
 ### D-201（2026-10-20，使用者：「再來規劃新聞用向量資料庫來關聯股票的功能，這些用向量資料庫做應該很適合，要完整規劃，之後可以用來訓練新的模型 基於新聞因子」）新聞向量層與新聞因子：免費歷史語料、本機 pgvector、情緒第一階段、事前登記
 
 規格：[SPEC-018](docs/specs/SPEC-018-news-vectors.md)；任務 T-410～T-416（取代原 T-406）。規劃時使用者決定（AskUserQuestion）：

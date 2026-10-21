@@ -41,6 +41,36 @@ class PushConfig(BaseConfig):
     group_max_listed: int = Field(ge=1)  # 一則通知最多寫幾個族群（其餘寫「等 N 個」）
 
 
+class LineGroupKind(BaseConfig):
+    """一種 LINE 群組貼文：要不要發、排進來多久沒送出就作廢。"""
+
+    enabled: bool
+    stale_hours: float = Field(gt=0)
+
+
+class LineGroupConfig(BaseConfig):
+    """configs/line_group.yaml：LINE 群組記事本貼文（T-423／D-204）。"""
+
+    group_mids_env: str = Field(min_length=1)
+    web_schema: str = Field(pattern=r"^[a-z_][a-z0-9_]*$")
+    site_url: str = Field(pattern=r"^https://")
+    footer: str
+    share_to_chat: bool
+    node_bin: str = Field(min_length=1)
+    adapter: str = Field(min_length=1)  # 相對 repo 根目錄
+    adapter_timeout_seconds: float = Field(gt=0)
+    login_timeout_seconds: float = Field(gt=0)
+    lease_seconds: float = Field(gt=0)
+    lock_wait_seconds: float = Field(ge=0)
+    poll_seconds: float = Field(gt=0)
+    max_backoff_wait_seconds: float = Field(ge=0)
+    max_attempts: int = Field(ge=1)
+    max_chars: int = Field(ge=100)
+    picks_max_per_line: int = Field(ge=1)
+    picks_with_blurbs: bool
+    kinds: dict[str, LineGroupKind]
+
+
 class SourceRate(BaseConfig):
     """單一來源的限流設定（滑動窗語意，SPEC-001 §7）。"""
 

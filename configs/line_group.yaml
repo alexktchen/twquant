@@ -1,0 +1,41 @@
+# LINE 群組記事本貼文（T-423／D-204）：照 lt-foods/new_erp 的做法，用一支備用 LINE 帳號（linejs，非官方客戶端協定）
+# 在一般群組的記事本發文，再把貼文卡片分享到群組聊天。⚠ 違反 LINE 使用條款、帳號可能被停權——只能用備用帳號。
+# 登入憑證存雲端 web.line_account（refresh token 會輪替，要能寫回）；群組 id 不進版控，放環境變數。
+
+group_mids_env: TWQUANT_LINE_GROUP_MIDS # 要發到哪些群組（c…，逗號分隔）：.env／GitHub secret；`twquant line-group groups` 列得出來
+web_schema: web # 排隊表與帳號表放這個 schema（與 serving 分開：重灌、修剪都不碰）；測試用別的 schema
+site_url: https://twquant.pages.dev/ # 貼文最後附的網站連結
+footer: 僅供參考，不是投資建議；名單與研判都是程式產生的。
+share_to_chat: true # 發完記事本再把貼文卡片分享到群組聊天（new_erp 的主流程）
+
+node_bin: node
+adapter: line-poster/src/cli.mjs # Node 轉接器（相對 repo 根目錄），要先 `cd line-poster && npm ci`
+adapter_timeout_seconds: 600 # 一次 send／groups 最多跑多久
+login_timeout_seconds: 240 # 掃 QR＋輸入 PIN（轉接器自己 180 秒放棄）
+lease_seconds: 900 # 發文時占住帳號多久：兩個排程同時跑時不要一起發（也不要一起換 token）；要大於 adapter_timeout_seconds
+lock_wait_seconds: 900 # 帳號被另一班占住時最多等多久，等不到就留給下一班
+poll_seconds: 15 # 等帳號空出來時多久看一次
+# LINE 叫我們慢一點（被暫時限制／701 請稍後再發；new_erp 實測停 10 或 2 分鐘）時，同一步裡最多等多久再試；超過就留給下一班
+max_backoff_wait_seconds: 660
+max_attempts: 3 # 一則貼文失敗（不是 LINE 叫停的那種）幾次就放棄、標失敗
+max_chars: 10000 # 一篇貼文最多幾個字；超過 raise（LINE 記事本的上限沒實測過，new_erp 的貼文都遠低於此）
+
+picks_max_per_line: 20 # 每條線最多列幾檔，其餘寫「另 N 檔」
+picks_with_blurbs: true # 每檔下面附「名單一句話」（pick_blurbs；那天沒有就不附）
+# 族群資金貼文的門檻與最多寫幾個族群沿用 configs/push.yaml 的 group_min_picks／group_max_listed（跟網頁推播同一套條件）
+
+# 四種貼文（使用者 2026-10-21 全選）。stale_hours：排進來多久還送不出去（LINE 叫停、帳號掉線）就作廢，
+# 晚了才發的「今日名單」「盤前晨報」沒有意義。
+kinds:
+  picks: # 每日名單：daily-pipeline 寫好名單後（17:33 主跑、21:13 補跑）
+    enabled: true
+    stale_hours: 15 # 17:33 排進來 → 隔天 08:33 前
+  groups: # 族群資金流入：同 notify-groups 的條件
+    enabled: true
+    stale_hours: 15
+  morning: # 盤前晨報：morning-brief 06:30
+    enabled: true
+    stale_hours: 2.5 # 開盤前要送到
+  evening: # 盤後快訊：morning-brief --edition evening 18:00
+    enabled: true
+    stale_hours: 12 # 隔天 06:00 前（之後就是新的晨報）
