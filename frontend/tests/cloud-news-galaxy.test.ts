@@ -3,13 +3,12 @@ import test from 'node:test'
 import {
   DRAG_RAD,
   FOCUS_RELATED,
-  PITCH_MAX,
   REF_S,
-  angleDiff,
   clusterLabelAt,
   density,
   depthAlpha,
   dockInspector,
+  dragRotate,
   ease,
   galaxySummary,
   hubClass,
@@ -19,6 +18,9 @@ import {
   pivotScreenY,
   placeLabels,
   project,
+  qFromYawPitch,
+  qSame,
+  qSlerp,
   type GalaxyData,
   type GalaxyItem,
 } from '../src/cloud/news-galaxy.ts'
@@ -27,14 +29,14 @@ const near = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < e
 
 test('T-418 投影：不轉時原點在畫面中心、z=0 不放大；繞直軸轉 90° 把 x 轉成深度；越近越大', () => {
   const v = { s: 100, x: 200, y: 300 }
-  const p0 = project({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 0 }, v)
+  const p0 = project({ x: 0, y: 0, z: 0 }, qFromYawPitch(0, 0), v)
   assert.deepEqual(p0.slice(0, 3), [200, 300, 0])
   near(p0[3], 1)
-  const p = project({ x: 1, y: 0, z: 0 }, { yaw: Math.PI / 2, pitch: 0 }, v)
+  const p = project({ x: 1, y: 0, z: 0 }, qFromYawPitch(Math.PI / 2, 0), v)
   near(p[0], 200, 1e-6)
   near(p[2], -1, 1e-9) // 轉到後面去了
   assert.ok(p[3] < 1, '遠的變小')
-  const q = project({ x: 0, y: 0, z: 1 }, { yaw: 0, pitch: 0 }, v)
+  const q = project({ x: 0, y: 0, z: 1 }, qFromYawPitch(0, 0), v)
   assert.ok(q[3] > 1 && q[2] === 1, '近的變大')
 })
 
@@ -128,26 +130,62 @@ test('單獨看：給第二個亮點只留同時提到兩個的，列的其他�
 test('不迷航：轉動中心那顆永遠在畫面中央、轉了也不動；其他的繞著它轉', () => {
   const v = { s: 100, x: 200, y: 300 }
   const c = { x: 0.6, y: -0.4, z: 0.3 }
-  for (const r of [{ yaw: 0, pitch: 0 }, { yaw: 1.2, pitch: -0.5 }, { yaw: -2.9, pitch: 0.7 }]) {
+  for (const r of [qFromYawPitch(0, 0), qFromYawPitch(1.2, -0.5), qFromYawPitch(-2.9, 0.7)]) {
     const p = project(c, r, v, c)
     near(p[0], 200)
     near(p[1], 300)
   }
-  const a = project({ x: 0.6, y: -0.4, z: 0.3 + 0.5 }, { yaw: 0, pitch: 0 }, v, c)
-  const b = project({ x: 0, y: 0, z: 0.5 }, { yaw: 0, pitch: 0 }, v)
+  const a = project({ x: 0.6, y: -0.4, z: 0.3 + 0.5 }, qFromYawPitch(0, 0), v, c)
+  const b = project({ x: 0, y: 0, z: 0.5 }, qFromYawPitch(0, 0), v)
   assert.deepEqual(a, b, '換中心＝整團平移')
 })
 
-test('不迷航：滑回去跟幀率無關、角度走短的那邊、拖曳與上下翻的上限', () => {
+test('不迷航：滑回去跟幀率無關；回到一開始走短的那邊；拖曳靈敏度', () => {
   near(ease(0, 10, 0), 0)
   near(ease(0, 10, 10), 10, 1e-6)
   near(ease(ease(0, 10, 0.05), 10, 0.05), ease(0, 10, 0.1), 1e-9) // 兩幀 0.05 秒＝一幀 0.1 秒
-  near(angleDiff(0.5 + 6 * Math.PI, 0.5), 0, 1e-9) // 自轉了三圈：不用倒轉回去
-  near(angleDiff(3, -3), 2 * Math.PI - 6, 1e-9) // 跨過 ±π 走短的
-  near(angleDiff(-3, 3), 6 - 2 * Math.PI, 1e-9)
-  assert.ok(Math.abs(angleDiff(0, 3)) <= Math.PI)
+  const home = qFromYawPitch(0.5, -0.3)
+  const far = qFromYawPitch(0.5 + 6 * Math.PI, -0.3) // 自轉了三圈
+  near(qSame(far, home), 1, 1e-9) // 同一個轉向：不用倒轉回去
+  const a = qFromYawPitch(2.8, 1), b = qFromYawPitch(-2.8, -1)
+  near(qSame(qSlerp(a, b, 0), a), 1, 1e-9)
+  near(qSame(qSlerp(a, b, 1), b), 1, 1e-9)
+  let r = a
+  for (let i = 0; i < 120; i++) r = qSlerp(r, home, 1 - Math.exp(-8 / 60)) // 60fps 兩秒
+  assert.ok(qSame(r, home) > 1 - 1e-7, '回得去')
   assert.ok(200 * DRAG_RAD < Math.PI / 3, '手機滑 200px 轉不到 60°（原本 92°）')
-  assert.ok(PITCH_MAX < Math.PI / 4, '上下翻不到 45°')
+})
+
+test('上下左右一直轉：舊的兩角度算法照舊；往下拖一路過頭頂不卡、轉一整圈回原樣；翻過去後往右拖還是往右', () => {
+  const v = { s: 100, x: 0, y: 0 }
+  // 四元數跟原本「先繞直軸 yaw、再繞橫軸 pitch」的公式一樣
+  for (const [yaw, pitch] of [[0.5, -0.3], [2, 1.1], [-1, 0.4]]) {
+    const o = { x: 0.3, y: -0.7, z: 0.5 }
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch)
+    const x1 = o.x * cy + o.z * sy, z1 = -o.x * sy + o.z * cy
+    const y1 = o.y * cp - z1 * sp, z2 = o.y * sp + z1 * cp
+    const p = project(o, qFromYawPitch(yaw, pitch), v)
+    near(p[2], z2, 1e-9)
+    near(p[0] / p[3], x1 * 100, 1e-9)
+    near(p[1] / p[3], y1 * 100, 1e-9)
+  }
+  const front = { x: 0, y: 0, z: 1 }
+  const start = qFromYawPitch(0, 0)
+  assert.ok(project(front, dragRotate(start, 0.2, 0), v)[0] > 0, '往右拖，前面的往右')
+  assert.ok(project(front, dragRotate(start, 0, 0.2), v)[1] > 0, '往下拖，前面的往下')
+  let r = start
+  const step = 10 * DRAG_RAD // 每次拖 10px
+  const n = Math.round(Math.PI / step)
+  for (let i = 0; i < n; i++) r = dragRotate(r, 0, step)
+  near(project(front, r, v)[2], -1, 1e-2) // 轉了 180°：前面的到了後面，沒有卡住
+  const back = { x: 0, y: 0, z: -1 } // 現在面對我們的是原本背面那顆
+  near(project(back, r, v)[2], 1, 1e-2)
+  assert.ok(project(back, dragRotate(r, 0.2, 0), v)[0] > 0, '翻過頭頂之後，往右拖還是面前的往右（不會左右顛倒）')
+  assert.ok(project(back, dragRotate(r, 0, 0.2), v)[1] > 0, '翻過頭頂之後，往下拖還是面前的往下')
+  for (let i = 0; i < n; i++) r = dragRotate(r, 0, step)
+  near(qSame(r, start), 1, 1e-3) // 一整圈回原樣
+  for (let i = 0; i < 4 * n; i++) r = dragRotate(r, step, 0)
+  near(qSame(r, start), 1, 1e-3) // 左右轉兩圈也回原樣
 })
 
 test('不迷航：手機放不下右邊的檢視框 → 框貼下緣、選取那顆放在框上方空間的正中；桌機照舊在正中央', () => {

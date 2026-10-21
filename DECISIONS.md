@@ -7900,6 +7900,11 @@ D-085 重跑後，A 軌由 +15.90% 跳到 **+26.30%（+10.40pp）**，遠大於�
   分頁按鈕由 `/api/access` 決定；`/api/line`、`/api/line/groups/:id` 每支自己用 Cloudflare 簽過的權杖驗身分再查角色（不信標頭、
   不只靠前端藏分頁）。網站讀帳號表只選顯示用欄位，**登入憑證不出資料庫**（測試守著）。要發哪些群組改在網站勾（`web.line_groups`，
   新群組預設不發），取代原本的 secret `TWQUANT_LINE_GROUP_MIDS`；沒登入、沒勾群組時排程這幾步自己略過。
+- **§二之一 從網站登入**（使用者：「twquant line-group login 可以你幫我跑嗎」「從網頁跑」）：網站「LINE 群組」分頁按「登入」→
+  `/api/line/login`（只有 line 角色、只收本站請求）記下 `web.line_login`、用 Pages 祕密 `TWQUANT_DISPATCH_TOKEN`（GitHub fine-grained token，
+  只有 Actions 讀寫）觸發 `line-login.yml` → 轉接器的 QR 與 PIN 一出來就寫進 `web.line_login`（QR 在我們這邊畫成 PNG，不送第三方 QR 服務），
+  網頁每 3 秒讀一次顯示；成功就存憑證。登入跑在 GitHub Actions（美國 IP，§四的風險同樣適用）。進行中不能再按；10 分鐘沒動靜當作掛了可以重按。
+  Claude 的沙盒連不到使用者的 Supabase，也不該經手 LINE 憑證，所以不由 Claude 代跑。
 - **§三 官方帳號為什麼沒用**：使用者問過「可以透過我的官方帳號來做這個發文嗎」。官方 Messaging API 能發 Flex 到群組，但
   [推播額度按收到的人數算](https://developers.line.biz/en/docs/messaging-api/pricing/)（30 人的群發一則＝30 則），台灣免費方案一個月 200 則；
   四種天天發要付費方案，而且要另做 webhook 才拿得到群組 id。說明後使用者選備用帳號。

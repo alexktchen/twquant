@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { CARD_TOKEN_RE, HOME_ID_RE, parseToggle } from '../functions/_lib/line-admin.ts'
+import { CARD_TOKEN_RE, HOME_ID_RE, LOGIN_WORKFLOW, dispatchRequest, loginBusy, parseToggle } from '../functions/_lib/line-admin.ts'
 import { FEATURE_ROLES, ROLE_MEMBERS, can, featuresOf, rolesOf } from '../functions/_lib/roles.ts'
-import { groupsMeta, shortTime, statusView } from '../src/cloud/linegroup.ts'
+import { findGroups, groupsMeta, latestSync, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 LINE 群組，大小寫不分', () => {
@@ -22,14 +22,15 @@ test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 L
 })
 
 test('T-423 AC9 權限：每個 LINE 端點都自己擋（不只靠前端藏分頁）', () => {
-  for (const f of ['../functions/api/line/index.ts', '../functions/api/line/groups/[id].ts']) {
+  for (const f of ['../functions/api/line/index.ts', '../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8')
     assert.match(src, /accessEmail\(request\)/, f) // 身分來自驗過的權杖，不信標頭
     assert.match(src, /can\(email, 'line'\)/, f)
     assert.match(src, /fail\(403, '沒有權限'\)/, f)
   }
-  const put = readFileSync(new URL('../functions/api/line/groups/[id].ts', import.meta.url), 'utf8')
-  assert.match(put, /sameOrigin\(request\)/)
+  for (const f of ['../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts']) {
+    assert.match(readFileSync(new URL(f, import.meta.url), 'utf8'), /sameOrigin\(request\)/, f) // 會改東西的只收本站請求
+  }
 })
 
 test('T-423 AC10 安全：網站讀帳號表只選要顯示的欄位，登入憑證不出資料庫', () => {
@@ -60,4 +61,54 @@ test('T-423 分頁與顯示：?tab=line 認得；狀態、時間、群組摘要'
   const g = (home_id: string, enabled: boolean, present: boolean) => ({ home_id, name: home_id, enabled, present, synced_at: '' })
   assert.equal(groupsMeta([g('a', true, true), g('b', false, true), g('c', true, false)]), '發 1／在 2 個群組')
   assert.equal(groupsMeta([]), '還沒有群組')
+  // 同步好沒有：看清單最後一次同步的時間有沒有變
+  assert.equal(latestSync([{ ...g('a', true, true), synced_at: '2026-10-21 09:00' }, { ...g('b', true, true), synced_at: '2026-10-21 22:05' }]), '2026-10-21 22:05')
+  assert.equal(latestSync([]), '')
+  // 找群組：名字含關鍵字（不分大小寫），勾了的永遠留著
+  const list = [{ ...g('c1', false, true), name: 'Family' }, { ...g('c2', true, true), name: '股友會' }, { ...g('c3', false, true), name: '家長群' }]
+  assert.deepEqual(findGroups(list, ' fam ').map((x) => x.home_id), ['c1', 'c2'])
+  assert.deepEqual(findGroups(list, '').map((x) => x.home_id), ['c1', 'c2', 'c3'])
+})
+
+const login = (status: string, fresh = true): LineLogin => ({
+  status,
+  requested_by: 'cktalex@gmail.com',
+  requested_at: '2026-10-21 21:00',
+  updated_at: '2026-10-21 21:01',
+  run_url: null,
+  qr_url: null,
+  qr_png: null,
+  pin: status === 'pin' ? '4321' : null,
+  display_name: status === 'done' ? '小幫手' : null,
+  error: status === 'failed' ? '等太久沒掃 QR' : null,
+  fresh,
+})
+
+test('T-423 AC11 從網站登入：進行中不再觸發、10 分鐘沒動靜可以重按', () => {
+  for (const st of ['requested', 'starting', 'scan', 'pin']) {
+    assert.ok(loginBusy(login(st)), st)
+    assert.ok(loginActive(login(st)), st)
+    assert.ok(!loginBusy(login(st, false)), `${st} 過期`)
+  }
+  for (const st of ['done', 'failed']) assert.ok(!loginBusy(login(st)) && !loginActive(login(st)), st)
+  assert.ok(!loginBusy(null) && !loginActive(null))
+  assert.match(loginStep(login('scan')), /備用帳號/)
+  assert.match(loginStep(login('done')), /已登入「小幫手」/)
+  assert.match(loginStep(login('failed')), /等太久沒掃 QR/)
+  assert.match(loginStep(login('scan', false)), /可以重按/)
+})
+
+test('T-423 AC11 觸發 GitHub Actions：只打 line-login.yml、main、沒 token 就大聲失敗', () => {
+  const r = dispatchRequest('tok')
+  assert.equal(r.url, `https://api.github.com/repos/alexktchen/twquant/actions/workflows/${LOGIN_WORKFLOW}/dispatches`)
+  assert.equal(LOGIN_WORKFLOW, 'line-login.yml')
+  assert.deepEqual(JSON.parse(String(r.init.body)), { ref: 'main', inputs: { task: 'login' } })
+  assert.deepEqual(JSON.parse(String(dispatchRequest('tok', 'groups').init.body)), { ref: 'main', inputs: { task: 'groups' } })
+  assert.equal((r.init.headers as Record<string, string>).Authorization, 'Bearer tok')
+  assert.throws(() => dispatchRequest(undefined), /TWQUANT_DISPATCH_TOKEN/)
+  assert.throws(() => dispatchRequest(''), /TWQUANT_DISPATCH_TOKEN/)
+  // 工作流程檔真的在
+  const wf = readFileSync(new URL(`../../.github/workflows/${LOGIN_WORKFLOW}`, import.meta.url), 'utf8')
+  assert.ok(wf.includes('line-group login') && wf.includes('line-group groups'))
+  assert.match(wf, /options: \[login, groups\]/)
 })

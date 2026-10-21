@@ -4,6 +4,8 @@
 #   CLOUDFLARE_ACCOUNT_ID  Cloudflare 帳號 ID（後台 Workers & Pages 右側欄）
 #   TWQUANT_SUPABASE_DSN   既有（每日 pipeline 也用它）；部署時寫進 Pages 的祕密 TWQUANT_PG_DSN
 #   FUGLE_API_KEY          選填：富果行情 API 金鑰；部署時寫進 Pages 的祕密 FUGLE_API_KEY，證交所擋下即時報價時用富果補
+#   TWQUANT_DISPATCH_TOKEN 選填（T-423）：GitHub fine-grained token（只給 alexktchen/twquant 的 Actions: Read and write）；
+#                          部署時寫進 Pages 的同名祕密，網站「LINE 群組」分頁按「登入」才觸發得了 line-login.yml
 # main 上前端有改動就自動部署；也可在 Actions 頁手動觸發。
 name: deploy-web
 
@@ -93,6 +95,17 @@ jobs:
             exit 0
           fi
           printf '%s' "$FUGLE" | npx --yes wrangler@4 pages secret put FUGLE_API_KEY --project-name "$PROJECT"
+
+      - name: 從網站登入 LINE 用的 GitHub token（選填，T-423）
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          DISPATCH: ${{ secrets.TWQUANT_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$DISPATCH" ]; then
+            echo "沒有設 TWQUANT_DISPATCH_TOKEN：網站上的 LINE「登入」按鈕會回「沒設定」，只能在本機跑 twquant line-group login"
+            exit 0
+          fi
+          printf '%s' "$DISPATCH" | npx --yes wrangler@4 pages secret put TWQUANT_DISPATCH_TOKEN --project-name "$PROJECT"
 
       - name: 部署
         if: steps.secrets.outputs.ok == 'true'

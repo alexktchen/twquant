@@ -5,6 +5,8 @@
 // 用法：node src/cli.mjs <login|groups|send>，stdin 一份 JSON 請求；stdout 一行一個事件（NDJSON），
 // 人看的訊息（QR、PIN、錯誤細節）走 stderr。事件：
 //   credential  憑證有換就馬上吐（程序中途死掉也不會丟掉輪替後的 refresh token）
+//   qr          登入用的 QR 網址（login；網站「LINE 群組」分頁把它畫成 QR 碼）
+//   pin         掃完 QR 後手機要輸入的 PIN（login）
 //   profile     登入的是哪個帳號
 //   group       加入中的群組（groups）
 //   sending     要開始送某一筆了（之後沒有 result＝送到一半中斷，不確定有沒有發出去）
@@ -38,6 +40,7 @@ async function cmdLogin() {
   const client = await loginByQr({
     deadlineMs: LOGIN_DEADLINE_MS,
     async onQr(url) {
+      emit({ type: "qr", url });
       console.error("\n用要發文的那支 LINE 帳號掃這個 QR（備用帳號！不要用本人主帳號）：\n");
       try {
         const qr = await import("qrcode-terminal");
@@ -48,6 +51,7 @@ async function cmdLogin() {
       console.error("\n或把這個網址貼到手機 LINE 開啟：\n" + url + "\n");
     },
     onPin(pin) {
+      emit({ type: "pin", pin: String(pin) });
       console.error(`\n手機 LINE 會要你輸入 PIN：  ${pin}\n`);
     },
   });
