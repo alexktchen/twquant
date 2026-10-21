@@ -7,12 +7,13 @@
 //   credential  憑證有換就馬上吐（程序中途死掉也不會丟掉輪替後的 refresh token）
 //   profile     登入的是哪個帳號
 //   group       加入中的群組（groups）
+//   sending     要開始送某一筆了（之後沒有 result＝送到一半中斷，不確定有沒有發出去）
 //   result      一筆貼文的結果（send）
 //   fatal       整個指令失敗（登不進去之類），之後 exit 2
 
-import { lineBackoffMs } from "./backoff.mjs";
+import { deliver } from "./deliver.mjs";
 import {
-  clientFromCredential, createPost, findPost, listGroups, loginByQr, readCredential, sharePost, whoami,
+  clientFromCredential, listGroups, loginByQr, readCredential, sendFlex, sendText, whoami,
 } from "./line.mjs";
 
 const LOGIN_DEADLINE_MS = 180_000; // 掃 QR＋輸入 PIN 的時間
@@ -61,47 +62,20 @@ async function cmdGroups(req) {
 }
 
 /**
- * jobs: [{ id, homeId, text, sinceMs, linePostId?, share }]
- * 沒有 linePostId → 先找記事本上有沒有同內文的（上一輪發了沒記到）、沒有才發；有 → 只補分享。
- * LINE 叫我們慢一點（backoffMs）就停，後面的這一輪不送。
+ * 請求：{ credential, liffId?, jobs: [{ id, homeId, message（Flex 訊息物件）, fallbackText }] }
+ * 每筆先發 Flex 圖卡、不行改發文字（deliver.mjs）。LINE 叫我們慢一點（backoffMs）就停，後面的這一輪不送。
  */
 async function cmdSend(req) {
   const client = await connect(req);
+  const send = {
+    sendFlex: (to, message) => sendFlex(client, to, message, { liffId: req.liffId || undefined }),
+    sendText: (to, text) => sendText(client, to, text),
+  };
   for (const job of req.jobs ?? []) {
-    const out = { type: "result", id: job.id, linePostId: job.linePostId ?? null, posted: Boolean(job.linePostId), shared: false };
-    let stage = "post";
-    try {
-      if (!out.linePostId) {
-        let existing = null;
-        try {
-          existing = await findPost(client, job.homeId, job.text, job.sinceMs);
-        } catch (e) {
-          // 列貼文失敗（新群組記事本還是空的之類）照樣發文，同 new_erp；LINE 叫停的話就不要再打
-          if (lineBackoffMs(e?.message ?? e) !== null) throw e;
-          console.error(`[line-poster] 第 ${job.id} 筆找既有貼文失敗（照樣發文）：${e?.message ?? e}`);
-        }
-        if (existing) {
-          out.linePostId = existing;
-          out.adopted = true;
-        } else {
-          out.linePostId = await createPost(client, job.homeId, job.text);
-        }
-        out.posted = true;
-        // create 的回應撿不到 id 時，馬上用 list 把剛發的那篇對回來（沒有 id 就分享不了）
-        if (!out.linePostId) out.linePostId = await findPost(client, job.homeId, job.text, job.sinceMs);
-      }
-      if (job.share && out.linePostId) {
-        stage = "share";
-        await sharePost(client, job.homeId, out.linePostId);
-        out.shared = true;
-      }
-    } catch (e) {
-      const msg = String(e?.message ?? e);
-      console.error(`[line-poster] 第 ${job.id} 筆（${stage}）失敗：${msg}`);
-      out.stage = stage;
-      out.error = msg.slice(0, 1000);
-      out.backoffMs = lineBackoffMs(msg);
-    }
+    emit({ type: "sending", id: job.id });
+    const out = { type: "result", id: job.id, ...(await deliver(job, send)) };
+    if (!out.sent) console.error(`[line-poster] 第 ${job.id} 筆沒送出：${out.error}`);
+    else if (out.flexError) console.error(`[line-poster] 第 ${job.id} 筆圖卡發不出去、改發文字：${out.flexError}`);
     emit(out);
     if (out.backoffMs) break;
   }

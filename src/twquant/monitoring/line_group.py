@@ -1,28 +1,32 @@
-"""LINE 群組記事本貼文（T-423／D-204）：照 lt-foods/new_erp 的做法，用一支備用 LINE 帳號在一般群組的記事本發文，
-再把貼文卡片分享到群組聊天。四種貼文：每日名單、族群資金流入、盤前晨報、盤後快訊。
+"""LINE 群組每日圖卡（T-423／D-204）：用一支備用 LINE 帳號在一般群組的**聊天**發一張圖卡，點圖打開網站。
+四種：每日名單、族群資金流入、盤前晨報、盤後快訊。做法來自 lt-foods/new_erp（linejs 登入備用帳號）。
 
-分工跟 new_erp 一樣是「排隊 → worker 撿」：排程寫好名單／晨報後 `line-group enqueue` 把整篇文字排進
-web.line_posts（同一天同一種同一群組只排一次），`line-group send` 撿到期的送出。跟 LINE 講話的是
+分工是「排隊 → 撿著送」：排程寫好名單／晨報後 `line-group enqueue` 畫好圖卡（web.line_cards，網站
+/pub/line-card/<token> 公開給 LINE 抓）、排進 web.line_posts（同一天同一種同一群組只排一次）；`line-group send`
+撿到期的送出。要發哪些群組在網站「LINE 群組」分頁勾（web.line_groups，有權限的人才看得到）。跟 LINE 講話的是
 Node 轉接器 line-poster/（linejs 只有 JS 版），這裡用子程序呼叫：stdin 一份 JSON、stdout 一行一個事件。
 
 ⚠ linejs 是 LINE **非官方**客戶端協定，違反 LINE 使用條款、帳號可能被停權——只能用備用帳號。
 登入憑證存在 web.line_account：access token 7 天、refresh token 一年且每次換新都會輪替，所以要能寫回，
-不能放 GitHub secret。上半部是純函數（組文字、解析事件、決定每筆的下一個狀態），下半部連資料庫。
+不能放 GitHub secret。上半部是純函數（組卡片、Flex 訊息、解析事件、決定每筆的下一個狀態），下半部連資料庫。
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+import secrets
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from twquant.config import LineGroupConfig
-from twquant.errors import ConfigError, DataError, ExecutionError
+from twquant.errors import ConfigError, ExecutionError
+from twquant.monitoring.line_card import Card, CardRow, CardSection
 from twquant.monitoring.push_notify import HotGroup
 
 KINDS = ("picks", "groups", "morning", "evening")
@@ -31,88 +35,84 @@ ACCOUNT_ID = "default"  # 只有一支發文帳號；表留 id 欄位，之後�
 _WEEKDAYS = "一二三四五六日"
 # LINE 叫停（被暫時限制／701）時寫在貼文上的說明：不是失敗，下一輪自動再送
 BACKOFF_HINT = "LINE 要求暫緩（暫時限制或請稍後再發），帳號先停一陣子，之後自動重送"
+# 轉接器說「要開始送了」卻沒有結果：可能已經發出去，不重送（寧可漏一則也不要同一張圖發兩次）
+UNKNOWN_HINT = "送到一半轉接器中斷，不確定有沒有發出去；不自動重送，請看群組"
+ALT_TEXT_MAX = 400  # LINE Flex 訊息 altText 上限
+TEXT_MAX = 5000  # LINE 文字訊息上限
 
 
-# ── 組文字 ─────────────────────────────────────────────────────────────────
+# ── 卡片內容 ───────────────────────────────────────────────────────────────
 
 
 def day_label(day: dt.date) -> str:
-    """10/21（二）。"""
+    """10/21（三）。"""
     return f"{day.month}/{day.day}（{_WEEKDAYS[day.weekday()]}）"
-
-
-def finish(body: str, *, site_url: str, footer: str, max_chars: int) -> str:
-    """附上網站連結與免責聲明；超過字數上限 raise（不偷偷截斷）。"""
-    text = f"{body.rstrip()}\n\n{site_url}\n{footer}".strip()
-    if len(text) > max_chars:
-        raise DataError(
-            "line_posts", None, f"LINE 貼文 {len(text)} 字超過上限 {max_chars}：{text[:40]}…"
-        )
-    return text
 
 
 @dataclass(frozen=True)
 class PickRow:
-    """名單上的一檔：哪條線、第幾名、代號、股名、族群、名單一句話（沒有就 None）。"""
+    """名單上的一檔：哪條線、第幾名、代號、股名、族群。"""
 
     line: str
     rank: int
     stock_id: str
     name: str | None
     group: str | None
-    blurb: str | None
 
 
-def compose_picks(
-    day: dt.date,
+def picks_sections(
     lines: Sequence[tuple[str, str]],
     picks: Sequence[PickRow],
     previous: Mapping[str, set[str]],
     *,
-    max_per_line: int,
-) -> str:
-    """每日名單：照設定的線別順序，每條線列名次、代號、股名、族群，新進的標出來，下面附一句話。
+    rows_per_line: int,
+) -> tuple[CardSection, ...]:
+    """每日名單：照設定的線別順序，每條線列前幾名（代號、股名、族群、新進標 NEW），其餘寫「…另 N 檔」。
 
     previous＝各線上一個有名單的日子的代號（這條線之前沒有名單就不在 dict 裡 → 不標新進）。
     """
     by_line: dict[str, list[PickRow]] = {}
     for p in sorted(picks, key=lambda r: (r.line, r.rank)):
         by_line.setdefault(p.line, []).append(p)
-    parts = [f"{day_label(day)}今日名單"]
+    out: list[CardSection] = []
     for code, name in lines:
         rows = by_line.get(code, [])
         if not rows:
-            parts.append(f"【{name}】今天沒有符合條件的股票")
+            out.append(CardSection(name, "今天沒有符合條件的股票"))
             continue
         prev = previous.get(code)
-        new = [r for r in rows if prev is not None and r.stock_id not in prev]
-        head = f"【{name}】{len(rows)} 檔" + (f"，新進 {len(new)}" if new else "")
-        out = [head]
-        for r in rows[:max_per_line]:
-            label = f"{r.stock_id} {r.name}" if r.name else r.stock_id
-            group = f"（{r.group}）" if r.group else ""
-            mark = " 新進" if r in new else ""
-            out.append(f"{r.rank}. {label}{group}{mark}")
-            if r.blurb:
-                out.append(f"　{r.blurb}")
-        if len(rows) > max_per_line:
-            out.append(f"另 {len(rows) - max_per_line} 檔請看網站")
-        parts.append("\n".join(out))
-    return "\n\n".join(parts)
+        new = {r.stock_id for r in rows if prev is not None and r.stock_id not in prev}
+        note = f"{len(rows)} 檔" + (f" · 新進 {len(new)}" if new else "")
+        shown = tuple(
+            CardRow(
+                str(r.rank),
+                r.stock_id,
+                r.name or r.stock_id,
+                r.group or "",
+                "NEW" if r.stock_id in new else "",
+            )
+            for r in rows[:rows_per_line]
+        )
+        more = f"…另 {len(rows) - rows_per_line} 檔" if len(rows) > rows_per_line else ""
+        out.append(CardSection(name, note, shown, more=more))
+    return tuple(out)
 
 
-def compose_groups(day: dt.date, hot: Sequence[HotGroup], *, max_listed: int) -> str:
-    """族群資金流入：一個族群一行（資金倍數、漲跌家數、名單上的股票），條件同網頁推播（T-354）。"""
+def groups_sections(hot: Sequence[HotGroup], *, max_listed: int) -> tuple[CardSection, ...]:
+    """族群資金流入：一個族群一塊（資金倍數、漲跌家數、名單上的股票），條件同網頁推播（T-354）。"""
     if not hot:
-        raise ValueError("沒有資金流入的族群，不該組貼文")
-    shown = hot[:max_listed]
-    rows = [
-        f"{h.group}：資金 {h.ratio:.1f} 倍、{h.n} 檔 {h.up} 漲｜名單 {len(h.picks)} 檔：{'、'.join(h.picks)}"
-        for h in shown
+        raise ValueError("沒有資金流入的族群，不該做圖卡")
+    out = [
+        CardSection(
+            h.group,
+            f"資金 {h.ratio:.1f} 倍 · {h.n} 檔 {h.up} 漲",
+            paragraphs=(f"名單 {len(h.picks)} 檔：{'、'.join(h.picks)}",),
+        )
+        for h in hot[:max_listed]
     ]
     if len(hot) > max_listed:
-        rows.append(f"另 {len(hot) - max_listed} 個族群請看網站「盤勢」")
-    return f"{day_label(day)}名單上的族群資金流入\n\n" + "\n".join(rows)
+        out[-1] = replace(out[-1], more=f"…另 {len(hot) - max_listed} 個族群")
+    return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -125,19 +125,85 @@ class BriefRow:
     rule_text: str | None
 
 
-def compose_brief(day: dt.date, kind: str, brief: BriefRow) -> str:
+def brief_sections(day: dt.date, kind: str, brief: BriefRow) -> tuple[CardSection, ...]:
     """晨報／盤後快訊：有模型版用標題＋要點＋風險，沒有就用規則那一句（跟網站首頁同一份）。"""
-    title = f"{day_label(day)}{BRIEF_KINDS[kind][1]}"
     if brief.headline:
-        body = [brief.headline]
-        if brief.bullets:
-            body.append("\n".join(f"• {b}" for b in brief.bullets))
+        out = [CardSection(brief.headline, paragraphs=tuple(f"• {b}" for b in brief.bullets))]
         if brief.risk_note:
-            body.append(f"風險：{brief.risk_note}")
-        return f"{title}\n\n" + "\n\n".join(body)
+            out.append(CardSection("風險", paragraphs=(brief.risk_note,)))
+        return tuple(out)
     if brief.rule_text:
-        return f"{title}\n\n{brief.rule_text}"
+        return (CardSection("", paragraphs=(brief.rule_text,)),)
     raise ValueError(f"{day} 的{BRIEF_KINDS[kind][1]}沒有內容")
+
+
+_TITLES = {"picks": "今日名單", "groups": "名單上的族群資金流入"} | {
+    k: v[1] for k, v in BRIEF_KINDS.items()
+}
+
+
+def card_title(day: dt.date, kind: str) -> str:
+    """圖卡標題。"""
+    return f"{day_label(day)}{_TITLES[kind]}"
+
+
+def make_card(title: str, sections: tuple[CardSection, ...], cfg: LineGroupConfig) -> Card:
+    """組成一整張卡（底部的「點圖看…」、網站、免責聲明照設定）。"""
+    host = urlsplit(cfg.site_url).hostname or cfg.site_url
+    return Card(title, sections, cfg.cta, host, cfg.footer)
+
+
+def summary_lines(card: Card) -> list[str]:
+    """卡片的文字摘要：標題＋每個區塊的標題與旁註（altText 與備案文字用）。"""
+    out = [card.title]
+    for s in card.sections:
+        head = "　".join(x for x in (s.heading, s.note) if x)
+        if head:
+            out.append(head)
+        elif s.paragraphs:
+            out.append(s.paragraphs[0])
+    return out
+
+
+def alt_text(card: Card) -> str:
+    """Flex 訊息的 altText（通知與聊天列表看到的那行），也是備案文字的內容。"""
+    lines = summary_lines(card)
+    text = lines[0] + ("：" + "；".join(lines[1:]) if len(lines) > 1 else "")
+    return text if len(text) <= ALT_TEXT_MAX else text[: ALT_TEXT_MAX - 1] + "…"
+
+
+def fallback_text(alt: str, link: str) -> str:
+    """圖卡發不出去時的文字版：摘要＋連結（LINE 會把網址做成連結預覽）。"""
+    return f"{alt}\n\n{link}"
+
+
+def flex_message(alt: str, image_url: str, width: int, height: int, link: str) -> dict[str, Any]:
+    """一則 Flex 訊息：整張是圖，點圖打開網站。"""
+    if not image_url.startswith("https://") or not link.startswith("https://"):
+        raise ValueError(f"Flex 的圖與連結都要 https：{image_url} {link}")
+    if height > 3 * width:
+        raise ValueError(f"圖太長（{width}×{height}）：Flex 圖片高度不能超過寬度三倍")
+    return {
+        "type": "flex",
+        "altText": alt,
+        "contents": {
+            "type": "bubble",
+            "size": "giga",
+            "hero": {
+                "type": "image",
+                "url": image_url,
+                "size": "full",
+                "aspectRatio": f"{width}:{height}",
+                "aspectMode": "fit",
+                "action": {"type": "uri", "label": "打開 twquant", "uri": link},
+            },
+        },
+    }
+
+
+def new_token() -> str:
+    """圖卡網址裡的亂數（猜不到；32 個十六進位字）。"""
+    return secrets.token_hex(16)
 
 
 # ── 轉接器事件 ─────────────────────────────────────────────────────────────
@@ -154,12 +220,13 @@ class Credential:
 
 @dataclass(frozen=True)
 class AdapterOutput:
-    """轉接器跑一次的結果。credential＝程序中吐出的最後一組（沒吐 → None）。"""
+    """轉接器跑一次的結果。credential＝程序中吐出的最後一組（沒吐 → 呼叫時給的那組）。"""
 
     returncode: int
     credential: Credential | None = None
     profile: dict[str, str] = field(default_factory=dict)
     groups: tuple[dict[str, str], ...] = ()
+    sending: tuple[int, ...] = ()
     results: tuple[dict[str, Any], ...] = ()
     fatal: str | None = None
 
@@ -172,6 +239,7 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
     cred = base
     profile: dict[str, str] = {}
     groups: list[dict[str, str]] = []
+    sending: list[int] = []
     results: list[dict[str, Any]] = []
     fatal: str | None = None
     for raw in lines:
@@ -201,6 +269,8 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
             profile = {k: str(v) for k, v in ev.items() if k != "type" and v is not None}
         elif kind == "group":
             groups.append({"homeId": str(ev["homeId"]), "name": str(ev.get("name") or "")})
+        elif kind == "sending":
+            sending.append(int(ev["id"]))
         elif kind == "result":
             results.append(ev)
         elif kind == "fatal":
@@ -209,7 +279,9 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
             raise ExecutionError(f"轉接器回了不認得的事件：{line[:200]}")
     if returncode != 0 and fatal is None:
         fatal = f"轉接器結束碼 {returncode}"
-    return AdapterOutput(returncode, cred, profile, tuple(groups), tuple(results), fatal)
+    return AdapterOutput(
+        returncode, cred, profile, tuple(groups), tuple(sending), tuple(results), fatal
+    )
 
 
 AdapterRunner = Callable[[str, dict[str, Any], Credential | None], AdapterOutput]
@@ -241,73 +313,79 @@ def node_runner(cfg: LineGroupConfig, repo_root: Path) -> AdapterRunner:
     return run
 
 
+# linejs 登不進去的兩種訊息：token 被拒、access token 過期又沒有能用的 refresh token
+_LOGIN_ERRORS = ("AUTHENTICATION_FAILED", "MUST_REFRESH_V3_TOKEN", "cached token rejected")
+
+
+def needs_login(error: str) -> bool:
+    """這個錯誤是不是要重新掃 QR 登入。"""
+    return any(k in error for k in _LOGIN_ERRORS)
+
+
 # ── 每筆貼文的下一個狀態 ───────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class Job:
-    """web.line_posts 裡到期要處理的一列。"""
+    """web.line_posts 裡到期要送的一列（含圖卡的尺寸，組 Flex 訊息用）。"""
 
     id: int
+    kind: str
     home_id: str
-    text: str
-    enqueued_at: dt.datetime
-    line_post_id: str | None
-    status: str  # queued（還沒發）／posted（發了、分享還沒成功）
-    share_state: str
+    card_token: str
+    alt_text: str
+    link_url: str
     attempts: int
+    width: int
+    height: int
 
-    def request(self) -> dict[str, Any]:
-        """給轉接器的那一筆。"""
+    def request(self, cfg: LineGroupConfig) -> dict[str, Any]:
+        """給轉接器的那一筆：Flex 圖卡＋備案文字。"""
         return {
             "id": self.id,
             "homeId": self.home_id,
-            "text": self.text,
-            "sinceMs": int(self.enqueued_at.timestamp() * 1000),
-            "linePostId": self.line_post_id,
-            "share": self.share_state == "pending",
+            "message": flex_message(
+                self.alt_text,
+                f"{cfg.card_url_base}{self.card_token}.png",
+                self.width,
+                self.height,
+                self.link_url,
+            ),
+            "fallbackText": fallback_text(self.alt_text, self.link_url)
+            if cfg.fallback_text
+            else "",
         }
 
 
 def next_state(
-    job: Job, result: Mapping[str, Any], *, now: dt.datetime, max_attempts: int
+    job: Job,
+    result: Mapping[str, Any] | None,
+    *,
+    sending: bool,
+    now: dt.datetime,
+    max_attempts: int,
 ) -> dict[str, Any]:
     """依轉接器的結果決定這一列要改哪些欄位（純函數）。
 
-    - 發成功：status=posted；要分享的看分享結果（LINE 叫停 → 留 pending 下輪再分享；其他錯誤 → failed）
-    - 發失敗、LINE 叫停：維持 queued，不算一次失敗
-    - 發失敗、其他錯誤：attempts+1，到上限才標 failed
+    - 送出：status=sent（via＝flex 或 text；改發文字時把圖卡的錯誤留著）
+    - 沒結果但說了要送（送到一半中斷）：status=unknown，不重送
+    - 沒結果也沒開始送：原樣（{}）
+    - LINE 叫停：維持 queued，不算一次失敗；其他錯誤 attempts+1，到上限才標 failed
     """
-    error = result.get("error")
-    backoff = result.get("backoffMs") is not None
-    if result.get("posted"):
-        upd: dict[str, Any] = {
-            "status": "posted",
-            "line_post_id": result.get("linePostId") or job.line_post_id,
-            "last_error": None,
+    if result is None:
+        return {"status": "unknown", "last_error": UNKNOWN_HINT} if sending else {}
+    if result.get("sent"):
+        flex_err = result.get("flexError")
+        return {
+            "status": "sent",
+            "via": str(result.get("via") or "flex"),
+            "sent_at": now,
+            "last_error": f"圖卡發不出去，改發文字：{flex_err}"[:1000] if flex_err else None,
         }
-        if job.status != "posted":
-            upd["posted_at"] = now
-        if job.share_state == "pending":
-            if result.get("shared"):
-                upd.update(share_state="shared", shared_at=now)
-            elif not upd["line_post_id"]:
-                upd.update(
-                    share_state="failed",
-                    last_error="發文成功但沒拿到 LINE 貼文 id，沒分享到聊天",
-                )
-            elif error and backoff:
-                upd["last_error"] = f"分享到聊天：{BACKOFF_HINT}"
-            elif error:
-                upd.update(share_state="failed", last_error=f"分享到聊天失敗：{error}"[:1000])
-            else:
-                raise ExecutionError(
-                    f"line_posts #{job.id}：要分享卻沒有分享結果也沒有錯誤：{result}"
-                )
-        return upd
+    error = result.get("error")
     if not error:
-        raise ExecutionError(f"line_posts #{job.id}：轉接器說沒發成功卻沒有錯誤：{result}")
-    if backoff:
+        raise ExecutionError(f"line_posts #{job.id}：轉接器說沒送出卻沒有錯誤：{result}")
+    if result.get("backoffMs") is not None:
         return {"last_error": BACKOFF_HINT}
     attempts = job.attempts + 1
     return {
@@ -323,34 +401,11 @@ def backoff_until(results: Sequence[Mapping[str, Any]], now: dt.datetime) -> dt.
     return now + dt.timedelta(milliseconds=max(waits)) if waits else None
 
 
-# linejs 登不進去的兩種訊息：token 被拒、access token 過期又沒有能用的 refresh token
-_LOGIN_ERRORS = ("AUTHENTICATION_FAILED", "MUST_REFRESH_V3_TOKEN", "cached token rejected")
-
-
-def needs_login(error: str) -> bool:
-    """這個錯誤是不是要重新掃 QR 登入。"""
-    return any(k in error for k in _LOGIN_ERRORS)
-
-
-def group_mids(cfg: LineGroupConfig, env: Mapping[str, str]) -> list[str]:
-    """要發的群組（環境變數，逗號分隔）。只收一般群組 c…（社群 s…／m… 的路徑不同，D-204 不做）。"""
-    raw = env.get(cfg.group_mids_env, "")
-    mids = [m.strip() for m in raw.split(",") if m.strip()]
-    if not mids:
-        raise ConfigError(
-            f"缺要發的 LINE 群組：環境變數 {cfg.group_mids_env}（`twquant line-group groups` 列得出 c… 的 id）"
-        )
-    bad = [m for m in mids if not m.startswith("c")]
-    if bad:
-        raise ConfigError(f"{cfg.group_mids_env} 只收一般群組（c… 開頭），拿到 {bad}")
-    return mids
-
-
 # ── 資料庫 ─────────────────────────────────────────────────────────────────
 
 
 def ensure_tables(conn: Any, schema: str) -> None:
-    """建排隊表與帳號表（第一次用時自動建；沒有備份，丟了只是重新掃 QR）。"""
+    """建帳號、群組、圖卡、排隊四張表（第一次用時自動建；沒有備份，丟了只是重新掃 QR、重新勾群組）。"""
     with conn.cursor() as cur:
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
         cur.execute(
@@ -360,13 +415,25 @@ def ensure_tables(conn: Any, schema: str) -> None:
             "updated_at timestamptz NOT NULL, paused_until timestamptz, busy_until timestamptz, "
             "last_error text)"
         )
+        # enabled：網站「LINE 群組」分頁勾的（新加入的群組預設不發）；present：帳號現在還在不在這個群組
+        cur.execute(
+            f'CREATE TABLE IF NOT EXISTS "{schema}".line_groups ('
+            "home_id text PRIMARY KEY, name text NOT NULL, enabled boolean NOT NULL DEFAULT false, "
+            "present boolean NOT NULL DEFAULT true, synced_at timestamptz NOT NULL, "
+            "updated_by text, updated_at timestamptz)"
+        )
+        cur.execute(
+            f'CREATE TABLE IF NOT EXISTS "{schema}".line_cards ('
+            "token text PRIMARY KEY, date date NOT NULL, kind text NOT NULL, png bytea NOT NULL, "
+            "width integer NOT NULL, height integer NOT NULL, created_at timestamptz NOT NULL)"
+        )
         cur.execute(
             f'CREATE TABLE IF NOT EXISTS "{schema}".line_posts ('
             "id bigserial PRIMARY KEY, date date NOT NULL, kind text NOT NULL, home_id text NOT NULL, "
-            "text text NOT NULL, status text NOT NULL, share_state text NOT NULL, line_post_id text, "
-            "enqueued_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, "
-            "posted_at timestamptz, shared_at timestamptz, attempts integer NOT NULL DEFAULT 0, "
-            "last_error text, UNIQUE (date, kind, home_id))"
+            f'card_token text NOT NULL REFERENCES "{schema}".line_cards(token) ON DELETE CASCADE, '
+            "alt_text text NOT NULL, link_url text NOT NULL, status text NOT NULL, via text, "
+            "enqueued_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, sent_at timestamptz, "
+            "attempts integer NOT NULL DEFAULT 0, last_error text, UNIQUE (date, kind, home_id))"
         )
     conn.commit()
 
@@ -378,19 +445,17 @@ def _exists(cur: Any, schema: str, table: str) -> bool:
 
 
 def load_picks(
-    conn: Any, schema: str, day: dt.date, lines: Sequence[tuple[str, str]], *, with_blurbs: bool
+    conn: Any, schema: str, day: dt.date, lines: Sequence[tuple[str, str]]
 ) -> tuple[list[PickRow], dict[str, set[str]]] | None:
-    """當天名單（含股名、族群、一句話）與各線上一個有名單的日子的代號；當天沒有名單 → None。
+    """當天名單（含股名、族群）與各線上一個有名單的日子的代號；當天沒有名單 → None。
 
     族群照網站：族群表上有就用表上的，沒有（重抓之間新上市）用官方產業別。
     """
     with conn.cursor() as cur:
-        blurbs = with_blurbs and _exists(cur, schema, "pick_blurbs")
         groups = _exists(cur, schema, "stock_group")
         cur.execute(
             "SELECT p.line, p.rank, p.stock_id, m.name, "
-            + ("coalesce(g.grp, m.industry)" if groups else "m.industry")
-            + (", b.text " if blurbs else ", NULL ")
+            + ("coalesce(g.grp, m.industry) " if groups else "m.industry ")
             + f'FROM "{schema}"."daily_picks" p '
             f'LEFT JOIN "{schema}"."stock_meta" m ON m.stock_id = p.stock_id '
             + (
@@ -398,18 +463,12 @@ def load_picks(
                 if groups
                 else ""
             )
-            + (
-                f'LEFT JOIN "{schema}"."pick_blurbs" b '
-                "ON b.date = p.date AND b.line = p.line AND b.stock_id = p.stock_id "
-                if blurbs
-                else ""
-            )
             + "WHERE p.date = %s ORDER BY p.line, p.rank",
             (day,),
         )
         rows = [
-            PickRow(str(ln), int(rk), str(sid), nm or None, grp or None, bl or None)
-            for ln, rk, sid, nm, grp, bl in cur.fetchall()
+            PickRow(str(ln), int(rk), str(sid), nm or None, grp or None)
+            for ln, rk, sid, nm, grp in cur.fetchall()
         ]
         if not rows:
             return None
@@ -447,17 +506,94 @@ def load_brief(conn: Any, schema: str, day: dt.date, kind: str) -> BriefRow | No
     )
 
 
+def enabled_groups(conn: Any, schema: str) -> list[str]:
+    """網站上勾了、帳號也還在裡面的群組。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT home_id FROM "{schema}".line_groups WHERE enabled AND present ORDER BY home_id'
+        )
+        return [str(r[0]) for r in cur.fetchall()]
+
+
+def save_groups(
+    conn: Any, schema: str, groups: Sequence[Mapping[str, str]], now: dt.datetime
+) -> None:
+    """記下帳號現在在哪些群組（新的預設不發；不在清單上的標 present=false，不刪，網站上的勾選留著）。"""
+    ids = [g["homeId"] for g in groups]
+    with conn.cursor() as cur:
+        for g in groups:
+            cur.execute(
+                f'INSERT INTO "{schema}".line_groups (home_id, name, synced_at) VALUES (%s, %s, %s) '
+                "ON CONFLICT (home_id) DO UPDATE SET name = EXCLUDED.name, present = true, "
+                "synced_at = EXCLUDED.synced_at",
+                (g["homeId"], g["name"], now),
+            )
+        cur.execute(
+            f'UPDATE "{schema}".line_groups SET present = false, synced_at = %s '
+            "WHERE NOT (home_id = ANY(%s))",
+            (now, ids),
+        )
+    conn.commit()
+
+
+def save_card(
+    conn: Any,
+    schema: str,
+    day: dt.date,
+    kind: str,
+    png: bytes,
+    size: tuple[int, int],
+    now: dt.datetime,
+) -> str:
+    """存一張圖卡，回它的 token（網址用）。"""
+    token = new_token()
+    with conn.cursor() as cur:
+        cur.execute(
+            f'INSERT INTO "{schema}".line_cards (token, date, kind, png, width, height, created_at) '
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (token, day, kind, png, size[0], size[1], now),
+        )
+    conn.commit()
+    return token
+
+
+def prune_cards(conn: Any, schema: str, today: dt.date, keep_days: int) -> int:
+    """刪掉太舊的圖卡（連帶它的貼文紀錄）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'DELETE FROM "{schema}".line_cards WHERE date < %s',
+            (today - dt.timedelta(days=keep_days),),
+        )
+        n = int(cur.rowcount)
+    conn.commit()
+    return n
+
+
+def already_queued(
+    conn: Any, schema: str, day: dt.date, kind: str, home_ids: Sequence[str]
+) -> set[str]:
+    """這天這種已經排過的群組（排過就不再畫圖、不再排）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f'SELECT home_id FROM "{schema}".line_posts WHERE date = %s AND kind = %s '
+            "AND home_id = ANY(%s)",
+            (day, kind, list(home_ids)),
+        )
+        return {str(r[0]) for r in cur.fetchall()}
+
+
 def enqueue(
     conn: Any,
     schema: str,
     day: dt.date,
     kind: str,
     home_ids: Sequence[str],
-    text: str,
     *,
+    card_token: str,
+    alt: str,
+    link: str,
     now: dt.datetime,
     stale_hours: float,
-    share: bool,
 ) -> int:
     """排進 web.line_posts；同一天同一種同一群組已經排過就不動（回新排了幾則）。"""
     if now.tzinfo is None:
@@ -468,10 +604,10 @@ def enqueue(
         for home in home_ids:
             cur.execute(
                 f'INSERT INTO "{schema}".line_posts '
-                "(date, kind, home_id, text, status, share_state, enqueued_at, expires_at) "
-                "VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s) "
+                "(date, kind, home_id, card_token, alt_text, link_url, status, enqueued_at, expires_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s, %s) "
                 "ON CONFLICT (date, kind, home_id) DO NOTHING",
-                (day, kind, home, text, "pending" if share else "skipped", now, expires),
+                (day, kind, home, card_token, alt, link, now, expires),
             )
             added += cur.rowcount
     conn.commit()
@@ -582,24 +718,18 @@ def set_account_status(
 
 
 def due_jobs(conn: Any, schema: str, now: dt.datetime) -> list[Job]:
-    """先把過期的作廢，再撿還沒發的與發了但分享還沒成功的（舊的先）。"""
+    """先把過期的作廢，再撿還沒送的（舊的先）。"""
     with conn.cursor() as cur:
         cur.execute(
-            f"UPDATE \"{schema}\".line_posts SET status = 'expired', "
-            "share_state = CASE WHEN share_state = 'pending' THEN 'expired' ELSE share_state END "
+            f"UPDATE \"{schema}\".line_posts SET status = 'expired' "
             "WHERE status = 'queued' AND expires_at <= %s",
             (now,),
         )
         cur.execute(
-            f"UPDATE \"{schema}\".line_posts SET share_state = 'expired' "
-            "WHERE status = 'posted' AND share_state = 'pending' AND expires_at <= %s",
-            (now,),
-        )
-        cur.execute(
-            "SELECT id, home_id, text, enqueued_at, line_post_id, status, share_state, attempts "
-            f'FROM "{schema}".line_posts '
-            "WHERE expires_at > %s AND (status = 'queued' OR (status = 'posted' AND share_state = 'pending')) "
-            "ORDER BY enqueued_at, id",
+            "SELECT p.id, p.kind, p.home_id, p.card_token, p.alt_text, p.link_url, p.attempts, "
+            f'c.width, c.height FROM "{schema}".line_posts p '
+            f'JOIN "{schema}".line_cards c ON c.token = p.card_token '
+            "WHERE p.status = 'queued' AND p.expires_at > %s ORDER BY p.enqueued_at, p.id",
             (now,),
         )
         jobs = [Job(*r) for r in cur.fetchall()]
@@ -623,11 +753,15 @@ def apply_update(conn: Any, schema: str, job_id: int, upd: Mapping[str, Any]) ->
 class SendSummary:
     """send 一次的結果。left＝還留在隊裡等下一班的。"""
 
-    posted: int = 0
-    shared: int = 0
+    sent: int = 0
+    as_text: int = 0
     failed: tuple[str, ...] = ()
     left: int = 0
     note: str = ""
+
+
+def _left(conn: Any, schema: str, now: dt.datetime) -> int:
+    return len(due_jobs(conn, schema, now))
 
 
 def send_due(
@@ -638,27 +772,30 @@ def send_due(
     now_fn: Callable[[], dt.datetime],
     sleep: Callable[[float], None],
 ) -> SendSummary:
-    """撿到期的貼文送出。帳號被另一班占著就等（最多 lock_wait_seconds）；LINE 叫停就等到解禁再送
-    （最多 max_backoff_wait_seconds，超過就留給下一班）。憑證有換就寫回。"""
+    """撿到期的貼文送出。沒有要送的就直接結束（還沒登入也不算錯）；帳號被另一班占著就等（最多
+    lock_wait_seconds）；LINE 叫停就等到解禁再送（最多 max_backoff_wait_seconds，超過就留給下一班）。憑證有換就寫回。
+    """
     schema = cfg.web_schema
     ensure_tables(conn, schema)
+    if not due_jobs(conn, schema, now_fn()):
+        return SendSummary()
     cred = load_credential(conn, schema)
     if cred is None:
         raise ConfigError("還沒登入 LINE 發文帳號：本機跑 `twquant line-group login` 掃 QR")
     start = now_fn()
     lock_deadline = start + dt.timedelta(seconds=cfg.lock_wait_seconds)
     backoff_deadline = start + dt.timedelta(seconds=cfg.max_backoff_wait_seconds)
-    posted = shared = 0
+    sent = as_text = 0
     failed: list[str] = []
     while True:
         now = now_fn()
         if not due_jobs(conn, schema, now):
-            return SendSummary(posted, shared, tuple(failed), 0)
+            return SendSummary(sent, as_text, tuple(failed), 0)
         if not acquire_lease(conn, schema, now, cfg.lease_seconds):
             if now >= lock_deadline:
-                left = len(due_jobs(conn, schema, now))
+                left = _left(conn, schema, now)
                 return SendSummary(
-                    posted, shared, tuple(failed), left, "帳號被另一班占著，留給下一班"
+                    sent, as_text, tuple(failed), left, "帳號被另一班占著，留給下一班"
                 )
             sleep(cfg.poll_seconds)
             continue
@@ -666,49 +803,73 @@ def send_due(
             paused = account_state(conn, schema).get("paused_until")
             if paused is not None and paused > now:
                 if paused > backoff_deadline:
-                    left = len(due_jobs(conn, schema, now))
-                    return SendSummary(
-                        posted,
-                        shared,
-                        tuple(failed),
-                        left,
-                        f"LINE 叫停到 {paused:%H:%M}，留給下一班",
-                    )
+                    left = _left(conn, schema, now)
+                    note = f"LINE 叫停到 {paused:%H:%M}，留給下一班"
+                    return SendSummary(sent, as_text, tuple(failed), left, note)
                 release_lease(conn, schema)
                 sleep((paused - now).total_seconds())
                 continue
             jobs = due_jobs(conn, schema, now)
             cred = load_credential(conn, schema) or cred
-            out = runner(
-                "send", {"credential": _cred_json(cred), "jobs": [j.request() for j in jobs]}, cred
-            )
+            request = {
+                "credential": _cred_json(cred),
+                "liffId": cfg.liff_id,
+                "jobs": [j.request(cfg) for j in jobs],
+            }
+            out = runner("send", request, cred)
             done = now_fn()
             if out.credential is not None and out.credential != cred:
                 save_account(conn, schema, out.credential, now=done, profile=out.profile)
                 cred = out.credential
             by_id = {int(r["id"]): r for r in out.results}
             for job in jobs:
-                res = by_id.get(job.id)
-                if res is None:
-                    continue  # 轉接器還沒輪到它（被叫停或中途結束）：原樣留著
-                upd = next_state(job, res, now=done, max_attempts=cfg.max_attempts)
+                upd = next_state(
+                    job,
+                    by_id.get(job.id),
+                    sending=job.id in out.sending,
+                    now=done,
+                    max_attempts=cfg.max_attempts,
+                )
                 apply_update(conn, schema, job.id, upd)
-                if res.get("posted") and job.status != "posted":
-                    posted += 1
-                if upd.get("share_state") == "shared":
-                    shared += 1
-                if upd.get("status") == "failed" or upd.get("share_state") == "failed":
+                if upd.get("status") == "sent":
+                    sent += 1
+                    as_text += upd.get("via") == "text"
+                if upd.get("status") in ("failed", "unknown"):
                     failed.append(f"#{job.id} {upd.get('last_error')}")
             until = backoff_until(out.results, done)
             set_account_status(conn, schema, paused_until=until, last_error=out.fatal)
             if out.fatal is not None:
-                left = len(due_jobs(conn, schema, done))
-                return SendSummary(posted, shared, (*failed, out.fatal), left, "轉接器失敗")
+                left = _left(conn, schema, done)
+                return SendSummary(sent, as_text, (*failed, out.fatal), left, "轉接器失敗")
             if until is None:
-                left = len(due_jobs(conn, schema, done))
-                return SendSummary(posted, shared, tuple(failed), left)
+                return SendSummary(sent, as_text, tuple(failed), _left(conn, schema, done))
         finally:
             release_lease(conn, schema)
+
+
+def sync_groups(
+    conn: Any, cfg: LineGroupConfig, runner: AdapterRunner, *, now_fn: Callable[[], dt.datetime]
+) -> AdapterOutput | None:
+    """問帳號現在在哪些群組（順便接受邀請）存進 web.line_groups，網站上才勾得到。
+
+    還沒登入、或帳號正被另一班占著 → None（不算錯：同步只是讓清單新一點）。
+    """
+    schema = cfg.web_schema
+    ensure_tables(conn, schema)
+    cred = load_credential(conn, schema)
+    if cred is None or not acquire_lease(conn, schema, now_fn(), cfg.lease_seconds):
+        return None
+    try:
+        out = runner("groups", credential_request(cred), cred)
+        done = now_fn()
+        if out.credential is not None and out.credential != cred:
+            save_account(conn, schema, out.credential, now=done, profile=out.profile)
+        if out.fatal is None:
+            save_groups(conn, schema, out.groups, done)
+        set_account_status(conn, schema, paused_until=None, last_error=out.fatal)
+        return out
+    finally:
+        release_lease(conn, schema)
 
 
 def _cred_json(cred: Credential) -> dict[str, Any]:

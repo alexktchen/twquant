@@ -1,28 +1,16 @@
-// LINE 群組記事本發文（T-423／D-204）。
+// LINE 群組聊天發圖卡（T-423／D-204）。
 //
-// ⚠ 移植自 lt-foods/new_erp 的 supabase/functions/_shared/lineNote.ts（Edge 正式版）與
-//   tools/line-note-scraper/src/line.mjs，只留「登入、列群組、記事本發文、分享卡片到群組聊天」。
+// ⚠ 登入與憑證的處理移植自 lt-foods/new_erp 的 supabase/functions/_shared/lineNote.ts（Edge 正式版）。
 //   走的是 LINE **非官方**客戶端協定（linejs），違反 LINE 使用條款、帳號可能被停權：只能用備用帳號。
 //
-// 記事本不是 Thrift，是 LINE 內部的 JSON REST（myhome）：
-//   群組  GET https://<host>/mh/api/v57/post/list.json?homeId=<c…>&sourceType=TALKROOM
-// header 要 X-Line-Access（登入 token）+ X-Line-ChannelToken（channel token）+ X-Line-Mid。
-// 沒有 wire trace，所以 host / 路徑前綴 / channel 都做了候選清單，第一個回 code 0 的就記住。
-// ⚠ 不要改用 linejs 內建的 timeline.createPost/listPost —— 它把網址寫死成 legy.line-apps.com
-//   （LEGY 加密閘道，不吃純 HTTPS JSON），直接 fetch failed。
+// 發到群組聊天（不是記事本，使用者 2026-10-21）：Flex 訊息走 LIFF 分享（api.line.me/message/v3/share，
+// 跟手機上 LIFF 的「分享給好友」同一條），個人帳號也能發「一張圖、點了開網站」；發不出去時改發一則附連結的文字
+// （talk.sendMessage，new_erp 對群組發結單提醒用的就是它）。
 
 import { loginWithAuthToken, loginWithQR } from "@evex/linejs";
 import { MemoryStorage } from "@evex/linejs/storage";
-import { matchPost } from "./match.mjs";
 
 export const DEFAULT_DEVICE = process.env.LINE_DEVICE || "ANDROIDSECONDARY";
-
-const CHANNEL_IDS = {
-  HOME: "1341209850",
-  TIMELINE: "1341209950",
-  NOTE: "1655599932",
-  SQUARE_NOTE: "1657618623",
-};
 
 export function log(...args) {
   console.error("[line-poster]", ...args);
@@ -61,7 +49,7 @@ export async function readCredential(client) {
 }
 
 /**
- * 網路瞬斷重試一次的 fetch（Thrift 與記事本 REST 都走它）。只對「送不出去」的錯誤重試；
+ * 網路瞬斷重試一次的 fetch（Thrift 與 LIFF 分享都走它）。只對「送不出去」的錯誤重試；
  * HTTP 回了什麼（4xx/5xx）、逾時中止都原樣丟回去。
  */
 const TRANSIENT_FETCH_RE = /error sending request|stream closed|broken pipe|connection (reset|closed|error)|ECONNRESET|EPIPE|fetch failed/i;
@@ -145,189 +133,40 @@ export async function listGroups(client) {
     .map((c) => ({ homeId: String(c.chatMid), name: c.chatName ?? "" }));
 }
 
-// ── 記事本 REST ────────────────────────────────────────────────────────────
+// ── 發訊息 ─────────────────────────────────────────────────────────────────
 
-function assertGroup(homeId) {
-  // 社群（s…／m…）要另外找主聊天室、路徑也不同；D-204 只發一般群組
-  if (!String(homeId).startsWith("c")) throw new Error(`只支援一般群組（c…），拿到 ${homeId}`);
+function assertGroup(chatMid) {
+  // 社群（s…／m…）走另一套 API；D-204 只發一般群組
+  if (!String(chatMid).startsWith("c")) throw new Error(`只支援一般群組（c…），拿到 ${chatMid}`);
 }
 
-function hostCandidates(client) {
-  const forced = process.env.LINE_NOTE_HOST;
-  if (forced) return [forced];
-  const ep = client.base.request?.endpoint;
-  return [...new Set([ep, "gw.line.naver.jp", "ga2.line.naver.jp"].filter(Boolean))];
-}
-
-const PREFIXES = process.env.LINE_NOTE_PREFIX ? [process.env.LINE_NOTE_PREFIX] : ["/mh", "/ext/note/nt"];
-const CHANNELS = process.env.LINE_NOTE_CHANNEL
-  ? [process.env.LINE_NOTE_CHANNEL]
-  : [CHANNEL_IDS.HOME, CHANNEL_IDS.NOTE, CHANNEL_IDS.TIMELINE, CHANNEL_IDS.SQUARE_NOTE];
-
-// channel token 是「這個帳號 × 這個 channel」的，依 client 分開存
-const tokenCache = new WeakMap();
-function tokensFor(client) {
-  let m = tokenCache.get(client);
-  if (!m) { m = new Map(); tokenCache.set(client, m); }
-  return m;
-}
-async function channelToken(client, channelId) {
-  const cache = tokensFor(client);
-  if (cache.has(channelId)) return cache.get(channelId);
-  let token;
-  try {
-    const r = await client.base.channel.approveChannelAndIssueChannelToken({ channelId });
-    token = r?.channelAccessToken ?? r?.token;
-  } catch (e) {
-    log(`approveChannelAndIssueChannelToken(${channelId}) 失敗：${e?.message ?? e}`);
-  }
-  if (!token) {
-    const r = await client.base.channel.issueChannelToken({ channelId });
-    token = r?.token ?? r?.channelAccessToken;
-  }
-  if (!token) throw new Error(`no channel token for ${channelId}`);
-  cache.set(channelId, token);
-  return token;
-}
-
-function baseHeaders(client, token) {
-  return {
-    accept: "application/json",
-    "content-type": "application/json",
-    "user-agent": client.base.request.userAgent,
-    "x-line-application": client.base.request.systemType,
-    "x-line-mid": client.base.profile?.mid ?? "",
-    "x-line-access": client.base.authToken,
-    "x-line-channeltoken": token,
-    "x-lal": process.env.LINE_LANG || "zh-Hant_TW",
-    "x-lsr": process.env.LINE_REGION || "TW",
-    "x-lpv": "1",
-    "x-lhm": "GET",
-    "x-line-bdbtemplateversion": "v1",
-    "x-line-global-config": "discover.enable=true; follow.enable=true",
-  };
-}
-
-// 記住第一個打通的組合，之後同一個 homeId 直接用。
-const routeCache = new Map();
-
-/** 對記事本 REST 打一次請求，回 { code, message, result }；依序試 host × prefix × channel 直到 code 0。 */
-async function noteRequest(client, homeId, path, params, { method = "GET", body } = {}) {
-  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== "")));
-  const tryOne = async (host, prefix, channelId) => {
-    const token = await channelToken(client, channelId);
-    const url = `https://${host}${prefix}${path}?${qs}`;
-    const res = await client.base.fetch(url, {
-      method,
-      headers: { ...baseHeaders(client, token), "x-lhm": method },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const text = await res.text();
-    let json;
-    try { json = JSON.parse(text); } catch { json = { code: res.status, message: text.slice(0, 200), result: null }; }
-    return { httpStatus: res.status, json };
-  };
-
-  const cached = routeCache.get(homeId);
-  if (cached) {
-    let { json } = await tryOne(cached.host, cached.prefix, cached.channelId);
-    // channel token 會過期：401/403 就丟掉重 issue 再試一次
-    if (json && (json.code === 401 || json.code === 403)) {
-      tokensFor(client).delete(cached.channelId);
-      ({ json } = await tryOne(cached.host, cached.prefix, cached.channelId));
-    }
-    return json;
-  }
-  const attempts = [];
-  for (const host of hostCandidates(client)) {
-    for (const prefix of PREFIXES) {
-      for (const channelId of CHANNELS) {
-        try {
-          const { httpStatus, json } = await tryOne(host, prefix, channelId);
-          if (json && json.code === 0) {
-            routeCache.set(homeId, { host, prefix, channelId });
-            return json;
-          }
-          attempts.push(`${httpStatus} ${host}${prefix}${path} ch=${channelId} code=${json?.code} ${json?.message ?? ""}`);
-        } catch (e) {
-          attempts.push(`ERR ${host}${prefix}${path} ch=${channelId}: ${e?.message ?? e}`);
-        }
-      }
-    }
-  }
-  throw new Error(`記事本 API 全部打不通（homeId=${homeId}）：\n` + attempts.join("\n"));
-}
-
-function pick(obj, ...paths) {
-  for (const p of paths) {
-    const v = p.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
-  return undefined;
-}
-
-function toMs(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return n < 1e12 ? n * 1000 : n;
-}
-
-function normalizePost(p) {
-  const post = p?.post ?? p; // feeds[] 會包一層 { post: {...} }
-  return {
-    postId: pick(post, "id", "postInfo.postId", "postId"),
-    createdMs: toMs(pick(post, "postInfo.createdTime", "createdTime")),
-    text: pick(post, "contents.text", "contents.textMeta.text", "text") ?? "",
-  };
-}
-
-/** 最近的記事本貼文（只看第一頁，夠用來對回剛發的那篇）。 */
-async function recentPosts(client, homeId) {
-  const json = await noteRequest(client, homeId, "/api/v57/post/list.json", {
-    homeId, sourceType: "TALKROOM", likeLimit: "0", commentLimit: "0",
-  });
-  const r = json?.result;
-  const rows = Array.isArray(r?.posts) ? r.posts : Array.isArray(r?.feeds) ? r.feeds : Array.isArray(r) ? r : [];
-  return rows.map(normalizePost).filter((p) => p.postId);
-}
-
-export async function findPost(client, homeId, text, sinceMs) {
-  assertGroup(homeId);
-  return matchPost(await recentPosts(client, homeId), text, sinceMs);
+/** linejs 的錯誤把 LINE 回的內容放在 data，併進訊息裡（判斷要不要停、寫進資料庫都看訊息）。 */
+function withData(e) {
+  const data = e?.data && Object.keys(e.data).length ? ` ${JSON.stringify(e.data).slice(0, 600)}` : "";
+  return new Error(`${e?.message ?? e}${data}`);
 }
 
 /**
- * 在群組記事本發一篇純文字貼文，回 LINE 的貼文 id（撿不到回 null）。
- * 呼叫前先 findPost：它用唯讀的 list 把路由探出來並記住，create 才不會在探路時對不同前綴各發一篇
- * （list 失敗時 create 會自己探路，同 new_erp）。
- * ⚠ 不要帶 textStyle／backgroundColor：2026-09-18 起 LINE 回 code=118「『純文字』功能已停止提供使用」。
+ * 用 LIFF 分享發一則 Flex 訊息到群組聊天。liffId 不給就用 linejs 內建的那個 LIFF app（第三方的）；
+ * 給自己的 LIFF app（LINE Login channel、scope 要 chat_message.write）比較穩，也不會掛別人的名字。
  */
-export async function createPost(client, homeId, text) {
-  assertGroup(homeId);
-  if (!text) throw new Error("貼文不能是空的");
-  const body = {
-    postInfo: { readPermission: { type: "ALL", gids: [] } },
-    contents: { contentsStyle: { mediaStyle: { displayType: "GRID_1_A" } }, stickers: [], locations: [], media: [], text },
-  };
-  const json = await noteRequest(client, homeId, "/api/v57/post/create.json",
-    { homeId, sourceType: "TALKROOM" }, { method: "POST", body });
-  if (!json || json.code !== 0) {
-    throw new Error(`發文失敗：code=${json?.code} ${json?.message ?? ""}`);
+export async function sendFlex(client, chatMid, message, { liffId } = {}) {
+  assertGroup(chatMid);
+  if (liffId) client.base.liff.liffId = liffId;
+  try {
+    return await client.base.liff.sendLiff({ to: String(chatMid), messages: [message] });
+  } catch (e) {
+    throw withData(e);
   }
-  // 回應裡貼文長在哪一層沒有 wire trace（new_erp 線上 38 篇都撿不到），多試幾種包法
-  const r = json.result;
-  const post = r?.post ?? r?.feed?.post ?? r?.feeds?.[0]?.post ?? r?.posts?.[0] ?? r?.feeds?.[0] ?? r;
-  const id = normalizePost(post).postId ?? pick(r, "postId", "id", "post.id", "feed.post.id");
-  return id ? String(id) : null;
 }
 
-/** 把記事本貼文用 LINE 原生的「分享貼文」卡片發到群組聊天（同手機上按「分享到聊天」）。 */
-export async function sharePost(client, homeId, postId) {
-  assertGroup(homeId);
-  if (!postId) throw new Error("沒有貼文 id，無法分享");
-  const json = await noteRequest(client, homeId, "/api/v57/post/sendPostToTalk.json",
-    {}, { method: "POST", body: { postId: String(postId), receiveMids: [String(homeId)] } });
-  if (!json || json.code !== 0) {
-    throw new Error(`分享貼文到聊天失敗：code=${json?.code} ${json?.message ?? ""}`);
+/** 對群組聊天發一段文字（Flex 發不出去時的備案，網址 LINE 會自己做成連結預覽）。 */
+export async function sendText(client, chatMid, text) {
+  assertGroup(chatMid);
+  if (!text) throw new Error("訊息不能是空的");
+  try {
+    return await client.base.talk.sendMessage({ to: String(chatMid), text: String(text) });
+  } catch (e) {
+    throw withData(e);
   }
 }

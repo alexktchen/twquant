@@ -71,23 +71,22 @@ jobs:
       - name: 晨報或盤後快訊（行情＋體檢、籌碼、公告、新聞 → 規則一句話＋模型五到六點）
         run: uv run python -m twquant morning-brief --date "$DAY" --edition "$EDITION" $SKIP
 
-      # T-423（D-204）：晨報／盤後快訊發到 LINE 群組記事本。同一天同一版本只排一次（備援班重跑不會重發）；
-      # 這一班也順手把之前被 LINE 叫停、還沒過期的名單貼文送出去。沒設群組 secret＝還沒啟用，整段略過。
+      # T-423（D-204）：晨報／盤後快訊做成圖卡發到 LINE 群組聊天。同一天同一版本只發一次（備援班重跑不會重發）；
+      # 這一班也順手把之前被 LINE 叫停、還沒過期的圖卡送出去。還沒登入或網站上沒勾群組時這幾步自己略過。
       - uses: actions/setup-node@v4
         if: ${{ !cancelled() }}
         continue-on-error: true
         with:
           node-version: 22
 
-      - name: LINE 群組貼文（晨報或盤後快訊；T-423）
+      - name: LINE 群組圖卡（晨報或盤後快訊；T-423）
         if: ${{ !cancelled() }}
         continue-on-error: true # 貼文失敗不影響晨報
-        env:
-          TWQUANT_LINE_GROUP_MIDS: ${{ secrets.TWQUANT_LINE_GROUP_MIDS }}
         run: |
-          if [ -z "$TWQUANT_LINE_GROUP_MIDS" ]; then echo "沒設 TWQUANT_LINE_GROUP_MIDS，LINE 貼文還沒啟用"; exit 0; fi
-          uv run python -m twquant line-group enqueue --kind "$EDITION" --date "$DAY"
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
           npm ci --prefix line-poster --no-audit --no-fund
+          uv run python -m twquant line-group groups
+          uv run python -m twquant line-group enqueue --kind "$EDITION" --date "$DAY"
           uv run python -m twquant line-group send
 
       # T-418：新聞全景（星雲圖）快照，早上與傍晚各更新一次；失敗不影響晨報（網站顯示上一份）

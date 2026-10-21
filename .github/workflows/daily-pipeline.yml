@@ -100,32 +100,29 @@ jobs:
           TWQUANT_VAPID_PRIVATE_KEY: ${{ secrets.TWQUANT_VAPID_PRIVATE_KEY }}
         run: uv run python -m twquant notify-groups --date "$DAY"
 
-      # T-423（D-204）：LINE 群組記事本貼文（備用帳號、非官方 linejs）。排隊：同一天同一種同一群組只排一次，
-      # 21:13 補跑時已排過就不動；還沒有名單、或族群不符條件，這步自己會略過。沒設群組 secret＝還沒啟用，整段略過。
-      - name: LINE 群組貼文排隊（每日名單、族群資金；T-423）
-        if: ${{ !cancelled() }}
-        continue-on-error: true # 貼文失敗不影響名單
-        env:
-          TWQUANT_LINE_GROUP_MIDS: ${{ secrets.TWQUANT_LINE_GROUP_MIDS }}
-        run: |
-          if [ -z "$TWQUANT_LINE_GROUP_MIDS" ]; then echo "沒設 TWQUANT_LINE_GROUP_MIDS，LINE 貼文還沒啟用"; exit 0; fi
-          uv run python -m twquant line-group enqueue --kind picks --date "$DAY"
-          uv run python -m twquant line-group enqueue --kind groups --date "$DAY"
-
+      # T-423（D-204）：LINE 群組每日圖卡——備用帳號（非官方 linejs）在群組聊天發一張圖、點了開網站。
+      # 要發哪些群組在網站「LINE 群組」分頁勾（只有有權限的帳號看得到）；還沒登入或沒勾群組時這幾步自己略過。
+      # 同一天同一種同一群組只發一次（21:13 補跑不會重發，但會把 17:33 被 LINE 叫停的補送）。
       - uses: actions/setup-node@v4
         if: ${{ !cancelled() }}
         continue-on-error: true
         with:
           node-version: 22
 
-      - name: LINE 群組貼文送出（記事本發文＋分享到群組聊天；被 LINE 叫停就留給下一班）
+      - name: LINE 圖卡準備（中文字型 Noto Sans CJK、Node 轉接器）
         if: ${{ !cancelled() }}
         continue-on-error: true # 貼文失敗不影響名單
-        env:
-          TWQUANT_LINE_GROUP_MIDS: ${{ secrets.TWQUANT_LINE_GROUP_MIDS }}
         run: |
-          if [ -z "$TWQUANT_LINE_GROUP_MIDS" ]; then echo "沒設 TWQUANT_LINE_GROUP_MIDS，LINE 貼文還沒啟用"; exit 0; fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
           npm ci --prefix line-poster --no-audit --no-fund
+
+      - name: LINE 群組圖卡（同步群組 → 每日名單、族群資金排隊 → 送出；T-423）
+        if: ${{ !cancelled() }}
+        continue-on-error: true # 貼文失敗不影響名單
+        run: |
+          uv run python -m twquant line-group groups
+          uv run python -m twquant line-group enqueue --kind picks --date "$DAY"
+          uv run python -m twquant line-group enqueue --kind groups --date "$DAY"
           uv run python -m twquant line-group send
 
       - name: Install rclone（Drive 歸檔用；排在推薦之後，失敗不影響當天名單）
