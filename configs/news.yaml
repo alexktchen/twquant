@@ -190,6 +190,9 @@ translate:
   max_tokens: 3000
   # D-200 §五：Workers AI 每天 10,000 Neurons，新聞分 2,500（估計用約 900）；UTC 日界
   daily_neurons: 2500
+  # 留給向量的額度：翻譯用到 2,500 − 400 就停。2026-10-20 新聞多的日子（英文 449 則）翻譯 21:30 就把額度吃光，
+  # 向量、同事件合併、事件追蹤全停到隔天；向量一天只要約 300。
+  reserve_for_embed: 400
   input_neurons_per_1m: 4625
   output_neurons_per_1m: 30475
   glossary:

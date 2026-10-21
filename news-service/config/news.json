@@ -211,6 +211,7 @@
     "per_run_limit": 40,
     "max_tokens": 3000,
     "daily_neurons": 2500,
+    "reserve_for_embed": 400,
     "input_neurons_per_1m": 4625,
     "output_neurons_per_1m": 30475,
     "glossary": {
