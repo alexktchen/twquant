@@ -423,7 +423,10 @@
     "stock_limit": 20,
     "counts_days": 3,
     "counts_max_ids": 60,
-    "hub_share": 0.15
+    "hub_share": 0.15,
+    "timeline_days": 120,
+    "timeline_per_day": 3,
+    "quiet_min_days": 14
   },
   "cooccur": {
     "window_days": 90,
