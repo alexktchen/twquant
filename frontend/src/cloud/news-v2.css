@@ -34,7 +34,7 @@ em.cq-news-type { font-style: normal; margin-right: 6px; padding: 1px 6px; font-
 .cq-news-type.policy { color: #ff8a65; background: rgba(255, 138, 101, .14); }
 .cq-news-type.market { color: #3d9bff; background: rgba(61, 155, 255, .14); }
 .cq-news-type.other { color: #9aa3ad; background: rgba(154, 163, 173, .14); }
-button.cq-news-type.on { border-color: currentColor; }
+button.cq-news-type.on { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
 .cq-news-title { font-size: 16px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
 .cq-news-meta { display: flex; align-items: center; gap: 4px; font-size: 13.5px; color: var(--mute); }
 .cq-news-meta svg { margin-left: auto; flex: none; transition: transform .15s; }
