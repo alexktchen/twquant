@@ -35,6 +35,7 @@ class PgTableSource:
         cache: bool = False,
         since: dt.date | None = None,
         table_since: Mapping[str, dt.date] | None = None,
+        until: dt.date | None = None,
     ) -> None:
         self._conn = conn
         self._schema = schema
@@ -46,6 +47,9 @@ class PgTableSource:
         # 對那種表縮窗會讓它悄悄少讀歷史。
         self._table_since: dict[str, dt.date] = dict(table_since or {})
         self._has_date: dict[str, bool] = {}
+        # 讀取上界（分段讀大表用，T-425）：不給就讀到最新。只省記憶體——呼叫端要確定 view 的截點
+        # 本來就看不到 date > until 的列，否則等於悄悄少讀。
+        self._until = until
 
     def _assert_exists(self, table: str) -> None:
         with self._conn.cursor() as cur:
@@ -77,8 +81,13 @@ class PgTableSource:
         self._assert_exists(table)
         query = f'SELECT * FROM "{self._schema}"."{table}"'
         since = self._table_since.get(table, self._since)
+        conds = []
         if since is not None and self._date_col(table):
-            query += f" WHERE date >= '{since.isoformat()}'"
+            conds.append(f"date >= '{since.isoformat()}'")
+        if self._until is not None and self._date_col(table):
+            conds.append(f"date <= '{self._until.isoformat()}'")
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
         # infer_schema_length=None：看完**全部**列才定型別。預設只看前 100 列——某欄若前面全是
         # null、後面才出現值（`stock_meta.delist_date` 2026-09-20 實際發生），會被定成 Null 型，
         # 再遇到日期就 ComputeError；而 stock_meta 是每次宇宙過濾都要讀的表。

@@ -177,6 +177,32 @@ class PickBlurbsConfig(BaseConfig):
     advice_terms: list[str]
 
 
+class PickScoreRules(BaseConfig):
+    """四面向 10 分制的規則門檻（T-426／D-206 §二）。權威說明在 system.yaml 的註解。"""
+
+    base: int = Field(ge=0)  # 起始分（中性）
+    stock_pattern: str  # 全市場比較的宇宙（四碼普通股）
+    hi_pct: float = Field(gt=0.5, le=1)  # 百分位 ≥ 這個算偏多（波動相反）
+    lo_pct: float = Field(ge=0, lt=0.5)
+    ma_days: list[int]
+    mom_days: int = Field(gt=0)
+    vol_days: int = Field(gt=1)
+    near_high: float = Field(gt=0, lt=1)  # 離 52 週高點幾成以內算「貼近」
+    volume_burst: float = Field(gt=1)  # 量是前 N 日平均幾倍算爆量
+    flow_days: int = Field(gt=0)  # 外資、主力看近幾個交易日
+    trust_streak: int = Field(ge=2)
+    margin_jump: float = Field(gt=0)  # 融資增加幾成以上算「大增」
+    holders_pp: float = Field(gt=0)  # 千張大戶比例變化（百分點）
+    rev_hot: float = Field(gt=0)  # 月營收年增 ≥ 這個 +1
+    rev_cold: float = Field(gt=0)  # 年減 ≥ 這個 −1
+    rev_trend_months: int = Field(ge=2)
+    cheap: float = Field(gt=0, lt=1)  # 本益比／股價淨值比 ≤ 同產業中位數 × cheap 算便宜
+    dear: float = Field(gt=1)
+    min_peers: int = Field(ge=2)  # 同產業至少幾檔才算得出中位數
+    good_news: list[str]  # 重大訊息主旨含這些字 +1
+    bad_news: list[str]  # 含這些字 −1
+
+
 class PickReviewConfig(BaseConfig):
     """名單四面向評分與 AI 首選（T-394／D-196）。權威說明在 system.yaml 的註解。"""
 
@@ -185,8 +211,8 @@ class PickReviewConfig(BaseConfig):
     view_chars: int = Field(gt=0)
     conclusion_chars: int = Field(gt=0)
     stances: list[str]
-    bull_min: int = Field(ge=4, le=20)
-    bear_max: int = Field(ge=4, le=20)
+    bull_min: int = Field(ge=0, le=40)
+    bear_max: int = Field(ge=0, le=40)
     forbidden_terms: list[str]
     interpretive_terms: list[str]
     conclusion_allow: list[str]
@@ -206,6 +232,7 @@ class PickReviewConfig(BaseConfig):
     holders_level: int
     holders_lookback_days: int = Field(gt=0)
     revenue_months: int = Field(ge=1)
+    rules: PickScoreRules
 
 
 class MorningBriefConfig(BaseConfig):

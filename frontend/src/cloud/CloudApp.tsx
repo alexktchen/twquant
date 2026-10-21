@@ -39,7 +39,7 @@ import { dropNote, weakSummary } from './weak'
 import { ArrowDown, ArrowUp, Banknote, CandlestickChart, Check, ChevronDown, CircleDot, CircleHelp, CircleMinus, CirclePlus, Gauge, History, Info, Layers, Lightbulb, MessageSquareText, ShoppingBag, Trophy } from 'lucide-react'
 import { Kpi, Section } from './Section'
 import { ScoreBars, ReviewTiles, StanceChip, TopPickCard } from './Review'
-import { DIMS, MAX_SCORE, REVIEW_NOTE, topOf, type Review } from './pickreview'
+import { DIMS, REVIEW_NOTE, topOf, type Review } from './pickreview'
 import { blurbTitle, type Blurb } from './blurb'
 import { pickBadges, rowBadges, type Badge } from './badges'
 import { BadgeChip } from './Icon'
@@ -1330,7 +1330,7 @@ function Detail({
         )}
       </header>
       {review ? (
-        <Section icon={Gauge} title="AI 分析師觀點" meta={`共 ${review.total}／${MAX_SCORE * DIMS.length}`}>
+        <Section icon={Gauge} title="AI 分析師觀點" meta={`共 ${review.total}／${review.max * DIMS.length}`}>
           <ReviewTiles r={review} />
         </Section>
       ) : blurb && (

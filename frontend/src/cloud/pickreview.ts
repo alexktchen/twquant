@@ -1,10 +1,16 @@
-// 名單四面向評分與 AI 首選（T-394／D-196）的型別、四個面向的名稱與顏色、說明文字。畫面在 Review.tsx。
+// 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的型別、四個面向的名稱與顏色、說明文字。畫面在 Review.tsx。
+/** 一個小項：偏多 +1／中性 0／偏空 −1，附白話理由（D-206，只有 10 分制才有）。 */
+export type ReviewItem = { dim: DimKey; name: string; points: -1 | 0 | 1; text: string }
+
 export type Review = {
   news: number
   tech: number
   chips: number
   fund: number
   total: number
+  /** 每個面向滿分：10（規則算，5＝中性）或 5（2026-10-21 以前，AI 自評） */
+  max: number
+  items: ReviewItem[]
   top: boolean
   reason: string | null
   ai: boolean
@@ -23,16 +29,27 @@ export const DIMS: { key: DimKey; name: string; short: string; color: string }[]
   { key: 'fund', name: '基本', short: '基', color: '#f472b6' },
 ]
 
-/** 滿分：四個面向各 5 分。 */
-export const MAX_SCORE = 5
-
-/** 「消息 3、技術 5、籌碼 5、基本 5（共 18／20）」。 */
+/** 「消息 5、技術 8、籌碼 4、基本 6（共 23／40）」。 */
 export function scoreText(r: Review): string {
-  return `${DIMS.map((d) => `${d.name} ${r[d.key]}`).join('、')}（共 ${r.total}／${MAX_SCORE * DIMS.length}）`
+  return `${DIMS.map((d) => `${d.name} ${r[d.key]}`).join('、')}（共 ${r.total}／${r.max * DIMS.length}）`
+}
+
+/** 說明文字依量表分兩種：10 分制是規則算的（D-206），5 分制是舊的 AI 自評。 */
+export function reviewNote(r: Pick<Review, 'max'>): string {
+  return r.max === 10
+    ? '分數由規則算：每個面向 5 項，偏多 +1、偏空 −1，從 5 分（中性）起算；描述現況，沒有驗證過能預測報酬。AI 只寫觀點與建議，數字都和事實核對過。首選累積 60 個交易日後會事後檢驗。請自行判斷。'
+    : REVIEW_NOTE
 }
 
 export const REVIEW_NOTE =
   'AI 只根據當天的事實替四個面向打分、寫觀點與建議；數字與說法都和事實核對過，但沒有驗證過能預測報酬。首選累積 60 個交易日後會事後檢驗。請自行判斷。'
+
+/** 小項的補充說明：主力賣超扣分不等於會跌（D-203 驗過）。 */
+export function itemNote(i: ReviewItem): string | null {
+  return i.name === '主力' && i.points < 0
+    ? '主力在賣，不代表會跌：2022～2026 驗過，主力大賣之後 20 天的表現跟條件相近的股票差不多，跌 10% 的比例反而少一點。'
+    : null
+}
 
 /** 立場的顏色：偏多紅、偏空綠、中性灰（台股紅漲綠跌）。 */
 export function stanceTone(s: string | null): 'up' | 'down' | 'flat' {
