@@ -12,6 +12,7 @@ import {
   fetchPickDates,
   fetchPicks,
   fetchStockNewsCounts,
+  fetchStockNewsDays,
   fetchPublicDates,
   fetchQuotes,
   fetchScores,
@@ -58,7 +59,7 @@ import { edgeScroll, moveItem, rowAt } from './reorder'
 import { modelView, scoreTags, sparkPoints, type SearchHit, type StockScores, type WatchItem, type WatchList } from './scores'
 import { StockCalendar } from './StockCalendar'
 import { StockNews } from './StockNews'
-import type { NewsCount } from './news'
+import { newsMarkers, type NewsCount, type StockNewsDay } from './news'
 
 
 // 追蹤股 API 的身分驗不過時（401）不切成沒登入的預覽：名單照常看，只有追蹤股區塊顯示這句
@@ -1180,6 +1181,19 @@ function Detail({
   const [scores, setScores] = useState<StockScores | null>(null)
   const [scoreErr, setScoreErr] = useState('')
   const [err, setErr] = useState('')
+  // K 線上的新聞標記（T-419）：哪幾天有直接提到這檔的新聞；點了哪一天
+  const [newsDays, setNewsDays] = useState<{ sid: string; days: StockNewsDay[] }>({ sid: '', days: [] })
+  const [newsDay, setNewsDay] = useState<string | null>(null)
+  useEffect(() => {
+    let stale = false
+    setNewsDay(null)
+    fetchStockNewsDays(sid)
+      .then((d) => !stale && setNewsDays({ sid, days: d.days }))
+      .catch(() => !stale && setNewsDays({ sid, days: [] })) // 新聞服務沒設定或連不上：沒有標記，K 線照常
+    return () => {
+      stale = true
+    }
+  }, [sid, refresh])
   useEffect(() => {
     // stale：快速切換時，晚到的上一檔回應不能蓋到這一檔
     let stale = false
@@ -1332,12 +1346,59 @@ function Detail({
                 ▼{n}
               </b>
             ))}
+            {newsDays.sid === sid && newsDays.days.length > 0 && (
+              <b style={{ color: '#79B8FF' }} title="K 棒下方的藍點＝那天有直接提到這檔的新聞；點那一天列出來">
+                ●新聞
+              </b>
+            )}
           </span>
         }
       >
-        {err ? <div className="cq-err">{err}</div> : <KChart bars={chart.bars} live={chart.sid === sid ? todayBar : null} pickDays={chart.days} lineNames={lineNames} />}
+        {err ? (
+          <div className="cq-err">{err}</div>
+        ) : (
+          <KChart
+            bars={chart.bars}
+            live={chart.sid === sid ? todayBar : null}
+            pickDays={chart.days}
+            lineNames={lineNames}
+            newsDays={newsDays.sid === sid ? newsMarkers(newsDays.days, chart.bars.map((b) => b.date)) : []}
+            onDayClick={setNewsDay}
+          />
+        )}
+        {newsDay && newsDays.sid === sid && <DayNews day={newsDays.days.find((d) => d.day === newsDay) ?? null} onClose={() => setNewsDay(null)} />}
       </Section>
     </>
+  )
+}
+
+/** K 線上點了某一天：那天直接提到這檔的新聞（T-419）。 */
+function DayNews({ day, onClose }: { day: StockNewsDay | null; onClose: () => void }) {
+  if (!day) return null
+  const d = new Date(`${day.day}T00:00:00+08:00`)
+  return (
+    <div className="cq-daynews">
+      <div className="cq-daynews-h">
+        <b>
+          {d.getMonth() + 1}/{d.getDate()} 的新聞・{day.n} 則
+        </b>
+        <small>{day.outlets.join('・')}</small>
+        <button onClick={onClose} aria-label="關閉">
+          ×
+        </button>
+      </div>
+      <ul>
+        {day.items.map((it) => (
+          <li key={it.id}>
+            <a href={it.url} target="_blank" rel="noopener noreferrer">
+              {it.title}
+            </a>
+            <small>{it.src}</small>
+          </li>
+        ))}
+        {day.n > day.items.length && <li className="cq-daynews-more">還有 {day.n - day.items.length} 則，在下面「相關新聞」或新聞分頁看</li>}
+      </ul>
+    </div>
   )
 }
 

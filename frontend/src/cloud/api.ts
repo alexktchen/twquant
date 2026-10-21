@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsDigest, NewsHealth, NewsKind, NewsReview, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
+import type { NewsDigest, NewsHealth, NewsKind, NewsReview, StockNewsDays, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { GalaxyData } from './news-galaxy'
 import type { StockCalItem } from './stockcal'
@@ -150,6 +150,8 @@ export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
 export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */
 export const fetchNewsGalaxy = () => get<GalaxyData>('/api/news/galaxy')
+/** 個股頁 K 線上的新聞標記（T-419） */
+export const fetchStockNewsDays = (sid: string) => get<StockNewsDays>(`/api/news/stock-days?id=${encodeURIComponent(`tw:${sid}`)}`)
 /** 新聞三張卡（T-417） */
 export const fetchNewsDigest = () => get<NewsDigest>('/api/news/digest')
 /** 核可頁（T-403）：擁有者才有 can_review 與草稿清單 */

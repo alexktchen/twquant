@@ -4,7 +4,7 @@
 import { Flame, Layers, TrendingUp } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchNewsDigest } from './api'
-import { everywhereNote, hotBadge, hotLine, topicDelta, type NewsDigest as DigestData } from './news'
+import { everywhereNote, hotBadge, hotLine, quietNote, topicDelta, type NewsDigest as DigestData } from './news'
 
 export function NewsDigest({ refresh, onSearch, onStock }: { refresh: number; onSearch: (q: string) => void; onStock: (sid: string, name: string) => void }) {
   const [d, setD] = useState<DigestData | null>(null)
@@ -88,8 +88,12 @@ export function NewsDigest({ refresh, onSearch, onStock }: { refresh: number; on
                     {h.sub && <em className="code">{h.sub}</em>}
                     <b>{h.label}</b>
                     {badge && <i className="x">{badge}</i>}
+                    {quietNote(h.quiet) && <i className="q">久違</i>}
                   </span>
-                  <small>{hotLine(h)}</small>
+                  <small>
+                    {hotLine(h)}
+                    {quietNote(h.quiet) && `・${quietNote(h.quiet)}`}
+                  </small>
                 </button>
               </li>
             )
