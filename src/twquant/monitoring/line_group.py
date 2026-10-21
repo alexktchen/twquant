@@ -212,11 +212,16 @@ def new_token() -> str:
 
 @dataclass(frozen=True)
 class Credential:
-    """LINE 登入憑證（三個都要存，見模組說明）。"""
+    """LINE 登入憑證（三個都要存，見模組說明）。
+
+    e2ee_keys：登入時手機交過來的加密金鑰（JSON 文字，linejs storage 的 `e2eeKeys:*`）。群組開了加密就只收
+    加密訊息，少了它文字發不出去（「E2EE Key has not been saved」），而且只有掃 QR 那一趟拿得到。
+    """
 
     access_token: str
     refresh_token: str | None
     expire: int | None
+    e2ee_keys: str | None = None
 
 
 @dataclass(frozen=True)
@@ -257,6 +262,9 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
             token = ev.get("accessToken") or (cred.access_token if cred else "")
             if not token:
                 raise ExecutionError(f"轉接器回的憑證沒有 access token：{sorted(ev)}")
+            keys = ev.get("e2eeKeys")
+            if keys is not None and not isinstance(keys, dict):
+                raise ExecutionError(f"轉接器回的加密金鑰不是物件：{type(keys).__name__}")
             cred = Credential(
                 access_token=str(token),
                 refresh_token=ev["refreshToken"]
@@ -265,6 +273,9 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
                 expire=int(ev["expire"])
                 if ev.get("expire") is not None
                 else (cred.expire if cred else None),
+                e2ee_keys=json.dumps(keys, sort_keys=True, ensure_ascii=False)
+                if keys
+                else (cred.e2ee_keys if cred else None),
             )
         elif kind == "profile":
             profile = {k: str(v) for k, v in ev.items() if k != "type" and v is not None}
@@ -456,8 +467,10 @@ def ensure_tables(conn: Any, schema: str) -> None:
             "id text PRIMARY KEY, mid text, display_name text, "
             "access_token text NOT NULL, refresh_token text, token_expire bigint, "
             "updated_at timestamptz NOT NULL, paused_until timestamptz, busy_until timestamptz, "
-            "last_error text)"
+            "last_error text, e2ee_keys text)"
         )
+        # 2026-10-21 才加的欄（之前登入的那組沒有加密金鑰，要重新登入一次才有）
+        cur.execute(f'ALTER TABLE "{schema}".line_account ADD COLUMN IF NOT EXISTS e2ee_keys text')
         # enabled：網站「LINE 群組」分頁勾的（新加入的群組預設不發）；present：帳號現在還在不在這個群組
         cur.execute(
             f'CREATE TABLE IF NOT EXISTS "{schema}".line_groups ('
@@ -669,11 +682,11 @@ def load_credential(conn: Any, schema: str) -> Credential | None:
         if not _exists(cur, schema, "line_account"):
             return None
         cur.execute(
-            f'SELECT access_token, refresh_token, token_expire FROM "{schema}".line_account WHERE id = %s',
+            f'SELECT access_token, refresh_token, token_expire, e2ee_keys FROM "{schema}".line_account WHERE id = %s',
             (ACCOUNT_ID,),
         )
         row = cur.fetchone()
-    return Credential(str(row[0]), row[1], row[2]) if row else None
+    return Credential(str(row[0]), row[1], row[2], row[3]) if row else None
 
 
 def save_account(
@@ -688,10 +701,11 @@ def save_account(
     with conn.cursor() as cur:
         cur.execute(
             f'INSERT INTO "{schema}".line_account '
-            "(id, mid, display_name, access_token, refresh_token, token_expire, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO UPDATE SET "
+            "(id, mid, display_name, access_token, refresh_token, token_expire, e2ee_keys, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO UPDATE SET "
             "access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token, "
-            "token_expire = EXCLUDED.token_expire, updated_at = EXCLUDED.updated_at, "
+            "token_expire = EXCLUDED.token_expire, e2ee_keys = EXCLUDED.e2ee_keys, "
+            "updated_at = EXCLUDED.updated_at, "
             "mid = coalesce(EXCLUDED.mid, line_account.mid), "
             "display_name = coalesce(EXCLUDED.display_name, line_account.display_name)",
             (
@@ -701,6 +715,7 @@ def save_account(
                 cred.access_token,
                 cred.refresh_token,
                 cred.expire,
+                cred.e2ee_keys,
                 now,
             ),
         )
@@ -1021,11 +1036,14 @@ def web_login(
 
 
 def _cred_json(cred: Credential) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "accessToken": cred.access_token,
         "refreshToken": cred.refresh_token,
         "expire": cred.expire,
     }
+    if cred.e2ee_keys:
+        out["e2eeKeys"] = json.loads(cred.e2ee_keys)
+    return out
 
 
 def credential_request(cred: Credential | None) -> dict[str, Any]:

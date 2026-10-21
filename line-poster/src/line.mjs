@@ -5,10 +5,13 @@
 //
 // 發到群組聊天（不是記事本，使用者 2026-10-21）：Flex 訊息走 LIFF 分享（api.line.me/message/v3/share，
 // 跟手機上 LIFF 的「分享給好友」同一條），個人帳號也能發「一張圖、點了開網站」；發不出去時改發一則附連結的文字
-// （talk.sendMessage，new_erp 對群組發結單提醒用的就是它）。
+// （talk.sendMessage，new_erp 對群組發結單提醒用的就是它）。群組開了加密時文字要加密發，所以登入時的加密金鑰
+// 也跟憑證一起存（e2ee-keys.mjs）。
 
 import { loginWithAuthToken, loginWithQR } from "@evex/linejs";
 import { MemoryStorage } from "@evex/linejs/storage";
+
+import { pickE2EEKeys, withE2EEHint } from "./e2ee-keys.mjs";
 
 export const DEFAULT_DEVICE = process.env.LINE_DEVICE || "ANDROIDSECONDARY";
 
@@ -35,7 +38,7 @@ class PersistingStorage extends MemoryStorage {
   }
 }
 
-/** 從跑起來的 client 身上把現在這組憑證撿出來（登入完、refresh 完都用這支對帳） */
+/** 從跑起來的 client 身上把現在這組憑證撿出來（登入完、refresh 完都用這支對帳）。e2eeKeys：加密金鑰，沒有 → null */
 export async function readCredential(client) {
   const st = client?.base?.storage;
   const get = async (k) => { try { return st ? await st.get(k) : undefined; } catch { return undefined; } };
@@ -45,8 +48,13 @@ export async function readCredential(client) {
     accessToken: String(client?.base?.authToken ?? ""),
     refreshToken: typeof refreshToken === "string" && refreshToken ? refreshToken : null,
     expire: typeof expire === "number" ? expire : null,
+    e2eeKeys: pickE2EEKeys(st?.getAll?.()),
   };
 }
+
+// linejs 拿不到 LiffToken 時只丟「Failed to get LiffToken: <liffId>@<群組>」，LINE 回的原因只走 log 事件；
+// 接下來放進錯誤訊息，網站上才看得出是要同意權限、LIFF app 不給用還是別的。
+const liffErrors = new WeakMap();
 
 /**
  * 網路瞬斷重試一次的 fetch（Thrift 與 LIFF 分享都走它）。只對「送不出去」的錯誤重試；
@@ -75,7 +83,7 @@ function retryingFetch() {
  */
 export async function clientFromCredential(cred, { onCredential, device = DEFAULT_DEVICE } = {}) {
   if (!cred?.accessToken) throw new Error("沒有登入憑證，先跑 twquant line-group login");
-  const storage = new PersistingStorage();
+  const storage = new PersistingStorage(pickE2EEKeys(cred.e2eeKeys) ?? undefined);
   storage.seeded = { refreshToken: cred.refreshToken ?? undefined, expire: cred.expire ?? undefined };
   storage.onCredential = onCredential ?? null;
   const client = await loginWithAuthToken({
@@ -84,6 +92,9 @@ export async function clientFromCredential(cred, { onCredential, device = DEFAUL
     ...(typeof cred.expire === "number" ? { expire: cred.expire } : {}),
   }, { device, storage, fetch: retryingFetch() });
   client.base.on("update:authtoken", (t) => onCredential?.({ accessToken: t }));
+  client.base.on("log", (ev) => {
+    if (ev?.type === "liff-error") liffErrors.set(client, ev.data);
+  });
   // 上面那行掛得再快也趕不上 loginWithAuthToken 裡面 ready() 觸發的那次 refresh，回來再對一次
   if (client.base.authToken && client.base.authToken !== cred.accessToken) {
     onCredential?.({ accessToken: client.base.authToken });
@@ -140,10 +151,15 @@ function assertGroup(chatMid) {
   if (!String(chatMid).startsWith("c")) throw new Error(`只支援一般群組（c…），拿到 ${chatMid}`);
 }
 
-/** linejs 的錯誤把 LINE 回的內容放在 data，併進訊息裡（判斷要不要停、寫進資料庫都看訊息）。 */
-function withData(e) {
-  const data = e?.data && Object.keys(e.data).length ? ` ${JSON.stringify(e.data).slice(0, 600)}` : "";
-  return new Error(`${e?.message ?? e}${data}`);
+/**
+ * linejs 的錯誤把 LINE 回的內容放在 data，併進訊息裡（判斷要不要停、寫進資料庫都看訊息）。
+ * cause：linejs 吞掉、只從 log 事件吐出來的那層原因（LIFF）。
+ */
+function withData(e, cause) {
+  const parts = [e?.data, cause]
+    .filter((d) => d && typeof d === "object" && Object.keys(d).length)
+    .map((d) => ` ${JSON.stringify(d).slice(0, 600)}`);
+  return new Error(`${e?.message ?? e}${parts.join("")}`);
 }
 
 /**
@@ -153,10 +169,11 @@ function withData(e) {
 export async function sendFlex(client, chatMid, message, { liffId } = {}) {
   assertGroup(chatMid);
   if (liffId) client.base.liff.liffId = liffId;
+  liffErrors.delete(client);
   try {
     return await client.base.liff.sendLiff({ to: String(chatMid), messages: [message] });
   } catch (e) {
-    throw withData(e);
+    throw withData(e, liffErrors.get(client));
   }
 }
 
@@ -167,6 +184,7 @@ export async function sendText(client, chatMid, text) {
   try {
     return await client.base.talk.sendMessage({ to: String(chatMid), text: String(text) });
   } catch (e) {
-    throw withData(e);
+    const err = withData(e);
+    throw new Error(withE2EEHint(err.message));
   }
 }

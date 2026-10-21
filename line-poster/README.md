@@ -69,7 +69,11 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 ## 打不通的時候
 
 - `AUTHENTICATION_FAILED`／`MUST_REFRESH_V3_TOKEN`：憑證失效，本機重跑 `line-group login`。
-- 一直「改發文字」：LIFF 那段不通（`Failed to get LiffToken`），填自己的 `liff_id` 試試。
+- 一直「改發文字」：LIFF 那段不通（`Failed to get LiffToken`），填自己的 `liff_id` 試試。錯誤後面會附 LINE 回的原因
+  （linejs 本來只寫在 log，`sendFlex` 把它接進錯誤訊息）。
+- 文字也發不出去、`E2EE Key has not been saved`：群組開了加密（Letter Sealing），只收加密訊息；加密要用登入時手機
+  交過來的金鑰，2026-10-21 之前的登入沒存它（現在跟憑證一起存在 `web.line_account.e2ee_keys`）→ 網站「LINE 群組」分頁
+  **重新登入一次**。金鑰只有掃 QR 那一趟拿得到，換 token 不會補。
 - GitHub Actions 的機器在美國；new_erp 的經驗是**從國外 IP 上線容易被鎖**。真的被鎖的話，改在台灣的機器跑
   `line-group send`（本機排程或台灣 VM）。
 - `LINE_DEVICE` 環境變數可換模擬的裝置（預設 `ANDROIDSECONDARY`）。

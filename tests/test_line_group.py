@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import io
+import json
 import os
 import re
 import shutil
@@ -235,6 +236,28 @@ def test_ac4_events_credential_sending_results(capsys: pytest.CaptureFixture[str
     assert "linejs 自己印的雜訊" in capsys.readouterr().err  # 不吞掉
 
 
+def test_ac4_e2ee_keys_carried_and_sent_back() -> None:
+    keys = {"e2eeKeys:3": '{"keyId":3}', "e2eeKeys:u1": '{"keyId":3}'}
+    login = lg.parse_events(
+        [
+            json.dumps(
+                {"type": "credential", "accessToken": "a", "refreshToken": "r", "e2eeKeys": keys}
+            )
+        ],
+        0,
+        None,
+    )
+    assert login.credential is not None and login.credential.e2ee_keys is not None
+    assert lg.credential_request(login.credential)["credential"]["e2eeKeys"] == keys
+    # 換 token 的事件不帶金鑰：沿用原本那份；登入過但沒金鑰的舊憑證不送 e2eeKeys
+    rotated = lg.parse_events(['{"type":"credential","accessToken":"b"}'], 0, login.credential)
+    assert rotated.credential == lg.Credential("b", "r", None, login.credential.e2ee_keys)
+    old = lg.credential_request(lg.Credential("a", "r", 1))["credential"]
+    assert "e2eeKeys" not in old
+    with pytest.raises(ExecutionError, match="加密金鑰"):
+        lg.parse_events(['{"type":"credential","accessToken":"a","e2eeKeys":"x"}'], 0, None)
+
+
 def test_ac4_fatal_unknown_event_and_relogin() -> None:
     fatal = lg.parse_events(['{"type":"fatal","error":"AUTHENTICATION_FAILED"}'], 2, None)
     assert fatal.fatal == "AUTHENTICATION_FAILED"
@@ -455,6 +478,29 @@ def test_ac6_send_nothing_due_needs_no_login() -> None:
         _queue(conn, "picks", ["c1"])
         with pytest.raises(ConfigError, match="還沒登入"):
             lg.send_due(conn, cfg, FakeRunner(), now_fn=lambda: NOW, sleep=lambda s: None)
+    finally:
+        conn.close()
+
+
+def test_ac6_e2ee_keys_stored_and_old_table_upgraded() -> None:
+    conn = _connect_or_skip()
+    try:
+        # 加密金鑰欄之前建的表：ensure_tables 補欄，舊的那組讀得出來（沒有金鑰）
+        with conn.cursor() as cur:
+            cur.execute(f'DROP TABLE "{_SCHEMA}".line_account')
+            cur.execute(
+                f'CREATE TABLE "{_SCHEMA}".line_account (id text PRIMARY KEY, mid text, '
+                "display_name text, access_token text NOT NULL, refresh_token text, "
+                "token_expire bigint, updated_at timestamptz NOT NULL, paused_until timestamptz, "
+                "busy_until timestamptz, last_error text)"
+            )
+        conn.commit()
+        lg.ensure_tables(conn, _SCHEMA)
+        _login(conn)
+        assert lg.load_credential(conn, _SCHEMA) == lg.Credential("a1", "r1", 1)
+        keys = lg.Credential("a2", "r2", 2, '{"e2eeKeys:3": "{}"}')
+        lg.save_account(conn, _SCHEMA, keys, now=NOW)
+        assert lg.load_credential(conn, _SCHEMA) == keys
     finally:
         conn.close()
 
