@@ -448,6 +448,10 @@
         "fed-press"
       ]
     },
+    "thread": {
+      "min_score": 0.78,
+      "window_days": 14
+    },
     "similar": {
       "limit": 8,
       "min_score": 0.6

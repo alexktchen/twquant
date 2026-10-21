@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsDigest, NewsHealth, NewsKind, NewsReview, StockNewsDays, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
+import type { NewsDigest, NewsHealth, NewsKind, NewsReview, NewsThread, StockNewsDays, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { GalaxyData } from './news-galaxy'
 import type { StockCalItem } from './stockcal'
@@ -146,6 +146,8 @@ export const fetchStockNewsCounts = (sids: string[]) =>
   get<StockNewsCounts>(`/api/news/stock-counts?ids=${encodeURIComponent(sids.map((s) => `tw:${s}`).join(','))}`)
 /** 新聞服務最後抓取時間與各來源狀態。 */
 export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
+/** 這件事的來龍去脈（T-420） */
+export const fetchNewsThread = (id: string) => get<NewsThread>(`/api/news/thread?id=${encodeURIComponent(id)}`)
 /** 一則新聞的相似新聞（T-410） */
 export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */

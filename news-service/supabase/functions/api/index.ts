@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
@@ -284,6 +284,44 @@ Deno.serve(async (req) => {
         approved: plan.insert.length,
         rejected: plan.reviews.length - plan.insert.length,
         skipped: plan.skipped,
+      })
+    }
+    if (path === '/v1/thread') {
+      const id = url.searchParams.get('id')
+      if (!id) return json({ detail: '缺 id' }, 400)
+      const [me] = await sql<{ cluster_id: string; thread_id: string }[]>`
+        select c.cluster_id, coalesce(t.thread_id, c.cluster_id) as thread_id from news.clusters c left join news.threads t on t.cluster_id = c.cluster_id where c.item_id = ${id}`
+      if (!me) return json({ id, cluster_id: null, steps: [] })
+      // 這條線上的每個事件群：最早那則當代表（標題、來源），幾則、哪幾家、起訖時間；依時間排
+      const steps = await sql<{ cluster_id: string; n: number; first_seen_at: Date; last_seen_at: Date; item_id: string; title: string; title_zh: string | null; url: string; sources: string[] }[]>`
+        with tc as (select cluster_id from news.threads where thread_id = ${me.thread_id} union select ${me.cluster_id}),
+        members as (
+          select c.cluster_id, i.id, i.source, i.url, i.first_seen_at, coalesce(v.title_orig, i.title_orig) as title, tr.title_zh
+          from tc join news.clusters c using (cluster_id) join news.raw_items i on i.id = c.item_id
+          left join lateral (select title_orig, content_sha from news.raw_item_versions where item_id = i.id order by seen_at desc limit 1) v on true
+          left join news.translations tr on tr.item_id = i.id and tr.content_sha = coalesce(v.content_sha, i.content_sha) and tr.status = 'ok'
+        )
+        select m.cluster_id, count(*)::int as n, min(m.first_seen_at) as first_seen_at, max(m.first_seen_at) as last_seen_at,
+               (array_agg(m.id order by m.first_seen_at, m.id))[1] as item_id,
+               (array_agg(m.title order by m.first_seen_at, m.id))[1] as title,
+               (array_agg(m.title_zh order by m.first_seen_at, m.id))[1] as title_zh,
+               (array_agg(m.url order by m.first_seen_at, m.id))[1] as url,
+               array_agg(distinct m.source) as sources
+        from members m group by m.cluster_id order by min(m.first_seen_at)`
+      return json({
+        id,
+        cluster_id: me.cluster_id,
+        steps: steps.map((s) => ({
+          cluster_id: s.cluster_id,
+          current: s.cluster_id === me.cluster_id,
+          n: s.n,
+          first_seen_at: iso(s.first_seen_at),
+          last_seen_at: iso(s.last_seen_at),
+          item_id: s.item_id,
+          title: s.title_zh ?? s.title,
+          url: s.url,
+          outlets: [...new Set(s.sources.map((x) => meta.get(x)?.name ?? x))].sort(),
+        })),
       })
     }
     if (path === '/v1/similar') {

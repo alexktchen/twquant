@@ -6,7 +6,7 @@ import type { EntityAliases, MentionDeps, PendingItem } from '../../../src/menti
 import type { Pending, TranslateDeps } from '../../../src/translate.ts'
 import type { CooccurDeps, CooccurEdge, PairCount } from '../../../src/cooccur.ts'
 import type { EntityType } from '../../../src/graph.ts'
-import { embedText, parseEmbedReply, vecLiteral, type EmbedConfig, type EmbedDeps, type EmbedSource, type Neighbor } from '../../../src/embed.ts'
+import { embedText, parseEmbedReply, vecLiteral, type EmbedConfig, type EmbedDeps, type EmbedSource, type NearCluster, type Neighbor } from '../../../src/embed.ts'
 import { sha256Hex } from '../../../src/ingest.ts'
 
 export type Sql = ReturnType<typeof postgres>
@@ -287,6 +287,35 @@ export function embedDeps(sql: Sql, cfg: EmbedConfig): EmbedDeps {
         delete from news.embeddings e using news.raw_items i
         where i.id = e.item_id and i.first_seen_at < now() - make_interval(days => ${days})`
       return r.count
+    },
+    // 群中心＝成員向量的平均：讀出舊的 (n, vec) 在這裡算新平均再寫回（pgvector 沒有乘除純量）
+    upsertCentroid: async (clusterId, vec, seenAt) => {
+      const [old] = await sql<{ n: number; v: string }[]>`select n, vec::text as v from news.cluster_centroids where cluster_id = ${clusterId}`
+      let n = 1
+      let mean = vec
+      if (old) {
+        const prev = JSON.parse(old.v) as number[]
+        n = old.n + 1
+        mean = prev.map((p, i) => (p * old.n + vec[i]) / n)
+      }
+      await sql`
+        insert into news.cluster_centroids (cluster_id, n, vec, first_seen_at, last_seen_at)
+        values (${clusterId}, ${n}, ${vecLiteral(mean)}::extensions.halfvec, ${seenAt}::timestamptz, ${seenAt}::timestamptz)
+        on conflict (cluster_id) do update set n = excluded.n, vec = excluded.vec,
+          first_seen_at = least(news.cluster_centroids.first_seen_at, excluded.first_seen_at),
+          last_seen_at = greatest(news.cluster_centroids.last_seen_at, excluded.last_seen_at)`
+    },
+    nearestCluster: async (vec, before, windowDays, excludeCluster) => {
+      const [row] = await sql<NearCluster[]>`
+        select cc.cluster_id, coalesce(t.thread_id, cc.cluster_id) as thread_id, (1 - (cc.vec <=> ${vec}::extensions.halfvec))::float8 as score
+        from news.cluster_centroids cc left join news.threads t on t.cluster_id = cc.cluster_id
+        where cc.cluster_id <> ${excludeCluster} and cc.first_seen_at < ${before}::timestamptz
+          and cc.last_seen_at > ${before}::timestamptz - make_interval(days => ${windowDays})
+        order by cc.vec <=> ${vec}::extensions.halfvec limit 1`
+      return row ?? null
+    },
+    saveThread: async (t) => {
+      await sql`insert into news.threads ${sql(t)} on conflict (cluster_id) do nothing`
     },
   }
 }
