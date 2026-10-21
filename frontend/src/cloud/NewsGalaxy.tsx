@@ -1,6 +1,8 @@
 // 新聞全景（T-418；使用者 2026-10-20：「星雲圖當成可以切換的一個視角就好」）：新聞頁「清單／全景」切到全景時才載入（React.lazy）。
 // 光點＝一則新聞（台灣橘、國際藍），靠在一起＝內容相近；亮點＝被很多則提到的股票、公司、主題；線＝這則提到它。
 // 3D、預設慢慢自轉（使用者：「可以旋轉嗎」）；一指拖曳旋轉、兩指或滾輪縮放、⟳ 開關自轉；點光點或亮點浮出檢視框（點了就停住）。
+// 不迷航（使用者 2026-10-21：「有時候再旋轉很容易迷航」）：點了的那顆慢慢移到中央、之後繞著它轉、縮放也朝它；
+// 一動手（拖、縮放）就關掉自轉；拖曳轉得慢一點、上下最多翻約 43°；「回到一開始」滑回去而不是跳回去。
 // 亮度跟著畫面密度調（使用者：「手機看好像太亮」）。資料是排程算好的快照（一天幾次）。
 // 亮點的檢視框有「單獨看」：把提到它的新聞拎出來照主題讀、看常一起出現的（GalaxyFocus.tsx）。
 import { ExternalLink, Maximize2, Minus, Plus, RotateCw, Undo2, X } from 'lucide-react'
@@ -8,20 +10,28 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchNewsGalaxy } from './api'
 import { GalaxyFocus } from './GalaxyFocus'
 import {
+  DRAG_RAD,
+  ORIGIN,
+  PITCH_MAX,
   REF_S,
+  angleDiff,
   clusterLabelAt,
   density,
   depthAlpha,
+  dockInspector,
+  ease,
   galaxySummary,
   hubClass,
   hubRadius,
   hubTypeLabel,
   pickAt,
+  pivotScreenY,
   placeLabels,
   project,
   type GalaxyData,
   type Proj,
   type Rot,
+  type Vec3,
   type View,
 } from './news-galaxy'
 import { shortWhen, taipeiDay } from './news'
@@ -76,11 +86,16 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     const SP = Object.fromEntries(Object.entries(COL).map(([k, v]) => [k, sprite(v)]))
     const items = data.items, hubs = data.hubs, clusters = data.clusters
     const hubIdx = new Map(hubs.map((h, i) => [h.id, i]))
+    const itemIdx = new Map(items.map((it, i) => [it.id, i]))
     const itemHubs = items.map((it) => it.m.map((m) => hubIdx.get(m)).filter((i): i is number => i !== undefined))
     const seed = items.map((_, i) => [Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1, Math.abs(Math.sin(i * 78.233) * 12345.678) % 1])
     let W = 0, H = 0, dpr = 1
     let view: View = { s: 1, x: 0, y: 0 }, home: View = { s: 1, x: 0, y: 0 }
     const rot: Rot = { ...HOME_ROT }
+    // 轉動中心：選了東西就慢慢移到它身上；取消選取後留在原地，回到一開始才回整團的中心
+    const pivot: Vec3 = { ...ORIGIN }
+    let pivotGoal: Vec3 = ORIGIN
+    let goal: { yaw: number; pitch: number; s: number } | null = null
     let raf = 0, last = 0, t0 = performance.now(), resetSeen = 0
 
     // 標籤（DOM 比較好排版）：主題依則數、亮點台股優先；大小量一次
@@ -126,21 +141,37 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       const lv = live.current
       if (lv.reset !== resetSeen) {
         resetSeen = lv.reset
-        view = { ...home }
-        rot.yaw = HOME_ROT.yaw
-        rot.pitch = HOME_ROT.pitch
+        goal = { yaw: rot.yaw + angleDiff(rot.yaw, HOME_ROT.yaw), pitch: HOME_ROT.pitch, s: home.s }
+        pivotGoal = ORIGIN
       }
       if (lv.zoom !== 1) {
         view.s = Math.max(home.s * 0.6, Math.min(home.s * 9, view.s * lv.zoom))
         lv.zoom = 1
+        goal = null
       }
       const dt = Math.min(0.05, (now - (last || now)) / 1000)
       last = now
-      if (lv.auto && !lv.sel && !drag) rot.yaw += dt * 0.12
+      if (lv.auto && !lv.sel && !drag && !goal) rot.yaw += dt * 0.12
+      if (goal) {
+        rot.yaw = ease(rot.yaw, goal.yaw, dt)
+        rot.pitch = ease(rot.pitch, goal.pitch, dt)
+        view.s = ease(view.s, goal.s, dt)
+        if (Math.abs(rot.yaw - goal.yaw) + Math.abs(rot.pitch - goal.pitch) < 1e-3 && Math.abs(view.s - goal.s) < 0.5) goal = null
+      }
+      if (lv.sel) {
+        const o = lv.sel.kind === 'item' ? items[itemIdx.get(lv.sel.id) ?? -1] : hubs[hubIdx.get(lv.sel.id) ?? -1]
+        if (o) pivotGoal = o
+      }
+      pivot.x = ease(pivot.x, pivotGoal.x, dt, 6)
+      pivot.y = ease(pivot.y, pivotGoal.y, dt, 6)
+      pivot.z = ease(pivot.z, pivotGoal.z, dt, 6)
+      const insp = inspRef.current
+      const dock = !!(lv.sel && insp && dockInspector(W, insp.offsetWidth))
+      view.y = ease(view.y, pivotScreenY(H, dock ? insp!.offsetHeight : null), dt, 6)
       const tt = (now - t0) / 1000
-      P.items = items.map((it) => project(it, rot, view))
-      P.hubs = hubs.map((h) => project(h, rot, view))
-      P.clusters = clusters.map((c) => project(c, rot, view))
+      P.items = items.map((it) => project(it, rot, view, pivot))
+      P.hubs = hubs.map((h) => project(h, rot, view, pivot))
+      P.clusters = clusters.map((c) => project(c, rot, view, pivot))
       const sel = lv.sel
       let relItems: Set<string> | null = null, relHubs: Set<string> | null = null
       if (sel?.kind === 'item') {
@@ -237,8 +268,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         }
       }
       ctx.stroke()
-      // 選取的那顆畫框；檢視框跟著它
-      const insp = inspRef.current
+      // 選取的那顆畫框；檢視框跟著它（窄畫面貼在下緣）
       if (sel && insp) {
         const p = sel.kind === 'item' ? P.items[items.findIndex((x) => x.id === sel.id)] : P.hubs[hubIdx.get(sel.id) ?? -1]
         if (p) {
@@ -248,7 +278,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
             ctx.strokeRect(p[0] - 9, p[1] - 9, 18, 18)
           }
           const w = insp.offsetWidth, h = insp.offsetHeight
-          let x = p[0] + 18, y = p[1] - h - 14
+          let x = dock ? (W - w) / 2 : p[0] + 18, y = dock ? H - 50 - h : p[1] - h - 14
           if (x + w > W - 8) x = p[0] - w - 18
           if (x < 8) x = 8
           if (y < 8) y = p[1] + 18
@@ -272,8 +302,15 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       const a = [...pts.values()]
       return a.length === 2 ? Math.hypot(a[0][0] - a[1][0], a[0][1] - a[1][1]) : 0
     }
+    // 一動手就不再自己轉（轉到想看的角度，放開後不會又轉走）
+    const stopAuto = () => {
+      if (!live.current.auto) return
+      live.current.auto = false
+      setAuto(false)
+    }
     const onDown = (e: PointerEvent) => {
       if ((e.target as HTMLElement).closest('.gx-insp,.gx-ctl')) return
+      goal = null
       stage.setPointerCapture(e.pointerId)
       pts.set(e.pointerId, xy(e))
       const [x, y] = xy(e)
@@ -287,11 +324,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       if (pts.size === 2 && drag.d) {
         view.s = Math.max(home.s * 0.6, Math.min(home.s * 9, drag.s * (pinch() / drag.d)))
         moved = 99
+        stopAuto()
         return
       }
-      rot.yaw = drag.yaw + (x - drag.sx) * 0.008
-      rot.pitch = Math.max(-1.3, Math.min(1.3, drag.pitch + (y - drag.sy) * 0.008))
+      rot.yaw = drag.yaw + (x - drag.sx) * DRAG_RAD
+      rot.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, drag.pitch + (y - drag.sy) * DRAG_RAD))
       moved = Math.max(moved, Math.hypot(x - drag.sx, y - drag.sy))
+      if (moved >= 6) stopAuto()
     }
     const onUp = (e: PointerEvent) => {
       const was = pts.size
@@ -316,6 +355,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      stopAuto()
+      goal = null
       view.s = Math.max(home.s * 0.6, Math.min(home.s * 9, view.s * Math.exp(-e.deltaY * 0.0015)))
     }
     stage.addEventListener('pointerdown', onDown)
@@ -432,13 +473,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           <button className={auto ? 'on' : ''} onClick={() => setAuto(!auto)} aria-pressed={auto} aria-label="自動旋轉" title="自動旋轉（開／關）">
             <RotateCw size={17} aria-hidden="true" />
           </button>
-          <button onClick={() => (live.current.zoom = 1.5)} aria-label="放大">
+          <button onClick={() => { live.current.zoom = 1.5; setAuto(false) }} aria-label="放大">
             <Plus size={17} aria-hidden="true" />
           </button>
-          <button onClick={() => (live.current.zoom = 1 / 1.5)} aria-label="縮小">
+          <button onClick={() => { live.current.zoom = 1 / 1.5; setAuto(false) }} aria-label="縮小">
             <Minus size={17} aria-hidden="true" />
           </button>
-          <button onClick={() => { live.current.reset += 1; setSel(null) }} aria-label="回到一開始" title="回到一開始">
+          <button onClick={() => { live.current.reset += 1; live.current.sel = null; setSel(null) }} aria-label="回到一開始" title="回到一開始">
             <Undo2 size={17} aria-hidden="true" />
           </button>
         </div>
@@ -455,7 +496,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           onStock={onStock}
         />
       )}
-      <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放，點一顆看細節。要快速讀新聞用上面三張卡或「清單」。</p>
+      <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放；點一顆看細節，它會移到中間、之後繞著它轉。要快速讀新聞用上面三張卡或「清單」。</p>
     </section>
   )
 }
