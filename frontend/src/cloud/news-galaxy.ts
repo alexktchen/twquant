@@ -36,16 +36,42 @@ export const FOV = 3.4
 /** 電腦版一開的比例（每單位約 300px）＝亮度 1 */
 export const REF_S = 300
 
-/** 繞直軸轉 yaw、再繞橫軸轉 pitch，透視投影到畫面。 */
-export function project(o: Vec3, r: Rot, v: View): Proj {
+export const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 }
+
+/** 繞直軸轉 yaw、再繞橫軸轉 pitch，透視投影到畫面。c＝轉動中心（放在畫面中央）：預設整團的中心，選了東西就換成它。 */
+export function project(o: Vec3, r: Rot, v: View, c: Vec3 = ORIGIN): Proj {
   const cy = Math.cos(r.yaw), sy = Math.sin(r.yaw), cp = Math.cos(r.pitch), sp = Math.sin(r.pitch)
-  const x1 = o.x * cy + o.z * sy
-  const z1 = -o.x * sy + o.z * cy
-  const y1 = o.y * cp - z1 * sp
-  const z2 = o.y * sp + z1 * cp
+  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z
+  const x1 = ox * cy + oz * sy
+  const z1 = -ox * sy + oz * cy
+  const y1 = oy * cp - z1 * sp
+  const z2 = oy * sp + z1 * cp
   const f = FOV / (FOV - z2)
   return [v.x + x1 * v.s * f, v.y + y1 * v.s * f, z2, f]
 }
+
+/**
+ * 轉起來不迷航（使用者 2026-10-21：「有時候再旋轉很容易迷航」）：拖曳每 px 轉幾弧度（原 0.008，手機滑 200px 就轉 92°；現在 57°）、
+ * 上下最多翻幾弧度（原 1.3≈75°，翻過頭分不清上下；0.75≈43°）。
+ */
+export const DRAG_RAD = 0.005
+export const PITCH_MAX = 0.75
+
+/** 往目標靠：每過 1 秒剩下的距離乘 e^−rate（跟幀率無關；rate 8 ≈ 0.3 秒走完九成） */
+export const ease = (a: number, b: number, dt: number, rate = 8): number => b + (a - b) * Math.exp(-rate * dt)
+
+/** 從 from 轉到 to 走短的那邊（−π～π）：自轉累積了好幾圈，回到一開始不要倒著轉好幾圈 */
+export function angleDiff(from: number, to: number): number {
+  const d = (to - from) % (2 * Math.PI)
+  return d > Math.PI ? d - 2 * Math.PI : d < -Math.PI ? d + 2 * Math.PI : d
+}
+
+/**
+ * 選取那顆移到中央後，檢視框放它右邊；窄畫面（手機）右邊放不下 → 框貼在圖的下緣（按鈕上面），
+ * 那顆改放在框上方空間的正中，不被框蓋住、手指從中間拖也不會拖到框。bottom＝下緣留給按鈕的高度。
+ */
+export const dockInspector = (W: number, inspW: number): boolean => W < 2 * (inspW + 26)
+export const pivotScreenY = (H: number, inspH: number | null, bottom = 50): number => (inspH === null ? H / 2 : Math.max(40, (H - bottom - inspH) / 2))
 
 /** 遠的淡：深度 −1.15～1.15 對到 0.4～1。 */
 export const depthAlpha = (z: number): number => 0.4 + 0.6 * Math.min(1, Math.max(0, (z + 1.15) / 2.3))
@@ -120,4 +146,55 @@ export function galaxySummary(d: GalaxyData): string {
   const t = new Date(Date.parse(d.built) + 8 * 3600_000)
   const hm = `${t.getUTCMonth() + 1}/${t.getUTCDate()} ${String(t.getUTCHours()).padStart(2, '0')}:${String(t.getUTCMinutes()).padStart(2, '0')}`
   return `近 ${d.days} 天 ${d.items.length.toLocaleString('en-US')} 則・${d.clusters.length} 個主題・${hm} 更新`
+}
+
+/** 單獨看：「常一起出現」列幾個、每個主題先列幾則、每則列幾個其他亮點 */
+export const FOCUS_RELATED = 12
+export const FOCUS_GROUP_ROWS = 5
+export const FOCUS_ROW_HUBS = 3
+
+/** item＝同一件事裡最新的一則；n＝這件事有幾則 */
+export type FocusRow = { item: GalaxyItem; n: number; srcs: string[]; others: GalaxyHub[] }
+export type FocusGroup = { k: number; name: string; rows: FocusRow[] }
+export type HubFocus = { hub: GalaxyHub; total: number; related: { hub: GalaxyHub; n: number }[]; shown: number; groups: FocusGroup[] }
+
+/**
+ * 單獨看一個亮點（使用者 2026-10-21：「針對這樣的選擇把它再單獨拎出來閱讀…可以快速看到關聯」）：
+ * 提到它的新聞照主題分組（則數多的組在前、組內新的在前），同一件事只留最新一則、記下哪幾家報；
+ * 「常一起出現」＝這些新聞裡還提到哪些亮點、各幾則。給 withId → 只留同時提到兩個的。找不到亮點 → null。
+ */
+export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = null): HubFocus | null {
+  const byId = new Map(d.hubs.map((h) => [h.id, h]))
+  const hub = byId.get(hubId)
+  if (!hub) return null
+  const all = d.items.filter((it) => it.m.includes(hubId))
+  const co = new Map<string, number>()
+  for (const it of all) for (const m of new Set(it.m)) if (m !== hubId && byId.has(m)) co.set(m, (co.get(m) ?? 0) + 1)
+  const related = [...co]
+    .map(([id, n]) => ({ hub: byId.get(id)!, n }))
+    .sort((a, b) => b.n - a.n || b.hub.n - a.hub.n || a.hub.label.localeCompare(b.hub.label))
+    .slice(0, FOCUS_RELATED)
+  const picked = withId ? all.filter((it) => it.m.includes(withId)) : all
+  const newest = (a: GalaxyItem, b: GalaxyItem) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0)
+  const events = new Map<string, GalaxyItem[]>()
+  for (const it of [...picked].sort(newest)) {
+    const key = it.ev ?? `item:${it.id}`
+    events.set(key, [...(events.get(key) ?? []), it])
+  }
+  const groups = new Map<number, FocusRow[]>()
+  for (const g of events.values()) {
+    const item = g[0]
+    const others = [...new Set(item.m)].filter((m) => m !== hubId && m !== withId && byId.has(m)).map((m) => byId.get(m)!)
+    groups.set(item.k, [...(groups.get(item.k) ?? []), { item, n: g.length, srcs: [...new Set(g.map((x) => x.src))], others }])
+  }
+  const names = new Map(d.clusters.map((c) => [c.k, c.name]))
+  return {
+    hub,
+    total: all.length,
+    related,
+    shown: picked.length,
+    groups: [...groups]
+      .map(([k, rows]) => ({ k, name: names.get(k) ?? '其他', rows }))
+      .sort((a, b) => b.rows.length - a.rows.length || newest(a.rows[0].item, b.rows[0].item)),
+  }
 }

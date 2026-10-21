@@ -1,11 +1,12 @@
 /* 新聞全景（T-418）：黑底發光星雲；標籤是黑底白框等寬字（影片的樣子）；最大三團黃框；按鈕在右下 */
-/* 滿版（使用者 2026-10-21）：圖左右貼齊視窗、桌機高到只留 140px——滾輪在圖上是縮放，畫面上一定要留得到能捲頁的地方；上下兩行字仍對齊 920px 的新聞欄 */
+/* 滿版（使用者 2026-10-21）：圖不受 920px 新聞欄限制、桌機高到只留 140px；上下兩行字仍對齊新聞欄。
+   滾輪在圖上是縮放、手指在圖上是旋轉，所以左右各留 16px 能捲頁的邊（使用者：「星雲圖左右留一點給 scrollbar」） */
 .gx { margin-top: 12px; padding-bottom: 48px; }
 .gx-sum, .gx-help { box-sizing: border-box; max-width: 920px; margin-left: auto; margin-right: auto; padding: 0 18px; }
 .gx-sum { margin-bottom: 6px; font: 13px/1.4 ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", monospace; color: var(--mute); letter-spacing: .03em; }
 .gx-stage {
-  position: relative; height: calc(100vh - 140px); min-height: 380px; overflow: hidden; touch-action: none; cursor: grab;
-  background: radial-gradient(ellipse at 50% 45%, #1a0f0d 0%, #070505 60%, #050506 100%); border: solid #241c1d; border-width: 1px 0;
+  position: relative; height: calc(100vh - 140px); min-height: 380px; margin: 0 16px; overflow: hidden; touch-action: none; cursor: grab; border-radius: 12px;
+  background: radial-gradient(ellipse at 50% 45%, #1a0f0d 0%, #070505 60%, #050506 100%); border: 1px solid #241c1d;
 }
 .gx-stage:active { cursor: grabbing; }
 .gx-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -32,6 +33,9 @@
 .cq .gx-chip.tw { color: #ffb199; border-color: #ff9b6a; cursor: pointer; }
 .gx-insp a { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; color: #ff7a59; font-size: 14px; text-decoration: none; }
 .cq .gx-go { margin-top: 8px; height: 34px; padding: 0 12px; border-radius: 8px; background: #ff7a59; color: #120705; font-size: 14px; font-weight: 700; }
+.gx-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.cq .gx-acts .gx-go { margin-top: 0; }
+.cq .gx-focus { height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid #ffd23f; color: #ffd23f; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
 .cq .gx-x { position: absolute; right: 4px; top: 4px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; color: #9c8f8a; background: none; }
 .gx-legend { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: flex; gap: 12px; font-size: 12.5px; color: #9c8f8a; pointer-events: none; }
 .gx-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
@@ -44,3 +48,23 @@
   .gx-stage { height: 62vh; }
   .gx-legend { bottom: 54px; }
 }
+
+/* 單獨看（GalaxyFocus）：用新聞閱讀卡的殼；顏色跟星雲圖一樣——台股橘、國外藍、主題青，選中的關聯＝黃，同一件事幾家＝紫（同「多家同報」） */
+.gxf-type { font-size: 13px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+.gxf-type.tw { color: #ffb199; background: rgba(217, 89, 38, .2); }
+.gxf-type.abroad { color: #b9d3ff; background: rgba(57, 135, 229, .2); }
+.gxf-type.cluster { color: #8ff0df; background: rgba(25, 158, 112, .2); }
+.gxf-title small { margin-left: 10px; font-size: 15px; font-weight: 500; color: var(--mute); }
+.gxf-rel { display: flex; flex-wrap: wrap; gap: 8px; }
+.cq .gxf-rel .cq-news-ent { padding: 7px 11px; border: 1px solid var(--tile-line, #2a2c36); border-radius: 999px; font-size: 14.5px; color: var(--text); }
+.cq .gxf-rel .cq-news-ent small { font-size: 12.5px; color: var(--mute); }
+.cq .gxf-rel .cq-news-ent.on { border-color: #ffd23f; background: rgba(255, 210, 63, .12); color: #ffd23f; }
+.gxf-with { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 6px 6px 12px; border-radius: 10px; background: rgba(255, 210, 63, .08); border: 1px solid rgba(255, 210, 63, .35); font-size: 15px; }
+.gxf-with span { flex: 1; min-width: 0; }
+.gxf-with b { color: #ffd23f; }
+.cq .gxf-with > button:not(.cq-icon-btn) { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid #ffd23f; color: #ffd23f; font-size: 14px; white-space: nowrap; }
+.gxf .cq-reader-list a { padding-bottom: 6px; }
+.gxf .cq-reader-list a small { flex-wrap: wrap; }
+.gxf-n { font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 5px; color: #c4a5ff; background: rgba(160, 120, 255, .16); }
+.gxf-ents { display: flex; flex-wrap: wrap; gap: 2px 14px; padding-bottom: 10px; }
+.cq .gxf-ents .cq-news-ent { font-size: 13px; color: #b8bcc6; }

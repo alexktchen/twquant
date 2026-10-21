@@ -41,6 +41,68 @@ class PushConfig(BaseConfig):
     group_max_listed: int = Field(ge=1)  # 一則通知最多寫幾個族群（其餘寫「等 N 個」）
 
 
+class LineGroupKind(BaseConfig):
+    """一種 LINE 群組貼文：要不要發、排進來多久沒送出就作廢、點圖打開哪一頁。"""
+
+    enabled: bool
+    stale_hours: float = Field(gt=0)
+    link: str = Field(pattern=r"^https://")
+
+
+class LineCardFont(BaseConfig):
+    """一個字型檔候選（.ttc 要指定第幾個字面：Noto Sans CJK 的繁中是 3）。"""
+
+    path: str = Field(min_length=1)
+    index: int = Field(ge=0)
+
+
+class LineCardColors(BaseConfig):
+    """圖卡配色（同網站 frontend/src/cloud/cloud.css）。"""
+
+    bg: str
+    panel: str
+    rule: str
+    text: str
+    muted: str
+    accent: str
+    badge_text: str
+
+
+class LineCardStyle(BaseConfig):
+    """每日圖卡的版面與字型。"""
+
+    width: int = Field(ge=480, le=2080)
+    palette_colors: int = Field(ge=16, le=256)
+    fonts_regular: tuple[LineCardFont, ...] = Field(min_length=1)
+    fonts_bold: tuple[LineCardFont, ...] = Field(min_length=1)
+    colors: LineCardColors
+
+
+class LineGroupConfig(BaseConfig):
+    """configs/line_group.yaml：LINE 群組聊天每日圖卡（T-423／D-204）。"""
+
+    web_schema: str = Field(pattern=r"^[a-z_][a-z0-9_]*$")
+    site_url: str = Field(pattern=r"^https://")
+    card_url_base: str = Field(pattern=r"^https://.*/$")
+    liff_id: str
+    footer: str
+    fallback_text: bool
+    cta: str = Field(min_length=1)
+    node_bin: str = Field(min_length=1)
+    adapter: str = Field(min_length=1)  # 相對 repo 根目錄
+    adapter_timeout_seconds: float = Field(gt=0)
+    login_timeout_seconds: float = Field(gt=0)
+    lease_seconds: float = Field(gt=0)
+    lock_wait_seconds: float = Field(ge=0)
+    poll_seconds: float = Field(gt=0)
+    max_backoff_wait_seconds: float = Field(ge=0)
+    max_attempts: int = Field(ge=1)
+    card_keep_days: int = Field(ge=7)
+    picks_rows_per_line: int = Field(ge=1)
+    card: LineCardStyle
+    kinds: dict[str, LineGroupKind]
+
+
 class SourceRate(BaseConfig):
     """單一來源的限流設定（滑動窗語意，SPEC-001 §7）。"""
 

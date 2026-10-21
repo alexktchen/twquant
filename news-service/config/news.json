@@ -512,7 +512,8 @@
       "gate_f1": 0.7,
       "gate_auc": 0.85,
       "workers": 16,
-      "batch": 5000
+      "batch": 5000,
+      "max_consecutive_failures": 50
     }
   },
   "types": {
