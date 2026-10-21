@@ -2,6 +2,7 @@
 // /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
+import typeWeights from '../../../config/news_types.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
 import type { EntityType } from '../../../src/graph.ts'
 import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
@@ -409,7 +410,7 @@ Deno.serve(async (req) => {
     if (path === '/v1/items') {
       let q
       try {
-        q = parseItemsQuery(url.searchParams, cfg)
+        q = parseItemsQuery(url.searchParams, cfg, typeWeights.classes)
       } catch (e) {
         return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
       }
@@ -429,12 +430,16 @@ Deno.serve(async (req) => {
         summary_zh: string | null
         tr_status: string | null
         sha: string
+        type: string | null
       }[]>`
         select i.id, i.source, i.lang, i.url,
                coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
                i.published_at, i.first_seen_at, coalesce(v.n, 0)::int as versions,
-               t.title_zh, t.summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha
+               t.title_zh, t.summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha,
+               ty.type
         from news.raw_items i
+        -- 新聞類型（T-421）：現行探針版本；還沒分類 → null
+        left join news.item_types ty on ty.item_id = i.id and ty.version = ${typeWeights.version}
         left join lateral (
           select title_orig, summary_orig, content_sha, count(*) over () as n from news.raw_item_versions
           where item_id = i.id order by seen_at desc limit 1
@@ -446,6 +451,7 @@ Deno.serve(async (req) => {
           ${q.until ? sql`and i.first_seen_at <= ${q.until}` : sql``}
           ${q.source ? sql`and i.source = ${q.source}` : sql``}
           ${kindSources ? sql`and i.source = any(${kindSources})` : sql``}
+          ${q.type ? sql`and ty.type = ${q.type}` : sql``}
         order by i.first_seen_at desc, i.id
         limit ${q.limit}`
       // 每則目前這一版內容比對到的實體（T-402，一度）；實體已停用（valid_to 有值）的不列
@@ -479,6 +485,8 @@ Deno.serve(async (req) => {
         translation: r.lang === 'en' ? (r.tr_status ?? 'pending') : null,
         title_zh: r.title_zh,
         summary_zh: r.summary_zh,
+        // 新聞類型（T-421）：earnings／business／capital／policy／market／other；還沒分類 null
+        type: r.type,
         // 台股在前、再國外、再族群／主題，最多 graph.mentions_per_item 個；沒有 → []
         mentions: itemMentions(mentionsOf.get(r.id) ?? [], cfg.graph.mentions_per_item),
       }))

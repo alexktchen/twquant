@@ -21,6 +21,20 @@
 }
 .cq-news-kind.intl { color: #3d9bff; background: rgba(61, 155, 255, .14); }
 .cq-news-kind.tw { color: #2dd4bf; background: rgba(45, 212, 191, .14); }
+/* 新聞類型（T-421）：篩選列與標題前的小標同一套顏色；dataviz 類別色（固定順序，不隨數量換） */
+.cq-news-types { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.cq-news-type {
+  display: inline-flex; align-items: center; font-size: 13px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+  border: 1px solid transparent; background: rgba(255, 255, 255, .06); color: var(--cq-text-2, #b8c0cc); white-space: nowrap; cursor: pointer;
+}
+em.cq-news-type { font-style: normal; margin-right: 6px; padding: 1px 6px; font-size: 12.5px; cursor: default; vertical-align: 2px; }
+.cq-news-type.earnings { color: #f5b942; background: rgba(245, 185, 66, .14); }
+.cq-news-type.business { color: #58c8a0; background: rgba(88, 200, 160, .14); }
+.cq-news-type.capital { color: #c792ea; background: rgba(199, 146, 234, .14); }
+.cq-news-type.policy { color: #ff8a65; background: rgba(255, 138, 101, .14); }
+.cq-news-type.market { color: #3d9bff; background: rgba(61, 155, 255, .14); }
+.cq-news-type.other { color: #9aa3ad; background: rgba(154, 163, 173, .14); }
+button.cq-news-type.on { border-color: currentColor; }
 .cq-news-title { font-size: 16px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
 .cq-news-meta { display: flex; align-items: center; gap: 4px; font-size: 13.5px; color: var(--mute); }
 .cq-news-meta svg { margin-left: auto; flex: none; transition: transform .15s; }
