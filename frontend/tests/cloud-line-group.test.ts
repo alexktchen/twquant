@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { CARD_TOKEN_RE, HOME_ID_RE, LOGIN_WORKFLOW, dispatchRequest, loginBusy, parseToggle } from '../functions/_lib/line-admin.ts'
 import { FEATURE_ROLES, ROLE_MEMBERS, can, featuresOf, rolesOf } from '../functions/_lib/roles.ts'
-import { groupsMeta, latestSync, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
+import { findGroups, groupsMeta, latestSync, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 LINE 群組，大小寫不分', () => {
@@ -64,6 +64,10 @@ test('T-423 分頁與顯示：?tab=line 認得；狀態、時間、群組摘要'
   // 同步好沒有：看清單最後一次同步的時間有沒有變
   assert.equal(latestSync([{ ...g('a', true, true), synced_at: '2026-10-21 09:00' }, { ...g('b', true, true), synced_at: '2026-10-21 22:05' }]), '2026-10-21 22:05')
   assert.equal(latestSync([]), '')
+  // 找群組：名字含關鍵字（不分大小寫），勾了的永遠留著
+  const list = [{ ...g('c1', false, true), name: 'Family' }, { ...g('c2', true, true), name: '股友會' }, { ...g('c3', false, true), name: '家長群' }]
+  assert.deepEqual(findGroups(list, ' fam ').map((x) => x.home_id), ['c1', 'c2'])
+  assert.deepEqual(findGroups(list, '').map((x) => x.home_id), ['c1', 'c2', 'c3'])
 })
 
 const login = (status: string, fresh = true): LineLogin => ({

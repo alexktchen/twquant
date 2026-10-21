@@ -116,6 +116,15 @@ export function shortTime(ts: string | null): string {
   return m ? `${Number(m[1])}/${Number(m[2])} ${m[3]}:${m[4]}` : ts
 }
 
+/** 群組多過這個數就顯示搜尋框 */
+export const GROUP_FIND_MIN = 8
+
+/** 搜尋群組：名字含關鍵字（不分大小寫、前後空白不算）；勾了的永遠留著，免得找別的時候看不到已經在發的。 */
+export function findGroups(groups: LineGroupRow[], q: string): LineGroupRow[] {
+  const k = q.trim().toLowerCase()
+  return k ? groups.filter((g) => g.enabled || g.name.toLowerCase().includes(k)) : groups
+}
+
 /** 群組區塊右上那行：勾了幾個、帳號在幾個群組。 */
 export function groupsMeta(groups: LineGroupRow[]): string {
   const present = groups.filter((g) => g.present)
