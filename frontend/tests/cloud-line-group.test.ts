@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { CARD_TOKEN_RE, HOME_ID_RE, LOGIN_WORKFLOW, dispatchRequest, loginBusy, parseToggle } from '../functions/_lib/line-admin.ts'
+import { CARD_TOKEN_RE, HOME_ID_RE, LOGIN_WORKFLOW, POST_KINDS, dispatchRequest, loginBusy, parsePost, parseToggle } from '../functions/_lib/line-admin.ts'
 import { FEATURE_ROLES, ROLE_MEMBERS, can, featuresOf, rolesOf } from '../functions/_lib/roles.ts'
-import { findGroups, groupsMeta, latestSync, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
+import { KIND_LABEL, findGroups, groupsMeta, latestPostId, latestSync, taipeiToday, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 LINE 群組，大小寫不分', () => {
@@ -22,13 +22,13 @@ test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 L
 })
 
 test('T-423 AC9 權限：每個 LINE 端點都自己擋（不只靠前端藏分頁）', () => {
-  for (const f of ['../functions/api/line/index.ts', '../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts']) {
+  for (const f of ['../functions/api/line/index.ts', '../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts', '../functions/api/line/post.ts']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8')
     assert.match(src, /accessEmail\(request\)/, f) // 身分來自驗過的權杖，不信標頭
     assert.match(src, /can\(email, 'line'\)/, f)
     assert.match(src, /fail\(403, '沒有權限'\)/, f)
   }
-  for (const f of ['../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts']) {
+  for (const f of ['../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts', '../functions/api/line/post.ts']) {
     assert.match(readFileSync(new URL(f, import.meta.url), 'utf8'), /sameOrigin\(request\)/, f) // 會改東西的只收本站請求
   }
 })
@@ -110,5 +110,22 @@ test('T-423 AC11 觸發 GitHub Actions：只打 line-login.yml、main、沒 toke
   // 工作流程檔真的在
   const wf = readFileSync(new URL(`../../.github/workflows/${LOGIN_WORKFLOW}`, import.meta.url), 'utf8')
   assert.ok(wf.includes('line-group login') && wf.includes('line-group groups'))
-  assert.match(wf, /options: \[login, groups\]/)
+  assert.match(wf, /options: \[login, groups, post\]/)
+})
+
+test('T-423 AC12 手動發送：只收四種與合法日期、輸入走環境變數不直接展開進指令', () => {
+  assert.deepEqual(parsePost('{"kind":"picks","date":"2026-10-21"}'), { kind: 'picks', date: '2026-10-21' })
+  for (const bad of ['', '{"kind":"picks"}', '{"kind":"x","date":"2026-10-21"}', '{"kind":"picks","date":"10/21"}',
+    '{"kind":"picks","date":"2026-10-21; rm -rf /"}', '{"kind":"picks","date":"2026-13-45"}', '{"kind":"picks","date":"2026-10-21","x":1}']) {
+    assert.equal(parsePost(bad), null, bad)
+  }
+  assert.deepEqual([...POST_KINDS].sort(), Object.keys(KIND_LABEL).sort()) // 下拉選單跟後端認得的一樣
+  const body = JSON.parse(String(dispatchRequest('tok', 'post', { kind: 'morning', date: '2026-10-22' }).init.body))
+  assert.deepEqual(body, { ref: 'main', inputs: { task: 'post', kind: 'morning', date: '2026-10-22' } })
+  const wf = readFileSync(new URL(`../../.github/workflows/${LOGIN_WORKFLOW}`, import.meta.url), 'utf8')
+  assert.match(wf, /options: \[login, groups, post\]/)
+  assert.match(wf, /DAY: \$\{\{ inputs\.date \}\}/)
+  assert.doesNotMatch(wf, /run:[^\n]*\$\{\{ inputs\.(date|kind) \}\}/) // 不能直接展開進 run
+  assert.equal(taipeiToday(Date.parse('2026-10-21T16:30:00Z')), '2026-10-22') // 台北已經過午夜
+  assert.equal(latestPostId([]), 0)
 })

@@ -3,6 +3,7 @@
 # login：轉接器掃 QR 登入，QR 與 PIN 一出來就寫進 web.line_login，網站每幾秒讀一次顯示；用備用帳號的手機掃、輸入 PIN，
 #        憑證存 web.line_account（等掃描最多 3 分鐘）；登入成功順便同步一次群組。
 # groups：只同步帳號在哪些群組（順便接受群組邀請）到 web.line_groups，網站上才勾得到。
+# post：手動發送（網站「手動發送」）——畫好那天那一種圖卡、排進隊、送到勾了的群組；同一天同一種同一群組照樣只發一次。
 # ⚠ linejs 是 LINE 非官方協定、這台機器在美國（國外 IP 上線可能被鎖）——只用備用帳號。
 name: line-login
 
@@ -10,15 +11,26 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "login＝掃 QR 登入（成功後順便同步群組）；groups＝只同步群組清單"
+        description: "login＝掃 QR 登入（成功後順便同步群組）；groups＝只同步群組清單；post＝手動發送一張圖卡"
         required: false
         default: login
         type: choice
-        options: [login, groups]
+        options: [login, groups, post]
+      kind:
+        description: "post 用：picks｜groups｜morning｜evening"
+        required: false
+        default: picks
+        type: choice
+        options: [picks, groups, morning, evening]
+      date:
+        description: "post 用：哪一天 YYYY-MM-DD（留空＝台北今天）"
+        required: false
+        default: ""
 
 concurrency:
   group: line-login-${{ inputs.task || 'login' }}
-  cancel-in-progress: true # 再按一次「登入」就換新的 QR
+  # 再按一次「登入」就換新的 QR；發送不能砍到一半（會留下不確定有沒有發出去的貼文）
+  cancel-in-progress: ${{ (inputs.task || 'login') == 'login' }}
 
 jobs:
   login:
@@ -49,4 +61,20 @@ jobs:
         run: uv run --no-sync python -m twquant line-group login # 不讓 uv run 依預設群組重新同步
 
       - name: 同步群組清單（帳號在哪些群組；順便接受群組邀請）
+        if: ${{ (inputs.task || 'login') != 'post' }}
         run: uv run --no-sync python -m twquant line-group groups
+
+      - name: 中文字型（畫圖卡）
+        if: ${{ inputs.task == 'post' }}
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: 手動發送（畫圖卡 → 排隊 → 送出）
+        if: ${{ inputs.task == 'post' }}
+        env: # 輸入一律走環境變數、不直接展開進指令（防注入）
+          KIND: ${{ inputs.kind }}
+          DAY: ${{ inputs.date }}
+        run: |
+          if [ -z "$DAY" ]; then DAY="$(TZ=Asia/Taipei date +%F)"; fi
+          if ! [[ "$DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "::error::日期格式不對：$DAY"; exit 1; fi
+          uv run --no-sync python -m twquant line-group enqueue --kind "$KIND" --date "$DAY"
+          uv run --no-sync python -m twquant line-group send

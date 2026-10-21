@@ -46,6 +46,12 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 6. （建議）在 LINE Developers 建一個自己的 LIFF app（LINE Login channel、scope 勾 `chat_message.write`），
    把 LIFF ID 填到 `configs/line_group.yaml` 的 `liff_id`。空著的話用 linejs 內建的那個（別人的 LIFF app）。
 
+## 手動發送
+
+網站「LINE 群組」分頁的「手動發送」：選哪一種、哪一天，按「發到 N 個群組」→ GitHub Actions `line-login.yml`
+（`task=post`）畫好圖卡、排隊、送出，約 1～2 分鐘後出現在「最近發的圖卡」。同一天同一種同一群組照樣只發一次；
+那天還沒有內容（例如名單還沒寫好）就不會發。
+
 ## 每天怎麼跑
 
 | 排程 | 做什麼 |
