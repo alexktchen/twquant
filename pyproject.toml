@@ -49,8 +49,9 @@ serving = [  # 供應層 PG（SPEC-009）；唯 data/serving 與 monitoring/pg_s
 push = [
     "pywebpush>=2.0",
 ]
-line = [  # LINE 群組每日圖卡（T-423）；只有 monitoring/line_card 用
+line = [  # LINE 群組每日圖卡（T-423）；monitoring/line_card 畫圖卡、line_group 畫登入 QR
     "pillow>=11.0",
+    "qrcode>=8.0",
 ]
 
 [[tool.uv.index]]
@@ -97,8 +98,8 @@ files = ["src", "tests"]
 warn_unused_configs = true
 # 第三方庫缺型別 stub 時不擋（polars/duckdb/pandera 自帶或部分缺）
 [[tool.mypy.overrides]]
-# psycopg 未列於 CI 預設群組（serving 為選用）；缺套件時不擋型別檢查（同 anthropic）。pywebpush 等推播套件沒有型別 stub（T-348）。
-module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*", "sentence_transformers.*", "sklearn.*", "psycopg", "psycopg.*", "pywebpush", "http_ece"]
+# psycopg 未列於 CI 預設群組（serving 為選用）；缺套件時不擋型別檢查（同 anthropic）。pywebpush 等推播套件沒有型別 stub（T-348）；qrcode 也沒有（T-423）。
+module = ["duckdb.*", "pandera.*", "pyarrow.*", "yaml.*", "anthropic.*", "sentence_transformers.*", "sklearn.*", "psycopg", "psycopg.*", "pywebpush", "http_ece", "qrcode"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

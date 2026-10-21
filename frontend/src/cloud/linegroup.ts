@@ -24,7 +24,55 @@ export type LinePostRow = {
   card_token: string
   alt_text: string
 }
-export type LineStatus = { ready: boolean; account: LineAccount | null; groups: LineGroupRow[]; posts: LinePostRow[] }
+export type LineLogin = {
+  status: string
+  requested_by: string | null
+  requested_at: string | null
+  updated_at: string
+  run_url: string | null
+  qr_url: string | null
+  qr_png: string | null
+  pin: string | null
+  display_name: string | null
+  error: string | null
+  fresh: boolean
+}
+export type LineStatus = {
+  ready: boolean
+  account: LineAccount | null
+  groups: LineGroupRow[]
+  posts: LinePostRow[]
+  login: LineLogin | null
+}
+
+/** 登入進行中時多久重抓一次（QR 出來、PIN 出來都要快點看到） */
+export const LOGIN_POLL_MS = 3000
+const ACTIVE = ['requested', 'starting', 'scan', 'pin']
+
+/** 登入是不是正在跑（同 functions/_lib/line-admin.ts loginBusy）。 */
+export const loginActive = (l: LineLogin | null): boolean => l !== null && l.fresh && ACTIVE.includes(l.status)
+
+/** 登入進度要顯示的那一句。 */
+export function loginStep(l: LineLogin | null): string {
+  if (!l) return ''
+  if (!l.fresh && ACTIVE.includes(l.status)) return '上一次登入沒有跑完（超過 10 分鐘沒動靜），可以重按'
+  switch (l.status) {
+    case 'requested':
+      return '已送出，等 GitHub Actions 開機（約 1 分鐘）…'
+    case 'starting':
+      return '登入程式啟動中，QR 碼馬上出來…'
+    case 'scan':
+      return '用「備用帳號」的手機 LINE 掃這個 QR 碼（3 分鐘內）'
+    case 'pin':
+      return '掃到了，手機 LINE 會要你輸入這組 PIN：'
+    case 'done':
+      return `已登入「${l.display_name ?? '?'}」`
+    case 'failed':
+      return `登入失敗：${l.error ?? '沒有原因'}`
+    default:
+      return l.status
+  }
+}
 
 export const KIND_LABEL: Record<string, string> = {
   picks: '每日名單',

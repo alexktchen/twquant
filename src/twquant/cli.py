@@ -7264,23 +7264,39 @@ def _line_relogin_hint(errors: Sequence[str]) -> None:
 
 @line_group_app.command("login")
 def line_group_login() -> None:
-    """掃 QR 登入發文帳號（本機跑；用備用帳號的手機掃、輸入 PIN）→ 憑證存雲端 web.line_account。"""
+    """掃 QR 登入發文帳號（用備用帳號的手機掃、輸入 PIN）→ 憑證存雲端 web.line_account。
+
+    本機跑時 QR 印在終端機；網站「LINE 群組」分頁按「登入」則由 GitHub Actions line-login.yml 跑這支，
+    QR 與 PIN 同時寫進 web.line_login 給網站顯示。
+    """
+    import os
+
     from twquant.conventions import now_tw
     from twquant.data.serving import store
-    from twquant.errors import ExecutionError
     from twquant.monitoring import line_group as lg
 
     cfg = _line_group_cfg()
-    out = _line_group_runner(cfg)("login", {}, None)
-    if out.fatal is not None or out.credential is None:
-        raise ExecutionError(f"LINE 登入失敗：{out.fatal or '轉接器沒有回憑證'}")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    run_url = (
+        f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+        f"{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{run_id}"
+        if run_id
+        else None
+    )
     conn = store.connect_cloud(_load_serving())
     try:
-        lg.ensure_tables(conn, cfg.web_schema)
-        lg.save_account(conn, cfg.web_schema, out.credential, now=now_tw(), profile=out.profile)
-        lg.set_account_status(conn, cfg.web_schema, paused_until=None, last_error=None)
+        out = lg.web_login(
+            conn,
+            cfg,
+            lambda on_event: lg.run_node(cfg, _CONFIG_DIR.parent, "login", {}, None, on_event),
+            now_fn=now_tw,
+            run_url=run_url,
+        )
     finally:
         conn.close()
+    if out.fatal is not None or out.credential is None:
+        typer.secho(f"[FAIL] LINE 登入失敗：{out.fatal or '轉接器沒有回憑證'}", fg=typer.colors.RED)
+        raise typer.Exit(1)
     who = out.profile.get("displayName") or out.profile.get("mid") or "?"
     typer.secho(
         f"[OK] 已登入「{who}」，憑證存在雲端 {cfg.web_schema}.line_account", fg=typer.colors.GREEN

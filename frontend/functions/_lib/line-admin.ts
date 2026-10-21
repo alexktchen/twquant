@@ -34,7 +34,65 @@ export type LinePostRow = {
   card_token: string
   alt_text: string
 }
-export type LineStatus = { ready: boolean; account: LineAccount | null; groups: LineGroupRow[]; posts: LinePostRow[] }
+/** 從網站登入的進度（web.line_login 一列；qr_png 是 base64 PNG，只給有權限的人看） */
+export type LineLogin = {
+  status: string
+  requested_by: string | null
+  requested_at: string | null
+  updated_at: string
+  run_url: string | null
+  qr_url: string | null
+  qr_png: string | null
+  pin: string | null
+  display_name: string | null
+  error: string | null
+  /** 10 分鐘內有動靜（排程那邊還活著）；超過就當它已經掛了，可以重按 */
+  fresh: boolean
+}
+export type LineStatus = {
+  ready: boolean
+  account: LineAccount | null
+  groups: LineGroupRow[]
+  posts: LinePostRow[]
+  login: LineLogin | null
+}
+
+/** 登入還在進行中的狀態（同 Python line_group.LOGIN_ACTIVE） */
+export const LOGIN_ACTIVE = ['requested', 'starting', 'scan', 'pin'] as const
+/** 多久沒動靜就當登入流程已經掛了 */
+export const LOGIN_STALE_MINUTES = 10
+export const DISPATCH_REPO = 'alexktchen/twquant'
+export const LOGIN_WORKFLOW = 'line-login.yml'
+
+/** web.line_login 的建表（Python monitoring/line_group.ensure_tables 也建這張，欄位要一樣，pytest 守著）。 */
+export const LOGIN_DDL =
+  'CREATE TABLE IF NOT EXISTS web.line_login (' +
+  'id text PRIMARY KEY, status text NOT NULL, requested_by text, requested_at timestamptz, ' +
+  'updated_at timestamptz NOT NULL, run_url text, qr_url text, qr_png text, pin text, ' +
+  'display_name text, error text)'
+
+/** 登入是不是正在跑（正在跑就不再觸發一次，免得兩支程式搶同一個 QR）。 */
+export const loginBusy = (l: Pick<LineLogin, 'status' | 'fresh'> | null): boolean =>
+  l !== null && l.fresh && (LOGIN_ACTIVE as readonly string[]).includes(l.status)
+
+/** 觸發 GitHub Actions line-login.yml 的請求；沒有 token 直接丟錯（不能靜默變成「什麼都沒觸發」）。 */
+export function dispatchRequest(token: string | undefined): { url: string; init: RequestInit } {
+  if (!token) throw new Error('網站沒設 TWQUANT_DISPATCH_TOKEN（GitHub fine-grained token，Actions: Read and write），沒辦法從網頁登入')
+  return {
+    url: `https://api.github.com/repos/${DISPATCH_REPO}/actions/workflows/${LOGIN_WORKFLOW}/dispatches`,
+    init: {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'twquant-pages',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ref: 'main' }),
+    },
+  }
+}
 
 /** PUT /api/line/groups/:id 的內容：{ enabled: true|false }，其他一律不收。 */
 export function parseToggle(text: string): { enabled: boolean } | null {
@@ -51,6 +109,37 @@ export function parseToggle(text: string): { enabled: boolean } | null {
   return keys.length === 1 && typeof enabled === 'boolean' ? { enabled } : null
 }
 
+/** 登入進度；表還沒建（沒按過登入、也沒跑過 Python）→ null。 */
+export async function loginState(db: Db): Promise<LineLogin | null> {
+  const [ok] = await db<{ ok: boolean }[]>`SELECT to_regclass('web.line_login') IS NOT NULL AS ok`
+  if (!ok?.ok) return null
+  const [row] = await db<LineLogin[]>`
+    SELECT status, requested_by,
+           to_char(requested_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS requested_at,
+           to_char(updated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS updated_at,
+           run_url, qr_url, qr_png, pin, display_name, error,
+           updated_at > now() - make_interval(mins => ${LOGIN_STALE_MINUTES}) AS fresh
+    FROM web.line_login WHERE id = 'default'`
+  return row ?? null
+}
+
+/** 記下「有人按了登入」（沒有表就先建）。 */
+export async function markLoginRequested(db: Db, email: string): Promise<void> {
+  await db.unsafe('CREATE SCHEMA IF NOT EXISTS web')
+  await db.unsafe(LOGIN_DDL)
+  await db`
+    INSERT INTO web.line_login (id, status, requested_by, requested_at, updated_at)
+    VALUES ('default', 'requested', ${email}, now(), now())
+    ON CONFLICT (id) DO UPDATE SET status = 'requested', requested_by = EXCLUDED.requested_by,
+      requested_at = EXCLUDED.requested_at, updated_at = EXCLUDED.updated_at,
+      run_url = NULL, qr_url = NULL, qr_png = NULL, pin = NULL, error = NULL`
+}
+
+/** 觸發失敗時記下原因（網站上顯示，讓人知道不是在等）。 */
+export async function markLoginFailed(db: Db, error: string): Promise<void> {
+  await db`UPDATE web.line_login SET status = 'failed', error = ${error.slice(0, 1000)}, updated_at = now() WHERE id = 'default'`
+}
+
 async function tablesReady(db: Db): Promise<boolean> {
   const [r] = await db<{ ok: boolean }[]>`
     SELECT to_regclass('web.line_account') IS NOT NULL AND to_regclass('web.line_groups') IS NOT NULL
@@ -58,9 +147,10 @@ async function tablesReady(db: Db): Promise<boolean> {
   return Boolean(r?.ok)
 }
 
-/** 整頁要的資料；排程還沒建過表（還沒用過 `twquant line-group`）→ ready=false。 */
+/** 整頁要的資料；排程還沒建過表（還沒用過 `twquant line-group`）→ ready=false（登入進度照樣給）。 */
 export async function lineStatus(db: Db): Promise<LineStatus> {
-  if (!(await tablesReady(db))) return { ready: false, account: null, groups: [], posts: [] }
+  const login = await loginState(db)
+  if (!(await tablesReady(db))) return { ready: false, account: null, groups: [], posts: [], login }
   const [account] = await db<LineAccount[]>`
     SELECT display_name, mid, to_char(updated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS updated_at, to_char(paused_until AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') AS paused_until, last_error
     FROM web.line_account WHERE id = 'default'`
@@ -73,7 +163,7 @@ export async function lineStatus(db: Db): Promise<LineStatus> {
            p.card_token, p.alt_text
     FROM web.line_posts p LEFT JOIN web.line_groups g USING (home_id)
     ORDER BY p.id DESC LIMIT ${POSTS_SHOWN}`
-  return { ready: true, account: account ?? null, groups: [...groups], posts: [...posts] }
+  return { ready: true, account: account ?? null, groups: [...groups], posts: [...posts], login }
 }
 
 /** 勾／取消一個群組；回改好的那列，找不到 → null。 */

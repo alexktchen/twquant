@@ -22,12 +22,16 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 ## 第一次設定
 
 1. 準備備用 LINE 帳號（手機上能登入）。轉接器模擬「第二台裝置」（`ANDROIDSECONDARY`），手機那邊不會被登出。
-2. 在本機裝套件、掃 QR 登入（憑證存到雲端 `web.line_account`，需要 `.env` 裡的 `TWQUANT_SUPABASE_DSN`）：
+2. **從網站登入**：網站「LINE 群組」分頁按「登入」→ 約 1 分鐘後頁面出現 QR 碼 → 用備用帳號的手機 LINE 掃 →
+   頁面出現 PIN → 在手機輸入 → 頁面顯示「已登入」。背後是 GitHub Actions `line-login.yml`（等掃描最多 3 分鐘）。
+   第一次要先準備一把 GitHub token 讓網站觸發得了它：GitHub → Settings → Developer settings → Fine-grained tokens，
+   只選 `alexktchen/twquant`、權限 **Actions: Read and write**；把它加成 repo secret `TWQUANT_DISPATCH_TOKEN`，
+   再手動跑一次 Actions 的 `deploy-web`（它會寫進網站的祕密）。
+   也可以在本機登入（QR 印在終端機）：
    ```bash
    npm ci --prefix line-poster
    uv run --env-file .env python -m twquant line-group login
    ```
-   用備用帳號的手機掃終端機上的 QR，再在手機輸入畫面上的 PIN。
 3. 用手機把備用帳號拉進要發的群組，然後同步群組清單（順便接受邀請）：
    ```bash
    uv run --env-file .env python -m twquant line-group groups
