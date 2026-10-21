@@ -250,3 +250,19 @@ test('T-417 新聞三張卡：proxy 不帶參數；主題增減、到處都提�
   assert.equal(hotBadge(h(3, 2, 1.5)), null, '不到 2 倍不標')
   assert.equal(hotBadge(h(12, null, null)), null)
 })
+
+test('T-419 新聞時間軸與久違的消息：K 線標記只標範圍內的日子、久違那句、個股頁摘要句、proxy 只轉 id', async () => {
+  assert.deepEqual(ALLOWED['/v1/stock-news-days'], ['id'])
+  const { newsMarkers, quietNote, stockNewsSummary } = await import('../src/cloud/news.ts')
+  const day = (d: string, n: number) => ({ day: d, n, outlets: ['鉅亨網'], items: [] })
+  assert.deepEqual(newsMarkers([day('2026-10-20', 3), day('2026-10-18', 1), day('2026-09-01', 2)], ['2026-10-17', '2026-10-18', '2026-10-20']), [
+    { time: '2026-10-18', n: 1 },
+    { time: '2026-10-20', n: 3 },
+  ])
+  assert.equal(quietNote({ days: 30, at_least: false }), '30 天沒消息後第一次')
+  assert.equal(quietNote({ days: 120, at_least: true }), '至少 120 天沒消息後第一次')
+  assert.equal(quietNote(null), null)
+  const sn = { id: 'tw:2330', days: 7, items: [] as never[] }
+  assert.equal(stockNewsSummary(sn), '近 7 天・直接 0・間接 0')
+  assert.equal(stockNewsSummary({ ...sn, quiet: { days: 21, at_least: false } }), '近 7 天・直接 0・間接 0・21 天沒消息後第一次')
+})
