@@ -844,6 +844,45 @@ class FundFlowFactorsConfig(BaseConfig):
     adv_window: int = Field(default=20, ge=1)  # SPEC-003：20 日成交金額中位數
 
 
+class NewsFactorWindows(BaseConfig):
+    """SPEC-018 §5 的窗口（日曆日）。"""
+
+    attention_short: int = Field(ge=1)
+    attention_mid: int = Field(ge=1)
+    attention_base: int = Field(ge=1)
+    sent_short: int = Field(ge=1)
+    sent_mid: int = Field(ge=1)
+    sent_shift_base: int = Field(ge=1)
+    sector_short: int = Field(ge=1)
+    sector_base: int = Field(ge=1)
+    sector_min_base: int = Field(ge=1)
+    novelty_recent: int = Field(ge=1)
+    novelty_base: int = Field(ge=1)
+    mops_count: int = Field(ge=1)
+    mops_novelty_base: int = Field(ge=1)
+    mops_latest_max_age: int = Field(ge=1)
+
+
+class NewsTopicsConfig(BaseConfig):
+    """主題中心：只在第一折訓練期擬合並凍結（SPEC-018 §5）。"""
+
+    k: int = Field(ge=2)
+    version: str
+    fit_until: dt.date
+    fit_sample: int = Field(ge=1000)
+    seed: int
+    centers_file: str
+
+
+class NewsFactorsConfig(BaseConfig):
+    """configs/news_factors.yaml（T-414）。"""
+
+    cutoff_hour: int = Field(ge=0, le=23)
+    windows: NewsFactorWindows
+    topics: NewsTopicsConfig
+    sentiment_version: str = ""
+
+
 class FundFlowTracesConfig(BaseConfig):
     """SPEC-016 §5 的軌跡量測（D-171 §一）。"""
 

@@ -1,0 +1,37 @@
+# 新聞因子（T-414／SPEC-018 §5／D-201）。全部日頻逐股。
+# 特徵由資料層 `twquant news features` 先算進主庫 news_features（含 available_at），因子模組 factors/news.py 只讀表
+#（跟 ml_scores 同一套路，黃金規則 1）；參數都在這裡，程式裡沒有數字。
+
+# t 日的值只用 available_at ≤ t 日 cutoff_hour 的新聞；之後的算隔天。
+# 本機排程 19:00 跑（docker-compose scheduler），所以截點 19；程式只算截點已過的日子，排程提早也不會蓋出未來時間，
+# 只是當天那列要等下一次跑。PitView 的訊號截點是 20:00（conventions.SIGNAL_CUTOFF_HOUR），19:00 的列當天看得到。
+cutoff_hour: 19
+
+windows:                 # 都是日曆日（週末的新聞照算進窗）
+  attention_short: 5
+  attention_mid: 20
+  attention_base: 60
+  sent_short: 1
+  sent_mid: 5
+  sent_shift_base: 20    # sent_shift ＝ 近 5 日情緒 − 再往前 20 日的情緒
+  sector_short: 5
+  sector_base: 120
+  sector_min_base: 30    # 族群歷史不足 30 天不算 z 分數
+  novelty_recent: 5
+  novelty_base: 60
+  mops_count: 5
+  mops_novelty_base: 180
+  mops_latest_max_age: 20   # 最新一則公告超過 20 天就不算 mops_novelty（null）
+
+topics:
+  k: 16
+  version: "2026-10-21.1"
+  # 只用第一折訓練期的新聞擬合 k-means 並凍結（ml.yaml：訓練期 2020 起、首窗最短 2 年 → 2021 年底）；
+  # 之後所有折與線上都用同一組中心，未來資料不會滲進中心
+  fit_until: "2021-12-31"
+  fit_sample: 200000     # 擬合最多抽幾則（固定 seed）
+  seed: 7
+  centers_file: news_topics_2026-10-21.1.npz   # 放 <data_dir>/models/，不進版控；版本寫在 news_features.topic_version
+
+# 用哪一版情緒探針分數（news_hist.sentiment_scores.version）；空＝還沒有情緒，sent_* 全 null（T-413 過門檻後填）
+sentiment_version: ""

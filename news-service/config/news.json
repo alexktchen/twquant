@@ -509,69 +509,63 @@
     }
   },
   "types": {
-    "version": "2026-10-21.1",
-    "min_confidence": 0.45,
+    "version": "2026-10-21.3",
+    "min_confidence": 0.2,
     "gate_f1": 0.6,
     "gate_other_recall": 0.3,
     "classes": [
       {
         "id": "earnings",
-        "label": "財報營收",
-        "hint": "月營收、季報、EPS、毛利率、獲利"
+        "label": "財報展望",
+        "hint": "月營收、季報、EPS、毛利率、法說會、財測、目標價、評等",
+        "from": [
+          "earnings",
+          "guidance"
+        ]
       },
       {
-        "id": "order",
-        "label": "訂單合作",
-        "hint": "接單、簽約、供應、客戶、合作案"
+        "id": "business",
+        "label": "訂單產品",
+        "hint": "接單、簽約、客戶、合作案、新產品、製程、技術、認證",
+        "from": [
+          "order",
+          "product"
+        ]
       },
       {
-        "id": "capex",
-        "label": "擴廠投資",
-        "hint": "建廠、擴產、設備投資、資料中心動土"
+        "id": "capital",
+        "label": "擴廠併購",
+        "hint": "建廠、擴產、資本支出、併購、入股、增資、董監事與經營層異動",
+        "from": [
+          "capex",
+          "ma",
+          "people"
+        ]
       },
       {
-        "id": "ma",
-        "label": "併購持股",
-        "hint": "併購、入股、處分股權、私募、增資"
-      },
-      {
-        "id": "product",
-        "label": "產品技術",
-        "hint": "新產品、製程、技術突破、認證、展會"
-      },
-      {
-        "id": "guidance",
-        "label": "展望評等",
-        "hint": "法說會、財測、目標價、評等調整、法人看法"
-      },
-      {
-        "id": "people",
-        "label": "人事治理",
-        "hint": "董事長、總經理異動、董事會、股東會"
-      },
-      {
-        "id": "regulation",
-        "label": "法規監管",
-        "hint": "處分、裁罰、調查、政策管制、出口管制"
-      },
-      {
-        "id": "macro",
-        "label": "總經政策",
-        "hint": "利率、匯率、通膨、關稅、央行、GDP"
+        "id": "policy",
+        "label": "政策事故",
+        "hint": "法規、裁罰、管制、利率、匯率、關稅、央行、工安、火災、停工、資安、天災",
+        "from": [
+          "regulation",
+          "macro",
+          "incident"
+        ]
       },
       {
         "id": "market",
         "label": "盤勢行情",
-        "hint": "大盤漲跌、外資買賣超、個股漲停跌停、盤前盤後"
-      },
-      {
-        "id": "incident",
-        "label": "意外事故",
-        "hint": "工安、火災、停工、資安、天災"
+        "hint": "大盤漲跌、外資買賣超、個股漲停跌停、盤前盤後",
+        "from": [
+          "market"
+        ]
       },
       {
         "id": "other",
-        "label": "其他"
+        "label": "其他",
+        "from": [
+          "other"
+        ]
       }
     ]
   }
