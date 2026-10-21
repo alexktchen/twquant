@@ -121,3 +121,54 @@ export function galaxySummary(d: GalaxyData): string {
   const hm = `${t.getUTCMonth() + 1}/${t.getUTCDate()} ${String(t.getUTCHours()).padStart(2, '0')}:${String(t.getUTCMinutes()).padStart(2, '0')}`
   return `近 ${d.days} 天 ${d.items.length.toLocaleString('en-US')} 則・${d.clusters.length} 個主題・${hm} 更新`
 }
+
+/** 單獨看：「常一起出現」列幾個、每個主題先列幾則、每則列幾個其他亮點 */
+export const FOCUS_RELATED = 12
+export const FOCUS_GROUP_ROWS = 5
+export const FOCUS_ROW_HUBS = 3
+
+/** item＝同一件事裡最新的一則；n＝這件事有幾則 */
+export type FocusRow = { item: GalaxyItem; n: number; srcs: string[]; others: GalaxyHub[] }
+export type FocusGroup = { k: number; name: string; rows: FocusRow[] }
+export type HubFocus = { hub: GalaxyHub; total: number; related: { hub: GalaxyHub; n: number }[]; shown: number; groups: FocusGroup[] }
+
+/**
+ * 單獨看一個亮點（使用者 2026-10-21：「針對這樣的選擇把它再單獨拎出來閱讀…可以快速看到關聯」）：
+ * 提到它的新聞照主題分組（則數多的組在前、組內新的在前），同一件事只留最新一則、記下哪幾家報；
+ * 「常一起出現」＝這些新聞裡還提到哪些亮點、各幾則。給 withId → 只留同時提到兩個的。找不到亮點 → null。
+ */
+export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = null): HubFocus | null {
+  const byId = new Map(d.hubs.map((h) => [h.id, h]))
+  const hub = byId.get(hubId)
+  if (!hub) return null
+  const all = d.items.filter((it) => it.m.includes(hubId))
+  const co = new Map<string, number>()
+  for (const it of all) for (const m of new Set(it.m)) if (m !== hubId && byId.has(m)) co.set(m, (co.get(m) ?? 0) + 1)
+  const related = [...co]
+    .map(([id, n]) => ({ hub: byId.get(id)!, n }))
+    .sort((a, b) => b.n - a.n || b.hub.n - a.hub.n || a.hub.label.localeCompare(b.hub.label))
+    .slice(0, FOCUS_RELATED)
+  const picked = withId ? all.filter((it) => it.m.includes(withId)) : all
+  const newest = (a: GalaxyItem, b: GalaxyItem) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0)
+  const events = new Map<string, GalaxyItem[]>()
+  for (const it of [...picked].sort(newest)) {
+    const key = it.ev ?? `item:${it.id}`
+    events.set(key, [...(events.get(key) ?? []), it])
+  }
+  const groups = new Map<number, FocusRow[]>()
+  for (const g of events.values()) {
+    const item = g[0]
+    const others = [...new Set(item.m)].filter((m) => m !== hubId && m !== withId && byId.has(m)).map((m) => byId.get(m)!)
+    groups.set(item.k, [...(groups.get(item.k) ?? []), { item, n: g.length, srcs: [...new Set(g.map((x) => x.src))], others }])
+  }
+  const names = new Map(d.clusters.map((c) => [c.k, c.name]))
+  return {
+    hub,
+    total: all.length,
+    related,
+    shown: picked.length,
+    groups: [...groups]
+      .map(([k, rows]) => ({ k, name: names.get(k) ?? '其他', rows }))
+      .sort((a, b) => b.rows.length - a.rows.length || newest(a.rows[0].item, b.rows[0].item)),
+  }
+}
