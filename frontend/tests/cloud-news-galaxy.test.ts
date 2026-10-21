@@ -1,16 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  DRAG_RAD,
   FOCUS_RELATED,
+  PITCH_MAX,
   REF_S,
+  angleDiff,
   clusterLabelAt,
   density,
   depthAlpha,
+  dockInspector,
+  ease,
   galaxySummary,
   hubClass,
   hubFocus,
   hubRadius,
   pickAt,
+  pivotScreenY,
   placeLabels,
   project,
   type GalaxyData,
@@ -117,4 +123,38 @@ test('單獨看：給第二個亮點只留同時提到兩個的，列的其他�
   assert.deepEqual(f.groups[0].rows[0].others.map((h) => h.label), ['AI'])
   assert.equal(f.related.length, 3, '常一起出現照全部算，不跟著篩')
   assert.equal(hubFocus(focusData, 'tw:9999'), null)
+})
+
+test('不迷航：轉動中心那顆永遠在畫面中央、轉了也不動；其他的繞著它轉', () => {
+  const v = { s: 100, x: 200, y: 300 }
+  const c = { x: 0.6, y: -0.4, z: 0.3 }
+  for (const r of [{ yaw: 0, pitch: 0 }, { yaw: 1.2, pitch: -0.5 }, { yaw: -2.9, pitch: 0.7 }]) {
+    const p = project(c, r, v, c)
+    near(p[0], 200)
+    near(p[1], 300)
+  }
+  const a = project({ x: 0.6, y: -0.4, z: 0.3 + 0.5 }, { yaw: 0, pitch: 0 }, v, c)
+  const b = project({ x: 0, y: 0, z: 0.5 }, { yaw: 0, pitch: 0 }, v)
+  assert.deepEqual(a, b, '換中心＝整團平移')
+})
+
+test('不迷航：滑回去跟幀率無關、角度走短的那邊、拖曳與上下翻的上限', () => {
+  near(ease(0, 10, 0), 0)
+  near(ease(0, 10, 10), 10, 1e-6)
+  near(ease(ease(0, 10, 0.05), 10, 0.05), ease(0, 10, 0.1), 1e-9) // 兩幀 0.05 秒＝一幀 0.1 秒
+  near(angleDiff(0.5 + 6 * Math.PI, 0.5), 0, 1e-9) // 自轉了三圈：不用倒轉回去
+  near(angleDiff(3, -3), 2 * Math.PI - 6, 1e-9) // 跨過 ±π 走短的
+  near(angleDiff(-3, 3), 6 - 2 * Math.PI, 1e-9)
+  assert.ok(Math.abs(angleDiff(0, 3)) <= Math.PI)
+  assert.ok(200 * DRAG_RAD < Math.PI / 3, '手機滑 200px 轉不到 60°（原本 92°）')
+  assert.ok(PITCH_MAX < Math.PI / 4, '上下翻不到 45°')
+})
+
+test('不迷航：手機放不下右邊的檢視框 → 框貼下緣、選取那顆放在框上方空間的正中；桌機照舊在正中央', () => {
+  assert.equal(dockInspector(390, 320), true)
+  assert.equal(dockInspector(768, 320), false, '平板直放還放得下')
+  assert.equal(dockInspector(1330, 320), false)
+  assert.equal(pivotScreenY(760, null), 380)
+  assert.equal(pivotScreenY(523, 270), (523 - 50 - 270) / 2)
+  assert.equal(pivotScreenY(380, 330), 40, '框太高也不會貼到最上面')
 })

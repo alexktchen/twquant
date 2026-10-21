@@ -36,16 +36,42 @@ export const FOV = 3.4
 /** 電腦版一開的比例（每單位約 300px）＝亮度 1 */
 export const REF_S = 300
 
-/** 繞直軸轉 yaw、再繞橫軸轉 pitch，透視投影到畫面。 */
-export function project(o: Vec3, r: Rot, v: View): Proj {
+export const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 }
+
+/** 繞直軸轉 yaw、再繞橫軸轉 pitch，透視投影到畫面。c＝轉動中心（放在畫面中央）：預設整團的中心，選了東西就換成它。 */
+export function project(o: Vec3, r: Rot, v: View, c: Vec3 = ORIGIN): Proj {
   const cy = Math.cos(r.yaw), sy = Math.sin(r.yaw), cp = Math.cos(r.pitch), sp = Math.sin(r.pitch)
-  const x1 = o.x * cy + o.z * sy
-  const z1 = -o.x * sy + o.z * cy
-  const y1 = o.y * cp - z1 * sp
-  const z2 = o.y * sp + z1 * cp
+  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z
+  const x1 = ox * cy + oz * sy
+  const z1 = -ox * sy + oz * cy
+  const y1 = oy * cp - z1 * sp
+  const z2 = oy * sp + z1 * cp
   const f = FOV / (FOV - z2)
   return [v.x + x1 * v.s * f, v.y + y1 * v.s * f, z2, f]
 }
+
+/**
+ * 轉起來不迷航（使用者 2026-10-21：「有時候再旋轉很容易迷航」）：拖曳每 px 轉幾弧度（原 0.008，手機滑 200px 就轉 92°；現在 57°）、
+ * 上下最多翻幾弧度（原 1.3≈75°，翻過頭分不清上下；0.75≈43°）。
+ */
+export const DRAG_RAD = 0.005
+export const PITCH_MAX = 0.75
+
+/** 往目標靠：每過 1 秒剩下的距離乘 e^−rate（跟幀率無關；rate 8 ≈ 0.3 秒走完九成） */
+export const ease = (a: number, b: number, dt: number, rate = 8): number => b + (a - b) * Math.exp(-rate * dt)
+
+/** 從 from 轉到 to 走短的那邊（−π～π）：自轉累積了好幾圈，回到一開始不要倒著轉好幾圈 */
+export function angleDiff(from: number, to: number): number {
+  const d = (to - from) % (2 * Math.PI)
+  return d > Math.PI ? d - 2 * Math.PI : d < -Math.PI ? d + 2 * Math.PI : d
+}
+
+/**
+ * 選取那顆移到中央後，檢視框放它右邊；窄畫面（手機）右邊放不下 → 框貼在圖的下緣（按鈕上面），
+ * 那顆改放在框上方空間的正中，不被框蓋住、手指從中間拖也不會拖到框。bottom＝下緣留給按鈕的高度。
+ */
+export const dockInspector = (W: number, inspW: number): boolean => W < 2 * (inspW + 26)
+export const pivotScreenY = (H: number, inspH: number | null, bottom = 50): number => (inspH === null ? H / 2 : Math.max(40, (H - bottom - inspH) / 2))
 
 /** 遠的淡：深度 −1.15～1.15 對到 0.4～1。 */
 export const depthAlpha = (z: number): number => 0.4 + 0.6 * Math.min(1, Math.max(0, (z + 1.15) / 2.3))

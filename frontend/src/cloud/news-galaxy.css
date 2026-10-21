@@ -1,11 +1,12 @@
 /* 新聞全景（T-418）：黑底發光星雲；標籤是黑底白框等寬字（影片的樣子）；最大三團黃框；按鈕在右下 */
-/* 滿版（使用者 2026-10-21）：圖左右貼齊視窗、桌機高到只留 140px——滾輪在圖上是縮放，畫面上一定要留得到能捲頁的地方；上下兩行字仍對齊 920px 的新聞欄 */
+/* 滿版（使用者 2026-10-21）：圖不受 920px 新聞欄限制、桌機高到只留 140px；上下兩行字仍對齊新聞欄。
+   滾輪在圖上是縮放、手指在圖上是旋轉，所以左右各留 16px 能捲頁的邊（使用者：「星雲圖左右留一點給 scrollbar」） */
 .gx { margin-top: 12px; padding-bottom: 48px; }
 .gx-sum, .gx-help { box-sizing: border-box; max-width: 920px; margin-left: auto; margin-right: auto; padding: 0 18px; }
 .gx-sum { margin-bottom: 6px; font: 13px/1.4 ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", monospace; color: var(--mute); letter-spacing: .03em; }
 .gx-stage {
-  position: relative; height: calc(100vh - 140px); min-height: 380px; overflow: hidden; touch-action: none; cursor: grab;
-  background: radial-gradient(ellipse at 50% 45%, #1a0f0d 0%, #070505 60%, #050506 100%); border: solid #241c1d; border-width: 1px 0;
+  position: relative; height: calc(100vh - 140px); min-height: 380px; margin: 0 16px; overflow: hidden; touch-action: none; cursor: grab; border-radius: 12px;
+  background: radial-gradient(ellipse at 50% 45%, #1a0f0d 0%, #070505 60%, #050506 100%); border: 1px solid #241c1d;
 }
 .gx-stage:active { cursor: grabbing; }
 .gx-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
