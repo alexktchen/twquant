@@ -6,7 +6,7 @@
 // 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
 import { ChevronDown, ClipboardCheck, ExternalLink, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsReview, fetchNewsSearch } from './api'
 import {
   KIND_LABEL,
@@ -30,6 +30,7 @@ import {
 } from './news'
 import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
 import { NewsDigest } from './NewsDigest'
+import { galaxyFromUrl, withoutView } from './tabs'
 import { NewsReview } from './NewsReview'
 import { NewsSearchResults, SimilarNews } from './NewsSimilar'
 import './news-graph.css'
@@ -56,7 +57,27 @@ const FILTERS: { key: Filter; label: string }[] = [
 export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid: string, name: string) => void }) {
   const [filter, setFilter] = useState<Filter>('all')
   /** 清單（讀新聞）或全景（星雲圖，看全貌） */
-  const [mode, setMode] = useState<'list' | 'galaxy'>('list')
+  // 直接連結（?view=galaxy、舊網址 /api/prototype/galaxy）：一打開就是星雲圖，畫面捲到它（熱門主題卡在它上面）
+  const [jumpToGalaxy] = useState(() => galaxyFromUrl(window.location.href))
+  const [mode, setMode] = useState<'list' | 'galaxy'>(jumpToGalaxy ? 'galaxy' : 'list')
+  const galaxyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!jumpToGalaxy) return
+    window.history.replaceState(null, '', withoutView(window.location.href))
+    // 星雲圖是 lazy 載入、上面的卡片也要時間長出來：等它出現再捲
+    const timer = window.setInterval(() => {
+      const el = galaxyRef.current?.firstElementChild
+      if (el && el.getBoundingClientRect().height > 100) {
+        galaxyRef.current?.scrollIntoView({ block: 'start' })
+        window.clearInterval(timer)
+      }
+    }, 200)
+    const stop = window.setTimeout(() => window.clearInterval(timer), 8000)
+    return () => {
+      window.clearInterval(timer)
+      window.clearTimeout(stop)
+    }
+  }, [jumpToGalaxy])
   const [rows, setRows] = useState<NewsRow[]>([])
   const [health, setHealth] = useState<NewsHealth | null>(null)
   const [err, setErr] = useState('')
@@ -237,9 +258,11 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
 
       {!search && !reviewOpen && mode === 'galaxy' && (
-        <Suspense fallback={<p className="cq-war-mute cq-news-empty">全景讀取中…</p>}>
-          <NewsGalaxy onStock={onStock} />
-        </Suspense>
+        <div ref={galaxyRef} className="cq-news-galaxy-anchor">
+          <Suspense fallback={<p className="cq-war-mute cq-news-empty">全景讀取中…</p>}>
+            <NewsGalaxy onStock={onStock} />
+          </Suspense>
+        </div>
       )}
       {!search && !reviewOpen && mode === 'list' && groups.map((g) => (
         <section key={g.day} className="cq-news-day">
