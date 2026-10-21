@@ -6772,12 +6772,16 @@ def news_types_train(
     yi = np.array([ids.index(t) for t in labels])
     tr, va = lp.split(len(x), 0.2, 7)
     probe = lp.train_softmax(x[tr], yi[tr], len(ids))
-    pred = probe.proba(x[va]).argmax(axis=1)
+    tcfg = doc["types"]
+    proba = probe.proba(x[va])
+    # 跟雲端同一條規則（news_types.classify）：信心不到 min_confidence 判 other，門檻指標照這樣算
+    pred = np.where(
+        proba.max(axis=1) >= float(tcfg["min_confidence"]), proba.argmax(axis=1), ids.index("other")
+    )
     f1 = lp.macro_f1(yi[va], pred, len(ids))
     acc = float((pred == yi[va]).mean())
     recall = dict(zip(ids, lp.per_class_recall(yi[va], pred, len(ids)), strict=True))
     dist = {ids[i]: int(n) for i, n in enumerate(np.bincount(yi, minlength=len(ids)))}
-    tcfg = doc["types"]
     gate_f1, gate_other = float(tcfg["gate_f1"]), float(tcfg["gate_other_recall"])
     passed = f1 >= gate_f1 and recall["other"] >= gate_other
     typer.echo(f"標籤 {len(x)} 則 {dist}")

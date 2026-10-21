@@ -497,8 +497,8 @@
     }
   },
   "types": {
-    "version": "2026-10-21.2",
-    "min_confidence": 0.45,
+    "version": "2026-10-21.3",
+    "min_confidence": 0.2,
     "gate_f1": 0.6,
     "gate_other_recall": 0.3,
     "classes": [

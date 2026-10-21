@@ -432,8 +432,10 @@ hist:
 # 新聞類型（T-421；使用者 2026-10-20 選「新聞類型標籤」）：本機 Ollama 貼標 → 探針權重 news-service/config/news_types.json → 雲端 ingest 算內積。
 # 最後一類一定是 other；信心不到 min_confidence 也放 other。
 types:
-  version: "2026-10-21.2"
-  min_confidence: 0.45
+  version: "2026-10-21.3"
+  # 信心不到這個數就判「其他」。探針的 softmax 很平（驗證集信心中位數 0.30、九成分位 0.50）：0.45 會把 86% 判成其他、
+  # macro-F1 掉到 0.24（雲端 2026-10-21 實見）；驗證過的是 argmax，0.2 形同 argmax、只擋極端平的。門檻指標現在是「套用這個數之後」算的。
+  min_confidence: 0.2
   # 門檻（2026-10-21 看過第一次 1,500 標籤的結果 0.548 後登記、重訓前凍結）：不過就合併類別或換標籤方式，不調門檻
   gate_f1: 0.60
   gate_other_recall: 0.30
