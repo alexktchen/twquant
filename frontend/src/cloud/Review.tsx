@@ -99,7 +99,7 @@ export function ReviewTiles({ r }: { r: Review }) {
               </b>
               <span className="cq-rv-meter" aria-hidden="true">
                 {Array.from({ length: r.max }, (_, i) => (
-                  <i key={i} className={`${i < r[d.key] ? 'on' : ''}${r.max === 10 && i === 4 ? ' mid' : ''}`} />
+                  <i key={i} className={i < r[d.key] ? 'on' : ''} />
                 ))}
               </span>
               {r.views[d.key] && <span className="cq-rv-view">{r.views[d.key]}</span>}
