@@ -7489,5 +7489,173 @@ def line_group_status(
         )
 
 
+# ── 雲端可用的情緒小模型（T-424／D-205）──
+@news_app.command("sentiment-pair-embed")
+def news_sentiment_pair_embed(
+    limit: int = typer.Option(0, help="這次最多算幾對（0＝全部沒算的）"),
+    device: str = typer.Option("cuda", help="cuda 或 cpu"),
+) -> None:
+    """有標籤的配對算「股名：證據片段」的 bge-m3 向量（v_pair），存 news_hist.pair_embeddings；可重跑、只算沒算過的。"""
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise typer.BadParameter("沒裝 sentence-transformers：uv sync --extra embed") from exc
+    h = _news_hist_cfg()
+    mc = h["sentiment"]["mlp"]
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = 0
+    try:
+        ns.ensure_pair_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("select stock_id, name from serving.stock_meta")
+            names = {str(a): str(b) for a, b in cur.fetchall() if b}
+        model = SentenceTransformer(str(h["embed_model"]), device=device)
+        if device.startswith("cuda"):
+            model.half()
+        while True:
+            chunk = ns.pending_pair_texts(conn, min(5000, limit - done) if limit else 5000, names)
+            if not chunk:
+                break
+            vecs = model.encode(
+                [t for _, _, t in chunk],
+                batch_size=int(mc["embed_batch"]),
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            done += ns.save_pair_embeddings(
+                conn,
+                str(h["embed_model"]),
+                [(i, s, t, v) for (i, s, t), v in zip(chunk, vecs.tolist(), strict=True)],
+            )
+            typer.echo(f"  {done} 對；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(f"[OK] v_pair {done} 對；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN)
+
+
+@news_app.command("sentiment-mlp")
+def news_sentiment_mlp(
+    final: bool = typer.Option(
+        False,
+        "--final",
+        help="判定那一次（D-205 §三：全語料貼完後只跑一次）；不加＝試跑，數字只記錄、不判定",
+    ),
+    report: str = typer.Option(
+        "", help="報告寫到哪（空＝docs/reports/news-sentiment-mlp-<日期>.md）"
+    ),
+    out: str = typer.Option(
+        "", help="判定過關時權重寫到哪（空＝news-service/config/news_sentiment.json）"
+    ),
+) -> None:
+    """D-205：新聞向量＋股名證據片段 → MLP；按新聞切的驗證集算 macro-F1 與好壞 AUC，門檻同 SPEC-018 §6。報告附加在同一份檔案。"""
+    import numpy as np
+
+    from twquant.conventions import TZ
+    from twquant.data import news_sentiment as ns
+    from twquant.data import sentiment_mlp as sm
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    mc = h["sentiment"]["mlp"]
+    conn = store.connect(_load_serving())
+    try:
+        d = ns.load_mlp_data(conn)
+    finally:
+        conn.close()
+    share = float(mc["valid_share"])
+    is_valid = np.array(
+        [d["in_sample"][i] and sm.in_valid(it, share) for i, it in enumerate(d["item_id"])]
+    )
+    valid_items = {it for it, v in zip(d["item_id"], is_valid, strict=True) if v}
+    is_train = np.array([it not in valid_items for it in d["item_id"]])
+    y = d["label"].astype(np.int64)
+    yi = y + 1  # −1／0／1 → 0／1／2
+    t0 = time.monotonic()
+    model = sm.train_mlp(
+        d["v_news"][is_train],
+        d["v_pair"][is_train],
+        yi[is_train],
+        3,
+        hidden=int(mc["hidden"]),
+        l2=float(mc["l2"]),
+        lr=float(mc["lr"]),
+        batch=int(mc["batch"]),
+        epochs=int(mc["epochs"]),
+        seed=int(mc["seed"]),
+    )
+    secs = time.monotonic() - t0
+    p = sm.predict_proba(model, d["v_news"][is_valid], d["v_pair"][is_valid], 4096)
+    pred = np.array([sm.CLASSES[i] for i in p.argmax(axis=1)])
+    yv = y[is_valid]
+    f1 = ns.macro_f1(yv, pred)
+    mask = yv != 0
+    a = ns.auc((p[:, 2] - p[:, 0])[mask], yv[mask] == 1) if mask.sum() >= 2 else 0.0
+    gate_f1, gate_auc = float(mc["gate_f1"]), float(mc["gate_auc"])
+    passed = f1 >= gate_f1 and a >= gate_auc
+    rec = {c: float(((yv == c) & (pred == c)).sum() / max(1, (yv == c).sum())) for c in sm.CLASSES}
+    cm = sm.confusion(yv.tolist(), pred.tolist())
+
+    def dist(arr: np.ndarray) -> dict[int, int]:
+        return {c: int((arr == c).sum()) for c in sm.CLASSES}
+
+    day = dt.date.today().isoformat()
+    kind = "判定（--final）" if final else "試跑（數字只記錄，不判定；D-205 §三）"
+    lines = [
+        f"## {kind}　{dt.datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}",
+        "",
+        f"- 設定版本 {mc['version']}：MLP 3,072→{mc['hidden']}→3、L2 {mc['l2']}、lr {mc['lr']}、批次 {mc['batch']}、{mc['epochs']} 輪、seed {mc['seed']}（訓練 {secs:.0f} 秒）",
+        f"- 訓練 {int(is_train.sum()):,} 對 {dist(y[is_train])}；驗證 {int(is_valid.sum()):,} 對（{len(valid_items):,} 則新聞）{dist(yv)}",
+        f"- 驗證 macro-F1 **{f1:.3f}**（門檻 ≥ {gate_f1}）、好壞 AUC **{a:.3f}**（門檻 ≥ {gate_auc}）"
+        + (f" → **{'過' if passed else '不過'}**" if final else "（試跑不判定）"),
+        f"- 各類召回：壞 {rec[-1]:.2f}、中性 {rec[0]:.2f}、好 {rec[1]:.2f}",
+        "- 混淆矩陣（列＝Ollama 標籤 壞／中性／好，欄＝模型）："
+        + "；".join(" ".join(str(v) for v in row) for row in cm),
+        "",
+    ]
+    path = (
+        Path(report)
+        if report
+        else _CONFIG_DIR.parent / "docs" / "reports" / f"news-sentiment-mlp-{day}.md"
+    )
+    head = (
+        ""
+        if path.exists()
+        else "# 雲端可用的新聞情緒小模型（T-424／D-205）\n\n設定與門檻在 DECISIONS.md D-205（2026-10-21 事前登記）。"
+        "驗證集＝分層抽樣裡 md5(item_id) 落在前 20% 的新聞的全部配對，訓練集排除這些新聞。\n\n"
+    )
+    with path.open("a", encoding="utf-8") as f:
+        f.write(head + "\n".join(lines) + "\n")
+    typer.echo("\n".join(lines))
+    if final and passed:
+        wpath = (
+            Path(out)
+            if out
+            else _CONFIG_DIR.parent / "news-service" / "config" / "news_sentiment.json"
+        )
+        weights = sm.export_weights(
+            model,
+            version=str(mc["version"]),
+            metrics={
+                "valid_macro_f1": round(f1, 3),
+                "valid_auc": round(a, 3),
+                "n_train": int(is_train.sum()),
+            },
+            decimals=int(mc["weight_decimals"]),
+        )
+        wpath.write_text(json.dumps(weights, ensure_ascii=False), encoding="utf-8")
+        typer.secho(
+            f"[OK] 過關；權重 {wpath}（{wpath.stat().st_size // 1024} KB）", fg=typer.colors.GREEN
+        )
+    elif final:
+        typer.secho("[X] 沒過：依 D-205 §三改走 A（雲端 qwen3 每則判斷）", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

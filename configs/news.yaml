@@ -454,6 +454,20 @@ hist:
     batch: 5000
     # 連續失敗幾對就停（Ollama 沒在跑時不要一路刷過整個語料）
     max_consecutive_failures: 50
+    # 雲端可用的情緒小模型（T-424／D-205 §二、§三，2026-10-21 事前登記；改這裡等於違反登記）
+    mlp:
+      version: "2026-10-21.1"
+      hidden: 256
+      l2: 0.0001
+      lr: 0.001
+      batch: 512
+      epochs: 8
+      seed: 7
+      valid_share: 0.2
+      gate_f1: 0.70
+      gate_auc: 0.85
+      weight_decimals: 4
+      embed_batch: 256
 
 # 新聞類型（T-421；使用者 2026-10-20 選「新聞類型標籤」）：本機 Ollama 貼標 → 探針權重 news-service/config/news_types.json → 雲端 ingest 算內積。
 # 最後一類一定是 other；信心不到 min_confidence 也放 other。
