@@ -17,7 +17,10 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
    網站 `/pub/line-card/<32 位亂數>` 把它公開給 LINE 的伺服器抓（`/pub` 不經 Cloudflare Access，網址猜不到）。
 2. 轉接器用 LIFF 分享（`api.line.me/message/v3/share`，手機上 LIFF「分享給好友」那一條）發一則
    **Flex 訊息**：整則就是那張圖，點圖打開網站（`kinds.*.link`）。
-3. Flex 發不出去（LIFF 出問題）時，改發一則「摘要＋網址」的文字訊息，網站「LINE 群組」分頁會標「改發文字」。
+3. Flex 發不出去（LIFF 出問題，沒填自己的 `liff_id` 時幾乎都是）→ **直接發那張圖**（一般圖片訊息，不需要 LIFF），
+   後面再發一行「看完整內容：網址」。一般圖片點了只是放大、不會開網站，所以網址另外給。網站標「改發圖片＋網址」。
+   圖由 Python 從 `web.line_cards` 讀出放進請求，轉接器不用去抓網站。開關 `configs/line_group.yaml` 的 `fallback_image`。
+4. 圖也發不出去 → 改發一則「摘要＋網址」的文字訊息，網站標「改發文字」。
 
 ## 第一次設定
 
@@ -43,8 +46,9 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
    ```bash
    uv run --env-file .env python -m twquant line-group enqueue --kind picks --date 2026-10-21 --preview D:/tmp/picks.png
    ```
-6. （建議）在 LINE Developers 建一個自己的 LIFF app（LINE Login channel、scope 勾 `chat_message.write`），
-   把 LIFF ID 填到 `configs/line_group.yaml` 的 `liff_id`。空著的話用 linejs 內建的那個（別人的 LIFF app）。
+6. （要「點圖就開網站」才需要）在 LINE Developers 建一個自己的 LIFF app（LINE Login channel、scope 勾 `chat_message.write`），
+   把 LIFF ID 填到 `configs/line_group.yaml` 的 `liff_id`。空著的話用 linejs 內建的那個（別人的 LIFF app，在 GitHub Actions 上拿不到授權），
+   這時會改發「圖片＋一行網址」。
 
 ## 手動發送
 
@@ -69,8 +73,10 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 ## 打不通的時候
 
 - `AUTHENTICATION_FAILED`／`MUST_REFRESH_V3_TOKEN`：憑證失效，本機重跑 `line-group login`。
-- 一直「改發文字」：圖卡那段（LIFF）不通（`Failed to get LiffToken`）——內建 LIFF app 在無頭環境拿不到授權，要填自己的 `liff_id`。
-  這時圖卡會自動退成「摘要＋網址」的文字（照樣發得出去）。
+- 一直「改發圖片＋網址」：圖卡那段（LIFF）不通（`Failed to get LiffToken`）——內建 LIFF app 在無頭環境拿不到授權。
+  圖照樣看得到；要點圖就開網站，填自己的 `liff_id`。同一輪第一個群組失敗後，其他群組不再試 LIFF。
+- 「改發文字」：連圖都發不出去，錯誤在網站「最近發的圖卡」那列（`last_error`，`圖片也發不出去：…`）。
+  `圖片上傳失敗（obs HTTP …）`＝LINE 的圖片伺服器拒收（轉接器擋下來，不會發一張破圖）。
 - `E2EE Key has not been saved`：登入建立的端對端加密金鑰沒接到送出那一步。已修（`web.line_account.storage_json` 跨 run 保存整份 session）；
   還遇到就重新登入一次讓它重存。
 - GitHub Actions 的機器在美國；new_erp 的經驗是**從國外 IP 上線容易被鎖**。真的被鎖的話，改在台灣的機器跑

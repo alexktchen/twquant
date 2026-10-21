@@ -7,7 +7,9 @@ site_url: https://twquant.pages.dev/
 card_url_base: https://twquant.pages.dev/pub/line-card/ # 圖卡的公開網址（LINE 伺服器要抓得到；/pub 不經 Cloudflare Access）
 # Flex 訊息走 LIFF 分享。空＝用 linejs 內建的 LIFF app（別人的）；建議在 LINE Developers 建自己的 LIFF app（scope chat_message.write）填這裡
 liff_id: ""
-fallback_text: true # 圖卡發不出去時改發一則附連結的文字
+fallback_image: true # 圖卡（Flex）發不出去時直接發那張圖（一般圖片訊息：看得到，點了只是放大），後面再發一行網址
+image_caption: 看完整內容： # 圖片後面那行網址前的字
+fallback_text: true # 圖片也發不出去時改發一則「摘要＋網址」的文字
 cta: 點圖看完整內容 › # 圖卡底部那行
 footer: 僅供參考，不是投資建議；名單與研判都是程式產生的。
 

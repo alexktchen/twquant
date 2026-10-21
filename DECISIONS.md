@@ -7972,6 +7972,15 @@ D-085 重跑後，A 軌由 +15.90% 跳到 **+26.30%（+10.40pp）**，遠大於�
   下個 run 用 `MemoryStorage(data)` 還原——這正是 linejs `FileStorage` 的跨工作階段保存，只是改存資料庫（GitHub Actions 每次都是乾淨環境）。
   這份 blob 含使用者自己帳號的金鑰，跟 access token 同一個信任層級、同一張表；網站讀 `line_account` 只選顯示欄位，storage_json 不出資料庫（測試守著）。
   圖卡本身仍要使用者自己的 LIFF app（`liff_id`）才發得出來；沒設時一律退成文字（修好後文字能發）。
+- **§二之三 Flex 不通時直接發圖**（使用者 2026-10-21 看到群組裡只有文字＋連結預覽：「沒有發圖」）：備案改成三招依序——
+  ① Flex 圖卡（LIFF，點圖開網站）→ ② **直接發那張 PNG**（一般圖片訊息，linejs `obs.uploadMediaByE2EE`，跟文字一樣用 §二之二 存下的端對端加密金鑰；
+  不需要 LIFF）＋一行「看完整內容：網址」（一般圖片點了只是放大，不會開網站，網址要另外給）→ ③ 摘要＋網址的文字。
+  取捨：② 看得到圖但不是「點圖開網站」；要點圖就開網站仍要自己的 LIFF app（`liff_id`）。
+  圖由 Python 從 `web.line_cards` 讀出、base64 放進送出請求（同一張圖發多個群組只帶一份），不讓轉接器去抓網站——少一個依賴。
+  圖已發出、後面那行網址失敗仍算「已發」（`via=image`，錯誤留在 `last_error`）：重送的話圖會出現兩次。
+  linejs 上傳 obs 不看 HTTP 狀態，上傳被拒會拿空的 OID 照發一則破圖——轉接器的 fetch 對 obs 上傳的非 2xx 直接丟錯（`line-poster/src/obs.mjs`）。
+  同一輪 LIFF 拿不到 token 後不再對其他群組重試（同一個 LIFF app、同一支帳號，結果一樣；少打幾十次沒用的請求）。
+  開關 `configs/line_group.yaml` 的 `fallback_image`、那行字 `image_caption`。
 - **§三 官方帳號為什麼沒用**：使用者問過「可以透過我的官方帳號來做這個發文嗎」。官方 Messaging API 能發 Flex 到群組，但
   [推播額度按收到的人數算](https://developers.line.biz/en/docs/messaging-api/pricing/)（30 人的群發一則＝30 則），台灣免費方案一個月 200 則；
   四種天天發要付費方案，而且要另做 webhook 才拿得到群組 id。說明後使用者選備用帳號。
