@@ -980,7 +980,11 @@ def morning_brief_cmd(
     先等今天的大盤體檢寫進 market_daily（system.yaml evening_wait_minutes），等不到（休市、pipeline 沒跑完）就不出、印原因。
     """
     import json
+    import os
     import urllib.request
+
+    import psycopg
+    import yaml
 
     from twquant.conventions import now_tw
     from twquant.data.http import HttpClient
@@ -990,6 +994,7 @@ def morning_brief_cmd(
     from twquant.insight.client import InsightClient
     from twquant.insight.config import load_llm_config
     from twquant.reporting.morning_brief import compose, gather, rule_text, write_brief
+    from twquant.reporting.news_events import fetch_multi_outlet
 
     if edition not in ("morning", "evening"):
         raise typer.BadParameter(f"edition 只能是 morning 或 evening：{edition}")
@@ -1013,6 +1018,27 @@ def morning_brief_cmd(
         )
         with urllib.request.urlopen(req, timeout=15) as resp:  # 固定 https 端點
             return json.loads(resp.read().decode("utf-8"))  # type: ignore[no-any-return]
+
+    # 晨報接新聞（2026-10-20）：新聞庫連得上就拿「多家同報」的事件當事實句；沒設 DSN 就跳過（只有鉅亨網頭條）
+    news_dsn = os.environ.get(cfg.morning_brief.news_dsn_env, "").strip()
+    news_cfg = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    outlet_of = {s["id"]: s["name"] for s in news_cfg["sources"]}
+    rule_version = str(news_cfg["mention"]["rule_version"])
+    news_conn = (
+        psycopg.connect(news_dsn, connect_timeout=30, prepare_threshold=None) if news_dsn else None
+    )
+
+    def fetch_events(since: dt.datetime, until: dt.datetime) -> list[Any]:
+        assert news_conn is not None
+        return fetch_multi_outlet(
+            news_conn,
+            since,
+            until,
+            rule_version=rule_version,
+            outlet_of=outlet_of,
+            min_outlets=cfg.morning_brief.events_min_outlets,
+            limit=cfg.morning_brief.events_limit,
+        )
 
     conn = store.connect(scfg)
     if skip_existing and _brief_exists(conn, scfg.pg_schema, edition, day):
@@ -1042,6 +1068,7 @@ def morning_brief_cmd(
             fetch_quote=lambda sym, name: gq.fetch_yahoo(yahoo, sym, name),
             fetch_night=lambda: gq.fetch_taifex_night(post_json),
             fetch_news=lambda cat, n, label: news.fetch(cnyes, cat, n, label),
+            fetch_events=fetch_events if news_conn is not None else None,
             now=now,
             edition=edition,  # type: ignore[arg-type]  # 上面已限定兩個值
         )
@@ -1063,6 +1090,8 @@ def morning_brief_cmd(
         )
     finally:
         conn.close()
+        if news_conn is not None:
+            news_conn.close()
     kind = "盤後快訊" if edition == "evening" else "晨報"
     typer.secho(f"[OK] {kind} @ {day}：{rule}", fg=typer.colors.GREEN)
     if brief is not None:
