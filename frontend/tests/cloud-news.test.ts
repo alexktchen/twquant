@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ALLOWED, proxy, upstreamUrl } from '../functions/_lib/news-proxy.ts'
-import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, nextUntil, shown, shownTime, taipeiHm, timeLabel, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
+import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, nextUntil, shown, shownTime, splitSimilar, taipeiHm, timeLabel, titleKey, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const BASE = 'https://abc.supabase.co/functions/v1/api/'
@@ -275,4 +275,22 @@ test('T-420 事件追蹤：proxy 只轉 id；至少兩步才顯示；每步的�
   assert.equal(threadShown({ id: 'x', cluster_id: 'a', steps: [step('a', '2026-10-18T01:00:00Z', true)] }), false, '只有自己那一群不畫')
   assert.equal(threadShown({ id: 'x', cluster_id: 'b', steps: [step('a', '2026-10-18T01:00:00Z'), step('b', '2026-10-20T01:00:00Z', true)] }), true)
   assert.equal(stepDay(step('a', '2026-10-18T17:00:00Z')), '10/19', '台北日期')
+})
+
+test('2026-10-21 閱讀卡：同一事件與相似新聞分開、同標題只留一則、不重列這則', () => {
+  const it = (id: string, title: string, src: string, same: boolean, score: number) => ({
+    id, title, title_zh: null, url: `u/${id}`, source_name: src, kind: 'tw' as const, first_seen_at: '2026-10-21T08:00:00Z', score, same_event: same,
+  })
+  const r = splitSimilar('加高績攻AI高速光通訊 明年展望謹慎樂觀', [
+    it('a', '加高績攻 AI 高速光通訊，明年展望謹慎樂觀', '經濟日報', true, 0.95),
+    it('b', '光通訊等 AI 貢獻增加 法人調高台表科獲利預估值及目標價', '經濟日報', false, 0.83),
+    it('c', '光通訊等 AI 貢獻增加 法人調高台表科獲利預估值及目標價', '經濟日報', false, 0.82),
+    it('d', '雲端AI將推動2027年晶片成長', 'DigiTimes Asia', false, 0.8),
+    it('e', '加高績攻AI高速光通訊 明年展望謹慎樂觀', '中央社', false, 0.79),
+  ])
+  assert.deepEqual(r.sameEvent.map((x) => [x.id, x.sameTitle]), [['a', true]])
+  assert.deepEqual(r.related.map((x) => x.id), ['b', 'd'], '同標題的 c 合併、跟這則同標題的 e 不列')
+  assert.equal(titleKey('A, b！ c'), 'abc')
+  const ex = splitSimilar('x', [it('d', '雲端AI將推動2027年晶片成長', 'DigiTimes Asia', false, 0.8)], ['雲端 AI 將推動 2027 年晶片成長'])
+  assert.deepEqual(ex.related, [], '來龍去脈已列的不重列')
 })

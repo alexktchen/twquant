@@ -5,7 +5,7 @@
 // 擁有者多一顆「待核可 N」（T-403）：點了換成核可頁（AI 草擬的關係線）。
 // 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
-import { ChevronDown, ClipboardCheck, ExternalLink, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronRight, ClipboardCheck, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsReview, fetchNewsSearch } from './api'
 import {
@@ -35,7 +35,8 @@ import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
 import { NewsDigest } from './NewsDigest'
 import { galaxyFromUrl, withoutView } from './tabs'
 import { NewsReview } from './NewsReview'
-import { NewsSearchResults, SimilarNews } from './NewsSimilar'
+import { NewsReader } from './NewsReader'
+import { NewsSearchResults } from './NewsSimilar'
 import './news-graph.css'
 
 type Filter = 'all' | NewsKind
@@ -188,6 +189,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   }
 
   const groups = useMemo(() => groupByDay(rows), [rows])
+  const openRow = open ? (rows.find((r) => r.id === open) ?? null) : null
   const today = taipeiDay(now.toISOString())
   const status = healthLine(health, now)
 
@@ -293,7 +295,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
               return (
                 <li key={r.id} className={isOpen ? 'open' : ''}>
                   <div className="cq-news-head">
-                    <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.id)}>
+                    <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-haspopup="dialog" onClick={() => setOpen(r.id)}>
                       <span className={`cq-news-kind ${r.kind ?? 'tw'}`}>
                         {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
                         {r.kind ? KIND_LABEL[r.kind] : '其他'}
@@ -325,7 +327,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
                         <span className="cq-news-src">
                           {r.source_name}・{timeLabel(r, g.day)}
                         </span>
-                        <ChevronDown size={15} className={isOpen ? 'flip' : ''} aria-hidden="true" />
+                        <ChevronRight size={15} aria-hidden="true" />
                       </span>
                     </button>
                     {hasGraph && (
@@ -336,28 +338,14 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
                     )}
                   </div>
                   {graphErr?.id === r.id && <p className="cq-news-gerr">{graphErr.msg}</p>}
-                  {isOpen && (
-                    <div className="cq-news-body">
-                      {v.summary && <p lang={lang(v.lang)}>{v.summary}</p>}
-                      {v.original && (
-                        <div className="cq-news-orig" lang="en">
-                          <span>原文</span>
-                          <b>{v.original.title}</b>
-                          {v.original.summary && <p>{v.original.summary}</p>}
-                        </div>
-                      )}
-                      <a href={r.url} target="_blank" rel="noopener noreferrer">
-                        看原文（{r.source_name}）<ExternalLink size={13} aria-hidden="true" />
-                      </a>
-                      <SimilarNews id={r.id} />
-                    </div>
-                  )}
                 </li>
               )
             })}
           </ul>
         </section>
       ))}
+
+      {openRow && <NewsReader row={openRow} onClose={() => setOpen(null)} onGraph={openGraph} onStock={onStock} />}
 
       {!search && !reviewOpen && mode === 'list' && rows.length > 0 && more !== 'done' && (
         <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>

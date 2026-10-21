@@ -232,6 +232,42 @@ export function similarNote(d: SimilarNews): string | null {
   return null
 }
 
+/** 閱讀卡「相似新聞」先列幾則（其餘按「再看 N 則」） */
+export const READER_RELATED = 4
+
+/** 比較用的標題：去掉空白與標點、英文小寫（「加高績攻AI高速光通訊 明年展望謹慎樂觀」≈「加高績攻 AI 高速光通訊，明年展望謹慎樂觀」） */
+export const titleKey = (t: string): string => t.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '')
+
+export type ReaderSimilar = SimilarItem & { sameTitle: boolean }
+/** 閱讀卡用：同一事件與其他相似新聞分開；同標題只留一則（分數高的）；其他相似新聞不重複列同一事件已有的標題、也不列跟這則同標題的。
+ *  同一事件裡跟這則同標題的照樣列（那是「另一家也報了」），只是不再寫標題（sameTitle）。exclude＝別處已列的標題（來龍去脈）。 */
+export function splitSimilar(
+  selfTitle: string,
+  items: SimilarItem[],
+  exclude: readonly string[] = [],
+): { sameEvent: ReaderSimilar[]; related: ReaderSimilar[] } {
+  const self = titleKey(selfTitle)
+  const byScore = [...items].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+  const seen = new Set<string>()
+  const sameEvent: ReaderSimilar[] = []
+  for (const it of byScore.filter((x) => x.same_event)) {
+    const k = titleKey(it.title_zh ?? it.title)
+    const key = `${it.source_name}|${k}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    sameEvent.push({ ...it, sameTitle: k === self })
+  }
+  const taken = new Set([self, ...exclude.map(titleKey), ...sameEvent.map((x) => titleKey(x.title_zh ?? x.title))])
+  const related: ReaderSimilar[] = []
+  for (const it of byScore.filter((x) => !x.same_event)) {
+    const k = titleKey(it.title_zh ?? it.title)
+    if (taken.has(k)) continue
+    taken.add(k)
+    related.push({ ...it, sameTitle: false })
+  }
+  return { sameEvent, related }
+}
+
 /** 搜尋結果上面那一句。 */
 export function searchLine(d: NewsSearch): string {
   if (d.budget_stop) return '今天新聞的 AI 額度用完了，明天早上 8 點恢復'
