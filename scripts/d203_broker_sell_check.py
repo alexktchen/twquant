@@ -66,6 +66,37 @@ CONFIGS = ROOT / "configs"
 # ── 主力淨買超面板（分段兩趟，數學全在 factors.broker） ─────────────────────────────
 
 
+BOUNDED = ("broker_trades", "prices_daily")  # 只給 available_at 都不早於 date 的表加上界
+
+
+def bounded_source(conn: Any, sch: str, since: dt.date, until: dt.date) -> Any:
+    """讀 date ∈ [since, until] 的 PgTableSource（D-203 §九 修正一）。
+
+    原本每段 `since=a` 不設上界，第一段就把 2022 起整張 broker_trades（約 5,800 萬列）讀進記憶體，
+    超過 28 GB 被 OOM。這兩張表 available_at 皆不早於 date（2026-10-21 查過全表為 0 筆），
+    `view(until)` 的截點是 until 20:00，所以 date > until 的列本來就會被 PIT 濾掉；加上界只省記憶體，結果不變。
+    """
+    from twquant.data.serving.pg_view import PgTableSource
+
+    class _Bounded(PgTableSource):
+        def scan(self, table: str, layer: str = "clean") -> pl.LazyFrame:
+            if table not in BOUNDED:
+                return super().scan(table, layer)
+            df = pl.read_database(
+                f'SELECT * FROM "{sch}"."{table}" WHERE date >= %(a)s AND date <= %(b)s',
+                conn,
+                execute_options={"params": {"a": since, "b": until}},
+                infer_schema_length=None,
+            )
+            if df.is_empty():
+                raise ValueError(f"{sch}.{table} 在 {since}～{until} 沒有資料")
+            return df.with_columns(
+                pl.col("available_at").dt.convert_time_zone("Asia/Taipei")
+            ).lazy()
+
+    return _Bounded(conn, sch, since=since)
+
+
 def build_panel(
     view_of: Callable[[dt.date, dt.date], Any],
     segs: Sequence[tuple[dt.date, dt.date]],
@@ -480,7 +511,6 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
     from twquant.data.serving import store
-    from twquant.data.serving.pg_view import PgTableSource
 
     cfg = load_config(CONFIGS / "serving.yaml", ServingConfig)
     sch = cfg.pg_schema
@@ -488,9 +518,7 @@ def main() -> int:
     segs = _segments(BROKER_START, DEV_END, SEGMENT_MONTHS)
     conn = store.connect(cfg)
     try:
-        daily, vol = build_panel(
-            lambda a, b: PgTableSource(conn, sch, since=a).view(b), segs, params
-        )
+        daily, vol = build_panel(lambda a, b: bounded_source(conn, sch, a, b).view(b), segs, params)
         print(f"主力面板 {daily.height:,} 列（{len(segs)} 段）", flush=True)
         sig = signal_values(daily, vol, SIGNAL_START, DEV_END)
         del daily, vol
