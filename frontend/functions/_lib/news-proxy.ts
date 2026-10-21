@@ -7,7 +7,7 @@ export type NewsEnv = { NEWS_API_URL?: string; NEWS_API_KEY?: string }
 
 /** 每個端點准許轉過去的查詢參數（其餘丟掉，不讓瀏覽器亂帶）。 */
 export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search' | '/v1/review' | '/v1/digest' | '/v1/galaxy' | '/v1/stock-news-days' | '/v1/thread', string[]> = {
-  '/v1/items': ['since', 'until', 'kind', 'source', 'limit'],
+  '/v1/items': ['since', 'until', 'kind', 'source', 'limit', 'type'],
   '/v1/health': [],
   /** 一則新聞的關係圖（T-402／T-404）：id＝新聞 id；找不到 → 404 照轉 */
   '/v1/graph': ['id'],

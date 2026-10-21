@@ -16,6 +16,9 @@ import {
   groupByDay,
   healthLine,
   mentionChips,
+  NEWS_TYPES,
+  NEWS_TYPE_LABEL,
+  type NewsType,
   nextUntil,
   reviewLeft,
   searchLine,
@@ -56,6 +59,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid: string, name: string) => void }) {
   const [filter, setFilter] = useState<Filter>('all')
+  const [typeFilter, setTypeFilter] = useState<NewsType | null>(null)
   /** 清單（讀新聞）或全景（星雲圖，看全貌） */
   // 直接連結（?view=galaxy、舊網址 /api/prototype/galaxy）：一打開就是星雲圖，畫面捲到它（熱門主題卡在它上面）
   const [jumpToGalaxy] = useState(() => galaxyFromUrl(window.location.href))
@@ -139,7 +143,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
     setLoading(true)
     setErr('')
     setMore('idle')
-    fetchNewsItems({ kind: filter === 'all' ? null : filter, limit: NEWS_PAGE })
+    fetchNewsItems({ kind: filter === 'all' ? null : filter, type: typeFilter, limit: NEWS_PAGE })
       .then((r) => {
         if (stale) return
         setRows(r.items)
@@ -154,13 +158,13 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
     return () => {
       stale = true
     }
-  }, [filter, refresh])
+  }, [filter, typeFilter, refresh])
 
   const loadMore = () => {
     const until = nextUntil(rows)
     if (!until || more !== 'idle') return
     setMore('loading')
-    fetchNewsItems({ kind: filter === 'all' ? null : filter, limit: NEWS_PAGE, until })
+    fetchNewsItems({ kind: filter === 'all' ? null : filter, type: typeFilter, limit: NEWS_PAGE, until })
       .then((r) => {
         const next = appendPage(rows, r.items)
         setRows(next)
@@ -194,6 +198,18 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
           {FILTERS.map((f) => (
             <button key={f.key} className={filter === f.key && mode === 'list' ? 'on' : ''} onClick={() => { setFilter(f.key); setMode('list') }}>
               {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="cq-news-types" role="group" aria-label="新聞類型">
+          {NEWS_TYPES.map((t) => (
+            <button
+              key={t.key}
+              className={`cq-news-type ${t.key}${typeFilter === t.key ? ' on' : ''}`}
+              aria-pressed={typeFilter === t.key}
+              onClick={() => { setTypeFilter(typeFilter === t.key ? null : t.key); setMode('list') }}
+            >
+              {t.label}
             </button>
           ))}
         </div>
@@ -283,6 +299,11 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
                         {r.kind ? KIND_LABEL[r.kind] : '其他'}
                       </span>
                       <span className="cq-news-title" lang={lang(v.lang)}>
+                        {r.type && r.type !== 'other' && (
+                          <em className={`cq-news-type ${r.type}`} title="新聞類型（模型自動分類）">
+                            {NEWS_TYPE_LABEL[r.type]}
+                          </em>
+                        )}
                         {v.tag && (
                           <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
                             {v.tag}

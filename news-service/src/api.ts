@@ -8,6 +8,8 @@ export const ITEMS_MAX = 200
 export const ITEMS_DEFAULT = 100
 
 export type ItemsQuery = {
+  /** 新聞類型（T-421）：config/news_types.json 的類別之一；null＝全部 */
+  type: string | null
   since: string | null
   /** 含（≤）：同一次進料的一批同一個時間，翻頁時不能跳過；重複的由網站去掉（每來源每次最多 per_run_limit 則 < 一頁） */
   until: string | null
@@ -24,15 +26,17 @@ const isoOrNull = (v: string | null, name: string): string | null => {
 }
 
 /** /v1/items 的查詢參數 → ItemsQuery；不合法 → 丟錯（端點回 400）。 */
-export function parseItemsQuery(params: URLSearchParams, cfg: NewsConfig): ItemsQuery {
+export function parseItemsQuery(params: URLSearchParams, cfg: NewsConfig, typeClasses: readonly string[] = []): ItemsQuery {
   const kind = params.get('kind')
+  const type = params.get('type')
+  if (type !== null && !typeClasses.includes(type)) throw new Error(`沒有這個新聞類型：${type}`)
   if (kind !== null && kind !== 'intl' && kind !== 'tw') throw new Error(`kind 只能是 intl 或 tw：${kind}`)
   const source = params.get('source')
   if (source !== null && !cfg.sources.some((s) => s.id === source)) throw new Error(`沒有這個來源：${source}`)
   const rawLimit = params.get('limit')
   const limit = rawLimit === null ? ITEMS_DEFAULT : Number(rawLimit)
   if (!Number.isInteger(limit) || limit < 1 || limit > ITEMS_MAX) throw new Error(`limit 要是 1～${ITEMS_MAX}：${rawLimit}`)
-  return { since: isoOrNull(params.get('since'), 'since'), until: isoOrNull(params.get('until'), 'until'), kind, source, limit }
+  return { type, since: isoOrNull(params.get('since'), 'since'), until: isoOrNull(params.get('until'), 'until'), kind, source, limit }
 }
 
 /** 新聞庫容量（Supabase 免費方案）：健康檢查回報用量，超過 warn_share 網站狀態列變黃 */

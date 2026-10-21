@@ -22,7 +22,20 @@ export type NewsRow = {
   summary_zh?: string | null
   /** 這則提到的實體（T-402，一度；台股在前、再國外、再族群／主題）。舊的服務沒有這欄 → undefined */
   mentions?: NewsMention[]
+  /** 新聞類型（T-421）：財報展望／訂單產品／擴廠併購／政策事故／盤勢行情／其他；還沒分類或舊服務 → null／undefined */
+  type?: NewsType | null
 }
+export type NewsType = 'earnings' | 'business' | 'capital' | 'policy' | 'market' | 'other'
+/** 類型的中文與顏色類別（地鐵告示：顏色歸類、少字）；跟 news-service/config/news_types.json 的 labels 一致 */
+export const NEWS_TYPES: { key: NewsType; label: string }[] = [
+  { key: 'earnings', label: '財報展望' },
+  { key: 'business', label: '訂單產品' },
+  { key: 'capital', label: '擴廠併購' },
+  { key: 'policy', label: '政策事故' },
+  { key: 'market', label: '盤勢行情' },
+  { key: 'other', label: '其他' },
+]
+export const NEWS_TYPE_LABEL: Record<NewsType, string> = Object.fromEntries(NEWS_TYPES.map((t) => [t.key, t.label])) as Record<NewsType, string>
 export type NewsMention = { id: string; type: 'tw' | 'us' | 'company' | 'group' | 'theme'; label: string }
 
 /** 列上最多顯示幾個實體小標（其餘收成「+N」） */
