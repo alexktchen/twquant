@@ -131,9 +131,10 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
 /** 新聞分頁（T-400）：新聞流；until 含這個時間（翻頁用）。 */
-export function fetchNewsItems(q: { kind: NewsKind | null; limit: number; until?: string }) {
+export function fetchNewsItems(q: { kind: NewsKind | null; type?: string | null; limit: number; until?: string }) {
   const p = new URLSearchParams({ limit: String(q.limit) })
   if (q.kind) p.set('kind', q.kind)
+  if (q.type) p.set('type', q.type)
   if (q.until) p.set('until', q.until)
   return get<{ items: NewsRow[] }>(`/api/news/items?${p}`)
 }
