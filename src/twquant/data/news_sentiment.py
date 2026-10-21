@@ -204,6 +204,61 @@ def pending_pairs(
     return out
 
 
+CORPUS_PENDING_SQL = f"""
+select p.item_id, p.stock_id, i.title_zh, i.title, i.summary_zh, i.summary, i.content
+from (
+  select distinct m.item_id, substr(m.entity_id, 4) as stock_id
+  from {SCHEMA}.mentions m join {SCHEMA}.items i on i.id = m.item_id
+  where m.entity_id like 'tw:%%' and m.method in ('alias', 'tag') and (i.origin <> 'mops' or m.method = 'tag')
+) p
+join {SCHEMA}.items i on i.id = p.item_id
+left join {SCHEMA}.sentiment_labels l on l.item_id = p.item_id and l.stock_id = p.stock_id
+where l.item_id is null
+order by i.available_at desc, p.item_id, p.stock_id
+limit %s
+"""
+
+
+def pending_corpus(
+    conn: Any, limit: int, names: dict[str, str]
+) -> list[tuple[str, str, str, str, str | None]]:
+    """全語料還沒貼標的（新聞, 台股）對，新的先：配對定義跟新聞因子一樣（alias／tag 提及；公告只算公告公司本身）。
+    探針沒過門檻時用（T-413／D-201 §四）。回傳格式同 pending_pairs。"""
+    with conn.cursor() as cur:
+        cur.execute(CORPUS_PENDING_SQL, (limit,))
+        rows = cur.fetchall()
+    out = []
+    for item_id, stock_id, title_zh, title, summary_zh, summary, content in rows:
+        body = content or (summary_zh if title_zh else summary)
+        out.append(
+            (
+                str(item_id),
+                str(stock_id),
+                names.get(str(stock_id), str(stock_id)),
+                str(title_zh or title),
+                body,
+            )
+        )
+    return out
+
+
+def scores_from_labels(conn: Any, version: str) -> int:
+    """Ollama 標籤 → sentiment_scores（method='llm'、p 為 one-hot）；同 (item, stock, method) 覆蓋。回寫了幾列。
+    新聞因子用 p_pos − p_neg，所以 one-hot 就是 −1／0／+1。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""insert into {SCHEMA}.sentiment_scores (item_id, stock_id, label, p_neg, p_neu, p_pos, method, version)
+                select item_id, stock_id, label, (label = -1)::int, (label = 0)::int, (label = 1)::int, 'llm', %s
+                from {SCHEMA}.sentiment_labels
+                on conflict (item_id, stock_id, method) do update
+                  set label = excluded.label, p_neg = excluded.p_neg, p_neu = excluded.p_neu, p_pos = excluded.p_pos, version = excluded.version""",
+            (version,),
+        )
+        n = cur.rowcount
+    conn.commit()
+    return int(n)
+
+
 def save_label(conn: Any, item_id: str, stock_id: str, label: int, *, model: str, raw: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
