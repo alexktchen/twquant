@@ -8,8 +8,10 @@ import { Section } from './Section'
 import {
   KIND_LABEL,
   LOGIN_POLL_MS,
+  GROUP_FIND_MIN,
   SYNC_WAIT_MS,
   cardUrl,
+  findGroups,
   groupsMeta,
   latestSync,
   loginActive,
@@ -29,6 +31,7 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
   // 等群組同步：按下去時的「上次同步時間」（清單的同步時間變了就是同步好了）；null＝沒在等
   const [syncing, setSyncing] = useState<string | null>(null)
   const [syncNote, setSyncNote] = useState('')
+  const [find, setFind] = useState('')
 
   useEffect(() => {
     let stale = false
@@ -134,22 +137,33 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
               {data.groups.length === 0 ? (
                 <p className="cq-lg-hint">把發文帳號拉進群組，再按「同步群組」就會列在這裡（每一班排程也會自動同步）；新群組預設不發。</p>
               ) : (
-                <ul className="cq-lg-groups">
-                  {data.groups.map((g) => (
-                    <li key={g.home_id} className={g.present ? '' : 'gone'}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={g.enabled}
-                          disabled={busy !== null || !g.present}
-                          onChange={(e) => toggle(g.home_id, e.target.checked)}
-                        />
-                        <span>{g.name}</span>
-                      </label>
-                      {!g.present && <em>帳號已不在群組</em>}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {data.groups.length > GROUP_FIND_MIN && (
+                    <input
+                      className="cq-lg-find"
+                      type="search"
+                      placeholder="找群組（勾了的一直留著）"
+                      value={find}
+                      onChange={(e) => setFind(e.target.value)}
+                    />
+                  )}
+                  <ul className="cq-lg-groups">
+                    {findGroups(data.groups, find).map((g) => (
+                      <li key={g.home_id} className={g.present ? '' : 'gone'}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={g.enabled}
+                            disabled={busy !== null || !g.present}
+                            onChange={(e) => toggle(g.home_id, e.target.checked)}
+                          />
+                          <span>{g.name}</span>
+                        </label>
+                        {!g.present && <em>帳號已不在群組</em>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
               {syncNote && <p className="cq-lg-hint">{syncNote}</p>}
               {a && (
