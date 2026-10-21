@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import io
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -594,5 +596,113 @@ def test_ac6_load_picks_and_brief_from_serving() -> None:
         brief = lg.load_brief(conn, s, DAY, "morning")
         assert brief == lg.BriefRow("標題", ("一", "二"), None, "規則")
         assert lg.load_brief(conn, s, DAY, "evening") is None  # 表還沒建
+    finally:
+        conn.close()
+
+
+# ── AC11 從網站登入（QR 與 PIN 寫進 web.line_login） ───────────────────────
+
+
+def test_ac11_login_progress_qr_png_and_pin() -> None:
+    upd = lg.login_progress({"type": "qr", "url": "https://line.me/R/au/lgn/sq/abc"})
+    assert upd is not None and upd["status"] == "scan" and upd["pin"] is None
+    assert upd["qr_url"] == "https://line.me/R/au/lgn/sq/abc"
+    img = Image.open(io.BytesIO(base64.b64decode(upd["qr_png"])))
+    assert img.format == "PNG" and img.size[0] == img.size[1] >= 100
+    assert lg.login_progress({"type": "pin", "pin": "123456"}) == {
+        "status": "pin",
+        "pin": "123456",
+        "qr_url": None,
+        "qr_png": None,
+    }
+    assert lg.login_progress({"type": "credential", "accessToken": "x"}) is None
+    # qr／pin 事件在收尾解析時不是錯誤
+    out = lg.parse_events(['{"type":"qr","url":"u"}', '{"type":"pin","pin":"1"}'], 0, None)
+    assert out.fatal is None
+
+
+def test_ac11_set_login_rejects_bad_fields() -> None:
+    with pytest.raises(ValueError, match="要給 status"):
+        lg.set_login(None, "web", NOW, {"pin": "1"})
+    with pytest.raises(ValueError, match="沒有這些欄位"):
+        lg.set_login(None, "web", NOW, {"status": "scan", "access_token": "x"})
+
+
+def test_ac11_login_table_same_on_site() -> None:
+    ts = (ROOT / "frontend" / "functions" / "_lib" / "line-admin.ts").read_text(encoding="utf-8")
+    ddl = re.search(r"CREATE TABLE IF NOT EXISTS web\.line_login \((.*?)\)'", ts, re.S)
+    assert ddl is not None
+    cols = [p.strip().split()[0] for p in re.sub(r"'\s*\+\s*'", "", ddl.group(1)).split(",")]
+    assert tuple(cols) == lg.LOGIN_COLUMNS
+    assert "LOGIN_ACTIVE = ['requested', 'starting', 'scan', 'pin']" in ts
+    assert lg.LOGIN_ACTIVE == ("requested", "starting", "scan", "pin")
+
+
+_FAKE_ADAPTER = """
+const say = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+const cmd = process.argv[2];
+say({ type: "qr", url: "https://line.me/R/au/lgn/sq/x" });
+await new Promise((r) => setTimeout(r, 200));
+say({ type: "pin", pin: "4321" });
+if (cmd === "hang") await new Promise((r) => setTimeout(r, 60_000));
+say({ type: "credential", accessToken: "a", refreshToken: "r", expire: 9 });
+say({ type: "profile", mid: "u1", displayName: "小幫手" });
+"""
+
+
+def test_ac11_run_node_streams_events_and_times_out(tmp_path: Path) -> None:
+    if shutil.which("node") is None:
+        pytest.skip("沒有 node")
+    (tmp_path / "fake.mjs").write_text(_FAKE_ADAPTER, encoding="utf-8")
+    cfg = _cfg(adapter="fake.mjs", login_timeout_seconds=30, adapter_timeout_seconds=2)
+    seen: list[str] = []
+    out = lg.run_node(cfg, tmp_path, "login", {}, None, lambda ev: seen.append(str(ev["type"])))
+    assert seen == ["qr", "pin", "credential", "profile"]  # 邊跑邊收到，不是跑完才一次給
+    assert out.credential == lg.Credential("a", "r", 9) and out.fatal is None
+    hung = lg.run_node(cfg, tmp_path, "hang", {}, None)
+    assert hung.fatal is not None and "被中止" in hung.fatal
+
+
+def test_ac11_web_login_writes_progress_and_credential() -> None:
+    conn = _connect_or_skip()
+    cfg = _cfg(web_schema=_SCHEMA)
+
+    def login_row() -> tuple[Any, ...]:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT status, qr_url, qr_png IS NOT NULL, pin, display_name, error, run_url FROM "{_SCHEMA}".line_login'
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return tuple(row)
+
+    seen: list[tuple[Any, ...]] = []
+
+    def ok_run(on_event: lg.EventSink) -> lg.AdapterOutput:
+        seen.append(login_row())
+        on_event({"type": "qr", "url": "https://line.me/R/au/lgn/sq/x"})
+        seen.append(login_row())
+        on_event({"type": "pin", "pin": "4321"})
+        seen.append(login_row())
+        return lg.AdapterOutput(
+            0, lg.Credential("a", "r", 9), {"mid": "u1", "displayName": "小幫手"}
+        )
+
+    try:
+        out = lg.web_login(conn, cfg, ok_run, now_fn=lambda: NOW, run_url="https://gh/run/1")
+        assert out.fatal is None
+        assert [r[0] for r in seen] == ["starting", "scan", "pin"]
+        assert seen[1][1:3] == ("https://line.me/R/au/lgn/sq/x", True)
+        assert seen[2][1:4] == (None, False, "4321")  # 掃完就把 QR 拿掉
+        assert login_row() == ("done", None, False, None, "小幫手", None, "https://gh/run/1")
+        assert lg.load_credential(conn, _SCHEMA) == lg.Credential("a", "r", 9)
+
+        def bad_run(on_event: lg.EventSink) -> lg.AdapterOutput:
+            on_event({"type": "qr", "url": "https://line.me/R/au/lgn/sq/y"})
+            return lg.AdapterOutput(2, fatal="等太久沒掃 QR")
+
+        lg.web_login(conn, cfg, bad_run, now_fn=lambda: NOW, run_url=None)
+        assert login_row()[:3] == ("failed", None, False)
+        assert login_row()[5] == "等太久沒掃 QR"
     finally:
         conn.close()

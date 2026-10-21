@@ -18,6 +18,7 @@ import json
 import secrets
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -273,6 +274,8 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
             sending.append(int(ev["id"]))
         elif kind == "result":
             results.append(ev)
+        elif kind in ("qr", "pin"):
+            pass  # 登入進度：串流時由 on_event 處理（web_login），收尾時不用
         elif kind == "fatal":
             fatal = str(ev.get("error") or "轉接器失敗（沒有原因）")
         else:
@@ -285,30 +288,70 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
 
 
 AdapterRunner = Callable[[str, dict[str, Any], Credential | None], AdapterOutput]
+EventSink = Callable[[dict[str, Any]], None]
+
+
+def run_node(
+    cfg: LineGroupConfig,
+    repo_root: Path,
+    command: str,
+    request: dict[str, Any],
+    base: Credential | None,
+    on_event: EventSink | None = None,
+) -> AdapterOutput:
+    """跑一次 Node 轉接器，一行一行讀事件（登入時 QR、PIN 要邊跑邊寫進資料庫給網站顯示）。
+
+    stderr 直接接到終端機（QR、PIN、錯誤細節要讓人看到）；跑超過時限就砍掉，已讀到的事件照算。
+    """
+    timeout = cfg.login_timeout_seconds if command == "login" else cfg.adapter_timeout_seconds
+    lines: list[str] = []
+    killed = threading.Event()
+    # with：結束時關掉三條管線並等程序收掉（逾時被砍時也不留沒關的檔案）
+    with subprocess.Popen(
+        [cfg.node_bin, str(repo_root / cfg.adapter), command],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=None,
+        text=True,
+        encoding="utf-8",
+        cwd=str(repo_root),
+    ) as proc:
+        if proc.stdin is None or proc.stdout is None:
+            raise ExecutionError("轉接器的 stdin／stdout 沒接上")
+
+        def kill() -> None:
+            killed.set()
+            proc.kill()
+
+        timer = threading.Timer(timeout, kill)
+        timer.start()
+        try:
+            proc.stdin.write(json.dumps(request, ensure_ascii=False))
+            proc.stdin.close()
+            for line in proc.stdout:
+                lines.append(line)
+                if on_event is not None:
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue  # 雜訊行：parse_events 會轉到 stderr
+                    if isinstance(ev, dict):
+                        on_event(ev)
+            proc.wait()
+        except BaseException:
+            proc.kill()
+            raise
+        finally:
+            timer.cancel()
+    res = parse_events(lines, proc.returncode, base)
+    return replace(res, fatal=f"轉接器跑超過 {timeout:.0f} 秒被中止") if killed.is_set() else res
 
 
 def node_runner(cfg: LineGroupConfig, repo_root: Path) -> AdapterRunner:
-    """用子程序跑 Node 轉接器。stderr 直接接到終端機（QR、PIN、錯誤細節要讓人看到）。"""
+    """send／groups 用的轉接器（不需要邊跑邊處理事件）。"""
 
     def run(command: str, request: dict[str, Any], base: Credential | None) -> AdapterOutput:
-        timeout = cfg.login_timeout_seconds if command == "login" else cfg.adapter_timeout_seconds
-        proc = subprocess.Popen(
-            [cfg.node_bin, str(repo_root / cfg.adapter), command],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,
-            text=True,
-            encoding="utf-8",
-            cwd=str(repo_root),
-        )
-        try:
-            out, _ = proc.communicate(json.dumps(request, ensure_ascii=False), timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            out, _ = proc.communicate()
-            res = parse_events(out.splitlines(), proc.returncode or -9, base)
-            return replace(res, fatal=f"轉接器跑超過 {timeout:.0f} 秒被中止")
-        return parse_events(out.splitlines(), proc.returncode, base)
+        return run_node(cfg, repo_root, command, request, base)
 
     return run
 
@@ -405,7 +448,7 @@ def backoff_until(results: Sequence[Mapping[str, Any]], now: dt.datetime) -> dt.
 
 
 def ensure_tables(conn: Any, schema: str) -> None:
-    """建帳號、群組、圖卡、排隊四張表（第一次用時自動建；沒有備份，丟了只是重新掃 QR、重新勾群組）。"""
+    """建帳號、登入進度、群組、圖卡、排隊五張表（第一次用時自動建；沒有備份，丟了只是重新掃 QR、重新勾群組）。"""
     with conn.cursor() as cur:
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
         cur.execute(
@@ -421,6 +464,12 @@ def ensure_tables(conn: Any, schema: str) -> None:
             "home_id text PRIMARY KEY, name text NOT NULL, enabled boolean NOT NULL DEFAULT false, "
             "present boolean NOT NULL DEFAULT true, synced_at timestamptz NOT NULL, "
             "updated_by text, updated_at timestamptz)"
+        )
+        cur.execute(
+            f'CREATE TABLE IF NOT EXISTS "{schema}".line_login ('
+            "id text PRIMARY KEY, status text NOT NULL, requested_by text, requested_at timestamptz, "
+            "updated_at timestamptz NOT NULL, run_url text, qr_url text, qr_png text, pin text, "
+            "display_name text, error text)"
         )
         cur.execute(
             f'CREATE TABLE IF NOT EXISTS "{schema}".line_cards ('
@@ -870,6 +919,105 @@ def sync_groups(
         return out
     finally:
         release_lease(conn, schema)
+
+
+# ── 從網站登入（T-423） ───────────────────────────────────────────────────
+# 網站「LINE 群組」分頁按「登入」→ web.line_login 標 requested、觸發 GitHub Actions line-login.yml →
+# 這裡跑轉接器 login，QR 與 PIN 一出來就寫進 web.line_login，網站每幾秒讀一次顯示給使用者掃。
+
+LOGIN_ACTIVE = ("requested", "starting", "scan", "pin")
+# web.line_login 的欄位（網站 frontend/functions/_lib/line-admin.ts 也會建這張表，兩邊要一樣，測試守著）
+LOGIN_COLUMNS = (
+    "id",
+    "status",
+    "requested_by",
+    "requested_at",
+    "updated_at",
+    "run_url",
+    "qr_url",
+    "qr_png",
+    "pin",
+    "display_name",
+    "error",
+)
+LoginRunner = Callable[[EventSink], AdapterOutput]
+
+
+def qr_png_base64(url: str) -> str:
+    """把登入網址畫成 QR 碼（PNG、base64），網站直接當 data URL 顯示；不送去任何第三方服務。"""
+    import base64
+    import io
+
+    import qrcode
+
+    qr = qrcode.QRCode(border=2, box_size=8)
+    qr.add_data(url)
+    qr.make(fit=True)
+    buf = io.BytesIO()
+    qr.make_image(fill_color="black", back_color="white").save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def login_progress(ev: Mapping[str, Any]) -> dict[str, Any] | None:
+    """轉接器的登入事件 → web.line_login 要改的欄位（qr＝等掃描、pin＝等手機輸入；其他事件不管）。"""
+    if ev.get("type") == "qr":
+        url = str(ev["url"])
+        return {"status": "scan", "qr_url": url, "qr_png": qr_png_base64(url), "pin": None}
+    if ev.get("type") == "pin":
+        return {"status": "pin", "pin": str(ev["pin"]), "qr_url": None, "qr_png": None}
+    return None
+
+
+def set_login(conn: Any, schema: str, now: dt.datetime, fields: Mapping[str, Any]) -> None:
+    """更新登入進度那一列（沒有就建；網站每幾秒讀一次）。"""
+    if "status" not in fields:
+        raise ValueError("set_login 要給 status")
+    bad = set(fields) - set(LOGIN_COLUMNS)
+    if bad:
+        raise ValueError(f"web.line_login 沒有這些欄位：{sorted(bad)}")
+    cols = ["id", "updated_at", *fields]
+    sets = ", ".join(f"{k} = EXCLUDED.{k}" for k in ["updated_at", *fields])
+    with conn.cursor() as cur:
+        cur.execute(
+            f'INSERT INTO "{schema}".line_login ({", ".join(cols)}) '
+            f"VALUES ({', '.join(['%s'] * len(cols))}) ON CONFLICT (id) DO UPDATE SET {sets}",
+            (ACCOUNT_ID, now, *fields.values()),
+        )
+    conn.commit()
+
+
+def web_login(
+    conn: Any,
+    cfg: LineGroupConfig,
+    run: LoginRunner,
+    *,
+    now_fn: Callable[[], dt.datetime],
+    run_url: str | None,
+) -> AdapterOutput:
+    """掃 QR 登入，進度寫進 web.line_login（網站顯示 QR 與 PIN），成功就存憑證。"""
+    schema = cfg.web_schema
+    ensure_tables(conn, schema)
+    clear = {"qr_url": None, "qr_png": None, "pin": None}
+    set_login(
+        conn, schema, now_fn(), {"status": "starting", "run_url": run_url, "error": None, **clear}
+    )
+
+    def on_event(ev: dict[str, Any]) -> None:
+        upd = login_progress(ev)
+        if upd is not None:
+            set_login(conn, schema, now_fn(), upd)
+
+    out = run(on_event)
+    done = now_fn()
+    if out.fatal is not None or out.credential is None:
+        error = out.fatal or "轉接器沒有回憑證"
+        set_login(conn, schema, done, {"status": "failed", "error": error[:1000], **clear})
+        return out
+    save_account(conn, schema, out.credential, now=done, profile=out.profile)
+    set_account_status(conn, schema, paused_until=None, last_error=None)
+    name = out.profile.get("displayName") or out.profile.get("mid")
+    set_login(conn, schema, done, {"status": "done", "display_name": name, "error": None, **clear})
+    return out
 
 
 def _cred_json(cred: Credential) -> dict[str, Any]:
