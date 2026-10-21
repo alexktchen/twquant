@@ -69,7 +69,10 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 ## 打不通的時候
 
 - `AUTHENTICATION_FAILED`／`MUST_REFRESH_V3_TOKEN`：憑證失效，本機重跑 `line-group login`。
-- 一直「改發文字」：LIFF 那段不通（`Failed to get LiffToken`），填自己的 `liff_id` 試試。
+- 一直「改發文字」：圖卡那段（LIFF）不通（`Failed to get LiffToken`）——內建 LIFF app 在無頭環境拿不到授權，要填自己的 `liff_id`。
+  這時圖卡會自動退成「摘要＋網址」的文字（照樣發得出去）。
+- `E2EE Key has not been saved`：登入建立的端對端加密金鑰沒接到送出那一步。已修（`web.line_account.storage_json` 跨 run 保存整份 session）；
+  還遇到就重新登入一次讓它重存。
 - GitHub Actions 的機器在美國；new_erp 的經驗是**從國外 IP 上線容易被鎖**。真的被鎖的話，改在台灣的機器跑
   `line-group send`（本機排程或台灣 VM）。
 - `LINE_DEVICE` 環境變數可換模擬的裝置（預設 `ANDROIDSECONDARY`）。

@@ -7966,6 +7966,12 @@ D-085 重跑後，A 軌由 +15.90% 跳到 **+26.30%（+10.40pp）**，遠大於�
   只有 Actions 讀寫）觸發 `line-login.yml` → 轉接器的 QR 與 PIN 一出來就寫進 `web.line_login`（QR 在我們這邊畫成 PNG，不送第三方 QR 服務），
   網頁每 3 秒讀一次顯示；成功就存憑證。登入跑在 GitHub Actions（美國 IP，§四的風險同樣適用）。進行中不能再按；10 分鐘沒動靜當作掛了可以重按。
   Claude 的沙盒連不到使用者的 Supabase，也不該經手 LINE 憑證，所以不由 Claude 代跑。
+- **§二之二 跨 run 接續 session（修發不出去）**：第一次實測手動發送失敗——圖卡 `Failed to get LiffToken`（內建 LIFF app 在無頭環境拿不到授權）、
+  備援文字 `E2EE Key has not been saved`（發文字到群組要端對端加密金鑰）。原因：登入與送出是兩個 GitHub Actions run，我只存了 access／refresh／expire 三個欄位，
+  登入時 linejs 建立的 E2EE 金鑰沒帶過去。修法：把 linejs 整份 storage（`storage.getAll()`，含 E2EE 金鑰、reqseq）存進 `web.line_account.storage_json`，
+  下個 run 用 `MemoryStorage(data)` 還原——這正是 linejs `FileStorage` 的跨工作階段保存，只是改存資料庫（GitHub Actions 每次都是乾淨環境）。
+  這份 blob 含使用者自己帳號的金鑰，跟 access token 同一個信任層級、同一張表；網站讀 `line_account` 只選顯示欄位，storage_json 不出資料庫（測試守著）。
+  圖卡本身仍要使用者自己的 LIFF app（`liff_id`）才發得出來；沒設時一律退成文字（修好後文字能發）。
 - **§三 官方帳號為什麼沒用**：使用者問過「可以透過我的官方帳號來做這個發文嗎」。官方 Messaging API 能發 Flex 到群組，但
   [推播額度按收到的人數算](https://developers.line.biz/en/docs/messaging-api/pricing/)（30 人的群發一則＝30 則），台灣免費方案一個月 200 則；
   四種天天發要付費方案，而且要另做 webhook 才拿得到群組 id。說明後使用者選備用帳號。

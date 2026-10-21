@@ -235,6 +235,26 @@ def test_ac4_events_credential_sending_results(capsys: pytest.CaptureFixture[str
     assert "linejs 自己印的雜訊" in capsys.readouterr().err  # 不吞掉
 
 
+def test_ac4_storage_snapshot_rides_on_credential() -> None:
+    # 登入：credential 之後來一份 storage（端對端加密金鑰等），疊在 credential 上
+    out = lg.parse_events(
+        [
+            '{"type":"credential","accessToken":"a","refreshToken":"r","expire":9}',
+            '{"type":"storage","data":"{\\"e2eeKeys:u1\\":\\"k\\",\\"reqseq\\":\\"1\\"}"}',
+        ],
+        0,
+        None,
+    )
+    assert out.credential == lg.Credential("a", "r", 9, '{"e2eeKeys:u1":"k","reqseq":"1"}')
+    # 後面又來一次 credential（token 輪替）不會把先前的 storage 弄丟
+    out2 = lg.parse_events(['{"type":"credential","accessToken":"a2"}'], 0, out.credential)
+    assert out2.credential == lg.Credential("a2", "r", 9, '{"e2eeKeys:u1":"k","reqseq":"1"}')
+    # 給轉接器的請求：storage 還原成物件
+    assert lg._cred_json(out.credential)["storage"] == {"e2eeKeys:u1": "k", "reqseq": "1"}
+    assert "storage" not in lg._cred_json(lg.Credential("a", "r", 9))  # 沒有就不帶
+    assert "storage" not in lg._cred_json(lg.Credential("a", "r", 9, "壞掉的"))  # 壞的當沒有
+
+
 def test_ac4_fatal_unknown_event_and_relogin() -> None:
     fatal = lg.parse_events(['{"type":"fatal","error":"AUTHENTICATION_FAILED"}'], 2, None)
     assert fatal.fatal == "AUTHENTICATION_FAILED"
@@ -704,5 +724,34 @@ def test_ac11_web_login_writes_progress_and_credential() -> None:
         lg.web_login(conn, cfg, bad_run, now_fn=lambda: NOW, run_url=None)
         assert login_row()[:3] == ("failed", None, False)
         assert login_row()[5] == "等太久沒掃 QR"
+    finally:
+        conn.close()
+
+
+def test_ac4_storage_json_persists_and_column_added_to_old_table() -> None:
+    conn = _connect_or_skip()
+    try:
+        # 舊表（storage_json 之前就登入過）：ensure_tables 要把欄位補上
+        with conn.cursor() as cur:
+            cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
+            cur.execute(f'CREATE SCHEMA "{_SCHEMA}"')
+            # storage_json 之前的原始 schema（其他欄位都在，只差這一欄）
+            cur.execute(
+                f'CREATE TABLE "{_SCHEMA}".line_account ('
+                "id text PRIMARY KEY, mid text, display_name text, "
+                "access_token text NOT NULL, refresh_token text, token_expire bigint, "
+                "updated_at timestamptz NOT NULL, paused_until timestamptz, busy_until timestamptz, "
+                "last_error text)"
+            )
+        conn.commit()
+        lg.ensure_tables(conn, _SCHEMA)
+        blob = '{"e2eeKeys:u1":"secret","reqseq":"3"}'
+        lg.save_account(
+            conn, _SCHEMA, lg.Credential("a1", "r1", 1, blob), now=NOW, profile={"mid": "u1"}
+        )
+        assert lg.load_credential(conn, _SCHEMA) == lg.Credential("a1", "r1", 1, blob)
+        # 之後 token 輪替、但沒有新的 storage（None）：不要把存好的那份蓋掉
+        lg.save_account(conn, _SCHEMA, lg.Credential("a2", "r2", 2, None), now=NOW)
+        assert lg.load_credential(conn, _SCHEMA) == lg.Credential("a2", "r2", 2, blob)
     finally:
         conn.close()

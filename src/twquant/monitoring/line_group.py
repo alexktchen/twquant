@@ -13,6 +13,7 @@ Node 轉接器 line-poster/（linejs 只有 JS 版），這裡用子程序呼叫
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import secrets
@@ -212,11 +213,13 @@ def new_token() -> str:
 
 @dataclass(frozen=True)
 class Credential:
-    """LINE 登入憑證（三個都要存，見模組說明）。"""
+    """LINE 登入憑證。前三個是給網站顯示／refresh 的；storage＝整份 linejs storage 的 JSON 字串
+    （端對端加密金鑰等），跨 run 接續 session 用，只在資料庫與轉接器之間流動、不給網站讀。"""
 
     access_token: str
     refresh_token: str | None
     expire: int | None
+    storage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -265,7 +268,12 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
                 expire=int(ev["expire"])
                 if ev.get("expire") is not None
                 else (cred.expire if cred else None),
+                storage=cred.storage if cred else None,
             )
+        elif kind == "storage":
+            data = str(ev.get("data") or "")
+            if data and cred is not None:
+                cred = replace(cred, storage=data)
         elif kind == "profile":
             profile = {k: str(v) for k, v in ev.items() if k != "type" and v is not None}
         elif kind == "group":
@@ -453,10 +461,14 @@ def ensure_tables(conn: Any, schema: str) -> None:
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
         cur.execute(
             f'CREATE TABLE IF NOT EXISTS "{schema}".line_account ('
-            "id text PRIMARY KEY, mid text, display_name text, "
+            "id text PRIMARY KEY, mid text, display_name text, storage_json text, "
             "access_token text NOT NULL, refresh_token text, token_expire bigint, "
             "updated_at timestamptz NOT NULL, paused_until timestamptz, busy_until timestamptz, "
             "last_error text)"
+        )
+        # storage_json 是後加的欄位（T-423 修 E2EE）：舊表（先前已登入過）要補上
+        cur.execute(
+            f'ALTER TABLE "{schema}".line_account ADD COLUMN IF NOT EXISTS storage_json text'
         )
         # enabled：網站「LINE 群組」分頁勾的（新加入的群組預設不發）；present：帳號現在還在不在這個群組
         cur.execute(
@@ -669,11 +681,12 @@ def load_credential(conn: Any, schema: str) -> Credential | None:
         if not _exists(cur, schema, "line_account"):
             return None
         cur.execute(
-            f'SELECT access_token, refresh_token, token_expire FROM "{schema}".line_account WHERE id = %s',
+            f"SELECT access_token, refresh_token, token_expire, storage_json "
+            f'FROM "{schema}".line_account WHERE id = %s',
             (ACCOUNT_ID,),
         )
         row = cur.fetchone()
-    return Credential(str(row[0]), row[1], row[2]) if row else None
+    return Credential(str(row[0]), row[1], row[2], row[3]) if row else None
 
 
 def save_account(
@@ -688,10 +701,12 @@ def save_account(
     with conn.cursor() as cur:
         cur.execute(
             f'INSERT INTO "{schema}".line_account '
-            "(id, mid, display_name, access_token, refresh_token, token_expire, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO UPDATE SET "
+            "(id, mid, display_name, access_token, refresh_token, token_expire, storage_json, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO UPDATE SET "
             "access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token, "
             "token_expire = EXCLUDED.token_expire, updated_at = EXCLUDED.updated_at, "
+            # storage 有換才更新（send 失敗等情況可能回 None，不要把登入存好的那份蓋掉）
+            "storage_json = coalesce(EXCLUDED.storage_json, line_account.storage_json), "
             "mid = coalesce(EXCLUDED.mid, line_account.mid), "
             "display_name = coalesce(EXCLUDED.display_name, line_account.display_name)",
             (
@@ -701,6 +716,7 @@ def save_account(
                 cred.access_token,
                 cred.refresh_token,
                 cred.expire,
+                cred.storage,
                 now,
             ),
         )
@@ -1021,11 +1037,16 @@ def web_login(
 
 
 def _cred_json(cred: Credential) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "accessToken": cred.access_token,
         "refreshToken": cred.refresh_token,
         "expire": cred.expire,
     }
+    if cred.storage:
+        # 壞掉的 storage 就當沒有（頂多少了端對端加密金鑰、改走重登）；不讓它擋下整次發送
+        with contextlib.suppress(json.JSONDecodeError):
+            out["storage"] = json.loads(cred.storage)
+    return out
 
 
 def credential_request(cred: Credential | None) -> dict[str, Any]:
