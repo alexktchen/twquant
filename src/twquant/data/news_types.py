@@ -38,20 +38,37 @@ class TypeClass:
     id: str
     label: str
     hint: str
+    sources: tuple[str, ...] = ()  # 吸收哪些（舊版）標籤 id；沒寫＝只有自己
 
 
 def load_classes(doc: dict[str, Any]) -> list[TypeClass]:
-    """configs/news.yaml types.classes → 類別；id 要唯一、小寫英文；最後一類要是 other。"""
+    """configs/news.yaml types.classes → 類別；id 要唯一、小寫英文；最後一類要是 other；from 不能有兩類搶同一個舊標籤。"""
     t = doc.get("types")
     if not isinstance(t, dict) or not isinstance(t.get("classes"), list) or not t["classes"]:
         raise DataError("news_types", None, "configs/news.yaml 缺 types.classes")
-    out = [TypeClass(str(c["id"]), str(c["label"]), str(c.get("hint", ""))) for c in t["classes"]]
+    out = [
+        TypeClass(
+            str(c["id"]),
+            str(c["label"]),
+            str(c.get("hint", "")),
+            tuple(str(s) for s in c.get("from", [c["id"]])),
+        )
+        for c in t["classes"]
+    ]
     ids = [c.id for c in out]
     if len(set(ids)) != len(ids) or any(not re.fullmatch(r"[a-z_]+", i) for i in ids):
         raise DataError("news_types", None, f"types.classes 的 id 要唯一、小寫英文：{ids}")
     if ids[-1] != "other":
         raise DataError("news_types", None, "types.classes 最後一類要是 other（分不出來的放這裡）")
+    srcs = [s for c in out for s in c.sources]
+    if len(set(srcs)) != len(srcs):
+        raise DataError("news_types", None, f"types.classes 的 from 有重複：{srcs}")
     return out
+
+
+def label_map(classes: Sequence[TypeClass]) -> dict[str, str]:
+    """舊標籤 id → 現行類別 id（含自己）。"""
+    return {s: c.id for c in classes for s in (*c.sources, c.id)}
 
 
 def ensure_tables(conn: Any) -> None:
@@ -116,8 +133,10 @@ def save_label(conn: Any, item_id: str, type_id: str, *, model: str, raw: str) -
     conn.commit()
 
 
-def labeled_vectors(conn: Any) -> tuple[list[str], np.ndarray, list[str]]:
-    """有標籤且有向量的：(item_id, 向量矩陣, 類型 id)。"""
+def labeled_vectors(
+    conn: Any, classes: Sequence[TypeClass] | None = None
+) -> tuple[list[str], np.ndarray, list[str]]:
+    """有標籤且有向量的：(item_id, 向量矩陣, 類型 id)。給 classes 就把舊標籤換算成現行類別（不認得的標籤 → DataError）。"""
     with conn.cursor() as cur:
         cur.execute(
             f"select t.item_id, e.vec::text, t.type from {SCHEMA}.type_labels t join {SCHEMA}.embeddings e on e.item_id = t.item_id order by t.item_id"
@@ -125,10 +144,19 @@ def labeled_vectors(conn: Any) -> tuple[list[str], np.ndarray, list[str]]:
         rows = cur.fetchall()
     if not rows:
         raise DataError("news_types", None, "還沒有任何類型標籤")
+    m = label_map(classes) if classes else None
+    labels = []
+    for r in rows:
+        t = str(r[2])
+        if m is not None and t not in m:
+            raise DataError(
+                "news_types", None, f"標籤 {t!r} 不在 types.classes（含 from）裡：{r[0]}"
+            )
+        labels.append(m[t] if m is not None else t)
     return (
         [str(r[0]) for r in rows],
         np.array([json.loads(r[1]) for r in rows], dtype=np.float64),
-        [str(r[2]) for r in rows],
+        labels,
     )
 
 

@@ -18,7 +18,20 @@ DOC = yaml.safe_load((_ROOT / "configs" / "news.yaml").read_text(encoding="utf-8
 
 def test_classes_from_repo_config_and_validation() -> None:
     classes = nt.load_classes(DOC)
-    assert classes[-1].id == "other" and len(classes) >= 8 and all(c.label for c in classes)
+    assert classes[-1].id == "other" and len(classes) >= 5 and all(c.label for c in classes)
+    m = nt.label_map(classes)
+    assert m["earnings"] == "earnings" and m["guidance"] == "earnings" and m["other"] == "other"
+    with pytest.raises(DataError, match="from 有重複"):
+        nt.load_classes(
+            {
+                "types": {
+                    "classes": [
+                        {"id": "a", "label": "A", "from": ["x"]},
+                        {"id": "other", "label": "O", "from": ["x"]},
+                    ]
+                }
+            }
+        )
     with pytest.raises(DataError, match="other"):
         nt.load_classes({"types": {"classes": [{"id": "a", "label": "A"}]}})
     with pytest.raises(DataError, match="唯一"):
@@ -40,11 +53,11 @@ def test_classes_from_repo_config_and_validation() -> None:
 def test_prompt_lists_classes_and_parse_is_strict() -> None:
     classes = nt.load_classes(DOC)
     p = nt.build_prompt(classes, "台積電上調財測", "內文" * 500, max_body=6)
-    assert "- earnings：財報營收" in p and p.endswith("內文內文內文")
+    assert "- earnings：財報展望" in p and p.endswith("內文內文內文")
     ids = [c.id for c in classes]
-    assert nt.parse_type('{"type": "capex"}', ids) == "capex"
-    assert nt.parse_type('<think>x</think>{"type":"macro"}', ids) == "macro"
-    assert nt.parse_type("order", ids) == "order"
+    assert nt.parse_type('{"type": "capital"}', ids) == "capital"
+    assert nt.parse_type('<think>x</think>{"type":"policy"}', ids) == "policy"
+    assert nt.parse_type("market", ids) == "market"
     with pytest.raises(DataError):
         nt.parse_type('{"type": "banana"}', ids)
 

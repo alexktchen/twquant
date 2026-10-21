@@ -6764,7 +6764,7 @@ def news_types_train(
     ids = [c.id for c in classes]
     conn = store.connect(_load_serving())
     try:
-        _, x, labels = nt.labeled_vectors(conn)
+        _, x, labels = nt.labeled_vectors(conn, classes)
     finally:
         conn.close()
     import numpy as np
