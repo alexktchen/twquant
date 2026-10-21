@@ -1,31 +1,65 @@
 // 一筆貼文怎麼送（純函式：真正送訊息的函式由呼叫端注入，測試不用 linejs）。
 import { lineBackoffMs } from "./backoff.mjs";
 
+const LABEL = { flexError: "圖卡", imageError: "圖片", textError: "文字" };
+const errText = (e) => String(e?.message ?? e).slice(0, 1000);
+
+/** 失敗的每一招都寫進錯誤；只有一招就原樣。 */
+function joined(errors) {
+  const parts = Object.entries(errors);
+  if (parts.length === 1) return parts[0][1];
+  return parts.map(([k, v]) => `${LABEL[k]}：${v}`).join("；").slice(0, 1000);
+}
+
 /**
- * 先發 Flex 圖卡；不是「LINE 叫我們慢一點」的失敗就改發附連結的文字（fallbackText），兩個都失敗才算沒送出。
- * 回 { sent, via, error?, flexError?, backoffMs? }。LINE 叫停時不試備案：帳號正被限制，再打只會更久。
+ * 依序試三招，前一招不是「LINE 叫我們慢一點」的失敗才試下一招：
+ *   1. Flex 圖卡（LIFF 分享）：整則是圖、點圖打開網站。
+ *   2. 直接發那張圖（job.card，一般圖片訊息：看得到、點了只是放大），再發一行附網址的文字（job.imageCaption）。
+ *   3. 摘要＋網址的文字（job.fallbackText）。
+ * 回 { sent, via: flex|image|text, error?, flexError?, imageError?, captionError?, backoffMs? }。
+ * LINE 叫停時不試下一招：帳號正被限制，再打只會更久。
  */
-export async function deliver(job, { sendFlex, sendText }) {
-  let flexError;
+export async function deliver(job, { sendFlex, sendImage, sendText }) {
+  const errors = {};
   try {
     await sendFlex(job.homeId, job.message);
     return { sent: true, via: "flex" };
   } catch (e) {
-    flexError = String(e?.message ?? e);
+    errors.flexError = errText(e);
   }
-  const backoff = lineBackoffMs(flexError);
-  if (backoff !== null || !job.fallbackText) {
-    return { sent: false, error: flexError.slice(0, 1000), backoffMs: backoff };
+  let backoff = lineBackoffMs(errors.flexError);
+  if (backoff !== null) return { sent: false, error: joined(errors), backoffMs: backoff };
+
+  if (job.card) {
+    try {
+      await sendImage(job.homeId, job.card);
+    } catch (e) {
+      errors.imageError = errText(e);
+    }
+    if (!errors.imageError) {
+      // 圖已經在群組裡了：後面那行網址發不出去也算送出（重送的話圖會出現兩次）
+      const out = { sent: true, via: "image", ...errors };
+      if (job.imageCaption) {
+        try {
+          await sendText(job.homeId, job.imageCaption);
+        } catch (e) {
+          out.captionError = errText(e);
+          const b = lineBackoffMs(out.captionError);
+          if (b !== null) out.backoffMs = b;
+        }
+      }
+      return out;
+    }
+    backoff = lineBackoffMs(errors.imageError);
+    if (backoff !== null) return { sent: false, error: joined(errors), backoffMs: backoff };
   }
+
+  if (!job.fallbackText) return { sent: false, error: joined(errors), backoffMs: null };
   try {
     await sendText(job.homeId, job.fallbackText);
-    return { sent: true, via: "text", flexError: flexError.slice(0, 1000) };
+    return { sent: true, via: "text", ...errors };
   } catch (e) {
-    const textError = String(e?.message ?? e);
-    return {
-      sent: false,
-      error: `圖卡：${flexError}；文字：${textError}`.slice(0, 1000),
-      backoffMs: lineBackoffMs(textError),
-    };
+    const textError = errText(e);
+    return { sent: false, error: joined({ ...errors, textError }), backoffMs: lineBackoffMs(textError) };
   }
 }

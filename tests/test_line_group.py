@@ -16,7 +16,7 @@ from PIL import Image
 
 from twquant.config import LineCardFont, LineGroupConfig, load_config
 from twquant.conventions import TZ
-from twquant.errors import ConfigError, ExecutionError
+from twquant.errors import ConfigError, DataError, ExecutionError
 from twquant.monitoring import line_card as lc
 from twquant.monitoring import line_group as lg
 from twquant.monitoring.push_notify import HotGroup
@@ -155,6 +155,16 @@ def test_ac2_job_request_for_adapter() -> None:
     assert _job().request(_cfg(fallback_text=False))["fallbackText"] == ""
 
 
+def test_ac13_job_request_image_fallback() -> None:
+    """Flex 不通時直接發那張圖（圖在請求的 cards 裡，用 token 對），後面一行網址（一般圖片點了不會開網站）。"""
+    cfg = _cfg()
+    req = _job().request(cfg)
+    assert req["card"] == "f" * 32
+    assert req["imageCaption"] == f"{cfg.image_caption}\nhttps://twquant.pages.dev/?tab=picks"
+    assert _job().request(_cfg(fallback_image=False))["card"] == ""
+    assert cfg.fallback_image  # 預設要發圖：使用者 2026-10-21「沒有發圖」
+
+
 # ── AC3 畫圖 ───────────────────────────────────────────────────────────────
 
 
@@ -285,6 +295,16 @@ def test_ac5_sent_by_flex_or_text() -> None:
     upd = _next({"sent": True, "via": "text", "flexError": "Failed to get LiffToken"})
     assert upd["status"] == "sent" and upd["via"] == "text"
     assert upd["last_error"] == "圖卡發不出去，改發文字：Failed to get LiffToken"
+
+
+def test_ac13_sent_as_image_keeps_every_note() -> None:
+    upd = _next({"sent": True, "via": "image", "flexError": "Failed to get LiffToken"})
+    assert upd["status"] == "sent" and upd["via"] == "image"
+    assert upd["last_error"] == "圖卡發不出去，改發圖片：Failed to get LiffToken"
+    upd = _next({"sent": True, "via": "image", "flexError": "liff", "captionError": "code=701"})
+    assert upd["last_error"] == "圖卡發不出去，改發圖片：liff；圖片後面那行網址沒發出去：code=701"
+    upd = _next({"sent": True, "via": "text", "flexError": "liff", "imageError": "obs HTTP 400"})
+    assert upd["last_error"] == "圖卡發不出去，改發文字：liff；圖片也發不出去：obs HTTP 400"
 
 
 def test_ac5_interrupted_send_is_unknown_not_retried() -> None:
@@ -484,30 +504,35 @@ def test_ac6_send_saves_rotated_credential_and_marks_rows() -> None:
     cfg = _cfg(web_schema=_SCHEMA, liff_id="123-abc")
     try:
         _login(conn)
-        _queue(conn, "picks", ["c1", "c2", "c3"])
+        _queue(conn, "picks", ["c1", "c2", "c3", "c4"])
         runner = FakeRunner(
             lg.AdapterOutput(
                 0,
                 lg.Credential("a2", "r2", 2),
                 {"mid": "u1"},
-                sending=(1, 2, 3),
+                sending=(1, 2, 3, 4),
                 results=(
                     {"id": 1, "sent": True, "via": "flex"},
                     {"id": 2, "sent": True, "via": "text", "flexError": "liff"},
+                    {"id": 3, "sent": True, "via": "image", "flexError": "liff"},
                 ),
             )
         )
         res = lg.send_due(conn, cfg, runner, now_fn=lambda: NOW, sleep=lambda s: None)
-        assert (res.sent, res.as_text, res.left) == (2, 1, 0)
-        assert res.failed == (f"#3 {lg.UNKNOWN_HINT}",)
+        assert (res.sent, res.as_image, res.as_text, res.left) == (3, 1, 1, 0)
+        assert res.failed == (f"#4 {lg.UNKNOWN_HINT}",)
         req = runner.calls[0][1]
         assert req["credential"] == {"accessToken": "a1", "refreshToken": "r1", "expire": 1}
         assert req["liffId"] == "123-abc"
-        assert [j["homeId"] for j in req["jobs"]] == ["c1", "c2", "c3"]
+        assert [j["homeId"] for j in req["jobs"]] == ["c1", "c2", "c3", "c4"]
+        # AC13 改發圖片：同一張圖發四個群組，請求裡只帶一份 PNG（base64）
+        assert list(req["cards"].values()) == [base64.b64encode(b"png").decode()]
+        assert {j["card"] for j in req["jobs"]} == set(req["cards"])
         assert lg.load_credential(conn, _SCHEMA) == lg.Credential("a2", "r2", 2)
         assert [r[3:5] for r in _rows(conn)] == [
             ("sent", "flex"),
             ("sent", "text"),
+            ("sent", "image"),
             ("unknown", None),
         ]
         assert lg.account_state(conn, _SCHEMA)["busy_until"] is None  # 用完放開
@@ -534,6 +559,19 @@ def test_ac6_backoff_waits_then_retries_remaining() -> None:
         assert (res.sent, res.left) == (2, 0)
         assert [r[3] for r in _rows(conn)] == ["sent", "sent"]
         assert [r[5] for r in _rows(conn)] == [0, 0]  # 叫停不算失敗次數
+    finally:
+        conn.close()
+
+
+def test_ac13_card_images_dedup_and_missing_card_raises() -> None:
+    conn = _connect_or_skip()
+    try:
+        _queue(conn, "picks", ["c1"])
+        token = lg.due_jobs(conn, _SCHEMA, NOW)[0].card_token
+        assert lg.card_images(conn, _SCHEMA, [token, token]) == {token: "cG5n"}
+        assert lg.card_images(conn, _SCHEMA, []) == {}
+        with pytest.raises(DataError, match="找不到圖卡"):
+            lg.card_images(conn, _SCHEMA, [token, "0" * 32])
     finally:
         conn.close()
 

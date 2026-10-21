@@ -14,9 +14,11 @@
 //   result      一筆貼文的結果（send）
 //   fatal       整個指令失敗（登不進去之類），之後 exit 2
 
+import { Buffer } from "node:buffer";
+
 import { deliver } from "./deliver.mjs";
 import {
-  clientFromCredential, dumpStorage, listGroups, loginByQr, readCredential, sendFlex, sendText, whoami,
+  clientFromCredential, dumpStorage, listGroups, loginByQr, readCredential, sendFlex, sendImage, sendText, whoami,
 } from "./line.mjs";
 
 const LOGIN_DEADLINE_MS = 180_000; // 掃 QR＋輸入 PIN 的時間
@@ -70,21 +72,51 @@ async function cmdGroups(req) {
   emitStorage(client);
 }
 
+/** 請求裡的圖卡 PNG（base64）→ Blob；同一張圖發很多群組，每張只解一次。 */
+function cardImages(cards) {
+  const cache = new Map();
+  return (token) => {
+    if (!cache.has(token)) {
+      const b64 = cards?.[token];
+      if (!b64) throw new Error(`請求裡沒有圖卡 ${token} 的圖`);
+      cache.set(token, new Blob([Buffer.from(b64, "base64")], { type: "image/png" }));
+    }
+    return cache.get(token);
+  };
+}
+
 /**
- * 請求：{ credential, liffId?, jobs: [{ id, homeId, message（Flex 訊息物件）, fallbackText }] }
- * 每筆先發 Flex 圖卡、不行改發文字（deliver.mjs）。LINE 叫我們慢一點（backoffMs）就停，後面的這一輪不送。
+ * 請求：{ credential, liffId?, cards: { token: PNG base64 },
+ *         jobs: [{ id, homeId, message（Flex 訊息物件）, card（圖卡 token，空＝不改發圖片）, imageCaption, fallbackText }] }
+ * 每筆先發 Flex 圖卡、不行直接發圖＋一行網址、再不行改發文字（deliver.mjs）。LINE 叫我們慢一點（backoffMs）就停，後面的這一輪不送。
  */
 async function cmdSend(req) {
   const client = await connect(req);
+  const image = cardImages(req.cards);
+  // LIFF 拿不到 token 是那個 LIFF app／這支帳號的事，換群組也一樣：同一輪不要每個群組都再去要一次
+  let liffDown = null;
   const send = {
-    sendFlex: (to, message) => sendFlex(client, to, message, { liffId: req.liffId || undefined }),
+    async sendFlex(to, message) {
+      if (liffDown) throw new Error(`${liffDown}（這一輪前面已失敗，沒再試）`);
+      try {
+        return await sendFlex(client, to, message, { liffId: req.liffId || undefined });
+      } catch (e) {
+        if (/Failed to get LiffToken/.test(String(e?.message))) liffDown = String(e.message).replace(/@\S+/, "");
+        throw e;
+      }
+    },
+    sendImage: (to, token) => sendImage(client, to, image(token)),
     sendText: (to, text) => sendText(client, to, text),
   };
   for (const job of req.jobs ?? []) {
     emit({ type: "sending", id: job.id });
     const out = { type: "result", id: job.id, ...(await deliver(job, send)) };
     if (!out.sent) console.error(`[line-poster] 第 ${job.id} 筆沒送出：${out.error}`);
-    else if (out.flexError) console.error(`[line-poster] 第 ${job.id} 筆圖卡發不出去、改發文字：${out.flexError}`);
+    else if (out.flexError) {
+      const how = out.via === "image" ? "改發圖片" : "改發文字";
+      console.error(`[line-poster] 第 ${job.id} 筆圖卡發不出去、${how}：${out.flexError}${out.imageError ? `；圖片：${out.imageError}` : ""}`);
+    }
+    if (out.captionError) console.error(`[line-poster] 第 ${job.id} 筆圖片後面那行網址沒發出去：${out.captionError}`);
     emit(out);
     if (out.backoffMs) break;
   }

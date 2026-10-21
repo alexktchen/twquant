@@ -86,6 +86,8 @@ class LineGroupConfig(BaseConfig):
     card_url_base: str = Field(pattern=r"^https://.*/$")
     liff_id: str
     footer: str
+    fallback_image: bool
+    image_caption: str = Field(min_length=1)
     fallback_text: bool
     cta: str = Field(min_length=1)
     node_bin: str = Field(min_length=1)

@@ -7514,7 +7514,7 @@ def line_group_send() -> None:
     finally:
         conn.close()
     typer.echo(
-        f"送出 {res.sent}（其中改發文字 {res.as_text}）、還在排隊 {res.left}"
+        f"送出 {res.sent}（其中改發圖片 {res.as_image}、改發文字 {res.as_text}）、還在排隊 {res.left}"
         + (f"（{res.note}）" if res.note else "")
     )
     if res.failed:

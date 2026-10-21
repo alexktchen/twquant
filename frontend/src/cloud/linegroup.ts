@@ -92,6 +92,8 @@ export const KIND_LABEL: Record<string, string> = {
 export function statusView(p: Pick<LinePostRow, 'status' | 'via'>): { text: string; tone: 'ok' | 'wait' | 'bad' } {
   switch (p.status) {
     case 'sent':
+      // 改發圖片：看得到圖、點了不會開網站（網址另一行）；改發文字：連圖都沒有
+      if (p.via === 'image') return { text: '已發（改發圖片＋網址）', tone: 'wait' }
       return { text: p.via === 'text' ? '已發（改發文字）' : '已發', tone: p.via === 'text' ? 'wait' : 'ok' }
     case 'queued':
       return { text: '排隊中', tone: 'wait' }

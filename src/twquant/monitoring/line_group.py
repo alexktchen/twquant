@@ -13,6 +13,7 @@ Node 轉接器 line-poster/（linejs 只有 JS 版），這裡用子程序呼叫
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import datetime as dt
 import json
@@ -27,7 +28,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from twquant.config import LineGroupConfig
-from twquant.errors import ConfigError, ExecutionError
+from twquant.errors import ConfigError, DataError, ExecutionError
 from twquant.monitoring.line_card import Card, CardRow, CardSection
 from twquant.monitoring.push_notify import HotGroup
 
@@ -175,8 +176,13 @@ def alt_text(card: Card) -> str:
 
 
 def fallback_text(alt: str, link: str) -> str:
-    """圖卡發不出去時的文字版：摘要＋連結（LINE 會把網址做成連結預覽）。"""
+    """圖卡、圖片都發不出去時的文字版：摘要＋連結（LINE 會把網址做成連結預覽）。"""
     return f"{alt}\n\n{link}"
+
+
+def image_caption(caption: str, link: str) -> str:
+    """改發圖片時，圖後面那一行：一般圖片點了不會開網站，網址要另外給。"""
+    return f"{caption}\n{link}"
 
 
 def flex_message(alt: str, image_url: str, width: int, height: int, link: str) -> dict[str, Any]:
@@ -391,7 +397,7 @@ class Job:
     height: int
 
     def request(self, cfg: LineGroupConfig) -> dict[str, Any]:
-        """給轉接器的那一筆：Flex 圖卡＋備案文字。"""
+        """給轉接器的那一筆：Flex 圖卡；備案依序是直接發圖（card，圖在請求的 cards 裡）、摘要文字。"""
         return {
             "id": self.id,
             "homeId": self.home_id,
@@ -402,10 +408,15 @@ class Job:
                 self.height,
                 self.link_url,
             ),
+            "card": self.card_token if cfg.fallback_image else "",
+            "imageCaption": image_caption(cfg.image_caption, self.link_url),
             "fallbackText": fallback_text(self.alt_text, self.link_url)
             if cfg.fallback_text
             else "",
         }
+
+
+_VIA_NOTE = {"image": "改發圖片", "text": "改發文字"}
 
 
 def next_state(
@@ -418,7 +429,7 @@ def next_state(
 ) -> dict[str, Any]:
     """依轉接器的結果決定這一列要改哪些欄位（純函數）。
 
-    - 送出：status=sent（via＝flex 或 text；改發文字時把圖卡的錯誤留著）
+    - 送出：status=sent（via＝flex、image 或 text；改發時把前面失敗的錯誤留著）
     - 沒結果但說了要送（送到一半中斷）：status=unknown，不重送
     - 沒結果也沒開始送：原樣（{}）
     - LINE 叫停：維持 queued，不算一次失敗；其他錯誤 attempts+1，到上限才標 failed
@@ -426,12 +437,21 @@ def next_state(
     if result is None:
         return {"status": "unknown", "last_error": UNKNOWN_HINT} if sending else {}
     if result.get("sent"):
-        flex_err = result.get("flexError")
+        via = str(result.get("via") or "flex")
+        notes = [
+            f"{label}{result[key]}"
+            for key, label in (
+                ("flexError", f"圖卡發不出去，{_VIA_NOTE.get(via, '改發文字')}："),
+                ("imageError", "圖片也發不出去："),
+                ("captionError", "圖片後面那行網址沒發出去："),
+            )
+            if result.get(key)
+        ]
         return {
             "status": "sent",
-            "via": str(result.get("via") or "flex"),
+            "via": via,
             "sent_at": now,
-            "last_error": f"圖卡發不出去，改發文字：{flex_err}"[:1000] if flex_err else None,
+            "last_error": "；".join(notes)[:1000] if notes else None,
         }
     error = result.get("error")
     if not error:
@@ -802,6 +822,21 @@ def due_jobs(conn: Any, schema: str, now: dt.datetime) -> list[Job]:
     return jobs
 
 
+def card_images(conn: Any, schema: str, tokens: Sequence[str]) -> dict[str, str]:
+    """這一輪要用到的圖卡 PNG（base64，給轉接器改發圖片用；同一張圖發很多群組只帶一份）。"""
+    want = sorted(set(tokens))
+    if not want:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(f'SELECT token, png FROM "{schema}".line_cards WHERE token = ANY(%s)', (want,))
+        got = {str(t): base64.b64encode(bytes(png)).decode("ascii") for t, png in cur.fetchall()}
+    conn.commit()
+    missing = [t for t in want if t not in got]
+    if missing:
+        raise DataError(f"{schema}.line_cards", None, f"排隊的貼文找不到圖卡：{missing}")
+    return got
+
+
 def apply_update(conn: Any, schema: str, job_id: int, upd: Mapping[str, Any]) -> None:
     """寫回一列的新狀態。"""
     if not upd:
@@ -819,6 +854,7 @@ class SendSummary:
     """send 一次的結果。left＝還留在隊裡等下一班的。"""
 
     sent: int = 0
+    as_image: int = 0
     as_text: int = 0
     failed: tuple[str, ...] = ()
     left: int = 0
@@ -850,18 +886,20 @@ def send_due(
     start = now_fn()
     lock_deadline = start + dt.timedelta(seconds=cfg.lock_wait_seconds)
     backoff_deadline = start + dt.timedelta(seconds=cfg.max_backoff_wait_seconds)
-    sent = as_text = 0
+    sent = as_image = as_text = 0
     failed: list[str] = []
+
+    def summary(left: int, note: str = "", extra: tuple[str, ...] = ()) -> SendSummary:
+        return SendSummary(sent, as_image, as_text, (*failed, *extra), left, note)
+
     while True:
         now = now_fn()
         if not due_jobs(conn, schema, now):
-            return SendSummary(sent, as_text, tuple(failed), 0)
+            return summary(0)
         if not acquire_lease(conn, schema, now, cfg.lease_seconds):
             if now >= lock_deadline:
                 left = _left(conn, schema, now)
-                return SendSummary(
-                    sent, as_text, tuple(failed), left, "帳號被另一班占著，留給下一班"
-                )
+                return summary(left, "帳號被另一班占著，留給下一班")
             sleep(cfg.poll_seconds)
             continue
         try:
@@ -870,7 +908,7 @@ def send_due(
                 if paused > backoff_deadline:
                     left = _left(conn, schema, now)
                     note = f"LINE 叫停到 {paused:%H:%M}，留給下一班"
-                    return SendSummary(sent, as_text, tuple(failed), left, note)
+                    return summary(left, note)
                 release_lease(conn, schema)
                 sleep((paused - now).total_seconds())
                 continue
@@ -879,6 +917,9 @@ def send_due(
             request = {
                 "credential": _cred_json(cred),
                 "liffId": cfg.liff_id,
+                "cards": card_images(conn, schema, [j.card_token for j in jobs])
+                if cfg.fallback_image
+                else {},
                 "jobs": [j.request(cfg) for j in jobs],
             }
             out = runner("send", request, cred)
@@ -898,6 +939,7 @@ def send_due(
                 apply_update(conn, schema, job.id, upd)
                 if upd.get("status") == "sent":
                     sent += 1
+                    as_image += upd.get("via") == "image"
                     as_text += upd.get("via") == "text"
                 if upd.get("status") in ("failed", "unknown"):
                     failed.append(f"#{job.id} {upd.get('last_error')}")
@@ -905,9 +947,9 @@ def send_due(
             set_account_status(conn, schema, paused_until=until, last_error=out.fatal)
             if out.fatal is not None:
                 left = _left(conn, schema, done)
-                return SendSummary(sent, as_text, (*failed, out.fatal), left, "轉接器失敗")
+                return summary(left, "轉接器失敗", (out.fatal,))
             if until is None:
-                return SendSummary(sent, as_text, tuple(failed), _left(conn, schema, done))
+                return summary(_left(conn, schema, done))
         finally:
             release_lease(conn, schema)
 

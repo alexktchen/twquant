@@ -4,11 +4,13 @@
 //   走的是 LINE **非官方**客戶端協定（linejs），違反 LINE 使用條款、帳號可能被停權：只能用備用帳號。
 //
 // 發到群組聊天（不是記事本，使用者 2026-10-21）：Flex 訊息走 LIFF 分享（api.line.me/message/v3/share，
-// 跟手機上 LIFF 的「分享給好友」同一條），個人帳號也能發「一張圖、點了開網站」；發不出去時改發一則附連結的文字
-// （talk.sendMessage，new_erp 對群組發結單提醒用的就是它）。
+// 跟手機上 LIFF 的「分享給好友」同一條），個人帳號也能發「一張圖、點了開網站」；發不出去時直接發那張圖
+// （一般圖片訊息）＋一行網址，圖也不行才只發附連結的文字（talk.sendMessage，new_erp 對群組發結單提醒用的就是它）。
 
 import { loginWithAuthToken, loginWithQR } from "@evex/linejs";
 import { MemoryStorage } from "@evex/linejs/storage";
+
+import { guardObsUpload } from "./obs.mjs";
 
 export const DEFAULT_DEVICE = process.env.LINE_DEVICE || "ANDROIDSECONDARY";
 
@@ -63,22 +65,24 @@ export function dumpStorage(client) {
 }
 
 /**
- * 網路瞬斷重試一次的 fetch（Thrift 與 LIFF 分享都走它）。只對「送不出去」的錯誤重試；
- * HTTP 回了什麼（4xx/5xx）、逾時中止都原樣丟回去。
+ * 網路瞬斷重試一次的 fetch（Thrift、LIFF 分享、obs 上傳圖片都走它）。只對「送不出去」的錯誤重試；
+ * HTTP 回了什麼（4xx/5xx）、逾時中止都原樣丟回去——只有 obs 上傳被拒會在這裡丟錯（guardObsUpload）。
  */
 const TRANSIENT_FETCH_RE = /error sending request|stream closed|broken pipe|connection (reset|closed|error)|ECONNRESET|EPIPE|fetch failed/i;
 function retryingFetch() {
   return async (info, init) => {
     const req = new Request(info, init);
     const retry = req.clone(); // body 是串流，第一趟讀掉就沒了，先留一份
+    let res;
     try {
-      return await globalThis.fetch(req);
+      res = await globalThis.fetch(req);
     } catch (e) {
       const msg = String(e?.message ?? e);
       if (e?.name === "AbortError" || !TRANSIENT_FETCH_RE.test(msg)) throw e;
       log(`fetch 瞬斷，重試一次：${msg.slice(0, 160)}`);
-      return await globalThis.fetch(retry);
+      res = await globalThis.fetch(retry);
     }
+    return guardObsUpload(req, res);
   };
 }
 
@@ -178,7 +182,21 @@ export async function sendFlex(client, chatMid, message, { liffId } = {}) {
   }
 }
 
-/** 對群組聊天發一段文字（Flex 發不出去時的備案，網址 LINE 會自己做成連結預覽）。 */
+/**
+ * 對群組聊天發一張圖（Flex 發不出去時的備案：看得到圖，但點了只是放大，不會開網站——網址另外用文字發）。
+ * 走 linejs 的端對端加密上傳（uploadMediaByE2EE，跟發文字一樣用登入時存下的金鑰）。png 是 Blob。
+ */
+export async function sendImage(client, chatMid, png) {
+  assertGroup(chatMid);
+  if (!png?.size) throw new Error("圖是空的");
+  try {
+    return await client.base.obs.uploadMediaByE2EE({ data: png, oType: "image", to: String(chatMid), filename: "twquant.png" });
+  } catch (e) {
+    throw withData(e);
+  }
+}
+
+/** 對群組聊天發一段文字（圖片後面附的網址、或圖都發不出去時的摘要；網址 LINE 會自己做成連結預覽）。 */
 export async function sendText(client, chatMid, text) {
   assertGroup(chatMid);
   if (!text) throw new Error("訊息不能是空的");
