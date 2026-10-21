@@ -6642,6 +6642,9 @@ def news_sentiment_label(
 
 @news_app.command("sentiment-probe")
 def news_sentiment_probe(
+    data_dir: str = typer.Option(
+        "", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"
+    ),
     report: str = typer.Option(
         "", help="報告寫到哪（空＝docs/reports/news-sentiment-probe-<日期>.md）"
     ),
@@ -6710,7 +6713,7 @@ def news_sentiment_probe(
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     if ev.passed:
         np.savez(
-            _CONFIG_DIR.parent / "data" / "models" / "news_sentiment_probe.npz",
+            _news_models_dir(data_dir) / "news_sentiment_probe.npz",
             w=probe.w,
             b=probe.b,
             version=np.array([ns.PROMPT_VERSION]),
