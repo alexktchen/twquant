@@ -193,165 +193,170 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   const today = taipeiDay(now.toISOString())
   const status = healthLine(health, now)
 
+  const showGalaxy = !search && !reviewOpen && mode === 'galaxy'
+
   return (
-    <main className="cq-news">
-      <div className="cq-news-bar">
-        <div className="cq-seg cq-seg-small">
-          {FILTERS.map((f) => (
-            <button key={f.key} className={filter === f.key && mode === 'list' ? 'on' : ''} onClick={() => { setFilter(f.key); setMode('list') }}>
-              {f.label}
+    <>
+      <main className={`cq-news${showGalaxy ? ' cq-news-gx' : ''}`}>
+        <div className="cq-news-bar">
+          <div className="cq-seg cq-seg-small">
+            {FILTERS.map((f) => (
+              <button key={f.key} className={filter === f.key && mode === 'list' ? 'on' : ''} onClick={() => { setFilter(f.key); setMode('list') }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="cq-news-types" role="group" aria-label="新聞類型">
+            {NEWS_TYPES.map((t) => (
+              <button
+                key={t.key}
+                className={`cq-news-type ${t.key}${typeFilter === t.key ? ' on' : ''}`}
+                aria-pressed={typeFilter === t.key}
+                onClick={() => { setTypeFilter(typeFilter === t.key ? null : t.key); setMode('list') }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="cq-seg cq-seg-small cq-news-mode" role="group" aria-label="看法">
+            <button className={mode === 'list' ? 'on' : ''} onClick={() => setMode('list')} aria-pressed={mode === 'list'}>
+              清單
             </button>
-          ))}
-        </div>
-        <div className="cq-news-types" role="group" aria-label="新聞類型">
-          {NEWS_TYPES.map((t) => (
-            <button
-              key={t.key}
-              className={`cq-news-type ${t.key}${typeFilter === t.key ? ' on' : ''}`}
-              aria-pressed={typeFilter === t.key}
-              onClick={() => { setTypeFilter(typeFilter === t.key ? null : t.key); setMode('list') }}
-            >
-              {t.label}
+            <button className={mode === 'galaxy' ? 'on' : ''} onClick={() => setMode('galaxy')} aria-pressed={mode === 'galaxy'}>
+              全景
             </button>
-          ))}
+          </div>
+          {review && reviewLeft(review) > 0 && (
+            <button className="cq-news-review-btn" onClick={() => setReviewOpen(true)} title="AI 草擬的關係線，核可後才算數">
+              <ClipboardCheck size={15} aria-hidden="true" />
+              待核可 {reviewLeft(review)}
+            </button>
+          )}
+          <span className={`cq-news-health ${status.tone}`} title={health?.sources.filter((s) => s.failing).map((s) => `${s.name}：${s.last_error ?? ''}`).join('\n') || undefined}>
+            <RefreshCw size={14} aria-hidden="true" />
+            {status.text}
+          </span>
         </div>
-        <div className="cq-seg cq-seg-small cq-news-mode" role="group" aria-label="看法">
-          <button className={mode === 'list' ? 'on' : ''} onClick={() => setMode('list')} aria-pressed={mode === 'list'}>
-            清單
+        {reviewOpen && review && <NewsReview groups={review} onChange={setReview} onClose={() => setReviewOpen(false)} />}
+        <form className="cq-news-search" role="search" onSubmit={runSearch} hidden={reviewOpen}>
+          <Search size={16} aria-hidden="true" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="照意思找新聞，例：輝達財測、美債殖利率" maxLength={60} aria-label="搜尋新聞" enterKeyHint="search" />
+          {(q || search) && (
+            <button type="button" className="cq-news-search-x" onClick={clearSearch} aria-label="清除搜尋">
+              <X size={16} aria-hidden="true" />
+            </button>
+          )}
+          <button type="submit" disabled={!q.trim() || searching}>
+            {searching ? '找…' : '找'}
           </button>
-          <button className={mode === 'galaxy' ? 'on' : ''} onClick={() => setMode('galaxy')} aria-pressed={mode === 'galaxy'}>
-            全景
-          </button>
-        </div>
-        {review && reviewLeft(review) > 0 && (
-          <button className="cq-news-review-btn" onClick={() => setReviewOpen(true)} title="AI 草擬的關係線，核可後才算數">
-            <ClipboardCheck size={15} aria-hidden="true" />
-            待核可 {reviewLeft(review)}
+        </form>
+        {searchErr && <div className="cq-err">{searchErr}</div>}
+        {!search && !reviewOpen && <NewsDigest refresh={refresh} onSearch={searchTopic} onStock={onStock} />}
+        {search && !reviewOpen && (
+          <section className="cq-news-found">
+            <h2>{searchLine(search)}</h2>
+            <NewsSearchResults items={search.items} />
+            <button className="cq-news-more" onClick={clearSearch}>
+              回到全部新聞
+            </button>
+          </section>
+        )}
+
+        {graph && (
+          <Suspense fallback={null}>
+            <NewsGraph
+              graph={graph}
+              onClose={() => setGraph(null)}
+              onStock={(sid, name) => {
+                setGraph(null)
+                onStock(sid, name)
+              }}
+            />
+          </Suspense>
+        )}
+        {err && <div className="cq-err">{err}</div>}
+        {loading && rows.length === 0 && !err && <p className="cq-war-mute cq-news-empty">讀取中…</p>}
+        {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
+
+        {!search && !reviewOpen && mode === 'list' && groups.map((g) => (
+          <section key={g.day} className="cq-news-day">
+            <h2>{dayTitle(g.day, today)}</h2>
+            <ul>
+              {g.rows.map((r) => {
+                const isOpen = open === r.id
+                const v = shown(r)
+                const lang = (l: 'en' | 'zh') => (l === 'en' ? 'en' : 'zh-Hant')
+                const ents = mentionChips(r)
+                const hasGraph = ents.chips.length > 0
+                return (
+                  <li key={r.id} className={isOpen ? 'open' : ''}>
+                    <div className="cq-news-head">
+                      <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-haspopup="dialog" onClick={() => setOpen(r.id)}>
+                        <span className={`cq-news-kind ${r.kind ?? 'tw'}`}>
+                          {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
+                          {r.kind ? KIND_LABEL[r.kind] : '其他'}
+                        </span>
+                        <span className="cq-news-title" lang={lang(v.lang)}>
+                          {r.type && r.type !== 'other' && (
+                            <em className={`cq-news-type ${r.type}`} title="新聞類型（模型自動分類）">
+                              {NEWS_TYPE_LABEL[r.type]}
+                            </em>
+                          )}
+                          {v.tag && (
+                            <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
+                              {v.tag}
+                            </em>
+                          )}
+                          {v.title}
+                        </span>
+                        {hasGraph && (
+                          <span className="cq-news-ents">
+                            {ents.chips.map((m) => (
+                              <span key={m.id} className={`cq-news-ent ${classOf(m.type)}`}>
+                                {m.label}
+                              </span>
+                            ))}
+                            {ents.more > 0 && <span className="cq-news-ent-more">+{ents.more}</span>}
+                          </span>
+                        )}
+                        <span className="cq-news-meta">
+                          <span className="cq-news-src">
+                            {r.source_name}・{timeLabel(r, g.day)}
+                          </span>
+                          <ChevronRight size={15} aria-hidden="true" />
+                        </span>
+                      </button>
+                      {hasGraph && (
+                        <button className="cq-news-graph" onClick={() => openGraph(r.id)} disabled={graphLoading !== null} title="這則新聞提到的公司、族群，往外牽動到哪些台股">
+                          <Network size={14} aria-hidden="true" />
+                          {graphLoading === r.id ? '讀取中…' : '關係圖'}
+                        </button>
+                      )}
+                    </div>
+                    {graphErr?.id === r.id && <p className="cq-news-gerr">{graphErr.msg}</p>}
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        ))}
+
+        {openRow && <NewsReader row={openRow} onClose={() => setOpen(null)} onGraph={openGraph} onStock={onStock} />}
+
+        {!search && !reviewOpen && mode === 'list' && rows.length > 0 && more !== 'done' && (
+          <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>
+            {more === 'loading' ? '讀取中…' : '更多'}
           </button>
         )}
-        <span className={`cq-news-health ${status.tone}`} title={health?.sources.filter((s) => s.failing).map((s) => `${s.name}：${s.last_error ?? ''}`).join('\n') || undefined}>
-          <RefreshCw size={14} aria-hidden="true" />
-          {status.text}
-        </span>
-      </div>
-      {reviewOpen && review && <NewsReview groups={review} onChange={setReview} onClose={() => setReviewOpen(false)} />}
-      <form className="cq-news-search" role="search" onSubmit={runSearch} hidden={reviewOpen}>
-        <Search size={16} aria-hidden="true" />
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="照意思找新聞，例：輝達財測、美債殖利率" maxLength={60} aria-label="搜尋新聞" enterKeyHint="search" />
-        {(q || search) && (
-          <button type="button" className="cq-news-search-x" onClick={clearSearch} aria-label="清除搜尋">
-            <X size={16} aria-hidden="true" />
-          </button>
-        )}
-        <button type="submit" disabled={!q.trim() || searching}>
-          {searching ? '找…' : '找'}
-        </button>
-      </form>
-      {searchErr && <div className="cq-err">{searchErr}</div>}
-      {!search && !reviewOpen && <NewsDigest refresh={refresh} onSearch={searchTopic} onStock={onStock} />}
-      {search && !reviewOpen && (
-        <section className="cq-news-found">
-          <h2>{searchLine(search)}</h2>
-          <NewsSearchResults items={search.items} />
-          <button className="cq-news-more" onClick={clearSearch}>
-            回到全部新聞
-          </button>
-        </section>
-      )}
-
-      {graph && (
-        <Suspense fallback={null}>
-          <NewsGraph
-            graph={graph}
-            onClose={() => setGraph(null)}
-            onStock={(sid, name) => {
-              setGraph(null)
-              onStock(sid, name)
-            }}
-          />
-        </Suspense>
-      )}
-      {err && <div className="cq-err">{err}</div>}
-      {loading && rows.length === 0 && !err && <p className="cq-war-mute cq-news-empty">讀取中…</p>}
-      {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
-
-      {!search && !reviewOpen && mode === 'galaxy' && (
+      </main>
+      {/* 星雲圖滿版（使用者 2026-10-21）：放在 920px 的新聞欄外面，左右貼齊視窗 */}
+      {showGalaxy && (
         <div ref={galaxyRef} className="cq-news-galaxy-anchor">
           <Suspense fallback={<p className="cq-war-mute cq-news-empty">全景讀取中…</p>}>
             <NewsGalaxy onStock={onStock} />
           </Suspense>
         </div>
       )}
-      {!search && !reviewOpen && mode === 'list' && groups.map((g) => (
-        <section key={g.day} className="cq-news-day">
-          <h2>{dayTitle(g.day, today)}</h2>
-          <ul>
-            {g.rows.map((r) => {
-              const isOpen = open === r.id
-              const v = shown(r)
-              const lang = (l: 'en' | 'zh') => (l === 'en' ? 'en' : 'zh-Hant')
-              const ents = mentionChips(r)
-              const hasGraph = ents.chips.length > 0
-              return (
-                <li key={r.id} className={isOpen ? 'open' : ''}>
-                  <div className="cq-news-head">
-                    <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-haspopup="dialog" onClick={() => setOpen(r.id)}>
-                      <span className={`cq-news-kind ${r.kind ?? 'tw'}`}>
-                        {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
-                        {r.kind ? KIND_LABEL[r.kind] : '其他'}
-                      </span>
-                      <span className="cq-news-title" lang={lang(v.lang)}>
-                        {r.type && r.type !== 'other' && (
-                          <em className={`cq-news-type ${r.type}`} title="新聞類型（模型自動分類）">
-                            {NEWS_TYPE_LABEL[r.type]}
-                          </em>
-                        )}
-                        {v.tag && (
-                          <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
-                            {v.tag}
-                          </em>
-                        )}
-                        {v.title}
-                      </span>
-                      {hasGraph && (
-                        <span className="cq-news-ents">
-                          {ents.chips.map((m) => (
-                            <span key={m.id} className={`cq-news-ent ${classOf(m.type)}`}>
-                              {m.label}
-                            </span>
-                          ))}
-                          {ents.more > 0 && <span className="cq-news-ent-more">+{ents.more}</span>}
-                        </span>
-                      )}
-                      <span className="cq-news-meta">
-                        <span className="cq-news-src">
-                          {r.source_name}・{timeLabel(r, g.day)}
-                        </span>
-                        <ChevronRight size={15} aria-hidden="true" />
-                      </span>
-                    </button>
-                    {hasGraph && (
-                      <button className="cq-news-graph" onClick={() => openGraph(r.id)} disabled={graphLoading !== null} title="這則新聞提到的公司、族群，往外牽動到哪些台股">
-                        <Network size={14} aria-hidden="true" />
-                        {graphLoading === r.id ? '讀取中…' : '關係圖'}
-                      </button>
-                    )}
-                  </div>
-                  {graphErr?.id === r.id && <p className="cq-news-gerr">{graphErr.msg}</p>}
-                </li>
-              )
-            })}
-          </ul>
-        </section>
-      ))}
-
-      {openRow && <NewsReader row={openRow} onClose={() => setOpen(null)} onGraph={openGraph} onStock={onStock} />}
-
-      {!search && !reviewOpen && mode === 'list' && rows.length > 0 && more !== 'done' && (
-        <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>
-          {more === 'loading' ? '讀取中…' : '更多'}
-        </button>
-      )}
-    </main>
+    </>
   )
 }
