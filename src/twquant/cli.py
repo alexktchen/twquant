@@ -6615,6 +6615,7 @@ def news_sentiment_label(
     sc = h["sentiment"]
     n_workers = workers or int(sc["workers"])
     max_body = int(sc["max_body_chars"])
+    per_batch = int(sc["batch"])
     model, url = str(sc["model"]), str(sc["ollama_url"])
     pending = ns.pending_corpus if scope == "corpus" else ns.pending_pairs
 
@@ -6641,7 +6642,9 @@ def news_sentiment_label(
             while True:
                 batch = [
                     p
-                    for p in pending(conn, min(500, limit - done) if limit else 500, names)
+                    for p in pending(
+                        conn, min(per_batch, limit - done) if limit else per_batch, names
+                    )
                     if (p[0], p[1]) not in seen
                 ]
                 if not batch:

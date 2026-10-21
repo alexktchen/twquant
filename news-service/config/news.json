@@ -511,7 +511,8 @@
       "probe_min_labels": 2000,
       "gate_f1": 0.7,
       "gate_auc": 0.85,
-      "workers": 16
+      "workers": 16,
+      "batch": 5000
     }
   },
   "types": {
