@@ -44,7 +44,17 @@ function sprite(rgb: string): HTMLCanvasElement {
   return s
 }
 
-export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) => void }) {
+export function NewsGalaxy({
+  onStock,
+  load = fetchNewsGalaxy,
+  standalone = false,
+}: {
+  onStock: (sid: string, name: string) => void
+  /** 資料從哪裡拿；公開頁（不登入）用自己的端點 */
+  load?: () => Promise<GalaxyData>
+  /** 公開頁：沒有上面三張卡與清單，說明文字不提它們 */
+  standalone?: boolean
+}) {
   const [data, setData] = useState<GalaxyData | null>(null)
   const [err, setErr] = useState('')
   const [sel, setSel] = useState<Sel>(null)
@@ -59,13 +69,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
 
   useEffect(() => {
     let stale = false
-    fetchNewsGalaxy()
+    load()
       .then((d) => !stale && setData(d))
       .catch((e: Error) => !stale && setErr(e.message))
     return () => {
       stale = true
     }
-  }, [])
+  }, [load])
 
   useEffect(() => {
     if (!data || !stageRef.current || !canvasRef.current || !labelsRef.current) return
@@ -434,7 +444,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
         </div>
       </div>
-      <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放，點一顆看細節。要快速讀新聞用上面三張卡或「清單」。</p>
+      <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放，點一顆看細節。{standalone ? '' : '要快速讀新聞用上面三張卡或「清單」。'}</p>
     </section>
   )
 }

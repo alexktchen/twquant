@@ -42,3 +42,9 @@
   .gx-stage { height: 62vh; }
   .gx-legend { bottom: 54px; }
 }
+
+/* 公開星雲圖頁（/api/prototype/galaxy，不用登入） */
+.cq-public-galaxy { min-height: 100vh; background: #0f1115; color: #e6e9ef; padding: 12px 12px 24px; max-width: 960px; margin: 0 auto; }
+.cq-public-galaxy-head { display: flex; align-items: baseline; gap: 10px; padding: 4px 4px 12px; font-size: 16px; }
+.cq-public-galaxy-brand { font-weight: 800; font-size: 20px; color: #e6e9ef; text-decoration: none; }
+.cq-public-galaxy-head span { color: #9aa3ad; }
