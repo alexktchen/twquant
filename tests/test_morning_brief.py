@@ -38,6 +38,7 @@ from twquant.reporting.morning_brief import (
     user_payload,
     write_brief,
 )
+from twquant.reporting.news_events import NewsEvent
 
 _ROOT = Path(__file__).resolve().parent.parent
 DAY = dt.date(2026, 10, 17)
@@ -911,3 +912,99 @@ def test_morning_prev_evening_claims_must_match_stance() -> None:
     # 沒有昨天盤後快訊：提到昨日盤後就丟（不准編）
     bare = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
     assert check_prev_evening(["【研判】延續昨日盤後偏空看法"], "偏空", bare, notes) == []
+
+
+# ── 晨報接新聞（2026-10-20）：新聞服務的多家同報事件當事實句 ──────────────────────────
+def _event(
+    ev: str, title: str, outlets: tuple[str, ...], hour: int, stocks: tuple[str, ...] = ()
+) -> NewsEvent:
+    t = dt.datetime(2026, 10, 16, hour, 0, tzinfo=TZ)
+    return NewsEvent(
+        event_id=ev,
+        title=title,
+        url=f"https://x/{ev}",
+        outlets=outlets,
+        items=len(outlets),
+        first_seen_at=t,
+        last_seen_at=t,
+        stocks=stocks,
+    )
+
+
+def test_events_become_fact_lines_and_direction_checks_use_them() -> None:
+    seen: list[tuple[dt.datetime, dt.datetime]] = []
+
+    def events(since: dt.datetime, until: dt.datetime) -> list[NewsEvent]:
+        seen.append((since, until))
+        return [
+            _event(
+                "A",
+                "台積電跌25元至2395元 台股早盤挫逾400點",
+                ("中央社", "經濟日報", "鉅亨網"),
+                10,
+                ("台積電",),
+            ),
+            _event(
+                "B", "聯準會暗示降息 美債殖利率下滑", ("Bloomberg", "CNBC", "中央社", "鉅亨網"), 22
+            ),
+        ]
+
+    inp = gather(
+        _conn(),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        fetch_events=events,
+        now=NOW,
+    )
+    assert seen == [(dt.datetime(2026, 10, 16, 14, 0, tzinfo=TZ), NOW)], (
+        "盤前：前一天 14:00 到現在，跟頭條同一個時間窗"
+    )
+    f = facts(inp)
+    assert (
+        "多家同報（3 家：中央社、經濟日報、鉅亨網；10/16 10:00）：台積電跌25元至2395元 台股早盤挫逾400點（提到 台積電）"
+        in f
+    )
+    assert (
+        "多家同報（4 家：Bloomberg、CNBC、中央社、鉅亨網；10/16 22:00）：聯準會暗示降息 美債殖利率下滑"
+        in f
+    )
+    # 事實句裡的數字可以被引用
+    ok = MorningBrief(
+        headline="台積電跌25元，台股早盤挫逾400點",
+        bullets=["【大事】3 家媒體報台積電跌25元"],
+        risk_note="",
+        stance="",
+        strategy="",
+    )
+    out, notes = check_brief(ok, inp)
+    assert out is not None and notes == []
+    # 方向寫反也會被抓：事件說殖利率下滑，模型寫上升
+    inp.news_subjects = ["美債殖利率"]
+    assert reversed_directions("美債殖利率上升", inp) == ["美債殖利率"]
+
+
+def test_events_failure_is_recorded_not_raised_and_absent_means_empty() -> None:
+    def broken(since: dt.datetime, until: dt.datetime) -> list[NewsEvent]:
+        raise RuntimeError("connection refused")
+
+    inp = gather(
+        _conn(),
+        "serving",
+        DAY,
+        CFG,
+        CATS,
+        fetch_quote=_quote,
+        fetch_night=_night,
+        fetch_events=broken,
+        now=NOW,
+    )
+    assert inp.events == [] and any(e.startswith("多家同報") and "refused" in e for e in inp.errors)
+    bare = gather(
+        _conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night, now=NOW
+    )
+    assert bare.events == [] and not any(e.startswith("多家同報") for e in bare.errors)
+    assert not any(x.startswith("多家同報") for x in facts(bare))

@@ -22,8 +22,8 @@ FactorFn = Callable[["PitView", dict[str, object]], pl.DataFrame]
 
 # 名稱格式（SPEC-000 命名 / REVIEW M14）：category.snake_name，可選 _Nd 視窗後綴
 # ml：ML 排序層 meta-factor（SPEC-010 §6）——讀 ml_scores 表的薄因子，非新算因子
-_CATEGORIES = ("price", "volume", "chip", "fundamental", "market", "ml")
-_NAME_RE = re.compile(r"^(price|volume|chip|fundamental|market|ml)\.[a-z0-9_]+$")
+_CATEGORIES = ("price", "volume", "chip", "fundamental", "market", "ml", "news")
+_NAME_RE = re.compile(r"^(price|volume|chip|fundamental|market|ml|news)\.[a-z0-9_]+$")
 
 
 @dataclass(frozen=True)

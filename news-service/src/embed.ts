@@ -25,6 +25,8 @@ export type EmbedConfig = {
     /** 這些來源不合併（聯準會新聞稿是同一個範本換名字，分數高但不是同一件事） */
     exclude_sources: string[]
   }
+  /** 事件追蹤（T-420）：新開的事件群跟近 window_days 天最像的舊群中心 cosine ≥ min_score → 串成同一條線 */
+  thread: { min_score: number; window_days: number }
   similar: { limit: number; min_score: number }
   search: { limit: number; max_query_chars: number; min_score: number }
 }
@@ -41,6 +43,8 @@ export function validateEmbedConfig(x: unknown): EmbedConfig {
   const score = (v: unknown) => typeof v === 'number' && v > 0 && v < 1
   const cl = c!.cluster
   if (!cl || !score(cl.min_score) || !Number.isInteger(cl.window_hours) || cl.window_hours < 1 || !Array.isArray(cl.exclude_sources)) fail('cluster')
+  const th = c!.thread
+  if (!th || !score(th.min_score) || !Number.isInteger(th.window_days) || th.window_days < 1) fail('thread')
   const si = c!.similar
   if (!si || !Number.isInteger(si.limit) || si.limit < 1 || !score(si.min_score)) fail('similar')
   const se = c!.search
@@ -100,6 +104,17 @@ export function assignCluster(item: Pick<EmbedSource, 'item_id' | 'source'>, nei
   return { item_id: item.item_id, cluster_id: item.item_id, seed_item_id: null, score: null }
 }
 
+/** 近期最像的舊事件群（中心向量） */
+export type NearCluster = { cluster_id: string; thread_id: string; score: number }
+export type ThreadRow = { cluster_id: string; thread_id: string; seed_cluster_id: string | null; score: number | null }
+
+/** 新開的事件群要不要接上舊的線：最像的舊群 ≥ min_score → 接它那條線；否則自己開一條（thread_id＝cluster_id）。 */
+export function assignThread(clusterId: string, nearest: NearCluster | null, cfg: EmbedConfig['thread']): ThreadRow {
+  if (nearest && nearest.cluster_id !== clusterId && nearest.score >= cfg.min_score)
+    return { cluster_id: clusterId, thread_id: nearest.thread_id, seed_cluster_id: nearest.cluster_id, score: nearest.score }
+  return { cluster_id: clusterId, thread_id: clusterId, seed_cluster_id: null, score: null }
+}
+
 export type EmbeddingRow = { item_id: string; model: string; text_sha: string; vec: string }
 export type EmbedUsage = { ts: string; task: string; model_id: string; input_tokens: number; output_tokens: number; neurons: number }
 
@@ -119,9 +134,14 @@ export type EmbedDeps = {
   saveUsage: (u: EmbedUsage) => Promise<void>
   /** 刪掉超過保留期的向量，回刪了幾筆 */
   prune: (retentionDays: number) => Promise<number>
+  /** 事件群中心：成員加入就更新（第一個成員＝自己） */
+  upsertCentroid: (clusterId: string, vec: number[], seenAt: string) => Promise<void>
+  /** 近 windowDays 天、比 before 早開始、不是自己的最像舊群 */
+  nearestCluster: (vec: string, before: string, windowDays: number, excludeCluster: string) => Promise<NearCluster | null>
+  saveThread: (t: ThreadRow) => Promise<void>
 }
 
-export type EmbedResult = { embedded: number; clusters_joined: number; budget_stop: boolean; pruned: number }
+export type EmbedResult = { embedded: number; clusters_joined: number; threads_joined: number; budget_stop: boolean; pruned: number }
 
 /** 一批一批算；額度（跟翻譯共用的每日 Neurons）用完就停。一則一則依時間先後寫，後面的才找得到前面的當同事件。 */
 export async function embedPending(cfg: EmbedConfig, dailyNeurons: number, deps: EmbedDeps): Promise<EmbedResult> {
@@ -130,7 +150,7 @@ export async function embedPending(cfg: EmbedConfig, dailyNeurons: number, deps:
   // 先刪過期的（不花額度），再算新的
   const pruned = await deps.prune(cfg.retention_days)
   const todo = await deps.pending(cfg.per_run_limit)
-  const res: EmbedResult = { embedded: 0, clusters_joined: 0, budget_stop: false, pruned }
+  const res: EmbedResult = { embedded: 0, clusters_joined: 0, threads_joined: 0, budget_stop: false, pruned }
   for (let i = 0; i < todo.length; i += cfg.batch) {
     if (used >= dailyNeurons) {
       res.budget_stop = true
@@ -146,7 +166,14 @@ export async function embedPending(cfg: EmbedConfig, dailyNeurons: number, deps:
       const c = assignCluster(batch[k], await deps.neighbors(vec, batch[k].first_seen_at, cfg.cluster.window_hours), cfg.cluster)
       await deps.save({ item_id: batch[k].item_id, model: cfg.model, text_sha: await deps.sha(texts[k]), vec }, c)
       res.embedded += 1
+      await deps.upsertCentroid(c.cluster_id, r.vecs[k], batch[k].first_seen_at)
       if (c.seed_item_id !== null) res.clusters_joined += 1
+      else {
+        // 新開的事件群：找近期最像的舊群，接上它的線（T-420）
+        const t = assignThread(c.cluster_id, await deps.nearestCluster(vec, batch[k].first_seen_at, cfg.thread.window_days, c.cluster_id), cfg.thread)
+        await deps.saveThread(t)
+        if (t.seed_cluster_id !== null) res.threads_joined += 1
+      }
     }
   }
   return res

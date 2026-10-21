@@ -8,8 +8,9 @@ const cfg = validateConfig(JSON.parse(readFileSync(new URL('../config/news.json'
 const q = (s: string) => parseItemsQuery(new URLSearchParams(s), cfg)
 
 test('T-400：/v1/items 參數——預設、上限、時間、來源與種類要合法', () => {
-  assert.deepEqual(q(''), { since: null, until: null, kind: null, source: null, limit: ITEMS_DEFAULT })
+  assert.deepEqual(q(''), { type: null, since: null, until: null, kind: null, source: null, limit: ITEMS_DEFAULT })
   assert.deepEqual(q('since=2026-10-19T00:00:00%2B08:00&kind=intl&source=cnbc-top&limit=5'), {
+    type: null,
     since: '2026-10-18T16:00:00.000Z',
     until: null,
     kind: 'intl',
@@ -59,4 +60,10 @@ test('2026-10-20 新加的來源：11 個都在、代號不重複、台灣中文
     assert.ok(ids.includes(id), id)
   assert.equal(new Set(ids).size, ids.length)
   for (const s of cfg.sources.filter((x) => x.kind === 'tw')) assert.equal(s.lang, 'zh', `${s.id}：台灣來源都是中文，不花翻譯額度`)
+})
+
+test('T-421：?type= 要是探針的類別之一', () => {
+  assert.equal(parseItemsQuery(new URLSearchParams('type=earnings'), cfg, ['earnings', 'other']).type, 'earnings')
+  assert.throws(() => parseItemsQuery(new URLSearchParams('type=earnings'), cfg), /新聞類型/)
+  assert.throws(() => parseItemsQuery(new URLSearchParams('type=banana'), cfg, ['earnings', 'other']), /banana/)
 })

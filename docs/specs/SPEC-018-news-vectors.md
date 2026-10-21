@@ -110,6 +110,10 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 - **先 `pg_dump` 再換**（記憶 2026-09-10：Docker 重設曾把整顆 PG 磁碟刪掉；大型 PG 工作前後都要 dump；Git Bash 下 `pg_dump` 路徑會被 MSYS 轉壞，照 WHERE-IS-EVERYTHING ⑬）。
 - 官方 pgvector 映像是 Debian（glibc），現在的 `postgres:16-alpine` 是 musl：**文字欄位的排序規則版本會不同**。切換後必做
   `ALTER DATABASE twquant REFRESH COLLATION VERSION` 並 `REINDEX DATABASE twquant`（否則 PG 會一直警告、B-tree 索引可能壞）。REINDEX 時間要先在 dump 還原的副本上量，寫進 T-412 完成註記。
+  - **實做紀錄（2026-10-20，T-412）**：`REFRESH COLLATION VERSION` 回「invalid collation version change」——alpine 映像沒記過版本，略過無害。
+    `REINDEX DATABASE` 跑到一半後端 segfault（平行維護工人），PG 自動進復原、沒掉資料；改成只重建 114 個索引欄含文字的索引、
+    每條前 `SET max_parallel_maintenance_workers = 0`（`scripts/pg_reindex_collatable.sh`），約 2 小時，資料庫 70 → 57 GB。
+    切換前的 dump：`data/backup/twquant_serving_20261020-2333_pre-pgvector.dump`（11.2 GB）。
 - `CREATE EXTENSION vector` 一次；`twquant serving migrate` 檢查擴充存在，沒有就 raise（不靜默退回無向量模式）。
 - 切換當天不跑任何回測、訓練或 pipeline（記憶：不要同時跑重工作）。
 
@@ -148,6 +152,16 @@ news.mentions（method＝semantic，草稿）┘                 news_hist.menti
 - 每個因子的測試檔必須呼叫 `assert_no_lookahead`，並加一條「把截點往前移，值只能變少或不變」的性質測試（則數類）。
 - 缺值規則：沒有新聞＝null（LightGBM 原生處理），**不補 0**；但 `count_1d` 沒新聞＝0 是真值不是缺值（唯一例外，在 schema 註明）。
 - 標準化：同既有因子，逐日橫斷面 z（`standardize`）。
+- **實做紀錄（2026-10-21，T-414）**：特徵由資料層 `data/news_features.py` 先算進主庫 `news_features`（含 `available_at`），
+  `factors/news.py` 只讀表（跟 ml_scores 同套路）。跟上表的差異：
+  （a）`cutoff_hour` 是 **19:00** 不是 21:00——本機排程 19:00 跑，截點要 ≤ 排程時間；只算截點已過的日子，不蓋未來時間；
+  PitView 的訊號截點 20:00，19:00 的列當天看得到；
+  （b）novelty 的「過去 60 日」以每則新聞自己的日期往回算（先算每則對舊聞的最大 cosine、存 `news_hist.item_stock_sim`，再對近 5 日取最大）；
+  （c）族群成員用現在的 `stock_group` 快照（主庫沒有歷史，D-177）；
+  （d）attention 的分母在語料開頭用「已有天數」不是 60；
+  （e）MOPS 只算公告公司本身（tag），內文提到的對手方不算它的公告；
+  （f）mops_novelty 只看最近 20 天內的最新公告，更久沒公告＝null。
+  主題中心：≤ 2021-12-31 的 36,478 則、k-means 16、seed 7、版本 2026-10-21.1，寫在每列的 `topic_version`。
 
 ## 6. 情緒（T-413）
 

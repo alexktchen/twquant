@@ -352,6 +352,43 @@ ML_SCORES = _schema(
     },
 )
 
+NEWS_FEATURES = _schema(
+    "news_features",
+    1,
+    {
+        "date": _col(pl.Date),
+        "stock_id": _col(pl.String),
+        "available_at": _col(TW_DT),  # date 的 cutoff_hour（configs/news_factors.yaml）；PIT 邊界
+        "count_1d": _col(pl.Float64, nullable=True),
+        "attention_5d": _col(pl.Float64, nullable=True),
+        "attention_20d": _col(pl.Float64, nullable=True),
+        "novelty": _col(pl.Float64, nullable=True),
+        "sent_1d": _col(pl.Float64, nullable=True),
+        "sent_5d": _col(pl.Float64, nullable=True),
+        "sent_shift": _col(pl.Float64, nullable=True),
+        "sector_heat": _col(pl.Float64, nullable=True),
+        "mops_count_5d": _col(pl.Float64, nullable=True),
+        "mops_novelty": _col(pl.Float64, nullable=True),
+        "topic_01": _col(pl.Float64, nullable=True),
+        "topic_02": _col(pl.Float64, nullable=True),
+        "topic_03": _col(pl.Float64, nullable=True),
+        "topic_04": _col(pl.Float64, nullable=True),
+        "topic_05": _col(pl.Float64, nullable=True),
+        "topic_06": _col(pl.Float64, nullable=True),
+        "topic_07": _col(pl.Float64, nullable=True),
+        "topic_08": _col(pl.Float64, nullable=True),
+        "topic_09": _col(pl.Float64, nullable=True),
+        "topic_10": _col(pl.Float64, nullable=True),
+        "topic_11": _col(pl.Float64, nullable=True),
+        "topic_12": _col(pl.Float64, nullable=True),
+        "topic_13": _col(pl.Float64, nullable=True),
+        "topic_14": _col(pl.Float64, nullable=True),
+        "topic_15": _col(pl.Float64, nullable=True),
+        "topic_16": _col(pl.Float64, nullable=True),
+        "topic_version": _col(pl.String, nullable=True),
+    },
+)
+
 # ── 投信／ETF 資金流（SPEC-016／T-335）：只寫 PG（見 serving/schema.py 的 FUND_FLOW_SPECS）──
 
 ETF_META = _schema(
@@ -441,6 +478,7 @@ SCHEMAS: dict[str, pa.DataFrameSchema] = {
     "ingest_log": INGEST_LOG,
     "structural_breaks": STRUCTURAL_BREAKS,
     "ml_scores": ML_SCORES,
+    "news_features": NEWS_FEATURES,
     "etf_meta": ETF_META,
     "etf_units_daily": ETF_UNITS_DAILY,
     "etf_holdings_daily": ETF_HOLDINGS_DAILY,

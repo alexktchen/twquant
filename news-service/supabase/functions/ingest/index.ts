@@ -1,12 +1,14 @@
 // POST /functions/v1/ingest（T-400、T-401、T-402、T-410）：pg_cron 每 30 分鐘呼叫（supabase/setup/schedule.sql）——先進料、再翻譯、再比對提到哪些實體、再從新聞學關係（cooccur）、再算向量與同事件合併。
 // 先回 202、工作放 EdgeRuntime.waitUntil：pg_net 只等 5 秒，九個來源一起抓要十幾秒。
 import config from '../../../config/news.json' with { type: 'json' }
+import typeWeights from '../../../config/news_types.json' with { type: 'json' }
 import { runIngest, validateConfig } from '../../../src/ingest.ts'
 import { learnCooccur } from '../../../src/cooccur.ts'
 import { detectPending } from '../../../src/mention.ts'
 import { embedPending } from '../../../src/embed.ts'
 import { translatePending } from '../../../src/translate.ts'
-import { authorized, cooccurDeps, db, embedDeps, fetchFeed, json, mentionDeps, pgStore, translateDeps } from '../_shared/io.ts'
+import { typePending, validateTypeWeights } from '../../../src/types.ts'
+import { authorized, cooccurDeps, db, embedDeps, fetchFeed, json, mentionDeps, pgStore, translateDeps, typeDeps } from '../_shared/io.ts'
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void }
 
@@ -33,9 +35,12 @@ async function run(runId: string): Promise<void> {
     // 第四步（2026-10-20）：從新聞學關係——一起被提到夠多次的兩方長出「新聞常一起提到」的線
     const co = await learnCooccur(cfg.cooccur, cooccurDeps(sql, cfg.mention.rule_version))
     console.log(`news cooccur ${runId}：${JSON.stringify(co)}`)
-    // 第五步（T-410）：向量與同事件合併；英文等翻譯完才算（見 embedDeps 的 pending），額度跟翻譯共用
+    // 第五步（T-410）：向量與同事件合併；英文等翻譯完才算（見 embedDeps 的 pending），額度跟翻譯共用，翻譯會留 translate.reserve_for_embed 給這一步
     const em = await embedPending(cfg.embed, cfg.translate.daily_neurons, embedDeps(sql, cfg.embed))
     console.log(`news embed ${runId}：${JSON.stringify(em)}`)
+    // 第六步（T-421）：新聞類型——本機訓好的探針對向量算一次，不花額度；舊新聞第一次部署後幾輪補完
+    const ty = await typePending(validateTypeWeights(typeWeights), cfg.embed.per_run_limit * 5, typeDeps(sql, typeWeights.version))
+    console.log(`news types ${runId}：${JSON.stringify(ty)}`)
     if (trError !== null) throw trError
   } finally {
     await sql.end({ timeout: 5 })

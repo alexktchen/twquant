@@ -22,7 +22,20 @@ export type NewsRow = {
   summary_zh?: string | null
   /** 這則提到的實體（T-402，一度；台股在前、再國外、再族群／主題）。舊的服務沒有這欄 → undefined */
   mentions?: NewsMention[]
+  /** 新聞類型（T-421）：財報展望／訂單產品／擴廠併購／政策事故／盤勢行情／其他；還沒分類或舊服務 → null／undefined */
+  type?: NewsType | null
 }
+export type NewsType = 'earnings' | 'business' | 'capital' | 'policy' | 'market' | 'other'
+/** 類型的中文與顏色類別（地鐵告示：顏色歸類、少字）；跟 news-service/config/news_types.json 的 labels 一致 */
+export const NEWS_TYPES: { key: NewsType; label: string }[] = [
+  { key: 'earnings', label: '財報展望' },
+  { key: 'business', label: '訂單產品' },
+  { key: 'capital', label: '擴廠併購' },
+  { key: 'policy', label: '政策事故' },
+  { key: 'market', label: '盤勢行情' },
+  { key: 'other', label: '其他' },
+]
+export const NEWS_TYPE_LABEL: Record<NewsType, string> = Object.fromEntries(NEWS_TYPES.map((t) => [t.key, t.label])) as Record<NewsType, string>
 export type NewsMention = { id: string; type: 'tw' | 'us' | 'company' | 'group' | 'theme'; label: string }
 
 /** 列上最多顯示幾個實體小標（其餘收成「+N」） */
@@ -155,7 +168,7 @@ export type StockNewsItem = {
   draft: boolean
   path: StockNewsStep[]
 }
-export type StockNews = { id: string; days: number; items: StockNewsItem[] }
+export type StockNews = { id: string; days: number; items: StockNewsItem[]; quiet?: Quiet | null }
 export type NewsCount = { direct: number; indirect: number }
 export type StockNewsCounts = { days: number; counts: Record<string, NewsCount> }
 
@@ -180,10 +193,11 @@ export function pathText(it: Pick<StockNewsItem, 'path' | 'draft'>): string {
 export const shouldJumpToNews = (focus: number, done: number, loadedId: string | null, sid: string): boolean =>
   focus > 0 && focus !== done && loadedId === `tw:${sid}`
 
-/** 個股頁標題右邊那一句：「近 7 天・直接 1・間接 19」。 */
+/** 個股頁標題右邊那一句：「近 7 天・直接 1・間接 19」；久違的消息再加一句。 */
 export function stockNewsSummary(d: StockNews): string {
   const direct = d.items.filter((x) => x.degree === 1).length
-  return `近 ${d.days} 天・直接 ${direct}・間接 ${d.items.length - direct}`
+  const q = quietNote(d.quiet)
+  return `近 ${d.days} 天・直接 ${direct}・間接 ${d.items.length - direct}${q ? `・${q}` : ''}`
 }
 
 // ── 相似新聞與語意搜尋（T-410／SPEC-018）：新聞服務用 bge-m3 向量找出來的 ────────────────────────
@@ -216,6 +230,42 @@ export function similarNote(d: SimilarNews): string | null {
   if (!d.ready) return '這則還在算（英文新聞翻譯完才算，通常 30 分鐘內）'
   if (d.items.length === 0) return '沒有內容相近的新聞'
   return null
+}
+
+/** 閱讀卡「相似新聞」先列幾則（其餘按「再看 N 則」） */
+export const READER_RELATED = 4
+
+/** 比較用的標題：去掉空白與標點、英文小寫（「加高績攻AI高速光通訊 明年展望謹慎樂觀」≈「加高績攻 AI 高速光通訊，明年展望謹慎樂觀」） */
+export const titleKey = (t: string): string => t.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '')
+
+export type ReaderSimilar = SimilarItem & { sameTitle: boolean }
+/** 閱讀卡用：同一事件與其他相似新聞分開；同標題只留一則（分數高的）；其他相似新聞不重複列同一事件已有的標題、也不列跟這則同標題的。
+ *  同一事件裡跟這則同標題的照樣列（那是「另一家也報了」），只是不再寫標題（sameTitle）。exclude＝別處已列的標題（來龍去脈）。 */
+export function splitSimilar(
+  selfTitle: string,
+  items: SimilarItem[],
+  exclude: readonly string[] = [],
+): { sameEvent: ReaderSimilar[]; related: ReaderSimilar[] } {
+  const self = titleKey(selfTitle)
+  const byScore = [...items].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+  const seen = new Set<string>()
+  const sameEvent: ReaderSimilar[] = []
+  for (const it of byScore.filter((x) => x.same_event)) {
+    const k = titleKey(it.title_zh ?? it.title)
+    const key = `${it.source_name}|${k}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    sameEvent.push({ ...it, sameTitle: k === self })
+  }
+  const taken = new Set([self, ...exclude.map(titleKey), ...sameEvent.map((x) => titleKey(x.title_zh ?? x.title))])
+  const related: ReaderSimilar[] = []
+  for (const it of byScore.filter((x) => !x.same_event)) {
+    const k = titleKey(it.title_zh ?? it.title)
+    if (taken.has(k)) continue
+    taken.add(k)
+    related.push({ ...it, sameTitle: false })
+  }
+  return { sameEvent, related }
 }
 
 /** 搜尋結果上面那一句。 */
@@ -255,7 +305,7 @@ export const reviewLeft = (groups: ReviewGroup[]): number => groups.reduce((a, g
 // ── 新聞三張卡（T-417；使用者 2026-10-20：「要快速閱讀可以三張卡片」）──────────────────────────
 export type DigestTopic = { id: string; label: string; type: string; n: number; prev: number; stocks: { id: string; label: string; n: number }[] }
 export type DigestMulti = { ev: string; outlets: string[]; items: number; title: string; url: string; first_seen_at: string; last_seen_at: string; stocks: string[] }
-export type DigestHot = { id: string; label: string; sub: string | null; n: number; base: number | null; ratio: number | null }
+export type DigestHot = { id: string; label: string; sub: string | null; n: number; base: number | null; ratio: number | null; quiet?: Quiet | null }
 export type NewsDigest = {
   as_of: string
   /** 平常值用了幾天的資料（0＝還不到一天，股票熱度只排則數、主題不比前一天） */
@@ -285,3 +335,33 @@ export function hotLine(h: DigestHot): string {
 
 /** 倍數小標：至少 2 倍才標（×2.5）；沒有平常值 → null。 */
 export const hotBadge = (h: DigestHot): string | null => (h.ratio !== null && h.ratio >= 2 ? `×${h.ratio}` : null)
+
+// ── 個股頁新聞時間軸與久違的消息（T-419；使用者 2026-10-20 選的 2、4）──────────────────────────
+export type Quiet = { days: number; at_least: boolean }
+export type StockNewsDay = { day: string; n: number; outlets: string[]; items: { id: string; title: string; src: string; url: string }[] }
+export type StockNewsDays = { id: string; timeline_days: number; days: StockNewsDay[] }
+
+/** K 線上的新聞標記：只標 K 線範圍內的日子，附當天幾則。 */
+export function newsMarkers(days: StockNewsDay[], barDates: string[]): { time: string; n: number }[] {
+  const inRange = new Set(barDates)
+  return days.filter((d) => inRange.has(d.day)).map((d) => ({ time: d.day, n: d.n })).sort((a, b) => (a.time < b.time ? -1 : 1))
+}
+
+/** 「30 天沒消息後第一次」「至少 60 天沒消息後第一次」；null → 不顯示。 */
+export function quietNote(q: Quiet | null | undefined): string | null {
+  if (!q) return null
+  return `${q.at_least ? '至少 ' : ''}${q.days} 天沒消息後第一次`
+}
+
+// ── 事件追蹤（T-420；使用者 2026-10-20 選「事件追蹤」）：同一件事連續幾天的報導串成一條線 ───────────
+export type ThreadStep = { cluster_id: string; current: boolean; n: number; first_seen_at: string; last_seen_at: string; item_id: string; title: string; url: string; outlets: string[] }
+export type NewsThread = { id: string; cluster_id: string | null; steps: ThreadStep[] }
+
+/** 這條線值得顯示嗎：至少兩個事件群（只有自己那一群就不用畫） */
+export const threadShown = (t: NewsThread | null): boolean => !!t && t.steps.length >= 2
+
+/** 線上每一步的日期：「10/18」；同一天多步照樣寫日期（時間在 title 旁） */
+export const stepDay = (s: ThreadStep): string => {
+  const d = new Date(Date.parse(s.first_seen_at) + 8 * 3600_000)
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}

@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsDigest, NewsHealth, NewsKind, NewsReview, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
+import type { NewsDigest, NewsHealth, NewsKind, NewsReview, NewsThread, StockNewsDays, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { GalaxyData } from './news-galaxy'
 import type { StockCalItem } from './stockcal'
@@ -131,9 +131,10 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
 /** 新聞分頁（T-400）：新聞流；until 含這個時間（翻頁用）。 */
-export function fetchNewsItems(q: { kind: NewsKind | null; limit: number; until?: string }) {
+export function fetchNewsItems(q: { kind: NewsKind | null; type?: string | null; limit: number; until?: string }) {
   const p = new URLSearchParams({ limit: String(q.limit) })
   if (q.kind) p.set('kind', q.kind)
+  if (q.type) p.set('type', q.type)
   if (q.until) p.set('until', q.until)
   return get<{ items: NewsRow[] }>(`/api/news/items?${p}`)
 }
@@ -146,10 +147,14 @@ export const fetchStockNewsCounts = (sids: string[]) =>
   get<StockNewsCounts>(`/api/news/stock-counts?ids=${encodeURIComponent(sids.map((s) => `tw:${s}`).join(','))}`)
 /** 新聞服務最後抓取時間與各來源狀態。 */
 export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
+/** 這件事的來龍去脈（T-420） */
+export const fetchNewsThread = (id: string) => get<NewsThread>(`/api/news/thread?id=${encodeURIComponent(id)}`)
 /** 一則新聞的相似新聞（T-410） */
 export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */
 export const fetchNewsGalaxy = () => get<GalaxyData>('/api/news/galaxy')
+/** 個股頁 K 線上的新聞標記（T-419） */
+export const fetchStockNewsDays = (sid: string) => get<StockNewsDays>(`/api/news/stock-days?id=${encodeURIComponent(`tw:${sid}`)}`)
 /** 新聞三張卡（T-417） */
 export const fetchNewsDigest = () => get<NewsDigest>('/api/news/digest')
 /** 核可頁（T-403）：擁有者才有 can_review 與草稿清單 */

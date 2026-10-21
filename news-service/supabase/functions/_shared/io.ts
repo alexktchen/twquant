@@ -6,7 +6,8 @@ import type { EntityAliases, MentionDeps, PendingItem } from '../../../src/menti
 import type { Pending, TranslateDeps } from '../../../src/translate.ts'
 import type { CooccurDeps, CooccurEdge, PairCount } from '../../../src/cooccur.ts'
 import type { EntityType } from '../../../src/graph.ts'
-import { embedText, parseEmbedReply, vecLiteral, type EmbedConfig, type EmbedDeps, type EmbedSource, type Neighbor } from '../../../src/embed.ts'
+import type { TypeDeps } from '../../../src/types.ts'
+import { embedText, parseEmbedReply, vecLiteral, type EmbedConfig, type EmbedDeps, type EmbedSource, type NearCluster, type Neighbor } from '../../../src/embed.ts'
 import { sha256Hex } from '../../../src/ingest.ts'
 
 export type Sql = ReturnType<typeof postgres>
@@ -288,6 +289,35 @@ export function embedDeps(sql: Sql, cfg: EmbedConfig): EmbedDeps {
         where i.id = e.item_id and i.first_seen_at < now() - make_interval(days => ${days})`
       return r.count
     },
+    // 群中心＝成員向量的平均：讀出舊的 (n, vec) 在這裡算新平均再寫回（pgvector 沒有乘除純量）
+    upsertCentroid: async (clusterId, vec, seenAt) => {
+      const [old] = await sql<{ n: number; v: string }[]>`select n, vec::text as v from news.cluster_centroids where cluster_id = ${clusterId}`
+      let n = 1
+      let mean = vec
+      if (old) {
+        const prev = JSON.parse(old.v) as number[]
+        n = old.n + 1
+        mean = prev.map((p, i) => (p * old.n + vec[i]) / n)
+      }
+      await sql`
+        insert into news.cluster_centroids (cluster_id, n, vec, first_seen_at, last_seen_at)
+        values (${clusterId}, ${n}, ${vecLiteral(mean)}::extensions.halfvec, ${seenAt}::timestamptz, ${seenAt}::timestamptz)
+        on conflict (cluster_id) do update set n = excluded.n, vec = excluded.vec,
+          first_seen_at = least(news.cluster_centroids.first_seen_at, excluded.first_seen_at),
+          last_seen_at = greatest(news.cluster_centroids.last_seen_at, excluded.last_seen_at)`
+    },
+    nearestCluster: async (vec, before, windowDays, excludeCluster) => {
+      const [row] = await sql<NearCluster[]>`
+        select cc.cluster_id, coalesce(t.thread_id, cc.cluster_id) as thread_id, (1 - (cc.vec <=> ${vec}::extensions.halfvec))::float8 as score
+        from news.cluster_centroids cc left join news.threads t on t.cluster_id = cc.cluster_id
+        where cc.cluster_id <> ${excludeCluster} and cc.first_seen_at < ${before}::timestamptz
+          and cc.last_seen_at > ${before}::timestamptz - make_interval(days => ${windowDays})
+        order by cc.vec <=> ${vec}::extensions.halfvec limit 1`
+      return row ?? null
+    },
+    saveThread: async (t) => {
+      await sql`insert into news.threads ${sql(t)} on conflict (cluster_id) do nothing`
+    },
   }
 }
 
@@ -298,4 +328,21 @@ export async function embedQuery(sql: Sql, cfg: EmbedConfig, dailyNeurons: numbe
   const r = parseEmbedReply(await workersAi(cfg.model)({ text: [q] }), 1, cfg)
   await sql`insert into news.llm_usage ${sql({ ts: now.toISOString(), task: 'news_search', model_id: cfg.model, input_tokens: r.tokens, output_tokens: 0, neurons: r.neurons })}`
   return vecLiteral(r.vecs[0])
+}
+
+/** 新聞類型（T-421）：有向量、還沒有這一版類型的新聞 → 分類結果寫 news.item_types。不花 AI 額度。 */
+export function typeDeps(sql: Sql, version: string): TypeDeps {
+  return {
+    pending: async (limit) => {
+      const rows = await sql<{ item_id: string; v: string }[]>`
+        select e.item_id, e.vec::text as v from news.embeddings e
+        left join news.item_types t on t.item_id = e.item_id and t.version = ${version}
+        join news.raw_items i on i.id = e.item_id
+        where t.item_id is null order by i.first_seen_at desc limit ${limit}`
+      return rows.map((r) => ({ item_id: r.item_id, vec: JSON.parse(r.v) as number[] }))
+    },
+    save: async (rows) => {
+      await sql`insert into news.item_types ${sql(rows)} on conflict (item_id, version) do update set type = excluded.type, confidence = excluded.confidence`
+    },
+  }
 }

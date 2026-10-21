@@ -21,7 +21,7 @@ D-128／D-132 明文排除 `chip.broker_*`、D-192 也不含分點因子（雲�
 **用途**：決定名單 AI 評分（T-394／D-196）的籌碼面要不要加「主力賣超」這條事實並當扣分。不改名單、不進模型。
 現況（2026-10-21 查）：籌碼面只有三大法人、融資、千張大戶（`reporting/pick_review.py` `chip_facts`），提示詞禁止寫「主力」。
 
-#### 二、定義（T-419，腳本 `scripts/d203_broker_sell_check.py`，報告 `docs/reports/d203-broker-sell-check.md`；看到結果後不得修改）
+#### 二、定義（T-422，腳本 `scripts/d203_broker_sell_check.py`，報告 `docs/reports/d203-broker-sell-check.md`；看到結果後不得修改）
 
 - **資料**：本機 PG `serving.broker_trades`（富邦 DJ 每檔每日前 15 大買超＋前 15 大賣超券商，總公司層級，D-019）、
   `prices_daily`、`corporate_events`、`factor_values`、`margin_daily`、`ml_scores`。只讀，不寫 PG。

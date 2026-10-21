@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ALLOWED, proxy, upstreamUrl } from '../functions/_lib/news-proxy.ts'
-import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, nextUntil, shown, shownTime, taipeiHm, timeLabel, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
+import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, nextUntil, shown, shownTime, splitSimilar, taipeiHm, timeLabel, titleKey, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const BASE = 'https://abc.supabase.co/functions/v1/api/'
@@ -249,4 +249,48 @@ test('T-417 新聞三張卡：proxy 不帶參數；主題增減、到處都提�
   assert.equal(hotBadge(h(12, 2, 6)), '×6')
   assert.equal(hotBadge(h(3, 2, 1.5)), null, '不到 2 倍不標')
   assert.equal(hotBadge(h(12, null, null)), null)
+})
+
+test('T-419 新聞時間軸與久違的消息：K 線標記只標範圍內的日子、久違那句、個股頁摘要句、proxy 只轉 id', async () => {
+  assert.deepEqual(ALLOWED['/v1/stock-news-days'], ['id'])
+  const { newsMarkers, quietNote, stockNewsSummary } = await import('../src/cloud/news.ts')
+  const day = (d: string, n: number) => ({ day: d, n, outlets: ['鉅亨網'], items: [] })
+  assert.deepEqual(newsMarkers([day('2026-10-20', 3), day('2026-10-18', 1), day('2026-09-01', 2)], ['2026-10-17', '2026-10-18', '2026-10-20']), [
+    { time: '2026-10-18', n: 1 },
+    { time: '2026-10-20', n: 3 },
+  ])
+  assert.equal(quietNote({ days: 30, at_least: false }), '30 天沒消息後第一次')
+  assert.equal(quietNote({ days: 120, at_least: true }), '至少 120 天沒消息後第一次')
+  assert.equal(quietNote(null), null)
+  const sn = { id: 'tw:2330', days: 7, items: [] as never[] }
+  assert.equal(stockNewsSummary(sn), '近 7 天・直接 0・間接 0')
+  assert.equal(stockNewsSummary({ ...sn, quiet: { days: 21, at_least: false } }), '近 7 天・直接 0・間接 0・21 天沒消息後第一次')
+})
+
+test('T-420 事件追蹤：proxy 只轉 id；至少兩步才顯示；每步的日期', async () => {
+  assert.deepEqual(ALLOWED['/v1/thread'], ['id'])
+  const { stepDay, threadShown } = await import('../src/cloud/news.ts')
+  const step = (c: string, t: string, current = false) => ({ cluster_id: c, current, n: 3, first_seen_at: t, last_seen_at: t, item_id: 'x', title: 'T', url: 'u', outlets: ['鉅亨網'] })
+  assert.equal(threadShown(null), false)
+  assert.equal(threadShown({ id: 'x', cluster_id: 'a', steps: [step('a', '2026-10-18T01:00:00Z', true)] }), false, '只有自己那一群不畫')
+  assert.equal(threadShown({ id: 'x', cluster_id: 'b', steps: [step('a', '2026-10-18T01:00:00Z'), step('b', '2026-10-20T01:00:00Z', true)] }), true)
+  assert.equal(stepDay(step('a', '2026-10-18T17:00:00Z')), '10/19', '台北日期')
+})
+
+test('2026-10-21 閱讀卡：同一事件與相似新聞分開、同標題只留一則、不重列這則', () => {
+  const it = (id: string, title: string, src: string, same: boolean, score: number) => ({
+    id, title, title_zh: null, url: `u/${id}`, source_name: src, kind: 'tw' as const, first_seen_at: '2026-10-21T08:00:00Z', score, same_event: same,
+  })
+  const r = splitSimilar('加高績攻AI高速光通訊 明年展望謹慎樂觀', [
+    it('a', '加高績攻 AI 高速光通訊，明年展望謹慎樂觀', '經濟日報', true, 0.95),
+    it('b', '光通訊等 AI 貢獻增加 法人調高台表科獲利預估值及目標價', '經濟日報', false, 0.83),
+    it('c', '光通訊等 AI 貢獻增加 法人調高台表科獲利預估值及目標價', '經濟日報', false, 0.82),
+    it('d', '雲端AI將推動2027年晶片成長', 'DigiTimes Asia', false, 0.8),
+    it('e', '加高績攻AI高速光通訊 明年展望謹慎樂觀', '中央社', false, 0.79),
+  ])
+  assert.deepEqual(r.sameEvent.map((x) => [x.id, x.sameTitle]), [['a', true]])
+  assert.deepEqual(r.related.map((x) => x.id), ['b', 'd'], '同標題的 c 合併、跟這則同標題的 e 不列')
+  assert.equal(titleKey('A, b！ c'), 'abc')
+  const ex = splitSimilar('x', [it('d', '雲端AI將推動2027年晶片成長', 'DigiTimes Asia', false, 0.8)], ['雲端 AI 將推動 2027 年晶片成長'])
+  assert.deepEqual(ex.related, [], '來龍去脈已列的不重列')
 })

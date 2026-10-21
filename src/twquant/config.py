@@ -170,6 +170,10 @@ class MorningBriefConfig(BaseConfig):
     evening_poll_seconds: int = Field(default=60, gt=0)  # 等的時候每幾秒查一次
     news_fetch_limit: int = Field(default=30, ge=1)  # 每個分類抓幾則
     headline_limit: int = Field(default=8, ge=1)  # 晨報與首頁列幾則
+    # 晨報接新聞（2026-10-20）：新聞服務裡同一段時間被至少幾家不同媒體報的事，最多列幾件；新聞庫 DSN 的環境變數名
+    events_min_outlets: int = Field(default=3, ge=2)
+    events_limit: int = Field(default=5, ge=1)
+    news_dsn_env: str = "TWQUANT_NEWS_DSN"
     news_direction_subjects: list[str] = []  # 檢查晨報有沒有把頭條的漲跌方向寫反的標的
     news_direction_window: int = Field(default=4, ge=1)  # 標的後面幾個字內找方向字
     stances: list[str] = []  # 今天的操作方向：立場三選一（T-396）
@@ -838,6 +842,45 @@ class FundFlowFactorsConfig(BaseConfig):
     disc_window: int = Field(default=10, ge=1)
     market_window: int = Field(default=5, ge=1)
     adv_window: int = Field(default=20, ge=1)  # SPEC-003：20 日成交金額中位數
+
+
+class NewsFactorWindows(BaseConfig):
+    """SPEC-018 §5 的窗口（日曆日）。"""
+
+    attention_short: int = Field(ge=1)
+    attention_mid: int = Field(ge=1)
+    attention_base: int = Field(ge=1)
+    sent_short: int = Field(ge=1)
+    sent_mid: int = Field(ge=1)
+    sent_shift_base: int = Field(ge=1)
+    sector_short: int = Field(ge=1)
+    sector_base: int = Field(ge=1)
+    sector_min_base: int = Field(ge=1)
+    novelty_recent: int = Field(ge=1)
+    novelty_base: int = Field(ge=1)
+    mops_count: int = Field(ge=1)
+    mops_novelty_base: int = Field(ge=1)
+    mops_latest_max_age: int = Field(ge=1)
+
+
+class NewsTopicsConfig(BaseConfig):
+    """主題中心：只在第一折訓練期擬合並凍結（SPEC-018 §5）。"""
+
+    k: int = Field(ge=2)
+    version: str
+    fit_until: dt.date
+    fit_sample: int = Field(ge=1000)
+    seed: int
+    centers_file: str
+
+
+class NewsFactorsConfig(BaseConfig):
+    """configs/news_factors.yaml（T-414）。"""
+
+    cutoff_hour: int = Field(ge=0, le=23)
+    windows: NewsFactorWindows
+    topics: NewsTopicsConfig
+    sentiment_version: str = ""
 
 
 class FundFlowTracesConfig(BaseConfig):

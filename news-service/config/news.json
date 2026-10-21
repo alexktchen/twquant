@@ -211,6 +211,7 @@
     "per_run_limit": 40,
     "max_tokens": 3000,
     "daily_neurons": 2500,
+    "reserve_for_embed": 400,
     "input_neurons_per_1m": 4625,
     "output_neurons_per_1m": 30475,
     "glossary": {
@@ -286,10 +287,11 @@
     }
   },
   "mention": {
-    "rule_version": "2026-10-20.5",
+    "rule_version": "2026-10-20.6",
     "per_run_limit": 400,
     "latin_min": 3,
     "cjk_min": 2,
+    "cjk_bound_len": 2,
     "stopwords": [
       "ON",
       "ARM",
@@ -331,6 +333,12 @@
       "志強",
       "東明",
       "永新",
+      "地球",
+      "台南",
+      "幸福",
+      "冠軍",
+      "遠見",
+      "時報",
       "亞航"
     ],
     "blockers": [
@@ -349,6 +357,8 @@
       "日本佳能",
       "佳能行銷",
       "基米爾",
+      "紐約時報",
+      "可成台商",
       "巨大的",
       "帶來巨大",
       "造成巨大",
@@ -414,7 +424,10 @@
     "stock_limit": 20,
     "counts_days": 3,
     "counts_max_ids": 60,
-    "hub_share": 0.15
+    "hub_share": 0.15,
+    "timeline_days": 120,
+    "timeline_per_day": 3,
+    "quiet_min_days": 14
   },
   "cooccur": {
     "window_days": 90,
@@ -435,6 +448,10 @@
       "exclude_sources": [
         "fed-press"
       ]
+    },
+    "thread": {
+      "min_score": 0.78,
+      "window_days": 14
     },
     "similar": {
       "limit": 8,
@@ -470,5 +487,93 @@
     "hub_min": 3,
     "keep": 3,
     "seed": 7
+  },
+  "hist": {
+    "cnyes_categories": [
+      "headline",
+      "tw_stock"
+    ],
+    "cnyes_from": "2021-01-04",
+    "content_chars": 2000,
+    "mops_content_chars": 1500,
+    "embed_model": "BAAI/bge-m3",
+    "embed_batch": 128,
+    "pull_since_default": "2026-10-19T00:00:00+08:00",
+    "pull_lookback_days": 2,
+    "research_until": "2026-08-31",
+    "sentiment": {
+      "model": "qwen3:8b",
+      "ollama_url": "http://localhost:11434",
+      "sample_n": 20000,
+      "seed": 7,
+      "max_body_chars": 800,
+      "valid_share": 0.2,
+      "probe_min_labels": 2000,
+      "gate_f1": 0.7,
+      "gate_auc": 0.85,
+      "workers": 16,
+      "batch": 5000
+    }
+  },
+  "types": {
+    "version": "2026-10-21.3",
+    "min_confidence": 0.2,
+    "gate_f1": 0.6,
+    "gate_other_recall": 0.3,
+    "classes": [
+      {
+        "id": "earnings",
+        "label": "財報展望",
+        "hint": "月營收、季報、EPS、毛利率、法說會、財測、目標價、評等",
+        "from": [
+          "earnings",
+          "guidance"
+        ]
+      },
+      {
+        "id": "business",
+        "label": "訂單產品",
+        "hint": "接單、簽約、客戶、合作案、新產品、製程、技術、認證",
+        "from": [
+          "order",
+          "product"
+        ]
+      },
+      {
+        "id": "capital",
+        "label": "擴廠併購",
+        "hint": "建廠、擴產、資本支出、併購、入股、增資、董監事與經營層異動",
+        "from": [
+          "capex",
+          "ma",
+          "people"
+        ]
+      },
+      {
+        "id": "policy",
+        "label": "政策事故",
+        "hint": "法規、裁罰、管制、利率、匯率、關稅、央行、工安、火災、停工、資安、天災",
+        "from": [
+          "regulation",
+          "macro",
+          "incident"
+        ]
+      },
+      {
+        "id": "market",
+        "label": "盤勢行情",
+        "hint": "大盤漲跌、外資買賣超、個股漲停跌停、盤前盤後",
+        "from": [
+          "market"
+        ]
+      },
+      {
+        "id": "other",
+        "label": "其他",
+        "from": [
+          "other"
+        ]
+      }
+    ]
   }
 }

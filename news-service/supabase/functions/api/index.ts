@@ -1,7 +1,8 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
+import typeWeights from '../../../config/news_types.json' with { type: 'json' }
 import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
 import type { EntityType } from '../../../src/graph.ts'
 import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
@@ -9,7 +10,7 @@ import { validateConfig } from '../../../src/ingest.ts'
 import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
 import { baseDaysOf, hotStocks, multiOutlet, topTopics, type CoRow, type EvRow, type HotRow, type TopicRow } from '../../../src/digest.ts'
 import { REVIEW_TYPES, edgeKey, groupDrafts, isOwner, parseReviewBody, planReview, type DecisionIn, type DraftEdge, type EntityInfo } from '../../../src/review.ts'
-import { countsFor, linksTo, parseStockIds, prepare, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
+import { countsFor, coverageDaysOf, linksTo, newsDays, parseStockIds, prepare, quietGap, type DayRow, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
 import { authorized, db, embedQuery, json } from '../_shared/io.ts'
 
 const cfg = validateConfig(config)
@@ -37,6 +38,31 @@ async function recentMentions(sql: ReturnType<typeof db>, days: number): Promise
   const by = new Map<string, string[]>()
   for (const r of rows) by.set(r.item_id, [...(by.get(r.item_id) ?? []), r.entity_id])
   return [...by].map(([item_id, entities]) => ({ item_id, entities: entities.sort() }))
+}
+
+/** 直接提到這檔的新聞，近 days 天（台北日期）。 */
+async function dayRows(sql: ReturnType<typeof db>, id: string, days: number): Promise<DayRow[]> {
+  return sql<DayRow[]>`
+    select (i.first_seen_at at time zone 'Asia/Taipei')::date::text as day, i.id, i.source,
+           coalesce(v.title_orig, i.title_orig) as title, tr.title_zh, i.url, i.first_seen_at::text as first_seen_at
+    from news.mentions m join news.raw_items i on i.id = m.item_id
+    left join lateral (select title_orig, content_sha from news.raw_item_versions where item_id = i.id order by seen_at desc limit 1) v on true
+    left join news.translations tr on tr.item_id = i.id and tr.content_sha = coalesce(v.content_sha, i.content_sha) and tr.status = 'ok'
+    where m.entity_id = ${id} and m.rule_version = ${cfg.mention.rule_version}
+      and i.first_seen_at > now() - make_interval(days => ${days})`
+}
+
+/** 久違的消息（T-419）：這檔最近一次被提到之前隔了多久；要我們收新聞夠久才說得出口。 */
+async function quietOf(sql: ReturnType<typeof db>, id: string) {
+  const sn = cfg.stock_news
+  const [days, first] = await Promise.all([
+    sql<{ day: string }[]>`
+      select distinct (i.first_seen_at at time zone 'Asia/Taipei')::date::text as day
+      from news.mentions m join news.raw_items i on i.id = m.item_id
+      where m.entity_id = ${id} and m.rule_version = ${cfg.mention.rule_version} and i.first_seen_at > now() - make_interval(days => ${sn.timeline_days})`,
+    sql<{ t: Date | null }[]>`select min(first_seen_at) as t from news.raw_items`,
+  ])
+  return quietGap(days.map((d) => d.day), coverageDaysOf(iso(first[0]?.t ?? null), new Date()), sn.timeline_days, sn.quiet_min_days)
 }
 
 type Scored = { item_id: string; score: number; same_event?: boolean }
@@ -136,7 +162,18 @@ Deno.serve(async (req) => {
         })
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
         .slice(0, sn.stock_limit)
-      return json({ id: ids[0], days, items })
+      return json({ id: ids[0], days, items, quiet: await quietOf(sql, ids[0]) })
+    }
+    if (path === '/v1/stock-news-days') {
+      let ids: string[]
+      try {
+        ids = parseStockIds(url.searchParams.get('id'), 1)
+      } catch (e) {
+        return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
+      }
+      const sn = cfg.stock_news
+      const rows = await dayRows(sql, ids[0], sn.timeline_days)
+      return json({ id: ids[0], timeline_days: sn.timeline_days, days: newsDays(rows, (s) => meta.get(s)?.name ?? s, sn.timeline_per_day) })
     }
     if (path === '/v1/galaxy') {
       // 排程（scripts/news_galaxy.py）算好的整包；原樣送出文字，不在這裡 parse 再 stringify（約 700 KB，省 CPU）
@@ -195,13 +232,16 @@ Deno.serve(async (req) => {
           from m join news.entities e on e.id = m.entity_id and e.valid_to is null and e.type = 'tw'
           group by 1, 2, 3`,
       ])
+      const hot = hotStocks(hotRows, baseDays, dg)
+      // 久違的消息（T-419）：熱度榜上的台股，上一次被提到是多久以前
+      const quiet = await Promise.all(hot.map((h) => quietOf(sql, h.id)))
       return json({
         api_version: API_VERSION,
         as_of: now.toISOString(),
         base_days: baseDays,
         topics: topTopics(topicRows, coRows, total, dg),
         multi: multiOutlet(evRows.map((r) => ({ ...r, first_seen_at: iso(r.first_seen_at)! })), (s) => meta.get(s)?.name ?? s, dg),
-        hot: hotStocks(hotRows, baseDays, dg),
+        hot: hot.map((h, i) => ({ ...h, quiet: quiet[i] })),
       })
     }
     if (path === '/v1/review') {
@@ -245,6 +285,44 @@ Deno.serve(async (req) => {
         approved: plan.insert.length,
         rejected: plan.reviews.length - plan.insert.length,
         skipped: plan.skipped,
+      })
+    }
+    if (path === '/v1/thread') {
+      const id = url.searchParams.get('id')
+      if (!id) return json({ detail: '缺 id' }, 400)
+      const [me] = await sql<{ cluster_id: string; thread_id: string }[]>`
+        select c.cluster_id, coalesce(t.thread_id, c.cluster_id) as thread_id from news.clusters c left join news.threads t on t.cluster_id = c.cluster_id where c.item_id = ${id}`
+      if (!me) return json({ id, cluster_id: null, steps: [] })
+      // 這條線上的每個事件群：最早那則當代表（標題、來源），幾則、哪幾家、起訖時間；依時間排
+      const steps = await sql<{ cluster_id: string; n: number; first_seen_at: Date; last_seen_at: Date; item_id: string; title: string; title_zh: string | null; url: string; sources: string[] }[]>`
+        with tc as (select cluster_id from news.threads where thread_id = ${me.thread_id} union select ${me.cluster_id}),
+        members as (
+          select c.cluster_id, i.id, i.source, i.url, i.first_seen_at, coalesce(v.title_orig, i.title_orig) as title, tr.title_zh
+          from tc join news.clusters c using (cluster_id) join news.raw_items i on i.id = c.item_id
+          left join lateral (select title_orig, content_sha from news.raw_item_versions where item_id = i.id order by seen_at desc limit 1) v on true
+          left join news.translations tr on tr.item_id = i.id and tr.content_sha = coalesce(v.content_sha, i.content_sha) and tr.status = 'ok'
+        )
+        select m.cluster_id, count(*)::int as n, min(m.first_seen_at) as first_seen_at, max(m.first_seen_at) as last_seen_at,
+               (array_agg(m.id order by m.first_seen_at, m.id))[1] as item_id,
+               (array_agg(m.title order by m.first_seen_at, m.id))[1] as title,
+               (array_agg(m.title_zh order by m.first_seen_at, m.id))[1] as title_zh,
+               (array_agg(m.url order by m.first_seen_at, m.id))[1] as url,
+               array_agg(distinct m.source) as sources
+        from members m group by m.cluster_id order by min(m.first_seen_at)`
+      return json({
+        id,
+        cluster_id: me.cluster_id,
+        steps: steps.map((s) => ({
+          cluster_id: s.cluster_id,
+          current: s.cluster_id === me.cluster_id,
+          n: s.n,
+          first_seen_at: iso(s.first_seen_at),
+          last_seen_at: iso(s.last_seen_at),
+          item_id: s.item_id,
+          title: s.title_zh ?? s.title,
+          url: s.url,
+          outlets: [...new Set(s.sources.map((x) => meta.get(x)?.name ?? x))].sort(),
+        })),
       })
     }
     if (path === '/v1/similar') {
@@ -332,7 +410,7 @@ Deno.serve(async (req) => {
     if (path === '/v1/items') {
       let q
       try {
-        q = parseItemsQuery(url.searchParams, cfg)
+        q = parseItemsQuery(url.searchParams, cfg, typeWeights.classes)
       } catch (e) {
         return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
       }
@@ -352,12 +430,16 @@ Deno.serve(async (req) => {
         summary_zh: string | null
         tr_status: string | null
         sha: string
+        type: string | null
       }[]>`
         select i.id, i.source, i.lang, i.url,
                coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
                i.published_at, i.first_seen_at, coalesce(v.n, 0)::int as versions,
-               t.title_zh, t.summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha
+               t.title_zh, t.summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha,
+               ty.type
         from news.raw_items i
+        -- 新聞類型（T-421）：現行探針版本；還沒分類 → null
+        left join news.item_types ty on ty.item_id = i.id and ty.version = ${typeWeights.version}
         left join lateral (
           select title_orig, summary_orig, content_sha, count(*) over () as n from news.raw_item_versions
           where item_id = i.id order by seen_at desc limit 1
@@ -369,6 +451,7 @@ Deno.serve(async (req) => {
           ${q.until ? sql`and i.first_seen_at <= ${q.until}` : sql``}
           ${q.source ? sql`and i.source = ${q.source}` : sql``}
           ${kindSources ? sql`and i.source = any(${kindSources})` : sql``}
+          ${q.type ? sql`and ty.type = ${q.type}` : sql``}
         order by i.first_seen_at desc, i.id
         limit ${q.limit}`
       // 每則目前這一版內容比對到的實體（T-402，一度）；實體已停用（valid_to 有值）的不列
@@ -402,6 +485,8 @@ Deno.serve(async (req) => {
         translation: r.lang === 'en' ? (r.tr_status ?? 'pending') : null,
         title_zh: r.title_zh,
         summary_zh: r.summary_zh,
+        // 新聞類型（T-421）：earnings／business／capital／policy／market／other；還沒分類 null
+        type: r.type,
         // 台股在前、再國外、再族群／主題，最多 graph.mentions_per_item 個；沒有 → []
         mentions: itemMentions(mentionsOf.get(r.id) ?? [], cfg.graph.mentions_per_item),
       }))

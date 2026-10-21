@@ -5,8 +5,8 @@
 // 擁有者多一顆「待核可 N」（T-403）：點了換成核可頁（AI 草擬的關係線）。
 // 頂端搜尋框（T-410）：照意思找，不必字面相同（「輝達財測」找得到英文的 Nvidia guidance）；展開一則時底下列「相似新聞」。
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
-import { ChevronDown, ClipboardCheck, ExternalLink, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { ChevronRight, ClipboardCheck, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsReview, fetchNewsSearch } from './api'
 import {
   KIND_LABEL,
@@ -16,6 +16,9 @@ import {
   groupByDay,
   healthLine,
   mentionChips,
+  NEWS_TYPES,
+  NEWS_TYPE_LABEL,
+  type NewsType,
   nextUntil,
   reviewLeft,
   searchLine,
@@ -30,8 +33,10 @@ import {
 } from './news'
 import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
 import { NewsDigest } from './NewsDigest'
+import { galaxyFromUrl, withoutView } from './tabs'
 import { NewsReview } from './NewsReview'
-import { NewsSearchResults, SimilarNews } from './NewsSimilar'
+import { NewsReader } from './NewsReader'
+import { NewsSearchResults } from './NewsSimilar'
 import './news-graph.css'
 
 type Filter = 'all' | NewsKind
@@ -55,8 +60,29 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid: string, name: string) => void }) {
   const [filter, setFilter] = useState<Filter>('all')
+  const [typeFilter, setTypeFilter] = useState<NewsType | null>(null)
   /** 清單（讀新聞）或全景（星雲圖，看全貌） */
-  const [mode, setMode] = useState<'list' | 'galaxy'>('list')
+  // 直接連結（?view=galaxy、舊網址 /api/prototype/galaxy）：一打開就是星雲圖，畫面捲到它（熱門主題卡在它上面）
+  const [jumpToGalaxy] = useState(() => galaxyFromUrl(window.location.href))
+  const [mode, setMode] = useState<'list' | 'galaxy'>(jumpToGalaxy ? 'galaxy' : 'list')
+  const galaxyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!jumpToGalaxy) return
+    window.history.replaceState(null, '', withoutView(window.location.href))
+    // 星雲圖是 lazy 載入、上面的卡片也要時間長出來：等它出現再捲
+    const timer = window.setInterval(() => {
+      const el = galaxyRef.current?.firstElementChild
+      if (el && el.getBoundingClientRect().height > 100) {
+        galaxyRef.current?.scrollIntoView({ block: 'start' })
+        window.clearInterval(timer)
+      }
+    }, 200)
+    const stop = window.setTimeout(() => window.clearInterval(timer), 8000)
+    return () => {
+      window.clearInterval(timer)
+      window.clearTimeout(stop)
+    }
+  }, [jumpToGalaxy])
   const [rows, setRows] = useState<NewsRow[]>([])
   const [health, setHealth] = useState<NewsHealth | null>(null)
   const [err, setErr] = useState('')
@@ -118,7 +144,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
     setLoading(true)
     setErr('')
     setMore('idle')
-    fetchNewsItems({ kind: filter === 'all' ? null : filter, limit: NEWS_PAGE })
+    fetchNewsItems({ kind: filter === 'all' ? null : filter, type: typeFilter, limit: NEWS_PAGE })
       .then((r) => {
         if (stale) return
         setRows(r.items)
@@ -133,13 +159,13 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
     return () => {
       stale = true
     }
-  }, [filter, refresh])
+  }, [filter, typeFilter, refresh])
 
   const loadMore = () => {
     const until = nextUntil(rows)
     if (!until || more !== 'idle') return
     setMore('loading')
-    fetchNewsItems({ kind: filter === 'all' ? null : filter, limit: NEWS_PAGE, until })
+    fetchNewsItems({ kind: filter === 'all' ? null : filter, type: typeFilter, limit: NEWS_PAGE, until })
       .then((r) => {
         const next = appendPage(rows, r.items)
         setRows(next)
@@ -163,6 +189,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
   }
 
   const groups = useMemo(() => groupByDay(rows), [rows])
+  const openRow = open ? (rows.find((r) => r.id === open) ?? null) : null
   const today = taipeiDay(now.toISOString())
   const status = healthLine(health, now)
 
@@ -173,6 +200,18 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
           {FILTERS.map((f) => (
             <button key={f.key} className={filter === f.key && mode === 'list' ? 'on' : ''} onClick={() => { setFilter(f.key); setMode('list') }}>
               {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="cq-news-types" role="group" aria-label="新聞類型">
+          {NEWS_TYPES.map((t) => (
+            <button
+              key={t.key}
+              className={`cq-news-type ${t.key}${typeFilter === t.key ? ' on' : ''}`}
+              aria-pressed={typeFilter === t.key}
+              onClick={() => { setTypeFilter(typeFilter === t.key ? null : t.key); setMode('list') }}
+            >
+              {t.label}
             </button>
           ))}
         </div>
@@ -237,9 +276,11 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
       {!loading && !err && rows.length === 0 && <p className="cq-war-mute cq-news-empty">這段時間還沒有新聞。</p>}
 
       {!search && !reviewOpen && mode === 'galaxy' && (
-        <Suspense fallback={<p className="cq-war-mute cq-news-empty">全景讀取中…</p>}>
-          <NewsGalaxy onStock={onStock} />
-        </Suspense>
+        <div ref={galaxyRef} className="cq-news-galaxy-anchor">
+          <Suspense fallback={<p className="cq-war-mute cq-news-empty">全景讀取中…</p>}>
+            <NewsGalaxy onStock={onStock} />
+          </Suspense>
+        </div>
       )}
       {!search && !reviewOpen && mode === 'list' && groups.map((g) => (
         <section key={g.day} className="cq-news-day">
@@ -254,12 +295,17 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
               return (
                 <li key={r.id} className={isOpen ? 'open' : ''}>
                   <div className="cq-news-head">
-                    <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.id)}>
+                    <button className={`cq-news-row${hasGraph ? ' has-graph' : ''}`} aria-haspopup="dialog" onClick={() => setOpen(r.id)}>
                       <span className={`cq-news-kind ${r.kind ?? 'tw'}`}>
                         {r.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
                         {r.kind ? KIND_LABEL[r.kind] : '其他'}
                       </span>
                       <span className="cq-news-title" lang={lang(v.lang)}>
+                        {r.type && r.type !== 'other' && (
+                          <em className={`cq-news-type ${r.type}`} title="新聞類型（模型自動分類）">
+                            {NEWS_TYPE_LABEL[r.type]}
+                          </em>
+                        )}
                         {v.tag && (
                           <em className={`cq-news-tag ${v.tag === '譯' ? 'tr' : 'raw'}`} title={TAG_TITLE[v.tag]}>
                             {v.tag}
@@ -281,7 +327,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
                         <span className="cq-news-src">
                           {r.source_name}・{timeLabel(r, g.day)}
                         </span>
-                        <ChevronDown size={15} className={isOpen ? 'flip' : ''} aria-hidden="true" />
+                        <ChevronRight size={15} aria-hidden="true" />
                       </span>
                     </button>
                     {hasGraph && (
@@ -292,28 +338,14 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
                     )}
                   </div>
                   {graphErr?.id === r.id && <p className="cq-news-gerr">{graphErr.msg}</p>}
-                  {isOpen && (
-                    <div className="cq-news-body">
-                      {v.summary && <p lang={lang(v.lang)}>{v.summary}</p>}
-                      {v.original && (
-                        <div className="cq-news-orig" lang="en">
-                          <span>原文</span>
-                          <b>{v.original.title}</b>
-                          {v.original.summary && <p>{v.original.summary}</p>}
-                        </div>
-                      )}
-                      <a href={r.url} target="_blank" rel="noopener noreferrer">
-                        看原文（{r.source_name}）<ExternalLink size={13} aria-hidden="true" />
-                      </a>
-                      <SimilarNews id={r.id} />
-                    </div>
-                  )}
                 </li>
               )
             })}
           </ul>
         </section>
       ))}
+
+      {openRow && <NewsReader row={openRow} onClose={() => setOpen(null)} onGraph={openGraph} onStock={onStock} />}
 
       {!search && !reviewOpen && mode === 'list' && rows.length > 0 && more !== 'done' && (
         <button className="cq-news-more" onClick={loadMore} disabled={more === 'loading'}>
