@@ -45,6 +45,13 @@ export type LineStatus = {
   login: LineLogin | null
 }
 
+/** 按了「同步群組」最多等多久（GitHub Actions 開機＋跑完約 1 分鐘） */
+export const SYNC_WAIT_MS = 180_000
+
+/** 群組清單最後一次同步的時間（「YYYY-MM-DD HH:MI」可以直接比大小）；沒有群組 → 空字串。 */
+export const latestSync = (groups: LineGroupRow[]): string =>
+  groups.reduce((m, g) => (g.synced_at > m ? g.synced_at : m), '')
+
 /** 登入進行中時多久重抓一次（QR 出來、PIN 出來都要快點看到） */
 export const LOGIN_POLL_MS = 3000
 const ACTIVE = ['requested', 'starting', 'scan', 'pin']

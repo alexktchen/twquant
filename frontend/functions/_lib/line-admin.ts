@@ -75,8 +75,11 @@ export const LOGIN_DDL =
 export const loginBusy = (l: Pick<LineLogin, 'status' | 'fresh'> | null): boolean =>
   l !== null && l.fresh && (LOGIN_ACTIVE as readonly string[]).includes(l.status)
 
+/** line-login.yml 的兩種工作：login＝掃 QR 登入（成功後順便同步群組）、groups＝只同步群組清單 */
+export type LoginTask = 'login' | 'groups'
+
 /** 觸發 GitHub Actions line-login.yml 的請求；沒有 token 直接丟錯（不能靜默變成「什麼都沒觸發」）。 */
-export function dispatchRequest(token: string | undefined): { url: string; init: RequestInit } {
+export function dispatchRequest(token: string | undefined, task: LoginTask = 'login'): { url: string; init: RequestInit } {
   if (!token) throw new Error('網站沒設 TWQUANT_DISPATCH_TOKEN（GitHub fine-grained token，Actions: Read and write），沒辦法從網頁登入')
   return {
     url: `https://api.github.com/repos/${DISPATCH_REPO}/actions/workflows/${LOGIN_WORKFLOW}/dispatches`,
@@ -89,7 +92,7 @@ export function dispatchRequest(token: string | undefined): { url: string; init:
         'User-Agent': 'twquant-pages',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ref: 'main' }),
+      body: JSON.stringify({ ref: 'main', inputs: { task } }),
     },
   }
 }

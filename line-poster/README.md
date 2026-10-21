@@ -32,11 +32,11 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
    npm ci --prefix line-poster
    uv run --env-file .env python -m twquant line-group login
    ```
-3. 用手機把備用帳號拉進要發的群組，然後同步群組清單（順便接受邀請）：
+3. 用手機把備用帳號拉進要發的群組，然後在網站「LINE 群組」分頁按「**同步群組**」（約 1 分鐘，順便接受群組邀請；
+   登入成功時也會自動同步一次，每一班排程也會）。本機也可以：
    ```bash
    uv run --env-file .env python -m twquant line-group groups
    ```
-   之後每一班排程也會自動同步，所以拉進新群組後等下一班就好。
 4. 到網站「**LINE 群組**」分頁勾要發的群組。只有有權限的帳號看得到這個分頁
    （`frontend/functions/_lib/roles.ts` 的 `line_admin`，目前是 cktalex@gmail.com）。新群組預設不發。
 5. 先看圖長怎樣（不排隊、不發）：
