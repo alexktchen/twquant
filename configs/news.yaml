@@ -420,3 +420,51 @@ galaxy:
   # 新聞庫只留最近幾筆快照
   keep: 3
   seed: 7
+
+# 本機歷史語料（T-412／SPEC-018 §3.2、§4；使用者 2026-10-20：「歷史語料的訓練也一起做」）：`python -m twquant news …`
+hist:
+  cnyes_categories: [headline, tw_stock]
+  cnyes_from: "2021-01-04"
+  # 鉅亨網全文截短到幾字（情緒標籤要看得到內文；研究只存本機）
+  content_chars: 2000
+  mops_content_chars: 1500
+  # 本機向量：跟雲端同一個模型；文字規則同 news-service/src/embed.ts（有譯文用譯文，標題＋摘要，截 1500 字）
+  embed_model: BAAI/bge-m3
+  embed_batch: 128
+  # 第一次 news pull 從哪裡拉（線上新聞 2026-10-19 起）
+  pull_since_default: "2026-10-19T00:00:00+08:00"
+  # 每次 pull 從上次拉到的時間再往回看幾天：英文新聞拉下來時常還沒翻譯、還沒向量，重拉會覆蓋文字欄與向量（雲端為準）
+  pull_lookback_days: 2
+  # 研究上限（D-109 第二保留期：2026-09-09 起封存；開發期照 SPEC-010 ≤ 2026-08-31）：抽樣、探針、因子、訓練都只用這天（含）以前的新聞
+  research_until: "2026-08-31"
+  # 情緒（T-413／D-201 §四）：Ollama qwen3 對分層抽樣貼標；探針門檻事前寫死
+  sentiment:
+    model: qwen3:8b
+    ollama_url: http://localhost:11434
+    sample_n: 20000
+    seed: 7
+    max_body_chars: 800
+    valid_share: 0.2
+    probe_min_labels: 2000
+    gate_f1: 0.70
+    gate_auc: 0.85
+
+# 新聞類型（T-421；使用者 2026-10-20 選「新聞類型標籤」）：本機 Ollama 貼標 → 探針權重 news-service/config/news_types.json → 雲端 ingest 算內積。
+# 最後一類一定是 other；信心不到 min_confidence 也放 other。
+types:
+  version: "2026-10-21.3"
+  # 信心不到這個數就判「其他」。探針的 softmax 很平（驗證集信心中位數 0.30、九成分位 0.50）：0.45 會把 86% 判成其他、
+  # macro-F1 掉到 0.24（雲端 2026-10-21 實見）；驗證過的是 argmax，0.2 形同 argmax、只擋極端平的。門檻指標現在是「套用這個數之後」算的。
+  min_confidence: 0.2
+  # 門檻（2026-10-21 看過第一次 1,500 標籤的結果 0.548 後登記、重訓前凍結）：不過就合併類別或換標籤方式，不調門檻
+  gate_f1: 0.60
+  gate_other_recall: 0.30
+  # 2026-10-21：12 類貼了 5,500 則，探針 macro-F1 0.525、other 召回 0.08 沒過；合併成 6 類（from＝吸收哪些舊標籤，
+  # 已貼的標籤照這張表換算、新貼的直接用 6 類）。試過 12／7／5／6 類幾種合併，這組在三個不同驗證切分都過（0.65～0.67、other 0.40～0.45）。
+  classes:
+    - {id: earnings, label: 財報展望, hint: 月營收、季報、EPS、毛利率、法說會、財測、目標價、評等, from: [earnings, guidance]}
+    - {id: business, label: 訂單產品, hint: 接單、簽約、客戶、合作案、新產品、製程、技術、認證, from: [order, product]}
+    - {id: capital, label: 擴廠併購, hint: 建廠、擴產、資本支出、併購、入股、增資、董監事與經營層異動, from: [capex, ma, people]}
+    - {id: policy, label: 政策事故, hint: 法規、裁罰、管制、利率、匯率、關稅、央行、工安、火災、停工、資安、天災, from: [regulation, macro, incident]}
+    - {id: market, label: 盤勢行情, hint: 大盤漲跌、外資買賣超、個股漲停跌停、盤前盤後, from: [market]}
+    - {id: other, label: 其他, from: [other]}

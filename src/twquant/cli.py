@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import pathlib
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -2179,6 +2181,22 @@ def _run_daily_pipeline(
             return "PG 不可達，略過"
         return _insider_transfers_for_day(day)
 
+    def _news_pull_step() -> str:
+        # T-412 新聞語料：雲端新聞服務是每日資料權威，拉新聞、提及、向量回本機 news_hist（回看兩天，覆蓋晚到的翻譯）。best-effort。
+        import os
+
+        if not os.environ.get("TWQUANT_NEWS_DSN", "").strip():
+            return "沒有 TWQUANT_NEWS_DSN，略過"
+        return _news_pull_run("", True)
+
+    def _news_features_step() -> str:
+        # T-414 新聞因子特徵：語料拉回之後算今天那列（截點 19:00 沒過就只到前一天）。best-effort。
+        import os
+
+        if not os.environ.get("TWQUANT_NEWS_DSN", "").strip():
+            return "沒有 TWQUANT_NEWS_DSN（語料不在這台），略過"
+        return _news_features_run("", "")
+
     def _conferences_step() -> str:
         # T-376 法說會行事曆：MOPS 月表整月覆蓋，休市日照跑。best-effort。
         from twquant.data.serving import store
@@ -2307,6 +2325,8 @@ def _run_daily_pipeline(
         PipelineStep("法說會", _conferences_step),
         PipelineStep("除權息預告", _dividend_calendar_step),
         PipelineStep("內部人申讓", _insider_transfers_step),
+        PipelineStep("新聞語料拉回", _news_pull_step),
+        PipelineStep("新聞因子特徵", _news_features_step),
         PipelineStep("名單一句話", _pick_blurbs_step),
         PipelineStep("名單評分", _pick_review_step),
         PipelineStep("紙上交易", _paper_trading_step),
@@ -5157,6 +5177,11 @@ def serving_materialize(
     trim_lookback: bool = typer.Option(
         False, "--trim-lookback", help="依各因子宣告的 lookback_days 裁切歷史（T-083）"
     ),
+    cache: bool = typer.Option(
+        False,
+        "--cache",
+        help="--from/--to 整段每張表只讀 PG 一次（從 --from 減最長回看起）；補算少數薄因子的長歷史用（T-414：26 個 news.* 補 2021 起），記憶體要裝得下",
+    ),
 ) -> None:
     """物化因子（全宇宙 value/z/pct/composite）→ PG。單日或 --from/--to 逐日範圍。
 
@@ -5177,12 +5202,21 @@ def serving_materialize(
     cfg = _load_serving()
     conn = store.connect(cfg)
     try:
-        source = PgTableSource(conn, cfg.pg_schema)
         names = [f.strip() for f in factors.split(",") if f.strip()] or None
         if names:
             unknown = sorted(set(names) - set(list_factors()))
             if unknown:
                 raise TwquantError(f"未註冊的因子：{', '.join(unknown)}")
+        if cache and from_ and to:
+            # 不給 since 的 PgTableSource 是整張表全掃；逐日 × 逐因子各掃一次，長歷史根本跑不完
+            source = PgTableSource(
+                conn,
+                cfg.pg_schema,
+                cache=True,
+                since=smat.read_since(dt.date.fromisoformat(from_), names or list_factors()),
+            )
+        else:
+            source = PgTableSource(conn, cfg.pg_schema)
         if from_ and to:
             results = smat.materialize_range(
                 source,
@@ -6283,6 +6317,862 @@ def pl_config() -> pl.Config:
     import polars as pl
 
     return pl.Config(tbl_rows=30, tbl_cols=20, fmt_str_lengths=40)
+
+
+# ── 新聞歷史語料（T-412／SPEC-018 第二階段；使用者 2026-10-20：「歷史語料的訓練也一起做」）：本機 news_hist ──
+news_app = typer.Typer(
+    help="新聞歷史語料（SPEC-018 第二階段）：鉅亨網回補、MOPS 搬運、雲端拉取、本機向量"
+)
+app.add_typer(news_app, name="news")
+
+
+def _news_hist_cfg() -> dict[str, Any]:
+    import yaml
+
+    doc = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    h = doc.get("hist")
+    if not isinstance(h, dict):
+        raise typer.BadParameter("configs/news.yaml 缺 hist 段")
+    return {
+        **h,
+        "rule_version": str(doc["mention"]["rule_version"]),
+        "embed_max_chars": int(doc["embed"]["max_chars"]),
+    }
+
+
+@news_app.command("init-schema")
+def news_init_schema(
+    vectors: bool = typer.Option(
+        False, "--vectors", help="同時建向量表（本機 PG 要已換 pgvector 映像）"
+    ),
+) -> None:
+    """建 news_hist schema（冪等）。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    conn = store.connect(_load_serving())
+    try:
+        news_hist.ensure_schema(conn)
+        if vectors:
+            news_hist.ensure_embeddings_table(conn)
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] news_hist schema 就緒{'（含向量表）' if vectors else ''}", fg=typer.colors.GREEN
+    )
+
+
+@news_app.command("backfill-cnyes")
+def news_backfill_cnyes(
+    start: str = typer.Option(
+        "", "--from", help="起日 YYYY-MM-DD（空＝configs/news.yaml hist.cnyes_from）"
+    ),
+    end: str = typer.Option("", "--to", help="迄日（空＝昨天，台北）"),
+    categories: str = typer.Option("", help="逗號分隔（空＝hist.cnyes_categories）"),
+    max_days: int = typer.Option(0, help="這次最多補幾天（0＝全部）；按天可續跑、重跑略過已成功的"),
+) -> None:
+    """鉅亨網歷史回補（D-201 §五：只做研究、只存本機、不對外重發）。一天一個分類一筆紀錄；失敗記下來、繼續下一天。"""
+    from twquant.conventions import now_tw
+    from twquant.data import news_hist
+    from twquant.data.http import HttpClient
+    from twquant.data.serving import store
+    from twquant.data.sources import cnyes_archive as ca
+    from twquant.errors import TwquantError
+
+    cfg = _load_system()
+    h = _news_hist_cfg()
+    day0 = dt.date.fromisoformat(start or str(h["cnyes_from"]))
+    day1 = dt.date.fromisoformat(end) if end else now_tw().date() - dt.timedelta(days=1)
+    cats = [
+        c.strip() for c in (categories or ",".join(h["cnyes_categories"])).split(",") if c.strip()
+    ]
+    client = HttpClient(source="cnyes_archive", rate=cfg.source_rates["cnyes_archive"])
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    n_days = n_items = n_err = 0
+    try:
+        news_hist.ensure_schema(conn)
+        for cat in cats:
+            source = f"cnyes-{cat.replace('_', '-')}"
+            done = news_hist.done_days(conn, source)
+            todo = [d for d in news_hist.days_between(day0, day1) if d not in done]
+            typer.echo(f"{source}：{day0}～{day1} 共 {len(todo)} 天要補（已有 {len(done)} 天）")
+            for day in todo:
+                if max_days and n_days >= max_days:
+                    break
+                try:
+                    items, total, skipped = ca.fetch_day(
+                        client, cat, day, content_chars=int(h["content_chars"])
+                    )
+                    rows = [
+                        news_hist.ItemRow(
+                            id=f"cnyes:{it.news_id}",
+                            origin="cnyes",
+                            source=source,
+                            published_at=it.published_at,
+                            available_at=it.published_at,
+                            title=it.title,
+                            summary=it.summary,
+                            content=it.content,
+                            stocks=it.stocks,
+                            keywords=it.keywords,
+                            url=it.url,
+                        )
+                        for it in items
+                    ]
+                    n_items += news_hist.upsert_items(conn, rows)
+                    news_hist.record_run(
+                        conn,
+                        source,
+                        day,
+                        total=total,
+                        fetched=len(items),
+                        ok=True,
+                        error=f"略過 {skipped} 則沒有標題" if skipped else None,
+                    )
+                except (TwquantError, OSError) as exc:  # 一天失敗記下來、繼續（之後重跑會補）
+                    n_err += 1
+                    conn.rollback()
+                    news_hist.record_run(
+                        conn, source, day, total=None, fetched=None, ok=False, error=str(exc)[:300]
+                    )
+                    typer.secho(f"  [!] {source} {day}：{exc}", fg=typer.colors.YELLOW)
+                n_days += 1
+                if n_days % 25 == 0:
+                    typer.echo(
+                        f"  {n_days} 天、{n_items} 則、失敗 {n_err}；{time.monotonic() - t0:.0f} 秒"
+                    )
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 回補 {n_days} 天、{n_items} 則、失敗 {n_err}；{time.monotonic() - t0:.0f} 秒",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("import-mops")
+def news_import_mops() -> None:
+    """本機 serving.material_news（9/28 研究全文快照）的主旨與截短內容 → news_hist（冪等）。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    conn = store.connect(_load_serving())
+    try:
+        news_hist.ensure_schema(conn)
+        n = news_hist.import_mops(conn, int(h["mops_content_chars"]))
+    finally:
+        conn.close()
+    typer.secho(f"[OK] MOPS 公告新增 {n} 則", fg=typer.colors.GREEN)
+
+
+def _news_pull_run(since: str, with_embeddings: bool) -> str:
+    """雲端新聞服務 → 本機 news_hist（D-201 §二：雲端是每日資料權威，只拉不反向）；回一行摘要。
+    `news pull` 指令與每日 pipeline「新聞語料拉回」共用。需要 TWQUANT_NEWS_DSN。"""
+    import os
+
+    import psycopg
+
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    dsn = os.environ.get("TWQUANT_NEWS_DSN", "").strip()
+    if not dsn:
+        raise typer.BadParameter("沒有 TWQUANT_NEWS_DSN（新聞專案的連線字串，放 .env）")
+    local = store.connect(_load_serving())
+    try:
+        news_hist.ensure_schema(local)
+        if with_embeddings:
+            news_hist.ensure_embeddings_table(local)
+        s = since or news_hist.get_state(local, "cloud_pull_since") or str(h["pull_since_default"])
+        since_dt = dt.datetime.fromisoformat(s)
+        if not since:
+            # 回看幾天：翻譯晚到的英文新聞要重拉（文字欄與向量以雲端為準）
+            since_dt -= dt.timedelta(days=int(h["pull_lookback_days"]))
+        with psycopg.connect(dsn, connect_timeout=30, prepare_threshold=None) as cloud:
+            n = news_hist.pull_cloud(
+                local,
+                cloud,
+                rule_version=h["rule_version"],
+                since=since_dt,
+                with_embeddings=with_embeddings,
+            )
+    finally:
+        local.close()
+    return f"從 {since_dt.isoformat()} 起拉下：新聞 {n['items']}、提及 {n['mentions']}、向量 {n['embeddings']}"
+
+
+@news_app.command("pull")
+def news_pull(
+    since: str = typer.Option(
+        "",
+        help="拉 first_seen_at 晚於這個時間的（ISO，帶時區；空＝上次拉到哪再回看 hist.pull_lookback_days 天，或 hist.pull_since_default）",
+    ),
+    no_embeddings: bool = typer.Option(
+        False, "--no-embeddings", help="不拉雲端向量（本機 PG 還沒有 pgvector 時）"
+    ),
+) -> None:
+    """雲端新聞服務 → 本機 news_hist（D-201 §二：雲端是每日資料權威，只拉不反向）。需要 TWQUANT_NEWS_DSN。"""
+    typer.secho("[OK] " + _news_pull_run(since, not no_embeddings), fg=typer.colors.GREEN)
+
+
+@news_app.command("embed")
+def news_embed(
+    limit: int = typer.Option(0, help="這次最多算幾則（0＝全部）"),
+    batch: int = typer.Option(0, help="一批幾則（0＝hist.embed_batch）"),
+    device: str = typer.Option("cuda", help="cuda 或 cpu"),
+) -> None:
+    """本機向量：sentence-transformers bge-m3（fp16、GPU），只算還沒有向量的；可重跑。要 `uv sync --extra embed`。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise typer.BadParameter(
+            "沒裝 sentence-transformers：uv sync --extra embed（torch CUDA 約 2.5 GB）"
+        ) from exc
+    h = _news_hist_cfg()
+    bs = batch or int(h["embed_batch"])
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = 0
+    try:
+        news_hist.ensure_embeddings_table(conn)
+        model = SentenceTransformer(str(h["embed_model"]), device=device)
+        if device.startswith("cuda"):
+            model.half()
+        while True:
+            chunk = news_hist.pending_for_embedding(
+                conn, min(2000, limit - done) if limit else 2000, int(h["embed_max_chars"])
+            )
+            if not chunk:
+                break
+            vecs = model.encode(
+                [t for _, t in chunk],
+                batch_size=bs,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            done += news_hist.save_embeddings(
+                conn, str(h["embed_model"]), zip((i for i, _ in chunk), vecs.tolist(), strict=True)
+            )
+            typer.echo(f"  {done} 則；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(f"[OK] 向量 {done} 則；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN)
+
+
+# ── 情緒（T-413／D-201 §四）：Ollama 抽樣貼標 → 探針 → 全語料打分 ──
+@news_app.command("sentiment-sample")
+def news_sentiment_sample(
+    n: int = typer.Option(0, help="抽幾對（0＝hist.sentiment.sample_n）"),
+) -> None:
+    """分層抽樣（年 × 來源）要貼標的 (新聞, 台股) 對；只用研究上限之前的新聞（D-109）。冪等。"""
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    sc = h["sentiment"]
+    conn = store.connect(_load_serving())
+    try:
+        ns.ensure_tables(conn)
+        pairs = ns.candidate_pairs(
+            conn, dt.date.fromisoformat(str(h["research_until"])) + dt.timedelta(days=1)
+        )
+        sample = ns.stratified_sample(pairs, n or int(sc["sample_n"]), int(sc["seed"]))
+        k = ns.save_sample(conn, sample)
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 候選 {len(pairs)} 對，抽 {k} 對（{len({p.stratum for p in sample})} 層）",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("sentiment-label")
+def news_sentiment_label(
+    limit: int = typer.Option(0, help="這次最多貼幾對（0＝全部沒貼的）"),
+) -> None:
+    """本機 Ollama 對抽樣貼三類標籤；可中斷續跑。失敗的那對印出來、跳過（不猜）。"""
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    h = _news_hist_cfg()
+    sc = h["sentiment"]
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = bad = 0
+    try:
+        ns.ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("select stock_id, name from serving.stock_meta")
+            names = {str(a): str(b) for a, b in cur.fetchall() if b}
+        while True:
+            batch = ns.pending_pairs(conn, min(200, limit - done) if limit else 200, names)
+            if not batch:
+                break
+            for item_id, stock_id, name, title, body in batch:
+                prompt = ns.build_prompt(name, stock_id, title, body, int(sc["max_body_chars"]))
+                try:
+                    raw = ns.ollama_chat(prompt, model=str(sc["model"]), url=str(sc["ollama_url"]))
+                    label = ns.parse_label(raw)
+                except (DataError, OSError) as exc:
+                    bad += 1
+                    typer.secho(
+                        f"  [!] {item_id} {stock_id}：{str(exc)[:100]}", fg=typer.colors.YELLOW
+                    )
+                    continue
+                ns.save_label(conn, item_id, stock_id, label, model=str(sc["model"]), raw=raw)
+                done += 1
+                if done % 100 == 0:
+                    typer.echo(f"  {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 貼標 {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN
+    )
+
+
+@news_app.command("sentiment-probe")
+def news_sentiment_probe(
+    report: str = typer.Option(
+        "", help="報告寫到哪（空＝docs/reports/news-sentiment-probe-<日期>.md）"
+    ),
+) -> None:
+    """在 bge-m3 向量上訓線性探針複製標籤，驗證集算 macro-F1 與正負 AUC，對事前門檻；過了才存探針、打全語料。"""
+    import json as _json
+
+    import numpy as np
+
+    from twquant.conventions import now_tw
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    sc = h["sentiment"]
+    conn = store.connect(_load_serving())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """select l.item_id, l.stock_id, l.label, e.vec::text from news_hist.sentiment_labels l
+                   join news_hist.embeddings e on e.item_id = l.item_id order by l.item_id, l.stock_id"""
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    if len(rows) < int(sc["probe_min_labels"]):
+        raise typer.BadParameter(
+            f"標籤只有 {len(rows)} 對（有向量的），探針至少要 {sc['probe_min_labels']}"
+        )
+    x = np.array([_json.loads(r[3]) for r in rows], dtype=np.float64)
+    y = np.array([int(r[2]) for r in rows])
+    tr, va = ns.split_train_valid(len(x), float(sc["valid_share"]), int(sc["seed"]))
+    probe = ns.train_probe(x[tr], y[tr])
+    ev = ns.evaluate_probe(
+        probe,
+        x[va],
+        y[va],
+        f1_min=float(sc["gate_f1"]),
+        auc_min=float(sc["gate_auc"]),
+        n_train=len(tr),
+    )
+    day = now_tw().date().isoformat()
+    out = (
+        Path(report)
+        if report
+        else _CONFIG_DIR.parent / "docs" / "reports" / f"news-sentiment-probe-{day}.md"
+    )
+    dist = {int(k): int(v) for k, v in zip(*np.unique(y, return_counts=True), strict=True)}
+    lines = [
+        f"# 新聞情緒探針（T-413／D-201 §四）— {day}",
+        "",
+        f"標籤 {len(y)} 對（分布 {dist}）；訓練 {ev.n_train}、驗證 {ev.n_valid}；探針＝softmax 迴歸（L2、類別加權）在 bge-m3 1024 維向量上。",
+        "",
+        "| 指標 | 事前門檻 | 實測 | 結果 |",
+        "|---|---|---|---|",
+        f"| 驗證 macro-F1 | ≥ {sc['gate_f1']} | {ev.macro_f1:.3f} | {'過' if ev.macro_f1 >= float(sc['gate_f1']) else '沒過'} |",
+        f"| 正負二分 AUC | ≥ {sc['gate_auc']} | {ev.pos_neg_auc:.3f} | {'過' if ev.pos_neg_auc >= float(sc['gate_auc']) else '沒過'} |",
+        "",
+        "**判定："
+        + (
+            "過，探針可用來打全語料（`news sentiment-score`）。**"
+            if ev.passed
+            else "沒過，探針棄用，改全語料用 Ollama 貼完（D-201 §四）。**"
+        ),
+    ]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if ev.passed:
+        np.savez(
+            _CONFIG_DIR.parent / "data" / "models" / "news_sentiment_probe.npz",
+            w=probe.w,
+            b=probe.b,
+            version=np.array([ns.PROMPT_VERSION]),
+        )
+    typer.secho(
+        f"[{'OK' if ev.passed else 'FAIL'}] macro-F1 {ev.macro_f1:.3f}、AUC {ev.pos_neg_auc:.3f}；報告 {out}",
+        fg=typer.colors.GREEN if ev.passed else typer.colors.YELLOW,
+    )
+
+
+# ── 新聞類型（T-421）：Ollama 貼標 → 探針 → 權重給雲端 ──
+@news_app.command("types-label")
+def news_types_label(
+    limit: int = typer.Option(1500, help="這次最多貼幾則"),
+    origins: str = typer.Option("cloud", help="貼哪些來源（逗號分隔）；線上新聞跟雲端同一種文字"),
+) -> None:
+    """本機 Ollama 對線上新聞貼類型（可續跑）。"""
+    import yaml
+
+    from twquant.data import news_types as nt
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    doc = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    classes = nt.load_classes(doc)
+    sc = doc["hist"]["sentiment"]
+    ids = [c.id for c in classes]
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = bad = 0
+    try:
+        nt.ensure_tables(conn)
+        from twquant.data import news_sentiment as ns
+
+        while True:
+            batch = nt.pending_items(
+                conn, min(200, limit - done), [o.strip() for o in origins.split(",")]
+            )
+            if not batch:
+                break
+            for item_id, title, body in batch:
+                try:
+                    raw = ns.ollama_chat(
+                        nt.build_prompt(classes, title, body, int(sc["max_body_chars"])),
+                        model=str(sc["model"]),
+                        url=str(sc["ollama_url"]),
+                    )
+                    t = nt.parse_type(raw, ids)
+                except (DataError, OSError) as exc:
+                    bad += 1
+                    typer.secho(f"  [!] {item_id}：{str(exc)[:100]}", fg=typer.colors.YELLOW)
+                    continue
+                nt.save_label(conn, item_id, t, model=str(sc["model"]), raw=raw)
+                done += 1
+                if done % 100 == 0:
+                    typer.echo(f"  {done} 則、失敗 {bad}；{time.monotonic() - t0:.0f} 秒")
+            if done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 類型貼標 {done} 則、失敗 {bad}；{time.monotonic() - t0:.0f} 秒",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("types-train")
+def news_types_train(
+    out: str = typer.Option("", help="權重寫到哪（空＝news-service/config/news_types.json）"),
+) -> None:
+    """標籤＋bge-m3 向量 → softmax 探針；驗證集 macro-F1 與各類準確率印出來、寫進權重檔的 metrics；權重給雲端 ingest 用。"""
+    import yaml
+
+    from twquant.data import linear_probe as lp
+    from twquant.data import news_types as nt
+    from twquant.data.serving import store
+
+    doc = yaml.safe_load((_CONFIG_DIR / "news.yaml").read_text(encoding="utf-8"))
+    classes = nt.load_classes(doc)
+    ids = [c.id for c in classes]
+    conn = store.connect(_load_serving())
+    try:
+        _, x, labels = nt.labeled_vectors(conn, classes)
+    finally:
+        conn.close()
+    import numpy as np
+
+    yi = np.array([ids.index(t) for t in labels])
+    tr, va = lp.split(len(x), 0.2, 7)
+    probe = lp.train_softmax(x[tr], yi[tr], len(ids))
+    tcfg = doc["types"]
+    proba = probe.proba(x[va])
+    # 跟雲端同一條規則（news_types.classify）：信心不到 min_confidence 判 other，門檻指標照這樣算
+    pred = np.where(
+        proba.max(axis=1) >= float(tcfg["min_confidence"]), proba.argmax(axis=1), ids.index("other")
+    )
+    f1 = lp.macro_f1(yi[va], pred, len(ids))
+    acc = float((pred == yi[va]).mean())
+    recall = dict(zip(ids, lp.per_class_recall(yi[va], pred, len(ids)), strict=True))
+    dist = {ids[i]: int(n) for i, n in enumerate(np.bincount(yi, minlength=len(ids)))}
+    gate_f1, gate_other = float(tcfg["gate_f1"]), float(tcfg["gate_other_recall"])
+    passed = f1 >= gate_f1 and recall["other"] >= gate_other
+    typer.echo(f"標籤 {len(x)} 則 {dist}")
+    typer.echo(
+        f"驗證 macro-F1 {f1:.3f}、準確率 {acc:.3f}；各類召回 "
+        + "、".join(f"{k} {v:.2f}" for k, v in recall.items())
+    )
+    if not passed:
+        typer.secho(
+            f"[X] 門檻沒過（macro-F1 ≥ {gate_f1}、other 召回 ≥ {gate_other}）：不寫權重。合併類別或換標籤方式再試，不調門檻。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    weights = nt.export_weights(
+        lp.train_softmax(x, yi, len(ids)),  # 正式權重用全部標籤訓
+        classes,
+        version=str(tcfg["version"]),
+        min_confidence=float(tcfg["min_confidence"]),
+        metrics={
+            "n": len(x),
+            "valid_macro_f1": round(f1, 3),
+            "valid_accuracy": round(acc, 3),
+            "valid_recall": {k: round(v, 3) for k, v in recall.items()},
+        },
+    )
+    path = Path(out) if out else _CONFIG_DIR.parent / "news-service" / "config" / "news_types.json"
+    path.write_text(json.dumps(weights, ensure_ascii=False), encoding="utf-8")
+    typer.secho(
+        f"[OK] 門檻過；權重 {path}（{path.stat().st_size // 1024} KB）", fg=typer.colors.GREEN
+    )
+
+
+# ── 提及回補（T-412）：本機語料用雲端同一套 mention.ts 規則離線比；驗收 ② 鉅亨 tag vs 別名 ──
+@news_app.command("mentions-backfill")
+def news_mentions_backfill(
+    limit: int = typer.Option(0, help="這次最多比幾則（0＝全部沒比過的）"),
+    batch: int = typer.Option(5000, help="一次交給 node 幾則"),
+    origins: str = typer.Option(
+        "cnyes", help="哪些來源（逗號分隔）；cloud 的提及由 news pull 拉回，不在這裡比"
+    ),
+    entities: str = typer.Option(
+        "", help="實體清單 JSON（空＝<data_dir>/news_entities.json；沒有就從雲端拉）"
+    ),
+    refresh_entities: bool = typer.Option(False, "--refresh-entities", help="重新從雲端拉實體清單"),
+) -> None:
+    """本機語料的提及（T-412）：雲端同一套 mention.ts 規則離線跑（node），來源自帶股票代號記 method='tag'。可中斷續跑。"""
+    import os
+    import shutil
+    import subprocess
+
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+    from twquant.errors import DataError
+
+    h = _news_hist_cfg()
+    root = _CONFIG_DIR.parent
+    node = shutil.which("node")
+    if not node:
+        raise typer.BadParameter("找不到 node（news-service 的提及規則要用 node 跑）")
+    ent_path = Path(entities) if entities else Path(_load_system().data_dir) / "news_entities.json"
+    if refresh_entities or not ent_path.exists():
+        import psycopg
+
+        dsn = os.environ.get("TWQUANT_NEWS_DSN", "").strip()
+        if not dsn:
+            raise typer.BadParameter("沒有實體清單也沒有 TWQUANT_NEWS_DSN，拉不到雲端實體")
+        with psycopg.connect(dsn, connect_timeout=30, prepare_threshold=None) as cloud:
+            ents = news_hist.export_entities(cloud)
+        ent_path.parent.mkdir(parents=True, exist_ok=True)
+        ent_path.write_text(json.dumps(ents, ensure_ascii=False), encoding="utf-8")
+        typer.echo(f"實體 {len(ents)} 個 → {ent_path}")
+    cmd = [
+        node,
+        "--experimental-strip-types",
+        str(root / "news-service" / "scripts" / "mentions_offline.ts"),
+        str(ent_path),
+        str(root / "news-service" / "config" / "news.json"),
+    ]
+    rv = str(h["rule_version"])
+    conn = store.connect(_load_serving())
+    t0 = time.monotonic()
+    done = hits = 0
+    try:
+        news_hist.ensure_schema(conn)
+        while True:
+            items = news_hist.pending_for_mentions(
+                conn, rv, origins.split(","), min(batch, limit - done) if limit else batch
+            )
+            if not items:
+                break
+            payload = "\n".join(
+                json.dumps(
+                    {"id": i[0], "texts": news_hist.mention_texts(i[1], i[2], i[3], i[4])},
+                    ensure_ascii=False,
+                )
+                for i in items
+            )
+            res = subprocess.run(
+                cmd,
+                input=(payload + "\n").encode("utf-8"),
+                capture_output=True,
+                cwd=str(root),
+                check=False,
+            )
+            if res.returncode != 0:
+                raise DataError(
+                    "news_mentions",
+                    None,
+                    f"node 離線比對失敗：{res.stderr.decode('utf-8', 'replace')[:300]}",
+                )
+            found: dict[str, list[dict[str, str]]] = {}
+            for line in res.stdout.decode("utf-8").splitlines():
+                if line.strip():
+                    o = json.loads(line)
+                    found[o["id"]] = o["hits"]
+            rows: list[tuple[str, str, str, str | None, str]] = []
+            scans: list[tuple[str, str, int]] = []
+            for i in items:
+                hs = found.get(i[0])
+                if hs is None:
+                    raise DataError("news_mentions", None, f"{i[0]}：node 沒回結果")
+                rows += [(i[0], x["entity"], "alias", x["evidence"], rv) for x in hs]
+                rows += news_hist.tag_mentions(i[0], i[5], rv)
+                scans.append((i[0], rv, len(hs)))
+            hits += news_hist.save_mentions(conn, rows, scans)
+            done += len(items)
+            typer.echo(f"  {done} 則、提及 {hits}；{time.monotonic() - t0:.0f} 秒")
+            if limit and done >= limit:
+                break
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 比對 {done} 則、提及 {hits}（含 tag）；規則 {rv}；{time.monotonic() - t0:.0f} 秒",
+        fg=typer.colors.GREEN,
+    )
+
+
+@news_app.command("mentions-report")
+def news_mentions_report(
+    out: str = typer.Option(
+        ..., help="markdown 報告路徑（docs/reports/news-mention-parity-<日期>.md）"
+    ),
+    top: int = typer.Option(30, help="列幾個「別名命中但來源沒標」的實體"),
+) -> None:
+    """T-412 驗收 ②：鉅亨網自帶股票 tag vs 別名命中一致率（只算有 tag 的新聞），附沒標的實體看誤判。"""
+    from twquant.data import news_hist
+    from twquant.data.serving import store
+
+    h = _news_hist_cfg()
+    conn = store.connect(_load_serving())
+    try:
+        r = news_hist.mention_agreement(conn, str(h["rule_version"]), top)
+    finally:
+        conn.close()
+    lines = [
+        f"# 鉅亨網自帶股票 tag vs 別名命中（T-412 驗收 ②，{dt.date.today().isoformat()}）",
+        "",
+        f"- 規則版本 {h['rule_version']}；已比對 {r['scanned']:,} 則，其中來源有標股票的 {r['items_with_tag']:,} 則",
+        f"- 來源的 tag 共 {r['tags']:,} 個，別名也找到的 {r['tags_found']:,} 個 → **tag 召回 {r['tag_recall']:.1%}**（沒找到的多半是內文沒出現公司名、只在圖表或標的清單）",
+        f"- 有標股票的新聞上，別名命中台股 {r['alias_hits_on_tagged']:,} 個，其中來源沒標的 {r['alias_not_tagged']:,} 個 → **{r['alias_untagged_share']:.1%}**（含正確的「順帶提到」與誤判，要人工看下表）",
+        "",
+        "| 實體 | 沒標次數 | 一段證據 |",
+        "|---|---|---|",
+    ]
+    lines += [
+        f"| {e} | {n} | {(s or '')[:60].replace('|', '｜')} |" for e, n, s in r["top_untagged"]
+    ]
+    Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    typer.echo("\n".join(lines[:5]))
+    typer.secho(f"[OK] 報告 {out}", fg=typer.colors.GREEN)
+
+
+# ── 新聞因子特徵（T-414／SPEC-018 §5）：主題中心一次性擬合；每日逐股特徵 → 主庫 news_features ──
+def _news_factors_cfg() -> Any:
+    from twquant.config import NewsFactorsConfig, load_config
+
+    return load_config(_CONFIG_DIR / "news_factors.yaml", NewsFactorsConfig)
+
+
+def _news_models_dir(data_dir: str) -> Path:
+    """主題中心放哪：<data_dir>/models。system.yaml 的 data_dir 是相對路徑，在 worktree 裡要用 --data-dir 給絕對路徑（§0.2）。"""
+    return (Path(data_dir) if data_dir else Path(_load_system().data_dir)).resolve() / "models"
+
+
+@news_app.command("topics-fit")
+def news_topics_fit(
+    data_dir: str = typer.Option(
+        "", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"
+    ),
+) -> None:
+    """主題中心（T-414）：只用 fit_until 以前的新聞向量（固定 seed 抽樣）跑 k-means，存 <data_dir>/models/<centers_file>。一次性、凍結。"""
+    import numpy as np
+
+    from twquant.conventions import TZ
+    from twquant.data import news_features as nfe
+    from twquant.data.serving import store
+
+    cfg = _news_factors_cfg()
+    until = dt.datetime.combine(cfg.topics.fit_until, dt.time(23, 59, 59), tzinfo=TZ)
+    conn = store.connect(_load_serving())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select e.item_id from news_hist.embeddings e join news_hist.items i on i.id = e.item_id "
+                "where i.origin <> 'mops' and i.available_at <= %s order by e.item_id",
+                (until,),
+            )
+            ids = [str(r[0]) for r in cur.fetchall()]
+        if len(ids) > cfg.topics.fit_sample:
+            rng = np.random.default_rng(cfg.topics.seed)
+            ids = sorted(rng.choice(np.array(ids), cfg.topics.fit_sample, replace=False).tolist())
+        _, vecs = nfe.load_vectors(conn, ids)
+    finally:
+        conn.close()
+    centers = nfe.fit_topics(vecs, cfg.topics.k, cfg.topics.seed)
+    path = _news_models_dir(data_dir) / cfg.topics.centers_file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        path,
+        centers=centers,
+        version=cfg.topics.version,
+        fit_until=str(cfg.topics.fit_until),
+        n=len(vecs),
+    )
+    typer.secho(
+        f"[OK] 主題中心 {cfg.topics.k} 個，用 {len(vecs)} 則 ≤ {cfg.topics.fit_until} 的新聞；{path}",
+        fg=typer.colors.GREEN,
+    )
+
+
+def _news_features_run(start: str, end: str, data_dir: str = "") -> str:
+    """每日逐股新聞特徵 → 主庫 news_features；回一行摘要。`news features` 指令與每日 pipeline 共用。"""
+    import numpy as np
+    import polars as pl
+
+    from twquant.conventions import TZ, now_tw
+    from twquant.data import news_features as nfe
+    from twquant.data.serving import schema as sch
+    from twquant.data.serving import store
+
+    cfg = _news_factors_cfg()
+    w = cfg.topics
+    win = cfg.windows
+    scfg = _load_serving()
+    schema = scfg.pg_schema
+    centers_path = _news_models_dir(data_dir) / w.centers_file
+    if not centers_path.exists():
+        raise typer.BadParameter(f"沒有主題中心 {centers_path}：先跑 twquant news topics-fit")
+    centers = np.load(centers_path)["centers"]
+    now = now_tw()
+    conn = store.connect(scfg)
+    try:
+        nfe.ensure_sim_table(conn)
+        sch.ensure_tables(conn, tuple(t for t in sch.FACTOR_SPECS if t.name == nfe.TABLE), schema)
+        end_d = dt.date.fromisoformat(end) if end else now.date()
+        if start:
+            start_d = dt.date.fromisoformat(start)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(f'select max(date) from "{schema}".news_features')
+                last = cur.fetchone()[0]
+                if last is None:
+                    cur.execute(
+                        "select min(available_at at time zone 'Asia/Taipei')::date from news_hist.items"
+                    )
+                    last = cur.fetchone()[0] - dt.timedelta(days=1)
+            start_d = last + dt.timedelta(days=1)
+        dates = [
+            d
+            for d in nfe.load_trading_days(conn, schema, start_d, end_d)
+            if nfe.cutoff_passed(d, cfg.cutoff_hour, now)
+        ]
+        if not dates:
+            return f"{start_d}～{end_d} 沒有截點已過的交易日，略過"
+        until = dt.datetime(
+            dates[-1].year, dates[-1].month, dates[-1].day, cfg.cutoff_hour, tzinfo=TZ
+        )
+        lookback = (
+            max(
+                win.attention_base,
+                win.sector_base,
+                win.sent_mid + win.sent_shift_base,
+                win.novelty_base + win.novelty_recent,
+                win.mops_novelty_base + win.mops_latest_max_age,
+            )
+            + 1
+        )
+        grid_start = dates[0] - dt.timedelta(days=lookback)
+        mentions = nfe.load_mentions(conn, until)
+        universe = sorted(
+            set(nfe.load_universe(conn, schema)) | set(mentions["stock_id"].to_list())
+        )
+        grid = nfe.dense_grid(universe, grid_start, dates[-1])
+        counts = nfe.daily_counts(mentions, cfg.cutoff_hour)
+        cf = nfe.count_features(
+            grid,
+            counts,
+            short=win.attention_short,
+            mid=win.attention_mid,
+            base=win.attention_base,
+            mops=win.mops_count,
+        )
+        sf = nfe.sentiment_features(
+            grid,
+            nfe.load_scores(conn, cfg.sentiment_version, until),
+            cutoff_hour=cfg.cutoff_hour,
+            short=win.sent_short,
+            mid=win.sent_mid,
+            shift_base=win.sent_shift_base,
+        )
+        hf = nfe.sector_heat(
+            cf.select("day", "stock_id", "n"),
+            nfe.load_groups(conn, schema),
+            short=win.sector_short,
+            base=win.sector_base,
+            min_base=win.sector_min_base,
+        )
+        items = (
+            mentions.with_columns(
+                nfe.news_day(pl.col("available_at"), cfg.cutoff_hour).alias("day")
+            )
+            .filter(pl.col("day") >= grid_start)
+            .select("item_id", "stock_id", "day", "is_mops")
+            .sort(["stock_id", "day", "item_id"])
+        )
+        sims_news, sims_mops, tf = nfe.compute_item_sims_and_topics(
+            conn,
+            items,
+            centers,
+            news_base=win.novelty_base,
+            mops_base=win.mops_novelty_base,
+            recent=win.novelty_recent,
+        )
+        nov = nfe.novelty_features(grid, sims_news, recent=win.novelty_recent)
+        mn = nfe.mops_novelty_features(grid, sims_mops, max_age=win.mops_latest_max_age)
+        out = nfe.assemble(
+            dates,
+            [cf, sf, hf, nov, mn, tf],
+            cutoff_hour=cfg.cutoff_hour,
+            topic_k=w.k,
+            topic_version=w.version,
+        )
+        n = nfe.write_features(conn, schema, out)
+    finally:
+        conn.close()
+    return f"news_features {n} 列（{dates[0]}～{dates[-1]}，{len(dates)} 個交易日；情緒版本 {cfg.sentiment_version or '無'}）"
+
+
+@news_app.command("features")
+def news_features_cmd(
+    start: str = typer.Option(
+        "", help="從哪天（空＝主庫 news_features 最後一天的隔天；第一次＝語料最早一天）"
+    ),
+    end: str = typer.Option("", help="到哪天（空＝今天）；歷史回填建議一年一段"),
+    data_dir: str = typer.Option(
+        "", help="覆寫 system.yaml data_dir（worktree 裡給主 checkout 的絕對路徑）"
+    ),
+) -> None:
+    """每日逐股新聞特徵（T-414）→ 主庫 news_features。只算截點已過的日子；可重跑（同日覆蓋）。"""
+    t0 = time.monotonic()
+    msg = _news_features_run(start, end, data_dir)
+    typer.secho(f"[OK] {msg}；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN)
 
 
 if __name__ == "__main__":
