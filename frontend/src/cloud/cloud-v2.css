@@ -240,16 +240,19 @@
 .cq .cq-stance.up { color: var(--up); background: rgba(246, 70, 93, .14); }
 .cq .cq-stance.down { color: var(--down); background: rgba(14, 203, 129, .14); }
 .cq .cq-stance.flat { color: var(--mute); background: var(--tile); }
+/* 五級立場（D-206 §六）：強烈＝實心底；多空分歧＝黃框 */
+.cq .cq-stance.up.strong { color: #fff; background: var(--up); }
+.cq .cq-stance.down.strong { color: #0b0e11; background: var(--down); }
+.cq .cq-stance.split { color: #ffc04d; background: transparent; box-shadow: inset 0 0 0 1px #ffc04d; }
 .cq-row .cq-name small.cq-blurb .cq-stance { margin-top: 0; }
 .cq-rv-concl { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; font-size: 16px; line-height: 1.5; }
 .cq-rv-concl .cq-stance { margin-top: 3px; height: 22px; font-size: 13px; }
 .cq-rv-view { font-size: 13.5px; line-height: 1.45; color: #d6d8de; }
-/* 10 分制小項（D-206）：點開看 5 項，+1 紅、−1 綠、0 灰；量表第 5 格右邊一條細線標中性 */
-.cq-rv-meter i.mid { box-shadow: 2px 0 0 #8a8f9c; }
+/* 10 分制小項（D-206）：點開看 5 項，+1 紅、−1 綠、0 灰 */
 .cq-rv-items summary { cursor: pointer; font-size: 13px; color: var(--mute); }
 .cq-rv-items ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .cq-rv-item { display: flex; align-items: flex-start; gap: 6px; font-size: 13.5px; line-height: 1.45; color: #d6d8de; }
-.cq-rv-item b { color: #fff; font-weight: 700; }
+.cq-rv-tile .cq-rv-item b { color: #fff; font-size: inherit; font-weight: 700; line-height: inherit; margin-right: 4px; }  /* 不吃 .cq-rv-tile b 的 26px 大分數字（2026-10-21 使用者：「字太大了吧」） */
 .cq-rv-pt { flex: none; min-width: 26px; text-align: center; border-radius: 5px; font-style: normal; font-size: 12px; font-weight: 800; padding: 1px 0; margin-top: 1px; }
 .cq-rv-pt.up { color: var(--up); background: rgba(246, 70, 93, .14); }
 .cq-rv-pt.down { color: var(--down); background: rgba(14, 203, 129, .14); }

@@ -1004,6 +1004,7 @@ PICK_REVIEWS_SPEC = TableSpec(
         # 每面向滿分：NULL＝AI 自評 1～5（D-196），10＝規則算 0～10（D-206）；加在最後，舊表 ADD COLUMN 對齊
         ("scale", "integer"),
         ("items", "jsonb"),  # 20 個小項 [{dim, name, points, text}]（D-206）
+        ("split", "boolean"),  # 多空分歧：某面向 ≥ split_hi 且另一面向 ≤ split_lo（D-206 §六）
     ),
     pk=("date", "line", "stock_id"),
 )

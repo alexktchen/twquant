@@ -80,7 +80,6 @@ class PickReviewItem(BaseModel):
     tech_view: str
     chips_view: str
     fund_view: str
-    stance: str
     conclusion: str
 
 

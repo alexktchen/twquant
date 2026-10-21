@@ -26,6 +26,7 @@ from twquant.reporting.pick_review import (
     fund_facts,
     news_facts,
     rule_reason,
+    stance_of,
     stock_payload,
     tech_facts,
 )
@@ -110,6 +111,12 @@ def _dims(
     )
 
 
+def _dims_with_stance(*a: Any, **kw: Any) -> Dimensions:
+    d = _dims(*a, **kw)
+    d.stance, d.split = stance_of(d.scores, CFG)
+    return d
+
+
 def _llm() -> LlmConfig:
     return LlmConfig.model_validate(
         {
@@ -125,7 +132,6 @@ def _item(**kw: str) -> PickReviewItem:
         "tech_view": "創 52 週新高、量能放大，多頭排列",
         "chips_view": "外資買超，籌碼往法人集中",
         "fund_view": "9 月營收年增 63.7%，成長強勁",
-        "stance": "偏多",
         "conclusion": "技術與籌碼同步走強，可列入觀察、逢回再評估",
     }
     base.update(kw)
@@ -158,7 +164,7 @@ def _run(
 
 def test_ac2_one_call_per_stock_then_one_for_top(tmp_path: Path) -> None:
     items = [
-        _dims("2603", 1),
+        _dims_with_stance("2603", 1),  # 26 分 → 偏多
         _dims("2027", 2, ["今天是注意股"], {"news": 4, "tech": 8, "chips": 6, "fund": 6}),
         _dims("3010", 3),
     ]
@@ -205,7 +211,6 @@ def test_ac2_views_stance_and_conclusion_checked_one_by_one(tmp_path: Path) -> N
         news_view="無重大消息，技術面偏多",  # 消息觀點談到技術
         chips_view="外資連買，籌碼集中",  # 事實沒有連續買超
         fund_view="營收年增逾 60%",  # 數字不在事實
-        stance="偏多",  # 總分 15（中性 20）偏多 → 不一致
         conclusion="技術面創新高，目標價上看 300 元",  # 喊價
     )
     out, _ = _run(
@@ -214,9 +219,9 @@ def test_ac2_views_stance_and_conclusion_checked_one_by_one(tmp_path: Path) -> N
     r = out[0]
     assert r.scores is not None and r.views["tech"] is not None
     assert r.views["news"] is None and r.views["chips"] is None and r.views["fund"] is None
-    assert r.stance is None and r.conclusion is None
+    assert r.stance is None and r.conclusion is None  # 沒有程式定的立場（_dims 沒算）就不存
     joined = "\n".join(r.checks)
-    for w in ("談到別的面向", "連買", "數字不在事實裡", "不一致", "喊價或保證"):
+    for w in ("談到別的面向", "連買", "數字不在事實裡", "喊價或保證"):
         assert w in joined, w
 
 
@@ -227,7 +232,7 @@ def test_ac2_bad_reason_or_inconsistent_top_falls_back_to_highest_total(tmp_path
     ]
     replies = {
         "2603": _item(),
-        "2027": _item(stance="偏空", conclusion="技術與籌碼偏弱，宜觀望"),
+        "2027": _item(conclusion="技術與籌碼偏弱，宜觀望"),
     }
     # 理由有事實沒有的數字 → 後備
     out, _ = _run(tmp_path, replies, PickTop(top_sid="2603", top_reason="營收年增 80%"), items)
@@ -302,3 +307,35 @@ def test_ac3_wiring() -> None:
         encoding="utf-8"
     )
     assert CFG.lines == ["CORE", "QUIET"]
+
+
+def test_t427_ac1_stance_five_levels_and_split() -> None:
+    """D-206 §六：立場由總分定五級；某面向 ≥ 7 且另一面向 ≤ 3＝多空分歧。"""
+    lv = [stance_of({"news": n, "tech": 5, "chips": 5, "fund": 5}, CFG)[0] for n in (10, 8, 5, 1)]
+    assert lv == ["偏多", "偏多", "中性", "偏空"]  # 25、23、20、16
+    assert stance_of({"news": 10, "tech": 9, "chips": 8, "fund": 5}, CFG) == (
+        "強烈偏多",
+        False,
+    )  # 32
+    assert stance_of({"news": 0, "tech": 2, "chips": 5, "fund": 5}, CFG)[0] == "強烈偏空"  # 12
+    assert stance_of({"news": 5, "tech": 8, "chips": 3, "fund": 6}, CFG) == (
+        "中性",
+        True,
+    )  # 22、分歧
+    assert [lv.label for lv in CFG.stance_levels] == [
+        "強烈偏多",
+        "偏多",
+        "中性",
+        "偏空",
+        "強烈偏空",
+    ]
+
+
+def test_t427_ac2_stance_comes_from_rules_not_model(tmp_path: Path) -> None:
+    d = _dims_with_stance("2603", 1, scores={"news": 5, "tech": 8, "chips": 3, "fund": 6})
+    out, seen = _run(
+        tmp_path, {"2603": _item()}, PickTop(top_sid="2603", top_reason="創 52 週新高"), [d]
+    )
+    assert out[0].stance == "中性" and out[0].split is True
+    assert "立場：中性（多空分歧）" in seen[0][1]
+    assert "stance" not in PickReviewItem.model_fields

@@ -205,6 +205,13 @@ class PickScoreRules(BaseConfig):
     bad_news: list[str]  # 含這些字 −1
 
 
+class StanceLevel(BaseConfig):
+    """立場的一級：總分 ≥ min 就是 label（D-206 §六）。"""
+
+    min: int = Field(ge=0, le=40)
+    label: str
+
+
 class PickReviewConfig(BaseConfig):
     """名單四面向評分與 AI 首選（T-394／D-196）。權威說明在 system.yaml 的註解。"""
 
@@ -212,9 +219,9 @@ class PickReviewConfig(BaseConfig):
     max_tokens: int = Field(gt=0)
     view_chars: int = Field(gt=0)
     conclusion_chars: int = Field(gt=0)
-    stances: list[str]
-    bull_min: int = Field(ge=0, le=40)
-    bear_max: int = Field(ge=0, le=40)
+    stance_levels: list[StanceLevel]
+    split_hi: int = Field(ge=0, le=10)
+    split_lo: int = Field(ge=0, le=10)
     forbidden_terms: list[str]
     interpretive_terms: list[str]
     conclusion_allow: list[str]
