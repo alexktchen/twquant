@@ -23,6 +23,7 @@ dependencies = [
 embed = [
     "torch>=2.5",
     "sentence-transformers>=3.0",
+    "scikit-learn>=1.5",
 ]
 
 [project.scripts]

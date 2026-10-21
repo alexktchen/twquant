@@ -285,10 +285,10 @@ def topic_features(
 
 def fit_topics(vecs: np.ndarray, k: int, seed: int) -> np.ndarray:
     """k-means 主題中心（固定 seed、單次初始化 → 決定性），中心正規化。只在第一折訓練期的新聞上擬合並凍結。"""
-    from sklearn.cluster import KMeans
-
     if len(vecs) < k * 10:
         raise DataError("news_topics", None, f"只有 {len(vecs)} 則新聞，不夠擬合 {k} 個主題")
+    from sklearn.cluster import KMeans  # uv 群組 embed（跟本機向量同一包）
+
     km = KMeans(n_clusters=k, n_init=1, random_state=seed, max_iter=100).fit(
         vecs.astype(np.float32)
     )
