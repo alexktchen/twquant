@@ -117,6 +117,11 @@ morning_brief:
     - {category: headline, label: 頭條}
     - {category: wd_stock, label: 國際股}
   news_since_hour: 14
+  # 晨報接新聞（使用者 2026-10-20 選「晨報接新聞」）：新聞服務裡同一段時間被至少 3 家不同媒體報的事（同一家的兩個頻道算一家），
+  # 最多 5 件當事實句；新聞庫連線放 .env／GitHub 祕密 TWQUANT_NEWS_DSN，沒設就只有鉅亨網頭條
+  events_min_outlets: 3
+  events_limit: 5
+  news_dsn_env: TWQUANT_NEWS_DSN
   # 盤後快訊（2026-10-19，使用者：「這邊台灣晚上時間也要跑一次」）：取今天 09:00（開盤）起到快訊當下的新聞
   evening_news_since_hour: 9
   # 2026-10-20 使用者：「不要 21:45，換 17:45」、同日再改 18:00——每日 pipeline（17:33 開始、約 20 分鐘）有時 18:00 還沒寫好今天的大盤體檢，
