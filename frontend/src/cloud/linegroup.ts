@@ -116,6 +116,15 @@ export function shortTime(ts: string | null): string {
   return m ? `${Number(m[1])}/${Number(m[2])} ${m[3]}:${m[4]}` : ts
 }
 
+/** 按了「手動發送」最多等多久（開機、畫圖、送出約 1～2 分鐘） */
+export const POST_WAIT_MS = 300_000
+
+/** 台北今天 YYYY-MM-DD（手動發送的預設日期）。 */
+export const taipeiToday = (nowMs: number = Date.now()): string => new Date(nowMs + 8 * 3600_000).toISOString().slice(0, 10)
+
+/** 最新一則貼文的 id（沒有 → 0）；手動發送後看它變了沒。 */
+export const latestPostId = (posts: LinePostRow[]): number => posts.reduce((m, p) => Math.max(m, p.id), 0)
+
 /** 群組多過這個數就顯示搜尋框 */
 export const GROUP_FIND_MIN = 8
 
