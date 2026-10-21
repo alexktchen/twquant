@@ -1,7 +1,7 @@
 # 新聞因子試驗的對照組（T-415／SPEC-018 §7 H2）：與 ml_h20_cost_aware_lw.yaml **逐字相同，只換 sample_tag**。
 # 為什麼要另一份：正式模型 lgbm_lw_net_h20_20260225_83890036 的 artifact 不能被覆蓋（fingerprint 不同會拒絕），
 # 而對照組必須跟新聞組在同一天、同一份程式、同一份資料上重訓，才是「同折同 seed」。
-sample_tag: lw_newsbase
+sample_tag: lwbase
 
 # T-072 / SPEC-011：唯一預先登記的 H20 成本感知候選。
 horizon_days: 20

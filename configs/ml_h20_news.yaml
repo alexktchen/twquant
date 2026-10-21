@@ -1,7 +1,7 @@
 # 新聞因子試驗（T-415／SPEC-018 §7 H2，事前登記）：與 ml_h20_cost_aware_lw.yaml **逐字相同，只多 26 個 news.* 特徵與 sample_tag**。
 # 對照組＝同一份 lw 設定、同 --from／--to、同折同 seed，在同一天重訓。開發期評估只看測試期 ≥ 2023-01 的折；
 # 研究 CLI 一律 --to 2026-08-31（D-109 第二保留期）。新聞特徵 2021-01 以前是 null（語料從 2021 開始），LightGBM 原生處理。
-sample_tag: lw_news
+sample_tag: lwnews
 
 # T-072 / SPEC-011：唯一預先登記的 H20 成本感知候選。
 horizon_days: 20
