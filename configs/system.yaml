@@ -25,6 +25,9 @@ source_rates:
   cnyes:  # 晨報的新聞頭條：一天兩個請求
     max_requests: 2
     per_seconds: 1.0
+  cnyes_archive:  # 歷史回補（T-412）：一秒一次，約一萬次、三小時
+    max_requests: 1
+    per_seconds: 1.0
   yahoo:  # 晨報的全球行情（T-377）：9 個代號各一次，不是正式開放的介面，放慢
     max_requests: 2
     per_seconds: 1.0

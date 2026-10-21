@@ -487,5 +487,91 @@
     "hub_min": 3,
     "keep": 3,
     "seed": 7
+  },
+  "hist": {
+    "cnyes_categories": [
+      "headline",
+      "tw_stock"
+    ],
+    "cnyes_from": "2021-01-04",
+    "content_chars": 2000,
+    "mops_content_chars": 1500,
+    "embed_model": "BAAI/bge-m3",
+    "embed_batch": 128,
+    "pull_since_default": "2026-10-19T00:00:00+08:00",
+    "pull_lookback_days": 2,
+    "research_until": "2026-08-31",
+    "sentiment": {
+      "model": "qwen3:8b",
+      "ollama_url": "http://localhost:11434",
+      "sample_n": 20000,
+      "seed": 7,
+      "max_body_chars": 800,
+      "valid_share": 0.2,
+      "probe_min_labels": 2000,
+      "gate_f1": 0.7,
+      "gate_auc": 0.85
+    }
+  },
+  "types": {
+    "version": "2026-10-21.3",
+    "min_confidence": 0.2,
+    "gate_f1": 0.6,
+    "gate_other_recall": 0.3,
+    "classes": [
+      {
+        "id": "earnings",
+        "label": "財報展望",
+        "hint": "月營收、季報、EPS、毛利率、法說會、財測、目標價、評等",
+        "from": [
+          "earnings",
+          "guidance"
+        ]
+      },
+      {
+        "id": "business",
+        "label": "訂單產品",
+        "hint": "接單、簽約、客戶、合作案、新產品、製程、技術、認證",
+        "from": [
+          "order",
+          "product"
+        ]
+      },
+      {
+        "id": "capital",
+        "label": "擴廠併購",
+        "hint": "建廠、擴產、資本支出、併購、入股、增資、董監事與經營層異動",
+        "from": [
+          "capex",
+          "ma",
+          "people"
+        ]
+      },
+      {
+        "id": "policy",
+        "label": "政策事故",
+        "hint": "法規、裁罰、管制、利率、匯率、關稅、央行、工安、火災、停工、資安、天災",
+        "from": [
+          "regulation",
+          "macro",
+          "incident"
+        ]
+      },
+      {
+        "id": "market",
+        "label": "盤勢行情",
+        "hint": "大盤漲跌、外資買賣超、個股漲停跌停、盤前盤後",
+        "from": [
+          "market"
+        ]
+      },
+      {
+        "id": "other",
+        "label": "其他",
+        "from": [
+          "other"
+        ]
+      }
+    ]
   }
 }
