@@ -56,8 +56,9 @@ test('T-402：中文長名先比、命中的範圍不再給短名（長榮航空
   const ids2 = (texts: string[]) => detectMentions(texts, all).map((h) => h.entity)
   assert.deepEqual(ids2(['長榮航空第3季獲利創高']), ['tw:2618'])
   assert.deepEqual(ids2(['台塑化調降油價']), ['tw:6505'])
-  // 短名出現在別處照樣命中
-  assert.deepEqual(ids2(['台塑化與台塑同步調價']), ['tw:6505', 'tw:1301'])
+  // 短名出現在別處照樣命中；2026-10-20 起兩字股名夾在兩個中文字中間不算（「與台塑同步」），旁邊有括號、標點才算（見下面「站得住」那條）
+  assert.deepEqual(ids2(['台塑化與台塑同步調價']), ['tw:6505'])
+  assert.deepEqual(ids2(['台塑化與台塑（1301）同步調價']), ['tw:6505', 'tw:1301'])
   assert.deepEqual(ids2(['長榮航空、長榮同步上漲']), ['tw:2618', 'tw:2603'])
   // 中文是子字串比對，不需要字界
   assert.deepEqual(ids(['外資買超台積電3萬張']), ['tw:2330'])
@@ -229,4 +230,36 @@ test('2026-10-20 二次抽查的錯命中都擋掉，真的提到照樣命中（
   assert.deepEqual(hit('自行車雙雄巨大、美利達9月營收同步走弱'), ['tw:9921'])
   assert.deepEqual(hit('巨大9月營收年減'), ['tw:9921'])
   assert.deepEqual(hit('惠特獲大廠訂單'), ['tw:6706'])
+})
+
+test('2026-10-20 兩字股名要站得住：夾在兩個中文字中間不算（全新產品、達新台幣、截至上午），旁邊有標點、括號、數字、開頭結尾才算', () => {
+  const tw = [
+    { id: 'tw:2455', label: '全新', aliases: ['全新'] },
+    { id: 'tw:1315', label: '達新', aliases: ['達新'] },
+    { id: 'tw:8112', label: '至上', aliases: ['至上'] },
+    { id: 'tw:2317', label: '鴻海', aliases: ['鴻海'] },
+    { id: 'tw:6669', label: '緯穎', aliases: ['緯穎'] },
+    { id: 'tw:1815', label: '富喬', aliases: ['富喬'] },
+    { id: 'tw:8039', label: '台虹', aliases: ['台虹'] },
+    { id: 'tw:3443', label: '創意', aliases: ['創意'] },
+    { id: 'tw:2474', label: '可成', aliases: ['可成'] },
+    { id: 'tw:1303', label: '南亞', aliases: ['南亞'] },
+    { id: 'tw:2330', label: '台積電', aliases: ['台積電'] },
+  ]
+  const idx = buildIndex(tw, cfg)
+  const hit = (...s: string[]) => detectMentions(s, idx).map((h) => h.entity)
+  for (const wrong of ['我們有趣的全新產品出貨', '裁罰金額達新台幣1億', '截至上午10時20分暫報', '並強化推理與創意解題能力', '「可成台商進軍歐洲的立足點」'])
+    assert.deepEqual(hit(wrong), [], wrong)
+  assert.deepEqual(hit('台積電收平盤、鴻海下跌1.84%'), ['tw:2330', 'tw:2317'])
+  assert.deepEqual(hit('高盛看好鴻海（2317）、緯穎等供應鏈'), ['tw:2317', 'tw:6669'])
+  assert.deepEqual(hit('焦點股》台虹：PTFE材料題材強強滾'), ['tw:8039'])
+  assert.deepEqual(hit('盤中隨創意、緯穎、南電逆勢走揚'), ['tw:3443', 'tw:6669'])
+  assert.deepEqual(hit('富喬帶量漲停攻新高'), ['tw:1815'], '開頭')
+  assert.deepEqual(hit('在南亞、被動元件'), ['tw:1303'])
+  // 同一則裡別處站得住就算（標題「花旗給緯穎目標價」夾在中文字裡，摘要有「緯穎(6669-TW)」）
+  assert.deepEqual(hit('花旗給緯穎目標價3200元', '最新調查：緯穎(6669-TW)'), ['tw:6669'])
+  assert.deepEqual(hit('花旗給緯穎目標價3200元'), [], '只夾在中文字裡的那一次不算')
+  // 三個字以上的股名不受影響
+  assert.deepEqual(hit('看好台積電獲利'), ['tw:2330'])
+  assert.throws(() => validateConfig({ ...config, mention: { ...cfg, cjk_bound_len: -1 } }), /cjk_bound_len/)
 })
