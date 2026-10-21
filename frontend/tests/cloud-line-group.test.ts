@@ -54,6 +54,7 @@ test('T-423 分頁與顯示：?tab=line 認得；狀態、時間、群組摘要'
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=line'), 'line')
   assert.deepEqual(statusView({ status: 'sent', via: 'flex' }), { text: '已發', tone: 'ok' })
   assert.deepEqual(statusView({ status: 'sent', via: 'text' }), { text: '已發（改發文字）', tone: 'wait' })
+  assert.deepEqual(statusView({ status: 'sent', via: 'image' }), { text: '已發（改發圖片＋網址）', tone: 'wait' }) // AC13
   assert.equal(statusView({ status: 'unknown', via: null }).tone, 'bad')
   assert.equal(statusView({ status: 'queued', via: null }).text, '排隊中')
   assert.equal(shortTime('2026-10-21 17:40'), '10/21 17:40')
