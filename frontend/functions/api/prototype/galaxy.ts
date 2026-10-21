@@ -1,4 +1,20 @@
-// GET /api/prototype/galaxy：使用者 2026-10-21「我要這位置直接可以看」。原本是星雲圖原型快照（T-418 換成正式版時拿掉），
-// 現在轉到新聞頁並直接開星雲圖（即時資料，一天更新四次）。放在 /api 底下＝在 Cloudflare Access 後面，要登入（同新聞頁）。
-export const onRequestGet: PagesFunction = ({ request }) =>
-  Response.redirect(new URL('/?tab=news&view=galaxy', request.url).toString(), 302)
+// GET /api/prototype/galaxy：公開星雲圖（使用者 2026-10-21：「我要這位置直接可以看」「我想要不登入」）。
+// Cloudflare Access 只對這一條路徑開例外（scratchpad/cf_access_public_galaxy.py）：頁面與資料都在這個網址，
+// 不連帶公開 /api/news/* 或其他端點。
+//   ?format=json → 新聞服務 /v1/galaxy（排程算好的最新一筆，一天更新幾次；同一執行個體 60 秒暫存）
+//   其他        → 網站本體（單一 index.html），main.tsx 看路徑只載入公開星雲圖
+import { cached } from '../../_lib/cache'
+import { proxy, type NewsEnv } from '../../_lib/news-proxy'
+
+type Env = NewsEnv & { ASSETS: Fetcher }
+
+export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
+  const url = new URL(request.url)
+  if (url.searchParams.get('format') === 'json') {
+    const data = new URL(request.url)
+    data.search = ''
+    return cached('/api/prototype/galaxy?format=json', () => proxy(env, '/v1/galaxy', data.toString()))
+  }
+  const page = await env.ASSETS.fetch(new URL('/', request.url))
+  return new Response(page.body, { status: page.status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300' } })
+}
