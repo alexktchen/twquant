@@ -1,6 +1,6 @@
 """T-394／D-196：名單四面向評分與 AI 首選——事實句、觀點核對、首選核對與後備、接進每日 pipeline。
 
-T-425／D-205 起分數由規則算（tests/test_pick_score.py），模型只寫觀點；本檔改成檢查「分數照規則、模型不再打分」。
+T-426／D-206 起分數由規則算（tests/test_pick_score.py），模型只寫觀點；本檔改成檢查「分數照規則、模型不再打分」。
 """
 
 from __future__ import annotations

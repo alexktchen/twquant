@@ -51,14 +51,14 @@ cloud:
   # 空間允許再放 K 線。網站不再有回測、選股池、分點面板。初始切片見 configs/cloud_seed.yaml。
   windows:                         # 滾動窗（交易日數）；未列出的表全史保留（小表）
     prices_daily: 500              # 因子硬下限 260（price.high_52w，test_cloud 把關）；500 日兼作約兩年 K 線
-    broker_trades: 3               # 當日聚合、Drive 歸檔，與主力買賣超（T-424：隔日沖事件要前一交易日的明細）；三支分點因子雲端不算
+    broker_trades: 3               # 當日聚合、Drive 歸檔，與主力買賣超（T-425：隔日沖事件要前一交易日的明細）；三支分點因子雲端不算
     fubon_fetch_log: 10
     factor_values: 2               # 模型只讀當日因子；網站不再顯示因子走勢
     news_features: 30              # T-414：模型只讀當日；雲端其實不算（步驟略過），留窗給未來同步
     composite_daily: 2
     screener_daily: 5              # 選股池不上雲（它要 166 天分點明細，雲端本來就算不對）
     broker_flow_daily: 5
-    main_force_daily: 10           # 主力淨買超（T-424／D-205）：名單評分看近 5 日；broker_daytrade_events 不修剪（一天最多約 840 列）
+    main_force_daily: 10           # 主力淨買超（T-425／D-206）：名單評分看近 5 日；broker_daytrade_events 不修剪（一天最多約 840 列）
     ml_scores: 5                   # 只供當日推薦；每日名單另存（待辦）
     factor_cross_stats: 5
     institutional_daily: 80        # chip.foreign_streak 等讀取下界約 63 個交易日

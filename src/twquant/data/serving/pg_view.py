@@ -47,7 +47,7 @@ class PgTableSource:
         # 對那種表縮窗會讓它悄悄少讀歷史。
         self._table_since: dict[str, dt.date] = dict(table_since or {})
         self._has_date: dict[str, bool] = {}
-        # 讀取上界（分段讀大表用，T-424）：不給就讀到最新。只省記憶體——呼叫端要確定 view 的截點
+        # 讀取上界（分段讀大表用，T-425）：不給就讀到最新。只省記憶體——呼叫端要確定 view 的截點
         # 本來就看不到 date > until 的列，否則等於悄悄少讀。
         self._until = until
 

@@ -178,7 +178,7 @@ class PickBlurbsConfig(BaseConfig):
 
 
 class PickScoreRules(BaseConfig):
-    """四面向 10 分制的規則門檻（T-425／D-205 §二）。權威說明在 system.yaml 的註解。"""
+    """四面向 10 分制的規則門檻（T-426／D-206 §二）。權威說明在 system.yaml 的註解。"""
 
     base: int = Field(ge=0)  # 起始分（中性）
     stock_pattern: str  # 全市場比較的宇宙（四碼普通股）

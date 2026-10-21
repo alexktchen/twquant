@@ -72,7 +72,7 @@ class PickBlurbs(BaseModel):
 
 
 class PickReviewItem(BaseModel):
-    """名單一檔的四面向觀點、立場、結論（T-394／D-196）；分數由規則算（D-205），模型不打分。文字由程式核對。"""
+    """名單一檔的四面向觀點、立場、結論（T-394／D-196）；分數由規則算（D-206），模型不打分。文字由程式核對。"""
 
     model_config = ConfigDict(extra="forbid")
 

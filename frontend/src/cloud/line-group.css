@@ -24,8 +24,9 @@
 .cq-lg-st.ok { color: var(--down); }
 .cq-lg-st.wait { color: var(--mute); }
 .cq-lg-st.bad { color: var(--up); }
-.cq-lg-btn { margin-top: 10px; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--accent); background: rgba(255, 122, 0, .14); color: var(--accent); font-weight: 600; cursor: pointer; }
-.cq-lg-btn:disabled { opacity: .5; cursor: default; }
+/* .cq button（cloud.css）會把背景與邊框清掉，這裡要比它具體 */
+.cq button.cq-lg-btn { margin-top: 10px; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--accent); background: rgba(255, 122, 0, .14); color: var(--accent); font-weight: 600; cursor: pointer; }
+.cq button.cq-lg-btn:disabled { opacity: .5; cursor: default; }
 .cq-lg-login { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 13.5px; }
 .cq-lg-login p { margin: 0 0 8px; }
 .cq-lg-login.failed p { color: var(--up); }
@@ -34,3 +35,6 @@
 .cq-lg-qr { display: block; width: 220px; max-width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; }
 .cq-lg-pin { display: block; font-size: 34px; letter-spacing: .18em; color: var(--accent); }
 .cq-lg-run { color: var(--mute) !important; }
+.cq-lg-post { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.cq-lg-post select, .cq-lg-post input { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 13.5px; color-scheme: dark; }
+.cq .cq-lg-post button.cq-lg-btn { margin-top: 0; }

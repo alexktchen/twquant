@@ -75,11 +75,37 @@ export const LOGIN_DDL =
 export const loginBusy = (l: Pick<LineLogin, 'status' | 'fresh'> | null): boolean =>
   l !== null && l.fresh && (LOGIN_ACTIVE as readonly string[]).includes(l.status)
 
-/** line-login.yml 的兩種工作：login＝掃 QR 登入（成功後順便同步群組）、groups＝只同步群組清單 */
-export type LoginTask = 'login' | 'groups'
+/** line-login.yml 的工作：login＝掃 QR 登入（成功後順便同步群組）、groups＝只同步群組清單、post＝手動發送一張圖卡 */
+export type LoginTask = 'login' | 'groups' | 'post'
+
+/** 手動發送能選的四種（同 Python line_group.KINDS） */
+export const POST_KINDS = ['picks', 'groups', 'morning', 'evening'] as const
+export type PostKind = (typeof POST_KINDS)[number]
+const POST_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** POST /api/line/post 的內容：{ kind, date }，其他一律不收。 */
+export function parsePost(text: string): { kind: PostKind; date: string } | null {
+  if (text.length > LINE_BODY_MAX) return null
+  let v: unknown
+  try {
+    v = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const { kind, date } = v as { kind?: unknown; date?: unknown }
+  if (Object.keys(v).length !== 2 || typeof kind !== 'string' || typeof date !== 'string') return null
+  if (!(POST_KINDS as readonly string[]).includes(kind) || !POST_DATE_RE.test(date)) return null
+  if (Number.isNaN(Date.parse(`${date}T00:00:00Z`))) return null
+  return { kind: kind as PostKind, date }
+}
 
 /** 觸發 GitHub Actions line-login.yml 的請求；沒有 token 直接丟錯（不能靜默變成「什麼都沒觸發」）。 */
-export function dispatchRequest(token: string | undefined, task: LoginTask = 'login'): { url: string; init: RequestInit } {
+export function dispatchRequest(
+  token: string | undefined,
+  task: LoginTask = 'login',
+  extra: Record<string, string> = {},
+): { url: string; init: RequestInit } {
   if (!token) throw new Error('網站沒設 TWQUANT_DISPATCH_TOKEN（GitHub fine-grained token，Actions: Read and write），沒辦法從網頁登入')
   return {
     url: `https://api.github.com/repos/${DISPATCH_REPO}/actions/workflows/${LOGIN_WORKFLOW}/dispatches`,
@@ -92,7 +118,7 @@ export function dispatchRequest(token: string | undefined, task: LoginTask = 'lo
         'User-Agent': 'twquant-pages',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ref: 'main', inputs: { task } }),
+      body: JSON.stringify({ ref: 'main', inputs: { task, ...extra } }),
     },
   }
 }

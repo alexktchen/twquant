@@ -1,4 +1,4 @@
-"""T-425／D-205 §二：名單四面向 10 分制的 20 條規則。"""
+"""T-426／D-206 §二：名單四面向 10 分制的 20 條規則。"""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _pts(items: list[Item]) -> dict[str, int]:
     return {i.name: i.points for i in items}
 
 
-def test_t425_ac1_score_is_base_plus_items_clamped() -> None:
+def test_t426_ac1_score_is_base_plus_items_clamped() -> None:
     assert R.base == 5
     up = [Item(str(i), 1, "") for i in range(5)]
     assert total(up, R) == 10 and total([Item("a", -1, "")] * 5, R) == 0
@@ -56,7 +56,7 @@ def test_t425_ac1_score_is_base_plus_items_clamped() -> None:
     assert total([Item("a", 1, "")] * 9, R) == 10  # 夾在 0～10
 
 
-def test_t425_ac2_tech_rules() -> None:
+def test_t426_ac2_tech_rules() -> None:
     closes = [100.0] * 239 + [100.0 + i for i in range(1, 12)]  # 一路漲到創新高
     vols = [1000.0] * 249 + [3000.0]
     m = _m(mom={"2330": (0.11, 0.9)}, vol={"2330": (0.01, 0.1)})
@@ -70,7 +70,7 @@ def test_t425_ac2_tech_rules() -> None:
     assert all(i.points == 0 and i.text == NO_DATA for i in none)
 
 
-def test_t425_ac3_chip_rules_need_sign_and_percentile() -> None:
+def test_t426_ac3_chip_rules_need_sign_and_percentile() -> None:
     m = _m(
         foreign={"2330": (5_000_000.0, 0.05, 0.9)},
         main_force={"2330": (-3_000_000.0, -0.03, 0.1)},
@@ -83,7 +83,7 @@ def test_t425_ac3_chip_rules_need_sign_and_percentile() -> None:
     assert _pts(items) == {"外資": 1, "投信": 1, "主力": -1, "融資": 1, "千張大戶": 1}
     mf = next(i for i in items if i.name == "主力")
     assert "賣超 3,000 張" in mf.text and "前 15 大券商" in mf.text
-    # 百分位高但其實是賣超 → 不加分（D-205：要同號）
+    # 百分位高但其實是賣超 → 不加分（D-206：要同號）
     m2 = _m(foreign={"2330": (-1.0, -0.0001, 0.85)})
     assert _pts(chip_items("2330", [], [], [], [], m2, R))["外資"] == 0
     # 融資大增且下跌 → −1；投信連賣 3 天 → −1
@@ -93,7 +93,7 @@ def test_t425_ac3_chip_rules_need_sign_and_percentile() -> None:
     assert _pts(up)["融資"] == -1 and _pts(up)["投信"] == -1 and _pts(up)["主力"] == 0
 
 
-def test_t425_ac4_fund_rules_against_industry() -> None:
+def test_t426_ac4_fund_rules_against_industry() -> None:
     m = _m(
         industry={"2330": "半導體"},
         per_median={"半導體": 20.0},
@@ -116,7 +116,7 @@ def test_t425_ac4_fund_rules_against_industry() -> None:
     assert _pts(lone) == {"月營收": 0, "營收趨勢": 0, "本益比": 0, "股價淨值比": 0, "殖利率": 0}
 
 
-def test_t425_ac5_news_rules_and_calendar_not_scored() -> None:
+def test_t426_ac5_news_rules_and_calendar_not_scored() -> None:
     quiet = news_items([], False, 0, 30, [], [], R)
     assert total(quiet, R) == 5
     loud = news_items(
@@ -132,7 +132,7 @@ def test_t425_ac5_news_rules_and_calendar_not_scored() -> None:
     assert next(i for i in loud if i.name == "行事曆").text == "10/22 法說會"
 
 
-def test_t425_ac6_market_helpers() -> None:
+def test_t426_ac6_market_helpers() -> None:
     assert percentile({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0}) == {
         "a": 0.25,
         "b": 0.5,
@@ -167,6 +167,6 @@ def test_t425_ac6_market_helpers() -> None:
     assert industry_medians({"0": (1.0, None, None)}, {"0": "X"}, R.min_peers) == ({}, {})
 
 
-def test_t425_ac7_items_json_shape() -> None:
+def test_t426_ac7_items_json_shape() -> None:
     js = items_json({"籌碼": [Item("主力", -1, "主力賣超")]})
     assert js == [{"dim": "籌碼", "name": "主力", "points": -1, "text": "主力賣超"}]

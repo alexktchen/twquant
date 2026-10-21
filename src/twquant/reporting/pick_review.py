@@ -1,8 +1,8 @@
-"""名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 T-425／D-205）。
+"""名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 T-426／D-206）。
 
 使用者 2026-10-18：「15 檔你最推哪一檔，每檔依照消息、技術、籌碼、基本四個面向來評分…兩個模型各 15 檔都要給，
 然後兩個模型給我一檔最推薦的」。做法同一句話（T-393）：規則先把每檔四個面向的資料寫成事實句；
-**分數由規則算**（`pick_score`：每面向 5 個小項 ±1，0～10、5＝中性，D-205），模型只寫觀點、立場、結論，
+**分數由規則算**（`pick_score`：每面向 5 個小項 ±1，0～10、5＝中性，D-206），模型只寫觀點、立場、結論，
 從名單裡挑一檔首選並寫理由；程式核對（首選在名單上、理由的數字與說法出自事實、不准建議）。
 首選理由沒過 → 改用四面向加總最高的那檔（source=rule）。**AI 評分與首選都沒有驗證過能預測報酬**；事後怎麼檢驗在 D-196 事前登記。
 只顯示，不改名單、不進模型。
@@ -53,7 +53,7 @@ DIMS = ("消息", "技術", "籌碼", "基本")
 KEYS = ("news", "tech", "chips", "fund")
 SHARES_PER_LOT = 1000  # 台股一張＝1,000 股（制度，不是參數）
 NO_NEWS = "近期沒有公告、處置、注意、除權息或法說會"
-SCALE = 10  # 每個面向滿分（D-205）；舊資料是 1～5（AI 自評），網站依 pick_reviews.scale 分開畫
+SCALE = 10  # 每個面向滿分（D-206）；舊資料是 1～5（AI 自評），網站依 pick_reviews.scale 分開畫
 
 
 @dataclass
@@ -65,7 +65,7 @@ class Dimensions:
     line: str
     rank: int
     facts: dict[str, list[str]] = field(default_factory=dict)
-    items: dict[str, list[Item]] = field(default_factory=dict)  # 面向 → 5 個小項（D-205）
+    items: dict[str, list[Item]] = field(default_factory=dict)  # 面向 → 5 個小項（D-206）
     scores: dict[str, int] = field(default_factory=dict)  # news／tech／chips／fund → 0～10
 
     def all_facts(self) -> list[str]:
@@ -351,7 +351,7 @@ class Inputs:
 
 
 def score_dims(d: Dimensions, p: PickFacts, x: Inputs, m: Market, cfg: PickReviewConfig) -> None:
-    """D-205：四面向 20 個小項 → d.items／d.scores；小項理由併進事實（模型寫觀點時可以引用）。"""
+    """D-206：四面向 20 個小項 → d.items／d.scores；小項理由併進事實（模型寫觀點時可以引用）。"""
     r = cfg.rules
     d.items = {
         "消息": news_items(
@@ -372,7 +372,7 @@ def score_dims(d: Dimensions, p: PickFacts, x: Inputs, m: Market, cfg: PickRevie
 class Review:
     line: str
     stock_id: str
-    scores: dict[str, int] | None  # news／tech／chips／fund，0～10（規則算，D-205）；模型缺席＝None
+    scores: dict[str, int] | None  # news／tech／chips／fund，0～10（規則算，D-206）；模型缺席＝None
     views: dict[str, str | None] = field(default_factory=dict)  # 每個面向一句觀點；沒過核對＝None
     stance: str | None = None
     conclusion: str | None = None
@@ -667,7 +667,7 @@ def write(conn: Any, schema: str, day: dt.date, reviews: list[Review], now: dt.d
     if not reviews:
         return
     ensure_tables(conn, (PICK_REVIEWS_SPEC,), schema)
-    add_trailing_columns(conn, PICK_REVIEWS_SPEC, schema)  # scale／items（D-205）加在最後
+    add_trailing_columns(conn, PICK_REVIEWS_SPEC, schema)  # scale／items（D-206）加在最後
     df = pl.DataFrame(
         [
             {

@@ -1,4 +1,4 @@
-// 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-205）的畫面：名單列的四根小直條、名單上方的首選卡、
+// 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的畫面：名單列的四根小直條、名單上方的首選卡、
 // 個股頁的四張分數卡（10 分制可以點開看 5 個小項怎麼加減分）。
 import { Trophy } from 'lucide-react'
 import { DIMS, itemNote, reviewNote, scoreText, stanceTone, type Review, type ReviewItem } from './pickreview'

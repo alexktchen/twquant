@@ -1,23 +1,26 @@
 // 「LINE 群組」分頁（T-423／D-204）：發文帳號狀態、勾要發的群組、最近發出去的圖卡。
 // 只有能用 line 功能的角色看得到（分頁按鈕由 /api/access 決定，資料端點自己再擋一次）。
 import { useEffect, useRef, useState } from 'react'
-import { Images, UserRound, Users } from 'lucide-react'
+import { Images, Send, UserRound, Users } from 'lucide-react'
 import './line-group.css'
-import { fetchLineStatus, setLineGroup, startLineLogin, syncLineGroups } from './api'
+import { fetchLineStatus, postLineCard, setLineGroup, startLineLogin, syncLineGroups } from './api'
 import { Section } from './Section'
 import {
   KIND_LABEL,
   LOGIN_POLL_MS,
+  POST_WAIT_MS,
   GROUP_FIND_MIN,
   SYNC_WAIT_MS,
   cardUrl,
   findGroups,
   groupsMeta,
+  latestPostId,
   latestSync,
   loginActive,
   loginStep,
   shortTime,
   statusView,
+  taipeiToday,
   type LineLogin,
   type LineStatus,
 } from './linegroup'
@@ -32,6 +35,11 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
   const [syncing, setSyncing] = useState<string | null>(null)
   const [syncNote, setSyncNote] = useState('')
   const [find, setFind] = useState('')
+  // 手動發送：選哪一種、哪一天；posting＝按下去時最新一則貼文的 id（有更新的貼文送完了就是好了），null＝沒在等
+  const [postKind, setPostKind] = useState('picks')
+  const [postDate, setPostDate] = useState(() => taipeiToday())
+  const [posting, setPosting] = useState<number | null>(null)
+  const [postNote, setPostNote] = useState('')
 
   useEffect(() => {
     let stale = false
@@ -82,8 +90,38 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
       .finally(() => setBusy(null))
   }
 
-  // 登入或同步進行中：每幾秒重抓一次，QR、PIN、群組清單一出來就顯示
-  const polling = loggingIn || syncing !== null
+  const lastPost = latestPostId(data?.posts ?? [])
+  useEffect(() => {
+    if (posting === null || !data) return
+    const fresh = data.posts.filter((p) => p.id > posting)
+    if (fresh.length === 0 || fresh.some((p) => p.status === 'queued')) return
+    setPosting(null)
+    setPostNote(`發好了：${fresh.map((p) => `${p.group_name ?? '群組'} ${statusView(p).text}`).join('、')}`)
+  }, [data, posting])
+  useEffect(() => {
+    if (posting === null) return
+    const t = window.setTimeout(() => {
+      setPosting(null)
+      setPostNote('等了 5 分鐘沒看到新的貼文：那天可能還沒有內容、或這一種那天已經發過（到 GitHub Actions 看 line-login 的紀錄）')
+    }, POST_WAIT_MS)
+    return () => window.clearTimeout(t)
+  }, [posting])
+
+  const send = () => {
+    setPostNote('')
+    setBusy('post')
+    postLineCard(postKind, postDate)
+      .then(() => {
+        setPosting(lastPost)
+        setPostNote('已送出，約 1～2 分鐘後出現在下面…')
+      })
+      .catch((e: Error) => setPostNote(e.message))
+      .finally(() => setBusy(null))
+  }
+  const enabledCount = (data?.groups ?? []).filter((g) => g.enabled && g.present).length
+
+  // 登入、同步、發送進行中：每幾秒重抓一次，QR、PIN、群組清單、新貼文一出來就顯示
+  const polling = loggingIn || syncing !== null || posting !== null
   useEffect(() => {
     if (!polling) return
     const id = window.setInterval(() => setTick((n) => n + 1), LOGIN_POLL_MS)
@@ -176,6 +214,25 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
         )}
       </aside>
       <section className="cq-detail">
+        {data?.account && (
+          <Section icon={Send} title="手動發送" meta="同一天同一種只發一次">
+            <div className="cq-lg-post">
+              <select value={postKind} onChange={(e) => setPostKind(e.target.value)} disabled={posting !== null}>
+                {Object.entries(KIND_LABEL).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <input type="date" value={postDate} onChange={(e) => setPostDate(e.target.value)} disabled={posting !== null} />
+              <button className="cq-lg-btn" onClick={send} disabled={busy !== null || posting !== null || enabledCount === 0 || !postDate}>
+                {posting !== null ? '發送中…' : `發到 ${enabledCount} 個群組`}
+              </button>
+            </div>
+            {enabledCount === 0 && <p className="cq-lg-hint">先在左邊勾要發的群組。</p>}
+            {postNote && <p className="cq-lg-hint">{postNote}</p>}
+          </Section>
+        )}
         {data && (
           <Section icon={Images} title="最近發的圖卡" meta={data.posts.length ? `${data.posts.length} 則` : undefined}>
             {data.posts.length === 0 ? (

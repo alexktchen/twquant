@@ -1001,14 +1001,14 @@ PICK_REVIEWS_SPEC = TableSpec(
         ("facts", "jsonb"),
         ("checks", "jsonb"),
         ("created_at", "timestamptz"),
-        # 每面向滿分：NULL＝AI 自評 1～5（D-196），10＝規則算 0～10（D-205）；加在最後，舊表 ADD COLUMN 對齊
+        # 每面向滿分：NULL＝AI 自評 1～5（D-196），10＝規則算 0～10（D-206）；加在最後，舊表 ADD COLUMN 對齊
         ("scale", "integer"),
-        ("items", "jsonb"),  # 20 個小項 [{dim, name, points, text}]（D-205）
+        ("items", "jsonb"),  # 20 個小項 [{dim, name, points, text}]（D-206）
     ),
     pk=("date", "line", "stock_id"),
 )
 
-# 主力買賣超（T-424／D-205）：雲端不可能留 broker_trades 全歷史，隔日沖排除要的全期累計改成逐日事件表。
+# 主力買賣超（T-425／D-206）：雲端不可能留 broker_trades 全歷史，隔日沖排除要的全期累計改成逐日事件表。
 # 地端用全歷史寫一列「截至種子日的累計」當底（resolve_date＝種子日），之後每天加當天那一列；
 # 某天的累計＝resolve_date ≤ 那天的列加總（數學同 factors/broker.py daytrade_events → cumulate_events）。
 BROKER_DAYTRADE_EVENTS_SPEC = TableSpec(

@@ -1,4 +1,4 @@
-"""T-424／D-205 §三：主力淨買超的逐日增量版，要跟 factors/broker.py 的全歷史批次版逐列相同。"""
+"""T-425／D-206 §三：主力淨買超的逐日增量版，要跟 factors/broker.py 的全歷史批次版逐列相同。"""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def _incremental(bt: pl.DataFrame, days: list[dt.date]) -> tuple[pl.DataFrame, p
     return pl.concat(events), pl.concat(nets)
 
 
-def test_t424_ac1_events_match_batch() -> None:
+def test_t425_ac1_events_match_batch() -> None:
     """逐日算的隔日沖事件 = factors/broker.py 一次算全期的事件。"""
     days = _days(30)
     bt = _panel(days)
@@ -109,7 +109,7 @@ def test_t424_ac1_events_match_batch() -> None:
     assert batch["n_flip"].sum() > 0
 
 
-def test_t424_ac2_net_matches_clean_daily() -> None:
+def test_t425_ac2_net_matches_clean_daily() -> None:
     """逐日的主力淨買超 = clean_daily（全歷史 expanding 隔日沖排除）；而且真的有分點被排除。"""
     days = _days(30)
     bt = _panel(days)
@@ -126,14 +126,14 @@ def test_t424_ac2_net_matches_clean_daily() -> None:
     assert not raw.sort("date", "stock_id")["buy_shares"].equals(batch["net_shares"])
 
 
-def test_t424_ac3_deterministic() -> None:
+def test_t425_ac3_deterministic() -> None:
     days = _days(20)
     bt = _panel(days)
     a, b = _incremental(bt, days), _incremental(bt, days)
     assert a[0].equals(b[0]) and a[1].equals(b[1])
 
 
-def test_t424_ac4_flagged_threshold() -> None:
+def test_t425_ac4_flagged_threshold() -> None:
     state = pl.DataFrame(
         {"broker_id": ["X", "Y", "Z"], "n_buys": [10, 3, 10], "n_flip": [5, 3, 4]},
         schema={"broker_id": pl.Utf8, "n_buys": pl.Int64, "n_flip": pl.Int64},
@@ -142,12 +142,12 @@ def test_t424_ac4_flagged_threshold() -> None:
     assert mf.flagged(state, 0.5, 4).to_list() == ["X"]
 
 
-def test_t424_ac5_tables_registered() -> None:
+def test_t425_ac5_tables_registered() -> None:
     assert {"broker_daytrade_events", "main_force_daily"} <= set(ALL_TABLES)
     assert spec_of("main_force_daily").pk == ("date", "stock_id")
     assert spec_of("broker_daytrade_events").pk == ("broker_id", "resolve_date")
 
 
-def test_t424_ac6_naive_now_rejected() -> None:
+def test_t425_ac6_naive_now_rejected() -> None:
     with pytest.raises(ValueError, match="時區"):
         mf.refresh_day(None, "serving", dt.date(2025, 3, 3), _PARAMS, dt.datetime(2025, 3, 3))

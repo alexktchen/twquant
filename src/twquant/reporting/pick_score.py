@@ -1,4 +1,4 @@
-"""名單四面向 10 分制的規則評分（T-425／D-205 §二）。
+"""名單四面向 10 分制的規則評分（T-426／D-206 §二）。
 
 每個面向 5 個小項，每項偏多 +1、中性 0、偏空 −1，從 `rules.base` 起算 → 0～10（5＝中性）。
 「偏多／偏空」大多跟同一天全市場（四碼普通股）比百分位。**描述現況，不是預測**——
@@ -112,7 +112,7 @@ def flow_ratio(
 ) -> dict[str, tuple[float, float]]:
     """flows＝(date, stock_id, net)、volume＝(date, stock_id, volume) → 近 sessions 的 (淨買股數, 占成交量)。
 
-    每個交易日都要有那檔的 flow 才算（缺一天不補 0，那檔就不算，D-205 §二「資料缺不猜」）。"""
+    每個交易日都要有那檔的 flow 才算（缺一天不補 0，那檔就不算，D-206 §二「資料缺不猜」）。"""
     n = len(sessions)
     f = (
         flows.filter(pl.col("date").is_in(sessions))

@@ -1,4 +1,4 @@
-"""主力買賣超（T-424／D-205）：每檔每天「前 15 大券商、排除隔日沖分點」的淨買超股數。
+"""主力買賣超（T-425／D-206）：每檔每天「前 15 大券商、排除隔日沖分點」的淨買超股數。
 
 數學同 `factors/broker.py`（`daytrade_events` → `cumulate_events` → `clean_daily`），但改成**逐日增量**：
 雲端只留幾天 `broker_trades`，隔日沖判定要的全期累計放在小表 `broker_daytrade_events`——

@@ -1,5 +1,5 @@
-// 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-205）的型別、四個面向的名稱與顏色、說明文字。畫面在 Review.tsx。
-/** 一個小項：偏多 +1／中性 0／偏空 −1，附白話理由（D-205，只有 10 分制才有）。 */
+// 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的型別、四個面向的名稱與顏色、說明文字。畫面在 Review.tsx。
+/** 一個小項：偏多 +1／中性 0／偏空 −1，附白話理由（D-206，只有 10 分制才有）。 */
 export type ReviewItem = { dim: DimKey; name: string; points: -1 | 0 | 1; text: string }
 
 export type Review = {
@@ -34,7 +34,7 @@ export function scoreText(r: Review): string {
   return `${DIMS.map((d) => `${d.name} ${r[d.key]}`).join('、')}（共 ${r.total}／${r.max * DIMS.length}）`
 }
 
-/** 說明文字依量表分兩種：10 分制是規則算的（D-205），5 分制是舊的 AI 自評。 */
+/** 說明文字依量表分兩種：10 分制是規則算的（D-206），5 分制是舊的 AI 自評。 */
 export function reviewNote(r: Pick<Review, 'max'>): string {
   return r.max === 10
     ? '分數由規則算：每個面向 5 項，偏多 +1、偏空 −1，從 5 分（中性）起算；描述現況，沒有驗證過能預測報酬。AI 只寫觀點與建議，數字都和事實核對過。首選累積 60 個交易日後會事後檢驗。請自行判斷。'
