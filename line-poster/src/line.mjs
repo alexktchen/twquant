@@ -49,6 +49,20 @@ export async function readCredential(client) {
 }
 
 /**
+ * 整份 linejs storage 的快照（JSON 可序列化的值）。linejs 把登入時建立的端對端加密金鑰、reqseq 等都放在 storage，
+ * 登入與送出在不同的 GitHub Actions run，要靠它把 session 接起來（等同 linejs FileStorage 的跨工作階段保存，只是改存資料庫）。
+ */
+export function dumpStorage(client) {
+  const st = client?.base?.storage;
+  if (!st || typeof st.getAll !== "function") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(st.getAll())) {
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
+  }
+  return out;
+}
+
+/**
  * 網路瞬斷重試一次的 fetch（Thrift 與 LIFF 分享都走它）。只對「送不出去」的錯誤重試；
  * HTTP 回了什麼（4xx/5xx）、逾時中止都原樣丟回去。
  */
@@ -75,8 +89,12 @@ function retryingFetch() {
  */
 export async function clientFromCredential(cred, { onCredential, device = DEFAULT_DEVICE } = {}) {
   if (!cred?.accessToken) throw new Error("沒有登入憑證，先跑 twquant line-group login");
-  const storage = new PersistingStorage();
-  storage.seeded = { refreshToken: cred.refreshToken ?? undefined, expire: cred.expire ?? undefined };
+  // 用上次存的整份 storage 當底（端對端加密金鑰、reqseq…都在裡面），再補上這次的 refreshToken／expire
+  const seed = { ...(cred.storage ?? {}) };
+  if (cred.refreshToken) seed.refreshToken = cred.refreshToken;
+  if (typeof cred.expire === "number") seed.expire = cred.expire;
+  const storage = new PersistingStorage(seed);
+  storage.seeded = { ...seed };
   storage.onCredential = onCredential ?? null;
   const client = await loginWithAuthToken({
     accessToken: cred.accessToken,

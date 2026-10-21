@@ -36,7 +36,7 @@ test('T-423 AC9 權限：每個 LINE 端點都自己擋（不只靠前端藏分�
 test('T-423 AC10 安全：網站讀帳號表只選要顯示的欄位，登入憑證不出資料庫', () => {
   const src = readFileSync(new URL('../functions/_lib/line-admin.ts', import.meta.url), 'utf8')
   const sql = src.replace(/\/\/.*$/gm, '') // 註解裡提到「憑證」不算
-  assert.doesNotMatch(sql, /access_token|refresh_token|token_expire|SELECT \*/)
+  assert.doesNotMatch(sql, /access_token|refresh_token|token_expire|storage_json|SELECT \*/)
 })
 
 test('T-423 AC10 輸入檢查：群組 id、圖卡 token、勾選內容', () => {

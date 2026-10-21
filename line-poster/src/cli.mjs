@@ -5,6 +5,7 @@
 // 用法：node src/cli.mjs <login|groups|send>，stdin 一份 JSON 請求；stdout 一行一個事件（NDJSON），
 // 人看的訊息（QR、PIN、錯誤細節）走 stderr。事件：
 //   credential  憑證有換就馬上吐（程序中途死掉也不會丟掉輪替後的 refresh token）
+//   storage     整份 linejs storage 快照（端對端加密金鑰等）；跨 run 接續 session 用，收尾時吐一次
 //   qr          登入用的 QR 網址（login；網站「LINE 群組」分頁把它畫成 QR 碼）
 //   pin         掃完 QR 後手機要輸入的 PIN（login）
 //   profile     登入的是哪個帳號
@@ -15,12 +16,14 @@
 
 import { deliver } from "./deliver.mjs";
 import {
-  clientFromCredential, listGroups, loginByQr, readCredential, sendFlex, sendText, whoami,
+  clientFromCredential, dumpStorage, listGroups, loginByQr, readCredential, sendFlex, sendText, whoami,
 } from "./line.mjs";
 
 const LOGIN_DEADLINE_MS = 180_000; // 掃 QR＋輸入 PIN 的時間
 
 const emit = (ev) => process.stdout.write(JSON.stringify(ev) + "\n");
+// 整份 storage（端對端加密金鑰等）收尾時吐一次，Python 存起來給下一個 run 接續 session
+const emitStorage = (client) => emit({ type: "storage", data: JSON.stringify(dumpStorage(client)) });
 
 async function readRequest() {
   let s = "";
@@ -57,12 +60,14 @@ async function cmdLogin() {
   });
   emit({ type: "credential", ...(await readCredential(client)) });
   emit({ type: "profile", ...whoami(client) });
+  emitStorage(client);
 }
 
 async function cmdGroups(req) {
   const client = await connect(req);
   for (const g of await listGroups(client)) emit({ type: "group", ...g });
   emit({ type: "credential", ...(await readCredential(client)) });
+  emitStorage(client);
 }
 
 /**
@@ -84,6 +89,7 @@ async function cmdSend(req) {
     if (out.backoffMs) break;
   }
   emit({ type: "credential", ...(await readCredential(client)) });
+  emitStorage(client);
 }
 
 const COMMANDS = { login: cmdLogin, groups: cmdGroups, send: cmdSend };
