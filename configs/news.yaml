@@ -448,6 +448,8 @@ hist:
     probe_min_labels: 2000
     gate_f1: 0.70
     gate_auc: 0.85
+    # 同時送幾個請求給 Ollama（2026-10-21 實測：1 個 0.4 對／秒、8 個 3.0、16 個 4.5；跟逐一貼的標籤一致 97.7%）
+    workers: 16
 
 # 新聞類型（T-421；使用者 2026-10-20 選「新聞類型標籤」）：本機 Ollama 貼標 → 探針權重 news-service/config/news_types.json → 雲端 ingest 算內積。
 # 最後一類一定是 other；信心不到 min_confidence 也放 other。

@@ -510,7 +510,8 @@
       "valid_share": 0.2,
       "probe_min_labels": 2000,
       "gate_f1": 0.7,
-      "gate_auc": 0.85
+      "gate_auc": 0.85,
+      "workers": 16
     }
   },
   "types": {

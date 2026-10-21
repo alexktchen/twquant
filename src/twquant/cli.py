@@ -6596,47 +6596,89 @@ def news_sentiment_sample(
 @news_app.command("sentiment-label")
 def news_sentiment_label(
     limit: int = typer.Option(0, help="這次最多貼幾對（0＝全部沒貼的）"),
+    scope: str = typer.Option(
+        "sample", help="sample＝抽樣（給探針）；corpus＝全語料（探針沒過時，依 D-201 §四），新的先"
+    ),
+    workers: int = typer.Option(0, help="同時送幾個請求給 Ollama（0＝hist.sentiment.workers）"),
 ) -> None:
-    """本機 Ollama 對抽樣貼三類標籤；可中斷續跑。失敗的那對印出來、跳過（不猜）。"""
+    """本機 Ollama 貼三類標籤；可中斷續跑。失敗的那對印出來、跳過（不猜）。
+    平行請求：Ollama 會把同時來的請求一起算，16 個同時約 4.5 對／秒（逐一 0.4），跟逐一貼的標籤一致 97.7%（2026-10-21 實測）。"""
+    from concurrent.futures import ThreadPoolExecutor
+
     from twquant.data import news_sentiment as ns
     from twquant.data.serving import store
     from twquant.errors import DataError
 
+    if scope not in ("sample", "corpus"):
+        raise typer.BadParameter(f"scope 只能是 sample 或 corpus：{scope}")
     h = _news_hist_cfg()
     sc = h["sentiment"]
+    n_workers = workers or int(sc["workers"])
+    max_body = int(sc["max_body_chars"])
+    model, url = str(sc["model"]), str(sc["ollama_url"])
+    pending = ns.pending_corpus if scope == "corpus" else ns.pending_pairs
+
+    def ask(p: tuple[str, str, str, str, str | None]) -> tuple[int, str] | str:
+        _, stock_id, name, title, body = p
+        try:
+            raw = ns.ollama_chat(
+                ns.build_prompt(name, stock_id, title, body, max_body), model=model, url=url
+            )
+            return ns.parse_label(raw), raw
+        except (DataError, OSError) as exc:
+            return str(exc)[:100]
+
     conn = store.connect(_load_serving())
     t0 = time.monotonic()
     done = bad = 0
+    seen: set[tuple[str, str]] = set()
     try:
         ns.ensure_tables(conn)
         with conn.cursor() as cur:
             cur.execute("select stock_id, name from serving.stock_meta")
             names = {str(a): str(b) for a, b in cur.fetchall() if b}
-        while True:
-            batch = ns.pending_pairs(conn, min(200, limit - done) if limit else 200, names)
-            if not batch:
-                break
-            for item_id, stock_id, name, title, body in batch:
-                prompt = ns.build_prompt(name, stock_id, title, body, int(sc["max_body_chars"]))
-                try:
-                    raw = ns.ollama_chat(prompt, model=str(sc["model"]), url=str(sc["ollama_url"]))
-                    label = ns.parse_label(raw)
-                except (DataError, OSError) as exc:
-                    bad += 1
-                    typer.secho(
-                        f"  [!] {item_id} {stock_id}：{str(exc)[:100]}", fg=typer.colors.YELLOW
-                    )
-                    continue
-                ns.save_label(conn, item_id, stock_id, label, model=str(sc["model"]), raw=raw)
-                done += 1
-                if done % 100 == 0:
-                    typer.echo(f"  {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒")
-            if limit and done >= limit:
-                break
+        with ThreadPoolExecutor(n_workers) as ex:
+            while True:
+                batch = [
+                    p
+                    for p in pending(conn, min(500, limit - done) if limit else 500, names)
+                    if (p[0], p[1]) not in seen
+                ]
+                if not batch:
+                    break
+                for p, r in zip(batch, ex.map(ask, batch), strict=True):
+                    seen.add((p[0], p[1]))  # 失敗的這一輪不再重試（下次執行才會再撿起來）
+                    if isinstance(r, str):
+                        bad += 1
+                        typer.secho(f"  [!] {p[0]} {p[1]}：{r}", fg=typer.colors.YELLOW)
+                        continue
+                    ns.save_label(conn, p[0], p[1], r[0], model=model, raw=r[1])
+                    done += 1
+                    if done % 1000 == 0:
+                        typer.echo(f"  {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒")
+                if limit and done >= limit:
+                    break
     finally:
         conn.close()
     typer.secho(
         f"[OK] 貼標 {done} 對、失敗 {bad}；{time.monotonic() - t0:.0f} 秒", fg=typer.colors.GREEN
+    )
+
+
+@news_app.command("sentiment-scores")
+def news_sentiment_scores() -> None:
+    """Ollama 標籤 → news_hist.sentiment_scores（method='llm'，版本＝提示詞版本）。探針沒過、改全貼時用；可重跑。"""
+    from twquant.data import news_sentiment as ns
+    from twquant.data.serving import store
+
+    conn = store.connect(_load_serving())
+    try:
+        n = ns.scores_from_labels(conn, ns.PROMPT_VERSION)
+    finally:
+        conn.close()
+    typer.secho(
+        f"[OK] 情緒分數 {n} 列（method=llm、版本 {ns.PROMPT_VERSION}）；configs/news_factors.yaml sentiment_version 填這個版本",
+        fg=typer.colors.GREEN,
     )
 
 
