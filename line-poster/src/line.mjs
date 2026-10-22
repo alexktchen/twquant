@@ -6,10 +6,12 @@
 // 發到群組聊天（不是記事本，使用者 2026-10-21）：Flex 訊息走 LIFF 分享（api.line.me/message/v3/share，
 // 跟手機上 LIFF 的「分享給好友」同一條），個人帳號也能發「一張圖、點了開網站」；發不出去時直接發那張圖
 // （一般圖片訊息）＋一行網址，圖也不行才只發附連結的文字（talk.sendMessage，new_erp 對群組發結單提醒用的就是它）。
+// 社群（OpenChat，使用者 2026-10-22）走 square 那一套：不發 Flex（LIFF 分享不支援社群），直接發圖＋一行網址。
 
 import { loginWithAuthToken, loginWithQR } from "@evex/linejs";
 import { MemoryStorage } from "@evex/linejs/storage";
 
+import { chatKind, squareChatMidsIn, squareChatRows } from "./chat.mjs";
 import { guardObsUpload } from "./obs.mjs";
 
 export const DEFAULT_DEVICE = process.env.LINE_DEVICE || "ANDROIDSECONDARY";
@@ -152,15 +154,53 @@ export async function listGroups(client) {
   const { chats } = await client.base.talk.getChats({ chatMids: member });
   return (chats ?? [])
     .filter((c) => c.type === "GROUP" || c.type === 0 || String(c.chatMid ?? "").startsWith("c"))
-    .map((c) => ({ homeId: String(c.chatMid), name: c.chatName ?? "" }));
+    .map((c) => ({ homeId: String(c.chatMid), name: c.chatName ?? "", noteHome: String(c.chatMid) })); // 群組的記事本就在群組上
+}
+
+const EVENT_PAGES_MAX = 10; // 事件流最多翻幾頁（new_erp 同一個值）
+const SQUARE_CHATS_MAX = 60; // 最多問幾間聊天（每間一次 getSquareChat）
+
+/**
+ * 加入中的社群聊天（m…，主聊天與子聊天），每列帶 noteHome＝所屬社群（s…，記事本在那裡）。
+ * ⚠ 不用 getJoinedSquareChats：LINE 已經下架、回 NOT_IMPLEMENTED（new_erp 2026-09-24／09-25）。改成：
+ *   加入中的社群（getJoinedSquares）＋ 自己的事件流（fetchMyEvents）裡出現過的聊天 → 逐間 getSquareChat 問屬於哪個社群、
+ *   什麼種類、自己還在不在。社群要先用手機以這支帳號加入；這裡不會自己加入，也不接受社群邀請——社群通常有規矩（禁廣告、
+ *   禁機器人），要不要進去是人決定的。
+ */
+export async function listSquareChats(client) {
+  const squares = new Map();
+  const seenTokens = new Set();
+  let token;
+  for (;;) {
+    const r = await client.base.square.getJoinedSquares(token ? { continuationToken: token } : {});
+    for (const sq of r?.squares ?? []) if (sq?.mid) squares.set(String(sq.mid), sq.name ?? "");
+    token = r?.continuationToken;
+    if (!token || seenTokens.has(token)) break;
+    seenTokens.add(token);
+  }
+  if (!squares.size) return [];
+  const mids = new Set();
+  token = undefined;
+  for (let page = 0; page < EVENT_PAGES_MAX; page++) {
+    const r = await client.base.square.fetchMyEvents({ limit: 200, ...(token ? { continuationToken: token } : {}) });
+    squareChatMidsIn(r, mids);
+    token = r?.continuationToken;
+    if (!token) break;
+  }
+  if (mids.size > SQUARE_CHATS_MAX) log(`事件流裡有 ${mids.size} 間社群聊天，只問前 ${SQUARE_CHATS_MAX} 間`);
+  const chats = [];
+  for (const mid of [...mids].slice(0, SQUARE_CHATS_MAX)) {
+    try {
+      chats.push(await client.base.square.getSquareChat({ squareChatMid: mid }));
+    } catch (e) {
+      // 被刪掉、被踢出的聊天會問不到：這間不列（帳號已經不在裡面），其他照列
+      log(`getSquareChat(${mid}) 失敗，這間不列：${e?.message ?? e}`);
+    }
+  }
+  return squareChatRows(squares, chats);
 }
 
 // ── 發訊息 ─────────────────────────────────────────────────────────────────
-
-function assertGroup(chatMid) {
-  // 社群（s…／m…）走另一套 API；D-204 只發一般群組
-  if (!String(chatMid).startsWith("c")) throw new Error(`只支援一般群組（c…），拿到 ${chatMid}`);
-}
 
 /** linejs 的錯誤把 LINE 回的內容放在 data，併進訊息裡（判斷要不要停、寫進資料庫都看訊息）。 */
 function withData(e) {
@@ -173,7 +213,7 @@ function withData(e) {
  * 給自己的 LIFF app（LINE Login channel、scope 要 chat_message.write）比較穩，也不會掛別人的名字。
  */
 export async function sendFlex(client, chatMid, message, { liffId } = {}) {
-  assertGroup(chatMid);
+  if (chatKind(chatMid) !== "group") throw new Error(`社群不發 Flex（LIFF 分享不支援社群）：${chatMid}`);
   if (liffId) client.base.liff.liffId = liffId;
   try {
     return await client.base.liff.sendLiff({ to: String(chatMid), messages: [message] });
@@ -183,24 +223,28 @@ export async function sendFlex(client, chatMid, message, { liffId } = {}) {
 }
 
 /**
- * 對群組聊天發一張圖（Flex 發不出去時的備案：看得到圖，但點了只是放大，不會開網站——網址另外用文字發）。
- * 走 linejs 的端對端加密上傳（uploadMediaByE2EE，跟發文字一樣用登入時存下的金鑰）。png 是 Blob。
+ * 對群組或社群聊天發一張圖（看得到圖，但點了只是放大，不會開網站——網址另外用文字發）。png 是 Blob。
+ * - 一般群組：linejs 的端對端加密上傳（uploadMediaByE2EE，跟發文字一樣用登入時存下的金鑰）。
+ * - 社群：不加密、不給 oid 直接上傳（reqseq 模式），伺服器收到就自己發那則訊息；社群不收「先發空的圖片訊息再補上傳」
+ *   （ILLEGAL_ARGUMENT，linejs SquareChat.sendImage 用的也是這招）。上傳被拒由 guardObsUpload 擋。
  */
 export async function sendImage(client, chatMid, png) {
-  assertGroup(chatMid);
+  const kind = chatKind(chatMid);
   if (!png?.size) throw new Error("圖是空的");
   try {
+    if (kind === "square") return await client.base.obs.uploadObjTalk(String(chatMid), "image", png, undefined, "twquant.png");
     return await client.base.obs.uploadMediaByE2EE({ data: png, oType: "image", to: String(chatMid), filename: "twquant.png" });
   } catch (e) {
     throw withData(e);
   }
 }
 
-/** 對群組聊天發一段文字（圖片後面附的網址、或圖都發不出去時的摘要；網址 LINE 會自己做成連結預覽）。 */
+/** 對群組或社群聊天發一段文字（圖片後面附的網址、或圖都發不出去時的摘要；網址 LINE 會自己做成連結預覽）。 */
 export async function sendText(client, chatMid, text) {
-  assertGroup(chatMid);
+  const kind = chatKind(chatMid);
   if (!text) throw new Error("訊息不能是空的");
   try {
+    if (kind === "square") return await client.base.square.sendMessage({ squareChatMid: String(chatMid), text: String(text) });
     return await client.base.talk.sendMessage({ to: String(chatMid), text: String(text) });
   } catch (e) {
     throw withData(e);
