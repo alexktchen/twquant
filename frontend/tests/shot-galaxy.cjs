@@ -99,6 +99,8 @@ function fakeGalaxy() {
     await page.waitForTimeout(300)
     await stage.screenshot({ path: path.join(out, `${name}-3-two.png`) })
     await input.press('Enter')
+    await page.waitForTimeout(650)
+    await stage.screenshot({ path: path.join(out, `${name}-4a-path-mid.png`) }) // 第二段正在畫
     await page.waitForTimeout(2200)
     await stage.screenshot({ path: path.join(out, `${name}-4-path.png`) })
     await input.fill('台泥 輝達')

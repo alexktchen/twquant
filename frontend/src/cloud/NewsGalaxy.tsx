@@ -87,8 +87,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
   const inspRef = useRef<HTMLDivElement>(null)
-  // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）
-  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null })
+  // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）；webAt／pathAt：牽連線從什麼時候開始畫（像 graphify 的「路徑逐段點亮」）
+  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0 })
   const graph = useMemo(() => (data ? hubGraph(data) : null), [data])
   const web = useMemo(() => (data && graph && sel?.kind === 'hub' ? hubWeb(data, graph, sel.id) : null), [data, graph, sel])
   const hits = useMemo(() => (data ? searchGalaxy(data, q) : []), [data, q])
@@ -96,6 +96,12 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   live.current.auto = auto
   live.current.web = web
   live.current.path = path ? { ids: path.hubs.map((h) => h.id), n: path.n } : null
+  useEffect(() => {
+    live.current.webAt = performance.now()
+  }, [web])
+  useEffect(() => {
+    live.current.pathAt = performance.now()
+  }, [path])
 
   /** 搜尋列裡選一個：亮點＝飛到它、畫牽連；新聞＝選那顆 */
   const pick = (hit: SearchHit) => {
@@ -168,6 +174,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     const FIT_S = 1.8
     /** 搜尋框佔掉圖的上緣：轉動中心最上只到這裡（手機檢視框貼下緣時） */
     const TOP_PAD = 96
+    /** 路徑逐段點亮（像 graphify 的 demo）：每一步隔 HOP 秒開始、花 DRAW 秒畫到底；一個亮點的牽連線 WEB_DRAW 秒從中心射出去 */
+    const HOP = 0.45, DRAW = 0.35, WEB_DRAW = 0.5
+    const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
+    /** 亮點被點亮那一下彈一下（半徑倍率），之後縮回 */
+    const pop = (since: number) => (since < 0 ? 1 : 1 + 0.7 * Math.exp(-since * 4))
 
     // 標籤（DOM 比較好排版）：主題依則數、亮點台股優先；大小量一次。亮點的標籤全部先做好，牽連到的才有名字可以亮出來（T-436）
     const bigK = new Set([...clusters].sort((a, b) => b.n - a.n).slice(0, 3).map((c) => c.k))
@@ -296,24 +307,32 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         ctx.stroke()
       }
       // 亮點之間的牽連線：粗細與亮度照同時提到的則數；路徑一律粗黃線
-      const hubLine = (a: string, b: string) => {
+      // prog＝畫到幾分（0～1），線從 a 往 b 長出來；畫到一半時前端放一顆亮點
+      const hubLine = (a: string, b: string, prog = 1) => {
         const pa = P.hubs[hubIdx.get(a)!], pb = P.hubs[hubIdx.get(b)!]
+        if (prog <= 0) return
+        const ex = pa[0] + (pb[0] - pa[0]) * prog, ey = pa[1] + (pb[1] - pa[1]) * prog
         ctx.beginPath()
         ctx.moveTo(pa[0], pa[1])
-        ctx.lineTo(pb[0], pb[1])
+        ctx.lineTo(ex, ey)
         ctx.stroke()
+        if (prog < 1) ctx.drawImage(SP.sel, ex - 7, ey - 7, 14, 14)
       }
+      const pathEl = (now - lv.pathAt) / 1000, webEl = (now - lv.webAt) / 1000
+      /** 路徑上第 i 個亮點被點亮了幾秒（還沒到 → 負數） */
+      const litFor = (i: number) => pathEl - i * HOP
       if (pathIds) {
         ctx.strokeStyle = 'rgba(255,210,63,0.9)'
         ctx.lineWidth = 2.4
-        for (let i = 1; i < pathIds.length; i++) hubLine(pathIds[i - 1], pathIds[i])
+        for (let i = 1; i < pathIds.length; i++) hubLine(pathIds[i - 1], pathIds[i], clamp01(litFor(i - 1) / DRAW))
       } else if (web) {
         const mx = web.first[0]?.n ?? 1
         for (const e of web.edges) {
           const f = e.n / mx
-          ctx.strokeStyle = `rgba(255,210,63,${e.deg === 1 ? 0.3 + 0.6 * f : 0.1 + 0.25 * f})`
+          const fade = e.deg === 1 ? 1 : clamp01((webEl - WEB_DRAW) / 0.3) // 彼此的線等中心的射完再浮出來
+          ctx.strokeStyle = `rgba(255,210,63,${(e.deg === 1 ? 0.3 + 0.6 * f : 0.1 + 0.25 * f) * fade})`
           ctx.lineWidth = e.deg === 1 ? 0.8 + 2.2 * f : 0.6
-          hubLine(e.a, e.b)
+          hubLine(e.a, e.b, e.deg === 1 ? clamp01(webEl / WEB_DRAW) : fade)
         }
       }
       // 新聞光點
@@ -327,8 +346,12 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       })
       // 亮點
       hubs.forEach((h, i) => {
-        const p = P.hubs[i], on = !relHubs || relHubs.has(h.id)
-        const r = hubSize(h.n) * p[3] * (1 + 0.06 * Math.sin(tt * 2 + i))
+        const p = P.hubs[i]
+        // 路徑上的亮點：輪到它才亮、亮的那一下彈一下；一個亮點的牽連：中心先亮、其餘等線射到才亮
+        const pi = pathIds ? pathIds.indexOf(h.id) : -1
+        const since = pi >= 0 ? litFor(pi) : web && h.id !== web.hub.id && relHubs?.has(h.id) ? webEl - WEB_DRAW : 1
+        const on = (!relHubs || relHubs.has(h.id)) && since >= 0
+        const r = hubSize(h.n) * p[3] * (1 + 0.06 * Math.sin(tt * 2 + i)) * pop(since)
         ctx.globalAlpha = (on ? 0.75 : 0.12) * Math.max(0.45, k) * depthAlpha(p[2])
         const c = hubClass(h.type)
         ctx.drawImage(c === 'tw' ? SP.hubtw : c === 'abroad' ? SP.abroad : SP.cluster, p[0] - r, p[1] - r, r * 2, r * 2)
@@ -383,16 +406,17 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         ctx.font = '11px ui-monospace, Menlo, Consolas, monospace'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        for (const [a, b, n] of counts) {
+        counts.forEach(([a, b, n], i) => {
           const pa = P.hubs[hubIdx.get(a)!], pb = P.hubs[hubIdx.get(b)!]
-          if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) < 48) continue // 線太短，數字會疊成一團；放大就看得到
+          if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) < 48) return // 線太短，數字會疊成一團；放大就看得到
+          if ((pathIds ? litFor(i) / DRAW : webEl / WEB_DRAW) < 1) return // 線畫到底才寫數字
           const x = (pa[0] + pb[0]) / 2, y = (pa[1] + pb[1]) / 2
           const text = String(n), w = ctx.measureText(text).width + 8
           ctx.fillStyle = 'rgba(5,5,6,0.85)'
           ctx.fillRect(x - w / 2, y - 8, w, 16)
           ctx.fillStyle = '#ffd23f'
           ctx.fillText(text, x, y)
-        }
+        })
       }
       // 選取的那顆畫框；檢視框跟著它（窄畫面貼在下緣）
       if (sel && insp) {
