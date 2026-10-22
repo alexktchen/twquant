@@ -95,6 +95,7 @@ function fakeGalaxy() {
     await input.press('Enter')
     await page.waitForTimeout(2200)
     await stage.screenshot({ path: path.join(out, `${name}-2-web.png`) })
+    await page.locator('.gx').screenshot({ path: path.join(out, `${name}-2-web-full.png`) }) // 連圖外面那排按鈕
     await input.fill('聯發科 記憶體')
     await page.waitForTimeout(300)
     await stage.screenshot({ path: path.join(out, `${name}-3-two.png`) })

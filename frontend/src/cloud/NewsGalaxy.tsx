@@ -9,7 +9,7 @@
 // 亮點的檢視框有「單獨看」：把提到它的新聞拎出來照主題讀、看常一起出現的（GalaxyFocus.tsx）。
 // 搜尋與牽連（T-436；使用者 2026-10-22：「想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」，像 graphify）：
 // 左上角搜尋框，打字就列符合的股票、主題、新聞；選一個＝飛到它、畫出它跟誰牽連（同一則新聞一起被提到＝一條線，越粗則數越多）；
-// 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一步幾則。
+// 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一度幾則（「幾度」＝隔幾層關係，跟新聞關係圖的講法一樣）。
 import { ExternalLink, Maximize2, Minus, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchNewsGalaxy } from './api'
@@ -172,8 +172,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     let raf = 0, last = 0, t0 = performance.now(), resetSeen = 0, fitSeen = 0
     /** 搜尋選了東西：拉近到這個比例（一開始的 1.8 倍），牽連的線與名字才拉得開 */
     const FIT_S = 1.8
+    /** 手機（檢視框貼下緣、看得到的區域只剩上半）拉近少一點，牽連的亮點才留在框上方（使用者 2026-10-23：「擋到了」） */
+    const FIT_S_PHONE = 1.3
     /** 搜尋框佔掉圖的上緣：轉動中心最上只到這裡（手機檢視框貼下緣時） */
     const TOP_PAD = 96
+    const INSP_W = 320
     /** 路徑逐段點亮（像 graphify 的 demo）：每一步隔 HOP 秒開始、花 DRAW 秒畫到底；一個亮點的牽連線 WEB_DRAW 秒從中心射出去 */
     const HOP = 0.45, DRAW = 0.35, WEB_DRAW = 0.5
     const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
@@ -233,7 +236,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       }
       if (lv.fit !== fitSeen) {
         fitSeen = lv.fit
-        if (view.s < home.s * FIT_S) goal = { q: rot, s: home.s * FIT_S }
+        const fitS = W < 600 ? FIT_S_PHONE : FIT_S
+        if (view.s < home.s * fitS) goal = { q: rot, s: home.s * fitS }
       }
       const dt = Math.min(0.05, (now - (last || now)) / 1000)
       last = now
@@ -251,8 +255,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       pivot.y = ease(pivot.y, pivotGoal.y, dt, 6)
       pivot.z = ease(pivot.z, pivotGoal.z, dt, 6)
       const insp = inspRef.current
-      const dock = !!(lv.sel && insp && dockInspector(W, insp.offsetWidth))
-      view.y = ease(view.y, pivotScreenY(H, dock ? insp!.offsetHeight : null, 50, TOP_PAD), dt, 6)
+      // 用固定寬度判斷（CSS 的 min(320px, …)）：手機上亮點的檢視框整個不顯示，量不到寬度
+      const dock = !!(lv.sel && dockInspector(W, INSP_W))
+      insp?.classList.toggle('dock', dock) // 貼下緣的版本矮一點：新聞標題收起來、超過就捲
+      stage.parentElement?.classList.toggle('dock', dock) // 整個區塊也記著：按鈕搬到圖的外面
+      view.y = ease(view.y, pivotScreenY(H, dock && insp?.offsetHeight ? insp.offsetHeight : null, 50, TOP_PAD), dt, 6)
       const tt = (now - t0) / 1000
       P.items = items.map((it) => project(it, rot, view, pivot))
       P.hubs = hubs.map((h) => project(h, rot, view, pivot))
@@ -615,7 +622,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                     </button>
                   </Fragment>
                 ))}
-                <small>{path.hubs.length === 1 ? '同一個' : `${path.hubs.length - 1} 步`}</small>
+                <small>{path.hubs.length === 1 ? '同一個' : `${path.hubs.length - 1} 度`}</small>
               </>
             ) : (
               <span>{pathMsg}</span>
@@ -634,7 +641,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </div>
         )}
         {(item || hub) && (
-          <div className="gx-insp" ref={inspRef}>
+          <div className={`gx-insp${hub ? ' hub' : ''}`} ref={inspRef}>
             <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
               <X size={16} aria-hidden="true" />
             </button>
@@ -705,15 +712,17 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                     ))}
                   </div>
                 )}
-                {data.items
-                  .filter((x) => x.m.includes(hub.id))
-                  .sort((a, b) => (a.t < b.t ? 1 : -1))
-                  .slice(0, 3)
-                  .map((x) => (
-                    <p key={x.id} className="gx-row">
-                      {shortWhen(x.t, today)}　{x.title}
-                    </p>
-                  ))}
+                <div className="gx-news">
+                  {data.items
+                    .filter((x) => x.m.includes(hub.id))
+                    .sort((a, b) => (a.t < b.t ? 1 : -1))
+                    .slice(0, 3)
+                    .map((x) => (
+                      <p key={x.id} className="gx-row">
+                        {shortWhen(x.t, today)}　{x.title}
+                      </p>
+                    ))}
+                </div>
                 <div className="gx-acts">
                   <button className="gx-focus" onClick={() => setFocus(hub.id)}>
                     <Maximize2 size={14} aria-hidden="true" />
@@ -749,6 +758,23 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
         </div>
       </div>
+      {hub && (
+        <div className="gx-bar">
+          <span className={`gx-bar-name ${hubClass(hub.type)}`}>
+            {hub.label}
+            <small>{hub.n} 則</small>
+          </span>
+          <button className="gx-focus" onClick={() => setFocus(hub.id)}>
+            <Maximize2 size={14} aria-hidden="true" />
+            單獨看 {hub.n} 則
+          </button>
+          {hub.type === 'tw' && hub.sub && (
+            <button className="gx-go" onClick={() => onStock(hub.sub!, hub.label)}>
+              開個股頁
+            </button>
+          )}
+        </div>
+      )}
       {focus && (
         <GalaxyFocus
           data={data}
