@@ -176,6 +176,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     const FIT_S_PHONE = 1.3
     /** 搜尋框佔掉圖的上緣：轉動中心最上只到這裡（手機檢視框貼下緣時） */
     const TOP_PAD = 96
+    const INSP_W = 320
     /** 路徑逐段點亮（像 graphify 的 demo）：每一步隔 HOP 秒開始、花 DRAW 秒畫到底；一個亮點的牽連線 WEB_DRAW 秒從中心射出去 */
     const HOP = 0.45, DRAW = 0.35, WEB_DRAW = 0.5
     const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
@@ -254,10 +255,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       pivot.y = ease(pivot.y, pivotGoal.y, dt, 6)
       pivot.z = ease(pivot.z, pivotGoal.z, dt, 6)
       const insp = inspRef.current
-      const dock = !!(lv.sel && insp && dockInspector(W, insp.offsetWidth))
+      // 用固定寬度判斷（CSS 的 min(320px, …)）：手機上亮點的檢視框整個不顯示，量不到寬度
+      const dock = !!(lv.sel && dockInspector(W, INSP_W))
       insp?.classList.toggle('dock', dock) // 貼下緣的版本矮一點：新聞標題收起來、超過就捲
       stage.parentElement?.classList.toggle('dock', dock) // 整個區塊也記著：按鈕搬到圖的外面
-      view.y = ease(view.y, pivotScreenY(H, dock ? insp!.offsetHeight : null, 50, TOP_PAD), dt, 6)
+      view.y = ease(view.y, pivotScreenY(H, dock && insp?.offsetHeight ? insp.offsetHeight : null, 50, TOP_PAD), dt, 6)
       const tt = (now - t0) / 1000
       P.items = items.map((it) => project(it, rot, view, pivot))
       P.hubs = hubs.map((h) => project(h, rot, view, pivot))
@@ -639,7 +641,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </div>
         )}
         {(item || hub) && (
-          <div className="gx-insp" ref={inspRef}>
+          <div className={`gx-insp${hub ? ' hub' : ''}`} ref={inspRef}>
             <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
               <X size={16} aria-hidden="true" />
             </button>

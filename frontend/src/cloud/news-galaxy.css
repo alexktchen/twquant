@@ -51,10 +51,11 @@
 /* 檢視框貼下緣時（手機）別把牽連的亮點蓋掉（使用者 2026-10-23：「擋到了」）：最高只到圖的四成、裡面可捲；亮點的三則新聞標題收起來（「單獨看」裡有） */
 .gx-insp.dock { max-height: 40%; overflow-y: auto; touch-action: pan-y; }
 .gx-insp.dock .gx-news { display: none; }
-/* 手機（檢視框貼下緣）時「單獨看」「開個股頁」搬到圖的框外面、正下方一排（使用者 2026-10-23：「單獨看放到在星雲圖的框的外面」）；桌機留在檢視框裡 */
+/* 手機（檢視框放不下右邊）點亮點不跳整個框（使用者 2026-10-23：「還是不要跳出整個框，只要顯示有幾則」）：
+   只在圖的框外面、正下方一排顯示名字、幾則、「單獨看」「開個股頁」；新聞光點的檢視框（標題、看原文）照舊。桌機照舊在檢視框裡 */
 .gx-bar { display: none; align-items: center; gap: 8px; margin: 8px 16px 0; }
 .gx.dock .gx-bar { display: flex; }
-.gx.dock .gx-insp .gx-acts { display: none; }
+.gx.dock .gx-insp.hub { display: none; }
 .gx-bar-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 700; color: #f3e9e4; }
 .gx-bar-name small { margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--mute); }
 .gx-bar-name.tw { color: #ffb199; } .gx-bar-name.abroad { color: #b9d3ff; } .gx-bar-name.cluster { color: #8ff0df; }
