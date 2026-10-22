@@ -9,6 +9,8 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from twquant.config import ServingConfig, SystemConfig, load_config
 from twquant.conventions import TZ
 from twquant.data.serving import schema as sch
@@ -381,3 +383,32 @@ def test_t428_ac2_conclusion_retried_once_with_reason(tmp_path: Path) -> None:
     assert "上一版的結論沒過核對" in calls[1] and "消息" in calls[1]
     assert r.conclusion is not None and r.conclusion.startswith("技術與籌碼同步走強：")
     assert any("重寫一次後通過" in c for c in r.checks)
+
+
+# ── T-429／D-207：名單評分只在 21:13 那班算 ───────────────────────────────────
+def test_t429_ac1_review_waits_for_evening_run_on_the_same_day() -> None:
+    from twquant.reporting.pick_review import review_time_ok
+
+    assert CFG.not_before == dt.time(21, 0)
+    early = dt.datetime(2026, 10, 22, 17, 40, tzinfo=TZ)
+    late = dt.datetime(2026, 10, 22, 21, 14, tzinfo=TZ)
+    why = review_time_ok(dt.date(2026, 10, 22), early, CFG)
+    assert why is not None and "21:00" in why and "晚上" in why
+    assert review_time_ok(dt.date(2026, 10, 22), late, CFG) is None
+    # 過去的日子（補跑）不受限；naive 時間拒絕
+    assert review_time_ok(dt.date(2026, 10, 21), early, CFG) is None
+    with pytest.raises(ValueError):
+        review_time_ok(dt.date(2026, 10, 22), dt.datetime(2026, 10, 22, 17, 40), CFG)
+
+
+def test_t429_ac2_wiring_evening_only_and_chip_dims_mention_new_items() -> None:
+    cli = (_ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
+    step = cli[cli.index("def _pick_review_step") : cli.index("def _warrants_step")]
+    assert "review_time_ok" in step
+    assert {"當沖", "借券"} <= set(CFG.conclusion_dims["籌碼"])
+    assert "當沖" in PICK_REVIEW_SYSTEM and "借券" in PICK_REVIEW_SYSTEM
+    assert PICK_REVIEW_PROMPT_VERSION >= "2026-10-22.8"
+    scfg = load_config(_ROOT / "configs" / "serving.yaml", ServingConfig)
+    assert (
+        scfg.cloud.windows["daytrade_daily"] >= 10 and scfg.cloud.windows["sbl_short_daily"] >= 10
+    )

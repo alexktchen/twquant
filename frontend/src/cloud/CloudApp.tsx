@@ -604,6 +604,9 @@ export default function CloudApp() {
               {!guest && topPick?.review && (
                 <TopPickCard sid={topPick.sid} name={topPick.name} r={topPick.review} on={topPick.sid === sid} onClick={() => setSid(topPick.sid)} />
               )}
+              {!guest && current && current.picks.length > 0 && !current.picks.some((p) => p.review) && nav.shown === today && (
+                <p className="cq-rv-eta">評分約 21:45 更新（籌碼要等當天的融資券與分點公布後才算，D-207）</p>
+              )}
               <div className="cq-head">
                 <span>
                   股票

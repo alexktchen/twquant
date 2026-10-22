@@ -1,7 +1,7 @@
 // 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的畫面：名單列的四根小直條、名單上方的首選卡、
-// 個股頁的四張分數卡（10 分制可以點開看 5 個小項怎麼加減分）。
+// 個股頁的四張分數卡（10 分制可以點開看各小項怎麼加減分；籌碼 7 項帶比重，D-207）。
 import { Trophy } from 'lucide-react'
-import { DIMS, itemNote, reviewNote, scoreText, stanceStrong, stanceTone, type Review, type ReviewItem } from './pickreview'
+import { DIMS, itemNote, itemPoints, reviewNote, scoreText, stanceStrong, stanceTone, type Review, type ReviewItem } from './pickreview'
 
 /** 四根小直條：顏色＝面向、高度＝分數。名單列用，滑過看數字。 */
 export function ScoreBars({ r, size = 'sm' }: { r: Review; size?: 'sm' | 'md' }) {
@@ -62,13 +62,13 @@ export function StanceChip({ s, split = false }: { s: string | null; split?: boo
   )
 }
 
-/** 一個小項的徽章：+1 紅、−1 綠、0 灰（台股紅漲綠跌）。 */
+/** 一個小項的徽章：偏多紅、偏空綠、0 灰（台股紅漲綠跌）；數字＝方向 × 比重（籌碼七項加權，D-207）。 */
 function ItemRow({ i }: { i: ReviewItem }) {
   const tone = i.points > 0 ? 'up' : i.points < 0 ? 'down' : 'flat'
   const note = itemNote(i)
   return (
     <li className="cq-rv-item">
-      <i className={`cq-rv-pt ${tone}`}>{i.points > 0 ? '+1' : i.points < 0 ? '−1' : '0'}</i>
+      <i className={`cq-rv-pt ${tone}`}>{itemPoints(i)}</i>
       <span>
         <b>{i.name}</b> {i.text}
         {note && <small className="cq-rv-itemnote">{note}</small>}
@@ -77,7 +77,7 @@ function ItemRow({ i }: { i: ReviewItem }) {
   )
 }
 
-/** 個股頁：結論（含立場）＋四張分數卡（分數、量表、一句觀點；10 分制可點開看 5 個小項）。 */
+/** 個股頁：結論（含立場）＋四張分數卡（分數、量表、一句觀點；10 分制可點開看各小項）。 */
 export function ReviewTiles({ r }: { r: Review }) {
   return (
     <div className="cq-rv">

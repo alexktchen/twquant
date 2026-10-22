@@ -1,5 +1,5 @@
 // 名單四面向評分、分析師觀點與 AI 首選（T-394／D-196）：每日 pipeline 寫進 serving.pick_reviews。
-// 分數兩種：scale＝10（2026-10-21 起，D-206）規則算 0～10、5＝中性，附 20 個小項；scale 空＝舊資料，AI 自評 1～5。
+// 分數兩種：scale＝10（2026-10-21 起，D-206）規則算 0～10、5＝中性，附各面向的小項（籌碼 7 項帶比重，D-207）；scale 空＝舊資料，AI 自評 1～5。
 // 每個面向一句觀點、立場（偏多／中性／偏空）、一句結論（含建議）；沒過核對的那一項是 null。
 // is_top＝這條線當天的首選；source＝model（AI 挑、理由核對過）或 rule（四面向加總最高）。只顯示，沒驗證過能預測報酬。
 import type { sql } from './db.ts'
@@ -7,8 +7,8 @@ import { readRows } from './scorecard.ts'
 
 export type DimKey = 'news' | 'tech' | 'chips' | 'fund'
 
-/** 一個小項：偏多 +1／中性 0／偏空 −1，附白話理由。 */
-export type ReviewItem = { dim: DimKey; name: string; points: -1 | 0 | 1; text: string }
+/** 一個小項：方向 偏多 +1／中性 0／偏空 −1、比重（D-207：籌碼七項 1.5～0.5，其他 1；舊列沒有＝1），附白話理由。 */
+export type ReviewItem = { dim: DimKey; name: string; points: -1 | 0 | 1; weight: number; text: string }
 
 export type Review = {
   news: number
@@ -78,7 +78,8 @@ export function itemsOf(v: unknown): ReviewItem[] {
     const dim = DIM_OF[String(o.dim)]
     const p = Number(o.points)
     if (!dim || typeof o.name !== 'string' || typeof o.text !== 'string' || ![-1, 0, 1].includes(p)) continue
-    out.push({ dim, name: o.name, points: p as -1 | 0 | 1, text: o.text })
+    const w = Number(o.weight)
+    out.push({ dim, name: o.name, points: p as -1 | 0 | 1, weight: Number.isFinite(w) && w > 0 ? w : 1, text: o.text })
   }
   return out
 }

@@ -64,8 +64,8 @@ cloud:
     institutional_daily: 80        # chip.foreign_streak 等讀取下界約 63 個交易日
     margin_daily: 80
     stock_valuation: 30            # 估值因子讀取下界約 1 個月
-    daytrade_daily: 5              # 籌碼步驟只回補最近幾日；目前沒有因子讀它
-    sbl_short_daily: 5
+    daytrade_daily: 10             # 名單評分的「當沖」看近 5 日（D-207）；籌碼步驟回補最近幾日；沒有因子讀它
+    sbl_short_daily: 10            # 名單評分的「借券」看近 5 日餘額變化，要 6 個交易日（D-207）
     attention_stocks: 5
     disposition_stocks: 5
     group_flow_daily: 60           # 族群資金（D-177 修訂）：網站只看最新一天，留三個月左右

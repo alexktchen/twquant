@@ -485,6 +485,24 @@ def test_ac310_5_gap_window_is_bounded() -> None:
     assert not [f for f in plan if f.reason == "缺日"], "第 9 個交易日前的缺口超出補抓窗"
 
 
+def test_t429_same_day_fetch_after_evening_cutoff_without_first_publication() -> None:
+    """D-207 §二.3：21:00 以後那班把當天的當沖、借券也抓進來（T-0），但首次值仍只在隔天 T-1 那次存。"""
+    today = dt.date(2026, 9, 25)
+    plan = di.plan_from(_S, _full_counts(), ChipDailyConfig(), live=True, today=today)
+    got = {(f.table, f.market, f.day, f.first, f.reason) for f in plan}
+    for m in ("twse", "tpex"):
+        assert ("daytrade_daily", m, today, False, "T-0") in got
+        assert ("sbl_short_daily", m, today, False, "T-0") in got
+        assert ("daytrade_daily", m, _S[0], True, "T-1") in got, "首次值還是 T+1 那次"
+    assert len(plan) == 12
+    assert di.plan_from(_S, _full_counts(), ChipDailyConfig(), live=True) == di.plan_from(
+        _S, _full_counts(), ChipDailyConfig(), live=True, today=None
+    )
+    cfg = ChipDailyConfig()
+    assert cfg.same_day_after == dt.time(21, 0)
+    assert ChipDailyConfig(same_day_after="20:45").same_day_after == dt.time(20, 45)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     "bad",
     [
