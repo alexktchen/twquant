@@ -75,6 +75,12 @@ AI 草擬的線（`graph_edges.status = draft`，來自 `configs/news_edges.yaml
 - 同步腳本（`scripts/news_sync_entities.py`）讀 `news.reviews` 最新決定：核可過的維持 approved、退回的不再插回去。
 - 非擁有者送出回 400（不回 403：網站把 403 當成要重新登入）。
 
+## 翻譯（T-401／D-207）
+
+排程（ingest 第二步）只翻標題；摘要等網站閱讀卡打開那則才翻：`GET /v1/summary?id=`（翻過直接給，沒翻過現在翻，結果存 `news.summary_translations`）。
+兩者跟向量、搜尋、全景取名共用 `translate.daily_neurons`（4,000），排程翻譯與點開翻摘要用到 `daily_neurons − reserve_for_embed` 就停。
+改了表（`migrations/`）要先 `npx supabase db push` 再 `functions deploy`——`/v1/items` 會 join `summary_translations`，表不在整個新聞流 503。
+
 ## 向量（T-410）
 
 雲端只留近 `embed.retention_days`（45）天的向量（一則向量＋索引約 5.6 KB，免費 500 MB）：第五步先刪過期的、也不再補算。`/v1/health` 的 `storage` 回報資料庫用量。

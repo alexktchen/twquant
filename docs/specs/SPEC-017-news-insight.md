@@ -69,12 +69,15 @@
 ## 4. 翻譯（T-401）
 
 - Workers AI qwen3（`configs/llm.yaml` 加 `news_translate` 任務），一次 `translate_batch` 則，術語表在 `configs/news.yaml`。
+- **D-207（2026-10-22）：排程只翻標題；摘要等網站閱讀卡打開那則才翻**（`GET /v1/summary?id=`，一次一則，結果存 `news.summary_translations`，只增不改）。
+  摘要的檢查同下面兩條（數字只拿摘要核對），沒過重翻一次、仍不過記 failed；額度用完或模型叫不到不記，下次點開再翻。
 - **擋**（不過→重試一次→仍不過：`status=failed`、網站顯示原文標「未譯」）：
   1. 數字：原文的每個數字（含 million／billion／trillion、%、$）換算後都要在譯文找到（億、兆、萬換算後相等）；
   2. 出現簡體專用字（字表在設定檔）。
 - **只記錄不擋**（`checks` 裡留結果，兩週後看誤擋率再決定）：漲跌方向詞相反、中文數字（排除「兩倍」等正常用法）、多出原文沒有的公司名。
-- 網站：譯文標「譯」，點開看原文與來源連結。
-- 用量：新聞每天上限 `daily_neurons`（初值 2,500，估計用約 900）；Python 各任務合計 6,500（`configs/llm.yaml` 調整）。
+- 網站：譯文標「譯」，點開看原文與來源連結；摘要翻好前寫「摘要翻譯中…」，翻不成顯示英文摘要並寫原因。
+- 用量：新聞每天上限 `daily_neurons`（初值 2,500；D-207 起 4,000，排程翻譯與點開翻摘要用到 `daily_neurons − reserve_for_embed` 就停）；
+  Python 各任務合計 6,500 → D-207 起 5,000（`configs/llm.yaml`）。
 
 ## 5. 實體與一度（T-402）
 
@@ -138,6 +141,7 @@
 | `GET /v1/links` | 依實體查相關資訊（個股頁、名單小標、晨報、名單分析） | entity（tw:2330／us:NVDA／grp:半導體）、max_degree（預設 2）、since、as_of |
 | `GET /v1/heat` | 今日影響地圖（族群熱度） | date |
 | `GET /v1/flows` | 美股→台股傳導 | date |
+| `GET /v1/summary` | 點開才翻的摘要（D-207）：翻過直接給，沒翻過現在翻；回 `status`＝ok／failed／budget／error／none 與 `summary_zh` | id |
 | `GET /v1/review` ／ `POST /v1/review` | 核可頁（草擬的線；POST 內容 `{decisions:[{src,dst,type,decision}]}`，T-403 實作時改成一次送多個） | 只收擁有者（由網站 Access 身分轉送 `x-news-user`；名單是祕密 `NEWS_OWNER_EMAILS`） |
 | `GET /v1/health` | 最後抓取時間、各來源狀態、今日用量 | — |
 

@@ -243,6 +243,7 @@ button.cq-news-type.on { border-color: currentColor; box-shadow: inset 0 0 0 1px
 .cq-reader-ents { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; }
 .cq-reader-ents button.cq-news-ent { font-size: 14.5px; color: var(--text); text-decoration: underline; text-decoration-color: #4a4d57; text-underline-offset: 3px; }
 .cq-reader .cq-reader-summary { margin: 14px 0 0; font-size: 16.5px; line-height: 1.8; color: #d6d9e0; }
+.cq-reader .cq-reader-sumnote { margin: 8px 0 0; font-size: 13px; color: var(--mute); }
 .cq-reader-orig { margin-top: 10px; font-size: 14px; color: var(--mute); }
 .cq-reader-orig summary { cursor: pointer; }
 .cq-reader-orig b { display: block; margin-top: 6px; color: #c9ccd4; }

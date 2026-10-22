@@ -47,7 +47,7 @@ const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.New
 const NewsGalaxy = lazy(() => import('./NewsGalaxy').then((m) => ({ default: m.NewsGalaxy })))
 
 const TAG_TITLE: Record<string, string> = {
-  譯: 'AI 翻譯（標題與摘要），數字與公司名都核對過；點開看英文原文',
+  譯: 'AI 翻譯，數字與公司名都核對過（標題先翻，摘要點開才翻）；點開看英文原文',
   未譯: '翻譯沒過檢查（數字或公司名對不上），先顯示英文原文',
   翻譯中: '剛抓到，下一輪（30 分鐘內）翻譯',
 }
