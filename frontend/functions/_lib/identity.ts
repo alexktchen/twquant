@@ -1,5 +1,5 @@
 // 追蹤股要知道「這是誰」：驗登入權杖，從裡面取 email。
-// T-435／D-210 起正式的登入是 Supabase Auth（Authorization: Bearer <Supabase 簽的 JWT>，userEmail）；
+// T-439／D-210 起正式的登入是 Supabase Auth（Authorization: Bearer <Supabase 簽的 JWT>，userEmail）；
 // 過渡期 Cloudflare Access 簽的權杖（Cf-Access-Jwt-Assertion，accessEmail）照收，使用者關掉 /api 的 Access 應用後就只剩 Supabase。
 // 不直接信 cf-access-authenticated-user-email 之類的標頭：任何人都能註冊登入，追蹤股又是每個帳號自己的資料，
 // 身分必須來自簽過名、驗得過的權杖。
@@ -79,7 +79,7 @@ export async function accessEmail(
   return typeof claims.email === 'string' && claims.email.includes('@') ? claims.email.toLowerCase() : null
 }
 
-// ── Supabase Auth（T-435）────────────────────────────────────────────────────────────────
+// ── Supabase Auth（T-439）────────────────────────────────────────────────────────────────
 /** Pages 的環境變數：SUPABASE_URL＝專案網址（https://<ref>.supabase.co）；SUPABASE_JWT_SECRET 只有舊專案（HS256 共用祕密）才要設，
  *  新專案用非對稱金鑰（ES256／RS256），公鑰從 /auth/v1/.well-known/jwks.json 拿。 */
 export type IdentityEnv = { SUPABASE_URL?: string; SUPABASE_JWT_SECRET?: string }

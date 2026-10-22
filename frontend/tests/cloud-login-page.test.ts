@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import { LOGIN_PAGE } from '../src/cloud/auth.ts'
 
-// T-432：深色登入／註冊頁 /login。T-435 起它是網站自己的頁（React，LoginPage.tsx），登入走 Supabase Auth，
+// T-432：深色登入／註冊頁 /login。T-439 起它是網站自己的頁（React，LoginPage.tsx），登入走 Supabase Auth，
 // 不再經過 Cloudflare Access 的白色卡片。
 const read = (p: string): string => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const page = read('src/cloud/LoginPage.tsx')

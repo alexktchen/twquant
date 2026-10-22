@@ -228,13 +228,15 @@ def plan_from(
     cfg: ChipDailyConfig,
     *,
     live: bool,
+    today: dt.date | None = None,
 ) -> list[ChipFetch]:
     """純函數：交易日（新到舊，sessions[k-1]＝T−k）＋各表各市場已有列數 → 要抓的清單。
 
     每張表每個市場：config 的 `refetch_offsets`（前第 k 個交易日，覆寫）＋最近 `catchup_trading_days`
     個交易日裡該市場一列都沒有的日子（缺日）。當沖在最小的 offset 那一次存首次公布值——只在 live
     （這一輪就是「今天」）時：手動重跑過去的日子、以及缺日補抓，抓到的可能已是定案值，混進去會把修訂幅度
-    低估成 0。
+    低估成 0。`today`（D-211 §二.3）＝這一輪在當天 21:00 以後跑，把當天也排進去（T-0，名單評分要當天的
+    當沖、借券）——但不當首次值，首次值仍是隔天 T-1 那一次。
     """
     plan: dict[tuple[str, str, dt.date], ChipFetch] = {}
     for table in CHIP_DAILY_TABLES:
@@ -242,6 +244,8 @@ def plan_from(
         first_k = min(offsets)
         have = counts.get(table, {})
         for market in MARKETS:
+            if today is not None:
+                plan[(table, market, today)] = ChipFetch(table, market, today, False, "T-0")
             for k in sorted(offsets):
                 if k <= len(sessions):
                     day = sessions[k - 1]
@@ -255,13 +259,19 @@ def plan_from(
 
 
 def plan_chip_fetches(
-    cur: Any, schema: str, day: dt.date, cfg: ChipDailyConfig, *, live: bool
+    cur: Any,
+    schema: str,
+    day: dt.date,
+    cfg: ChipDailyConfig,
+    *,
+    live: bool,
+    today: dt.date | None = None,
 ) -> list[ChipFetch]:
     """查 PG 的交易日與各市場列數，產生 day 這一輪要抓的清單（見 `plan_from`）。"""
     depth = max(cfg.catchup_trading_days, *(max(v) for v in cfg.refetch_offsets.values()))
     sessions = recent_sessions(cur, schema, day, depth)
     counts = {t: market_counts(cur, schema, t, sessions) for t in CHIP_DAILY_TABLES}
-    return plan_from(sessions, counts, cfg, live=live)
+    return plan_from(sessions, counts, cfg, live=live, today=today)
 
 
 @dataclass(frozen=True)

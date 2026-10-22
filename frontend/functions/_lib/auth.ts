@@ -1,4 +1,4 @@
-// 雲端版登入狀態（T-435／D-210：Supabase Auth；過渡期 Cloudflare Access 的權杖照收）。
+// 雲端版登入狀態（T-439／D-210：Supabase Auth；過渡期 Cloudflare Access 的權杖照收）。
 // 網站外殼與新聞公開；要身分的 /api 端點各自驗權杖（_lib/identity.ts）。
 import { userEmail, type IdentityEnv, type UserOpts } from './identity.ts'
 

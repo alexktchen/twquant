@@ -1,4 +1,4 @@
-// 瀏覽器端的 Supabase 登入（T-435／D-210）——碰網路與 localStorage 的部分。純函式在 session.ts。
+// 瀏覽器端的 Supabase 登入（T-439／D-210）——碰網路與 localStorage 的部分。純函式在 session.ts。
 // 登入狀態存 localStorage（twquant.session）：access_token 約 1 小時，到期前用 refresh_token 換新；登出就清掉。
 import {
   REFRESH_SKEW_S,

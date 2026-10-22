@@ -1,4 +1,4 @@
-/* 登入／註冊頁（T-432／T-435）：深色，配色同 cloud.css（漲紅 #F6465D、跌綠 #0ECB81、強調橘 #FF7A00） */
+/* 登入／註冊頁（T-432／T-439）：深色，配色同 cloud.css（漲紅 #F6465D、跌綠 #0ECB81、強調橘 #FF7A00） */
 .lg-page {
   --bg: #0e0f14; --panel: #15161c; --line: #23252d; --text: #e6e7eb; --mute: #8a8f98; --soft: #c9ccd3; --accent: #ff7a00; --up: #f6465d; --down: #0ecb81;
   box-sizing: border-box; min-height: 100vh; margin: 0; color: var(--text); background: #0e0f14;

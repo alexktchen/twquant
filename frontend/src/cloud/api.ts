@@ -22,7 +22,7 @@ import type { LineGroupRow, LineLogin, LineStatus } from './linegroup'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
-// 每個 /api 請求帶 Supabase 的 Bearer 權杖（T-435；快到期會先換新）；/pub 公開不用帶。
+// 每個 /api 請求帶 Supabase 的 Bearer 權杖（T-439；快到期會先換新）；/pub 公開不用帶。
 // redirect: 'manual'：過渡期 Access 會把沒登入的 /api 導去登入頁，攔下來改丟 LoginRequired，畫面切成預覽模式。
 async function get<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   let res: Response

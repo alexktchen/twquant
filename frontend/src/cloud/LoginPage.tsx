@@ -1,4 +1,4 @@
-// 登入／註冊頁 /login（T-432 深色頁；T-435 起登入走 Supabase Auth，不再經過 Cloudflare Access 的白色卡片）。
+// 登入／註冊頁 /login（T-432 深色頁；T-439 起登入走 Supabase Auth，不再經過 Cloudflare Access 的白色卡片）。
 // Google：整頁跳去 Google，回首頁時 CloudApp 用 ?code= 換登入狀態。Email：寄一組驗證碼（信裡也有連結），填進去就登入。
 // 第一次登入就自動完成註冊，不用另外填資料。
 import { useEffect, useState, type FormEvent } from 'react'

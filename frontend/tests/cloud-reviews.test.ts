@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { itemsOf, reviewOf } from '../functions/_lib/reviews.ts'
-import { DIMS, itemNote, REVIEW_NOTE, reviewNote, scoreText, stanceStrong, stanceTone, topOf } from '../src/cloud/pickreview.ts'
+import { DIMS, itemNote, itemPoints, REVIEW_NOTE, reviewNote, scoreText, stanceStrong, stanceTone, topOf } from '../src/cloud/pickreview.ts'
 
 test('T-394 四面向評分（舊資料，scale 空）：四個分數都在 1～5 才顯示；首選才帶理由', () => {
   const base = {
@@ -81,4 +81,30 @@ test('T-427 立場五級＋多空分歧（D-206 §六）：顏色看偏多／偏
   assert.match(api, /to_jsonb\(r\) ->> 'split'/)
   const ui = readFileSync(new URL('../src/cloud/Review.tsx', import.meta.url), 'utf8')
   assert.match(ui, /多空分歧/)
+})
+
+test('T-434 籌碼七項加權（D-211）：items 帶 weight、顯示比重×方向；舊列沒有 weight＝1；說明寫七項', () => {
+  const items = [
+    { dim: '籌碼', name: '外資', points: 1, weight: 1.5, text: '外資近 5 日買超 929 張' },
+    { dim: '籌碼', name: '當沖', points: -1, weight: 0.5, text: '近 5 日當沖佔成交量 45.0%' },
+    { dim: '籌碼', name: '借券', points: 0, weight: 0.5, text: '資料不足' },
+    { dim: '技術', name: '均線', points: 1, text: '收盤站在 5、20、60 日均線之上' },
+    { dim: '技術', name: '壞', points: 1, weight: -2, text: '比重不是正數 → 當 1' },
+  ]
+  const row = { news: 5, tech: 10, chips: 8, fund: 6, is_top: false, top_reason: null, source: 'model', scale: '10', items: JSON.stringify(items) }
+  const v = reviewOf(row)
+  assert.ok(v)
+  assert.deepEqual(
+    v.items.map((i) => [i.name, i.points, i.weight]),
+    [['外資', 1, 1.5], ['當沖', -1, 0.5], ['借券', 0, 0.5], ['均線', 1, 1], ['壞', 1, 1]],
+  )
+  assert.equal(itemPoints(v.items[0]), '+1.5')
+  assert.equal(itemPoints(v.items[1]), '−0.5')
+  assert.equal(itemPoints(v.items[2]), '0')
+  assert.equal(itemPoints(v.items[3]), '+1')
+  assert.match(reviewNote(v), /籌碼 7 項.*比重/)
+  const ui = readFileSync(new URL('../src/cloud/Review.tsx', import.meta.url), 'utf8')
+  assert.match(ui, /itemPoints\(i\)/)
+  const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')
+  assert.match(app, /評分約 21:45 更新/)
 })

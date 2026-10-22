@@ -1,7 +1,8 @@
-"""名單四面向 10 分制的規則評分（T-426／D-206 §二）。
+"""名單四面向 10 分制的規則評分（T-426／D-206 §二；籌碼七項加權 D-211 §二）。
 
-每個面向 5 個小項，每項偏多 +1、中性 0、偏空 −1，從 `rules.base` 起算 → 0～10（5＝中性）。
-「偏多／偏空」大多跟同一天全市場（四碼普通股）比百分位。**描述現況，不是預測**——
+每個面向幾個小項，每項偏多 +1、中性 0、偏空 −1，乘上比重後從 `rules.base` 起算 → 0～10（5＝中性）。
+消息、技術、基本各 5 項、比重 1；籌碼 7 項（外資、投信、主力、融資、借券、當沖、千張大戶），比重合計＝base，
+半分往離 base 的方向進位。「偏多／偏空」大多跟同一天全市場（四碼普通股）比百分位。**描述現況，不是預測**——
 除了波動（D-132）與投信連買（D-143），其他小項沒有驗證過能預測報酬；主力賣超扣分只代表「主力在賣」（D-203：之後並沒有比較差）。
 資料缺＝該項 0 分並寫「資料不足」，不猜。
 """
@@ -9,8 +10,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import statistics
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import polars as pl
@@ -23,20 +25,23 @@ NO_DATA = "資料不足"
 
 @dataclass(frozen=True)
 class Item:
-    """一個小項：名稱、+1／0／−1、白話理由。"""
+    """一個小項：名稱、方向 +1／0／−1、白話理由、比重（D-211；非籌碼面向都是 1）。"""
 
     name: str
     points: int
     text: str
+    weight: float = 1.0
 
 
 def total(items: list[Item], rules: PickScoreRules) -> int:
-    """面向分數＝base ＋ 各項加總，夾在 0～2×base。"""
-    return max(0, min(2 * rules.base, rules.base + sum(i.points for i in items)))
+    """面向分數＝base ＋ Σ(方向 × 比重)，半分往離 base 的方向進位（+0.5 → +1、−0.5 → −1，對稱），夾在 0～2×base。"""
+    s = sum(i.points * i.weight for i in items)
+    step = math.floor(abs(s) + 0.5) * (1 if s > 0 else -1 if s < 0 else 0)
+    return max(0, min(2 * rules.base, rules.base + step))
 
 
 def items_json(items: dict[str, list[Item]]) -> list[dict[str, Any]]:
-    """存進 pick_reviews.items 的格式：[{dim, name, points, text}]。"""
+    """存進 pick_reviews.items 的格式：[{dim, name, points, text, weight}]（weight 自 D-211 起；舊列沒有＝1）。"""
     return [{"dim": k, **asdict(i)} for k, lst in items.items() for i in lst]
 
 
@@ -76,6 +81,9 @@ class Market:
     industry: dict[str, str]
     per_median: dict[str, float]  # 產業 → 本益比中位數
     pbr_median: dict[str, float]
+    # D-211：(近 N 日當沖股數, 占成交量, 百分位)；(近 N 日借券賣出餘額變化股數, 占成交量, 百分位)
+    daytrade: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    sbl: dict[str, tuple[float, float, float]] = field(default_factory=dict)
 
 
 def percentile(values: dict[str, float]) -> dict[str, float]:
@@ -129,6 +137,39 @@ def flow_ratio(
     )
     return {
         str(r["stock_id"]): (float(r["net"]), float(r["net"]) / float(r["volume"]))
+        for r in j.iter_rows(named=True)
+    }
+
+
+def balance_change_ratio(
+    balances: pl.DataFrame, volume: pl.DataFrame, sessions: list[dt.date]
+) -> dict[str, tuple[float, float]]:
+    """balances＝(date, stock_id, balance)、volume＝(date, stock_id, volume)；sessions[0] 是基準日、其餘是窗
+    → (餘額變化股數, 占窗內成交量)。基準日與窗內每一天都要有那檔的餘額才算（D-206 §二「資料缺不猜」）。"""
+    n = len(sessions)
+    b = (
+        balances.filter(pl.col("date").is_in(sessions))
+        .sort("stock_id", "date")
+        .group_by("stock_id", maintain_order=True)
+        .agg(
+            pl.col("balance").first().alias("_first"),
+            pl.col("balance").last().alias("_last"),
+            pl.len().alias("_n"),
+        )
+    )
+    v = (
+        volume.filter(pl.col("date").is_in(sessions[1:]))
+        .group_by("stock_id")
+        .agg(pl.col("volume").sum(), pl.len().alias("_m"))
+    )
+    j = b.join(v, on="stock_id").filter(
+        (pl.col("_n") == n) & (pl.col("_m") == n - 1) & (pl.col("volume") > 0)
+    )
+    return {
+        str(r["stock_id"]): (
+            float(r["_last"] - r["_first"]),
+            float(r["_last"] - r["_first"]) / float(r["volume"]),
+        )
         for r in j.iter_rows(named=True)
     }
 
@@ -271,6 +312,44 @@ def _flow_item(
     )
 
 
+def _sbl_item(d: tuple[float, float, float] | None, rules: PickScoreRules) -> Item:
+    """借券（D-211）：近 N 日借券賣出餘額增加在全市場前段 −1（空方加碼）、減少在前段 +1（空方回補）。"""
+    if d is None:
+        return Item("借券", 0, NO_DATA)
+    delta, ratio, p = d
+    word = "增加" if delta > 0 else "減少" if delta < 0 else "持平"
+    pts = -1 if p >= rules.hi_pct and delta > 0 else 1 if p <= rules.lo_pct and delta < 0 else 0
+    cmp = (
+        f"增得比全市場 {round(p * 100)}% 的股票多"
+        if delta > 0
+        else f"減得比全市場 {round((1 - p) * 100)}% 的股票多（空方回補）"
+        if delta < 0
+        else "沒有變化"
+    )
+    return Item(
+        "借券",
+        pts,
+        f"借券賣出餘額近 {rules.flow_days} 日{word} {_lots(delta)}（占成交量 {_pct(abs(ratio))}），{cmp}",
+    )
+
+
+def _daytrade_item(d: tuple[float, float, float] | None, rules: PickScoreRules) -> Item:
+    """當沖（D-211）：近 N 日當沖佔成交量在全市場前段 −1（短線客多）；低不加分（當沖少不代表好）。"""
+    if d is None:
+        return Item("當沖", 0, NO_DATA)
+    _, ratio, p = d
+    cmp = (
+        f"比全市場 {round(p * 100)}% 的股票高"
+        if p >= 0.5
+        else f"比全市場 {round((1 - p) * 100)}% 的股票低"
+    )
+    return Item(
+        "當沖",
+        -1 if p >= rules.hi_pct else 0,
+        f"近 {rules.flow_days} 日當沖佔成交量 {_pct(ratio)}，{cmp}",
+    )
+
+
 def chip_items(
     sid: str,
     trust: list[float],
@@ -280,7 +359,8 @@ def chip_items(
     m: Market,
     rules: PickScoreRules,
 ) -> list[Item]:
-    """外資、投信、主力、融資、千張大戶。trust／margin／closes 舊到新；holders＝(週, 千張大戶比例) 舊到新。"""
+    """外資、投信、主力、融資、借券、當沖、千張大戶（D-211：七項各有比重 `rules.chip_weights`）。
+    trust／margin／closes 舊到新；holders＝(週, 千張大戶比例) 舊到新。"""
     out = [_flow_item("外資", "外資", m.foreign.get(sid), rules)]
     s = _streak(trust)
     if not trust:
@@ -301,6 +381,8 @@ def chip_items(
         txt = f"融資近 {n} 日{'增加' if dm > 0 else '減少' if dm < 0 else '持平'} {_pct(abs(dm))}，股價{'漲' if dp >= 0 else '跌'} {_pct(abs(dp))}"
         pts = 1 if dm < 0 and dp > 0 else -1 if dm >= rules.margin_jump and dp < 0 else 0
         out.append(Item("融資", pts, txt))
+    out.append(_sbl_item(m.sbl.get(sid), rules))
+    out.append(_daytrade_item(m.daytrade.get(sid), rules))
     if len(holders) < 2:
         out.append(Item("千張大戶", 0, NO_DATA))
     else:
@@ -313,7 +395,7 @@ def chip_items(
                 f"千張大戶持股 {_pct(holders[-1][1])}，比前一週{'多' if diff >= 0 else '少'} {abs(diff):.1f} 個百分點",
             )
         )
-    return out
+    return [Item(i.name, i.points, i.text, rules.chip_weights[i.name]) for i in out]
 
 
 def fund_items(
@@ -467,23 +549,36 @@ def load_market(
         volume = px.select("date", "stock_id", pl.col("volume").cast(pl.Float64))
     mp, vp = percentile(mom), percentile(vol)
 
-    def flows(table: str, col: str) -> dict[str, tuple[float, float, float]]:
+    def window(
+        table: str, col: str, alias: str, days: list[dt.date], need: int
+    ) -> pl.DataFrame | None:
+        """days 每一天都要有資料的那張表；缺任何一天＝None（相關小項記資料不足，D-206 §二）。"""
         df = read(
             table,
-            f"SELECT date, stock_id, {col}::double precision AS net FROM {s}.{table} "
+            f"SELECT date, stock_id, {col}::double precision AS {alias} FROM {s}.{table} "
             "WHERE date = ANY(%(d)s) AND stock_id ~ %(p)s AND " + col + " IS NOT NULL",
-            {"d": flow_sess, "p": rules.stock_pattern},
+            {"d": days, "p": rules.stock_pattern},
         )
-        if df is None or df.is_empty() or len(flow_sess) < rules.flow_days:
+        if df is None or df.is_empty() or len(days) < need:
             if df is not None:
-                errors.append(f"{table} 近 {rules.flow_days} 個交易日沒有資料")
-            return {}
+                errors.append(f"{table} 近 {need} 個交易日沒有資料")
+            return None
         have = set(df["date"].to_list())
-        missing = [d for d in flow_sess if d not in have]
+        missing = [d for d in days if d not in have]
         if missing:
             errors.append(f"{table} 缺 {', '.join(map(str, missing))}，相關小項記資料不足")
-            return {}
-        return with_pct(flow_ratio(df, volume, flow_sess))
+            return None
+        return df
+
+    def flows(table: str, col: str) -> dict[str, tuple[float, float, float]]:
+        df = window(table, col, "net", flow_sess, rules.flow_days)
+        return {} if df is None else with_pct(flow_ratio(df, volume, flow_sess))
+
+    def balances(table: str, col: str) -> dict[str, tuple[float, float, float]]:
+        # 餘額看「變化」：基準日 ＋ flow_days 天的窗（D-211 借券）
+        days = sess[-(rules.flow_days + 1) :]
+        df = window(table, col, "balance", days, rules.flow_days + 1)
+        return {} if df is None else with_pct(balance_change_ratio(df, volume, days))
 
     val_df = read(
         "stock_valuation",
@@ -510,6 +605,8 @@ def load_market(
             industry=industry,
             per_median=per_med,
             pbr_median=pbr_med,
+            daytrade=flows("daytrade_daily", "daytrade_shares"),
+            sbl=balances("sbl_short_daily", "sbl_balance"),
         ),
         errors,
     )

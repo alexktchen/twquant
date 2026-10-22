@@ -43,7 +43,7 @@ export function withoutView(href: string): string {
   return u.pathname + u.search + u.hash
 }
 
-/** 沒登入的人一打開網站要落在哪（T-434）：新聞是公開的，沒指定分頁就去新聞；網址明寫 ?tab=、或已經在別的分頁就不動。 */
+/** 沒登入的人一打開網站要落在哪（T-438）：新聞是公開的，沒指定分頁就去新聞；網址明寫 ?tab=、或已經在別的分頁就不動。 */
 export function guestTab(current: Tab, explicit: Tab | null): Tab {
   return explicit === null && current === 'home' ? 'news' : current
 }

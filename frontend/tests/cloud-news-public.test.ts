@@ -4,7 +4,7 @@ import test from 'node:test'
 import { PUBLIC_MAX_AGE_S, pubProxy } from '../functions/_lib/news-proxy.ts'
 import { guestTab } from '../src/cloud/tabs.ts'
 
-// T-434／D-210：新聞頁公開。只讀的新聞端點搬到 /pub/news/*（Cloudflare Access 不保護 /pub），
+// T-438／D-210：新聞頁公開。只讀的新聞端點搬到 /pub/news/*（Cloudflare Access 不保護 /pub），
 // 沒登入也看得到；核可（擁有者）與語意搜尋（花 AI 額度）留在 /api/news/* 要登入。
 const read = (p: string): string => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const env = { NEWS_API_URL: 'https://abc.supabase.co/functions/v1/api/', NEWS_API_KEY: 'k3y' }
@@ -12,7 +12,7 @@ const env = { NEWS_API_URL: 'https://abc.supabase.co/functions/v1/api/', NEWS_AP
 const PUBLIC = ['items', 'graph', 'stock', 'stock-counts', 'health', 'thread', 'similar', 'summary', 'galaxy', 'stock-days', 'digest']
 const PRIVATE = ['review', 'search']
 
-test('T-434 AC1 端點位置：只讀的在 functions/pub/news/，核可與搜尋留在 functions/api/news/', () => {
+test('T-438 AC1 端點位置：只讀的在 functions/pub/news/，核可與搜尋留在 functions/api/news/', () => {
   for (const name of PUBLIC) {
     assert.ok(existsSync(new URL(`../functions/pub/news/${name}.ts`, import.meta.url)), `pub/news/${name}.ts`)
     assert.ok(!existsSync(new URL(`../functions/api/news/${name}.ts`, import.meta.url)), `api/news/${name}.ts 不該還在`)
@@ -23,7 +23,7 @@ test('T-434 AC1 端點位置：只讀的在 functions/pub/news/，核可與搜�
   }
 })
 
-test('T-434 AC2 公開端點：同一執行個體暫存＋讓瀏覽器快取 60 秒；錯誤不快取', async () => {
+test('T-438 AC2 公開端點：同一執行個體暫存＋讓瀏覽器快取 60 秒；錯誤不快取', async () => {
   for (const name of PUBLIC) {
     const src = read(`functions/pub/news/${name}.ts`)
     assert.ok(src.includes('cached(cacheKey('), `pub/news/${name}.ts 要用共用暫存`)
@@ -44,7 +44,7 @@ test('T-434 AC2 公開端點：同一執行個體暫存＋讓瀏覽器快取 60 
   assert.equal(miss.headers.get('cache-control'), 'private, no-store')
 })
 
-test('T-434 AC3 網站的新聞請求：只讀的打 /pub/news/，核可與搜尋打 /api/news/；/pub 讓瀏覽器照快取標頭', () => {
+test('T-438 AC3 網站的新聞請求：只讀的打 /pub/news/，核可與搜尋打 /api/news/；/pub 讓瀏覽器照快取標頭', () => {
   const api = read('src/cloud/api.ts')
   const paths = [...api.matchAll(/['`](\/(?:api|pub)\/news\/[a-z-]+)/g)].map((m) => m[1])
   const pub = new Set(paths.filter((p) => p.startsWith('/pub/')).map((p) => p.slice('/pub/news/'.length)))
@@ -55,7 +55,7 @@ test('T-434 AC3 網站的新聞請求：只讀的打 /pub/news/，核可與搜�
   assert.match(api, /cache: path\.startsWith\('\/pub\/'\) \? 'default' : 'no-store'/)
 })
 
-test('T-434 AC4 沒登入：新聞分頁不蓋登入卡片；沒指定分頁的訪客直接落在新聞', () => {
+test('T-438 AC4 沒登入：新聞分頁不蓋登入卡片；沒指定分頁的訪客直接落在新聞', () => {
   const app = read('src/cloud/CloudApp.tsx')
   assert.ok(!app.includes('登入後看新聞'), '新聞分頁的登入卡片要拿掉')
   assert.match(app, /<NewsPage\s[^>]*guest=\{guest\}/s)
@@ -65,7 +65,7 @@ test('T-434 AC4 沒登入：新聞分頁不蓋登入卡片；沒指定分頁的�
   assert.equal(guestTab('news', null), 'news')
 })
 
-test('T-434 AC5 沒登入的新聞頁：不去抓核可清單、搜尋停用並說明要登入', () => {
+test('T-438 AC5 沒登入的新聞頁：不去抓核可清單、搜尋停用並說明要登入', () => {
   const page = read('src/cloud/NewsPage.tsx')
   assert.match(page, /guest: boolean/)
   assert.match(page, /if \(guest\) return\s*\n\s*fetchNewsReview\(\)/, '沒登入不抓核可清單（會被當成登入過期）')
@@ -73,7 +73,7 @@ test('T-434 AC5 沒登入的新聞頁：不去抓核可清單、搜尋停用並�
   assert.match(page, /登入後才能搜尋/)
 })
 
-test('T-434 AC6 公開頁與搜尋引擎：介紹頁說新聞不用登入；首頁有 description；登入頁不再說新聞要登入', () => {
+test('T-438 AC6 公開頁與搜尋引擎：介紹頁說新聞不用登入；首頁有 description；登入頁不再說新聞要登入', () => {
   assert.match(read('public/about.html'), /新聞.{0,12}不用登入/)
   assert.match(read('index.html'), /<meta name="description" content="[^"]{20,}"/)
   const login = read('src/cloud/LoginPage.tsx')

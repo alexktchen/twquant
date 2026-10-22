@@ -1,9 +1,9 @@
 // 登入狀態判斷與沒登入時的預覽資料（純函式，方便測試）。
-// 登入是 Supabase Auth（T-435／D-210，session-client.ts）：每個 /api 請求帶 Bearer 權杖，沒登入或過期時 API 回 401。
+// 登入是 Supabase Auth（T-439／D-210，session-client.ts）：每個 /api 請求帶 Bearer 權杖，沒登入或過期時 API 回 401。
 // 過渡期 /api 可能還在 Cloudflare Access 後面：它會把請求導去登入頁，前端用 redirect: 'manual' 攔下這個導向。
 import type { Pick, PicksDay } from './format'
 
-/** 本站的深色登入／註冊頁（T-432；T-435 起由 LoginPage.tsx 畫）。 */
+/** 本站的深色登入／註冊頁（T-432；T-439 起由 LoginPage.tsx 畫）。 */
 export const LOGIN_PAGE = '/login'
 
 export class LoginRequired extends Error {

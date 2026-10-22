@@ -1,6 +1,6 @@
 // 網站 → 新聞服務（T-400／D-200）：/pub/news/* 與 /api/news/* 只是把請求轉給新聞服務的 API v1（news-service/supabase/functions/api），
 // 服務金鑰放 Pages 祕密（NEWS_API_URL、NEWS_API_KEY），不給瀏覽器。
-// T-434／D-210：只讀的端點公開在 /pub/news/*（Cloudflare Access 不保護 /pub，沒登入也看得到，是放廣告與搜尋引擎的前提）；
+// T-438／D-210：只讀的端點公開在 /pub/news/*（Cloudflare Access 不保護 /pub，沒登入也看得到，是放廣告與搜尋引擎的前提）；
 // 核可（擁有者）與語意搜尋（每次都花 AI 額度，不讓匿名流量燒）留在 /api/news/* 要登入。
 // 新聞服務掛了 → 503，網站只有新聞分頁顯示暫停，其他分頁照常（SPEC-017 §10）。純函式＋注入 fetch，供 node 單元測試。
 import { sameOrigin } from './watchlist.ts'

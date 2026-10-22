@@ -14,11 +14,11 @@ import {
   withoutCode,
 } from '../src/cloud/session.ts'
 
-// T-435：瀏覽器端的 Supabase 登入（自己打 GoTrue 的 REST，不帶 supabase-js）——純函式的部分
+// T-439：瀏覽器端的 Supabase 登入（自己打 GoTrue 的 REST，不帶 supabase-js）——純函式的部分
 const read = (p: string): string => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const NOW = 1_760_000_000
 
-test('T-435 AC4 登入狀態：從 /token、/verify 的回應取出要存的欄位；壞的存檔不認', () => {
+test('T-439 AC4 登入狀態：從 /token、/verify 的回應取出要存的欄位；壞的存檔不認', () => {
   const body = { access_token: 'a.b.c', refresh_token: 'r1', expires_in: 3600, token_type: 'bearer', user: { id: 'u', email: 'Me@Example.com' } }
   assert.deepEqual(sessionFrom(body, NOW), { access_token: 'a.b.c', refresh_token: 'r1', expires_at: NOW + 3600, email: 'me@example.com' })
   assert.deepEqual(sessionFrom({ ...body, expires_at: NOW + 99 }, NOW)?.expires_at, NOW + 99, '有 expires_at 就用它')
@@ -37,7 +37,7 @@ test('T-435 AC4 登入狀態：從 /token、/verify 的回應取出要存的欄�
   assert.equal(needsRefresh(s, NOW + 9999), true)
 })
 
-test('T-435 AC5 Google 登入網址（PKCE）：帶 provider、回來的網址、code_challenge；驗證碼照 RFC 7636 算', async () => {
+test('T-439 AC5 Google 登入網址（PKCE）：帶 provider、回來的網址、code_challenge；驗證碼照 RFC 7636 算', async () => {
   const u = new URL(authorizeUrl('https://abc.supabase.co/', 'https://twquant.pages.dev/', 'CHAL'))
   assert.equal(u.origin + u.pathname, 'https://abc.supabase.co/auth/v1/authorize')
   assert.equal(u.searchParams.get('provider'), 'google')
@@ -59,7 +59,7 @@ test('T-435 AC5 Google 登入網址（PKCE）：帶 provider、回來的網址�
   assert.equal(emailLooksValid(' '), false)
 })
 
-test('T-435 AC6 GoTrue 的錯誤改成中文；不認得的照原文', () => {
+test('T-439 AC6 GoTrue 的錯誤改成中文；不認得的照原文', () => {
   assert.equal(gotrueMessage({ error_code: 'over_email_send_rate_limit', msg: 'x' }), '寄信次數到上限，請幾分鐘後再試')
   assert.equal(gotrueMessage({ msg: 'Token has expired or is invalid' }), '驗證碼錯誤或已過期，請重寄一次')
   assert.equal(gotrueMessage({ error_code: 'otp_expired' }), '驗證碼錯誤或已過期，請重寄一次')
@@ -68,7 +68,7 @@ test('T-435 AC6 GoTrue 的錯誤改成中文；不認得的照原文', () => {
   assert.equal(gotrueMessage(null), '登入服務暫時無法使用')
 })
 
-test('T-435 AC7 網站每個 /api 請求都帶 Bearer 權杖；/pub 不帶；401 當成要重新登入', () => {
+test('T-439 AC7 網站每個 /api 請求都帶 Bearer 權杖；/pub 不帶；401 當成要重新登入', () => {
   const api = read('src/cloud/api.ts')
   assert.match(api, /const token = path\.startsWith\('\/pub\/'\) \? null : await getToken\(\)/)
   assert.match(api, /authorization: `Bearer \$\{token\}`/)

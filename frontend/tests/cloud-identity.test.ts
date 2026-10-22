@@ -3,7 +3,7 @@ import test from 'node:test'
 import { me } from '../functions/_lib/auth.ts'
 import { ACCESS_AUD, ACCESS_TEAM, JWT_HEADER, supabaseEmail, userEmail } from '../functions/_lib/identity.ts'
 
-// T-435／D-210：登入換成 Supabase Auth。API 從 Authorization: Bearer 驗 Supabase 簽的權杖；
+// T-439／D-210：登入換成 Supabase Auth。API 從 Authorization: Bearer 驗 Supabase 簽的權杖；
 // 過渡期（Cloudflare 還沒關掉 /api 的 Access）Access 的權杖照收。
 const NOW = 1_760_000_000_000
 const SUPABASE_URL = 'https://abc.supabase.co'
@@ -46,7 +46,7 @@ const good = {
 const bearer = (token?: string) =>
   new Request('https://twquant.pages.dev/api/me', { headers: token ? { authorization: `Bearer ${token}` } : {} })
 
-test('T-435 AC1 Supabase 權杖（ES256＋JWKS）：簽章、簽發者、對象、角色、期限都對才算登入，email 轉小寫', async () => {
+test('T-439 AC1 Supabase 權杖（ES256＋JWKS）：簽章、簽發者、對象、角色、期限都對才算登入，email 轉小寫', async () => {
   const k = await es256()
   const env = { SUPABASE_URL }
   const ask = (claims: Record<string, unknown>, header?: Record<string, unknown>) =>
@@ -75,7 +75,7 @@ test('T-435 AC1 Supabase 權杖（ES256＋JWKS）：簽章、簽發者、對象�
   await assert.rejects(supabaseEmail(bearer(await (await es256('ec-9')).sign(good)), env, { fetchImpl: down, now: NOW }), /JWKS/)
 })
 
-test('T-435 AC2 Supabase 權杖（HS256 共用祕密，舊專案）：有設 SUPABASE_JWT_SECRET 才驗；祕密不對、沒設都不算', async () => {
+test('T-439 AC2 Supabase 權杖（HS256 共用祕密，舊專案）：有設 SUPABASE_JWT_SECRET 才驗；祕密不對、沒設都不算', async () => {
   const sign = await hs256('s3cret-s3cret-s3cret')
   const never = (async () => assert.fail('HS256 不該抓 JWKS')) as unknown as typeof fetch
   const env = { SUPABASE_URL, SUPABASE_JWT_SECRET: 's3cret-s3cret-s3cret' }
@@ -85,7 +85,7 @@ test('T-435 AC2 Supabase 權杖（HS256 共用祕密，舊專案）：有設 SUP
   assert.equal(await supabaseEmail(bearer(await sign(good)), { SUPABASE_URL }, { fetchImpl: never, now: NOW }), null, '沒設祕密不收 HS256')
 })
 
-test('T-435 AC3 userEmail：先看 Supabase 權杖，沒有再看 Cloudflare Access 的（過渡期）；兩個都沒有 → null', async () => {
+test('T-439 AC3 userEmail：先看 Supabase 權杖，沒有再看 Cloudflare Access 的（過渡期）；兩個都沒有 → null', async () => {
   const k = await es256('ec-3')
   // Access 的 RS256 權杖（沿用 cloud-watchlist.test.ts 的做法）
   const pair = (await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify'])) as CryptoKeyPair

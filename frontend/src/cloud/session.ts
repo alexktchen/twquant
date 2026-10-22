@@ -1,4 +1,4 @@
-// 瀏覽器端的 Supabase 登入（T-435／D-210）——純函式的部分，供 node 單元測試；碰網路與 localStorage 的在 session-client.ts。
+// 瀏覽器端的 Supabase 登入（T-439／D-210）——純函式的部分，供 node 單元測試；碰網路與 localStorage 的在 session-client.ts。
 // 不帶 supabase-js：只用到 GoTrue 的四支 REST（authorize、otp、verify、token），自己寫比整包小得多、也看得清楚在做什麼。
 
 export const SESSION_KEY = 'twquant.session'

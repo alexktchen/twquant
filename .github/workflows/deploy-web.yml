@@ -6,7 +6,7 @@
 #   FUGLE_API_KEY          選填：富果行情 API 金鑰；部署時寫進 Pages 的祕密 FUGLE_API_KEY，證交所擋下即時報價時用富果補
 #   TWQUANT_DISPATCH_TOKEN 選填（T-423）：GitHub fine-grained token（只給 alexktchen/twquant 的 Actions: Read and write）；
 #                          部署時寫進 Pages 的同名祕密，網站「LINE 群組」分頁按「登入」才觸發得了 line-login.yml
-#   SUPABASE_URL           T-435 登入（Supabase Auth）：專案網址 https://<ref>.supabase.co；建置時當 VITE_SUPABASE_URL、也寫進 Pages 祕密 SUPABASE_URL
+#   SUPABASE_URL           T-439 登入（Supabase Auth）：專案網址 https://<ref>.supabase.co；建置時當 VITE_SUPABASE_URL、也寫進 Pages 祕密 SUPABASE_URL
 #   SUPABASE_ANON_KEY      同上：專案的 anon（publishable）金鑰，只在建置時當 VITE_SUPABASE_ANON_KEY（本來就是給瀏覽器的）
 #   SUPABASE_JWT_SECRET    選填：只有舊專案（JWT 用 HS256 共用祕密簽）才要；新專案用 JWKS 公鑰驗，不用設
 # main 上前端有改動就自動部署；也可在 Actions 頁手動觸發。
@@ -112,7 +112,7 @@ jobs:
           fi
           printf '%s' "$DISPATCH" | npx --yes wrangler@4 pages secret put TWQUANT_DISPATCH_TOKEN --project-name "$PROJECT"
 
-      - name: 登入（Supabase Auth，T-435）
+      - name: 登入（Supabase Auth，T-439）
         if: steps.secrets.outputs.ok == 'true'
         env:
           SB_URL: ${{ secrets.SUPABASE_URL }}

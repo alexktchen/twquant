@@ -18,7 +18,7 @@ test('T-332 沒登入：Access 的導向、401／403、拿到 HTML 登入頁都�
   assert.equal(needsLogin(res('basic', 404, 'application/json')), false)
   assert.equal(needsLogin(res('basic', 500, 'text/html')), false)
   assert.ok(new LoginRequired('denied') instanceof Error)
-  // T-435 過渡期：有 Supabase 登入卻被 Cloudflare Access 導走（redirect）＝管理者還沒關 Access；401（denied）＝權杖失效
+  // T-439 過渡期：有 Supabase 登入卻被 Cloudflare Access 導走（redirect）＝管理者還沒關 Access；401（denied）＝權杖失效
   assert.equal(new LoginRequired('redirect').reason, 'redirect')
   assert.equal(new LoginRequired('denied').reason, 'denied')
 })

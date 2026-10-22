@@ -150,7 +150,7 @@ export default function CloudApp() {
       .catch((e: Error) => setTradesErr(watchError(e)))
 
   useEffect(() => {
-    // 先把 Google 登入回來的 ?code= 換成登入狀態（T-435），再問 /api/me 這是誰。
+    // 先把 Google 登入回來的 ?code= 換成登入狀態（T-439），再問 /api/me 這是誰。
     // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可。確定登入了才抓追蹤股
     completeOAuth()
       .catch((e: Error) => setNotice(e.message))
@@ -437,7 +437,7 @@ export default function CloudApp() {
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
               <div className="cq-rows">
-                <Gate title="登入後看今日戰情" text="開盤前一頁看完：昨晚美股與台指夜盤、昨天大盤漲跌家數與法人進出、重大訊息、族群資金往哪跑、今天名單有哪些新面孔。" />
+                <Gate title="登入後看今日戰情" text="開盤前一頁看完：昨晚美股與台指夜盤、昨天大盤漲跌家數與法人進出、重大訊息。" />
               </div>
             </aside>
             <section className="cq-detail" />
@@ -468,7 +468,7 @@ export default function CloudApp() {
           />
         )
       ) : tab === 'news' ? (
-        // 新聞公開（T-434／D-210）：沒登入也看得到；點股票會到要登入的追蹤分頁
+        // 新聞公開（T-438／D-210）：沒登入也看得到；點股票會到要登入的追蹤分頁
         <NewsPage
           refresh={refresh}
           guest={guest}
@@ -638,6 +638,9 @@ export default function CloudApp() {
               {!guest && topPick?.review && (
                 <TopPickCard sid={topPick.sid} name={topPick.name} r={topPick.review} on={topPick.sid === sid} onClick={() => setSid(topPick.sid)} />
               )}
+              {!guest && current && current.picks.length > 0 && !current.picks.some((p) => p.review) && nav.shown === today && (
+                <p className="cq-rv-eta">評分約 21:45 更新（籌碼要等當天的融資券與分點公布後才算，D-211）</p>
+              )}
               <div className="cq-head">
                 <span>
                   股票
@@ -741,7 +744,7 @@ export default function CloudApp() {
   )
 }
 
-/** 登入身分與登出（Supabase Auth，T-435）。沒登入時整塊不顯示。 */
+/** 登入身分與登出（Supabase Auth，T-439）。沒登入時整塊不顯示。 */
 function User({ email, push, onBell }: { email: string | null; push: PushState | null; onBell: () => void }) {
   if (!email) return null
   return (

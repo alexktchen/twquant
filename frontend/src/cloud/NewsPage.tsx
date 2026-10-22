@@ -67,7 +67,7 @@ export function NewsPage({
 }: {
   refresh: number
   onStock: (sid: string, name: string) => void
-  /** 沒登入（T-434：新聞照看，核可清單不抓、語意搜尋停用） */
+  /** 沒登入（T-438：新聞照看，核可清單不抓、語意搜尋停用） */
   guest: boolean
   /** /api/me 確定登入了（T-433：之前不放廣告） */
   signedIn: boolean
