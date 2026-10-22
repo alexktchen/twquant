@@ -1,8 +1,8 @@
 // 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的型別、四個面向的名稱與顏色、說明文字。畫面在 Review.tsx。
-/** 一個小項：方向 偏多 +1／中性 0／偏空 −1、比重（D-207：籌碼七項 1.5～0.5，其他 1），附白話理由（D-206，只有 10 分制才有）。 */
+/** 一個小項：方向 偏多 +1／中性 0／偏空 −1、比重（D-210：籌碼七項 1.5～0.5，其他 1），附白話理由（D-206，只有 10 分制才有）。 */
 export type ReviewItem = { dim: DimKey; name: string; points: -1 | 0 | 1; weight: number; text: string }
 
-/** 小項顯示的加減分＝方向 × 比重（D-207）：+1.5、−0.5、0；比重 1 就是 +1／−1。 */
+/** 小項顯示的加減分＝方向 × 比重（D-210）：+1.5、−0.5、0；比重 1 就是 +1／−1。 */
 export function itemPoints(i: Pick<ReviewItem, 'points' | 'weight'>): string {
   if (i.points === 0) return '0'
   const v = Math.abs(i.points * i.weight)

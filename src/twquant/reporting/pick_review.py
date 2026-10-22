@@ -2,7 +2,7 @@
 
 使用者 2026-10-18：「15 檔你最推哪一檔，每檔依照消息、技術、籌碼、基本四個面向來評分…兩個模型各 15 檔都要給，
 然後兩個模型給我一檔最推薦的」。做法同一句話（T-393）：規則先把每檔四個面向的資料寫成事實句；
-**分數由規則算**（`pick_score`：每面向幾個小項 ±1 乘比重，0～10、5＝中性，D-206；籌碼七項加權 D-207），模型只寫觀點、立場、結論，
+**分數由規則算**（`pick_score`：每面向幾個小項 ±1 乘比重，0～10、5＝中性，D-206；籌碼七項加權 D-210），模型只寫觀點、立場、結論，
 從名單裡挑一檔首選並寫理由；程式核對（首選在名單上、理由的數字與說法出自事實、不准建議）。
 首選理由沒過 → 改用四面向加總最高的那檔（source=rule）。**AI 評分與首選都沒有驗證過能預測報酬**；事後怎麼檢驗在 D-196 事前登記。
 只顯示，不改名單、不進模型。
@@ -68,7 +68,7 @@ class Dimensions:
     facts: dict[str, list[str]] = field(default_factory=dict)
     items: dict[str, list[Item]] = field(
         default_factory=dict
-    )  # 面向 → 小項（D-206；籌碼七項加權 D-207）
+    )  # 面向 → 小項（D-206；籌碼七項加權 D-210）
     scores: dict[str, int] = field(default_factory=dict)  # news／tech／chips／fund → 0～10
     stance: str | None = None  # 五級立場（程式依總分定，D-206 §六）
     split: bool = False  # 多空分歧
@@ -356,7 +356,7 @@ class Inputs:
 
 
 def score_dims(d: Dimensions, p: PickFacts, x: Inputs, m: Market, cfg: PickReviewConfig) -> None:
-    """D-206：四面向 22 個小項（籌碼 7 項，D-207）→ d.items／d.scores；小項理由併進事實（模型寫觀點時可以引用）。"""
+    """D-206：四面向 22 個小項（籌碼 7 項，D-210）→ d.items／d.scores；小項理由併進事實（模型寫觀點時可以引用）。"""
     r = cfg.rules
     d.items = {
         "消息": news_items(
@@ -401,7 +401,7 @@ class Review:
     checks: list[str] = field(default_factory=list)
     items: list[dict[str, Any]] = field(
         default_factory=list
-    )  # 22 個小項（存進 pick_reviews.items；籌碼 7 項帶比重，D-207）
+    )  # 22 個小項（存進 pick_reviews.items；籌碼 7 項帶比重，D-210）
 
 
 def check_reason(
@@ -714,12 +714,12 @@ def compose_line(
 
 
 def review_time_ok(day: dt.date, now: dt.datetime, cfg: PickReviewConfig) -> str | None:
-    """D-207 §二.1：當天的名單評分只在 `not_before`（台北）之後算——籌碼要等當天的融資券與分點，
+    """D-210 §二.1：當天的名單評分只在 `not_before`（台北）之後算——籌碼要等當天的融資券與分點，
     晚上那班才齊。回 None＝可以算；否則回為什麼先不算。過去的日子（補跑）不受限。"""
     if now.tzinfo is None:
         raise ValueError("now 必須帶時區")
     if day >= now.date() and now.time() < cfg.not_before:
-        return f"還沒到 {cfg.not_before:%H:%M}，晚上那班再評（D-207）"
+        return f"還沒到 {cfg.not_before:%H:%M}，晚上那班再評（D-210）"
     return None
 
 

@@ -10,8 +10,12 @@ import {
   missingNumbers,
   neurons,
   parseReply,
+  parseSummaryReply,
   passes,
   requestBody,
+  summaryFor,
+  summaryRequestBody,
+  SUMMARY_PROMPT_VERSION,
   foreignTokens,
   normalize,
   untranslatedWords,
@@ -19,6 +23,9 @@ import {
   simplifiedIn,
   translatePending,
   type Pending,
+  type SummaryDeps,
+  type SummaryItem,
+  type SummaryRow,
   type TranslateDeps,
   type TranslationRow,
   type UsageRow,
@@ -102,15 +109,15 @@ test('T-401 AC3：只記錄的檢查不擋（方向相反、中文數字、對�
   assert.equal(passes(check(cfg, src, { id: 'a1', title_zh: '輝達大漲4%', summary_zh: '' })), false, '少了 35 億就擋')
 })
 
-test('T-401：請求——指令在 system（含術語表與 /no_think）、資料在 user；回應解析與記帳', () => {
+test('T-401／T-429 AC1：請求——指令在 system（含術語表與 /no_think）、資料在 user；排程只送標題；回應解析與記帳', () => {
   const body = requestBody(cfg, [src]) as { messages: { role: string; content: string }[]; response_format: { type: string } }
   assert.equal(body.messages[0].role, 'system')
   assert.ok(body.messages[0].content.includes('Nvidia＝輝達') && body.messages[0].content.endsWith(' /no_think'))
   assert.ok(!body.messages[0].content.includes('3.5 billion deal'), '新聞內容不能進 system')
-  assert.deepEqual(JSON.parse(body.messages[1].content), { items: [{ id: 'a1', title: src.title, summary: src.summary }] })
+  assert.deepEqual(JSON.parse(body.messages[1].content), { items: [{ id: 'a1', title: src.title }] }, '摘要不送（D-207：點開才翻）')
   assert.equal(body.response_format.type, 'json_schema')
 
-  const ok = parseReply({ success: true, result: { response: '<think>x</think>```json\n{"items":[{"id":"a1","title_zh":" 輝達 ","summary_zh":""}]}\n```', usage: { prompt_tokens: 1000, completion_tokens: 100 } } })
+  const ok = parseReply({ success: true, result: { response: '<think>x</think>```json\n{"items":[{"id":"a1","title_zh":" 輝達 ","summary_zh":"多給的摘要不收"}]}\n```', usage: { prompt_tokens: 1000, completion_tokens: 100 } } })
   assert.deepEqual(ok, { items: [{ id: 'a1', title_zh: '輝達', summary_zh: '' }], inputTokens: 1000, outputTokens: 100 })
   const obj = parseReply({ success: true, result: { choices: [{ message: { content: { items: [] } } }], usage: { prompt_tokens: 1, completion_tokens: 1 } } })
   assert.deepEqual(obj.items, [])
@@ -154,7 +161,7 @@ test('T-401 AC4：一批翻完、記用量；沒過的那則單獨重翻一次�
   const w = world(
     [
       reply([
-        { id: 'a1', title_zh: '輝達大漲4%', summary_zh: '35億美元交易後晶片廠創新高' },
+        { id: 'a1', title_zh: '輝達完成35億美元交易後大漲4%' },
         { id: 'b2', title_zh: '油價下跌' },
       ]),
       reply([{ id: 'b2', title_zh: '油價下跌2%' }]),
@@ -167,10 +174,11 @@ test('T-401 AC4：一批翻完、記用量；沒過的那則單獨重翻一次�
   assert.deepEqual(
     w.saved.map((s) => [s.item_id, s.status, s.title_zh, s.content_sha, s.prompt_version]),
     [
-      ['a1', 'ok', '輝達大漲4%', 's1', PROMPT_VERSION],
+      ['a1', 'ok', '輝達完成35億美元交易後大漲4%', 's1', PROMPT_VERSION],
       ['b2', 'ok', '油價下跌2%', 's2', PROMPT_VERSION],
     ],
   )
+  assert.deepEqual(w.saved.map((s) => s.summary_zh), [null, null], '排程不翻摘要')
   assert.equal(w.usage.length, 2)
   assert.equal(w.usage[0].task, 'news_translate')
 })
@@ -188,7 +196,7 @@ test('T-401 AC4：重翻還是不過 → failed，不放譯文（網站顯示原
     () => {
       throw new Error('逾時')
     },
-    reply([{ id: 'a1', title_zh: '輝達大漲4%', summary_zh: '35億美元' }]),
+    reply([{ id: 'a1', title_zh: '輝達完成35億美元交易後大漲4%' }]),
   ])
   const r2 = await translatePending(cfg, w2.deps)
   assert.deepEqual(r2, { translated: 1, failed: 0, budget_stop: false })
@@ -205,11 +213,133 @@ test('T-401 AC4：今天的額度用完就停、不呼叫模型、不寫任何�
 
 test('2026-10-21：翻譯只能用到 daily_neurons − reserve_for_embed，剩下的留給向量', async () => {
   const cap = cfg.daily_neurons - cfg.reserve_for_embed
-  const ok = reply([{ id: 'a1', title_zh: '輝達大漲4%', summary_zh: '35億美元交易後晶片廠創新高' }])
+  const ok = reply([{ id: 'a1', title_zh: '輝達完成35億美元交易後大漲4%' }])
   const stop = world([ok], { pending: [src], used: cap })
   assert.deepEqual(await translatePending(cfg, stop.deps), { translated: 0, failed: 0, budget_stop: true })
   assert.equal(stop.calls.length, 0)
   const go = world([ok], { pending: [src], used: cap - 1 })
   assert.deepEqual(await translatePending(cfg, go.deps), { translated: 1, failed: 0, budget_stop: false })
   assert.equal(go.calls.length, 1)
+})
+
+test('T-429 AC1：排程只核對標題——摘要裡的數字譯文沒有不算擋；標題少了數字照樣擋', async () => {
+  const withNumbers: Pending = { id: 'c3', title: 'Oil falls 2%', summary: 'Brent dropped to $61.2 as OPEC+ added 137,000 barrels a day.', content_sha: 's3' }
+  const w = world([reply([{ id: 'c3', title_zh: '油價下跌2%' }])], { pending: [withNumbers] })
+  assert.deepEqual(await translatePending(cfg, w.deps), { translated: 1, failed: 0, budget_stop: false })
+  assert.deepEqual(w.saved.map((r) => [r.status, r.title_zh, r.summary_zh]), [['ok', '油價下跌2%', null]])
+  const c = w.saved[0].checks
+  assert.ok('missing_numbers' in c && c.missing_numbers.length === 0)
+
+  const bad = world([reply([{ id: 'c3', title_zh: '油價下跌' }]), reply([{ id: 'c3', title_zh: '油價下跌' }])], { pending: [withNumbers] })
+  assert.deepEqual(await translatePending(cfg, bad.deps), { translated: 0, failed: 1, budget_stop: false })
+})
+
+// ── 點開才翻的摘要（D-207）：假的模型與資料庫 ─────────────────────────────
+
+const enItem: SummaryItem = {
+  id: 'a1',
+  content_sha: 's1',
+  lang: 'en',
+  title: 'Nvidia shares jump 4% after $3.5 billion deal',
+  summary: 'The chipmaker rose 4% to a record after agreeing a $3.5 billion deal.',
+  title_zh: '輝達完成35億美元交易後大漲4%',
+  summary_zh: null,
+}
+
+function summaryWorld(
+  replies: ((body: Record<string, unknown>) => unknown)[],
+  opts: { item?: SummaryItem | null; used?: number; saved?: { status: 'ok' | 'failed'; summary_zh: string | null } } = {},
+) {
+  const rows: SummaryRow[] = []
+  const usage: UsageRow[] = []
+  const bodies: Record<string, unknown>[] = []
+  const deps: SummaryDeps = {
+    now: () => new Date('2026-10-22T13:00:00Z'),
+    item: async () => (opts.item === undefined ? enItem : opts.item),
+    saved: async () => opts.saved ?? null,
+    usedToday: async () => opts.used ?? 0,
+    ai: async (body) => {
+      bodies.push(body)
+      const r = replies.shift()
+      if (!r) throw new Error('沒有更多假回應')
+      return r(body)
+    },
+    save: async (row, u) => {
+      if (row) rows.push(row)
+      usage.push(...u)
+    },
+  }
+  return { deps, rows, usage, bodies }
+}
+const sumReply = (zh: string) => () => ({
+  success: true,
+  result: { response: JSON.stringify({ summary_zh: zh }), usage: { prompt_tokens: 600, completion_tokens: 120 } },
+})
+
+test('T-429 AC2：點開翻摘要——請求帶原文標題、中文標題、摘要（指令在 system）；過了檢查就存 ok、記用量 news_translate_summary', async () => {
+  const w = summaryWorld([sumReply('這家晶片廠同意35億美元交易後股價上漲4%，創下新高。')])
+  const r = await summaryFor(cfg, w.deps, 'a1')
+  assert.deepEqual(r, { status: 'ok', summary_zh: '這家晶片廠同意35億美元交易後股價上漲4%，創下新高。' })
+  const body = w.bodies[0] as { messages: { role: string; content: string }[] }
+  assert.ok(body.messages[0].content.includes('摘要') && body.messages[0].content.endsWith(' /no_think'))
+  assert.ok(!body.messages[0].content.includes('$3.5 billion deal'), '新聞內容不能進 system')
+  assert.deepEqual(JSON.parse(body.messages[1].content), { title: enItem.title, title_zh: enItem.title_zh, summary: enItem.summary })
+  assert.deepEqual(
+    w.rows.map((x) => [x.item_id, x.content_sha, x.status, x.prompt_version]),
+    [['a1', 's1', 'ok', SUMMARY_PROMPT_VERSION]],
+  )
+  assert.deepEqual(w.usage.map((u) => u.task), ['news_translate_summary'])
+  assert.deepEqual(summaryRequestBody(cfg, enItem as { title: string; title_zh: string; summary: string }), w.bodies[0])
+  assert.throws(() => parseSummaryReply({ success: true, result: { response: '{"items":[]}', usage: { prompt_tokens: 1, completion_tokens: 1 } } }), /摘要譯文格式不對/)
+})
+
+test('T-429 AC2：翻過的、舊制已有摘要譯文的直接給，不叫模型；中文、沒摘要、標題還沒翻好 → none；找不到 → null', async () => {
+  const saved = summaryWorld([], { saved: { status: 'ok', summary_zh: '先前翻好的' } })
+  assert.deepEqual(await summaryFor(cfg, saved.deps, 'a1'), { status: 'ok', summary_zh: '先前翻好的' })
+  const failed = summaryWorld([], { saved: { status: 'failed', summary_zh: null } })
+  assert.deepEqual(await summaryFor(cfg, failed.deps, 'a1'), { status: 'failed', summary_zh: null })
+  const legacy = summaryWorld([], { item: { ...enItem, summary_zh: '舊制排程翻好的摘要' } })
+  assert.deepEqual(await summaryFor(cfg, legacy.deps, 'a1'), { status: 'ok', summary_zh: '舊制排程翻好的摘要' })
+  for (const item of [{ ...enItem, lang: 'zh' }, { ...enItem, summary: null }, { ...enItem, title_zh: null }]) {
+    const w = summaryWorld([], { item })
+    assert.deepEqual(await summaryFor(cfg, w.deps, 'a1'), { status: 'none', summary_zh: null })
+  }
+  assert.equal(await summaryFor(cfg, summaryWorld([], { item: null }).deps, 'zz'), null)
+  for (const w of [saved, failed, legacy]) assert.equal(w.bodies.length, 0)
+})
+
+test('T-429 AC3：摘要沒過檢查重翻一次；仍不過 → failed 記下來（這一版不再翻）；模型呼叫失敗 → error、不記', async () => {
+  // 第一次漏了摘要的數字：標題譯文雖然有 35億、4%，也不能替摘要過關
+  const retry = summaryWorld([sumReply('這家晶片廠股價創新高。'), sumReply('這家晶片廠同意35億美元交易後上漲4%，創新高。')])
+  assert.deepEqual(await summaryFor(cfg, retry.deps, 'a1'), { status: 'ok', summary_zh: '這家晶片廠同意35億美元交易後上漲4%，創新高。' })
+  assert.equal(retry.bodies.length, 2)
+  const named = summaryWorld([sumReply('Nvidia 同意35億美元交易後上漲4%，創新高。')], { item: { ...enItem, summary: 'The company rose 4% to a record after agreeing a $3.5 billion deal.' } })
+  assert.equal((await summaryFor(cfg, named.deps, 'a1'))?.status, 'ok', '標題才有的英文名寫進摘要不算拼錯')
+
+  const bad = summaryWorld([sumReply('这家晶片厂创新高。'), sumReply('这家晶片厂创新高。')])
+  assert.deepEqual(await summaryFor(cfg, bad.deps, 'a1'), { status: 'failed', summary_zh: null })
+  assert.equal(bad.rows.length, 1)
+  assert.equal(bad.rows[0].status, 'failed')
+  assert.equal(bad.rows[0].summary_zh, null)
+  assert.ok(bad.rows[0].checks.fixes.length > 0, '簡體字自動轉了，但少了數字照樣擋')
+  assert.equal(bad.usage.length, 2)
+
+  const down = summaryWorld([
+    () => ({ success: false, errors: [{ code: 4006, message: 'daily free allocation' }] }),
+    () => {
+      throw new Error('逾時')
+    },
+  ])
+  assert.deepEqual(await summaryFor(cfg, down.deps, 'a1'), { status: 'error', summary_zh: null })
+  assert.equal(down.rows.length, 0, '暫時的錯誤不記，下次點開再翻')
+})
+
+test('T-429 AC4：點開翻摘要跟排程翻譯同一條線——用到 daily_neurons − reserve_for_embed 就回 budget，不叫模型、不記', async () => {
+  const cap = cfg.daily_neurons - cfg.reserve_for_embed
+  const stop = summaryWorld([sumReply('不該被叫到')], { used: cap })
+  assert.deepEqual(await summaryFor(cfg, stop.deps, 'a1'), { status: 'budget', summary_zh: null })
+  assert.equal(stop.bodies.length, 0)
+  assert.equal(stop.rows.length + stop.usage.length, 0)
+  const go = summaryWorld([sumReply('這家晶片廠同意35億美元交易後上漲4%，創新高。')], { used: cap - 1 })
+  assert.equal((await summaryFor(cfg, go.deps, 'a1'))?.status, 'ok')
 })

@@ -1,5 +1,5 @@
 // 名單四面向評分與 AI 首選（T-394／D-196；10 分制規則評分 D-206）的畫面：名單列的四根小直條、名單上方的首選卡、
-// 個股頁的四張分數卡（10 分制可以點開看各小項怎麼加減分；籌碼 7 項帶比重，D-207）。
+// 個股頁的四張分數卡（10 分制可以點開看各小項怎麼加減分；籌碼 7 項帶比重，D-210）。
 import { Trophy } from 'lucide-react'
 import { DIMS, itemNote, itemPoints, reviewNote, scoreText, stanceStrong, stanceTone, type Review, type ReviewItem } from './pickreview'
 
@@ -62,7 +62,7 @@ export function StanceChip({ s, split = false }: { s: string | null; split?: boo
   )
 }
 
-/** 一個小項的徽章：偏多紅、偏空綠、0 灰（台股紅漲綠跌）；數字＝方向 × 比重（籌碼七項加權，D-207）。 */
+/** 一個小項的徽章：偏多紅、偏空綠、0 灰（台股紅漲綠跌）；數字＝方向 × 比重（籌碼七項加權，D-210）。 */
 function ItemRow({ i }: { i: ReviewItem }) {
   const tone = i.points > 0 ? 'up' : i.points < 0 ? 'down' : 'flat'
   const note = itemNote(i)

@@ -1,6 +1,7 @@
 // 追蹤股與個股的模型評分：型別與白話顯示文字（純函式，供 node 單元測試）。
 // 後端資料形狀見 functions/_lib/scores.ts、watchlist.ts。
 import type { Group } from './group'
+import type { Risk } from './risks'
 
 export type ModelCode = 'rank' | 'quiet' | 'risk'
 export type ModelScore = {
@@ -32,6 +33,8 @@ export type WatchItem = {
   close: number | null
   chg: number | null
   models: ModelScore[]
+  /** 今天起 10 天內的除權息、法說會、月營收待公布（T-431）；沒有 → null；舊後端沒有這欄 → undefined */
+  events?: Risk[] | null
 }
 export type WatchList = { max: number; date: string | null; items: WatchItem[] }
 

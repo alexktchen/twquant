@@ -34,8 +34,6 @@ export const CARD_META: Record<CardId, { tone: CardTone; icon: HomeIcon; title: 
   news: { tone: 'event', icon: 'megaphone', title: '昨日消息' },
   picks: { tone: 'list', icon: 'listChecks', title: '今日名單' },
   score: { tone: 'list', icon: 'trophy', title: '名單成績' },
-  cal: { tone: 'event', icon: 'calendar', title: '行事曆' },
-  heat: { tone: 'group', icon: 'grid', title: '族群資金' },
 }
 
 export const TONE_NAME: Record<CardTone, string> = { view: '看法', quote: '行情', list: '名單', event: '事件', group: '族群' }

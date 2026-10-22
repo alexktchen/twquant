@@ -13,6 +13,10 @@ export const REVENUE_WARN_DAYS = 5
 export type RiskKind = 'disposition' | 'disposition_soon' | 'attention' | 'dividend' | 'conference' | 'revenue'
 export type Risk = { kind: RiskKind; date: string | null; text: string; detail: string | null }
 
+export const ALL_RISK_KINDS: readonly RiskKind[] = ['disposition', 'disposition_soon', 'attention', 'dividend', 'conference', 'revenue']
+/** 行事曆那幾種（T-431／D-209：追蹤股列只標這些；處置、注意是交易狀態，不是行事曆）。 */
+export const CALENDAR_KINDS: readonly RiskKind[] = ['dividend', 'conference', 'revenue']
+
 export type Disp = { stock_id: string; effective_start: string; effective_end: string; reason: string | null; match_minutes: number | null }
 export type Att = { stock_id: string; clauses: string | null; info: string | null }
 export type Div = { stock_id: string; date: string; kind: string; cash_dividend: number | null; stock_ratio: number | null }
@@ -66,35 +70,37 @@ export function risksFor(sid: string, date: string, inp: Inputs): Risk[] {
 
 type Db = ReturnType<typeof sql>
 
-/** date 那天名單股的風險。每張表還沒建 → 那一類當沒有。 */
-export async function readRisks(db: Db, date: string, sids: string[]): Promise<Map<string, Risk[]>> {
+/** date 那天這些股票的風險：名單股看全部種類；追蹤股傳 CALENDAR_KINDS 只看行事曆，用不到的表不查。每張表還沒建 → 那一類當沒有。 */
+export async function readRisks(db: Db, date: string, sids: string[], kinds: readonly RiskKind[] = ALL_RISK_KINDS): Promise<Map<string, Risk[]>> {
   const out = new Map<string, Risk[]>()
   if (sids.length === 0) return out
   const list = sids.join(',')
   const until = addDays(date, RISK_AHEAD_DAYS)
-  const disp = await readRows(
+  const want = (...k: RiskKind[]) => k.some((x) => kinds.includes(x))
+  const disp = !want('disposition', 'disposition_soon') ? [] : await readRows(
     () => db<Disp[]>`
       SELECT stock_id, effective_start::text AS effective_start, effective_end::text AS effective_end, reason, match_minutes
       FROM serving.disposition_stocks
       WHERE stock_id = ANY(string_to_array(${list}, ',')) AND date <= ${date}::date AND effective_end >= ${date}::date`,
   )
-  const att = await readRows(
+  const att = !want('attention') ? [] : await readRows(
     () => db<Att[]>`
       SELECT stock_id, clauses, info FROM serving.attention_stocks
       WHERE stock_id = ANY(string_to_array(${list}, ',')) AND date = ${date}::date`,
   )
-  const divs = await readRows(
+  const divs = !want('dividend') ? [] : await readRows(
     () => db<Div[]>`
       SELECT stock_id, date::text AS date, kind, cash_dividend, stock_ratio FROM serving.dividend_calendar
       WHERE stock_id = ANY(string_to_array(${list}, ',')) AND date > ${date}::date AND date <= ${until}::date`,
   )
-  const confs = await readRows(
+  const confs = !want('conference') ? [] : await readRows(
     () => db<Conf[]>`
       SELECT stock_id, date::text AS date, conf_time, location FROM serving.conference_calendar
       WHERE stock_id = ANY(string_to_array(${list}, ',')) AND date >= ${date}::date AND date <= ${until}::date`,
   )
   const { ym } = revenueDue(date)
-  const rev = await readRows(
+  // 不看營收時不查：revenuePublished 空的，算出來的營收提醒在下面一律濾掉
+  const rev = !want('revenue') ? [] : await readRows(
     () => db<{ stock_id: string }[]>`
       SELECT stock_id FROM serving.monthly_revenue
       WHERE stock_id = ANY(string_to_array(${list}, ',')) AND year_month = ${ym}`,
@@ -107,7 +113,7 @@ export async function readRisks(db: Db, date: string, sids: string[]): Promise<M
     revenuePublished: new Set(rev.map((r) => r.stock_id)),
   }
   for (const sid of sids) {
-    const rs = risksFor(sid, date, inp)
+    const rs = risksFor(sid, date, inp).filter((r) => kinds.includes(r.kind))
     if (rs.length) out.set(sid, rs)
   }
   return out

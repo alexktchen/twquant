@@ -385,8 +385,8 @@ def test_t428_ac2_conclusion_retried_once_with_reason(tmp_path: Path) -> None:
     assert any("重寫一次後通過" in c for c in r.checks)
 
 
-# ── T-429／D-207：名單評分只在 21:13 那班算 ───────────────────────────────────
-def test_t429_ac1_review_waits_for_evening_run_on_the_same_day() -> None:
+# ── T-432／D-210：名單評分只在 21:13 那班算 ───────────────────────────────────
+def test_t432_ac1_review_waits_for_evening_run_on_the_same_day() -> None:
     from twquant.reporting.pick_review import review_time_ok
 
     assert CFG.not_before == dt.time(21, 0)
@@ -401,7 +401,7 @@ def test_t429_ac1_review_waits_for_evening_run_on_the_same_day() -> None:
         review_time_ok(dt.date(2026, 10, 22), dt.datetime(2026, 10, 22, 17, 40), CFG)
 
 
-def test_t429_ac2_wiring_evening_only_and_chip_dims_mention_new_items() -> None:
+def test_t432_ac2_wiring_evening_only_and_chip_dims_mention_new_items() -> None:
     cli = (_ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
     step = cli[cli.index("def _pick_review_step") : cli.index("def _warrants_step")]
     assert "review_time_ok" in step

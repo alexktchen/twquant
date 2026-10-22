@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { SID_RE } from '../functions/_lib/picks.ts'
-import { addDays, marketWide, newsTags, parseSids, pickNews, revenueDeadline, taipeiDay } from '../functions/_lib/warroom.ts'
+import { addDays, marketWide, newsTags, parseSids, pickNews, taipeiDay } from '../functions/_lib/warroom.ts'
 import { breadth, headlineTime, signedYi, streakText, tone } from '../src/cloud/war.ts'
 
 const row = (stock_id: string, subject: string, at: string) => ({ stock_id, name: null, subject, at })
@@ -24,12 +24,10 @@ test('T-379：昨日消息——名單股的全留、其他只留全市場重要
   assert.deepEqual(newsTags('今天天氣很好'), [])
 })
 
-test('T-379：台北日期、加天數、月營收截止', () => {
+// T-431／D-209：首頁行事曆拿掉後，月營收截止日（revenueDeadline）跟著刪；個股的「營收待公布」在 _lib/risks.ts（cloud-risks.test.ts 守著）
+test('T-379：台北日期、加天數', () => {
   assert.equal(taipeiDay(Date.parse('2026-10-16T16:30:00Z')), '2026-10-17')
   assert.equal(addDays('2026-12-31', 1), '2027-01-01')
-  assert.deepEqual(revenueDeadline('2026-10-08'), { date: '2026-10-10', days: 2 })
-  assert.deepEqual(revenueDeadline('2026-10-10'), { date: '2026-10-10', days: 0 })
-  assert.deepEqual(revenueDeadline('2026-12-17'), { date: '2027-01-10', days: 24 })
 })
 
 test('T-379：追蹤股代號只收合法的、去重、有上限', () => {
@@ -92,49 +90,9 @@ test('除權息預告：種類中文與金額說明', async () => {
   assert.equal(dividendText({ cash_dividend: null, stock_ratio: null, rights_ratio: null }), '')
 })
 
-test('使用者 2026-10-17：行事曆收起——除權息與法說會依日期合併排序、每天的檔數', async () => {
-  const { calendarItems, calendarDays } = await import('../src/cloud/war.ts')
-  const div = (date: string, stock_id: string) => ({ date, stock_id, name: null, kind: 'cash' as const, cash_dividend: 0.3, stock_ratio: 0, rights_ratio: 0 })
-  const conf = (date: string, stock_id: string, conf_time: string) => ({ date, stock_id, name: null, conf_time, summary: null })
-  const cal = {
-    dividends: [div('2026-10-20', '00733'), div('2026-10-19', '00694B'), div('2026-10-19', '00695B')],
-    conferences: [conf('2026-10-19', '2330', '14:00'), conf('2026-10-19', '2317', '10:00')],
-    revenue: { date: '2026-11-10', days: 24 },
-  }
-  const items = calendarItems(cal)
-  assert.deepEqual(
-    items.map((x) => `${x.date.slice(5)} ${x.kind} ${x.stock_id}`),
-    ['10-19 cash 00694B', '10-19 cash 00695B', '10-19 conf 2317', '10-19 conf 2330', '10-20 cash 00733'],
-  )
-  assert.deepEqual(calendarDays(items), [
-    { date: '2026-10-19', dividends: 2, conferences: 2 },
-    { date: '2026-10-20', dividends: 1, conferences: 0 },
-  ])
-  assert.deepEqual(calendarDays([]), [])
-  assert.deepEqual(items[0].dividend, { cash_dividend: 0.3, stock_ratio: 0, rights_ratio: 0 })
-  assert.equal(items[2].dividend, null)
-})
-
 test('使用者 2026-10-17：首頁 API 回今天名單的代號（行事曆標名單）', () => {
   const src = readFileSync(new URL('../functions/api/warroom/index.ts', import.meta.url), 'utf8')
   assert.ok(src.includes('sids: [...listed]'))
-})
-
-test('使用者 2026-10-17：行事曆搜尋股號或股名、名單股與追蹤股排前面', async () => {
-  const { calendarMatch, mineFirst } = await import('../src/cloud/war.ts')
-  const fubon = { stock_id: '00694B', name: '富邦美債1-3' }
-  assert.equal(calendarMatch(fubon, '00694'), true)
-  assert.equal(calendarMatch(fubon, ' 富邦 '), true)
-  assert.equal(calendarMatch(fubon, '00694b'), true, '不分大小寫')
-  assert.equal(calendarMatch(fubon, '694'), false, '股號只比開頭，免得 694 撈到一堆')
-  assert.equal(calendarMatch({ stock_id: '2330', name: null }, '台積'), false)
-  assert.equal(calendarMatch(fubon, ''), true)
-  const rows = ['00694B', '2330', '00733', '2412'].map((stock_id) => ({ stock_id }))
-  const mine = new Set(['2412', '2330'])
-  assert.deepEqual(
-    mineFirst(rows, (s) => mine.has(s)).map((r) => r.stock_id),
-    ['2330', '2412', '00694B', '00733'],
-  )
 })
 
 test('使用者 2026-10-17：名單成績還沒有賣出的——估第一批大約哪天開始賣（只跳週末，所以畫面寫「約」）', async () => {

@@ -1,15 +1,18 @@
 // 新聞閱讀卡（使用者 2026-10-21：「展開可以用其他方式呈現嗎？會亂掉 很難閱讀」）：點一則新聞不再在清單裡往下展開，
 // 改成蓋在畫面上的閱讀卡（手機從底部升起、桌機置中），清單留在原位、關掉回到原處。
 // 由上到下：類型與出處 → 標題 → 提到的股票 → 摘要 → 看原文／關係圖 → 同一件事（幾家報導）→ 來龍去脈 → 相似新聞（先列 4 則）。
+// 英文新聞的摘要打開才翻（D-207：排程只翻標題），翻好前寫「摘要翻譯中…」。
 // 同標題的只留一則；跟這則同標題的不再列一次。手機的返回手勢＝關閉（不會離開網站）。
 import { ExternalLink, Globe, Layers, MapPin, Network, Route, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { fetchNewsThread, fetchSimilarNews } from './api'
+import { fetchNewsSummary, fetchNewsThread, fetchSimilarNews } from './api'
 import {
   KIND_LABEL,
   NEWS_TYPE_LABEL,
   READER_RELATED,
   mentionChips,
+  needsSummary,
+  readerSummary,
   shortWhen,
   shown,
   similarNote,
@@ -18,6 +21,7 @@ import {
   taipeiDay,
   threadShown,
   type NewsRow,
+  type NewsSummary,
   type NewsThread,
   type SimilarNews,
 } from './news'
@@ -42,6 +46,8 @@ export function NewsReader({
   const [simErr, setSimErr] = useState(false)
   const [thread, setThread] = useState<NewsThread | null>(null)
   const [moreRelated, setMoreRelated] = useState(false)
+  const [summaryRes, setSummaryRes] = useState<NewsSummary | 'loading' | 'error' | null>(null)
+  const wantSummary = needsSummary(row)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
@@ -75,6 +81,18 @@ export function NewsReader({
     }
   }, [row.id])
 
+  useEffect(() => {
+    if (!wantSummary) return
+    let stale = false
+    setSummaryRes('loading')
+    fetchNewsSummary(row.id)
+      .then((d) => !stale && setSummaryRes(d))
+      .catch(() => !stale && setSummaryRes('error'))
+    return () => {
+      stale = true
+    }
+  }, [row.id, wantSummary])
+
   /** 自己按的關閉：把打開時推的那筆歷史退掉（popstate 會再呼叫 onClose） */
   function close() {
     if ((window.history.state as { newsReader?: string } | null)?.newsReader === row.id) window.history.back()
@@ -85,6 +103,7 @@ export function NewsReader({
   const split = sim && sim.items.length > 0 ? splitSimilar(v.title, sim.items, threadTitles) : null
   const note = simErr ? null : sim ? similarNote(sim) : '讀取中…'
   const related = split ? (moreRelated ? split.related : split.related.slice(0, READER_RELATED)) : []
+  const sum = readerSummary(row, summaryRes)
 
   return (
     <div className="cq-sheet-backdrop cq-reader-backdrop" onClick={close}>
@@ -132,11 +151,12 @@ export function NewsReader({
           </div>
         )}
 
-        {v.summary && (
-          <p className="cq-reader-summary" lang={lang}>
-            {v.summary}
+        {sum.text && (
+          <p className="cq-reader-summary" lang={sum.lang === 'en' ? 'en' : 'zh-Hant'}>
+            {sum.text}
           </p>
         )}
+        {sum.note && <p className="cq-reader-sumnote">{sum.note}</p>}
         {v.original && (
           <details className="cq-reader-orig" lang="en">
             <summary>英文原文</summary>

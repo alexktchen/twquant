@@ -56,7 +56,7 @@ export type Shown = {
   original: { title: string; summary: string | null } | null
 }
 
-/** 這則要顯示的樣子：有過檢查的譯文就用譯文（附原文），否則顯示原文。 */
+/** 這則要顯示的樣子：有過檢查的譯文就用譯文（附原文），否則顯示原文。D-207 起排程只翻標題，摘要譯文多半是 null（閱讀卡另外翻，見 readerSummary）。 */
 export function shown(r: NewsRow): Shown {
   if (r.translation === 'ok' && r.title_zh) {
     return { title: r.title_zh, summary: r.summary_zh ?? null, lang: 'zh', tag: '譯', original: { title: r.title, summary: r.summary } }
@@ -64,6 +64,29 @@ export function shown(r: NewsRow): Shown {
   const tag = r.translation === 'failed' ? '未譯' : r.translation === 'pending' ? '翻譯中' : null
   return { title: r.title, summary: r.summary, lang: r.lang, tag, original: null }
 }
+
+/** 點開才翻的摘要（D-207）：/api/news/summary 的回應。budget＝今天的翻譯額度用完、error＝模型暫時叫不到、none＝不用翻 */
+export type NewsSummary = { id: string; status: 'ok' | 'failed' | 'budget' | 'error' | 'none'; summary_zh: string | null }
+
+/** 打開閱讀卡時要不要另外翻摘要：英文、標題已翻好、有英文摘要、還沒有摘要譯文。 */
+export function needsSummary(r: NewsRow): boolean {
+  return r.lang === 'en' && r.translation === 'ok' && !!r.title_zh && !!r.summary && !r.summary_zh
+}
+
+/** 閱讀卡的摘要：不用另外翻的照 shown()；翻好前寫「摘要翻譯中…」；翻不成（沒過檢查、額度用完、服務壞了）顯示英文摘要並說明原因。 */
+export function readerSummary(r: NewsRow, s: NewsSummary | 'loading' | 'error' | null): { text: string | null; lang: 'en' | 'zh'; note: string | null } {
+  if (!needsSummary(r)) {
+    const v = shown(r)
+    return { text: v.summary, lang: v.lang, note: null }
+  }
+  if (s === null || s === 'loading') return { text: null, lang: 'zh', note: '摘要翻譯中…' }
+  if (s !== 'error' && s.status === 'ok' && s.summary_zh) return { text: s.summary_zh, lang: 'zh', note: null }
+  const why = s === 'error' ? null : s.status
+  const note =
+    why === 'budget' ? '今天的翻譯額度用完了，先顯示英文摘要' : why === 'failed' ? '摘要翻譯沒過檢查（數字或公司名對不上），先顯示英文摘要' : '摘要暫時翻不了，先顯示英文摘要'
+  return { text: r.summary, lang: 'en', note }
+}
+
 export type NewsHealth = {
   now: string
   last_ok_at: string | null
