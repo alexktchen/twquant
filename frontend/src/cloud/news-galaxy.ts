@@ -98,7 +98,7 @@ export const ease = (a: number, b: number, dt: number, rate = 8): number => b + 
  * 那顆改放在框上方空間的正中，不被框蓋住、手指從中間拖也不會拖到框。bottom＝下緣留給按鈕的高度。
  */
 export const dockInspector = (W: number, inspW: number): boolean => W < 2 * (inspW + 26)
-export const pivotScreenY = (H: number, inspH: number | null, bottom = 50): number => (inspH === null ? H / 2 : Math.max(40, (H - bottom - inspH) / 2))
+export const pivotScreenY = (H: number, inspH: number | null, bottom = 50, top = 40): number => (inspH === null ? H / 2 : Math.max(top, (H - bottom - inspH) / 2))
 
 /** 遠的淡：深度 −1.15～1.15 對到 0.4～1。 */
 export const depthAlpha = (z: number): number => 0.4 + 0.6 * Math.min(1, Math.max(0, (z + 1.15) / 2.3))
@@ -224,4 +224,154 @@ export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = n
       .map(([k, rows]) => ({ k, name: names.get(k) ?? '其他', rows }))
       .sort((a, b) => b.rows.length - a.rows.length || newest(a.rows[0].item, b.rows[0].item)),
   }
+}
+
+// ── 搜尋與牽連（T-436；使用者 2026-10-22：「想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」，像 graphify 的圖）──
+// 牽連＝同一則新聞一起被提到。兩個亮點之間的線有多粗＝有幾則新聞同時提到兩個。資料就是星雲圖的快照，不另外打 API。
+
+/** 搜尋最多列幾個、一個亮點畫幾條最強的牽連、兩個亮點之間的路徑最多走幾步 */
+export const SEARCH_MAX = 8
+export const WEB_MAX = 12
+export const PATH_MAX_HOPS = 4
+
+/** 亮點 → （另一個亮點 → 同時提到兩個的則數）；對稱 */
+export type HubGraph = Map<string, Map<string, number>>
+
+/** 從快照算亮點兩兩同時被幾則提到（同一則重複提到只算一次）。 */
+export function hubGraph(d: GalaxyData): HubGraph {
+  const ids = new Set(d.hubs.map((h) => h.id))
+  const g: HubGraph = new Map()
+  for (const id of ids) g.set(id, new Map())
+  for (const it of d.items) {
+    const ms = [...new Set(it.m)].filter((m) => ids.has(m))
+    for (let i = 0; i < ms.length; i++)
+      for (let j = i + 1; j < ms.length; j++) {
+        const a = g.get(ms[i])!, b = g.get(ms[j])!
+        a.set(ms[j], (a.get(ms[j]) ?? 0) + 1)
+        b.set(ms[i], (b.get(ms[i]) ?? 0) + 1)
+      }
+  }
+  return g
+}
+
+/** 拆查詢：半形／全形空白、「、」分開；最多兩個詞（兩個＝找這兩個之間的牽連） */
+export function parseQuery(q: string): string[] {
+  return q
+    .split(/[\s　、,，]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
+export type SearchHit = { kind: 'hub'; hub: GalaxyHub } | { kind: 'item'; item: GalaxyItem }
+
+const fold = (s: string) => s.toLowerCase()
+
+/** 一個詞對一個亮點有多合：0＝股名或代號整個一樣、1＝開頭一樣、2＝有包含；不合 → null */
+export function hubMatch(h: GalaxyHub, term: string): number | null {
+  const t = fold(term), l = fold(h.label), c = h.sub ? fold(h.sub) : ''
+  if (!t) return null
+  if (l === t || (c && c === t)) return 0
+  if (l.startsWith(t) || (c && c.startsWith(t))) return 1
+  if (l.includes(t)) return 2
+  return null
+}
+
+/** 最合的那個亮點（找路徑用）：合度最好、再則數多的；沒有 → null */
+export function bestHub(d: GalaxyData, term: string): GalaxyHub | null {
+  let best: GalaxyHub | null = null, bs = Infinity
+  for (const h of d.hubs) {
+    const s = hubMatch(h, term)
+    if (s === null) continue
+    if (s < bs || (s === bs && best && h.n > best.n)) {
+      bs = s
+      best = h
+    }
+  }
+  return best
+}
+
+/**
+ * 打字就列：先列亮點（股名、代號、主題；整個一樣 → 開頭一樣 → 有包含，同級則數多的在前），不夠再補標題有這個詞的新聞（新的在前）。
+ * 兩個詞 → 只列第一個詞的結果（第二個詞是路徑的另一端）。
+ */
+export function searchGalaxy(d: GalaxyData, q: string, limit = SEARCH_MAX): SearchHit[] {
+  const [term] = parseQuery(q)
+  if (!term) return []
+  const hubs = d.hubs
+    .map((h) => ({ h, s: hubMatch(h, term) }))
+    .filter((x): x is { h: GalaxyHub; s: number } => x.s !== null)
+    .sort((a, b) => a.s - b.s || b.h.n - a.h.n || a.h.label.localeCompare(b.h.label))
+    .slice(0, limit)
+    .map((x): SearchHit => ({ kind: 'hub', hub: x.h }))
+  if (hubs.length >= limit) return hubs
+  const t = fold(term)
+  const items = d.items
+    .filter((it) => fold(it.title).includes(t))
+    .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0))
+    .slice(0, limit - hubs.length)
+    .map((it): SearchHit => ({ kind: 'item', item: it }))
+  return [...hubs, ...items]
+}
+
+/** 一條牽連線：a、b 是亮點代號，n＝同時提到的則數；deg 1＝跟中心的、2＝那些亮點彼此也牽連 */
+export type WebEdge = { a: string; b: string; n: number; deg: 1 | 2 }
+export type HubWeb = { hub: GalaxyHub; first: { hub: GalaxyHub; n: number }[]; edges: WebEdge[] }
+
+/**
+ * 一個亮點的牽連：最常跟它一起被提到的 max 個亮點（則數多的在前、同則數亮點大的在前），
+ * 加上這些亮點彼此之間的線（畫成一張小網，看得出哪幾個是一掛的）。找不到 → null。
+ */
+export function hubWeb(d: GalaxyData, g: HubGraph, hubId: string, max = WEB_MAX): HubWeb | null {
+  const byId = new Map(d.hubs.map((h) => [h.id, h]))
+  const hub = byId.get(hubId)
+  const nb = g.get(hubId)
+  if (!hub || !nb) return null
+  const first = [...nb]
+    .map(([id, n]) => ({ hub: byId.get(id)!, n }))
+    .sort((a, b) => b.n - a.n || b.hub.n - a.hub.n || a.hub.label.localeCompare(b.hub.label))
+    .slice(0, max)
+  const edges: WebEdge[] = first.map((f) => ({ a: hubId, b: f.hub.id, n: f.n, deg: 1 }))
+  for (let i = 0; i < first.length; i++)
+    for (let j = i + 1; j < first.length; j++) {
+      const n = g.get(first[i].hub.id)?.get(first[j].hub.id)
+      if (n) edges.push({ a: first[i].hub.id, b: first[j].hub.id, n, deg: 2 })
+    }
+  return { hub, first, edges }
+}
+
+/** 兩個亮點之間的路徑：hubs 依序、n[i]＝hubs[i] 與 hubs[i+1] 同時被幾則提到 */
+export type HubPath = { hubs: GalaxyHub[]; n: number[] }
+
+/**
+ * 找 a 到 b 怎麼牽在一起：步數最少優先，同步數挑一路線最粗的（每步成本 1 + 1/則數，所以多走一步一定輸）。
+ * 超過 maxHops 步或根本不相連 → null；a＝b → 只有它自己。
+ */
+export function hubPath(d: GalaxyData, g: HubGraph, a: string, b: string, maxHops = PATH_MAX_HOPS): HubPath | null {
+  const byId = new Map(d.hubs.map((h) => [h.id, h]))
+  if (!byId.has(a) || !byId.has(b)) return null
+  const cost = new Map<string, number>([[a, 0]])
+  const prev = new Map<string, string>()
+  const done = new Set<string>()
+  for (;;) {
+    let cur: string | null = null, cc = Infinity
+    for (const [id, c] of cost) if (!done.has(id) && (c < cc || (c === cc && cur !== null && id < cur))) {
+      cur = id
+      cc = c
+    }
+    if (cur === null || cur === b) break
+    done.add(cur)
+    for (const [nx, n] of g.get(cur) ?? []) {
+      const c = cc + 1 + 1 / n
+      if (c < (cost.get(nx) ?? Infinity)) {
+        cost.set(nx, c)
+        prev.set(nx, cur)
+      }
+    }
+  }
+  if (!cost.has(b)) return null
+  const ids = [b]
+  while (ids[0] !== a) ids.unshift(prev.get(ids[0])!)
+  if (ids.length - 1 > maxHops) return null
+  return { hubs: ids.map((id) => byId.get(id)!), n: ids.slice(1).map((id, i) => g.get(ids[i])!.get(id)!) }
 }
