@@ -55,7 +55,12 @@
    只在圖的框外面、正下方一排顯示名字、幾則、「單獨看」「開個股頁」；新聞光點的檢視框（標題、看原文）照舊。桌機照舊在檢視框裡 */
 .gx-bar { display: none; align-items: center; gap: 8px; margin: 8px 16px 0; }
 .gx.dock .gx-bar { display: flex; }
-.gx.dock .gx-insp.hub { display: none; }
+.gx.dock .gx-insp { display: none; } /* 手機：亮點和新聞光點都不在圖裡跳框（使用者：「全都改成第一張截圖」） */
+.gx-bar { position: relative; padding-right: 34px; }
+.gx-bar.news { flex-direction: column; align-items: stretch; gap: 0; }
+.gx-bar.news .gx-h { padding-right: 0; }
+.gx-bar a { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; color: #ff7a59; font-size: 14px; text-decoration: none; }
+.cq .gx-bar .gx-x { top: -4px; right: -4px; }
 .gx-bar-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 700; color: #f3e9e4; }
 .gx-bar-name small { margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--mute); }
 .gx-bar-name.tw { color: #ffb199; } .gx-bar-name.abroad { color: #b9d3ff; } .gx-bar-name.cluster { color: #8ff0df; }
