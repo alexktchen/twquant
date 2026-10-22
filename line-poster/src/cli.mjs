@@ -9,7 +9,7 @@
 //   qr          登入用的 QR 網址（login；網站「LINE 群組」分頁把它畫成 QR 碼）
 //   pin         掃完 QR 後手機要輸入的 PIN（login）
 //   profile     登入的是哪個帳號
-//   group       加入中的群組（groups）
+//   group       加入中的群組（c…）與社群聊天（m…）（groups）
 //   sending     要開始送某一筆了（之後沒有 result＝送到一半中斷，不確定有沒有發出去）
 //   result      一筆貼文的結果（send）
 //   fatal       整個指令失敗（登不進去之類），之後 exit 2
@@ -18,7 +18,8 @@ import { Buffer } from "node:buffer";
 
 import { deliver } from "./deliver.mjs";
 import {
-  clientFromCredential, dumpStorage, listGroups, loginByQr, readCredential, sendFlex, sendImage, sendText, whoami,
+  clientFromCredential, dumpStorage, listGroups, listSquareChats, loginByQr, readCredential, sendFlex, sendImage, sendText,
+  whoami,
 } from "./line.mjs";
 
 const LOGIN_DEADLINE_MS = 180_000; // 掃 QR＋輸入 PIN 的時間
@@ -68,6 +69,7 @@ async function cmdLogin() {
 async function cmdGroups(req) {
   const client = await connect(req);
   for (const g of await listGroups(client)) emit({ type: "group", ...g });
+  for (const g of await listSquareChats(client)) emit({ type: "group", ...g });
   emit({ type: "credential", ...(await readCredential(client)) });
   emitStorage(client);
 }
@@ -87,7 +89,8 @@ function cardImages(cards) {
 
 /**
  * 請求：{ credential, liffId?, cards: { token: PNG base64 },
- *         jobs: [{ id, homeId, message（Flex 訊息物件）, card（圖卡 token，空＝不改發圖片）, imageCaption, fallbackText }] }
+ *         jobs: [{ id, homeId（c… 群組／m… 社群聊天）, message（Flex 訊息物件；社群是 null）, card（圖卡 token，空＝不改發圖片）,
+ *                imageCaption, fallbackText }] }
  * 每筆先發 Flex 圖卡、不行直接發圖＋一行網址、再不行改發文字（deliver.mjs）。LINE 叫我們慢一點（backoffMs）就停，後面的這一輪不送。
  */
 async function cmdSend(req) {

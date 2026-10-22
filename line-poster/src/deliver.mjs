@@ -13,7 +13,7 @@ function joined(errors) {
 
 /**
  * 依序試三招，前一招不是「LINE 叫我們慢一點」的失敗才試下一招：
- *   1. Flex 圖卡（LIFF 分享）：整則是圖、點圖打開網站。
+ *   1. Flex 圖卡（LIFF 分享）：整則是圖、點圖打開網站。job.message 空的就跳過（社群：LIFF 分享不支援）。
  *   2. 直接發那張圖（job.card，一般圖片訊息：看得到、點了只是放大），再發一行附網址的文字（job.imageCaption）。
  *   3. 摘要＋網址的文字（job.fallbackText）。
  * 回 { sent, via: flex|image|text, error?, flexError?, imageError?, captionError?, backoffMs? }。
@@ -21,14 +21,17 @@ function joined(errors) {
  */
 export async function deliver(job, { sendFlex, sendImage, sendText }) {
   const errors = {};
-  try {
-    await sendFlex(job.homeId, job.message);
-    return { sent: true, via: "flex" };
-  } catch (e) {
-    errors.flexError = errText(e);
+  let backoff = null;
+  if (job.message) {
+    try {
+      await sendFlex(job.homeId, job.message);
+      return { sent: true, via: "flex" };
+    } catch (e) {
+      errors.flexError = errText(e);
+    }
+    backoff = lineBackoffMs(errors.flexError);
+    if (backoff !== null) return { sent: false, error: joined(errors), backoffMs: backoff };
   }
-  let backoff = lineBackoffMs(errors.flexError);
-  if (backoff !== null) return { sent: false, error: joined(errors), backoffMs: backoff };
 
   if (job.card) {
     try {
@@ -54,7 +57,10 @@ export async function deliver(job, { sendFlex, sendImage, sendText }) {
     if (backoff !== null) return { sent: false, error: joined(errors), backoffMs: backoff };
   }
 
-  if (!job.fallbackText) return { sent: false, error: joined(errors), backoffMs: null };
+  if (!job.fallbackText) {
+    if (!Object.keys(errors).length) errors.textError = "沒有任何能發的東西（這種聊天不發 Flex，圖片與文字備案又都關著）";
+    return { sent: false, error: joined(errors), backoffMs: null };
+  }
   try {
     await sendText(job.homeId, job.fallbackText);
     return { sent: true, via: "text", ...errors };

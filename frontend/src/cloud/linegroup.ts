@@ -88,11 +88,18 @@ export const KIND_LABEL: Record<string, string> = {
   evening: '盤後快訊',
 }
 
+/** 社群（OpenChat）的聊天 m…；一般群組是 c…。 */
+export const isSquare = (homeId: string): boolean => homeId.startsWith('m')
+
 /** 貼文狀態 → 文字與顏色（ok 綠、wait 灰、bad 紅）。 */
-export function statusView(p: Pick<LinePostRow, 'status' | 'via'>): { text: string; tone: 'ok' | 'wait' | 'bad' } {
+export function statusView(
+  p: Pick<LinePostRow, 'status' | 'via'> & { home_id?: string },
+): { text: string; tone: 'ok' | 'wait' | 'bad' } {
   switch (p.status) {
     case 'sent':
-      // 改發圖片：看得到圖、點了不會開網站（網址另一行）；改發文字：連圖都沒有
+      // 社群本來就不發 Flex（LIFF 分享不支援社群）：發圖＋網址是正常路線
+      if (p.via === 'image' && p.home_id && isSquare(p.home_id)) return { text: '已發（圖片＋網址）', tone: 'ok' }
+      // 群組改發圖片：看得到圖、點了不會開網站（網址另一行）；改發文字：連圖都沒有
       if (p.via === 'image') return { text: '已發（改發圖片＋網址）', tone: 'wait' }
       return { text: p.via === 'text' ? '已發（改發文字）' : '已發', tone: p.via === 'text' ? 'wait' : 'ok' }
     case 'queued':

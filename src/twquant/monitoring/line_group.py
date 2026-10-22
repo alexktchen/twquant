@@ -209,6 +209,16 @@ def flex_message(alt: str, image_url: str, width: int, height: int, link: str) -
     }
 
 
+def is_square(home_id: str) -> bool:
+    """社群（OpenChat）的聊天 m…；一般群組是 c…。"""
+    return home_id.startswith("m")
+
+
+def chat_label(home_id: str) -> str:
+    """清單上標的種類（社群／群組）。"""
+    return "社群" if is_square(home_id) else "群組"
+
+
 def new_token() -> str:
     """圖卡網址裡的亂數（猜不到；32 個十六進位字）。"""
     return secrets.token_hex(16)
@@ -397,11 +407,16 @@ class Job:
     height: int
 
     def request(self, cfg: LineGroupConfig) -> dict[str, Any]:
-        """給轉接器的那一筆：Flex 圖卡；備案依序是直接發圖（card，圖在請求的 cards 裡）、摘要文字。"""
+        """給轉接器的那一筆：Flex 圖卡；備案依序是直接發圖（card，圖在請求的 cards 裡）、摘要文字。
+
+        社群不發 Flex（message=None）：LIFF 分享不支援社群，直接從「發圖＋一行網址」開始。
+        """
         return {
             "id": self.id,
             "homeId": self.home_id,
-            "message": flex_message(
+            "message": None
+            if is_square(self.home_id)
+            else flex_message(
                 self.alt_text,
                 f"{cfg.card_url_base}{self.card_token}.png",
                 self.width,

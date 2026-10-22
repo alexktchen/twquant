@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { CARD_TOKEN_RE, HOME_ID_RE, LOGIN_WORKFLOW, POST_KINDS, dispatchRequest, loginBusy, parsePost, parseToggle } from '../functions/_lib/line-admin.ts'
 import { FEATURE_ROLES, ROLE_MEMBERS, can, featuresOf, rolesOf } from '../functions/_lib/roles.ts'
-import { KIND_LABEL, findGroups, groupsMeta, latestPostId, latestSync, taipeiToday, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
+import { KIND_LABEL, findGroups, groupsMeta, isSquare, latestPostId, latestSync, taipeiToday, loginActive, loginStep, shortTime, statusView, type LineLogin } from '../src/cloud/linegroup.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 LINE 群組，大小寫不分', () => {
@@ -42,6 +42,7 @@ test('T-423 AC10 安全：網站讀帳號表只選要顯示的欄位，登入憑
 test('T-423 AC10 輸入檢查：群組 id、圖卡 token、勾選內容', () => {
   assert.ok(HOME_ID_RE.test(`c${'0'.repeat(32)}`))
   assert.ok(!HOME_ID_RE.test(`C${'0'.repeat(32)}`) && !HOME_ID_RE.test("c1';--") && !HOME_ID_RE.test(`s${'0'.repeat(32)}`))
+  assert.ok(HOME_ID_RE.test(`m${'0'.repeat(32)}`) && !HOME_ID_RE.test(`u${'0'.repeat(32)}`)) // AC14 社群的聊天可以勾、個人不行
   assert.ok(CARD_TOKEN_RE.test('ab'.repeat(16)) && !CARD_TOKEN_RE.test('../etc/passwd') && !CARD_TOKEN_RE.test('ab'.repeat(15)))
   assert.deepEqual(parseToggle('{"enabled":true}'), { enabled: true })
   assert.deepEqual(parseToggle('{"enabled":false}'), { enabled: false })
@@ -55,6 +56,8 @@ test('T-423 分頁與顯示：?tab=line 認得；狀態、時間、群組摘要'
   assert.deepEqual(statusView({ status: 'sent', via: 'flex' }), { text: '已發', tone: 'ok' })
   assert.deepEqual(statusView({ status: 'sent', via: 'text' }), { text: '已發（改發文字）', tone: 'wait' })
   assert.deepEqual(statusView({ status: 'sent', via: 'image' }), { text: '已發（改發圖片＋網址）', tone: 'wait' }) // AC13
+  assert.deepEqual(statusView({ status: 'sent', via: 'image', home_id: `m${'0'.repeat(32)}` }), { text: '已發（圖片＋網址）', tone: 'ok' }) // AC14 社群不發 Flex
+  assert.ok(isSquare(`m${'0'.repeat(32)}`) && !isSquare(`c${'0'.repeat(32)}`))
   assert.equal(statusView({ status: 'unknown', via: null }).tone, 'bad')
   assert.equal(statusView({ status: 'queued', via: null }).text, '排隊中')
   assert.equal(shortTime('2026-10-21 17:40'), '10/21 17:40')

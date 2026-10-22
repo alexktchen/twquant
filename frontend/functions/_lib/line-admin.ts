@@ -5,7 +5,7 @@ import type { sql } from './db'
 
 type Db = ReturnType<typeof sql>
 
-export const HOME_ID_RE = /^c[0-9a-f]{32}$/
+export const HOME_ID_RE = /^[cm][0-9a-f]{32}$/ // c… 一般群組、m… 社群（OpenChat）的聊天；社群本身 s… 不能發
 export const CARD_TOKEN_RE = /^[0-9a-f]{32}$/
 /** 最近幾則貼文 */
 export const POSTS_SHOWN = 40

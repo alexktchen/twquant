@@ -297,6 +297,20 @@ def test_ac5_sent_by_flex_or_text() -> None:
     assert upd["last_error"] == "圖卡發不出去，改發文字：Failed to get LiffToken"
 
 
+def test_ac14_square_chat_skips_flex_and_starts_with_image() -> None:
+    """社群（m…）不發 Flex（LIFF 分享不支援社群）：直接發圖＋一行網址，圖也不行才發文字。"""
+    sq = _job(home_id="m" + "1" * 32).request(_cfg())
+    assert sq["message"] is None
+    assert sq["card"] == "f" * 32 and sq["imageCaption"].endswith(
+        "https://twquant.pages.dev/?tab=picks"
+    )
+    assert sq["fallbackText"]
+    assert _job(home_id="c" + "1" * 32).request(_cfg())["message"]["type"] == "flex"
+    assert (lg.chat_label("m" + "1" * 32), lg.chat_label("c" + "1" * 32)) == ("社群", "群組")
+    # 社群沒試 Flex，發圖就是正常路線：沒有「圖卡發不出去」的註記
+    assert _next({"sent": True, "via": "image"})["last_error"] is None
+
+
 def test_ac13_sent_as_image_keeps_every_note() -> None:
     upd = _next({"sent": True, "via": "image", "flexError": "Failed to get LiffToken"})
     assert upd["status"] == "sent" and upd["via"] == "image"
@@ -465,6 +479,38 @@ def test_ac6_groups_sync_enabled_and_present() -> None:
         out = lg.AdapterOutput(0, groups=({"homeId": "c3", "name": "C"},))
         assert lg.sync_groups(conn, cfg, FakeRunner(out), now_fn=lambda: NOW) == out
         assert lg.enabled_groups(conn, _SCHEMA) == []
+    finally:
+        conn.close()
+
+
+def test_ac14_square_chats_sync_enqueue_and_send_without_flex() -> None:
+    """社群聊天跟群組同一張表、同一個勾選：勾了就排隊，送出時那一筆沒有 Flex。"""
+    conn = _connect_or_skip()
+    grp, sq = "c" + "1" * 32, "m" + "2" * 32
+    cfg = _cfg(web_schema=_SCHEMA)
+    try:
+        _login(conn)
+        found = lg.AdapterOutput(
+            0, groups=({"homeId": grp, "name": "家人"}, {"homeId": sq, "name": "台股研究社"})
+        )
+        lg.sync_groups(conn, cfg, FakeRunner(found), now_fn=lambda: NOW)
+        _enable(conn, grp, sq)
+        assert lg.enabled_groups(conn, _SCHEMA) == [grp, sq]
+        _queue(conn, "picks", lg.enabled_groups(conn, _SCHEMA))
+        done = lg.AdapterOutput(
+            0,
+            sending=(1, 2),
+            results=(
+                {"id": 1, "sent": True, "via": "image", "flexError": "liff"},
+                {"id": 2, "sent": True, "via": "image"},
+            ),
+        )
+        runner = FakeRunner(done)
+        res = lg.send_due(conn, cfg, runner, now_fn=lambda: NOW, sleep=lambda s: None)
+        assert (res.sent, res.as_image) == (2, 2)
+        jobs = {j["homeId"]: j for j in runner.calls[0][1]["jobs"]}
+        assert jobs[grp]["message"]["type"] == "flex" and jobs[sq]["message"] is None
+        assert jobs[sq]["card"] in runner.calls[0][1]["cards"]
     finally:
         conn.close()
 

@@ -7399,10 +7399,10 @@ def line_group_groups() -> None:
         raise typer.Exit(1)
     typer.echo(f"帳號：{out.profile.get('displayName', '?')}（{out.profile.get('mid', '?')}）")
     if not out.groups:
-        typer.echo("沒有加入任何群組：先用手機把這個帳號拉進群組")
+        typer.echo("沒有加入任何群組或社群：先用手機把這個帳號拉進群組、或用它加入社群")
     for g in out.groups:
         mark = "發" if g["homeId"] in enabled else "不發"
-        typer.echo(f"  [{mark}] {g['name']}  {g['homeId']}")
+        typer.echo(f"  [{mark}] {lg.chat_label(g['homeId'])} {g['name']}  {g['homeId']}")
 
 
 @line_group_app.command("enqueue")
@@ -7539,7 +7539,8 @@ def line_group_status(
         acct = lg.account_state(conn, cfg.web_schema)
         with conn.cursor() as cur:
             cur.execute(
-                f'SELECT name, enabled, present FROM "{cfg.web_schema}".line_groups ORDER BY name'
+                f'SELECT home_id, name, enabled, present FROM "{cfg.web_schema}".line_groups '
+                "ORDER BY name"
             )
             groups = cur.fetchall()
             cur.execute(
@@ -7563,10 +7564,11 @@ def line_group_status(
             )
             + (f"；上次失敗：{acct['last_error']}" if acct["last_error"] else "")
         )
-    for name, enabled, present in groups:
+    for home_id, name, enabled, present in groups:
+        label = lg.chat_label(home_id)
         typer.echo(
-            f"  群組 [{'發' if enabled else '不發'}] {name}"
-            + ("" if present else "（帳號已不在群組）")
+            f"  {label} [{'發' if enabled else '不發'}] {name}"
+            + ("" if present else f"（帳號已不在這個{label}）")
         )
     for r in rows:
         err = f"  {r[7]}" if r[7] else ""
