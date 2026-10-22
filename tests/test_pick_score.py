@@ -6,6 +6,7 @@ import datetime as dt
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from twquant.config import SystemConfig, load_config
 from twquant.reporting.pick_score import (
@@ -80,7 +81,16 @@ def test_t426_ac3_chip_rules_need_sign_and_percentile() -> None:
     closes = [100.0] * 6 + [110.0]
     holders = [(dt.date(2026, 10, 3), 0.40), (dt.date(2026, 10, 9), 0.41)]
     items = chip_items("2330", trust, margin, closes, holders, m, R)
-    assert _pts(items) == {"外資": 1, "投信": 1, "主力": -1, "融資": 1, "千張大戶": 1}
+    # D-211 起多了借券、當沖兩項（這裡沒給資料 → 0）；原本五項的規則不變
+    assert _pts(items) == {
+        "外資": 1,
+        "投信": 1,
+        "主力": -1,
+        "融資": 1,
+        "借券": 0,
+        "當沖": 0,
+        "千張大戶": 1,
+    }
     mf = next(i for i in items if i.name == "主力")
     assert "賣超 3,000 張" in mf.text and "前 15 大券商" in mf.text
     # 百分位高但其實是賣超 → 不加分（D-206：要同號）
@@ -169,4 +179,101 @@ def test_t426_ac6_market_helpers() -> None:
 
 def test_t426_ac7_items_json_shape() -> None:
     js = items_json({"籌碼": [Item("主力", -1, "主力賣超")]})
-    assert js == [{"dim": "籌碼", "name": "主力", "points": -1, "text": "主力賣超"}]
+    # D-211 §二.4：多一欄 weight（比重 1）；其餘形狀不變
+    assert js == [{"dim": "籌碼", "name": "主力", "points": -1, "text": "主力賣超", "weight": 1.0}]
+
+
+# ── T-434／D-211 §二：籌碼七項加權、當沖與借券、對稱進位 ─────────────────────────
+
+
+def test_t434_ac1_chip_weights_sum_to_base_and_rounding_is_symmetric() -> None:
+    from twquant.config import PickScoreRules
+
+    assert set(R.chip_weights) == {"外資", "投信", "主力", "融資", "借券", "當沖", "千張大戶"}
+    assert abs(sum(R.chip_weights.values()) - R.base) < 1e-9
+    assert R.chip_weights["外資"] > R.chip_weights["投信"] > R.chip_weights["主力"]
+    # 半分往離 5 分的方向進位：+0.5 → 6、−0.5 → 4（不能一邊 6 一邊 5）
+    assert total([Item("當沖", 1, "", 0.5)], R) == 6
+    assert total([Item("當沖", -1, "", 0.5)], R) == 4
+    assert (
+        total([Item("外資", 1, "", 1.5), Item("投信", 1, "", 1.0), Item("主力", -1, "", 0.5)], R)
+        == 7
+    )
+    assert total([Item("a", 1, "", 1.5), Item("b", -1, "", 1.5)], R) == 5
+    # 七項全 +1＝10、全 −1＝0；比重 1 時與 D-206 逐位相同
+    seven = [Item(k, 1, "", w) for k, w in R.chip_weights.items()]
+    assert total(seven, R) == 10 and total([Item(i.name, -1, "", i.weight) for i in seven], R) == 0
+    assert total([Item("a", 1, "")] * 3, R) == 8
+    # 鍵不對或合計不等於 base → 設定檔就擋下
+    base = R.model_dump()
+    bad = dict(R.chip_weights)
+    bad["外資"] += 0.5
+    with pytest.raises(ValueError):
+        PickScoreRules(**{**base, "chip_weights": bad})
+    with pytest.raises(ValueError):
+        PickScoreRules(
+            **{**base, "chip_weights": {k: v for k, v in R.chip_weights.items() if k != "當沖"}}
+        )
+
+
+def test_t434_ac2_seven_chip_items_daytrade_only_minus_sbl_both_ways() -> None:
+    m = _m(
+        foreign={"2330": (5_000_000.0, 0.05, 0.9)},
+        main_force={"2330": (-3_000_000.0, -0.03, 0.1)},
+        daytrade={"2330": (40_000_000.0, 0.45, 0.95)},
+        sbl={"2330": (-2_000_000.0, -0.02, 0.1)},
+    )
+    trust = [1.0, 1.0, 1.0, 1.0]
+    margin = [1_000_000.0] * 6 + [900_000.0]
+    closes = [100.0] * 6 + [110.0]
+    holders = [(dt.date(2026, 10, 3), 0.40), (dt.date(2026, 10, 9), 0.41)]
+    items = chip_items("2330", trust, margin, closes, holders, m, R)
+    assert [i.name for i in items] == ["外資", "投信", "主力", "融資", "借券", "當沖", "千張大戶"]
+    assert _pts(items) == {
+        "外資": 1,
+        "投信": 1,
+        "主力": -1,
+        "融資": 1,
+        "借券": 1,
+        "當沖": -1,
+        "千張大戶": 1,
+    }
+    assert {i.name: i.weight for i in items} == R.chip_weights
+    assert total(items, R) == 8  # 5 + (1.5 + 1 − 0.5 + 0.5 + 0.5 − 0.5 + 0.5) = 8.0
+    dt_ = next(i for i in items if i.name == "當沖")
+    assert "當沖" in dt_.text and "45.0%" in dt_.text and "比全市場 95%" in dt_.text
+    sbl = next(i for i in items if i.name == "借券")
+    assert "借券賣出餘額" in sbl.text and "減少 2,000 張" in sbl.text
+    # 當沖低也不加分（只扣不加）；借券增加在前 20% → −1、同號才算
+    low = _m(daytrade={"2330": (1_000.0, 0.01, 0.05)}, sbl={"2330": (3_000_000.0, 0.03, 0.9)})
+    got = _pts(chip_items("2330", [], [], [], [], low, R))
+    assert got["當沖"] == 0 and got["借券"] == -1
+    odd = _m(sbl={"2330": (-1.0, -0.0001, 0.85)})
+    assert _pts(chip_items("2330", [], [], [], [], odd, R))["借券"] == 0
+    # 缺資料 → 0 分、資料不足
+    none = chip_items("9999", [], [], [], [], _m(), R)
+    assert all(i.points == 0 and i.text == NO_DATA for i in none) and len(none) == 7
+
+
+def test_t434_ac3_balance_change_ratio_needs_every_day() -> None:
+    from twquant.reporting.pick_score import balance_change_ratio
+
+    days = [dt.date(2026, 10, d) for d in (15, 16, 19, 20, 21, 22)]  # 第一天是基準，後五天是窗
+    bal = pl.DataFrame(
+        {
+            "date": days + days[1:],
+            "stock_id": ["A"] * 6 + ["B"] * 5,
+            "balance": [100.0, 110.0, 120.0, 130.0, 140.0, 160.0] + [50.0] * 5,
+        }
+    )
+    vol = pl.DataFrame(
+        {"date": days[1:] * 2, "stock_id": ["A"] * 5 + ["B"] * 5, "volume": [200.0] * 10}
+    )
+    assert balance_change_ratio(bal, vol, days) == {"A": (60.0, 0.06)}  # B 缺基準日 → 不算
+
+
+def test_t434_ac4_items_json_carries_weight() -> None:
+    js = items_json({"籌碼": [Item("當沖", -1, "當沖佔成交量 45.0%", 0.5)]})
+    assert js == [
+        {"dim": "籌碼", "name": "當沖", "points": -1, "text": "當沖佔成交量 45.0%", "weight": 0.5}
+    ]

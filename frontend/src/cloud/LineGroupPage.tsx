@@ -14,6 +14,7 @@ import {
   cardUrl,
   findGroups,
   groupsMeta,
+  isSquare,
   latestPostId,
   latestSync,
   loginActive,
@@ -173,7 +174,9 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
             </Section>
             <Section icon={Users} title="要發的群組" meta={groupsMeta(data.groups)}>
               {data.groups.length === 0 ? (
-                <p className="cq-lg-hint">把發文帳號拉進群組，再按「同步群組」就會列在這裡（每一班排程也會自動同步）；新群組預設不發。</p>
+                <p className="cq-lg-hint">
+                  把發文帳號拉進群組、或用它的手機加入社群，再按「同步群組」就會列在這裡（每一班排程也會自動同步）；新的預設不發。
+                </p>
               ) : (
                 <>
                   {data.groups.length > GROUP_FIND_MIN && (
@@ -195,9 +198,10 @@ export function LineGroupPage({ refresh }: { refresh: number }) {
                             disabled={busy !== null || !g.present}
                             onChange={(e) => toggle(g.home_id, e.target.checked)}
                           />
+                          {isSquare(g.home_id) && <i className="cq-lg-tag">社群</i>}
                           <span>{g.name}</span>
                         </label>
-                        {!g.present && <em>帳號已不在群組</em>}
+                        {!g.present && <em>帳號已不在{isSquare(g.home_id) ? '社群' : '群組'}</em>}
                       </li>
                     ))}
                   </ul>
