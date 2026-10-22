@@ -256,6 +256,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       const insp = inspRef.current
       const dock = !!(lv.sel && insp && dockInspector(W, insp.offsetWidth))
       insp?.classList.toggle('dock', dock) // 貼下緣的版本矮一點：新聞標題收起來、超過就捲
+      stage.parentElement?.classList.toggle('dock', dock) // 整個區塊也記著：按鈕搬到圖的外面
       view.y = ease(view.y, pivotScreenY(H, dock ? insp!.offsetHeight : null, 50, TOP_PAD), dt, 6)
       const tt = (now - t0) / 1000
       P.items = items.map((it) => project(it, rot, view, pivot))
@@ -755,6 +756,23 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
         </div>
       </div>
+      {hub && (
+        <div className="gx-bar">
+          <span className={`gx-bar-name ${hubClass(hub.type)}`}>
+            {hub.label}
+            <small>{hub.n} 則</small>
+          </span>
+          <button className="gx-focus" onClick={() => setFocus(hub.id)}>
+            <Maximize2 size={14} aria-hidden="true" />
+            單獨看 {hub.n} 則
+          </button>
+          {hub.type === 'tw' && hub.sub && (
+            <button className="gx-go" onClick={() => onStock(hub.sub!, hub.label)}>
+              開個股頁
+            </button>
+          )}
+        </div>
+      )}
       {focus && (
         <GalaxyFocus
           data={data}
