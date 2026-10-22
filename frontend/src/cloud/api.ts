@@ -16,7 +16,8 @@ import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
 import type { WarrantDay } from './warrants'
 import type { Trade, TradeList } from './trades'
-import type { Feature, LineGroupRow, LineLogin, LineStatus } from './linegroup'
+import type { Feature } from './access'
+import type { LineGroupRow, LineLogin, LineStatus } from './linegroup'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 

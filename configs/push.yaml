@@ -19,3 +19,8 @@ allowed_hosts:
 # 同一個族群至少 group_min_picks 檔，而且這個族群當天標了「資金流入」（門檻見 configs/stock_groups.yaml flow）→ 發一則。
 group_min_picks: 2
 group_max_listed: 3
+
+# 名單相關的兩種通知（今日名單、族群資金）只發給這些帳號（T-429／D-207，使用者 2026-10-22：每日名單與績效只給 admin）。
+# 與 frontend/functions/_lib/roles.ts 的 admin 角色相同（tests/test_push_notify.py 守著）；其他帳號開了通知也收不到這兩種。
+list_recipients:
+  - cktalex@gmail.com

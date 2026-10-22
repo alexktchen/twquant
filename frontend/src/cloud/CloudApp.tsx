@@ -53,7 +53,7 @@ import { WarRoom } from './WarRoom'
 import { NewsPage } from './NewsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { LineGroupPage } from './LineGroupPage'
-import type { Feature } from './linegroup'
+import { lockedText, tabAllowed, type Feature } from './access'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
 import { PUSH_HINT, type PushState } from './push'
 import { currentPushState, disablePush, enablePush, registerServiceWorker } from './push-client'
@@ -100,8 +100,11 @@ export default function CloudApp() {
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
-  // 這個帳號能用哪些功能（T-423：有 line 才顯示「LINE 群組」分頁）
+  // 這個帳號能用哪些功能（T-423：有 line 才顯示「LINE 群組」分頁；T-429：有 picks／score 才顯示每日名單／績效）
   const [features, setFeatures] = useState<Feature[]>([])
+  // 權限讀回來了沒（讀回來之前，從網址開到要權限的分頁先空白，不閃「沒有權限」）
+  const [accessKnown, setAccessKnown] = useState(false)
+  const canPicks = features.includes('picks')
   // 追蹤股：存在帳號裡（伺服器），手機和電腦同一份
   const [watch, setWatch] = useState<WatchList | null>(null)
   const [watchErr, setWatchErr] = useState('')
@@ -147,7 +150,10 @@ export default function CloudApp() {
       .then((m) => {
         setEmail(m.email)
         fetchAccess()
-          .then((r) => setFeatures(r.features))
+          .then((r) => {
+            setFeatures(r.features)
+            setAccessKnown(true)
+          })
           .catch((e: Error) => console.warn('權限讀取失敗', e))
         currentPushState()
           .then(setPush)
@@ -155,16 +161,10 @@ export default function CloudApp() {
         loadWatch()
         loadTrades()
       })
-      .catch((e: Error) => e instanceof LoginRequired && setGuest(true))
-    fetchPickDates()
-      .then((r) => {
-        setDates(r.dates)
-        setDateCounts(r.counts)
-      })
       .catch((e: Error) => {
-        if (!(e instanceof LoginRequired)) return setErr(e.message)
+        if (!(e instanceof LoginRequired)) return
         setGuest(true)
-        // 日期是公開資訊：沒登入也能選日期
+        // 日期是公開資訊（只有日期、沒有股票）：沒登入時追蹤分頁的評分日與預覽用
         fetchPublicDates().then(setDates).catch(onFail)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,20 +198,30 @@ export default function CloudApp() {
   // 沒登入時「最新一天」用公開日期清單的第一天；登入時這個值固定 undefined，不會多抓一次
   const guestToday = guest ? dates[0] : undefined
 
-  // 從背景回來時日期清單也重抓：隔天回來，選單才有新的一天（停在最新的人名單會自動換成新的一天）
+  // 名單日期清單：有名單權限才抓（T-429）；從背景回來時也重抓，隔天回來選單才有新的一天（停在最新的人名單會自動換成新的一天）
   useEffect(() => {
-    if (refresh === 0 || guest) return
+    if (guest || !canPicks) return
+    let stale = false
     fetchPickDates()
       .then((r) => {
+        if (stale) return
         setDates(r.dates)
         setDateCounts(r.counts)
       })
-      .catch((e: Error) => console.warn('日期清單重抓失敗', e))
-  }, [refresh, guest])
+      .catch((e: Error) => {
+        if (stale) return
+        if (refresh === 0) onFail(e)
+        else console.warn('日期清單重抓失敗', e)
+      })
+    return () => {
+      stale = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh, guest, canPicks])
 
   useEffect(() => {
-    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；首頁也抓（熱力圖標「在名單」）
-    if (guest || (tab !== 'picks' && tab !== 'home')) return
+    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；首頁也抓（熱力圖標「在名單」）；沒有名單權限不抓（T-429）
+    if (guest || !canPicks || (tab !== 'picks' && tab !== 'home')) return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
     setErr('')
@@ -233,7 +243,7 @@ export default function CloudApp() {
     }
     // line/sid 只用來保留使用者目前的選擇，不該觸發重抓
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, date, guest, refresh])
+  }, [tab, date, guest, refresh, canPicks])
 
   // 沒登入時畫面只讀假資料：就算有真名單寫進 day，也不會出現在沒登入的畫面
   const guestView = useMemo(
@@ -357,12 +367,16 @@ export default function CloudApp() {
           <button className={tab === 'news' ? 'on' : ''} onClick={() => setTab('news')}>
             新聞
           </button>
-          <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
-            每日名單
-          </button>
-          <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
-            績效
-          </button>
+          {canPicks && (
+            <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
+              每日名單
+            </button>
+          )}
+          {features.includes('score') && (
+            <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
+              績效
+            </button>
+          )}
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
             追蹤
           </button>
@@ -414,6 +428,7 @@ export default function CloudApp() {
         ) : (
           <WarRoom
             refresh={refresh}
+            features={features}
             watchSids={watchSids}
             listed={listedGroups}
             onPicks={(code) => {
@@ -454,34 +469,22 @@ export default function CloudApp() {
             }}
           />
         )
+      ) : !tabAllowed(tab, features) ? (
+        // 要權限的分頁（每日名單、績效、LINE 群組）：沒權限、沒登入，或權限還沒讀回來（先空白）
+        <main className="cq-body">
+          {(guest || accessKnown) && <p className="cq-empty">{lockedText(tab, guest)}</p>}
+        </main>
       ) : tab === 'line' ? (
-        features.includes('line') ? (
-          <LineGroupPage refresh={refresh} />
-        ) : (
-          <main className="cq-body">
-            <p className="cq-empty">{guest ? '登入後才看得到' : '這個帳號沒有「LINE 群組」的權限'}</p>
-          </main>
-        )
+        <LineGroupPage refresh={refresh} />
       ) : tab === 'score' ? (
-        guest ? (
-          <main className="cq-body">
-            <aside className="cq-list cq-list-guest">
-              <div className="cq-rows">
-                <Gate title="登入後看名單績效" text="把每天的名單照固定規則當成真的買了：模擬帳戶的淨值，以及每一檔新進名單的逐筆結果，賠的也照列。" />
-              </div>
-            </aside>
-            <section className="cq-detail" />
-          </main>
-        ) : (
-          <ScorecardPage
-            line={GUEST_LINES.some((l) => l.code === line) ? line : 'CORE'}
-            onLine={(code) => {
-              setLine(code)
-              savePref(LINE_KEY, code)
-            }}
-            refresh={refresh}
-          />
-        )
+        <ScorecardPage
+          line={GUEST_LINES.some((l) => l.code === line) ? line : 'CORE'}
+          onLine={(code) => {
+            setLine(code)
+            savePref(LINE_KEY, code)
+          }}
+          refresh={refresh}
+        />
       ) : (
         <main className="cq-body">
           {tab === 'watch' ? (
@@ -656,6 +659,7 @@ export default function CloudApp() {
                 <Detail
                   sid={watchCurrent.sid}
                   name={watchCurrent.name}
+                  showPicks={canPicks}
                   shared={watchSids.includes(watchCurrent.sid) && tab === 'watch' && !guest && !editMode ? watchLive : null}
                   lineNames={lineNames}
                   tracked={tracked.has(watchCurrent.sid)}
@@ -669,6 +673,7 @@ export default function CloudApp() {
               <Detail
                 sid={selected.sid}
                 name={selected.name}
+                showPicks={canPicks}
                 group={selected.group}
                 reasons={selected.reasons ?? null}
                 line={current?.code ?? null}
@@ -1154,6 +1159,7 @@ function Detail({
   chg,
   asOf,
   lineNames,
+  showPicks,
   tracked,
   onTrack,
   refresh,
@@ -1183,6 +1189,8 @@ function Detail({
   /** 看過去某天的名單時的日期：報價列停在那天，不顯示即時價 */
   asOf?: string
   lineNames: Record<string, string>
+  /** 有名單權限（T-429）：K 線標推薦日；沒有就不問被推薦日、圖例也不列線別 */
+  showPicks: boolean
   tracked: boolean
   onTrack?: (sid: string, on: boolean) => Promise<void>
   /** 從背景回來時加一：重抓 K 線、被推薦日與評分 */
@@ -1221,7 +1229,7 @@ function Detail({
     setErr('')
     setScoreErr('')
     // 換股時分數靠 scores.sid 判斷（不先清空，重抓同一檔時不會閃「計算中」）；K 線內容沒變就不換，免得整張圖重畫
-    Promise.all([fetchBars(sid), fetchStockPicks(sid)])
+    Promise.all([fetchBars(sid), showPicks ? fetchStockPicks(sid) : Promise.resolve<Record<string, string[]>>({})])
       .then(([bars, days]) => {
         if (stale) return
         setChart((prev) =>
@@ -1237,7 +1245,7 @@ function Detail({
     return () => {
       stale = true
     }
-  }, [sid, refresh])
+  }, [sid, refresh, showPicks])
   const bars = chart.sid === sid ? chart.bars : []
   // 分數同理：換股後到新分數回來前，不拿上一檔的分數與名稱
   const sc = scores?.sid === sid ? scores : null
@@ -1362,11 +1370,12 @@ function Detail({
                 MA{m.n}
               </span>
             ))}
-            {Object.entries(lineNames).map(([code, n]) => (
-              <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }} title={`▼＝${n}推薦日`}>
-                ▼{n}
-              </b>
-            ))}
+            {showPicks &&
+              Object.entries(lineNames).map(([code, n]) => (
+                <b key={code} style={{ color: LINE_LEGEND[code] ?? '#FF7A00' }} title={`▼＝${n}推薦日`}>
+                  ▼{n}
+                </b>
+              ))}
             {newsDays.sid === sid && newsDays.days.length > 0 && (
               <b style={{ color: '#79B8FF' }} title="K 棒下方的藍點＝那天有直接提到這檔的新聞；點那一天列出來">
                 ●新聞

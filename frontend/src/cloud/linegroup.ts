@@ -1,5 +1,4 @@
 // 「LINE 群組」分頁（T-423／D-204）的資料型別與顯示用小函式。型別與 functions/_lib/line-admin.ts 一致。
-export type Feature = 'line'
 
 export type LineAccount = {
   display_name: string | null

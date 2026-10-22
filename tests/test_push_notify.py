@@ -56,7 +56,7 @@ def test_ac2_only_known_push_services() -> None:
 
 
 def test_ac3_send_results_gone_and_failed_are_reported() -> None:
-    subs = [Subscription(f"https://web.push.apple.com/{i}", "p", "a") for i in range(4)]
+    subs = [Subscription(f"https://web.push.apple.com/{i}", "p", "a", "a@b.c") for i in range(4)]
     status = {
         subs[0].endpoint: 201,
         subs[1].endpoint: 410,
@@ -111,7 +111,7 @@ def test_ac4_encrypted_payload_decrypts_for_the_subscriber(monkeypatch: pytest.M
         return Resp()
 
     monkeypatch.setattr(requests, "post", fake_post)
-    sub = Subscription("https://web.push.apple.com/abc", _b64(ua_pub), _b64(auth))
+    sub = Subscription("https://web.push.apple.com/abc", _b64(ua_pub), _b64(auth), "a@b.c")
     payload = {"title": "10/13 今日名單已更新", "body": "大盤精選 15 檔"}
     r = send_all([sub], payload, webpush_sender(vapid_priv, "https://twquant.pages.dev", 43200, 15))
 
@@ -295,3 +295,41 @@ def test_ac7_t354_pg_hot_groups_and_not_ready() -> None:
             cur.execute(f'DROP SCHEMA IF EXISTS "{_SCHEMA}" CASCADE')
         conn.commit()
         conn.close()
+
+
+# ── 名單通知只給 admin（T-429／D-207）──────────────────────────────────────
+
+
+def test_t429_ac5_list_notifications_only_for_recipients() -> None:
+    """今日名單、族群資金兩種通知只發給 list_recipients 的帳號；同一帳號幾台裝置都收得到，email 不分大小寫。"""
+    from twquant.monitoring.push_notify import for_recipients
+
+    subs = [
+        Subscription("https://web.push.apple.com/1", "p", "a", "boss@example.com"),
+        Subscription("https://fcm.googleapis.com/2", "p", "a", "friend@example.com"),
+        Subscription("https://fcm.googleapis.com/3", "p", "a", "Boss@Example.com"),
+    ]
+    got = for_recipients(subs, ["boss@example.com"])
+    assert [s.endpoint for s in got] == [
+        "https://web.push.apple.com/1",
+        "https://fcm.googleapis.com/3",
+    ]
+    assert for_recipients(subs, ["nobody@example.com"]) == []
+
+
+def test_t429_ac5_recipients_match_website_admin_and_cli_filters() -> None:
+    """收件人＝網站 admin 角色（roles.ts）；兩個推播指令都先過濾收件人才發；讀訂閱時帶 email（靜態）。"""
+    cfg = load_config(ROOT / "configs" / "push.yaml", PushConfig)
+    roles = (ROOT / "frontend" / "functions" / "_lib" / "roles.ts").read_text(encoding="utf-8")
+    m = re.search(r"^\s*admin: \[([^\]]*)\]", roles, re.MULTILINE)
+    assert m, "roles.ts 找不到 admin 角色"
+    assert tuple(re.findall(r"'([^']+)'", m.group(1))) == cfg.list_recipients
+    assert all(e == e.strip().lower() and "@" in e for e in cfg.list_recipients)
+    cli = (ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
+    for cmd in ("def notify_picks(", "def notify_groups("):
+        body = cli[cli.index(cmd) :]
+        body = body[: body.index("\n@app.command")]
+        assert "pn.for_recipients(pn.load_subscriptions(conn), cfg.list_recipients)" in body, cmd
+        assert body.count("load_subscriptions(") == 1, cmd  # 沒有別條路拿到全部訂閱
+    src = (ROOT / "src" / "twquant" / "monitoring" / "push_notify.py").read_text(encoding="utf-8")
+    assert "SELECT endpoint, p256dh, auth, email FROM" in src

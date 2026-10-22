@@ -5,7 +5,9 @@
 // 潛伏兩條線每檔另附歷史相似情境（D-182，serving.pick_similar；那天沒算就是 null）；
 // 每檔另附近 30 天的內部人持股轉讓申報摘要（T-384，serving.insider_transfer_notices；沒有就是 null）；
 // 每檔另附一句話（T-393，serving.pick_blurbs）與四面向評分＋首選（T-394，serving.pick_reviews）；那天沒算就是 null。
+// 只給 admin（T-429／D-207，_lib/gate.ts）。
 import { fail, guarded, json, type Env } from '../../_lib/db'
+import { denied } from '../../_lib/gate'
 import { groupsFor } from '../../_lib/groups'
 import { readHolders } from '../../_lib/holders'
 import { readInsider } from '../../_lib/insider'
@@ -117,5 +119,6 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
   })
 }
 
-// 每個人看到都一樣、一天只更新兩次：同一執行個體 60 秒暫存，省下連資料庫的 CPU（_lib/cache.ts）
-export const onRequestGet: PagesFunction<Env> = (ctx) => cached(cacheKey(ctx.request), async () => handle(ctx))
+// 有權限的人看到都一樣、一天只更新兩次：同一執行個體 60 秒暫存，省下連資料庫的 CPU（_lib/cache.ts）；先擋權限再讀暫存
+export const onRequestGet: PagesFunction<Env> = async (ctx) =>
+  (await denied(ctx.request, 'picks')) ?? cached(cacheKey(ctx.request), async () => handle(ctx))

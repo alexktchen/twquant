@@ -3,8 +3,10 @@
 // 使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置，卡也要可以縮起來，縮起來後內容要可以輪播」——
 // 卡片照版面（useHomeLayout，登入後存在帳號）排；每張卡點標題收起，收起時輪播重點；「編輯版面」拖曳或 ▲▼ 換位置。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
+// T-429：「今日名單」「名單成績」兩張卡只給有名單／績效權限的帳號（access.ts），其他人版面裡沒有這兩張、也不去抓。
 import { Pencil } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { visibleLayout, type Feature } from './access'
 import { fetchMarketLive, fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
 import { CalendarCard } from './CalendarCard'
@@ -63,6 +65,7 @@ function useMarketLive(refresh: number): LiveMarket | null {
 
 export function WarRoom({
   refresh,
+  features,
   watchSids,
   listed,
   onPicks,
@@ -71,6 +74,8 @@ export function WarRoom({
   onStock,
 }: {
   refresh: number
+  /** 這個帳號能用的功能：沒有 picks／score 就不顯示名單卡、名單成績卡 */
+  features: Feature[]
   /** 追蹤股代號（登入後才有）：昨日消息多一個「追蹤」篩選、行事曆標「追蹤」 */
   watchSids: string[]
   /** 名單日期與各族群在名單上的股票（族群熱力圖標「在名單」用） */
@@ -87,7 +92,9 @@ export function WarRoom({
   const [scores, setScores] = useState<Record<string, Scorecard | null>>({})
   // 今日一句話目前顯示哪一天（切到歷史時，新聞頭條卡跟著換成那天的）
   const [shown, setShown] = useState<Brief | null>(null)
-  const { layout, toggle, setOrder, reset, error: layoutErr } = useHomeLayout()
+  const { layout: saved, toggle, setOrder, reset, error: layoutErr } = useHomeLayout()
+  const layout = useMemo(() => visibleLayout(saved, features), [saved, features])
+  const canScore = features.includes('score')
   const [editing, setEditing] = useState(false)
 
   useEffect(() => {
@@ -96,6 +103,15 @@ export function WarRoom({
     fetchWarroom()
       .then((d) => !stale && setData(d))
       .catch((e: Error) => !stale && setErr(e.message))
+    return () => {
+      stale = true
+    }
+  }, [refresh])
+
+  // 名單成績卡：有績效權限才抓（權限晚一步讀回來，讀到了再抓）
+  useEffect(() => {
+    if (!canScore) return
+    let stale = false
     for (const code of SCORE_LINES) {
       fetchScorecard(code)
         .then((s) => !stale && setScores((x) => ({ ...x, [code]: s })))
@@ -104,7 +120,7 @@ export function WarRoom({
     return () => {
       stale = true
     }
-  }, [refresh])
+  }, [refresh, canScore])
 
   const sidsKey = watchSids.join(',')
   useEffect(() => {
@@ -153,6 +169,7 @@ export function WarRoom({
         items={data?.news.items ?? []}
         watchNews={watchNews}
         watchSids={watchSids}
+        withList={features.includes('picks')}
         onStock={onStock}
         {...fold('news')}
       />
