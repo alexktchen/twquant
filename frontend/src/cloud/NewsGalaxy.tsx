@@ -9,7 +9,7 @@
 // 亮點的檢視框有「單獨看」：把提到它的新聞拎出來照主題讀、看常一起出現的（GalaxyFocus.tsx）。
 // 搜尋與牽連（T-436；使用者 2026-10-22：「想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」，像 graphify）：
 // 左上角搜尋框，打字就列符合的股票、主題、新聞；選一個＝飛到它、畫出它跟誰牽連（同一則新聞一起被提到＝一條線，越粗則數越多）；
-// 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一步幾則。
+// 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一度幾則（「幾度」＝隔幾層關係，跟新聞關係圖的講法一樣）。
 import { ExternalLink, Maximize2, Minus, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchNewsGalaxy } from './api'
@@ -622,7 +622,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                     </button>
                   </Fragment>
                 ))}
-                <small>{path.hubs.length === 1 ? '同一個' : `${path.hubs.length - 1} 步`}</small>
+                <small>{path.hubs.length === 1 ? '同一個' : `${path.hubs.length - 1} 度`}</small>
               </>
             ) : (
               <span>{pathMsg}</span>
