@@ -228,7 +228,7 @@ def test_ac4_events_credential_sending_results(capsys: pytest.CaptureFixture[str
             "linejs 自己印的雜訊",
             '{"type":"credential","refreshToken":"r2"}',
             '{"type":"credential","accessToken":"new","expire":200}',
-            '{"type":"group","homeId":"c1","name":"股友"}',
+            '{"type":"group","homeId":"c1","name":"股友","noteHome":"c1"}',
             '{"type":"sending","id":7}',
             '{"type":"result","id":7,"sent":true,"via":"flex"}',
             '{"type":"sending","id":8}',
@@ -239,7 +239,7 @@ def test_ac4_events_credential_sending_results(capsys: pytest.CaptureFixture[str
     )
     assert out.credential == lg.Credential("new", "r2", 200)
     assert out.profile == {"mid": "u1", "displayName": "小幫手"}
-    assert out.groups == ({"homeId": "c1", "name": "股友"},)
+    assert out.groups == ({"homeId": "c1", "name": "股友", "noteHome": "c1"},)
     assert out.sending == (7, 8) and out.results[0]["via"] == "flex"
     assert out.fatal is None
     assert "linejs 自己印的雜訊" in capsys.readouterr().err  # 不吞掉
@@ -297,6 +297,76 @@ def test_ac5_sent_by_flex_or_text() -> None:
     assert upd["last_error"] == "圖卡發不出去，改發文字：Failed to get LiffToken"
 
 
+def test_ac14_square_chat_skips_flex_and_starts_with_image() -> None:
+    """社群（m…）不發 Flex（LIFF 分享不支援社群）：直接發圖＋一行網址，圖也不行才發文字。"""
+    sq = _job(home_id="m" + "1" * 32).request(_cfg())
+    assert sq["message"] is None
+    assert sq["card"] == "f" * 32 and sq["imageCaption"].endswith(
+        "https://twquant.pages.dev/?tab=picks"
+    )
+    assert sq["fallbackText"]
+    assert _job(home_id="c" + "1" * 32).request(_cfg())["message"]["type"] == "flex"
+    assert (lg.chat_label("m" + "1" * 32), lg.chat_label("c" + "1" * 32)) == ("社群", "群組")
+    # 社群沒試 Flex，發圖就是正常路線：沒有「圖卡發不出去」的註記
+    assert _next({"sent": True, "via": "image"})["last_error"] is None
+
+
+def test_ac15_job_request_note_first() -> None:
+    """先貼記事本再分享（使用者 2026-10-22）：記事本在哪由同步決定（群組 c…、社群 s…），上次發好的那篇帶著走。"""
+    cfg = _cfg()
+    assert cfg.via_note
+    sq = _job(home_id="m" + "1" * 32, note_home="s" + "1" * 32, note_post_id="P9").request(cfg)
+    assert (sq["noteHome"], sq["noteId"]) == ("s" + "1" * 32, "P9")
+    assert (
+        sq["noteText"]
+        == "10/21（三）今日名單：大盤精選　2 檔\n\nhttps://twquant.pages.dev/?tab=picks"
+    )
+    grp = _job(note_home="cabc").request(cfg)
+    assert (grp["noteHome"], grp["noteId"]) == ("cabc", "")
+    assert _job().request(cfg)["noteHome"] == ""  # 還沒同步過（不知道記事本在哪）：照舊走聊天
+    assert _job(note_home="cabc").request(_cfg(via_note=False))["noteHome"] == ""
+    # 聊天發圖的備案關掉，記事本照樣有圖
+    off = _job(note_home="cabc").request(_cfg(fallback_image=False))
+    assert (off["card"], off["noteCard"]) == ("", "f" * 32)
+
+
+def test_ac15_next_state_keeps_note_post_id() -> None:
+    upd = _next({"sent": True, "via": "note", "notePostId": "P1"})
+    assert upd == {
+        "status": "sent",
+        "via": "note",
+        "sent_at": NOW,
+        "last_error": None,
+        "note_post_id": "P1",
+    }
+    # 分享時被叫停：先不算送出，但記事本那篇記下來（下次只分享）
+    stop = {"sent": False, "error": "code=701", "backoffMs": 120000, "notePostId": "P1"}
+    assert _next(stop) == {"last_error": lg.BACKOFF_HINT, "note_post_id": "P1"}
+    failed = _next({"sent": False, "error": "x", "notePostId": "P1"})
+    assert failed["note_post_id"] == "P1" and failed["status"] == "queued"
+    upd = _next({"sent": True, "via": "image", "noteError": "分享失敗", "notePostId": "P1"})
+    assert upd["last_error"] == "記事本發不出去，改發圖片：分享失敗"
+    upd = _next({"sent": True, "via": "flex", "noteError": "打不通"})
+    assert upd["last_error"] == "記事本發不出去，改發圖卡：打不通" and "note_post_id" not in upd
+
+
+def test_ac15_note_image_is_jpeg_and_switches() -> None:
+    png = io.BytesIO()
+    Image.new("RGB", (40, 30), (14, 15, 20)).quantize(colors=8).save(png, format="PNG")
+    jpg = lc.to_jpeg(png.getvalue(), 90)
+    assert jpg[:2] == b"\xff\xd8"  # JPEG
+    with Image.open(io.BytesIO(jpg)) as im:
+        assert im.size == (40, 30) and im.mode == "RGB"
+    assert lc.to_jpeg(png.getvalue(), 90) == jpg  # 決定性
+    cards, notes = lg.adapter_images({"t": png.getvalue()}, _cfg())
+    assert set(cards) == set(notes) == {"t"}
+    assert base64.b64decode(notes["t"]) == jpg
+    assert lg.adapter_images({"t": png.getvalue()}, _cfg(via_note=False, fallback_image=False)) == (
+        {},
+        {},
+    )
+
+
 def test_ac13_sent_as_image_keeps_every_note() -> None:
     upd = _next({"sent": True, "via": "image", "flexError": "Failed to get LiffToken"})
     assert upd["status"] == "sent" and upd["via"] == "image"
@@ -339,6 +409,8 @@ def test_ac7_config_kinds_links_and_lease() -> None:
     assert set(cfg.kinds) == set(lg.KINDS)
     assert all(k.link.startswith(cfg.site_url) for k in cfg.kinds.values())
     assert cfg.lease_seconds > cfg.adapter_timeout_seconds  # 占用不能比轉接器先到期
+    # 一次送滿上限、每筆之間等 post_gap_seconds：要遠在轉接器逾時之前送完（每筆本身還要幾秒）
+    assert cfg.max_posts_per_run * cfg.post_gap_seconds < 0.8 * cfg.adapter_timeout_seconds
     assert (ROOT / cfg.adapter).exists()
     # 圖卡網址要對到網站的公開端點 frontend/functions/pub/line-card/[token].ts
     assert cfg.card_url_base == f"{cfg.site_url}pub/line-card/"
@@ -419,8 +491,18 @@ def _rows(conn: Any) -> list[tuple[Any, ...]]:
         return list(cur.fetchall())
 
 
+def _png() -> bytes:
+    """一張真的小 PNG（記事本要轉 JPEG，假的位元組轉不了）。"""
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 6), (14, 15, 20)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+PNG = _png()
+
+
 def _queue(conn: Any, kind: str, homes: list[str], *, day: dt.date = DAY, stale: float = 5) -> int:
-    token = lg.save_card(conn, _SCHEMA, day, kind, b"png", (1040, 1200), NOW)
+    token = lg.save_card(conn, _SCHEMA, day, kind, PNG, (1040, 1200), NOW)
     return lg.enqueue(
         conn,
         _SCHEMA,
@@ -465,6 +547,91 @@ def test_ac6_groups_sync_enabled_and_present() -> None:
         out = lg.AdapterOutput(0, groups=({"homeId": "c3", "name": "C"},))
         assert lg.sync_groups(conn, cfg, FakeRunner(out), now_fn=lambda: NOW) == out
         assert lg.enabled_groups(conn, _SCHEMA) == []
+    finally:
+        conn.close()
+
+
+def test_ac14_square_chats_sync_enqueue_and_send_without_flex() -> None:
+    """社群聊天跟群組同一張表、同一個勾選：勾了就排隊，送出時那一筆沒有 Flex。"""
+    conn = _connect_or_skip()
+    grp, sq = "c" + "1" * 32, "m" + "2" * 32
+    cfg = _cfg(web_schema=_SCHEMA)
+    try:
+        _login(conn)
+        found = lg.AdapterOutput(
+            0, groups=({"homeId": grp, "name": "家人"}, {"homeId": sq, "name": "台股研究社"})
+        )
+        lg.sync_groups(conn, cfg, FakeRunner(found), now_fn=lambda: NOW)
+        _enable(conn, grp, sq)
+        assert lg.enabled_groups(conn, _SCHEMA) == [grp, sq]
+        _queue(conn, "picks", lg.enabled_groups(conn, _SCHEMA))
+        done = lg.AdapterOutput(
+            0,
+            sending=(1, 2),
+            results=(
+                {"id": 1, "sent": True, "via": "image", "flexError": "liff"},
+                {"id": 2, "sent": True, "via": "image"},
+            ),
+        )
+        runner = FakeRunner(done)
+        res = lg.send_due(conn, cfg, runner, now_fn=lambda: NOW, sleep=lambda s: None)
+        assert (res.sent, res.as_image) == (2, 2)
+        jobs = {j["homeId"]: j for j in runner.calls[0][1]["jobs"]}
+        assert jobs[grp]["message"]["type"] == "flex" and jobs[sq]["message"] is None
+        assert jobs[sq]["card"] in runner.calls[0][1]["cards"]
+    finally:
+        conn.close()
+
+
+def test_ac15_note_home_synced_and_note_post_id_reused() -> None:
+    """同步記下記事本在哪；分享被叫停時記事本那篇記下來，下一輪的請求帶著它（只分享、不再發一篇）。"""
+    conn = _connect_or_skip()
+    sq, home = "m" + "2" * 32, "s" + "2" * 32
+    cfg = _cfg(web_schema=_SCHEMA, max_backoff_wait_seconds=0)
+    try:
+        _login(conn)
+        found = lg.AdapterOutput(
+            0, groups=({"homeId": sq, "name": "台股研究社", "noteHome": home},)
+        )
+        lg.sync_groups(conn, cfg, FakeRunner(found), now_fn=lambda: NOW)
+        _enable(conn, sq)
+        _queue(conn, "picks", [sq])
+        assert lg.due_jobs(conn, _SCHEMA, NOW)[0].note_home == home
+        stop = {
+            "id": 1,
+            "sent": False,
+            "error": "code=701",
+            "backoffMs": 120000,
+            "notePostId": "P1",
+        }
+        runner = FakeRunner(lg.AdapterOutput(0, sending=(1,), results=(stop,)))
+        lg.send_due(conn, cfg, runner, now_fn=lambda: NOW, sleep=lambda s: None)
+        req = runner.calls[0][1]
+        assert req["jobs"][0]["noteHome"] == home and req["jobs"][0]["noteId"] == ""
+        assert set(req["noteImages"]) == set(req["cards"]) and req["gapMs"] == 20000
+        job = lg.due_jobs(conn, _SCHEMA, NOW + dt.timedelta(minutes=3))[0]
+        assert job.note_post_id == "P1"
+        assert job.request(cfg)["noteId"] == "P1"
+    finally:
+        conn.close()
+
+
+def test_ac15_more_than_one_run_worth_keeps_going() -> None:
+    """一次最多送 max_posts_per_run 筆，多的同一班接著送（每筆之間要等，一次塞太多會撞到轉接器逾時）。"""
+    conn = _connect_or_skip()
+    cfg = _cfg(web_schema=_SCHEMA, max_posts_per_run=2)
+    try:
+        _login(conn)
+        _queue(conn, "picks", ["c1", "c2", "c3"])
+
+        def ok(*ids: int) -> lg.AdapterOutput:
+            results = tuple({"id": i, "sent": True, "via": "note"} for i in ids)
+            return lg.AdapterOutput(0, sending=ids, results=results)
+
+        runner = FakeRunner(ok(1, 2), ok(3))
+        res = lg.send_due(conn, cfg, runner, now_fn=lambda: NOW, sleep=lambda s: None)
+        assert [len(c[1]["jobs"]) for c in runner.calls] == [2, 1]
+        assert (res.sent, res.as_note, res.left) == (3, 3, 0)
     finally:
         conn.close()
 
@@ -526,7 +693,7 @@ def test_ac6_send_saves_rotated_credential_and_marks_rows() -> None:
         assert req["liffId"] == "123-abc"
         assert [j["homeId"] for j in req["jobs"]] == ["c1", "c2", "c3", "c4"]
         # AC13 改發圖片：同一張圖發四個群組，請求裡只帶一份 PNG（base64）
-        assert list(req["cards"].values()) == [base64.b64encode(b"png").decode()]
+        assert list(req["cards"].values()) == [base64.b64encode(PNG).decode()]
         assert {j["card"] for j in req["jobs"]} == set(req["cards"])
         assert lg.load_credential(conn, _SCHEMA) == lg.Credential("a2", "r2", 2)
         assert [r[3:5] for r in _rows(conn)] == [
@@ -568,10 +735,10 @@ def test_ac13_card_images_dedup_and_missing_card_raises() -> None:
     try:
         _queue(conn, "picks", ["c1"])
         token = lg.due_jobs(conn, _SCHEMA, NOW)[0].card_token
-        assert lg.card_images(conn, _SCHEMA, [token, token]) == {token: "cG5n"}
-        assert lg.card_images(conn, _SCHEMA, []) == {}
+        assert lg.card_pngs(conn, _SCHEMA, [token, token]) == {token: PNG}
+        assert lg.card_pngs(conn, _SCHEMA, []) == {}
         with pytest.raises(DataError, match="找不到圖卡"):
-            lg.card_images(conn, _SCHEMA, [token, "0" * 32])
+            lg.card_pngs(conn, _SCHEMA, [token, "0" * 32])
     finally:
         conn.close()
 
@@ -781,8 +948,36 @@ def test_ac4_storage_json_persists_and_column_added_to_old_table() -> None:
                 "updated_at timestamptz NOT NULL, paused_until timestamptz, busy_until timestamptz, "
                 "last_error text)"
             )
+            # 記事本之前的 line_groups／line_cards／line_posts（少 note_home、note_post_id）
+            cur.execute(
+                f'CREATE TABLE "{_SCHEMA}".line_groups ('
+                "home_id text PRIMARY KEY, name text NOT NULL, enabled boolean NOT NULL DEFAULT false, "
+                "present boolean NOT NULL DEFAULT true, synced_at timestamptz NOT NULL, "
+                "updated_by text, updated_at timestamptz)"
+            )
+            cur.execute(
+                f'CREATE TABLE "{_SCHEMA}".line_cards ('
+                "token text PRIMARY KEY, date date NOT NULL, kind text NOT NULL, png bytea NOT NULL, "
+                "width integer NOT NULL, height integer NOT NULL, created_at timestamptz NOT NULL)"
+            )
+            cur.execute(
+                f'CREATE TABLE "{_SCHEMA}".line_posts ('
+                "id bigserial PRIMARY KEY, date date NOT NULL, kind text NOT NULL, home_id text NOT NULL, "
+                f'card_token text NOT NULL REFERENCES "{_SCHEMA}".line_cards(token) ON DELETE CASCADE, '
+                "alt_text text NOT NULL, link_url text NOT NULL, status text NOT NULL, via text, "
+                "enqueued_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, sent_at timestamptz, "
+                "attempts integer NOT NULL DEFAULT 0, last_error text, UNIQUE (date, kind, home_id))"
+            )
         conn.commit()
         lg.ensure_tables(conn, _SCHEMA)
+        with conn.cursor() as cur:
+            for table, col in (("line_groups", "note_home"), ("line_posts", "note_post_id")):
+                cur.execute(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+                    (_SCHEMA, table, col),
+                )
+                assert cur.fetchone(), f"{table}.{col} 沒補上"
         blob = '{"e2eeKeys:u1":"secret","reqseq":"3"}'
         lg.save_account(
             conn, _SCHEMA, lg.Credential("a1", "r1", 1, blob), now=NOW, profile={"mid": "u1"}

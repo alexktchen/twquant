@@ -16,6 +16,7 @@
 .cq-lg-groups label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cq-lg-groups input { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
 .cq-lg-groups em { color: var(--mute); font-size: 12px; font-style: normal; white-space: nowrap; }
+.cq-lg-tag { flex: none; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--mute); font-size: 11.5px; font-style: normal; }
 .cq-lg-posts { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .cq-lg-posts li { min-width: 0; }
 .cq-lg-posts img { display: block; width: 100%; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }

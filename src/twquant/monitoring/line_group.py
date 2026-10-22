@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 
 from twquant.config import LineGroupConfig
 from twquant.errors import ConfigError, DataError, ExecutionError
-from twquant.monitoring.line_card import Card, CardRow, CardSection
+from twquant.monitoring.line_card import Card, CardRow, CardSection, to_jpeg
 from twquant.monitoring.push_notify import HotGroup
 
 KINDS = ("picks", "groups", "morning", "evening")
@@ -209,6 +209,16 @@ def flex_message(alt: str, image_url: str, width: int, height: int, link: str) -
     }
 
 
+def is_square(home_id: str) -> bool:
+    """社群（OpenChat）的聊天 m…；一般群組是 c…。"""
+    return home_id.startswith("m")
+
+
+def chat_label(home_id: str) -> str:
+    """清單上標的種類（社群／群組）。"""
+    return "社群" if is_square(home_id) else "群組"
+
+
 def new_token() -> str:
     """圖卡網址裡的亂數（猜不到；32 個十六進位字）。"""
     return secrets.token_hex(16)
@@ -283,7 +293,13 @@ def parse_events(lines: Iterable[str], returncode: int, base: Credential | None)
         elif kind == "profile":
             profile = {k: str(v) for k, v in ev.items() if k != "type" and v is not None}
         elif kind == "group":
-            groups.append({"homeId": str(ev["homeId"]), "name": str(ev.get("name") or "")})
+            groups.append(
+                {
+                    "homeId": str(ev["homeId"]),
+                    "name": str(ev.get("name") or ""),
+                    "noteHome": str(ev.get("noteHome") or ""),
+                }
+            )
         elif kind == "sending":
             sending.append(int(ev["id"]))
         elif kind == "result":
@@ -395,13 +411,23 @@ class Job:
     attempts: int
     width: int
     height: int
+    note_home: str | None = None  # 記事本在哪（群組 c…、社群 s…）；還沒同步過就是 None
+    note_post_id: str | None = None  # 記事本上已經發好的那篇
 
     def request(self, cfg: LineGroupConfig) -> dict[str, Any]:
-        """給轉接器的那一筆：Flex 圖卡；備案依序是直接發圖（card，圖在請求的 cards 裡）、摘要文字。"""
+        """給轉接器的那一筆：先發記事本再分享（noteHome）；備案依序是 Flex 圖卡、直接發圖（card，圖在請求的
+        cards 裡）、摘要文字。社群不發 Flex（message=None）：LIFF 分享不支援社群。
+        """
         return {
             "id": self.id,
             "homeId": self.home_id,
-            "message": flex_message(
+            "noteHome": (self.note_home or "") if cfg.via_note else "",
+            "noteText": fallback_text(self.alt_text, self.link_url),
+            "noteCard": self.card_token,  # 記事本的圖（JPEG 在請求的 noteImages 裡）；不受 fallback_image 影響
+            "noteId": self.note_post_id or "",
+            "message": None
+            if is_square(self.home_id)
+            else flex_message(
                 self.alt_text,
                 f"{cfg.card_url_base}{self.card_token}.png",
                 self.width,
@@ -416,7 +442,9 @@ class Job:
         }
 
 
-_VIA_NOTE = {"image": "改發圖片", "text": "改發文字"}
+_VIA_NOTE = {"flex": "改發圖卡", "image": "改發圖片", "text": "改發文字"}
+# 前面失敗的那幾招（依試的順序）：第一個失敗的寫「X 發不出去，改發 Y」，之後的寫「X 也發不出去」
+_STEPS = (("noteError", "記事本"), ("flexError", "圖卡"), ("imageError", "圖片"))
 
 
 def next_state(
@@ -429,40 +457,42 @@ def next_state(
 ) -> dict[str, Any]:
     """依轉接器的結果決定這一列要改哪些欄位（純函數）。
 
-    - 送出：status=sent（via＝flex、image 或 text；改發時把前面失敗的錯誤留著）
+    - 送出：status=sent（via＝note、flex、image 或 text；改發時把前面失敗的錯誤留著）
+    - 記事本上已經有那篇（notePostId）：不管有沒有送出都記下來，下次重試只分享、不再發一篇
     - 沒結果但說了要送（送到一半中斷）：status=unknown，不重送
     - 沒結果也沒開始送：原樣（{}）
     - LINE 叫停：維持 queued，不算一次失敗；其他錯誤 attempts+1，到上限才標 failed
     """
     if result is None:
         return {"status": "unknown", "last_error": UNKNOWN_HINT} if sending else {}
+    note = {"note_post_id": str(result["notePostId"])} if result.get("notePostId") else {}
     if result.get("sent"):
         via = str(result.get("via") or "flex")
-        notes = [
-            f"{label}{result[key]}"
-            for key, label in (
-                ("flexError", f"圖卡發不出去，{_VIA_NOTE.get(via, '改發文字')}："),
-                ("imageError", "圖片也發不出去："),
-                ("captionError", "圖片後面那行網址沒發出去："),
-            )
-            if result.get(key)
-        ]
+        notes: list[str] = []
+        for key, name in _STEPS:
+            if result.get(key):
+                how = "也發不出去：" if notes else f"發不出去，{_VIA_NOTE.get(via, '改發文字')}："
+                notes.append(f"{name}{how}{result[key]}")
+        if result.get("captionError"):
+            notes.append(f"圖片後面那行網址沒發出去：{result['captionError']}")
         return {
             "status": "sent",
             "via": via,
             "sent_at": now,
             "last_error": "；".join(notes)[:1000] if notes else None,
+            **note,
         }
     error = result.get("error")
     if not error:
         raise ExecutionError(f"line_posts #{job.id}：轉接器說沒送出卻沒有錯誤：{result}")
     if result.get("backoffMs") is not None:
-        return {"last_error": BACKOFF_HINT}
+        return {"last_error": BACKOFF_HINT, **note}
     attempts = job.attempts + 1
     return {
         "attempts": attempts,
         "status": "failed" if attempts >= max_attempts else "queued",
         "last_error": str(error)[:1000],
+        **note,
     }
 
 
@@ -495,8 +525,10 @@ def ensure_tables(conn: Any, schema: str) -> None:
             f'CREATE TABLE IF NOT EXISTS "{schema}".line_groups ('
             "home_id text PRIMARY KEY, name text NOT NULL, enabled boolean NOT NULL DEFAULT false, "
             "present boolean NOT NULL DEFAULT true, synced_at timestamptz NOT NULL, "
-            "updated_by text, updated_at timestamptz)"
+            "updated_by text, updated_at timestamptz, note_home text)"
         )
+        # note_home（記事本在哪：群組自己 c…、社群聊天所屬的社群 s…）是後加的（使用者 2026-10-22 要先貼記事本再分享）
+        cur.execute(f'ALTER TABLE "{schema}".line_groups ADD COLUMN IF NOT EXISTS note_home text')
         cur.execute(
             f'CREATE TABLE IF NOT EXISTS "{schema}".line_login ('
             "id text PRIMARY KEY, status text NOT NULL, requested_by text, requested_at timestamptz, "
@@ -514,8 +546,11 @@ def ensure_tables(conn: Any, schema: str) -> None:
             f'card_token text NOT NULL REFERENCES "{schema}".line_cards(token) ON DELETE CASCADE, '
             "alt_text text NOT NULL, link_url text NOT NULL, status text NOT NULL, via text, "
             "enqueued_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, sent_at timestamptz, "
-            "attempts integer NOT NULL DEFAULT 0, last_error text, UNIQUE (date, kind, home_id))"
+            "attempts integer NOT NULL DEFAULT 0, last_error text, note_post_id text, "
+            "UNIQUE (date, kind, home_id))"
         )
+        # note_post_id：記事本上已經發好的那篇（分享被叫停時留著，下次只分享、不再發一篇）；後加的欄位
+        cur.execute(f'ALTER TABLE "{schema}".line_posts ADD COLUMN IF NOT EXISTS note_post_id text')
     conn.commit()
 
 
@@ -604,10 +639,11 @@ def save_groups(
     with conn.cursor() as cur:
         for g in groups:
             cur.execute(
-                f'INSERT INTO "{schema}".line_groups (home_id, name, synced_at) VALUES (%s, %s, %s) '
+                f'INSERT INTO "{schema}".line_groups (home_id, name, synced_at, note_home) '
+                "VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (home_id) DO UPDATE SET name = EXCLUDED.name, present = true, "
-                "synced_at = EXCLUDED.synced_at",
-                (g["homeId"], g["name"], now),
+                "synced_at = EXCLUDED.synced_at, note_home = EXCLUDED.note_home",
+                (g["homeId"], g["name"], now, g.get("noteHome") or None),
             )
         cur.execute(
             f'UPDATE "{schema}".line_groups SET present = false, synced_at = %s '
@@ -812,8 +848,9 @@ def due_jobs(conn: Any, schema: str, now: dt.datetime) -> list[Job]:
         )
         cur.execute(
             "SELECT p.id, p.kind, p.home_id, p.card_token, p.alt_text, p.link_url, p.attempts, "
-            f'c.width, c.height FROM "{schema}".line_posts p '
+            f'c.width, c.height, g.note_home, p.note_post_id FROM "{schema}".line_posts p '
             f'JOIN "{schema}".line_cards c ON c.token = p.card_token '
+            f'LEFT JOIN "{schema}".line_groups g ON g.home_id = p.home_id '
             "WHERE p.status = 'queued' AND p.expires_at > %s ORDER BY p.enqueued_at, p.id",
             (now,),
         )
@@ -822,19 +859,36 @@ def due_jobs(conn: Any, schema: str, now: dt.datetime) -> list[Job]:
     return jobs
 
 
-def card_images(conn: Any, schema: str, tokens: Sequence[str]) -> dict[str, str]:
-    """這一輪要用到的圖卡 PNG（base64，給轉接器改發圖片用；同一張圖發很多群組只帶一份）。"""
+def card_pngs(conn: Any, schema: str, tokens: Sequence[str]) -> dict[str, bytes]:
+    """這一輪要用到的圖卡 PNG（同一張圖發很多群組只讀一份）。"""
     want = sorted(set(tokens))
     if not want:
         return {}
     with conn.cursor() as cur:
         cur.execute(f'SELECT token, png FROM "{schema}".line_cards WHERE token = ANY(%s)', (want,))
-        got = {str(t): base64.b64encode(bytes(png)).decode("ascii") for t, png in cur.fetchall()}
+        got = {str(t): bytes(png) for t, png in cur.fetchall()}
     conn.commit()
     missing = [t for t in want if t not in got]
     if missing:
         raise DataError(f"{schema}.line_cards", None, f"排隊的貼文找不到圖卡：{missing}")
     return got
+
+
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def adapter_images(
+    pngs: Mapping[str, bytes], cfg: LineGroupConfig
+) -> tuple[dict[str, str], dict[str, str]]:
+    """給轉接器的圖（base64）：聊天裡發的 PNG、記事本用的 JPEG（linejs 上傳記事本圖片一律宣告 image/jpeg）。"""
+    cards = {t: _b64(b) for t, b in pngs.items()} if cfg.fallback_image else {}
+    notes = (
+        {t: _b64(to_jpeg(b, cfg.note_jpeg_quality)) for t, b in pngs.items()}
+        if cfg.via_note
+        else {}
+    )
+    return cards, notes
 
 
 def apply_update(conn: Any, schema: str, job_id: int, upd: Mapping[str, Any]) -> None:
@@ -854,6 +908,7 @@ class SendSummary:
     """send 一次的結果。left＝還留在隊裡等下一班的。"""
 
     sent: int = 0
+    as_note: int = 0
     as_image: int = 0
     as_text: int = 0
     failed: tuple[str, ...] = ()
@@ -886,11 +941,11 @@ def send_due(
     start = now_fn()
     lock_deadline = start + dt.timedelta(seconds=cfg.lock_wait_seconds)
     backoff_deadline = start + dt.timedelta(seconds=cfg.max_backoff_wait_seconds)
-    sent = as_image = as_text = 0
+    sent = as_note = as_image = as_text = 0
     failed: list[str] = []
 
     def summary(left: int, note: str = "", extra: tuple[str, ...] = ()) -> SendSummary:
-        return SendSummary(sent, as_image, as_text, (*failed, *extra), left, note)
+        return SendSummary(sent, as_note, as_image, as_text, (*failed, *extra), left, note)
 
     while True:
         now = now_fn()
@@ -912,14 +967,18 @@ def send_due(
                 release_lease(conn, schema)
                 sleep((paused - now).total_seconds())
                 continue
-            jobs = due_jobs(conn, schema, now)
+            # 一次最多送 max_posts_per_run 筆（每筆之間要等 post_gap_seconds，太多會撞到轉接器逾時），多的下一圈接著送
+            jobs = due_jobs(conn, schema, now)[: cfg.max_posts_per_run]
             cred = load_credential(conn, schema) or cred
+            cards, note_images = adapter_images(
+                card_pngs(conn, schema, [j.card_token for j in jobs]), cfg
+            )
             request = {
                 "credential": _cred_json(cred),
                 "liffId": cfg.liff_id,
-                "cards": card_images(conn, schema, [j.card_token for j in jobs])
-                if cfg.fallback_image
-                else {},
+                "gapMs": round(cfg.post_gap_seconds * 1000),
+                "cards": cards,
+                "noteImages": note_images,
                 "jobs": [j.request(cfg) for j in jobs],
             }
             out = runner("send", request, cred)
@@ -939,6 +998,7 @@ def send_due(
                 apply_update(conn, schema, job.id, upd)
                 if upd.get("status") == "sent":
                     sent += 1
+                    as_note += upd.get("via") == "note"
                     as_image += upd.get("via") == "image"
                     as_text += upd.get("via") == "text"
                 if upd.get("status") in ("failed", "unknown"):
@@ -949,7 +1009,11 @@ def send_due(
                 left = _left(conn, schema, done)
                 return summary(left, "轉接器失敗", (out.fatal,))
             if until is None:
-                return summary(_left(conn, schema, done))
+                left = _left(conn, schema, done)
+                # 這一圈有進展（有結果）而且還有排隊的（超過一次的上限）→ 再一圈；沒進展就收手，免得空轉
+                if left and out.results and len(jobs) == cfg.max_posts_per_run:
+                    continue
+                return summary(left)
         finally:
             release_lease(conn, schema)
 
