@@ -19,4 +19,4 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
 
 // 有權限的人看到都一樣、一天更新兩次：60 秒暫存（_lib/cache.ts）；先擋權限再讀暫存
 export const onRequestGet: PagesFunction<Env> = async (ctx) =>
-  (await denied(ctx.request, 'score')) ?? cached(cacheKey(ctx.request), async () => handle(ctx))
+  (await denied(ctx.request, 'score', ctx.env)) ?? cached(cacheKey(ctx.request), async () => handle(ctx))

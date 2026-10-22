@@ -1,6 +1,6 @@
 // POST /api/push：這台裝置開通知（存訂閱）；DELETE /api/push：關通知（內容 { endpoint }）。兩個都冪等。
 import { fail, guarded, json, type Env } from '../../_lib/db'
-import { accessEmail } from '../../_lib/identity'
+import { userEmail } from '../../_lib/identity'
 import { PUSH_BODY_MAX, PUSH_DDL, PUSH_MAX_PER_USER, parseSubscription } from '../../_lib/push'
 import { sameOrigin } from '../../_lib/watchlist'
 
@@ -19,7 +19,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const sub = parseSubscription(await readJson(request))
   if (sub === null) return fail(400, '通知訂閱的格式不對，或不是已知的推播服務')
   return guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     const [{ ok }] = await db<{ ok: boolean }[]>`SELECT to_regclass('web.push_subscriptions') IS NOT NULL AS ok`
     if (!ok) for (const stmt of PUSH_DDL) await db.unsafe(stmt)
@@ -40,7 +40,7 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
   const endpoint = body?.endpoint
   if (typeof endpoint !== 'string' || endpoint.length > 1000) return fail(400, '缺少要關掉的通知網址')
   return guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     const [{ ok }] = await db<{ ok: boolean }[]>`SELECT to_regclass('web.push_subscriptions') IS NOT NULL AS ok`
     if (ok) await db`DELETE FROM web.push_subscriptions WHERE endpoint = ${endpoint} AND email = ${email}`

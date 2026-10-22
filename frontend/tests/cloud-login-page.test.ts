@@ -1,53 +1,46 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { viaMainLogin } from '../functions/_lib/auth.ts'
-import { EMAIL_LOGIN_URL, GOOGLE_LOGIN_URL, LOGIN_PAGE } from '../src/cloud/auth.ts'
+import { LOGIN_PAGE } from '../src/cloud/auth.ts'
 
-// T-432：Cloudflare Access 的登入卡片固定是白的（只能改背景、logo、上下文字），
-// 所以「登入／註冊」改成先到本站的深色頁 /login，再分 Google、Email 兩條路進 Access。
+// T-432：深色登入／註冊頁 /login。T-439 起它是網站自己的頁（React，LoginPage.tsx），登入走 Supabase Auth，
+// 不再經過 Cloudflare Access 的白色卡片。
 const read = (p: string): string => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
-const login = read('public/login.html')
+const page = read('src/cloud/LoginPage.tsx')
+const css = read('src/cloud/login.css')
 
-test('T-432 AC1 登入頁：純靜態深色頁，不載腳本、不呼叫 API', () => {
-  assert.doesNotMatch(login, /<script/i)
-  assert.doesNotMatch(login, /fetch\(/)
-  assert.match(login, /<html lang="zh-Hant">/)
-  assert.match(login, /body \{[^}]*background: #0e0f14/, '頁面底色要跟網站一樣深')
-  assert.doesNotMatch(login, /background:\s*(#fff\b|#ffffff\b|white\b)/i, '不准有白底區塊')
+test('T-432 AC1 登入頁：/login 由網站自己畫（深色），不再有靜態的 login.html', () => {
+  assert.ok(!existsSync(new URL('../public/login.html', import.meta.url)), 'public/login.html 要拿掉（Cloudflare Pages 會優先給靜態檔）')
+  assert.match(read('src/main.tsx'), /pathname === '\/login'/)
+  assert.match(read('src/main.tsx'), /import\('\.\/cloud\/LoginPage'\)/)
+  assert.match(css, /\.lg-page \{[^}]*background: #0e0f14/, '頁面底色要跟網站一樣深')
+  assert.doesNotMatch(css, /background:\s*(#fff\b|#ffffff\b|white\b)/i, '不准有白底區塊')
 })
 
-test('T-432 AC2 登入頁：Google 與 Email 兩條路各自連到 Access 保護的入口，並附隱私權政策', () => {
-  const hrefs = [...login.matchAll(/href="([^"]+)"/g)].map((m) => m[1])
-  assert.ok(hrefs.includes(GOOGLE_LOGIN_URL), 'Google 按鈕')
-  assert.ok(hrefs.includes(EMAIL_LOGIN_URL), 'Email 驗證碼按鈕')
-  assert.ok(hrefs.includes('/privacy') && hrefs.includes('/about') && hrefs.includes('/'))
-  // 頁面只連到這兩個 /api 入口，不碰任何資料 API
-  assert.deepEqual(
-    hrefs.filter((h) => h.startsWith('/api/')).sort(),
-    [EMAIL_LOGIN_URL, GOOGLE_LOGIN_URL].sort(),
-  )
-  assert.match(login, /第一次登入就自動完成註冊/)
+test('T-432 AC2 登入頁：Google 與 Email 驗證碼兩條路、隱私權政策連結、第一次登入即註冊；不拿 admin 才有的功能招攬', () => {
+  assert.match(page, /signInWithGoogle\(/)
+  assert.match(page, /sendEmailCode\(/)
+  assert.match(page, /verifyEmailCode\(/)
+  assert.match(page, /href="\/privacy"/)
+  assert.match(page, /第一次登入就自動完成註冊/)
+  assert.match(page, /不是投資建議/)
   // D-208：每日名單與績效只給 admin，登入頁不能拿它們招攬一般使用者
-  assert.doesNotMatch(login, /每日名單|名單績效|潛伏飆股|大盤精選/)
-  assert.match(login, /不是投資建議/)
+  assert.doesNotMatch(page, /每日名單|名單績效|潛伏飆股|大盤精選/)
+  assert.match(page, /新聞搜尋/, '新聞已公開，登入後多的是搜尋')
 })
 
-test('T-432 AC3 入口路徑：Google 在 /api/login/ 底下（Access 保護、可單獨設一個應用），登入卡與頂欄都先到 /login', () => {
+test('T-432 AC3 入口：頂欄「登入」與登入卡「登入／註冊」都到 /login；沒有任何 /api/login、/api/logout', () => {
   assert.equal(LOGIN_PAGE, '/login')
-  assert.ok(GOOGLE_LOGIN_URL.startsWith('/api/login/'), 'Google 入口要比 /api 更深一層，才能在 Cloudflare 另設只開 Google 的應用')
-  assert.equal(EMAIL_LOGIN_URL, '/api/login')
   const app = read('src/cloud/CloudApp.tsx')
-  assert.doesNotMatch(app, /href=\{LOGIN_URL\}/, '網站裡的登入按鈕不再直接進 Cloudflare 的登入頁')
-  assert.equal((app.match(/href=\{LOGIN_PAGE\}/g) ?? []).length, 2, '頂欄「登入」與登入卡「登入／註冊」都到 /login')
+  assert.equal((app.match(/href=\{LOGIN_PAGE\}/g) ?? []).length, 2)
+  for (const p of ['functions/api/login.ts', 'functions/api/login/google.ts', 'functions/api/logout.ts', 'functions/_lib/logout.ts']) {
+    assert.ok(!existsSync(new URL(`../${p}`, import.meta.url)), `${p} 要拿掉`)
+  }
+  assert.ok(!app.includes('/api/login') && !app.includes('/cdn-cgi/access'), '網站不再連到 Cloudflare Access 的登入／登出')
 })
 
-test('T-432 AC4 /api/login/google：登入完先轉 /api/login 換主應用的通行證，不准共用暫存', () => {
-  const res = viaMainLogin(new Request('https://twquant.pages.dev/api/login/google'))
-  assert.equal(res.status, 302)
-  assert.equal(res.headers.get('location'), 'https://twquant.pages.dev/api/login')
-  assert.equal(res.headers.get('cache-control'), 'no-store')
-  const fn = read('functions/api/login/google.ts')
-  assert.match(fn, /viaMainLogin/)
-  assert.ok(!fn.includes('_lib/cache'))
+test('T-432 AC4 已登入的人開 /login 直接回首頁；登入還沒設定時說清楚', () => {
+  assert.match(page, /hasSession\(\)/)
+  assert.match(page, /authEnabled\(\)/)
+  assert.match(page, /登入還沒設定/)
 })

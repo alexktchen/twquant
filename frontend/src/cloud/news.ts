@@ -65,7 +65,7 @@ export function shown(r: NewsRow): Shown {
   return { title: r.title, summary: r.summary, lang: r.lang, tag, original: null }
 }
 
-/** 點開才翻的摘要（D-207）：/api/news/summary 的回應。budget＝今天的翻譯額度用完、error＝模型暫時叫不到、none＝不用翻 */
+/** 點開才翻的摘要（D-207）：/pub/news/summary 的回應。budget＝今天的翻譯額度用完、error＝模型暫時叫不到、none＝不用翻 */
 export type NewsSummary = { id: string; status: 'ok' | 'failed' | 'budget' | 'error' | 'none'; summary_zh: string | null }
 
 /** 打開閱讀卡時要不要另外翻摘要：英文、標題已翻好、有英文摘要、還沒有摘要譯文。 */

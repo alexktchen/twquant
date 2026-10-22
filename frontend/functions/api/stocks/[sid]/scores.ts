@@ -34,6 +34,6 @@ const handle = async (sid: string, env: Env, withLists: boolean): Promise<Respon
 
 // 同一種權限看到都一樣、一天只更新兩次：同一執行個體 60 秒暫存，省下連資料庫的 CPU（_lib/cache.ts）；有沒有名單分開存
 export const onRequestGet: PagesFunction<Env, 'sid'> = async (ctx) => {
-  const full = await allowed(ctx.request, 'picks')
+  const full = await allowed(ctx.request, 'picks', ctx.env)
   return cached(gatedKey(cacheKey(ctx.request), full), async () => handle(String(ctx.params.sid), ctx.env, full))
 }

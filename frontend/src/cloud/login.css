@@ -1,0 +1,85 @@
+/* 登入／註冊頁（T-432／T-439）：深色，配色同 cloud.css（漲紅 #F6465D、跌綠 #0ECB81、強調橘 #FF7A00） */
+.lg-page {
+  --bg: #0e0f14; --panel: #15161c; --line: #23252d; --text: #e6e7eb; --mute: #8a8f98; --soft: #c9ccd3; --accent: #ff7a00; --up: #f6465d; --down: #0ecb81;
+  box-sizing: border-box; min-height: 100vh; margin: 0; color: var(--text); background: #0e0f14;
+  font: 16px/1.6 -apple-system, 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.lg-page *, .lg-page *::before, .lg-page *::after { box-sizing: border-box; }
+/* 背景：兩團橘紅與綠的微光（漲跌色）＋淡淡的格線，不用圖片 */
+.lg-bg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(600px 420px at 12% 18%, rgba(255, 122, 0, .16), transparent 70%),
+    radial-gradient(520px 380px at 88% 82%, rgba(14, 203, 129, .10), transparent 70%),
+    linear-gradient(rgba(255, 255, 255, .025) 1px, transparent 1px) 0 0 / 100% 48px,
+    linear-gradient(90deg, rgba(255, 255, 255, .025) 1px, transparent 1px) 0 0 / 48px 100%;
+}
+.lg-wrap {
+  position: relative; z-index: 1; max-width: 980px; min-height: 100vh; margin: 0 auto; padding: 40px 22px 32px;
+  display: grid; grid-template-columns: 1fr 400px; gap: 56px; align-items: center;
+}
+.lg-brand { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 20px; }
+.lg-brand img { width: 40px; height: 40px; border-radius: 10px; }
+.lg-intro h2 { font-size: 30px; line-height: 1.35; margin: 28px 0 10px; letter-spacing: .5px; }
+.lg-intro h2 em { font-style: normal; color: var(--accent); }
+.lg-intro > p { margin: 0 0 22px; color: var(--soft); }
+.lg-perks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.lg-perks li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(21, 22, 28, .6); }
+.lg-perks b { display: block; font-size: 15.5px; }
+.lg-perks span { display: block; color: var(--mute); font-size: 14px; line-height: 1.5; }
+.lg-perks i { flex: none; width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px rgba(255, 122, 0, .7); }
+.lg-perks li:nth-child(2) i { background: var(--up); box-shadow: 0 0 10px rgba(246, 70, 93, .7); }
+.lg-perks li:nth-child(3) i { background: var(--down); box-shadow: 0 0 10px rgba(14, 203, 129, .7); }
+
+.lg-card {
+  padding: 30px 28px 24px; border-radius: 18px; background: rgba(21, 22, 28, .92);
+  border: 1px solid var(--line); box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.lg-card h1 { margin: 0; font-size: 26px; }
+.lg-sub { margin: 6px 0 24px; color: var(--mute); font-size: 15px; }
+.lg-btn {
+  display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; height: 50px; border-radius: 12px; border: 0;
+  cursor: pointer; text-decoration: none; font: inherit; font-weight: 600; font-size: 16.5px; transition: filter .15s, border-color .15s, background .15s;
+}
+.lg-btn:disabled { opacity: .6; cursor: default; }
+.lg-btn svg { width: 20px; height: 20px; flex: none; }
+.lg-google { background: var(--accent); color: #fff; box-shadow: 0 8px 24px rgba(255, 122, 0, .28); }
+.lg-google:hover, .lg-google:focus-visible { filter: brightness(1.08); }
+.lg-google .g { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--bg); }
+.lg-google .g svg { width: 17px; height: 17px; }
+.lg-or { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: var(--mute); font-size: 13.5px; }
+.lg-or::before, .lg-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.lg-mail { color: var(--text); border: 1px solid #343743; background: rgba(255, 255, 255, .02); }
+.lg-mail svg { color: var(--accent); }
+.lg-mail:hover:not(:disabled), .lg-mail:focus-visible { border-color: var(--accent); background: rgba(255, 122, 0, .06); }
+.lg-form { display: grid; gap: 10px; }
+.lg-input {
+  width: 100%; height: 48px; padding: 0 14px; border-radius: 12px; border: 1px solid #343743; background: rgba(255, 255, 255, .03);
+  color: var(--text); font: inherit; font-size: 16px; outline: none;
+}
+.lg-input:focus { border-color: var(--accent); }
+.lg-input::placeholder { color: var(--mute); }
+.lg-code { letter-spacing: .3em; text-align: center; font-size: 22px; font-variant-numeric: tabular-nums; }
+.lg-hint { margin: 8px 2px 0; color: var(--mute); font-size: 13px; line-height: 1.55; }
+.lg-err { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: rgba(246, 70, 93, .12); color: #ffb3bd; font-size: 14px; line-height: 1.5; }
+.lg-ok { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: rgba(14, 203, 129, .12); color: #9fe8c8; font-size: 14px; line-height: 1.5; }
+.lg-link { background: none; border: 0; padding: 0; color: #ff9a3c; font: inherit; font-size: 14px; cursor: pointer; text-decoration: underline; }
+.lg-safe { display: flex; gap: 8px; margin: 22px 0 0; padding: 12px 14px; border-radius: 10px; background: rgba(255, 255, 255, .03); color: var(--soft); font-size: 13.5px; line-height: 1.6; }
+.lg-safe svg { flex: none; width: 16px; height: 16px; margin-top: 3px; color: var(--down); }
+.lg-page a { color: #ff9a3c; }
+.lg-page .lg-brand { color: var(--text); }
+.lg-page .lg-back { display: inline-block; margin-top: 18px; color: var(--mute); font-size: 14px; text-decoration: none; }
+.lg-page .lg-back:hover { color: var(--text); }
+.lg-foot { grid-column: 1 / -1; padding-top: 18px; border-top: 1px solid var(--line); color: var(--mute); font-size: 13px; }
+.lg-page .lg-foot a { color: var(--mute); white-space: nowrap; }
+.lg-page a:focus-visible, .lg-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.lg-top-brand { display: none; margin-bottom: 18px; }
+
+@media (max-width: 860px) {
+  .lg-wrap { grid-template-columns: 1fr; gap: 28px; padding-top: 24px; align-items: start; }
+  .lg-card { order: -1; padding: 26px 20px 20px; }
+  .lg-intro h2 { font-size: 23px; margin-top: 4px; }
+  .lg-intro .lg-brand { display: none; }
+  .lg-top-brand { display: flex; }
+}

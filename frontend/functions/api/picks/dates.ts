@@ -29,4 +29,4 @@ export function listDates(request: Request, env: Env, publicDetail?: string): Pr
 
 // 60 秒暫存（_lib/cache.ts）；先擋權限再讀暫存
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) =>
-  (await denied(request, 'picks')) ?? cached(cacheKey(request), () => listDates(request, env))
+  (await denied(request, 'picks', env)) ?? cached(cacheKey(request), () => listDates(request, env))

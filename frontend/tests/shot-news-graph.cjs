@@ -1,5 +1,5 @@
 // 新聞關係圖（心智圖）截圖（手動檢查用）：node tests/shot-news-graph.cjs <baseUrl> <outDir> <items.json> <health.json> [graph.json]
-// /api/news/* 用錄好的回應代替：items 前幾則要有 mentions（才有「關係圖」按鈕）；graph.json＝一個或一串 /v1/graph 的回應
+// /pub/news/* 用錄好的回應代替：items 前幾則要有 mentions（才有「關係圖」按鈕）；graph.json＝一個或一串 /v1/graph 的回應
 // （沒給 → 同資料夾的 news-graph.json），依 id 找、找不到就回第一個（點緯穎、神達那兩步要它是台積電那張圖）。
 const { chromium } = require('playwright')
 const fs = require('node:fs')
@@ -17,9 +17,9 @@ const path = require('node:path')
     const page = await ctx.newPage()
     await page.setExtraHTTPHeaders({ 'cf-access-authenticated-user-email': 'cktalex@gmail.com' })
     await page.route('**/api/layout', (r) => r.fulfill({ json: { layout: null } }))
-    await page.route('**/api/news/items**', (r) => r.fulfill({ json: items }))
-    await page.route('**/api/news/health', (r) => r.fulfill({ json: health }))
-    await page.route('**/api/news/graph**', (r) => {
+    await page.route('**/pub/news/items**', (r) => r.fulfill({ json: items }))
+    await page.route('**/pub/news/health', (r) => r.fulfill({ json: health }))
+    await page.route('**/pub/news/graph**', (r) => {
       const id = new URL(r.request().url()).searchParams.get('id')
       r.fulfill({ json: graphs.find((g) => g.item.id === id) ?? graphs[0] })
     })

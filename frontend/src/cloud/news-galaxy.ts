@@ -1,5 +1,5 @@
 // 新聞全景星雲圖（T-418）的型別與純函式：3D 投影、亮度、標籤避讓、點選。畫面在 NewsGalaxy.tsx。
-// 資料由排程（scripts/news_galaxy.py）算好放新聞庫，/api/news/galaxy 讀最新一筆。
+// 資料由排程（scripts/news_galaxy.py）算好放新聞庫，/pub/news/galaxy 讀最新一筆。
 
 export type GalaxyItem = {
   id: string
