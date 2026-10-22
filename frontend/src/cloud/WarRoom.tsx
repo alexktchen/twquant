@@ -7,6 +7,7 @@
 import { Pencil } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { visibleLayout, type Feature } from './access'
+import { AdSlot } from './AdSlot'
 import { fetchMarketLive, fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
 import { HeadlinesCard } from './HeadlinesCard'
@@ -70,6 +71,7 @@ export function WarRoom({
   onNews,
   onScore,
   onStock,
+  signedIn,
 }: {
   refresh: number
   /** 這個帳號能用的功能：沒有 picks／score 就不顯示名單卡、名單成績卡 */
@@ -81,6 +83,8 @@ export function WarRoom({
   onNews: () => void
   onScore: (line: string) => void
   onStock: (sid: string, name: string | null) => void
+  /** /api/me 確定登入了（T-433：之前不放廣告） */
+  signedIn: boolean
 }) {
   const [data, setData] = useState<WarRoomData | null>(null)
   const [err, setErr] = useState('')
@@ -186,13 +190,16 @@ export function WarRoom({
       {editing ? (
         <LayoutEditor layout={layout} onOrder={setOrder} onToggle={toggle} onReset={reset} onDone={() => setEditing(false)} error={layoutErr} />
       ) : (
-        <div className="cq-war-cards">
-          {layout.order.map((id) => (
-            <div key={id} className={cardDef(id).wide ? 'cq-war-cell cq-wide' : 'cq-war-cell'} data-card={id}>
-              {card[id]()}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="cq-war-cards">
+            {layout.order.map((id) => (
+              <div key={id} className={cardDef(id).wide ? 'cq-war-cell cq-wide' : 'cq-war-cell'} data-card={id}>
+                {card[id]()}
+              </div>
+            ))}
+          </div>
+          <AdSlot place="home" signedIn={signedIn} />
+        </>
       )}
     </main>
   )
