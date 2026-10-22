@@ -172,6 +172,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     let raf = 0, last = 0, t0 = performance.now(), resetSeen = 0, fitSeen = 0
     /** 搜尋選了東西：拉近到這個比例（一開始的 1.8 倍），牽連的線與名字才拉得開 */
     const FIT_S = 1.8
+    /** 手機（檢視框貼下緣、看得到的區域只剩上半）拉近少一點，牽連的亮點才留在框上方（使用者 2026-10-23：「擋到了」） */
+    const FIT_S_PHONE = 1.3
     /** 搜尋框佔掉圖的上緣：轉動中心最上只到這裡（手機檢視框貼下緣時） */
     const TOP_PAD = 96
     /** 路徑逐段點亮（像 graphify 的 demo）：每一步隔 HOP 秒開始、花 DRAW 秒畫到底；一個亮點的牽連線 WEB_DRAW 秒從中心射出去 */
@@ -233,7 +235,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       }
       if (lv.fit !== fitSeen) {
         fitSeen = lv.fit
-        if (view.s < home.s * FIT_S) goal = { q: rot, s: home.s * FIT_S }
+        const fitS = W < 600 ? FIT_S_PHONE : FIT_S
+        if (view.s < home.s * fitS) goal = { q: rot, s: home.s * fitS }
       }
       const dt = Math.min(0.05, (now - (last || now)) / 1000)
       last = now
@@ -252,6 +255,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       pivot.z = ease(pivot.z, pivotGoal.z, dt, 6)
       const insp = inspRef.current
       const dock = !!(lv.sel && insp && dockInspector(W, insp.offsetWidth))
+      insp?.classList.toggle('dock', dock) // 貼下緣的版本矮一點：新聞標題收起來、超過就捲
       view.y = ease(view.y, pivotScreenY(H, dock ? insp!.offsetHeight : null, 50, TOP_PAD), dt, 6)
       const tt = (now - t0) / 1000
       P.items = items.map((it) => project(it, rot, view, pivot))
@@ -705,15 +709,17 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                     ))}
                   </div>
                 )}
-                {data.items
-                  .filter((x) => x.m.includes(hub.id))
-                  .sort((a, b) => (a.t < b.t ? 1 : -1))
-                  .slice(0, 3)
-                  .map((x) => (
-                    <p key={x.id} className="gx-row">
-                      {shortWhen(x.t, today)}　{x.title}
-                    </p>
-                  ))}
+                <div className="gx-news">
+                  {data.items
+                    .filter((x) => x.m.includes(hub.id))
+                    .sort((a, b) => (a.t < b.t ? 1 : -1))
+                    .slice(0, 3)
+                    .map((x) => (
+                      <p key={x.id} className="gx-row">
+                        {shortWhen(x.t, today)}　{x.title}
+                      </p>
+                    ))}
+                </div>
                 <div className="gx-acts">
                   <button className="gx-focus" onClick={() => setFocus(hub.id)}>
                     <Maximize2 size={14} aria-hidden="true" />
