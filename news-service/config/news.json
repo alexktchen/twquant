@@ -418,6 +418,10 @@
     "peers_per_group": 5,
     "mentions_per_item": 6
   },
+  "evidence": {
+    "max_ids": 80,
+    "max_entities": 8
+  },
   "stock_news": {
     "stock_max_degree": 2,
     "stock_days": 7,

@@ -297,6 +297,8 @@ test('2026-10-21 閱讀卡：同一事件與相似新聞分開、同標題只留
 
 test('T-429 AC6：點開才翻摘要——proxy 只轉 id、逾時給長一點；英文、標題翻好、有摘要、還沒摘要譯文才另外翻', async () => {
   assert.deepEqual(ALLOWED['/v1/summary'], ['id'])
+  assert.deepEqual(ALLOWED['/v1/evidence'], ['ids', 'entities'], 'T-437 證據句')
+  assert.equal(upstreamUrl(BASE, '/v1/evidence', 'https://x/api/news/evidence?ids=a%2Cb&entities=tw%3A2330&x=1'), 'https://abc.supabase.co/functions/v1/api/v1/evidence?entities=tw%3A2330&ids=a%2Cb')
   assert.equal(upstreamUrl(BASE, '/v1/summary', 'https://x/api/news/summary?id=cnbc-top-0&limit=9'), 'https://abc.supabase.co/functions/v1/api/v1/summary?id=cnbc-top-0')
   assert.ok(SUMMARY_TIMEOUT_MS > UPSTREAM_TIMEOUT_MS, '要等模型翻譯')
   const en = row('e', '2026-10-22T02:00:00Z', { title: 'Nvidia jumps 4%', summary: 'Shares rose 4%.', translation: 'ok', title_zh: '輝達大漲4%', summary_zh: null })

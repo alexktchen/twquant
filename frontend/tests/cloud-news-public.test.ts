@@ -9,7 +9,7 @@ import { guestTab } from '../src/cloud/tabs.ts'
 const read = (p: string): string => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const env = { NEWS_API_URL: 'https://abc.supabase.co/functions/v1/api/', NEWS_API_KEY: 'k3y' }
 
-const PUBLIC = ['items', 'graph', 'stock', 'stock-counts', 'health', 'thread', 'similar', 'summary', 'galaxy', 'stock-days', 'digest']
+const PUBLIC = ['items', 'graph', 'stock', 'stock-counts', 'health', 'thread', 'similar', 'summary', 'galaxy', 'stock-days', 'digest', 'evidence']
 const PRIVATE = ['review', 'search']
 
 test('T-438 AC1 端點位置：只讀的在 functions/pub/news/，核可與搜尋留在 functions/api/news/', () => {

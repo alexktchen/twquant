@@ -3,6 +3,7 @@
 // 所有 IO（抓網頁、時鐘、資料庫）由呼叫端注入：Edge Function 給真的、測試給假的。一個來源壞掉不擋其他來源。
 import { validateCooccurConfig, type CooccurConfig } from './cooccur.ts'
 import { validateEmbedConfig, type EmbedConfig } from './embed.ts'
+import { validateEvidenceConfig, type EvidenceConfig } from './evidence.ts'
 import { validateStorageConfig, type StorageConfig } from './api.ts'
 import { validateDigestConfig, type DigestConfig } from './digest.ts'
 import { validateStockNewsConfig, type StockNewsConfig } from './stocknews.ts'
@@ -37,6 +38,8 @@ export type NewsConfig = {
   /** T-404：關係圖（propagate 的參數＋同族群線、/v1/items 每則幾個實體） */
   graph: NewsGraphConfig
   stock_news: StockNewsConfig
+  /** T-437：證據句一次最多問幾則、幾個實體 */
+  evidence: EvidenceConfig
   cooccur: CooccurConfig
   embed: EmbedConfig
   storage: StorageConfig
@@ -89,6 +92,7 @@ export function validateConfig(x: unknown): NewsConfig {
   validateMentionConfig(c!.mention)
   validateGraphConfig(c!.graph)
   validateStockNewsConfig(c!.stock_news)
+  validateEvidenceConfig(c!.evidence)
   validateCooccurConfig(c!.cooccur)
   validateEmbedConfig(c!.embed)
   validateStorageConfig(c!.storage)

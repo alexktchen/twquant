@@ -123,5 +123,11 @@
 .gxf .cq-reader-list a { padding-bottom: 6px; }
 .gxf .cq-reader-list a small { flex-wrap: wrap; }
 .gxf-n { font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 5px; color: #c4a5ff; background: rgba(160, 120, 255, .16); }
+/* 證據句（T-437）：標題裡的名字標色；名字不在標題裡就在底下多一行比對到的那段字 */
+.gxf-mk { background: none; color: inherit; font-weight: 700; padding: 0 1px; border-bottom: 2px solid; }
+.gxf-mk.tw { color: #ffb199; border-color: #d95926; } .gxf-mk.abroad { color: #b9d3ff; border-color: #3987e5; } .gxf-mk.cluster { color: #8ff0df; border-color: #199e70; }
+.gxf-ev { display: flex; align-items: baseline; gap: 6px; margin: -4px 0 8px; font-size: 13.5px; line-height: 1.5; color: #b8bcc6; }
+.gxf-ev-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #8a8f98; align-self: center; }
+.gxf-ev-dot.tw { background: #d95926; } .gxf-ev-dot.abroad { background: #3987e5; } .gxf-ev-dot.cluster { background: #199e70; }
 .gxf-ents { display: flex; flex-wrap: wrap; gap: 2px 14px; padding-bottom: 10px; }
 .cq .gxf-ents .cq-news-ent { font-size: 13px; color: #b8bcc6; }
