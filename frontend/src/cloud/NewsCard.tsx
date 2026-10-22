@@ -1,5 +1,6 @@
 // 首頁「昨日消息」（T-379／D-188）：預設看名單股；點一則就地展開內文；可收起（收起時輪播名單股的公告）。
 // 2026-10-18 改版（地鐵告示）：每則＝時間、代號名稱（名單／追蹤小標）、主旨一行、類別色塊；說明移到 title。
+// T-430：沒有名單權限的帳號沒有「名單股」這一格，預設看全部。
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { CardFrame } from './CardFrame'
@@ -12,6 +13,7 @@ export function NewsCard({
   items,
   watchNews,
   watchSids,
+  withList,
   onStock,
   collapsed,
   onToggle,
@@ -22,11 +24,15 @@ export function NewsCard({
   /** 追蹤股的公告（另外查） */
   watchNews: NewsItem[]
   watchSids: string[]
+  /** 有名單權限：多「名單股」一格並預設看它 */
+  withList: boolean
   onStock: (sid: string, name: string | null) => void
   collapsed: boolean
   onToggle: () => void
 }) {
-  const [filter, setFilter] = useState<Filter>('listed')
+  const [chosen, setFilter] = useState<Filter>('listed')
+  // 權限晚一步讀回來：沒有名單權限時「名單股」那格不在，選到它就當全部
+  const filter: Filter = chosen === 'listed' && !withList ? 'all' : chosen
   const open = !collapsed
   const [expanded, setExpanded] = useState<string | null>(null)
   const watchSet = useMemo(() => new Set(watchSids), [watchSids])
@@ -90,9 +96,11 @@ export function NewsCard({
       extra={
         open && (
           <div className="cq-seg cq-seg-small">
-            <button className={filter === 'listed' ? 'on' : ''} onClick={() => setFilter('listed')}>
-              名單股 <em>{listed.length}</em>
-            </button>
+            {withList && (
+              <button className={filter === 'listed' ? 'on' : ''} onClick={() => setFilter('listed')}>
+                名單股 <em>{listed.length}</em>
+              </button>
+            )}
             <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
               全部 <em>{all.length}</em>
             </button>
@@ -108,7 +116,7 @@ export function NewsCard({
       {list.length === 0 && <p className="cq-war-mute">{filter === 'listed' ? '名單股昨天到今天沒有公告。' : '沒有符合的公告。'}</p>}
       <ul
         className="cq-newslist"
-        title="來源：公開資訊觀測站重大訊息，點一則看內文。「全部」＝名單股、追蹤股的每一則，加上全市場的處置、變更交易、減增資、併購、庫藏股、停工訴訟、董總異動。公告只說發生了什麼，不等於利多或利空"
+        title={`來源：公開資訊觀測站重大訊息，點一則看內文。「全部」＝${withList ? '名單股、' : ''}追蹤股的每一則，加上全市場的處置、變更交易、減增資、併購、庫藏股、停工訴訟、董總異動。公告只說發生了什麼，不等於利多或利空`}
       >
         {list.map(row)}
       </ul>

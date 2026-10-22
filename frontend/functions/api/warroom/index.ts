@@ -1,16 +1,19 @@
-// GET /api/warroom：首頁戰情室（T-379／D-188）——晨報（另回有晨報的日期，給歷史切換；某天內容走 /api/warroom/brief）、大盤體檢（D-199 起附上市／上櫃）、期交所盤後、今天名單速覽、昨日重大訊息、行事曆。
-// 每個人看到都一樣（追蹤股的消息另由 /api/warroom/news 查）：同一執行個體 60 秒暫存。任何一張表還沒建 → 那一塊是 null，不擋其他。
+// GET /api/warroom：首頁戰情室（T-379／D-188）——晨報（另回有晨報的日期，給歷史切換；某天內容走 /api/warroom/brief）、大盤體檢（D-199 起附上市／上櫃）、期交所盤後、今天名單速覽、昨日重大訊息。
+// 行事曆 T-431／D-209 搬出首頁（法說會、除權息改標在追蹤股與名單股上），這裡不再查。
+// 同一種權限看到都一樣（追蹤股的消息另由 /api/warroom/news 查）：同一執行個體 60 秒暫存。任何一張表還沒建 → 那一塊是 null，不擋其他。
 // 即時的美股、台指期、類股強弱與族群資金照舊走 /api/mood/*、/api/groups。
+// 名單速覽（picks）與昨日消息的「名單」標記只給 admin（T-430／D-208）：其他人 picks 是 null、消息照一般規則挑。
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
+import { allowed, gatedKey } from '../../_lib/gate'
 import { LINES } from '../../_lib/picks'
 import { readNewColumn, readRows } from '../../_lib/scorecard'
 import { briefKeys, selectLatestBrief } from '../../_lib/brief-db'
-import { BRIEF_DATES_LIMIT, CALENDAR_DAYS, addDays, attachContent, pickNews, revenueDeadline, taipeiDay, type NewsRow } from '../../_lib/warroom'
+import { BRIEF_DATES_LIMIT, addDays, attachContent, pickNews, taipeiDay, type NewsRow } from '../../_lib/warroom'
 
 type Row = Record<string, unknown>
 
-const handle: PagesFunction<Env> = async ({ env }) =>
+const handle = async (env: Env, withPicks: boolean): Promise<Response> =>
   guarded(env, async (db) => {
     const today = taipeiDay(Date.now())
     const brief = await selectLatestBrief(db)
@@ -40,10 +43,10 @@ const handle: PagesFunction<Env> = async ({ env }) =>
       : []
     const taifex = tx?.j ?? null
 
-    // 今天名單（最新一天）與前一天比，算新增
-    const pickDates = await readRows(
-      () => db<{ d: string }[]>`SELECT DISTINCT date::text AS d FROM serving.daily_picks ORDER BY d DESC LIMIT 2`,
-    )
+    // 今天名單（最新一天）與前一天比，算新增；沒有名單權限就不讀
+    const pickDates = withPicks
+      ? await readRows(() => db<{ d: string }[]>`SELECT DISTINCT date::text AS d FROM serving.daily_picks ORDER BY d DESC LIMIT 2`)
+      : []
     let picks: { date: string; lines: { code: string; name: string; n: number; new: number }[] } | null = null
     let listed = new Set<string>()
     if (pickDates.length > 0) {
@@ -96,20 +99,6 @@ const handle: PagesFunction<Env> = async ({ env }) =>
       : []
     const news = attachContent(picked, bodies)
 
-    const until = addDays(today, CALENDAR_DAYS - 1)
-    const conferences = await readRows(
-      () => db<Row[]>`
-        SELECT date::text AS date, stock_id, name, conf_time, summary FROM serving.conference_calendar
-        WHERE date BETWEEN ${today}::date AND ${until}::date ORDER BY date, conf_time, stock_id`,
-    )
-    // 除權除息預告（證交所＋櫃買）；corporate_events 是除權息之後才有的結果，查不到未來
-    const dividends = await readRows(
-      () => db<Row[]>`
-        SELECT date::text AS date, stock_id, name, kind, cash_dividend, stock_ratio, rights_ratio
-        FROM serving.dividend_calendar
-        WHERE date BETWEEN ${today}::date AND ${until}::date ORDER BY date, stock_id`,
-    )
-
     return json({
       today,
       brief,
@@ -119,8 +108,11 @@ const handle: PagesFunction<Env> = async ({ env }) =>
       taifex,
       picks,
       news: { since, items: news },
-      calendar: { conferences, dividends, revenue: revenueDeadline(today) },
     })
   })
 
-export const onRequestGet: PagesFunction<Env> = (ctx) => cached(cacheKey(ctx.request), async () => handle(ctx))
+// 有沒有名單權限分開暫存（_lib/gate.ts）
+export const onRequestGet: PagesFunction<Env> = async (ctx) => {
+  const full = await allowed(ctx.request, 'picks')
+  return cached(gatedKey(cacheKey(ctx.request), full), async () => handle(ctx.env, full))
+}

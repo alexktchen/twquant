@@ -62,7 +62,11 @@ test('暫存只用在每個人都一樣的資料：追蹤股、登入身分、�
   for (const p of ['api/watchlist/index.ts', 'api/watchlist/[sid].ts', 'api/me.ts', 'api/logout.ts', 'api/login.ts', 'api/quotes.ts']) {
     assert.ok(!read(p).includes('_lib/cache'), `${p} 不應該用共用暫存`)
   }
-  for (const p of ['api/picks/index.ts', 'api/picks/dates.ts', 'pub/dates.ts', 'api/stocks/[sid]/ohlc.ts', 'api/stocks/[sid]/picks.ts', 'api/stocks/[sid]/scores.ts', 'api/stocks/search.ts']) {
+  for (const p of ['api/picks/index.ts', 'api/picks/dates.ts', 'pub/dates.ts', 'api/stocks/[sid]/ohlc.ts', 'api/stocks/[sid]/picks.ts', 'api/stocks/search.ts']) {
     assert.ok(read(p).includes('cached(cacheKey('), `${p} 應該用共用暫存`)
+  }
+  // T-430：有名單權限的人多幾欄 → 依權限分開暫存（鍵不一樣），不能共用同一份
+  for (const p of ['api/stocks/[sid]/scores.ts', 'api/warroom/index.ts']) {
+    assert.ok(read(p).includes('cached(gatedKey(cacheKey(ctx.request), full)'), `${p} 應該依權限分開暫存`)
   }
 })

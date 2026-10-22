@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { galaxyFromUrl, tabFromUrl, withoutTab, withoutView } from '../src/cloud/tabs.ts'
 
-test('T-354／T-379：族群資金通知帶 ?tab=group，盤勢併進首頁後點開到首頁；不認得的不理', () => {
-  assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=group'), 'home')
+test('T-354／T-431：族群資金通知帶 ?tab=group，點開到「盤勢」分頁；不認得的不理', () => {
+  assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=group'), 'group')
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=home'), 'home')
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=score&x=1'), 'score')
   assert.equal(tabFromUrl('https://twquant.pages.dev/'), null)
