@@ -2,13 +2,15 @@
 // 行事曆 T-431／D-209 搬出首頁（法說會、除權息改標在追蹤股與名單股上），這裡不再查。
 // 同一種權限看到都一樣（追蹤股的消息另由 /api/warroom/news 查）：同一執行個體 60 秒暫存。任何一張表還沒建 → 那一塊是 null，不擋其他。
 // 即時的美股、台指期、類股強弱與族群資金照舊走 /api/mood/*、/api/groups。
-// 名單速覽（picks）與昨日消息的「名單」標記只給 admin（T-430／D-208）：其他人 picks 是 null、消息照一般規則挑。
+// 名單速覽（picks）與昨日消息的「名單」標記只給 admin（T-430／D-208）：其他人 picks 是 null、消息照一般規則挑；
+// 晨報裡的名單痕跡（舊晨報才有）也拿掉（T-435／D-212，_lib/brief-scrub.ts）。
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { allowed, gatedKey } from '../../_lib/gate'
 import { LINES } from '../../_lib/picks'
 import { readNewColumn, readRows } from '../../_lib/scorecard'
 import { briefKeys, selectLatestBrief } from '../../_lib/brief-db'
+import { scrubBrief } from '../../_lib/brief-scrub'
 import { BRIEF_DATES_LIMIT, addDays, attachContent, pickNews, taipeiDay, type NewsRow } from '../../_lib/warroom'
 
 type Row = Record<string, unknown>
@@ -16,7 +18,8 @@ type Row = Record<string, unknown>
 const handle = async (env: Env, withPicks: boolean): Promise<Response> =>
   guarded(env, async (db) => {
     const today = taipeiDay(Date.now())
-    const brief = await selectLatestBrief(db)
+    const latest = await selectLatestBrief(db)
+    const brief = withPicks ? latest : scrubBrief(latest)
     // 歷史清單一天兩格（盤前、盤後）：「2026-10-20|evening」
     const briefDays = await briefKeys(db, BRIEF_DATES_LIMIT * 2)
     // to_jsonb：日期變成 "YYYY-MM-DD"、數字照數字，不經過驅動程式的 Date
