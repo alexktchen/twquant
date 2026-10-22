@@ -375,3 +375,43 @@ export function hubPath(d: GalaxyData, g: HubGraph, a: string, b: string, maxHop
   if (ids.length - 1 > maxHops) return null
   return { hubs: ids.map((id) => byId.get(id)!), n: ids.slice(1).map((id, i) => g.get(ids[i])!.get(id)!) }
 }
+
+// ── 證據句（T-437；使用者 2026-10-23：「如果我想要用在工作上我要怎麼定位那段字？」）──
+
+/** 一次最多問新聞服務幾則（跟 news-service config evidence.max_ids 一樣） */
+export const EVIDENCE_BATCH = 80
+
+export type TextPart = { t: string; cls?: string }
+
+/**
+ * 把一段字切成「普通字」與「要標色的名字」：labels 依序找最早出現的（同位置長的先），給畫面用 <mark> 標出來。
+ * 名字沒出現就整段是普通字。
+ */
+export function evidenceParts(text: string, labels: { label: string; cls: string }[]): TextPart[] {
+  const ls = labels.filter((l) => l.label).sort((a, b) => b.label.length - a.label.length)
+  const out: TextPart[] = []
+  let rest = text
+  while (rest) {
+    let at = -1, hit: { label: string; cls: string } | null = null
+    for (const l of ls) {
+      const i = rest.indexOf(l.label)
+      if (i >= 0 && (at < 0 || i < at)) {
+        at = i
+        hit = l
+      }
+    }
+    if (!hit) {
+      out.push({ t: rest })
+      break
+    }
+    if (at > 0) out.push({ t: rest.slice(0, at) })
+    out.push({ t: hit.label, cls: hit.cls })
+    rest = rest.slice(at + hit.label.length)
+  }
+  return out
+}
+
+/** 還沒問過證據的新聞（fetched＝每個實體已問過哪些新聞）：任一個實體沒問過就要問 */
+export function evidenceNeeded(ids: string[], entities: string[], fetched: Map<string, Set<string>>): string[] {
+  return ids.filter((id) => entities.some((e) => !fetched.get(e)?.has(id)))
+}

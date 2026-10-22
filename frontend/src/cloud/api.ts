@@ -8,7 +8,7 @@ import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
 import type { Brief, BriefActual, LiveMarket, NewsItem, WarRoomData } from './war'
-import type { NewsDigest, NewsHealth, NewsKind, NewsReview, NewsSummary, NewsThread, StockNewsDays, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
+import type { NewsDigest, NewsEvidence, NewsHealth, NewsKind, NewsReview, NewsSummary, NewsThread, StockNewsDays, NewsRow, NewsSearch, ReviewDecision, ReviewResult, SimilarNews, StockNews, StockNewsCounts } from './news'
 import type { NewsGraph as NewsGraphData } from './news-graph'
 import type { GalaxyData } from './news-galaxy'
 import type { StockCalItem } from './stockcal'
@@ -173,6 +173,8 @@ export const fetchNewsThread = (id: string) => get<NewsThread>(`/api/news/thread
 /** 一則新聞的相似新聞（T-410） */
 export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
 /** 點開才翻的摘要（D-207） */
+/** 證據句（T-437）：這些新聞裡這些實體是在哪段字被比對到 */
+export const fetchNewsEvidence = (ids: string[], entities: string[]) => get<NewsEvidence>(`/api/news/evidence?ids=${encodeURIComponent(ids.join(','))}&entities=${encodeURIComponent(entities.join(','))}`)
 export const fetchNewsSummary = (id: string) => get<NewsSummary>(`/api/news/summary?id=${encodeURIComponent(id)}`)
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */
 export const fetchNewsGalaxy = () => get<GalaxyData>('/api/news/galaxy')

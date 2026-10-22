@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/summary?id=（D-207：點開才翻摘要）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/summary?id=（D-207：點開才翻摘要）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/evidence?ids=…&entities=…（T-437：證據句）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import typeWeights from '../../../config/news_types.json' with { type: 'json' }
@@ -7,6 +7,7 @@ import { API_VERSION, health, parseItemsQuery } from '../../../src/api.ts'
 import type { EntityType } from '../../../src/graph.ts'
 import { buildNodes, itemMentions, type EdgeRow, type EntityRow, type GNode, type ItemMention } from '../../../src/graphapi.ts'
 import { validateConfig } from '../../../src/ingest.ts'
+import { parseEvidenceQuery, pickEvidence, type EvidenceRow } from '../../../src/evidence.ts'
 import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
 import { baseDaysOf, hotStocks, multiOutlet, topTopics, type CoRow, type EvRow, type HotRow, type TopicRow } from '../../../src/digest.ts'
 import { REVIEW_TYPES, edgeKey, groupDrafts, isOwner, parseReviewBody, planReview, type DecisionIn, type DraftEdge, type EntityInfo } from '../../../src/review.ts'
@@ -325,6 +326,19 @@ Deno.serve(async (req) => {
           outlets: [...new Set(s.sources.map((x) => meta.get(x)?.name ?? x))].sort(),
         })),
       })
+    }
+    if (path === '/v1/evidence') {
+      // 證據句（T-437）：比對名字時存下的「命中字前後各 20 字」；只有目前比對規則的那一批
+      let q: { ids: string[]; entities: string[] }
+      try {
+        q = parseEvidenceQuery(url.searchParams.get('ids'), url.searchParams.get('entities'), cfg.evidence)
+      } catch (e) {
+        return json({ detail: e instanceof Error ? e.message : String(e) }, 400)
+      }
+      const rows = await sql<EvidenceRow[]>`
+        select item_id, entity_id, evidence, created_at from news.mentions
+        where item_id = any(${q.ids}) and entity_id = any(${q.entities}) and rule_version = ${cfg.mention.rule_version}`
+      return json({ api_version: API_VERSION, items: pickEvidence(rows) })
     }
     if (path === '/v1/summary') {
       // 點開才翻摘要（D-207）：翻過就直接給，沒翻過現在翻（一次約 2～5 秒）；額度用完回 budget，網站顯示英文摘要

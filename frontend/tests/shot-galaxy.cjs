@@ -76,6 +76,17 @@ function fakeGalaxy() {
     await page.route('**/api/news/health', (r) => r.fulfill({ json: { now: '2026-10-22T10:30:00Z', last_ok_at: '2026-10-22T10:30:00Z', stale: false, sources: [] } }))
     await page.route('**/api/news/digest', (r) => r.fulfill({ json: { as_of: '2026-10-22T10:30:00Z', base_days: 7, topics: { items: [], everywhere: [] }, multi: [], hot: [] } }))
     await page.route('**/api/news/galaxy', (r) => r.fulfill({ json: galaxy }))
+    // 證據句（T-437）：每則對每個問到的實體都回一段「命中字前後各 20 字」
+    await page.route('**/api/news/evidence**', (r) => {
+      const u = new URL(r.request().url())
+      const ids = (u.searchParams.get('ids') || '').split(','), ents = (u.searchParams.get('entities') || '').split(',')
+      const items = {}
+      for (const id of ids) for (const e of ents) {
+        const h = galaxy.hubs.find((x) => x.id === e)
+        if (h) (items[id] ??= {})[e] = `供應鏈消息指出，${h.label}本季訂單`
+      }
+      r.fulfill({ json: { items } })
+    })
     await page.goto(`${base}/?tab=news&view=galaxy`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1500)
     const btn = page.getByRole('button', { name: '同意並進入' })
@@ -95,6 +106,15 @@ function fakeGalaxy() {
     await input.press('Enter')
     await page.waitForTimeout(2200)
     await stage.screenshot({ path: path.join(out, `${name}-2-web.png`) })
+    // 單獨看＋證據句
+    await page.getByRole('button', { name: /單獨看/ }).first().click()
+    await page.waitForTimeout(1200)
+    await page.locator('.gxf').screenshot({ path: path.join(out, `${name}-6-focus.png`) })
+    await page.locator('.gxf-rel .cq-news-ent').nth(2).click() // 兩個都提到
+    await page.waitForTimeout(1200)
+    await page.locator('.gxf').screenshot({ path: path.join(out, `${name}-7-focus-with.png`) })
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(600)
     await input.fill('聯發科 記憶體')
     await page.waitForTimeout(300)
     await stage.screenshot({ path: path.join(out, `${name}-3-two.png`) })

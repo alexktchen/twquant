@@ -259,3 +259,22 @@ test('T-436 AC4 兩個之間怎麼牽：步數少優先、同步數挑粗的；�
   const self = hubPath(focusData, g, 'tw:2330', 'tw:2330')!
   assert.deepEqual([self.hubs.length, self.n], [1, []])
 })
+
+// ── T-437 證據句（使用者 2026-10-23：「如果我想要用在工作上我要怎麼定位那段字？」）──
+import { EVIDENCE_BATCH, evidenceNeeded, evidenceParts } from '../src/cloud/news-galaxy.ts'
+
+test('T-437 AC3 標題與證據句裡的名字標色：最早出現的先、同位置長的先、沒出現就整段普通字', () => {
+  const marks = [{ label: '台積電', cls: 'tw' }, { label: '輝達', cls: 'abroad' }, { label: '台積', cls: 'tw' }]
+  assert.deepEqual(evidenceParts('輝達下單台積電 2 奈米', marks), [{ t: '輝達', cls: 'abroad' }, { t: '下單' }, { t: '台積電', cls: 'tw' }, { t: ' 2 奈米' }])
+  assert.deepEqual(evidenceParts('聯發科法說', marks), [{ t: '聯發科法說' }])
+  assert.deepEqual(evidenceParts('台積ADR', marks), [{ t: '台積', cls: 'tw' }, { t: 'ADR' }], '只有短的出現就標短的')
+  assert.deepEqual(evidenceParts('', marks), [])
+})
+
+test('T-437 AC4 只補問沒問過的：任一個實體沒問過那則就要問', () => {
+  const fetched = new Map([['tw:2330', new Set(['a', 'b'])]])
+  assert.deepEqual(evidenceNeeded(['a', 'b', 'c'], ['tw:2330'], fetched), ['c'])
+  assert.deepEqual(evidenceNeeded(['a', 'b'], ['tw:2330', 'us:NVDA'], fetched), ['a', 'b'], '換成兩個都提到：輝達還沒問過')
+  assert.deepEqual(evidenceNeeded([], ['tw:2330'], fetched), [])
+  assert.ok(EVIDENCE_BATCH >= 20)
+})
