@@ -10,8 +10,8 @@ import { tabFromUrl } from '../src/cloud/tabs.ts'
 test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 LINE 群組，大小寫不分', () => {
   assert.deepEqual(ROLE_MEMBERS.line_admin, ['cktalex@gmail.com'])
   assert.deepEqual(FEATURE_ROLES.line, ['line_admin'])
-  assert.deepEqual(rolesOf('CKTalex@gmail.com '), ['line_admin'])
-  assert.deepEqual(featuresOf('cktalex@gmail.com'), ['line'])
+  assert.deepEqual(rolesOf('CKTalex@gmail.com '), ['admin', 'line_admin']) // T-430 起同一人也是 admin
+  assert.deepEqual(featuresOf('cktalex@gmail.com'), ['line', 'picks', 'score'])
   assert.ok(can('cktalex@gmail.com', 'line'))
   assert.ok(!can('someone@example.com', 'line'))
   assert.deepEqual(featuresOf(null), [])

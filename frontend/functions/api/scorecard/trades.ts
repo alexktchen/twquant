@@ -1,6 +1,7 @@
-// GET /api/scorecard/trades?line=CORE：這條線每一筆新進名單的結果（新到舊）。
+// GET /api/scorecard/trades?line=CORE：這條線每一筆新進名單的結果（新到舊）。只給 admin（T-430／D-208）。
 import { fail, guarded, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
+import { denied } from '../../_lib/gate'
 import { NOT_READY, lineOk, rawJson, readRows } from '../../_lib/scorecard'
 
 const handle: PagesFunction<Env> = async ({ request, env }) => {
@@ -16,4 +17,6 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
   })
 }
 
-export const onRequestGet: PagesFunction<Env> = (ctx) => cached(cacheKey(ctx.request), async () => handle(ctx))
+// 先擋權限再讀暫存
+export const onRequestGet: PagesFunction<Env> = async (ctx) =>
+  (await denied(ctx.request, 'score')) ?? cached(cacheKey(ctx.request), async () => handle(ctx))

@@ -4,29 +4,34 @@ import test from 'node:test'
 import { CARD_ID_RE, LAYOUT_MAX_CARDS, parseLayout } from '../functions/_lib/layout.ts'
 import { HOME_CARDS, defaultLayout, initialLayout, normalizeLayout, sameLayout, toggleCollapsed, withOrder, type CardId } from '../src/cloud/layout.ts'
 import { CAL_KEY, HEADS_KEY, HEAT_KEY, MOOD_KEY, NEWS_KEY } from '../src/cloud/prefs.ts'
+// T-431／D-209：行事曆（cal）、族群熱力圖（heat）搬出首頁；下面原本拿它們當例子的地方改用還在首頁的卡，檢查的事情不變
 
 const ids = HOME_CARDS.map((c) => c.id)
 
-test('使用者 2026-10-17：首頁版面預設——每張卡一次、熱力圖在最下面、新聞頭條與行事曆預設收起', () => {
+test('使用者 2026-10-17：首頁版面預設——每張卡一次、新聞頭條預設收起；T-431 起沒有行事曆與熱力圖', () => {
   const d = defaultLayout()
   assert.deepEqual(d.order, ids)
   assert.equal(new Set(d.order).size, d.order.length)
-  assert.equal(d.order.at(-1), 'heat')
-  assert.deepEqual(d.collapsed, ['heads', 'cal'])
+  assert.ok(!(ids as string[]).includes('cal') && !(ids as string[]).includes('heat'))
+  assert.deepEqual(d.collapsed, ['heads'])
   assert.ok(ids.every((id) => CARD_ID_RE.test(id)), '網站的卡片代號都符合伺服器的格式')
   assert.ok(ids.length <= LAYOUT_MAX_CARDS)
 })
 
 test('使用者 2026-10-17：存起來的版面——不認得的丟掉、重複只留一個、以後新增的卡插在預設位置旁、壞資料用預設', () => {
-  const saved = { order: ['heat', 'brief', 'bogus', 'brief', 'news'], collapsed: ['heat', 'bogus', 'mood'] }
+  const saved = { order: ['chips', 'brief', 'bogus', 'brief', 'news'], collapsed: ['chips', 'bogus', 'mood'] }
   const l = normalizeLayout(saved)
-  // 存的時候只有 heat、brief、news：其他卡插在預設順序裡前一張卡之後
-  assert.deepEqual(l.order.slice(0, 2), ['heat', 'brief'])
+  // 存的時候只有 chips、brief、news：其他卡插在預設順序裡前一張卡之後
+  assert.deepEqual(l.order.slice(0, 2), ['chips', 'brief'])
   assert.equal(l.order.indexOf('heads'), l.order.indexOf('brief') + 1, '新聞頭條接在今日一句話後面')
   assert.equal(l.order.length, ids.length)
   assert.deepEqual([...l.order].sort(), [...ids].sort())
-  // 收起：存的（heat、mood）＋新插入的卡用預設（heads、cal 預設收起）
-  assert.deepEqual(new Set(l.collapsed), new Set(['heat', 'mood', 'heads', 'cal']))
+  // 收起：存的（chips、mood）＋新插入的卡用預設（heads 預設收起）
+  assert.deepEqual(new Set(l.collapsed), new Set(['chips', 'mood', 'heads']))
+  // T-431 以前存的版面還有 cal、heat：讀回來當不認得的丟掉
+  const old = normalizeLayout({ order: ['heat', 'cal', ...ids], collapsed: ['cal', 'heat', 'news'] })
+  assert.deepEqual(old.order, ids)
+  assert.deepEqual(old.collapsed, ['news'])
   assert.deepEqual(l.collapsed, l.order.filter((id) => l.collapsed.includes(id)), '收起清單照順序排')
   for (const bad of [null, 'x', { order: 'brief' }, {}]) assert.ok(sameLayout(normalizeLayout(bad), defaultLayout()))
 })
@@ -36,20 +41,21 @@ test('使用者 2026-10-17：收起↔展開、換順序', () => {
   const t = toggleCollapsed(d, 'brief')
   assert.ok(t.collapsed.includes('brief'))
   assert.ok(!toggleCollapsed(t, 'brief').collapsed.includes('brief'))
-  assert.deepEqual(d.collapsed, ['heads', 'cal'], '原本那份不變')
-  const order = ['heat', ...ids.filter((x) => x !== 'heat')] as CardId[]
+  assert.deepEqual(d.collapsed, ['heads'], '原本那份不變')
+  const order = ['news', ...ids.filter((x) => x !== 'news')] as CardId[]
   const w = withOrder(t, order)
-  assert.equal(w.order[0], 'heat')
+  assert.equal(w.order[0], 'news')
   assert.deepEqual(new Set(w.collapsed), new Set(t.collapsed))
 })
 
 test('使用者 2026-10-17：打開首頁——有存版面就用；沒有就沿用改版前各卡記的展開／收起', () => {
-  const stored = JSON.stringify({ order: ['cal', ...ids.filter((x) => x !== 'cal')], collapsed: [] })
-  assert.equal(initialLayout(stored, () => null).order[0], 'cal')
+  const stored = JSON.stringify({ order: ['news', ...ids.filter((x) => x !== 'news')], collapsed: [] })
+  assert.equal(initialLayout(stored, () => null).order[0], 'news')
   assert.ok(sameLayout(initialLayout('{壞掉', () => null), defaultLayout()))
-  const legacy: Record<string, string> = { [HEAT_KEY]: '0', [HEADS_KEY]: '1', [MOOD_KEY]: '0', [NEWS_KEY]: '1', [CAL_KEY]: '1' }
+  // 熱力圖、行事曆的舊鍵還在瀏覽器裡也不影響（那兩張卡已不在首頁）
+  const legacy: Record<string, string> = { [HEAT_KEY]: '0', [HEADS_KEY]: '1', [MOOD_KEY]: '0', [NEWS_KEY]: '0', [CAL_KEY]: '1' }
   const l = initialLayout(null, (k) => legacy[k] ?? null)
-  assert.deepEqual(new Set(l.collapsed), new Set(['heat', 'mood']), '以前收起熱力圖、市場氛圍，打開新聞頭條、行事曆')
+  assert.deepEqual(new Set(l.collapsed), new Set(['news', 'mood']), '以前收起昨日消息、市場氛圍，打開新聞頭條')
   assert.ok(sameLayout(initialLayout(null, () => null), defaultLayout()))
 })
 

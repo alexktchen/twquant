@@ -3,7 +3,7 @@
 import postgres from 'npm:postgres@3.4.5'
 import type { FetchResult, NewsStore, SourceState } from '../../../src/ingest.ts'
 import type { EntityAliases, MentionDeps, PendingItem } from '../../../src/mention.ts'
-import type { Pending, TranslateDeps } from '../../../src/translate.ts'
+import type { Pending, SummaryDeps, SummaryItem, TranslateDeps } from '../../../src/translate.ts'
 import type { CooccurDeps, CooccurEdge, PairCount } from '../../../src/cooccur.ts'
 import type { EntityType } from '../../../src/graph.ts'
 import type { TypeDeps } from '../../../src/types.ts'
@@ -83,7 +83,7 @@ export function translateDeps(sql: Sql, model: string): TranslateDeps {
   if (!account || !token) throw new Error('CLOUDFLARE_ACCOUNT_ID／CLOUDFLARE_AI_TOKEN 沒設定，不能翻譯')
   return {
     now: () => new Date(),
-    // 還沒翻過「目前這一版內容」的英文新聞，新的先
+    // 還沒翻過「目前這一版內容」的英文新聞，新的先（只翻標題，D-207；摘要點開才翻，見 summaryDeps）
     pending: (limit) => sql<Pending[]>`
       select i.id, coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
              coalesce(v.content_sha, i.content_sha) as content_sha
@@ -114,6 +114,39 @@ export function translateDeps(sql: Sql, model: string): TranslateDeps {
         const data = rows.map((r) => ({ ...r, checks: sql.json(r.checks) }))
         await sql`insert into news.translations ${sql(data)} on conflict (item_id, content_sha) do nothing`
       }
+      if (usage.length > 0) await sql`insert into news.llm_usage ${sql(usage)}`
+    },
+  }
+}
+
+/** 點開才翻的摘要（D-207，/v1/summary）：讀這則目前這一版、排程翻好的標題，結果記 news.summary_translations。 */
+export function summaryDeps(sql: Sql, model: string): SummaryDeps {
+  return {
+    now: () => new Date(),
+    item: async (id) => {
+      const [r] = await sql<SummaryItem[]>`
+        select i.id, i.lang, coalesce(v.content_sha, i.content_sha) as content_sha,
+               coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
+               case when t.status = 'ok' then t.title_zh end as title_zh, case when t.status = 'ok' then t.summary_zh end as summary_zh
+        from news.raw_items i
+        left join lateral (
+          select title_orig, summary_orig, content_sha from news.raw_item_versions
+          where item_id = i.id order by seen_at desc limit 1
+        ) v on true
+        left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
+        where i.id = ${id}`
+      return r ?? null
+    },
+    saved: async (id, contentSha) => {
+      const [r] = await sql<{ status: 'ok' | 'failed'; summary_zh: string | null }[]>`
+        select status, summary_zh from news.summary_translations where item_id = ${id} and content_sha = ${contentSha}`
+      return r ?? null
+    },
+    usedToday: usedNeurons(sql),
+    ai: workersAi(model),
+    save: async (row, usage) => {
+      // 兩個人同時點開同一則：先寫的算數
+      if (row) await sql`insert into news.summary_translations ${sql({ ...row, checks: sql.json(row.checks) })} on conflict (item_id, content_sha) do nothing`
       if (usage.length > 0) await sql`insert into news.llm_usage ${sql(usage)}`
     },
   }

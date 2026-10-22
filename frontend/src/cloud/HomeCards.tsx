@@ -2,12 +2,9 @@
 // 2026-10-18 改版（地鐵告示）：表格改成數字卡（標籤、大數字、一行小字），說明文字移到滑過的 title；數字紅漲綠跌。
 // 只供看盤：這些數字都不進選股、不進模型。
 import { ArrowRight, ChevronRight } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { fetchGroups } from './api'
+import { useState } from 'react'
 import { CardFrame } from './CardFrame'
-import { GroupsPage } from './GroupsPage'
 import { pct } from './format'
-import { ratioText, type RankRow } from './group'
 import { bigMoney, chgSub, lots, signedBig } from './home'
 import type { Slide } from './Reel'
 import type { Scorecard } from './scorecard'
@@ -334,55 +331,6 @@ export function ScoreHomeCard({
             </div>
           )
         })}
-      </div>
-    </CardFrame>
-  )
-}
-
-/** 收起時輪播幾個族群（資金倍數最高的幾個）。 */
-const HEAT_SLIDES = 8
-
-export function HeatCard({
-  refresh,
-  listed,
-  onStock,
-  ...fold
-}: { refresh: number; listed: { date: string; sids: Map<string, string[]> } | null; onStock: (sid: string, name: string | null) => void } & Fold) {
-  // 收起時才另外讀一份族群排行來輪播（展開時熱力圖自己會讀）
-  const [rows, setRows] = useState<RankRow[] | null>(null)
-  const [date, setDate] = useState<string | null>(null)
-  useEffect(() => {
-    if (!fold.collapsed) return
-    let stale = false
-    fetchGroups()
-      .then((r) => {
-        if (stale) return
-        setRows(r.rows)
-        setDate(r.date)
-      })
-      .catch(() => !stale && setRows([]))
-    return () => {
-      stale = true
-    }
-  }, [fold.collapsed, refresh])
-  const top = (rows ?? [])
-    .filter((r) => r.ratio !== null)
-    .sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))
-    .slice(0, HEAT_SLIDES)
-  const slides = top.map((r) =>
-    kv(r.grp, r.grp, `資金 ${ratioText(r.ratio) ?? '—'}　${pct(r.ret, 1)}`, tone(r.ret), `${r.up} 漲 ${r.down} 跌・${r.n} 檔`),
-  )
-  return (
-    <CardFrame
-      id="heat"
-      className="cq-war-heat"
-      when={fold.collapsed && date ? `${dayLabel(date)}・資金倍數最高` : '資金倍數・漲跌・成員'}
-      slides={slides}
-      empty={rows === null ? '族群資料讀取中…' : '還沒有族群資金資料。'}
-      {...fold}
-    >
-      <div className="cq-war-heat-body">
-        <GroupsPage refresh={refresh} listed={listed} onStock={onStock} withMood={false} />
       </div>
     </CardFrame>
   )

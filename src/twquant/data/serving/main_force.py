@@ -207,14 +207,14 @@ def seed(
             from twquant.data.serving.schema import spec_of
 
             bt = spec_of("broker_trades")
-            for d in recent[-copy_trades:]:
-                rows = pl.read_database(
-                    f'SELECT {", ".join(bt.column_names)} FROM "{schema}".broker_trades WHERE date = %(d)s',
-                    src,
-                    execute_options={"params": {"d": d}},
-                )
-                upsert(cur, schema, bt, rows)
-                copied += rows.height
+            # 一次讀完再一次寫：upsert 的暫存表 ON COMMIT 才刪，同一交易裡寫第二次會撞名（2026-10-21 雲端種子實測）
+            rows = pl.read_database(
+                f'SELECT {", ".join(bt.column_names)} FROM "{schema}".broker_trades WHERE date = ANY(%(d)s)',
+                src,
+                execute_options={"params": {"d": recent[-copy_trades:]}},
+            )
+            upsert(cur, schema, bt, rows)
+            copied = rows.height
     dst.commit()
     return (
         f"種子：{base.height} 家分點的隔日沖累計（截至 {as_of}，其中達門檻 {flagged(base, ratio, min_events).len()} 家）、"
