@@ -25,3 +25,12 @@ def test_ac_sources_record_terms_and_check_date() -> None:
     for s in src["sources"]:
         assert s["terms"].startswith("https://"), s["id"]
         assert len(s["checked"]) == 10, s["id"]
+
+
+def test_t429_ac5_neuron_split_leaves_buffer() -> None:
+    """D-207：Workers AI 免費額度一天 10,000 Neurons；新聞＋Python 兩份分配要留 1,000 緩衝。"""
+    news = yaml.safe_load((_ROOT / "configs" / "news.yaml").read_text(encoding="utf-8"))
+    llm = yaml.safe_load((_ROOT / "configs" / "llm.yaml").read_text(encoding="utf-8"))
+    tr = news["translate"]
+    assert tr["daily_neurons"] + llm["daily_neuron_budget"] + 1_000 <= 10_000
+    assert 0 <= tr["reserve_for_embed"] < tr["daily_neurons"]

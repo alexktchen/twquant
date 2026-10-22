@@ -6,7 +6,7 @@ import { sameOrigin } from './watchlist.ts'
 export type NewsEnv = { NEWS_API_URL?: string; NEWS_API_KEY?: string }
 
 /** 每個端點准許轉過去的查詢參數（其餘丟掉，不讓瀏覽器亂帶）。 */
-export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search' | '/v1/review' | '/v1/digest' | '/v1/galaxy' | '/v1/stock-news-days' | '/v1/thread', string[]> = {
+export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/stock-news' | '/v1/stock-news-counts' | '/v1/similar' | '/v1/search' | '/v1/review' | '/v1/digest' | '/v1/galaxy' | '/v1/stock-news-days' | '/v1/thread' | '/v1/summary', string[]> = {
   '/v1/items': ['since', 'until', 'kind', 'source', 'limit', 'type'],
   '/v1/health': [],
   /** 一則新聞的關係圖（T-402／T-404）：id＝新聞 id；找不到 → 404 照轉 */
@@ -29,6 +29,8 @@ export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/sto
   '/v1/stock-news-days': ['id'],
   /** 這件事的來龍去脈（T-420）：id＝新聞 id */
   '/v1/thread': ['id'],
+  /** 點開才翻的摘要（D-207）：id＝新聞 id */
+  '/v1/summary': ['id'],
 }
 /**
  * 指定新聞服務在哪個區域執行（Supabase 的 x-region）：資料庫在新加坡，不指定的話從台灣打過去會在東京跑，
@@ -37,6 +39,8 @@ export const ALLOWED: Record<'/v1/items' | '/v1/health' | '/v1/graph' | '/v1/sto
 export const UPSTREAM_REGION = 'ap-southeast-1'
 /** 等新聞服務多久（毫秒）：Edge Function 冷啟動約 1 秒，查詢通常 1 秒內 */
 export const UPSTREAM_TIMEOUT_MS = 8_000
+/** 點開才翻摘要要等模型（一次約 2～5 秒，沒過檢查會重翻一次）：給長一點 */
+export const SUMMARY_TIMEOUT_MS = 25_000
 
 /** 上游網址：新聞服務基底＋路徑＋准許的參數（照字母排，同一組參數＝同一個暫存鍵）。 */
 export function upstreamUrl(base: string, path: keyof typeof ALLOWED, requestUrl: string): string {
@@ -53,7 +57,7 @@ const reply = (body: string, status: number) =>
   new Response(body, { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store' } })
 
 /** POST 的內容與登入者（核可頁）。user＝驗過 Cloudflare Access 權杖的 email，新聞服務拿它比對擁有者名單。 */
-export type ProxyOpts = { method?: 'GET' | 'POST'; body?: string; user?: string | null }
+export type ProxyOpts = { method?: 'GET' | 'POST'; body?: string; user?: string | null; timeoutMs?: number }
 
 /** 轉一次。沒設定、連不上、逾時、回的不是 JSON → 503（不外洩上游網址）；400／404 照轉（參數錯是使用者看得懂的訊息）。 */
 export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl: string, fetchFn: typeof fetch = fetch, opts: ProxyOpts = {}): Promise<Response> {
@@ -70,7 +74,7 @@ export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl
         ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
       },
       ...(opts.body !== undefined ? { body: opts.body } : {}),
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? UPSTREAM_TIMEOUT_MS),
     })
   } catch {
     return reply(JSON.stringify({ detail: '新聞服務暫時連不上' }), 503)

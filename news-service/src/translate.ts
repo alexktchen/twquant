@@ -1,9 +1,11 @@
-// 國外新聞翻譯（T-401／SPEC-017 §4）：Workers AI qwen3 把標題＋摘要翻成台灣繁中。
+// 國外新聞翻譯（T-401／SPEC-017 §4）：Workers AI qwen3 翻成台灣繁中。
+// D-207（2026-10-22）：排程只翻標題（一天四、五百則國際新聞，連摘要一起翻額度不夠）；摘要等有人點開那則才翻（summaryFor）。
 // 檢查分兩種：會「擋」的（數字換算後對不上、出現簡體字、譯文的英文字原文沒有、留著沒翻的英文字）→ 重試一次、仍不過就不用譯文、網站顯示原文標「未譯」；
 // 只「記錄」的（漲跌方向詞相反、中文數字、對岸用語、多出原文沒有的數字）→ 照用，結果存在 checks，兩週後看誤擋率再決定。
 // 指令在 system、資料在 user（SPEC-008 §0.3）。純函式；呼叫模型與資料庫由呼叫端注入。
 
-export const PROMPT_VERSION = '2026-10-20.1' // 2026-10-20：詞彙表加 Canon（保留英文）
+export const PROMPT_VERSION = '2026-10-22.1' // 2026-10-22：只翻標題（D-207）；2026-10-20：詞彙表加 Canon（保留英文）
+export const SUMMARY_PROMPT_VERSION = '2026-10-22.1'
 
 export type TranslateConfig = {
   model: string
@@ -52,22 +54,42 @@ export function validateTranslateConfig(x: unknown): TranslateConfig {
 
 // ── 請求與回應 ─────────────────────────────────────────────────────────────
 
-export function systemPrompt(cfg: TranslateConfig): string {
-  const terms = Object.entries(cfg.glossary)
+const glossaryLine = (cfg: TranslateConfig): string =>
+  '詞彙表：' +
+  Object.entries(cfg.glossary)
     .map(([en, zh]) => `${en}＝${zh}`)
     .join('；')
+
+/** 標題與摘要共用的翻譯規則。 */
+const RULES = [
+  '規則：',
+  '1. 只翻譯：不加評論、不加原文沒有的字詞（原文沒說「無糖」「士兵」「起訴」就不能寫）、不推測、不省略原文的數字。',
+  '   片語照整句意思翻，不逐字翻（turn on＝轉而看壞、look past＝不理會、beat forecasts＝優於預期）。',
+  '2. 數字一律用阿拉伯數字（第3季、2026年、G7、5G 照原樣）。金額換成中文單位：1 billion＝10億、3.5 billion＝35億、500 million＝5億、25 million＝2,500萬、1 trillion＝1兆。百分比照抄（4.5%）。',
+  '3. 公司、機構、人名、產品用詞彙表的台灣慣用譯名；不在詞彙表又不確定台灣譯名的，一律保留英文原文照抄（例：Huawei-JAC Maextro、Takaichi），不准自己音譯或猜中文名。',
+  '4. 英文一般字詞都要翻成中文，不可留英文單字（專有名詞與縮寫除外）。',
+  '5. 漲跌、升降方向照原文，不可相反。',
+]
+
+/** 排程批次：只翻標題（D-207）。 */
+export function systemPrompt(cfg: TranslateConfig): string {
   return [
-    '你是財經新聞翻譯。把每則英文新聞的標題與摘要翻成台灣繁體中文（台灣用語、全形標點）。',
-    '規則：',
-    '1. 只翻譯：不加評論、不加原文沒有的字詞（原文沒說「無糖」「士兵」「起訴」就不能寫）、不推測、不省略原文的數字。',
-    '   片語照整句意思翻，不逐字翻（turn on＝轉而看壞、look past＝不理會、beat forecasts＝優於預期）。',
-    '2. 數字一律用阿拉伯數字（第3季、2026年、G7、5G 照原樣）。金額換成中文單位：1 billion＝10億、3.5 billion＝35億、500 million＝5億、25 million＝2,500萬、1 trillion＝1兆。百分比照抄（4.5%）。',
-    '3. 公司、機構、人名、產品用詞彙表的台灣慣用譯名；不在詞彙表又不確定台灣譯名的，一律保留英文原文照抄（例：Huawei-JAC Maextro、Takaichi），不准自己音譯或猜中文名。',
-    '4. 英文一般字詞都要翻成中文，不可留英文單字（專有名詞與縮寫除外）。',
-    '5. 漲跌、升降方向照原文，不可相反。',
-    '6. 標題 40 字以內；摘要照原意翻完。原文沒有摘要時 summary_zh 給空字串。',
-    `詞彙表：${terms}`,
-    '輸出 JSON：{"items":[{"id":"…","title_zh":"…","summary_zh":"…"}]}，每一則都要有，id 照抄。',
+    '你是財經新聞翻譯。把每則英文新聞的標題翻成台灣繁體中文（台灣用語、全形標點）。',
+    ...RULES,
+    '6. 標題 40 字以內。',
+    glossaryLine(cfg),
+    '輸出 JSON：{"items":[{"id":"…","title_zh":"…"}]}，每一則都要有，id 照抄。',
+  ].join('\n')
+}
+
+/** 點開才翻的摘要（D-207）：原文標題與已翻好的中文標題只給模型對齊用詞。 */
+export function summarySystemPrompt(cfg: TranslateConfig): string {
+  return [
+    '你是財經新聞翻譯。把這則英文新聞的摘要翻成台灣繁體中文（台灣用語、全形標點）。標題與中文標題只是參考，讓用詞一致，不用翻也不要寫進摘要。',
+    ...RULES,
+    '6. 摘要照原意翻完，不縮短。',
+    glossaryLine(cfg),
+    '輸出 JSON：{"summary_zh":"…"}。',
   ].join('\n')
 }
 
@@ -78,32 +100,44 @@ export const RESPONSE_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { id: { type: 'string' }, title_zh: { type: 'string' }, summary_zh: { type: 'string' } },
-        required: ['id', 'title_zh', 'summary_zh'],
+        properties: { id: { type: 'string' }, title_zh: { type: 'string' } },
+        required: ['id', 'title_zh'],
       },
     },
   },
   required: ['items'],
 }
 
-/** Workers AI REST 的請求內容（同 src/twquant/insight/client.py cloudflare_request_body）。 */
+export const SUMMARY_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: { summary_zh: { type: 'string' } },
+  required: ['summary_zh'],
+}
+
+const body = (cfg: TranslateConfig, system: string, user: unknown, schema: unknown): Record<string, unknown> => ({
+  messages: [
+    { role: 'system', content: system + cfg.system_suffix },
+    { role: 'user', content: JSON.stringify(user) },
+  ],
+  max_tokens: cfg.max_tokens,
+  response_format: { type: 'json_schema', json_schema: schema },
+})
+
+/** Workers AI REST 的請求內容（同 src/twquant/insight/client.py cloudflare_request_body）：一批標題。 */
 export function requestBody(cfg: TranslateConfig, items: Source[]): Record<string, unknown> {
-  const user = JSON.stringify({ items: items.map((s) => ({ id: s.id, title: s.title, summary: s.summary ?? '' })) })
-  return {
-    messages: [
-      { role: 'system', content: systemPrompt(cfg) + cfg.system_suffix },
-      { role: 'user', content: user },
-    ],
-    max_tokens: cfg.max_tokens,
-    response_format: { type: 'json_schema', json_schema: RESPONSE_SCHEMA },
-  }
+  return body(cfg, systemPrompt(cfg), { items: items.map((s) => ({ id: s.id, title: s.title })) }, RESPONSE_SCHEMA)
+}
+
+/** 一則摘要的請求內容。 */
+export function summaryRequestBody(cfg: TranslateConfig, it: { title: string; title_zh: string; summary: string }): Record<string, unknown> {
+  return body(cfg, summarySystemPrompt(cfg), { title: it.title, title_zh: it.title_zh, summary: it.summary }, SUMMARY_RESPONSE_SCHEMA)
 }
 
 const THINK = /<think>[\s\S]*?<\/think>/g
 const FENCE = /^```[a-zA-Z]*\s*|\s*```$/g
 
-/** Workers AI 回應 → 譯文與 token 數；success=false、沒內容、沒用量、格式不對 → 丟錯（同 Python parse_cloudflare_reply）。 */
-export function parseReply(payload: unknown): { items: Translated[]; inputTokens: number; outputTokens: number } {
+/** Workers AI 回應 → 模型給的 JSON 物件與 token 數；success=false、沒內容、沒用量 → 丟錯（同 Python parse_cloudflare_reply）。 */
+function replyObject(payload: unknown): { obj: unknown; inputTokens: number; outputTokens: number } {
   const p = payload as { success?: boolean; errors?: unknown; result?: Record<string, unknown> } | null
   if (!p?.success) throw new Error(`Workers AI 回報失敗：${JSON.stringify(p?.errors ?? null)}`)
   const result = p.result ?? {}
@@ -113,14 +147,28 @@ export function parseReply(payload: unknown): { items: Translated[]; inputTokens
   if (usage.prompt_tokens === undefined || usage.completion_tokens === undefined) throw new Error('Workers AI 回應沒有 usage，無法記帳')
   if (content === null || content === undefined) throw new Error(`Workers AI 回應內容為空（completion_tokens=${usage.completion_tokens}）`)
   const obj = typeof content === 'string' ? JSON.parse(content.replace(THINK, '').trim().replace(FENCE, '').trim()) : content
-  const items = (obj as { items?: unknown }).items
+  return { obj, inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens }
+}
+
+/** 一批標題的回應 → 譯文（summary_zh 一律空字串：批次只翻標題）；格式不對 → 丟錯。 */
+export function parseReply(payload: unknown): { items: Translated[]; inputTokens: number; outputTokens: number } {
+  const r = replyObject(payload)
+  const items = (r.obj as { items?: unknown }).items
   if (!Array.isArray(items)) throw new Error('Workers AI 回應沒有 items')
   const out: Translated[] = []
   for (const it of items as Record<string, unknown>[]) {
-    if (typeof it.id !== 'string' || typeof it.title_zh !== 'string' || typeof it.summary_zh !== 'string') throw new Error(`譯文格式不對：${JSON.stringify(it).slice(0, 120)}`)
-    out.push({ id: it.id, title_zh: it.title_zh.trim(), summary_zh: it.summary_zh.trim() })
+    if (typeof it.id !== 'string' || typeof it.title_zh !== 'string') throw new Error(`譯文格式不對：${JSON.stringify(it).slice(0, 120)}`)
+    out.push({ id: it.id, title_zh: it.title_zh.trim(), summary_zh: '' })
   }
-  return { items: out, inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens }
+  return { items: out, inputTokens: r.inputTokens, outputTokens: r.outputTokens }
+}
+
+/** 一則摘要的回應 → 摘要譯文；格式不對 → 丟錯。 */
+export function parseSummaryReply(payload: unknown): { summary_zh: string; inputTokens: number; outputTokens: number } {
+  const r = replyObject(payload)
+  const zh = (r.obj as { summary_zh?: unknown }).summary_zh
+  if (typeof zh !== 'string') throw new Error(`摘要譯文格式不對：${JSON.stringify(r.obj).slice(0, 120)}`)
+  return { summary_zh: zh.trim(), inputTokens: r.inputTokens, outputTokens: r.outputTokens }
 }
 
 export const neurons = (cfg: TranslateConfig, inTok: number, outTok: number): number =>
@@ -351,7 +399,7 @@ export type TranslateDeps = {
 
 export type TranslateResult = { translated: number; failed: number; budget_stop: boolean }
 
-/** 一批一批翻；擋下的那則單獨重翻一次，還是不過就記 failed（網站顯示原文）。額度用完就停，剩下的下次。 */
+/** 一批一批翻標題；擋下的那則單獨重翻一次，還是不過就記 failed（網站顯示原文）。額度用完就停，剩下的下次。 */
 export async function translatePending(cfg: TranslateConfig, deps: TranslateDeps): Promise<TranslateResult> {
   const day = deps.now().toISOString().slice(0, 10)
   let used = await deps.usedToday(day)
@@ -392,10 +440,11 @@ export async function translatePending(cfg: TranslateConfig, deps: TranslateDeps
     }
     if (got === null) break
     const rows: TranslationRow[] = []
-    // 模型的輸出先自動修正（記在 checks.fixes）再檢查
+    // 模型的輸出先自動修正（記在 checks.fixes）再檢查；只翻了標題，所以只拿標題核對（摘要的數字不算在這裡）
     const review = (p: Pending, raw: Translated): { t: Translated; c: Checks } => {
-      const n = normalize(cfg, p, raw)
-      return { t: n.t, c: check(cfg, p, n.t, n.fixes) }
+      const titleOnly: Source = { id: p.id, title: p.title, summary: null }
+      const n = normalize(cfg, titleOnly, raw)
+      return { t: n.t, c: check(cfg, titleOnly, n.t, n.fixes) }
     }
     for (const p of batch) {
       const first = got.get(p.id)
@@ -428,4 +477,92 @@ export async function translatePending(cfg: TranslateConfig, deps: TranslateDeps
     if (rows.length > 0) await deps.save(rows, [])
   }
   return res
+}
+
+// ── 點開才翻的摘要（D-207）──────────────────────────────────────────────────
+
+/** 要翻摘要的那則：目前這一版的原文，加上排程翻好的標題（沒翻或沒過 → null）與舊制連摘要一起翻好的摘要。 */
+export type SummaryItem = {
+  id: string
+  content_sha: string
+  lang: string
+  title: string
+  summary: string | null
+  title_zh: string | null
+  summary_zh: string | null
+}
+export type SummaryRow = {
+  item_id: string
+  content_sha: string
+  summary_zh: string | null
+  status: 'ok' | 'failed'
+  checks: Checks
+  model_id: string
+  prompt_version: string
+  translated_at: string
+}
+export type SummaryDeps = {
+  now: () => Date
+  /** 這則目前這一版；找不到 → null */
+  item: (id: string) => Promise<SummaryItem | null>
+  /** 這一版之前點開翻過的結果 */
+  saved: (id: string, contentSha: string) => Promise<{ status: 'ok' | 'failed'; summary_zh: string | null } | null>
+  usedToday: (utcDay: string) => Promise<number>
+  ai: (body: Record<string, unknown>) => Promise<unknown>
+  save: (row: SummaryRow | null, usage: UsageRow[]) => Promise<void>
+}
+/**
+ * ok＝有譯文；failed＝兩次都沒過檢查（記下來，這一版不再翻）；budget＝今天的額度用完（不記，明天點開再翻）；
+ * error＝模型呼叫失敗（逾時、帳號額度用完之類，不記，下次點開再試）；none＝不用翻（中文新聞、沒有摘要、標題還沒翻好）。
+ */
+export type SummaryResult = { status: 'ok' | 'failed' | 'budget' | 'error' | 'none'; summary_zh: string | null }
+
+/** 點開一則英文新聞時翻它的摘要：翻過就直接給；沒翻過且額度還夠才叫模型，沒過檢查重翻一次。找不到這則 → null。 */
+export async function summaryFor(cfg: TranslateConfig, deps: SummaryDeps, id: string): Promise<SummaryResult | null> {
+  const it = await deps.item(id)
+  if (it === null) return null
+  if (it.summary_zh) return { status: 'ok', summary_zh: it.summary_zh } // 舊制排程連摘要一起翻好的
+  if (it.lang !== 'en' || !it.summary || !it.title_zh) return { status: 'none', summary_zh: null }
+  const prev = await deps.saved(it.id, it.content_sha)
+  if (prev) return { status: prev.status, summary_zh: prev.status === 'ok' ? prev.summary_zh : null }
+
+  let used = await deps.usedToday(deps.now().toISOString().slice(0, 10))
+  const src: Source = { id: it.id, title: it.title, summary: it.summary }
+  const titleZh = it.title_zh
+  let last: { zh: string; c: Checks } | null = null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // 跟排程翻譯同一條線：留 reserve_for_embed 給向量
+    if (used >= cfg.daily_neurons - cfg.reserve_for_embed) return { status: 'budget', summary_zh: null }
+    let r: ReturnType<typeof parseSummaryReply>
+    try {
+      r = parseSummaryReply(await deps.ai(summaryRequestBody(cfg, { title: it.title, title_zh: titleZh, summary: it.summary })))
+    } catch {
+      continue
+    }
+    const n = neurons(cfg, r.inputTokens, r.outputTokens)
+    used += n
+    await deps.save(null, [{ ts: deps.now().toISOString(), task: 'news_translate_summary', model_id: cfg.model, input_tokens: r.inputTokens, output_tokens: r.outputTokens, neurons: n }])
+    // 只拿摘要核對數字（標題譯文裡有的數字不能替摘要過關）；英文字比對原文標題＋摘要（摘要譯文寫到標題才有的名字不算拼錯）
+    const fixed = normalize(cfg, src, { id: it.id, title_zh: '', summary_zh: r.summary_zh })
+    const base = check(cfg, { id: it.id, title: '', summary: it.summary }, fixed.t, fixed.fixes)
+    const c: Checks = { ...base, foreign_tokens: foreignTokens(`${it.title}\n${it.summary}`, fixed.t.summary_zh) }
+    last = { zh: fixed.t.summary_zh, c }
+    if (passes(c)) break
+  }
+  if (last === null) return { status: 'error', summary_zh: null }
+  const ok = passes(last.c)
+  await deps.save(
+    {
+      item_id: it.id,
+      content_sha: it.content_sha,
+      summary_zh: ok ? last.zh : null,
+      status: ok ? 'ok' : 'failed',
+      checks: last.c,
+      model_id: cfg.model,
+      prompt_version: SUMMARY_PROMPT_VERSION,
+      translated_at: deps.now().toISOString(),
+    },
+    [],
+  )
+  return { status: ok ? 'ok' : 'failed', summary_zh: ok ? last.zh : null }
 }

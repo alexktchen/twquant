@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ALLOWED, proxy, upstreamUrl } from '../functions/_lib/news-proxy.ts'
-import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, nextUntil, shown, shownTime, splitSimilar, taipeiHm, timeLabel, titleKey, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
+import { ALLOWED, proxy, SUMMARY_TIMEOUT_MS, UPSTREAM_TIMEOUT_MS, upstreamUrl } from '../functions/_lib/news-proxy.ts'
+import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, needsSummary, nextUntil, readerSummary, shown, shownTime, splitSimilar, taipeiHm, timeLabel, titleKey, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const BASE = 'https://abc.supabase.co/functions/v1/api/'
@@ -293,4 +293,23 @@ test('2026-10-21 閱讀卡：同一事件與相似新聞分開、同標題只留
   assert.equal(titleKey('A, b！ c'), 'abc')
   const ex = splitSimilar('x', [it('d', '雲端AI將推動2027年晶片成長', 'DigiTimes Asia', false, 0.8)], ['雲端 AI 將推動 2027 年晶片成長'])
   assert.deepEqual(ex.related, [], '來龍去脈已列的不重列')
+})
+
+test('T-429 AC6：點開才翻摘要——proxy 只轉 id、逾時給長一點；英文、標題翻好、有摘要、還沒摘要譯文才另外翻', async () => {
+  assert.deepEqual(ALLOWED['/v1/summary'], ['id'])
+  assert.equal(upstreamUrl(BASE, '/v1/summary', 'https://x/api/news/summary?id=cnbc-top-0&limit=9'), 'https://abc.supabase.co/functions/v1/api/v1/summary?id=cnbc-top-0')
+  assert.ok(SUMMARY_TIMEOUT_MS > UPSTREAM_TIMEOUT_MS, '要等模型翻譯')
+  const en = row('e', '2026-10-22T02:00:00Z', { title: 'Nvidia jumps 4%', summary: 'Shares rose 4%.', translation: 'ok', title_zh: '輝達大漲4%', summary_zh: null })
+  assert.equal(needsSummary(en), true)
+  assert.equal(needsSummary({ ...en, summary_zh: '股價上漲4%。' }), false, '舊制已翻好')
+  assert.equal(needsSummary({ ...en, summary: null }), false, '沒有摘要')
+  assert.equal(needsSummary({ ...en, translation: 'pending', title_zh: null }), false, '標題還沒翻好')
+  assert.equal(needsSummary(row('z', '2026-10-22T02:00:00Z', { kind: 'tw', lang: 'zh', translation: null, summary: '中文摘要' })), false)
+
+  assert.deepEqual(readerSummary(en, 'loading'), { text: null, lang: 'zh', note: '摘要翻譯中…' })
+  assert.deepEqual(readerSummary(en, { id: 'e', status: 'ok', summary_zh: '股價上漲4%。' }), { text: '股價上漲4%。', lang: 'zh', note: null })
+  assert.deepEqual(readerSummary(en, { id: 'e', status: 'budget', summary_zh: null }), { text: 'Shares rose 4%.', lang: 'en', note: '今天的翻譯額度用完了，先顯示英文摘要' })
+  assert.equal(readerSummary(en, { id: 'e', status: 'failed', summary_zh: null }).note, '摘要翻譯沒過檢查（數字或公司名對不上），先顯示英文摘要')
+  assert.deepEqual(readerSummary(en, 'error'), { text: 'Shares rose 4%.', lang: 'en', note: '摘要暫時翻不了，先顯示英文摘要' })
+  assert.deepEqual(readerSummary({ ...en, summary_zh: '股價上漲4%。' }, null), { text: '股價上漲4%。', lang: 'zh', note: null }, '不用另外翻的照 shown()')
 })
