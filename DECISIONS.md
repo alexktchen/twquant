@@ -5,23 +5,6 @@
 
 ## 待裁決
 
-### D-210（2026-10-22，使用者：「幫我想個網站新名字，我想要放廣告在網站上面，然後那個登入註冊頁幫我修改一下不要白白的」；同日補充：「我主打是把新聞都聚合起來」「cloudflare access 他可以客製化嗎 還是說我想要超過50人，我有其他免費選擇嗎」「沒有每日名單的推薦了 也沒有績效頁了，一般使用者都看不到了」「有免費的方式又可以放廣告賺錢嗎」；**待裁決**，建議為 AI 提出）登入頁、放廣告、超過 50 人與網站新名字
-
-- **登入頁為什麼白（T-432，已做、可推翻）**：按「登入／註冊」後是 Cloudflare Access 的登入頁。2026-10-22 截圖：背景、logo、上下文字早已改成深色與中文，白的是中間那張卡片——Access 只開放改背景色、文字色、logo、標題、上下文字，卡片顏色改不了（免費、付費都一樣）。做法：本站深色頁 `/login`（`public/login.html`，純靜態），Google 走 `/api/login/google`、Email 驗證碼走 `/api/login`。**要讓 Google 完全不經白卡，使用者要在 Cloudflare 多建一個 Access 應用**（步驟見下）；沒建時 `/api/login/google` 仍歸主應用、照樣走白卡，不會壞。Email 驗證碼只能在 Cloudflare 的頁面輸入，一定經過白卡。
-  - Cloudflare 設定步驟：Zero Trust → Access → Applications → Add an application → Self-hosted；網域 `twquant.pages.dev`、路徑 `api/login/google`；Login methods 只勾 Google、打開 **Instant Auth**；Policy 照主應用（同樣允許的人）。登入完 `/api/login/google` 會轉 `/api/login`，Access 用剛建立的全域登入換主應用的通行證，不會再問一次。
-- **廣告（T-433，版位已做、預設關閉）**：`frontend/src/cloud/ads.ts` 的發布商 ID 空白＝不載 Google 的程式、不畫版位、不產生 ads.txt。版位：首頁戰情室最後、新聞清單最後；只給 `/api/me` 確定登入的人（沒登入的預覽畫面沒有內容，AdSense 不准放；剛打開還不知道有沒有登入時也不載，建置後實測抓到過）。隱私權政策已加「廣告」一節（標「尚未開啟」，開啟時要拿掉，測試守著）。
-- **開啟廣告前的條件**：
-  1. **自己的網域**：AdSense 要驗證網站擁有權、`ads.txt` 要放在根網域；`twquant.pages.dev` 不是自己的根網域。網域一年約幾百元台幣，是這條路唯一的固定支出。
-  2. **登入的人才看得到內容，AdSense 爬蟲預設看不到**：要嘛在 AdSense 設爬蟲登入，要嘛把新聞頁公開（建議，見選項 A）。只有 50 人能登入時廣告收入接近零。
-  3. **Cloudflare Access 免費方案 50 人上限**；超過每人每月 7 美元。
-  4. **法律**：證券投資信託及顧問法第 4 條把「直接或間接自委任人或第三人取得報酬」並「提供分析意見或推介建議」定為投顧、第 107 條未經許可經營有刑責；廣告收入可能算第三人報酬。**D-208 已把每日名單與績效改成只給 admin**，一般使用者只看到新聞與看盤資訊，這條風險大幅降低；仍避免對一般使用者寫買賣建議字眼。新聞公開後改注意**著作權**：公開頁只放標題、短摘要與原文連結，不整篇轉貼或整篇翻譯；非正式介面（鉅亨網列表 API）商用前看使用條款。
-  5. 歐洲經濟區／英國的使用者要 Google 認證的同意管理平台（CMP），沒有的話那邊不放或放有限廣告。
-- **超過 50 人的免費登入**：Supabase Auth（免費每月 5 萬活躍使用者，主庫已在 Supabase；Google＋Email 驗證碼，登入頁全自己做——`/login` 可沿用）；Firebase Auth（同樣 5 萬）；自己串 Google OAuth（沒上限、沒有 Email 驗證碼）。Supabase 內建寄信額度很小（第三方資料說每小時 2 封，未對官方文件核實），Email 驗證碼要接自己的寄信服務；Google 登入不受影響。
-- **選項 A（建議）**：新聞頁公開（不用登入，搜尋引擎帶流量、AdSense 看得到）；登入只留給個人功能（追蹤股、首頁版面、我的下單），從 Cloudflare Access 換成 Supabase Auth；買網域、申請 AdSense 後在 `ads.ts` 填 ID。公開後要先做 Cloudflare 邊緣快取：Pages Functions 免費每天 10 萬次請求、新聞服務 Supabase 免費每月 5 GB 流量。改動最大的是身分驗證（`identity.ts`、每支 API、登出），要分幾輪。admin 功能（每日名單、績效、LINE 群組）可以留在 Access 後面（只有一人，不受 50 人限制）。
-- **選項 B**：維持 Access 與 50 人，廣告只放登入後頁面並設 AdSense 爬蟲登入；收入很有限。
-- **選項 C**：不放廣告，只做登入頁。
-- **網站新名字（AI 建議，使用者決定，還沒改）**：台股雷達（taiguradar.com，建議：「雷達」是觀察工具、不像報明牌）、台股探 TW Scout（twscout.com）、盤後 AI（panhouai.com）、收盤後 StockDusk（stockdusk.com）、潛龍 LatentPick（latentpick.com，有「選」的意味，較不建議）。`.com` 於 2026-10-22 用 Verisign RDAP 查為未註冊；`.tw` 沒查到（TWNIC RDAP 對已註冊網域也回 404）；商標未查。主打改成新聞聚合後，也可考慮帶「新聞／財經」的名字。換名要改：`index.html` 標題、`manifest.webmanifest`、about／privacy／login、Cloudflare Access 登入頁標題、推播標題（`sw.js`）、LINE 圖卡。
-
 ### D-206（2026-10-21，使用者看南亞的「AI 分析師觀點」後：「我想把這個加到評分當中 每項評分應該要再細一點每項要有10分，再找一些規則來把四個面向都用成10分 但是要有意義…我先想到籌碼裡面的主力買賣超為一個分數」；AI 提出 20 條規則與兩個做法，使用者選「規則算分，AI 寫評語」「雲端只存每檔每天的主力淨買超」，再回「繼續」）名單評分改成四面向各 10 分、由規則算
 
 #### 一、做法（已裁決）
@@ -7966,6 +7949,24 @@ D-085 重跑後，A 軌由 +15.90% 跳到 **+26.30%（+10.40pp）**，遠大於�
   shares_outstanding 或 stock_meta 日頻化）。
 
 ## 已裁決
+
+### D-210（2026-10-22，使用者：「幫我想個網站新名字，我想要放廣告在網站上面，然後那個登入註冊頁幫我修改一下不要白白的」；同日補充：「我主打是把新聞都聚合起來」「cloudflare access 他可以客製化嗎 還是說我想要超過50人，我有其他免費選擇嗎」「沒有每日名單的推薦了 也沒有績效頁了，一般使用者都看不到了」「有免費的方式又可以放廣告賺錢嗎」；2026-10-22 使用者回「2 動工」＝選項 A）登入頁、放廣告、超過 50 人與網站新名字
+
+- **登入頁為什麼白（T-432，已做、可推翻）**：按「登入／註冊」後是 Cloudflare Access 的登入頁。2026-10-22 截圖：背景、logo、上下文字早已改成深色與中文，白的是中間那張卡片——Access 只開放改背景色、文字色、logo、標題、上下文字，卡片顏色改不了（免費、付費都一樣）。做法：本站深色頁 `/login`（`public/login.html`，純靜態），Google 走 `/api/login/google`、Email 驗證碼走 `/api/login`。**要讓 Google 完全不經白卡，使用者要在 Cloudflare 多建一個 Access 應用**（步驟見下）；沒建時 `/api/login/google` 仍歸主應用、照樣走白卡，不會壞。Email 驗證碼只能在 Cloudflare 的頁面輸入，一定經過白卡。
+  - Cloudflare 設定步驟：Zero Trust → Access → Applications → Add an application → Self-hosted；網域 `twquant.pages.dev`、路徑 `api/login/google`；Login methods 只勾 Google、打開 **Instant Auth**；Policy 照主應用（同樣允許的人）。登入完 `/api/login/google` 會轉 `/api/login`，Access 用剛建立的全域登入換主應用的通行證，不會再問一次。
+- **廣告（T-433，版位已做、預設關閉）**：`frontend/src/cloud/ads.ts` 的發布商 ID 空白＝不載 Google 的程式、不畫版位、不產生 ads.txt。版位：首頁戰情室最後、新聞清單最後；只給 `/api/me` 確定登入的人（沒登入的預覽畫面沒有內容，AdSense 不准放；剛打開還不知道有沒有登入時也不載，建置後實測抓到過）。隱私權政策已加「廣告」一節（標「尚未開啟」，開啟時要拿掉，測試守著）。
+- **開啟廣告前的條件**：
+  1. **自己的網域**：AdSense 要驗證網站擁有權、`ads.txt` 要放在根網域；`twquant.pages.dev` 不是自己的根網域。網域一年約幾百元台幣，是這條路唯一的固定支出。
+  2. **登入的人才看得到內容，AdSense 爬蟲預設看不到**：要嘛在 AdSense 設爬蟲登入，要嘛把新聞頁公開（建議，見選項 A）。只有 50 人能登入時廣告收入接近零。
+  3. **Cloudflare Access 免費方案 50 人上限**；超過每人每月 7 美元。
+  4. **法律**：證券投資信託及顧問法第 4 條把「直接或間接自委任人或第三人取得報酬」並「提供分析意見或推介建議」定為投顧、第 107 條未經許可經營有刑責；廣告收入可能算第三人報酬。**D-208 已把每日名單與績效改成只給 admin**，一般使用者只看到新聞與看盤資訊，這條風險大幅降低；仍避免對一般使用者寫買賣建議字眼。新聞公開後改注意**著作權**：公開頁只放標題、短摘要與原文連結，不整篇轉貼或整篇翻譯；非正式介面（鉅亨網列表 API）商用前看使用條款。
+  5. 歐洲經濟區／英國的使用者要 Google 認證的同意管理平台（CMP），沒有的話那邊不放或放有限廣告。
+- **超過 50 人的免費登入**：Supabase Auth（免費每月 5 萬活躍使用者，主庫已在 Supabase；Google＋Email 驗證碼，登入頁全自己做——`/login` 可沿用）；Firebase Auth（同樣 5 萬）；自己串 Google OAuth（沒上限、沒有 Email 驗證碼）。Supabase 內建寄信額度很小（第三方資料說每小時 2 封，未對官方文件核實），Email 驗證碼要接自己的寄信服務；Google 登入不受影響。
+- **選項 A（建議）**：新聞頁公開（不用登入，搜尋引擎帶流量、AdSense 看得到）；登入只留給個人功能（追蹤股、首頁版面、我的下單），從 Cloudflare Access 換成 Supabase Auth；買網域、申請 AdSense 後在 `ads.ts` 填 ID。公開後要先做 Cloudflare 邊緣快取：Pages Functions 免費每天 10 萬次請求、新聞服務 Supabase 免費每月 5 GB 流量。改動最大的是身分驗證（`identity.ts`、每支 API、登出），要分幾輪。admin 功能（每日名單、績效、LINE 群組）可以留在 Access 後面（只有一人，不受 50 人限制）。
+- **選項 B**：維持 Access 與 50 人，廣告只放登入後頁面並設 AdSense 爬蟲登入；收入很有限。
+- **選項 C**：不放廣告，只做登入頁。
+- **網站新名字（AI 建議，使用者決定，還沒改）**：台股雷達（taiguradar.com，建議：「雷達」是觀察工具、不像報明牌）、台股探 TW Scout（twscout.com）、盤後 AI（panhouai.com）、收盤後 StockDusk（stockdusk.com）、潛龍 LatentPick（latentpick.com，有「選」的意味，較不建議）。`.com` 於 2026-10-22 用 Verisign RDAP 查為未註冊；`.tw` 沒查到（TWNIC RDAP 對已註冊網域也回 404）；商標未查。主打改成新聞聚合後，也可考慮帶「新聞／財經」的名字。換名要改：`index.html` 標題、`manifest.webmanifest`、about／privacy／login、Cloudflare Access 登入頁標題、推播標題（`sw.js`）、LINE 圖卡。
+- **裁決（2026-10-22，使用者：「2 動工」）**：選項 A。分兩段做：**T-434 新聞頁公開**（只讀的新聞端點搬到 `/pub/news/*`、沒登入直接落在新聞分頁；核可與語意搜尋留 `/api` 要登入）→ **T-435 登入換成 Supabase Auth**（Google＋Email 驗證碼，登入頁全自己做；過渡期 Cloudflare Access 權杖照收，使用者在 Cloudflare 關掉 `/api/*` 的 Access 應用後只剩 Supabase）。網域、AdSense 申請、新名字另外等使用者。
 
 ### D-209（2026-10-22，使用者：「行事曆跟族群資金移到其他分頁」→ AI 問放哪 → 「一個盤勢的分頁，法說那些整合到追蹤股跟推薦股」）行事曆與族群資金搬出首頁
 

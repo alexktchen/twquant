@@ -52,7 +52,7 @@ import { exampleText, similarBar, similarText, spanText, type Similar } from './
 import { WarRoom } from './WarRoom'
 import { GroupsPage } from './GroupsPage'
 import { NewsPage } from './NewsPage'
-import { tabFromUrl, withoutTab, type Tab } from './tabs'
+import { guestTab, tabFromUrl, withoutTab, type Tab } from './tabs'
 import { LineGroupPage } from './LineGroupPage'
 import { lockedText, tabAllowed, type Feature } from './access'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
@@ -76,7 +76,9 @@ const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e
 
 export default function CloudApp() {
   // 推播通知點開帶 ?tab=（族群資金通知帶 group → 首頁）就直接開那個分頁；預設是首頁戰情室（T-379）
-  const [tab, setTab] = useState<Tab>(() => tabFromUrl(window.location.href) ?? 'home')
+  // 網址有沒有明寫 ?tab=：沒登入的人沒寫就落在公開的新聞頁（guestTab）
+  const [explicitTab] = useState<Tab | null>(() => tabFromUrl(window.location.href))
+  const [tab, setTab] = useState<Tab>(() => explicitTab ?? 'home')
   useEffect(() => {
     if (tabFromUrl(window.location.href)) window.history.replaceState(null, '', withoutTab(window.location.href))
     // 網站已開著時點通知：背景程式（sw.js）傳來要開的網址
@@ -167,6 +169,7 @@ export default function CloudApp() {
       .catch((e: Error) => {
         if (!(e instanceof LoginRequired)) return
         setGuest(true)
+        setTab((t) => guestTab(t, explicitTab))
         // 日期是公開資訊（只有日期、沒有股票）：沒登入時追蹤分頁的評分日與預覽用
         fetchPublicDates().then(setDates).catch(onFail)
       })
@@ -457,25 +460,16 @@ export default function CloudApp() {
           />
         )
       ) : tab === 'news' ? (
-        guest ? (
-          <main className="cq-body">
-            <aside className="cq-list cq-list-guest">
-              <div className="cq-rows">
-                <Gate title="登入後看新聞" text="國內外財經新聞每 30 分鐘更新一次（含半夜），國外的會翻成中文，並連到相關的美股、台股與族群。" />
-              </div>
-            </aside>
-            <section className="cq-detail" />
-          </main>
-        ) : (
-          <NewsPage
-            refresh={refresh}
-            signedIn={email !== null}
-            onStock={(sid, name) => {
-              setWatchSel({ sid, name })
-              setTab('watch')
-            }}
-          />
-        )
+        // 新聞公開（T-434／D-210）：沒登入也看得到；點股票會到要登入的追蹤分頁
+        <NewsPage
+          refresh={refresh}
+          guest={guest}
+          signedIn={email !== null}
+          onStock={(sid, name) => {
+            setWatchSel({ sid, name })
+            setTab('watch')
+          }}
+        />
       ) : tab === 'group' ? (
         // 盤勢（T-431／D-209）：族群資金熱力圖從首頁搬來；有名單權限的人，名單上的族群標「名單 N」
         guest ? (

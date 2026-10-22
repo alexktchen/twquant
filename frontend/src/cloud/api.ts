@@ -25,7 +25,8 @@ const OFFLINE = '連線中斷，請重新整理頁面'
 async function get<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   let res: Response
   try {
-    const init: RequestInit = { method, headers: { accept: 'application/json' }, redirect: 'manual', cache: 'no-store' }
+    // /pub 的資料每個人都一樣（新聞、日期），讓瀏覽器照伺服器給的 max-age 留一下；其他一律 no-store（登出後不能留在快取裡）
+    const init: RequestInit = { method, headers: { accept: 'application/json' }, redirect: 'manual', cache: path.startsWith('/pub/') ? 'default' : 'no-store' }
     // 只有存順序（PUT）帶內容
     if (body !== undefined) {
       init.headers = { accept: 'application/json', 'content-type': 'application/json' }
@@ -157,29 +158,29 @@ export function fetchNewsItems(q: { kind: NewsKind | null; type?: string | null;
   if (q.kind) p.set('kind', q.kind)
   if (q.type) p.set('type', q.type)
   if (q.until) p.set('until', q.until)
-  return get<{ items: NewsRow[] }>(`/api/news/items?${p}`)
+  return get<{ items: NewsRow[] }>(`/pub/news/items?${p}`)
 }
 /** 一則新聞的關係圖（T-402／T-404）：提到的實體往外三度；沒有這則 → 404。 */
-export const fetchNewsGraph = (id: string) => get<NewsGraphData>(`/api/news/graph?id=${encodeURIComponent(id)}`)
+export const fetchNewsGraph = (id: string) => get<NewsGraphData>(`/pub/news/graph?id=${encodeURIComponent(id)}`)
 /** 反向看圖：某一檔近 7 天連得到的新聞（個股頁「相關新聞」）。 */
-export const fetchStockNews = (sid: string) => get<StockNews>(`/api/news/stock?id=${encodeURIComponent(`tw:${sid}`)}`)
+export const fetchStockNews = (sid: string) => get<StockNews>(`/pub/news/stock?id=${encodeURIComponent(`tw:${sid}`)}`)
 /** 名單小標：一批股票近 3 天各有幾則相關新聞；鍵是 tw:代號。 */
 export const fetchStockNewsCounts = (sids: string[]) =>
-  get<StockNewsCounts>(`/api/news/stock-counts?ids=${encodeURIComponent(sids.map((s) => `tw:${s}`).join(','))}`)
+  get<StockNewsCounts>(`/pub/news/stock-counts?ids=${encodeURIComponent(sids.map((s) => `tw:${s}`).join(','))}`)
 /** 新聞服務最後抓取時間與各來源狀態。 */
-export const fetchNewsHealth = () => get<NewsHealth>('/api/news/health')
+export const fetchNewsHealth = () => get<NewsHealth>('/pub/news/health')
 /** 這件事的來龍去脈（T-420） */
-export const fetchNewsThread = (id: string) => get<NewsThread>(`/api/news/thread?id=${encodeURIComponent(id)}`)
+export const fetchNewsThread = (id: string) => get<NewsThread>(`/pub/news/thread?id=${encodeURIComponent(id)}`)
 /** 一則新聞的相似新聞（T-410） */
-export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/api/news/similar?id=${encodeURIComponent(id)}`)
+export const fetchSimilarNews = (id: string) => get<SimilarNews>(`/pub/news/similar?id=${encodeURIComponent(id)}`)
 /** 點開才翻的摘要（D-207） */
-export const fetchNewsSummary = (id: string) => get<NewsSummary>(`/api/news/summary?id=${encodeURIComponent(id)}`)
+export const fetchNewsSummary = (id: string) => get<NewsSummary>(`/pub/news/summary?id=${encodeURIComponent(id)}`)
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */
-export const fetchNewsGalaxy = () => get<GalaxyData>('/api/news/galaxy')
+export const fetchNewsGalaxy = () => get<GalaxyData>('/pub/news/galaxy')
 /** 個股頁 K 線上的新聞標記（T-419） */
-export const fetchStockNewsDays = (sid: string) => get<StockNewsDays>(`/api/news/stock-days?id=${encodeURIComponent(`tw:${sid}`)}`)
+export const fetchStockNewsDays = (sid: string) => get<StockNewsDays>(`/pub/news/stock-days?id=${encodeURIComponent(`tw:${sid}`)}`)
 /** 新聞三張卡（T-417） */
-export const fetchNewsDigest = () => get<NewsDigest>('/api/news/digest')
+export const fetchNewsDigest = () => get<NewsDigest>('/pub/news/digest')
 /** 核可頁（T-403）：擁有者才有 can_review 與草稿清單 */
 export const fetchNewsReview = () => get<NewsReview>('/api/news/review')
 export const postNewsReview = (decisions: ReviewDecision[]) => get<ReviewResult>('/api/news/review', 'POST', { decisions })
