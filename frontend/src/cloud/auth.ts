@@ -5,6 +5,14 @@ import type { Pick, PicksDay } from './format'
 
 export const LOGIN_URL = '/api/login'
 
+/** 本站的深色登入／註冊頁（T-432）。Access 的登入卡片固定白色、改不了，網站裡的登入按鈕都先到這裡。 */
+export const LOGIN_PAGE = '/login'
+/** Google 入口：Cloudflare 上可另設一個只開 Google、開 Instant Auth 的 Access 應用，直接跳 Google、不經白色卡片；
+ *  沒設時這個路徑仍歸主應用保護，照樣走 Cloudflare 的登入頁。 */
+export const GOOGLE_LOGIN_URL = '/api/login/google'
+/** Email 驗證碼入口：Cloudflare 的一次性驗證碼只能在它自己的登入頁輸入。 */
+export const EMAIL_LOGIN_URL = LOGIN_URL
+
 export class LoginRequired extends Error {
   constructor() {
     super('需要登入')
