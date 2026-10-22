@@ -1,4 +1,4 @@
-"""名單四面向 10 分制的規則評分（T-426／D-206 §二；籌碼七項加權 D-210 §二）。
+"""名單四面向 10 分制的規則評分（T-426／D-206 §二；籌碼七項加權 D-211 §二）。
 
 每個面向幾個小項，每項偏多 +1、中性 0、偏空 −1，乘上比重後從 `rules.base` 起算 → 0～10（5＝中性）。
 消息、技術、基本各 5 項、比重 1；籌碼 7 項（外資、投信、主力、融資、借券、當沖、千張大戶），比重合計＝base，
@@ -25,7 +25,7 @@ NO_DATA = "資料不足"
 
 @dataclass(frozen=True)
 class Item:
-    """一個小項：名稱、方向 +1／0／−1、白話理由、比重（D-210；非籌碼面向都是 1）。"""
+    """一個小項：名稱、方向 +1／0／−1、白話理由、比重（D-211；非籌碼面向都是 1）。"""
 
     name: str
     points: int
@@ -41,7 +41,7 @@ def total(items: list[Item], rules: PickScoreRules) -> int:
 
 
 def items_json(items: dict[str, list[Item]]) -> list[dict[str, Any]]:
-    """存進 pick_reviews.items 的格式：[{dim, name, points, text, weight}]（weight 自 D-210 起；舊列沒有＝1）。"""
+    """存進 pick_reviews.items 的格式：[{dim, name, points, text, weight}]（weight 自 D-211 起；舊列沒有＝1）。"""
     return [{"dim": k, **asdict(i)} for k, lst in items.items() for i in lst]
 
 
@@ -81,7 +81,7 @@ class Market:
     industry: dict[str, str]
     per_median: dict[str, float]  # 產業 → 本益比中位數
     pbr_median: dict[str, float]
-    # D-210：(近 N 日當沖股數, 占成交量, 百分位)；(近 N 日借券賣出餘額變化股數, 占成交量, 百分位)
+    # D-211：(近 N 日當沖股數, 占成交量, 百分位)；(近 N 日借券賣出餘額變化股數, 占成交量, 百分位)
     daytrade: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     sbl: dict[str, tuple[float, float, float]] = field(default_factory=dict)
 
@@ -313,7 +313,7 @@ def _flow_item(
 
 
 def _sbl_item(d: tuple[float, float, float] | None, rules: PickScoreRules) -> Item:
-    """借券（D-210）：近 N 日借券賣出餘額增加在全市場前段 −1（空方加碼）、減少在前段 +1（空方回補）。"""
+    """借券（D-211）：近 N 日借券賣出餘額增加在全市場前段 −1（空方加碼）、減少在前段 +1（空方回補）。"""
     if d is None:
         return Item("借券", 0, NO_DATA)
     delta, ratio, p = d
@@ -334,7 +334,7 @@ def _sbl_item(d: tuple[float, float, float] | None, rules: PickScoreRules) -> It
 
 
 def _daytrade_item(d: tuple[float, float, float] | None, rules: PickScoreRules) -> Item:
-    """當沖（D-210）：近 N 日當沖佔成交量在全市場前段 −1（短線客多）；低不加分（當沖少不代表好）。"""
+    """當沖（D-211）：近 N 日當沖佔成交量在全市場前段 −1（短線客多）；低不加分（當沖少不代表好）。"""
     if d is None:
         return Item("當沖", 0, NO_DATA)
     _, ratio, p = d
@@ -359,7 +359,7 @@ def chip_items(
     m: Market,
     rules: PickScoreRules,
 ) -> list[Item]:
-    """外資、投信、主力、融資、借券、當沖、千張大戶（D-210：七項各有比重 `rules.chip_weights`）。
+    """外資、投信、主力、融資、借券、當沖、千張大戶（D-211：七項各有比重 `rules.chip_weights`）。
     trust／margin／closes 舊到新；holders＝(週, 千張大戶比例) 舊到新。"""
     out = [_flow_item("外資", "外資", m.foreign.get(sid), rules)]
     s = _streak(trust)
@@ -575,7 +575,7 @@ def load_market(
         return {} if df is None else with_pct(flow_ratio(df, volume, flow_sess))
 
     def balances(table: str, col: str) -> dict[str, tuple[float, float, float]]:
-        # 餘額看「變化」：基準日 ＋ flow_days 天的窗（D-210 借券）
+        # 餘額看「變化」：基準日 ＋ flow_days 天的窗（D-211 借券）
         days = sess[-(rules.flow_days + 1) :]
         df = window(table, col, "balance", days, rules.flow_days + 1)
         return {} if df is None else with_pct(balance_change_ratio(df, volume, days))

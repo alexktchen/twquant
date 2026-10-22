@@ -1625,7 +1625,7 @@ def _run_chip_day(day: dt.date) -> str:
             # 只有「今天」那一輪的 T+1 抓取算首次值；手動重跑過去的日子抓到的可能已是定案值
             now = now_tw()
             live = day >= now.date()
-            # D-210 §二.3：晚上那班連當天也抓（名單評分要當天的當沖、借券），當天那次不當首次值
+            # D-211 §二.3：晚上那班連當天也抓（名單評分要當天的當沖、借券），當天那次不當首次值
             today = day if live and now.time() >= cfg.chip_daily.same_day_after else None
             plan = di.plan_chip_fetches(cur, pg, day, cfg.chip_daily, live=live, today=today)
         conn.commit()
@@ -1657,7 +1657,7 @@ def _run_chip_day(day: dt.date) -> str:
                 if o.status == "success":
                     done.append((f, o.rows))
                 elif f.reason == "T-0":
-                    # 當天的當沖／借券還沒公布不算失敗（D-210）：名單評分那一項記資料不足，隔天 T-1 照舊補
+                    # 當天的當沖／借券還沒公布不算失敗（D-211）：名單評分那一項記資料不足，隔天 T-1 照舊補
                     notes.append(f"當天 {o.table} {market} 還沒公布：{o.detail}")
                 else:
                     failures.append(f"{o.table} {d} {market}（{f.reason}）：{o.detail}")
@@ -1708,7 +1708,7 @@ def _run_chip_day(day: dt.date) -> str:
         parts.append(f"缺日補 {len(gaps)} 批（{sorted({str(f.day) for f in gaps})}）")
     if today is not None:
         t0 = [f for f, _ in done if f.reason == "T-0"]
-        parts.append(f"當天 {today} 的當沖／借券 {len(t0)}/{2 * len(di.MARKETS)} 批有資料（D-210）")
+        parts.append(f"當天 {today} 的當沖／借券 {len(t0)}/{2 * len(di.MARKETS)} 批有資料（D-211）")
     parts.append(
         f"處置 {alert_rows.get('disposition_stocks', 0):,}／注意 {alert_rows.get('attention_stocks', 0):,} 列"
         "（查詢窗，冪等）"
@@ -2180,7 +2180,7 @@ def _run_daily_pipeline(
 
     def _pick_review_step() -> str:
         # T-394／D-196 名單評分：四面向 10 分制（規則算）＋AI 首選。模型缺席 → 那天沒有評分（網站不顯示），不擋主線。
-        # D-210：當天只在 21:00 以後那班算（籌碼要當天的融資券與分點，17:33 都還沒公布）。
+        # D-211：當天只在 21:00 以後那班算（籌碼要當天的融資券與分點，17:33 都還沒公布）。
         from twquant.conventions import now_tw
         from twquant.data.serving import store
         from twquant.reporting.pick_review import review_time_ok

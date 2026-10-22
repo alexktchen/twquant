@@ -27,7 +27,7 @@ import {
   searchStocks,
   setTracked,
 } from './api'
-import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
+import { GUEST_LINES, LOGIN_PAGE, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
@@ -402,7 +402,7 @@ export default function CloudApp() {
         </div>
         {guest ? (
           <div className="cq-user">
-            <a className="cq-login" href={LOGIN_URL}>
+            <a className="cq-login" href={LOGIN_PAGE}>
               登入
             </a>
           </div>
@@ -435,6 +435,7 @@ export default function CloudApp() {
           <WarRoom
             refresh={refresh}
             features={features}
+            signedIn={email !== null}
             watchSids={watchSids}
             onPicks={(code) => {
               if (code) {
@@ -468,6 +469,7 @@ export default function CloudApp() {
         ) : (
           <NewsPage
             refresh={refresh}
+            signedIn={email !== null}
             onStock={(sid, name) => {
               setWatchSel({ sid, name })
               setTab('watch')
@@ -635,7 +637,7 @@ export default function CloudApp() {
                 <TopPickCard sid={topPick.sid} name={topPick.name} r={topPick.review} on={topPick.sid === sid} onClick={() => setSid(topPick.sid)} />
               )}
               {!guest && current && current.picks.length > 0 && !current.picks.some((p) => p.review) && nav.shown === today && (
-                <p className="cq-rv-eta">評分約 21:45 更新（籌碼要等當天的融資券與分點公布後才算，D-210）</p>
+                <p className="cq-rv-eta">評分約 21:45 更新（籌碼要等當天的融資券與分點公布後才算，D-211）</p>
               )}
               <div className="cq-head">
                 <span>
@@ -1646,7 +1648,7 @@ function Gate({
         <img src="/icon-192.png" alt="" width="52" height="52" />
         <h2>{title}</h2>
         <p>{text}</p>
-        <a className="cq-google" href={LOGIN_URL}>
+        <a className="cq-google" href={LOGIN_PAGE}>
           登入／註冊
         </a>
         <div className="cq-gate-ways">

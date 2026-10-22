@@ -81,7 +81,7 @@ def test_t426_ac3_chip_rules_need_sign_and_percentile() -> None:
     closes = [100.0] * 6 + [110.0]
     holders = [(dt.date(2026, 10, 3), 0.40), (dt.date(2026, 10, 9), 0.41)]
     items = chip_items("2330", trust, margin, closes, holders, m, R)
-    # D-210 起多了借券、當沖兩項（這裡沒給資料 → 0）；原本五項的規則不變
+    # D-211 起多了借券、當沖兩項（這裡沒給資料 → 0）；原本五項的規則不變
     assert _pts(items) == {
         "外資": 1,
         "投信": 1,
@@ -179,14 +179,14 @@ def test_t426_ac6_market_helpers() -> None:
 
 def test_t426_ac7_items_json_shape() -> None:
     js = items_json({"籌碼": [Item("主力", -1, "主力賣超")]})
-    # D-210 §二.4：多一欄 weight（比重 1）；其餘形狀不變
+    # D-211 §二.4：多一欄 weight（比重 1）；其餘形狀不變
     assert js == [{"dim": "籌碼", "name": "主力", "points": -1, "text": "主力賣超", "weight": 1.0}]
 
 
-# ── T-432／D-210 §二：籌碼七項加權、當沖與借券、對稱進位 ─────────────────────────
+# ── T-434／D-211 §二：籌碼七項加權、當沖與借券、對稱進位 ─────────────────────────
 
 
-def test_t432_ac1_chip_weights_sum_to_base_and_rounding_is_symmetric() -> None:
+def test_t434_ac1_chip_weights_sum_to_base_and_rounding_is_symmetric() -> None:
     from twquant.config import PickScoreRules
 
     assert set(R.chip_weights) == {"外資", "投信", "主力", "融資", "借券", "當沖", "千張大戶"}
@@ -216,7 +216,7 @@ def test_t432_ac1_chip_weights_sum_to_base_and_rounding_is_symmetric() -> None:
         )
 
 
-def test_t432_ac2_seven_chip_items_daytrade_only_minus_sbl_both_ways() -> None:
+def test_t434_ac2_seven_chip_items_daytrade_only_minus_sbl_both_ways() -> None:
     m = _m(
         foreign={"2330": (5_000_000.0, 0.05, 0.9)},
         main_force={"2330": (-3_000_000.0, -0.03, 0.1)},
@@ -255,7 +255,7 @@ def test_t432_ac2_seven_chip_items_daytrade_only_minus_sbl_both_ways() -> None:
     assert all(i.points == 0 and i.text == NO_DATA for i in none) and len(none) == 7
 
 
-def test_t432_ac3_balance_change_ratio_needs_every_day() -> None:
+def test_t434_ac3_balance_change_ratio_needs_every_day() -> None:
     from twquant.reporting.pick_score import balance_change_ratio
 
     days = [dt.date(2026, 10, d) for d in (15, 16, 19, 20, 21, 22)]  # 第一天是基準，後五天是窗
@@ -272,7 +272,7 @@ def test_t432_ac3_balance_change_ratio_needs_every_day() -> None:
     assert balance_change_ratio(bal, vol, days) == {"A": (60.0, 0.06)}  # B 缺基準日 → 不算
 
 
-def test_t432_ac4_items_json_carries_weight() -> None:
+def test_t434_ac4_items_json_carries_weight() -> None:
     js = items_json({"籌碼": [Item("當沖", -1, "當沖佔成交量 45.0%", 0.5)]})
     assert js == [
         {"dim": "籌碼", "name": "當沖", "points": -1, "text": "當沖佔成交量 45.0%", "weight": 0.5}

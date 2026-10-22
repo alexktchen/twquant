@@ -7,6 +7,7 @@
 // 地鐵告示風格：每則＝國際／台灣色塊、標題、實體小標、來源與時間；點一下就地展開摘要與原文連結。
 import { ChevronRight, ClipboardCheck, Globe, MapPin, Network, RefreshCw, Search, X } from 'lucide-react'
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { AdSlot } from './AdSlot'
 import { fetchNewsGraph, fetchNewsHealth, fetchNewsItems, fetchNewsReview, fetchNewsSearch } from './api'
 import {
   KIND_LABEL,
@@ -58,7 +59,16 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'tw', label: '台灣' },
 ]
 
-export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid: string, name: string) => void }) {
+export function NewsPage({
+  refresh,
+  onStock,
+  signedIn,
+}: {
+  refresh: number
+  onStock: (sid: string, name: string) => void
+  /** /api/me 確定登入了（T-433：之前不放廣告） */
+  signedIn: boolean
+}) {
   const [filter, setFilter] = useState<Filter>('all')
   const [typeFilter, setTypeFilter] = useState<NewsType | null>(null)
   /** 清單（讀新聞）或全景（星雲圖，看全貌） */
@@ -348,6 +358,7 @@ export function NewsPage({ refresh, onStock }: { refresh: number; onStock: (sid:
             {more === 'loading' ? '讀取中…' : '更多'}
           </button>
         )}
+        {!search && !reviewOpen && mode === 'list' && rows.length > 0 && <AdSlot place="news" signedIn={signedIn} />}
       </main>
       {/* 星雲圖滿版（使用者 2026-10-21）：放在 920px 的新聞欄外面，左右貼齊視窗 */}
       {showGalaxy && (

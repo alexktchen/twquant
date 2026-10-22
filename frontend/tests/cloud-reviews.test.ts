@@ -83,7 +83,7 @@ test('T-427 立場五級＋多空分歧（D-206 §六）：顏色看偏多／偏
   assert.match(ui, /多空分歧/)
 })
 
-test('T-432 籌碼七項加權（D-210）：items 帶 weight、顯示比重×方向；舊列沒有 weight＝1；說明寫七項', () => {
+test('T-434 籌碼七項加權（D-211）：items 帶 weight、顯示比重×方向；舊列沒有 weight＝1；說明寫七項', () => {
   const items = [
     { dim: '籌碼', name: '外資', points: 1, weight: 1.5, text: '外資近 5 日買超 929 張' },
     { dim: '籌碼', name: '當沖', points: -1, weight: 0.5, text: '近 5 日當沖佔成交量 45.0%' },

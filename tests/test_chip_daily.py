@@ -485,8 +485,8 @@ def test_ac310_5_gap_window_is_bounded() -> None:
     assert not [f for f in plan if f.reason == "缺日"], "第 9 個交易日前的缺口超出補抓窗"
 
 
-def test_t432_same_day_fetch_after_evening_cutoff_without_first_publication() -> None:
-    """D-210 §二.3：21:00 以後那班把當天的當沖、借券也抓進來（T-0），但首次值仍只在隔天 T-1 那次存。"""
+def test_t434_same_day_fetch_after_evening_cutoff_without_first_publication() -> None:
+    """D-211 §二.3：21:00 以後那班把當天的當沖、借券也抓進來（T-0），但首次值仍只在隔天 T-1 那次存。"""
     today = dt.date(2026, 9, 25)
     plan = di.plan_from(_S, _full_counts(), ChipDailyConfig(), live=True, today=today)
     got = {(f.table, f.market, f.day, f.first, f.reason) for f in plan}

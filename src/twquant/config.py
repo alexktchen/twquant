@@ -189,11 +189,11 @@ PICK_CHIP_ITEMS = (
     "借券",
     "當沖",
     "千張大戶",
-)  # 籌碼七項（D-210 §二）
+)  # 籌碼七項（D-211 §二）
 
 
 class PickScoreRules(BaseConfig):
-    """四面向 10 分制的規則門檻（T-426／D-206 §二；籌碼七項比重 D-210 §二）。權威說明在 system.yaml 的註解。"""
+    """四面向 10 分制的規則門檻（T-426／D-206 §二；籌碼七項比重 D-211 §二）。權威說明在 system.yaml 的註解。"""
 
     base: int = Field(ge=0)  # 起始分（中性）
     stock_pattern: str  # 全市場比較的宇宙（四碼普通股）
@@ -216,7 +216,7 @@ class PickScoreRules(BaseConfig):
     min_peers: int = Field(ge=2)  # 同產業至少幾檔才算得出中位數
     good_news: list[str]  # 重大訊息主旨含這些字 +1
     bad_news: list[str]  # 含這些字 −1
-    chip_weights: dict[str, float]  # 籌碼七項的比重，鍵＝PICK_CHIP_ITEMS、合計＝base（D-210 §二）
+    chip_weights: dict[str, float]  # 籌碼七項的比重，鍵＝PICK_CHIP_ITEMS、合計＝base（D-211 §二）
 
     @model_validator(mode="after")
     def _chip_weights_valid(self) -> PickScoreRules:
@@ -244,7 +244,7 @@ class PickReviewConfig(BaseConfig):
     """名單四面向評分與 AI 首選（T-394／D-196）。權威說明在 system.yaml 的註解。"""
 
     lines: list[str]
-    not_before: dt.time  # 當天的評分只在這個時刻（台北）之後算——晚上那班（D-210 §二.1）
+    not_before: dt.time  # 當天的評分只在這個時刻（台北）之後算——晚上那班（D-211 §二.1）
     max_tokens: int = Field(gt=0)
     view_chars: int = Field(gt=0)
     conclusion_chars: int = Field(gt=0)
@@ -333,7 +333,7 @@ class ChipDailyConfig(BaseConfig):
         "sbl_short_daily": (1,),
     }
     catchup_trading_days: int = Field(default=10, ge=1)  # 往回找「某市場一列都沒有」的交易日
-    # D-210 §二.3：「今天」那一輪在這個時刻（台北）以後跑，連當天的當沖、借券也抓（T-0；不存首次值）
+    # D-211 §二.3：「今天」那一輪在這個時刻（台北）以後跑，連當天的當沖、借券也抓（T-0；不存首次值）
     same_day_after: dt.time = dt.time(21, 0)
     # T-327：資料湖表也在同一個窗裡補缺日（PG 一列都沒有的交易日重抓，再由供應層鏡射進 PG）
     lake_catchup_tables: tuple[str, ...] = ("margin_daily",)
