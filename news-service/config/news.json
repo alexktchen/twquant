@@ -210,7 +210,7 @@
     "batch": 8,
     "per_run_limit": 40,
     "max_tokens": 3000,
-    "daily_neurons": 2500,
+    "daily_neurons": 4000,
     "reserve_for_embed": 400,
     "input_neurons_per_1m": 4625,
     "output_neurons_per_1m": 30475,

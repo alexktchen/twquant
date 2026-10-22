@@ -1,5 +1,5 @@
 // 新聞服務對外 API v1（SPEC-017 §10）：GET /functions/v1/api/v1/items（T-401 起多 translation、title_zh、summary_zh；T-402 起多 mentions）、
-// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
+// /v1/graph?id=（T-404：一則新聞的關係圖）、/v1/similar?id=（T-410：相似新聞，同事件在前）、/v1/search?q=（T-410：語意搜尋）、GET／POST /v1/review（T-403：核可頁，只有擁有者）、/v1/digest（T-417：熱門主題、多家同報、股票熱度三張卡）、/v1/galaxy（T-418：全景星雲圖，最新一筆快照）、/v1/stock-news-days?id=（T-419：個股頁 K 線上的新聞標記）、/v1/thread?id=（T-420：這件事的來龍去脈）、/v1/summary?id=（D-207：點開才翻摘要）、/v1/stock-news?id=tw:2382 與 /v1/stock-news-counts?ids=…（反向看圖：某檔連得到哪些新聞）、/v1/health。
 // 只給伺服器呼叫（網站的 Pages Functions、Python），帶 x-news-key（NEWS_API_KEY）；瀏覽器不直接打這裡。
 import config from '../../../config/news.json' with { type: 'json' }
 import typeWeights from '../../../config/news_types.json' with { type: 'json' }
@@ -11,7 +11,8 @@ import { mergeSimilar, parseSearchQuery } from '../../../src/embed.ts'
 import { baseDaysOf, hotStocks, multiOutlet, topTopics, type CoRow, type EvRow, type HotRow, type TopicRow } from '../../../src/digest.ts'
 import { REVIEW_TYPES, edgeKey, groupDrafts, isOwner, parseReviewBody, planReview, type DecisionIn, type DraftEdge, type EntityInfo } from '../../../src/review.ts'
 import { countsFor, coverageDaysOf, linksTo, newsDays, parseStockIds, prepare, quietGap, type DayRow, type ItemMentions, type Prepared } from '../../../src/stocknews.ts'
-import { authorized, db, embedQuery, json } from '../_shared/io.ts'
+import { summaryFor } from '../../../src/translate.ts'
+import { authorized, db, embedQuery, json, summaryDeps } from '../_shared/io.ts'
 
 const cfg = validateConfig(config)
 const meta = new Map(cfg.sources.map((s) => [s.id, s]))
@@ -325,6 +326,14 @@ Deno.serve(async (req) => {
         })),
       })
     }
+    if (path === '/v1/summary') {
+      // 點開才翻摘要（D-207）：翻過就直接給，沒翻過現在翻（一次約 2～5 秒）；額度用完回 budget，網站顯示英文摘要
+      const id = url.searchParams.get('id')
+      if (!id) return json({ detail: '缺 id' }, 400)
+      const r = await summaryFor(cfg.translate, summaryDeps(sql, cfg.translate.model), id)
+      if (r === null) return json({ detail: '找不到這則新聞' }, 404)
+      return json({ api_version: API_VERSION, id, ...r })
+    }
     if (path === '/v1/similar') {
       const id = url.searchParams.get('id')
       if (!id) return json({ detail: '缺 id' }, 400)
@@ -435,7 +444,7 @@ Deno.serve(async (req) => {
         select i.id, i.source, i.lang, i.url,
                coalesce(v.title_orig, i.title_orig) as title, coalesce(v.summary_orig, i.summary_orig) as summary,
                i.published_at, i.first_seen_at, coalesce(v.n, 0)::int as versions,
-               t.title_zh, t.summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha,
+               t.title_zh, coalesce(t.summary_zh, st.summary_zh) as summary_zh, t.status as tr_status, coalesce(v.content_sha, i.content_sha) as sha,
                ty.type
         from news.raw_items i
         -- 新聞類型（T-421）：現行探針版本；還沒分類 → null
@@ -446,6 +455,8 @@ Deno.serve(async (req) => {
         ) v on true
         -- 目前這一版內容的翻譯（T-401）；還沒翻 → null
         left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha)
+        -- 點開翻過的摘要（D-207）；排程只翻標題
+        left join news.summary_translations st on st.item_id = i.id and st.content_sha = coalesce(v.content_sha, i.content_sha) and st.status = 'ok'
         where true
           ${q.since ? sql`and i.first_seen_at >= ${q.since}` : sql``}
           ${q.until ? sql`and i.first_seen_at <= ${q.until}` : sql``}
