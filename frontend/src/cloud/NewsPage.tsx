@@ -62,10 +62,13 @@ const FILTERS: { key: Filter; label: string }[] = [
 export function NewsPage({
   refresh,
   onStock,
+  guest,
   signedIn,
 }: {
   refresh: number
   onStock: (sid: string, name: string) => void
+  /** 沒登入（T-438：新聞照看，核可清單不抓、語意搜尋停用） */
+  guest: boolean
   /** /api/me 確定登入了（T-433：之前不放廣告） */
   signedIn: boolean
 }) {
@@ -115,13 +118,14 @@ export function NewsPage({
 
   useEffect(() => {
     let stale = false
+    if (guest) return
     fetchNewsReview()
       .then((r) => !stale && setReview(r.can_review ? r.groups : null))
       .catch(() => !stale && setReview(null)) // 讀不到就不顯示按鈕，新聞照常
     return () => {
       stale = true
     }
-  }, [refresh])
+  }, [refresh, guest])
 
   const searchText = (raw: string) => {
     const text = raw.trim()
@@ -250,7 +254,16 @@ export function NewsPage({
         {reviewOpen && review && <NewsReview groups={review} onChange={setReview} onClose={() => setReviewOpen(false)} />}
         <form className="cq-news-search" role="search" onSubmit={runSearch} hidden={reviewOpen}>
           <Search size={16} aria-hidden="true" />
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="照意思找新聞，例：輝達財測、美債殖利率" maxLength={60} aria-label="搜尋新聞" enterKeyHint="search" />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={guest ? '登入後才能搜尋（照意思找新聞）' : '照意思找新聞，例：輝達財測、美債殖利率'}
+            maxLength={60}
+            aria-label="搜尋新聞"
+            enterKeyHint="search"
+            disabled={guest}
+          />
           {(q || search) && (
             <button type="button" className="cq-news-search-x" onClick={clearSearch} aria-label="清除搜尋">
               <X size={16} aria-hidden="true" />

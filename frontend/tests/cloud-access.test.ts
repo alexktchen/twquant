@@ -47,18 +47,18 @@ test('T-430 AC1 角色：admin（目前 cktalex@gmail.com）才能用每日名�
 test('T-430 AC2 擋人：沒權杖 401、不是 admin 403、admin 放行；只看驗過的權杖', async () => {
   const s = await signer('kid-t429-gate')
   const opts = { fetchImpl: s.certs, now: NOW }
-  assert.equal(await denied(req(await s.sign('cktalex@gmail.com')), 'picks', opts), null)
-  assert.equal(await denied(req(await s.sign('cktalex@gmail.com')), 'score', opts), null)
-  const other = await denied(req(await s.sign('friend@example.com')), 'picks', opts)
+  assert.equal(await denied(req(await s.sign('cktalex@gmail.com')), 'picks', {}, opts), null)
+  assert.equal(await denied(req(await s.sign('cktalex@gmail.com')), 'score', {}, opts), null)
+  const other = await denied(req(await s.sign('friend@example.com')), 'picks', {}, opts)
   assert.equal(other?.status, 403)
   assert.deepEqual(await other?.json(), { detail: '沒有權限' })
-  assert.equal((await denied(req(), 'score', opts))?.status, 401)
+  assert.equal((await denied(req(), 'score', {}, opts))?.status, 401)
   const spoof = new Request('https://twquant.pages.dev/api/picks', { headers: { 'cf-access-authenticated-user-email': 'cktalex@gmail.com' } })
-  assert.equal((await denied(spoof, 'picks', opts))?.status, 401) // 冒用 email 標頭沒用
+  assert.equal((await denied(spoof, 'picks', {}, opts))?.status, 401) // 冒用 email 標頭沒用
   // 首頁、個股評分：不擋，只決定多不多那幾欄；兩種內容暫存鍵不同
-  assert.equal(await allowed(req(await s.sign('cktalex@gmail.com')), 'picks', opts), true)
-  assert.equal(await allowed(req(await s.sign('friend@example.com')), 'picks', opts), false)
-  assert.equal(await allowed(req(), 'picks', opts), false)
+  assert.equal(await allowed(req(await s.sign('cktalex@gmail.com')), 'picks', {}, opts), true)
+  assert.equal(await allowed(req(await s.sign('friend@example.com')), 'picks', {}, opts), false)
+  assert.equal(await allowed(req(), 'picks', {}, opts), false)
   assert.notEqual(gatedKey('/api/warroom', true), gatedKey('/api/warroom', false))
 })
 
@@ -72,7 +72,7 @@ test('T-430 AC2 每支名單／績效端點都自己擋，而且在讀暫存之�
   ]
   for (const [f, feature] of gated) {
     const src = read(f)
-    assert.match(src, new RegExp(`\\(await denied\\((ctx\\.)?request, '${feature}'\\)\\) \\?\\? cached\\(cacheKey\\(`), f)
+    assert.match(src, new RegExp(`\\(await denied\\((ctx\\.)?request, '${feature}', (ctx\\.)?env\\)\\) \\?\\? cached\\(cacheKey\\(`), f)
     assert.equal(src.match(/cached\(/g)?.length, 1, f) // 沒有別條路繞過權限直接讀暫存
   }
   // 公開的日期清單照舊只給日期（不含任何股票、不含檔數）
@@ -82,11 +82,11 @@ test('T-430 AC2 每支名單／績效端點都自己擋，而且在讀暫存之�
 
 test('T-430 AC3 首頁與個股評分：沒有名單權限就不讀名單（名單速覽、「名單」標記、在哪條線上）', () => {
   const war = read('functions/api/warroom/index.ts')
-  assert.match(war, /const full = await allowed\(ctx\.request, 'picks'\)/)
+  assert.match(war, /const full = await allowed\(ctx\.request, 'picks', ctx\.env\)/)
   assert.match(war, /const pickDates = withPicks\s*\? await readRows/)
   assert.match(war, /handle\(ctx\.env, full\)/)
   const scores = read('functions/api/stocks/[sid]/scores.ts')
-  assert.match(scores, /const full = await allowed\(ctx\.request, 'picks'\)/)
+  assert.match(scores, /const full = await allowed\(ctx\.request, 'picks', ctx\.env\)/)
   assert.match(scores, /const lists = withLists\s*\? await db/)
   assert.match(scores, /handle\(String\(ctx\.params\.sid\), ctx\.env, full\)/)
 })

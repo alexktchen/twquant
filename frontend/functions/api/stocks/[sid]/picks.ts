@@ -18,4 +18,4 @@ const handle: PagesFunction<Env, 'sid'> = async ({ params, env }) => {
 
 // 有權限的人看到都一樣、一天只更新兩次：同一執行個體 60 秒暫存，省下連資料庫的 CPU（_lib/cache.ts）；先擋權限再讀暫存
 export const onRequestGet: PagesFunction<Env, 'sid'> = async (ctx) =>
-  (await denied(ctx.request, 'picks')) ?? cached(cacheKey(ctx.request), async () => handle(ctx))
+  (await denied(ctx.request, 'picks', ctx.env)) ?? cached(cacheKey(ctx.request), async () => handle(ctx))

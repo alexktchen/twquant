@@ -74,7 +74,7 @@ test('使用者 2026-10-17：伺服器只收格式對的版面', () => {
 
 test('使用者 2026-10-17：版面端點——身分取自登入憑證、寫入只收本站、可恢復預設；隱私權政策寫明存什麼', () => {
   const api = readFileSync(new URL('../functions/api/layout.ts', import.meta.url), 'utf8')
-  for (const s of ['accessEmail(request)', 'onRequestGet', 'onRequestPut', 'onRequestDelete', 'ensureLayout(db)', 'parseLayout(body)', 'LAYOUT_BODY_MAX'])
+  for (const s of ['userEmail(request, env)', 'onRequestGet', 'onRequestPut', 'onRequestDelete', 'ensureLayout(db)', 'parseLayout(body)', 'LAYOUT_BODY_MAX'])
     assert.ok(api.includes(s), s)
   assert.equal(api.match(/sameOrigin\(request\)/g)?.length, 2, 'PUT 與 DELETE 都擋跨站')
   const privacy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8')

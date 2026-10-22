@@ -1,5 +1,5 @@
 // 新聞分頁截圖（手動檢查用，T-400）：node tests/shot-news.cjs <baseUrl> <outDir> <items.json> <health.json>
-// 新聞服務還沒上線時，用錄好的回應代替 /api/news/*。
+// 新聞服務還沒上線時，用錄好的回應代替 /pub/news/*。
 const { chromium } = require('playwright')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -13,8 +13,8 @@ const path = require('node:path')
     const page = await ctx.newPage()
     await page.setExtraHTTPHeaders({ 'cf-access-authenticated-user-email': 'cktalex@gmail.com' })
     await page.route('**/api/layout', (r) => r.fulfill({ json: { layout: null } }))
-    await page.route('**/api/news/items**', (r) => r.fulfill({ json: items }))
-    await page.route('**/api/news/health', (r) => r.fulfill({ json: health }))
+    await page.route('**/pub/news/items**', (r) => r.fulfill({ json: items }))
+    await page.route('**/pub/news/health', (r) => r.fulfill({ json: health }))
     await page.goto(`${base}/?tab=news`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1500)
     const btn = page.getByRole('button', { name: '同意並進入' })

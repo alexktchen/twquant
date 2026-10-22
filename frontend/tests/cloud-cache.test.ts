@@ -59,7 +59,7 @@ test('暫存：最多存固定數量，滿了先清過期的；存不下就照�
 
 test('暫存只用在每個人都一樣的資料：追蹤股、登入身分、登出、即時報價的端點不准包', () => {
   const read = (p: string) => readFileSync(new URL(`../functions/${p}`, import.meta.url), 'utf8')
-  for (const p of ['api/watchlist/index.ts', 'api/watchlist/[sid].ts', 'api/me.ts', 'api/logout.ts', 'api/login.ts', 'api/quotes.ts']) {
+  for (const p of ['api/watchlist/index.ts', 'api/watchlist/[sid].ts', 'api/me.ts', 'api/quotes.ts']) {
     assert.ok(!read(p).includes('_lib/cache'), `${p} 不應該用共用暫存`)
   }
   for (const p of ['api/picks/index.ts', 'api/picks/dates.ts', 'pub/dates.ts', 'api/stocks/[sid]/ohlc.ts', 'api/stocks/[sid]/picks.ts', 'api/stocks/search.ts']) {

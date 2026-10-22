@@ -3,14 +3,14 @@
 // DELETE /api/layout：恢復預設（刪掉這個帳號的版面紀錄）。
 // 身分一律取自 Cloudflare Access 驗過的登入憑證，不信任網頁帶上來的任何帳號資訊；寫入只接受本站網頁送來的請求。
 import { fail, guarded, json, type Env } from '../_lib/db'
-import { accessEmail } from '../_lib/identity'
+import { userEmail } from '../_lib/identity'
 import { LAYOUT_BODY_MAX, parseLayout, type SavedLayout } from '../_lib/layout'
 import { ensureLayout } from '../_lib/layout-db'
 import { sameOrigin } from '../_lib/watchlist'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) =>
   guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     await ensureLayout(db)
     const [row] = await db<{ layout: SavedLayout }[]>`SELECT layout FROM web.home_layout WHERE email = ${email}`
@@ -31,7 +31,7 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
   const layout = parseLayout(body)
   if (layout === null) return fail(400, '版面格式不對：order 要是不重複的卡片代號，collapsed 只能是 order 裡的卡片')
   return guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     await ensureLayout(db)
     await db`
@@ -44,7 +44,7 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
 export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
   if (!sameOrigin(request)) return fail(403, '只接受本站送出的變更')
   return guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     await ensureLayout(db)
     await db`DELETE FROM web.home_layout WHERE email = ${email}`

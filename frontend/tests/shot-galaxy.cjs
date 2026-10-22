@@ -77,7 +77,7 @@ function fakeGalaxy() {
     await page.route('**/api/news/digest', (r) => r.fulfill({ json: { as_of: '2026-10-22T10:30:00Z', base_days: 7, topics: { items: [], everywhere: [] }, multi: [], hot: [] } }))
     await page.route('**/api/news/galaxy', (r) => r.fulfill({ json: galaxy }))
     // 證據句（T-437）：每則對每個問到的實體都回一段「命中字前後各 20 字」
-    await page.route('**/api/news/evidence**', (r) => {
+    await page.route('**/news/evidence**', (r) => {
       const u = new URL(r.request().url())
       const ids = (u.searchParams.get('ids') || '').split(','), ents = (u.searchParams.get('entities') || '').split(',')
       const items = {}
@@ -106,6 +106,13 @@ function fakeGalaxy() {
     await input.press('Enter')
     await page.waitForTimeout(2200)
     await stage.screenshot({ path: path.join(out, `${name}-2-web.png`) })
+    await page.locator('.gx').screenshot({ path: path.join(out, `${name}-2-web-full.png`) }) // 連圖外面那排按鈕
+    // 點一則新聞光點（用搜尋挑一則標題）：手機內容在圖外面那排
+    await input.fill('第 62 則')
+    await page.waitForTimeout(300)
+    await page.locator('.gx-hit.news').first().click()
+    await page.waitForTimeout(1500)
+    await page.locator('.gx').screenshot({ path: path.join(out, `${name}-8-item-full.png`) })
     // 單獨看＋證據句
     await page.getByRole('button', { name: /單獨看/ }).first().click()
     await page.waitForTimeout(1200)

@@ -1,5 +1,7 @@
-// 網站 → 新聞服務（T-400／D-200）：/api/news/* 只是把請求轉給新聞服務的 API v1（news-service/supabase/functions/api），
-// 服務金鑰放 Pages 祕密（NEWS_API_URL、NEWS_API_KEY），不給瀏覽器。/api 在 Cloudflare Access 後面：沒登入讀不到。
+// 網站 → 新聞服務（T-400／D-200）：/pub/news/* 與 /api/news/* 只是把請求轉給新聞服務的 API v1（news-service/supabase/functions/api），
+// 服務金鑰放 Pages 祕密（NEWS_API_URL、NEWS_API_KEY），不給瀏覽器。
+// T-438／D-210：只讀的端點公開在 /pub/news/*（Cloudflare Access 不保護 /pub，沒登入也看得到，是放廣告與搜尋引擎的前提）；
+// 核可（擁有者）與語意搜尋（每次都花 AI 額度，不讓匿名流量燒）留在 /api/news/* 要登入。
 // 新聞服務掛了 → 503，網站只有新聞分頁顯示暫停，其他分頁照常（SPEC-017 §10）。純函式＋注入 fetch，供 node 單元測試。
 import { sameOrigin } from './watchlist.ts'
 
@@ -85,6 +87,18 @@ export async function proxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl
   if (!(res.headers.get('content-type') ?? '').includes('json')) return reply(JSON.stringify({ detail: '新聞服務暫時無法取得資料' }), 503)
   if (res.status === 200 || res.status === 400 || res.status === 404) return reply(body, res.status)
   return reply(JSON.stringify({ detail: '新聞服務暫時無法取得資料' }), 503)
+}
+
+/** 公開端點讓瀏覽器快取幾秒：新聞每 30 分鐘才進一批，同一個人反覆切分頁不用再打伺服器（Pages Functions 免費每天 10 萬次）。 */
+export const PUBLIC_MAX_AGE_S = 60
+
+/** 公開（不看身分）的轉接：成功的回應帶公開快取標頭；錯誤照舊 no-store，不讓瀏覽器把 503 留 60 秒。 */
+export async function pubProxy(env: NewsEnv, path: keyof typeof ALLOWED, requestUrl: string, fetchFn: typeof fetch = fetch, opts: ProxyOpts = {}): Promise<Response> {
+  const res = await proxy(env, path, requestUrl, fetchFn, opts)
+  if (res.status !== 200) return res
+  const headers = new Headers(res.headers)
+  headers.set('cache-control', `public, max-age=${PUBLIC_MAX_AGE_S}`)
+  return new Response(await res.text(), { status: 200, headers })
 }
 
 /** 核可頁一次送出的內容上限（100 個決定綽綽有餘） */

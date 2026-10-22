@@ -22,12 +22,12 @@ import {
   fetchTrades,
   saveTrade,
   deleteTrade,
-  logoutTarget,
   saveWatchOrder,
   searchStocks,
   setTracked,
 } from './api'
 import { GUEST_LINES, LOGIN_PAGE, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
+import { clearSession, completeOAuth, hasSession, signOut } from './session-client'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
@@ -52,7 +52,7 @@ import { exampleText, similarBar, similarText, spanText, type Similar } from './
 import { WarRoom } from './WarRoom'
 import { GroupsPage } from './GroupsPage'
 import { NewsPage } from './NewsPage'
-import { tabFromUrl, withoutTab, type Tab } from './tabs'
+import { guestTab, tabFromUrl, withoutTab, type Tab } from './tabs'
 import { LineGroupPage } from './LineGroupPage'
 import { lockedText, tabAllowed, type Feature } from './access'
 import { chooseDay, dateOption, dayCount, dayNav, hits, pct, price, quoteBar, sameBars, trend, type Bar, type DateCounts, type Pick, type PicksDay } from './format'
@@ -76,7 +76,9 @@ const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e
 
 export default function CloudApp() {
   // 推播通知點開帶 ?tab=（族群資金通知帶 group → 首頁）就直接開那個分頁；預設是首頁戰情室（T-379）
-  const [tab, setTab] = useState<Tab>(() => tabFromUrl(window.location.href) ?? 'home')
+  // 網址有沒有明寫 ?tab=：沒登入的人沒寫就落在公開的新聞頁（guestTab）
+  const [explicitTab] = useState<Tab | null>(() => tabFromUrl(window.location.href))
+  const [tab, setTab] = useState<Tab>(() => explicitTab ?? 'home')
   useEffect(() => {
     if (tabFromUrl(window.location.href)) window.history.replaceState(null, '', withoutTab(window.location.href))
     // 網站已開著時點通知：背景程式（sw.js）傳來要開的網址
@@ -148,8 +150,11 @@ export default function CloudApp() {
       .catch((e: Error) => setTradesErr(watchError(e)))
 
   useEffect(() => {
+    // 先把 Google 登入回來的 ?code= 換成登入狀態（T-439），再問 /api/me 這是誰。
     // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可。確定登入了才抓追蹤股
-    fetchMe()
+    completeOAuth()
+      .catch((e: Error) => setNotice(e.message))
+      .then(() => fetchMe())
       .then((m) => {
         setEmail(m.email)
         fetchAccess()
@@ -166,7 +171,13 @@ export default function CloudApp() {
       })
       .catch((e: Error) => {
         if (!(e instanceof LoginRequired)) return
+        if (hasSession()) {
+          // 本機有 Supabase 登入卻被擋：被導走＝/api 還在 Cloudflare Access 後面（過渡期，管理者還沒關）；被拒＝權杖失效
+          if (e.reason === 'redirect') setNotice('登入系統切換中：/api 還在 Cloudflare Access 保護下，管理者關掉後重新整理即可')
+          else clearSession()
+        }
         setGuest(true)
+        setTab((t) => guestTab(t, explicitTab))
         // 日期是公開資訊（只有日期、沒有股票）：沒登入時追蹤分頁的評分日與預覽用
         fetchPublicDates().then(setDates).catch(onFail)
       })
@@ -457,25 +468,16 @@ export default function CloudApp() {
           />
         )
       ) : tab === 'news' ? (
-        guest ? (
-          <main className="cq-body">
-            <aside className="cq-list cq-list-guest">
-              <div className="cq-rows">
-                <Gate title="登入後看新聞" text="國內外財經新聞每 30 分鐘更新一次（含半夜），國外的會翻成中文，並連到相關的美股、台股與族群。" />
-              </div>
-            </aside>
-            <section className="cq-detail" />
-          </main>
-        ) : (
-          <NewsPage
-            refresh={refresh}
-            signedIn={email !== null}
-            onStock={(sid, name) => {
-              setWatchSel({ sid, name })
-              setTab('watch')
-            }}
-          />
-        )
+        // 新聞公開（T-438／D-210）：沒登入也看得到；點股票會到要登入的追蹤分頁
+        <NewsPage
+          refresh={refresh}
+          guest={guest}
+          signedIn={email !== null}
+          onStock={(sid, name) => {
+            setWatchSel({ sid, name })
+            setTab('watch')
+          }}
+        />
       ) : tab === 'group' ? (
         // 盤勢（T-431／D-209）：族群資金熱力圖從首頁搬來；有名單權限的人，名單上的族群標「名單 N」
         guest ? (
@@ -742,7 +744,7 @@ export default function CloudApp() {
   )
 }
 
-/** 登入身分與登出（Cloudflare Access）。沒開 Access 時整塊不顯示。 */
+/** 登入身分與登出（Supabase Auth，T-439）。沒登入時整塊不顯示。 */
 function User({ email, push, onBell }: { email: string | null; push: PushState | null; onBell: () => void }) {
   if (!email) return null
   return (
@@ -755,10 +757,10 @@ function User({ email, push, onBell }: { email: string | null; push: PushState |
       <span className="cq-avatar">{email.slice(0, 1).toUpperCase()}</span>
       <span className="cq-email">{email}</span>
       <a
-        href="/cdn-cgi/access/logout"
+        href="/"
         onClick={(e) => {
           e.preventDefault()
-          logoutTarget().then((to) => window.location.assign(to))
+          signOut().finally(() => window.location.assign('/'))
         }}
       >
         登出

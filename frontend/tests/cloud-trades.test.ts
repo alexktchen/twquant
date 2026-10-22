@@ -46,7 +46,7 @@ test('T-388 AC-3：一筆的文字與表單檢查', () => {
 test('T-388 AC-4（靜態）：端點 GET／PUT／DELETE 都驗身分、寫入只收本站；名單列有「我買了」、追蹤分頁有我的下單', () => {
   const api = readFileSync(new URL('../functions/api/trades/index.ts', import.meta.url), 'utf8')
   for (const fn of ['onRequestGet', 'onRequestPut', 'onRequestDelete']) assert.ok(api.includes(fn), fn)
-  assert.equal(api.match(/accessEmail\(request\)/g)?.length, 3)
+  assert.equal(api.match(/userEmail\(request, env\)/g)?.length, 3)
   assert.equal(api.match(/sameOrigin\(request\)/g)?.length, 2)
   assert.ok(api.includes('ON CONFLICT (email, stock_id, trade_date, side)'))
   const app = readFileSync(new URL('../src/cloud/CloudApp.tsx', import.meta.url), 'utf8')

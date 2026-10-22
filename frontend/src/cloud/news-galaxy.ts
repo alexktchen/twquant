@@ -1,5 +1,5 @@
 // 新聞全景星雲圖（T-418）的型別與純函式：3D 投影、亮度、標籤避讓、點選。畫面在 NewsGalaxy.tsx。
-// 資料由排程（scripts/news_galaxy.py）算好放新聞庫，/api/news/galaxy 讀最新一筆。
+// 資料由排程（scripts/news_galaxy.py）算好放新聞庫，/pub/news/galaxy 讀最新一筆。
 
 export type GalaxyItem = {
   id: string
@@ -229,7 +229,7 @@ export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = n
 // ── 搜尋與牽連（T-436；使用者 2026-10-22：「想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」，像 graphify 的圖）──
 // 牽連＝同一則新聞一起被提到。兩個亮點之間的線有多粗＝有幾則新聞同時提到兩個。資料就是星雲圖的快照，不另外打 API。
 
-/** 搜尋最多列幾個、一個亮點畫幾條最強的牽連、兩個亮點之間的路徑最多走幾步 */
+/** 搜尋最多列幾個、一個亮點畫幾條最強的牽連、兩個亮點之間的路徑最多幾度（隔幾層） */
 export const SEARCH_MAX = 8
 export const WEB_MAX = 12
 export const PATH_MAX_HOPS = 4
@@ -344,8 +344,8 @@ export function hubWeb(d: GalaxyData, g: HubGraph, hubId: string, max = WEB_MAX)
 export type HubPath = { hubs: GalaxyHub[]; n: number[] }
 
 /**
- * 找 a 到 b 怎麼牽在一起：步數最少優先，同步數挑一路線最粗的（每步成本 1 + 1/則數，所以多走一步一定輸）。
- * 超過 maxHops 步或根本不相連 → null；a＝b → 只有它自己。
+ * 找 a 到 b 怎麼牽在一起：度數（隔幾層）最少優先，同度數挑一路線最粗的（每一度成本 1 + 1/則數，所以多一度一定輸）。
+ * 超過 maxHops 度或根本不相連 → null；a＝b → 只有它自己。
  */
 export function hubPath(d: GalaxyData, g: HubGraph, a: string, b: string, maxHops = PATH_MAX_HOPS): HubPath | null {
   const byId = new Map(d.hubs.map((h) => [h.id, h]))

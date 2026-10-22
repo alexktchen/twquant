@@ -65,7 +65,7 @@ export function shown(r: NewsRow): Shown {
   return { title: r.title, summary: r.summary, lang: r.lang, tag, original: null }
 }
 
-/** 點開才翻的摘要（D-207）：/api/news/summary 的回應。budget＝今天的翻譯額度用完、error＝模型暫時叫不到、none＝不用翻 */
+/** 點開才翻的摘要（D-207）：/pub/news/summary 的回應。budget＝今天的翻譯額度用完、error＝模型暫時叫不到、none＝不用翻 */
 /** 證據句（T-437）：{新聞 id: {實體 id: 比對名字時存下的那段字}}；沒有的就沒有鍵 */
 export type NewsEvidence = { items: Record<string, Record<string, string>> }
 export type NewsSummary = { id: string; status: 'ok' | 'failed' | 'budget' | 'error' | 'none'; summary_zh: string | null }
