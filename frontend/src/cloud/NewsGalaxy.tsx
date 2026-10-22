@@ -544,6 +544,44 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const hub = sel?.kind === 'hub' ? data.hubs.find((h) => h.id === sel.id) : null
   const hubById = new Map(data.hubs.map((h) => [h.id, h]))
   const terms = parseQuery(q)
+  // 新聞光點的內容：桌機放在圖裡的檢視框，手機放在圖外面那排（使用者 2026-10-23：「有時候會擋到星雲圖？全都改成第一張」）
+  const itemBody = item ? (
+    <>
+      <div className="gx-h">
+        <span>
+          {item.src}
+          {item.tr ? '・譯' : ''}・{shortWhen(item.t, today)}
+        </span>
+        <b>{data.clusters.find((c) => c.k === item.k)?.name}</b>
+      </div>
+      <p className="gx-t">{item.title}</p>
+      {item.m.length + item.ml.length > 0 && (
+        <div className="gx-chips">
+          {item.m
+            .map((m) => hubById.get(m))
+            .filter((h) => h?.type === 'tw' && h.sub)
+            .map((h) => (
+              <button key={h!.id} className="gx-chip tw" onClick={() => onStock(h!.sub!, h!.label)} title="開個股頁">
+                {h!.label}
+              </button>
+            ))}
+          {item.ml
+            .filter((l) => !item.m.some((m) => hubById.get(m)?.type === 'tw' && hubById.get(m)?.label === l))
+            .map((l) => (
+              <span key={l} className="gx-chip">
+                {l}
+              </span>
+            ))}
+        </div>
+      )}
+      {item.ev && data.items.filter((x) => x.ev === item.ev).length > 1 && (
+        <p className="gx-row">同一件事 {data.items.filter((x) => x.ev === item.ev).length} 則・{[...new Set(data.items.filter((x) => x.ev === item.ev).map((x) => x.src))].join('、')}</p>
+      )}
+      <a href={item.url} target="_blank" rel="noopener noreferrer">
+        看原文 <ExternalLink size={13} aria-hidden="true" />
+      </a>
+    </>
+  ) : null
   return (
     <section className="gx">
       <p className="gx-sum">{galaxySummary(data)}</p>
@@ -645,43 +683,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
             <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
               <X size={16} aria-hidden="true" />
             </button>
-            {item && (
-              <>
-                <div className="gx-h">
-                  <span>
-                    {item.src}
-                    {item.tr ? '・譯' : ''}・{shortWhen(item.t, today)}
-                  </span>
-                  <b>{data.clusters.find((c) => c.k === item.k)?.name}</b>
-                </div>
-                <p className="gx-t">{item.title}</p>
-                {item.m.length + item.ml.length > 0 && (
-                  <div className="gx-chips">
-                    {item.m
-                      .map((m) => hubById.get(m))
-                      .filter((h) => h?.type === 'tw' && h.sub)
-                      .map((h) => (
-                        <button key={h!.id} className="gx-chip tw" onClick={() => onStock(h!.sub!, h!.label)} title="開個股頁">
-                          {h!.label}
-                        </button>
-                      ))}
-                    {item.ml
-                      .filter((l) => !item.m.some((m) => hubById.get(m)?.type === 'tw' && hubById.get(m)?.label === l))
-                      .map((l) => (
-                        <span key={l} className="gx-chip">
-                          {l}
-                        </span>
-                      ))}
-                  </div>
-                )}
-                {item.ev && data.items.filter((x) => x.ev === item.ev).length > 1 && (
-                  <p className="gx-row">同一件事 {data.items.filter((x) => x.ev === item.ev).length} 則・{[...new Set(data.items.filter((x) => x.ev === item.ev).map((x) => x.src))].join('、')}</p>
-                )}
-                <a href={item.url} target="_blank" rel="noopener noreferrer">
-                  看原文 <ExternalLink size={13} aria-hidden="true" />
-                </a>
-              </>
-            )}
+            {item && itemBody}
             {hub && (
               <>
                 <div className="gx-h">
@@ -758,20 +760,28 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
         </div>
       </div>
-      {hub && (
-        <div className="gx-bar">
-          <span className={`gx-bar-name ${hubClass(hub.type)}`}>
-            {hub.label}
-            <small>{hub.n} 則</small>
-          </span>
-          <button className="gx-focus" onClick={() => setFocus(hub.id)}>
-            <Maximize2 size={14} aria-hidden="true" />
-            單獨看 {hub.n} 則
+      {(hub || item) && (
+        <div className={`gx-bar${item ? ' news' : ''}`}>
+          <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
+            <X size={16} aria-hidden="true" />
           </button>
-          {hub.type === 'tw' && hub.sub && (
-            <button className="gx-go" onClick={() => onStock(hub.sub!, hub.label)}>
-              開個股頁
-            </button>
+          {item && itemBody}
+          {hub && (
+            <>
+              <span className={`gx-bar-name ${hubClass(hub.type)}`}>
+                {hub.label}
+                <small>{hub.n} 則</small>
+              </span>
+              <button className="gx-focus" onClick={() => setFocus(hub.id)}>
+                <Maximize2 size={14} aria-hidden="true" />
+                單獨看 {hub.n} 則
+              </button>
+              {hub.type === 'tw' && hub.sub && (
+                <button className="gx-go" onClick={() => onStock(hub.sub!, hub.label)}>
+                  開個股頁
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

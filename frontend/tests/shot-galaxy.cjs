@@ -96,6 +96,12 @@ function fakeGalaxy() {
     await page.waitForTimeout(2200)
     await stage.screenshot({ path: path.join(out, `${name}-2-web.png`) })
     await page.locator('.gx').screenshot({ path: path.join(out, `${name}-2-web-full.png`) }) // 連圖外面那排按鈕
+    // 點一則新聞光點（用搜尋挑一則標題）：手機內容在圖外面那排
+    await input.fill('第 62 則')
+    await page.waitForTimeout(300)
+    await page.locator('.gx-hit.news').first().click()
+    await page.waitForTimeout(1500)
+    await page.locator('.gx').screenshot({ path: path.join(out, `${name}-8-item-full.png`) })
     await input.fill('聯發科 記憶體')
     await page.waitForTimeout(300)
     await stage.screenshot({ path: path.join(out, `${name}-3-two.png`) })
