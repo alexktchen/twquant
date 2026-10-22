@@ -51,6 +51,8 @@
 /* 檢視框貼下緣時（手機）別把牽連的亮點蓋掉（使用者 2026-10-23：「擋到了」）：最高只到圖的四成、裡面可捲；亮點的三則新聞標題收起來（「單獨看」裡有） */
 .gx-insp.dock { max-height: 40%; overflow-y: auto; touch-action: pan-y; }
 .gx-insp.dock .gx-news { display: none; }
+/* 「單獨看」「開個股頁」釘在框的最下面（使用者 2026-10-23：「單獨看放到最下面」）：籌碼再多、往上捲也一直看得到 */
+.gx-insp.dock .gx-acts { position: sticky; bottom: 0; margin: 8px -12px -12px; padding: 8px 12px 12px; background: rgba(4, 4, 5, .95); border-top: 1px solid #3a3133; }
 
 /* 搜尋與牽連（T-436）：左上角搜尋框（跟新聞頁搜尋框同一個殼、黑底）；下拉列亮點與新聞；路徑列在它下面。
    亮點之間的牽連線畫在 canvas（黃，越粗則數越多）；檢視框裡「一起被提到」的籌碼可以點了換看 */
