@@ -2,9 +2,11 @@
 盤後快訊（T-409，2026-10-19 使用者：「這邊台灣晚上時間也要跑一次」）：同一套流程，edition="evening"——
 讀今天的收盤與籌碼（date <= 今天）、今天的公告、今天開盤起的新聞、明天的法說會與除權息，提示詞改成盤後研判，寫進 evening_brief。
 
-輸入全部來自 PG（昨天的大盤體檢、期交所盤後、族群資金、名單、公告、行事曆）與兩個行情介面
+輸入全部來自 PG（昨天的大盤體檢、期交所盤後、族群資金、公告、行事曆）與兩個行情介面
 （Yahoo、期交所夜盤）。行情抓不到就在 errors 記一筆、那一欄留空——晨報照出，數字少一塊。
 模型寫的部分走洞悉層（Cloudflare 免費額度）；模型不可用時只有規則那一句。
+T-434／D-211（使用者 2026-10-22：「首頁那邊的名單跟該擋的都要擋」）：晨報是每個人共用的一份（首頁、LINE 圖卡），
+名單只給 admin（D-208），所以晨報**不讀名單**——不寫各線檔數、公告也不因為在名單上就留、不標「名單」。
 
 純運算（gather 的 PG 讀取與行情抓取由呼叫端注入）。
 """
@@ -61,7 +63,6 @@ class MorningInputs:
     taifex_prev: dict[str, Any] | None = None  # 前一筆期交所盤後（算外資期貨未平倉增減）
     inflow: list[dict[str, Any]] = field(default_factory=list)
     outflow: list[dict[str, Any]] = field(default_factory=list)
-    picks: list[dict[str, Any]] = field(default_factory=list)  # 每條線：code, name, n, new
     news: list[dict[str, Any]] = field(default_factory=list)
     conferences_today: list[dict[str, Any]] = field(default_factory=list)
     dividends_today: list[str] = field(default_factory=list)
@@ -130,7 +131,6 @@ def gather(
         "market_daily",
         "taifex_daily",
         "group_flow_daily",
-        "daily_picks",
         "mops_announcements",
         "conference_calendar",
     )
@@ -197,37 +197,6 @@ def gather(
         )
         out.inflow = [m for m in moves if m["diff"] > 0][: cfg.top_groups]
         out.outflow = [m for m in reversed(moves) if m["diff"] < 0][: cfg.top_groups]
-        has_picks = "daily_picks" not in missing
-        picks = (
-            _rows(
-                conn,
-                schema,
-                'SELECT line, stock_id FROM "{schema}"."daily_picks" WHERE date = %s',
-                (mdate,),
-            )
-            if has_picks
-            else []
-        )
-        prev_rows = (
-            _rows(
-                conn,
-                schema,
-                'SELECT line, stock_id FROM "{schema}"."daily_picks" WHERE date = '
-                '(SELECT max(date) FROM "{schema}"."daily_picks" WHERE date < %s)',
-                (mdate,),
-            )
-            if has_picks
-            else []
-        )
-        prev = {(r["line"], r["stock_id"]) for r in prev_rows}
-        by_line: dict[str, dict[str, Any]] = {}
-        for r in picks:
-            name = cfg.line_names.get(r["line"], r["line"])
-            rec = by_line.setdefault(r["line"], {"code": r["line"], "name": name, "n": 0, "new": 0})
-            rec["n"] += 1
-            rec["new"] += int((r["line"], r["stock_id"]) not in prev)
-        out.picks = list(by_line.values())
-        pick_ids = {r["stock_id"] for r in picks}
         wide = [c for c in categories if c["market_wide"]]
         news = (
             _rows(
@@ -240,12 +209,12 @@ def gather(
             if "mops_announcements" not in missing
             else []
         )
-        kept: list[dict[str, Any]] = []
-        for n in news:
-            tags = classify(n["subject"], categories)
-            mine = n["stock_id"] in pick_ids
-            if mine or classify(n["subject"], wide):
-                kept.append({**n, "tags": (["名單"] if mine else []) + tags})
+        # 只留全市場重要類別的公告（名單只給 admin，晨報不看名單，D-211）
+        kept = [
+            {**n, "tags": classify(n["subject"], categories)}
+            for n in news
+            if classify(n["subject"], wide)
+        ]
         out.news = kept[: cfg.news_limit]
         tsmc = _rows(
             conn,
@@ -403,11 +372,6 @@ def rule_text(inp: MorningInputs) -> str:
         parts.append(s)
     if inp.inflow:
         parts.append("資金流入 " + "、".join(x["grp"] for x in inp.inflow))
-    if inp.picks:
-        parts.append(
-            "今日名單 "
-            + "、".join(f"{p['name']} {p['n']} 檔（新增 {p['new']}）" for p in inp.picks)
-        )
     # 盤後：今天的台股在前；再來是今晚進行中的夜盤（最新）、最後才是前一晚的美股
     ordered = parts + head[::-1] if inp.edition == "evening" else head + parts
     return "；".join(ordered) + "。" if ordered else "今天沒有可用的資料。"
@@ -500,8 +464,6 @@ def facts(inp: MorningInputs) -> list[str]:
     for h in inp.headlines:
         stamp = h.published_at.strftime("%m/%d %H:%M")
         out.append(f"新聞頭條（{h.source} {stamp}）：{h.title}")
-    for p in inp.picks:
-        out.append(f"今天名單「{p['name']}」{p['n']} 檔，其中新增 {p['new']} 檔")
     for nw in inp.news:
         tag = "、".join(nw.get("tags") or [])
         line = f"重大訊息 {nw['stock_id']} {nw.get('name') or ''}：{nw['subject']}"

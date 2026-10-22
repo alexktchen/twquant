@@ -156,7 +156,7 @@ def _conn(with_market: bool = True, market_date: dt.date = MDATE) -> _Conn:
             (
                 '"daily_picks" WHERE date = %s',
                 ["line", "stock_id"],
-                [("CORE", "2330"), ("CORE", "2317"), ("QUIET", "8084")],
+                [("CORE", "2330"), ("CORE", "2317"), ("QUIET", "8084"), ("QUIET", "1234")],
             ),
             (
                 '"mops_announcements"',
@@ -234,7 +234,8 @@ def _night() -> NightFuture:
     )
 
 
-# ── AC-1：收資料——昨天那一列、族群流向、名單新增、公告只留名單股與重要類別、ADR 折溢價 ─────
+# ── AC-1：收資料——昨天那一列、族群流向、公告只留全市場重要類別、ADR 折溢價 ─────────────────
+# T-434／D-211：晨報每個人共用，名單只給 admin → 晨報不讀名單（資料庫裡有名單也一樣）
 def test_ac1_gather_builds_inputs_from_pg_and_quotes() -> None:
     inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
     assert inp.market_date == MDATE and inp.market is not None and inp.market["up"] == 543
@@ -242,13 +243,10 @@ def test_ac1_gather_builds_inputs_from_pg_and_quotes() -> None:
     assert [m["grp"] for m in inp.inflow] == ["半導體", "航運"] and [
         m["grp"] for m in inp.outflow
     ] == ["金融"]
-    assert sorted((p["name"], p["n"], p["new"]) for p in inp.picks) == [
-        ("大盤精選", 2, 1),
-        ("潛伏飆股", 1, 1),
-    ]
-    # 8084 在名單上（任何公告都留）、9999 命中全市場重要類別（現金增資）、黑松的自結比率兩者皆非 → 不留
+    assert not hasattr(inp, "picks")
+    # 8084（變更交易）、9999（現金增資）命中全市場重要類別；黑松的自結比率不是——它在名單上也不留、誰都不標「名單」
     assert [(n["stock_id"], n["tags"]) for n in inp.news] == [
-        ("8084", ["名單", "變更交易／下市"]),
+        ("8084", ["變更交易／下市"]),
         ("9999", ["減資／增資／私募"]),
     ]
     assert len(inp.us) == 4 and len(inp.extras) == 5 and inp.errors == []
@@ -278,7 +276,7 @@ def test_ac1_no_market_row_yet_means_empty_sections_not_errors() -> None:
     inp = gather(
         _conn(with_market=False), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night
     )
-    assert inp.market is None and inp.picks == [] and inp.news == [] and inp.inflow == []
+    assert inp.market is None and inp.news == [] and inp.inflow == []
     assert rule_text(inp).startswith("美股")
 
 
@@ -292,7 +290,7 @@ def test_ac2_rule_text_cites_inputs_and_skips_missing() -> None:
     assert "前一交易日加權 -1.23%，漲跌家數 543：1238，漲停 40、跌停 2，量能 1.27 倍均量" in text
     assert "外資賣超 250 億（連 4 日賣超）" in text
     assert "外資期貨淨空單 93,675 口，P/C 未平倉比 68%" in text
-    assert "資金流入 半導體、航運" in text and "今日名單 大盤精選 2 檔（新增 1）" in text
+    assert "資金流入 半導體、航運" in text and "名單" not in text  # T-434：不寫各線檔數
     for casual in ("昨天", "是 20 日平均的", "連賣"):
         assert casual not in text
     empty = MorningInputs(day=DAY, market_date=None, market=None, taifex=None)
@@ -411,7 +409,8 @@ def test_ac5_facts_are_formatted_with_units_and_direction() -> None:
         x.startswith("台指期夜盤（近月）收 26,500 點") and "比加權收盤低 500 點" in x for x in f
     )
     assert any(x.startswith("台積電 ADR 對台股收盤溢價 28.0%") for x in f)
-    assert any("重大訊息 8084" in x and "（名單、變更交易／下市）" in x for x in f)
+    assert any("重大訊息 8084" in x and x.endswith("（變更交易／下市）") for x in f)
+    assert not any("名單" in x for x in f)  # T-434：事實裡沒有名單（檔數、「名單」標記都沒有）
 
 
 def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:

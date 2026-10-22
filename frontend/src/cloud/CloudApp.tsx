@@ -426,7 +426,7 @@ export default function CloudApp() {
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
               <div className="cq-rows">
-                <Gate title="登入後看今日戰情" text="開盤前一頁看完：昨晚美股與台指夜盤、昨天大盤漲跌家數與法人進出、重大訊息、族群資金往哪跑、今天名單有哪些新面孔。" />
+                <Gate title="登入後看今日戰情" text="開盤前一頁看完：昨晚美股與台指夜盤、昨天大盤漲跌家數與法人進出、重大訊息。" />
               </div>
             </aside>
             <section className="cq-detail" />
