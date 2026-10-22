@@ -49,6 +49,46 @@
   .gx-legend { bottom: 54px; }
 }
 
+/* 搜尋與牽連（T-436）：左上角搜尋框（跟新聞頁搜尋框同一個殼、黑底）；下拉列亮點與新聞；路徑列在它下面。
+   亮點之間的牽連線畫在 canvas（黃，越粗則數越多）；檢視框裡「一起被提到」的籌碼可以點了換看 */
+.gx-search {
+  position: absolute; left: 10px; top: 10px; z-index: 6; width: min(360px, calc(100% - 20px)); display: flex; align-items: center; gap: 8px;
+  padding: 0 6px 0 10px; border: 1px solid #5a4b45; border-radius: 10px; background: rgba(5, 5, 6, .88); color: #9c8f8a; cursor: default;
+}
+.gx-search:focus-within { border-color: #ffd23f; }
+.gx-search input { flex: 1; min-width: 0; height: 38px; border: 0; outline: 0; background: none; color: #f3e9e4; font-size: 16px; }
+.gx-search input::placeholder { color: #7d716c; }
+.gx-search input::-webkit-search-cancel-button { display: none; }
+.cq .gx-search-x { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: none; color: #9c8f8a; }
+.gx-hits { position: absolute; left: -1px; right: -1px; top: 100%; margin: 4px 0 0; padding: 4px 0; list-style: none; max-height: 300px; overflow-y: auto; background: rgba(4, 4, 5, .96); border: 1px solid #5a4b45; border-radius: 10px; }
+.gx-hit-tip { padding: 7px 12px; font-size: 13.5px; color: #c9bdb8; line-height: 1.4; }
+.cq .gx-hit { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 12px 7px 24px; background: none; text-align: left; position: relative; }
+.cq .gx-hit:hover, .cq .gx-hit:focus-visible { background: rgba(255, 210, 63, .1); }
+.gx-hit::before { content: ''; position: absolute; left: 10px; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: #8a8f98; }
+.gx-hit.tw::before { background: #ff7a59; box-shadow: 0 0 6px #ff7a59; }
+.gx-hit.abroad::before, .gx-hit.news.intl::before { background: #7fb2ff; box-shadow: 0 0 6px #7fb2ff; }
+.gx-hit.cluster::before { background: #2dd4bf; box-shadow: 0 0 6px #2dd4bf; }
+.gx-hit.news::before { width: 6px; height: 6px; left: 11px; top: 14px; }
+.gx-hit b { font-size: 15px; font-weight: 600; color: #f3e9e4; line-height: 1.35; }
+.gx-hit.news b { font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gx-hit small { font-size: 12.5px; color: #9c8f8a; }
+.gx-path {
+  position: absolute; left: 10px; top: 56px; z-index: 5; max-width: calc(100% - 20px); display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px 36px 8px 10px; border: 1px solid #ffd23f; border-radius: 10px; background: rgba(5, 5, 6, .9); color: #f3e9e4; font-size: 14px; cursor: default;
+}
+.gx-path i { font-style: normal; font-size: 12.5px; color: #ffd23f; white-space: nowrap; }
+.gx-path i::before, .gx-path i::after { content: '─'; color: #ffd23f; margin: 0 3px; }
+.gx-path small { margin-left: 4px; font-size: 12.5px; color: #9c8f8a; }
+.gx-path > span { font-size: 14px; color: #c9bdb8; }
+.cq .gx-path .gx-x { top: 5px; }
+.cq .gx-chip { display: inline-flex; align-items: center; gap: 4px; }
+.cq .gx-chip.abroad { color: #b9d3ff; border-color: #7fb2ff; cursor: pointer; }
+.cq .gx-chip.cluster { color: #8ff0df; border-color: #2dd4bf; cursor: pointer; }
+.cq .gx-chip.on { background: rgba(255, 210, 63, .18); border-color: #ffd23f; color: #ffd23f; }
+.cq .gx-chip small { font-size: 11.5px; color: #9c8f8a; }
+.gx-web { margin: 0 0 8px; }
+.gx-web-h { align-self: center; font-size: 12.5px; color: #9c8f8a; margin-right: 2px; }
+
 /* 單獨看（GalaxyFocus）：用新聞閱讀卡的殼；顏色跟星雲圖一樣——台股橘、國外藍、主題青，選中的關聯＝黃，同一件事幾家＝紫（同「多家同報」） */
 .gxf-type { font-size: 13px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
 .gxf-type.tw { color: #ffb199; background: rgba(217, 89, 38, .2); }

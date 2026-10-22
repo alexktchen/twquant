@@ -196,3 +196,66 @@ test('不迷航：手機放不下右邊的檢視框 → 框貼下緣、選取那
   assert.equal(pivotScreenY(523, 270), (523 - 50 - 270) / 2)
   assert.equal(pivotScreenY(380, 330), 40, '框太高也不會貼到最上面')
 })
+
+// ── T-436 搜尋與牽連（使用者 2026-10-22：「下一個字來搜尋就出現他是怎麼牽連在一起的」）──
+import { PATH_MAX_HOPS, SEARCH_MAX, WEB_MAX, bestHub, hubGraph, hubMatch, hubPath, hubWeb, parseQuery, searchGalaxy } from '../src/cloud/news-galaxy.ts'
+
+test('T-436 AC1 拆查詢：半形／全形空白、頓號分開，最多兩個詞；合度：整個一樣 → 開頭 → 包含，代號也算', () => {
+  assert.deepEqual(parseQuery('  台積電　輝達 '), ['台積電', '輝達'])
+  assert.deepEqual(parseQuery('台積電、輝達、AI'), ['台積電', '輝達'], '最多兩個')
+  assert.deepEqual(parseQuery('   '), [])
+  const h = focusData.hubs[0]
+  assert.equal(hubMatch(h, '台積電'), 0)
+  assert.equal(hubMatch(h, '2330'), 0, '代號整個一樣')
+  assert.equal(hubMatch(h, '23'), 1, '代號開頭')
+  assert.equal(hubMatch(h, '積電'), 2)
+  assert.equal(hubMatch(h, '聯發'), null)
+  assert.equal(hubMatch(h, ''), null)
+  assert.equal(hubMatch(focusData.hubs[2], 'ai'), 0, '英文不分大小寫')
+})
+
+test('T-436 AC2 打字就列：亮點先（整個一樣贏過則數多的）、不夠補標題有這個詞的新聞（新的在前）；兩個詞只列第一個詞', () => {
+  const d: GalaxyData = { ...focusData, hubs: [{ ...focusData.hubs[2], id: 'theme:aiserver', label: 'AI伺服器', n: 20 }, ...focusData.hubs] }
+  const hits = searchGalaxy(d, 'AI')
+  assert.deepEqual(hits.map((x) => (x.kind === 'hub' ? x.hub.label : x.item.id)), ['AI', 'AI伺服器'], '整個一樣的在前，即使它則數少')
+  assert.deepEqual(searchGalaxy(d, '2330').map((x) => x.kind === 'hub' && x.hub.id), ['tw:2330'])
+  const byTitle = searchGalaxy(d, '新聞')
+  assert.deepEqual(byTitle.map((x) => (x.kind === 'item' ? x.item.id : '?')), ['e', 'd', 'b', 'a', 'c'], '沒有亮點叫「新聞」→ 列標題有的，新的在前')
+  assert.deepEqual(searchGalaxy(d, '新聞', 2).length, 2, '照上限')
+  assert.deepEqual(searchGalaxy(d, 'ai 台積').map((x) => x.kind === 'hub' && x.hub.label), ['AI', 'AI伺服器'], '第二個詞是路徑的另一端，不混進來')
+  assert.deepEqual(searchGalaxy(d, ''), [])
+  assert.equal(bestHub(d, 'ai')?.label, 'AI')
+  assert.equal(bestHub(d, '伺服')?.label, 'AI伺服器')
+  assert.equal(bestHub(d, '鴻海'), null)
+  assert.ok(SEARCH_MAX >= 5 && WEB_MAX >= 8 && PATH_MAX_HOPS >= 3)
+})
+
+test('T-436 AC3 牽連：同一則一起被提到的算一條（重複提到只算一次）；一個亮點列最強的幾個、再畫那些亮點彼此的線', () => {
+  const g = hubGraph(focusData)
+  assert.equal(g.get('tw:2330')!.get('us:NVDA'), 2, 'a、b 兩則')
+  assert.equal(g.get('us:NVDA')!.get('tw:2330'), 2, '對稱')
+  assert.equal(g.get('tw:2330')!.get('theme:ai'), 2, 'd 重複提到台積電只算一次')
+  assert.equal(g.get('theme:ai')!.get('tw:2454'), undefined)
+  const w = hubWeb(focusData, g, 'tw:2330')!
+  assert.deepEqual(w.first.map((f) => [f.hub.label, f.n]), [['AI', 2], ['輝達', 2], ['聯發科', 1]], '跟單獨看的「常一起出現」同一個順序')
+  assert.deepEqual(w.edges.filter((e) => e.deg === 1).map((e) => e.b), ['theme:ai', 'us:NVDA', 'tw:2454'])
+  assert.deepEqual(w.edges.filter((e) => e.deg === 2), [{ a: 'theme:ai', b: 'us:NVDA', n: 1, deg: 2 }], 'AI 跟輝達彼此也牽連（b 那則）')
+  assert.equal(hubWeb(focusData, g, 'tw:2330', 1)!.edges.length, 1, '只留一個就沒有彼此的線')
+  assert.equal(hubWeb(focusData, g, 'tw:9999'), null)
+})
+
+test('T-436 AC4 兩個之間怎麼牽：步數少優先、同步數挑粗的；太遠或不相連 → null；自己到自己只有自己', () => {
+  const g = hubGraph(focusData)
+  const p = hubPath(focusData, g, 'tw:2454', 'us:NVDA')!
+  assert.deepEqual(p.hubs.map((h) => h.label), ['聯發科', '台積電', '輝達'])
+  assert.deepEqual(p.n, [1, 2])
+  const direct = hubPath(focusData, g, 'us:NVDA', 'theme:ai')!
+  assert.deepEqual(direct.hubs.map((h) => h.label), ['輝達', 'AI'], '直接有線（1 則）就不繞台積電（2 則＋2 則）')
+  assert.deepEqual(direct.n, [1])
+  assert.equal(hubPath(focusData, g, 'tw:2454', 'us:NVDA', 1), null, '限 1 步就到不了')
+  const lonely: GalaxyData = { ...focusData, hubs: [...focusData.hubs, gh('tw:1101', '台泥', 'tw', 3)] }
+  assert.equal(hubPath(lonely, hubGraph(lonely), 'tw:2330', 'tw:1101'), null, '沒有新聞把兩個連在一起')
+  assert.equal(hubPath(focusData, g, 'tw:2330', 'tw:9999'), null)
+  const self = hubPath(focusData, g, 'tw:2330', 'tw:2330')!
+  assert.deepEqual([self.hubs.length, self.n], [1, []])
+})
