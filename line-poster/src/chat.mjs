@@ -14,23 +14,45 @@ export function chatKind(mid) {
 
 // linejs 解出來的 enum 有時是名字、有時是數字，兩種都認
 const POSTABLE_TYPES = new Set(["OPEN", "SECRET", "SQUARE_DEFAULT", 1, 2, 4]); // 不含 ONE_ON_ONE（社群裡的私訊）
+const MAIN_TYPES = new Set(["SQUARE_DEFAULT", 4]);
 const ALIVE = new Set(["ALIVE", 0]);
 const JOINED = new Set(["JOINED", 1]);
 
 /**
- * getJoinedSquareChats 的一頁 → 能發的社群聊天 [{ homeId, name }]。
- * 已刪除／停權的聊天、等管理員核准（JOIN_RESERVED）或已退出的都不算：發了也會被拒。
+ * fetchMyEvents 的回應裡出現過的社群聊天 mid（m…）。事件的結構很多種，整包走一遍撿 squareChatMid
+ * （new_erp：getJoinedSquareChats 已被 LINE 下架、回 NOT_IMPLEMENTED；getJoinableSquareChats 只列還沒加入的）。
  */
-export function joinedSquareChats(res) {
+export function squareChatMidsIn(response, into = new Set()) {
+  const walk = (v, depth) => {
+    if (!v || depth > 8) return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1);
+    } else if (typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) {
+        if (k === "squareChatMid" && typeof x === "string" && /^m[0-9a-f]{32}$/.test(x)) into.add(x);
+        else walk(x, depth + 1);
+      }
+    }
+  };
+  walk(response, 0);
+  return into;
+}
+
+/**
+ * 社群聊天 → 清單上的一列 { homeId（m…，發到這裡）, name, noteHome（記事本在哪：所屬社群 s…） }。
+ * squares：加入中的社群 Map(s… → 社群名)；chats：getSquareChat 的回應 [{ squareChat, squareChatMember }]。
+ * 不列：不在加入中的社群裡（退出了）、私訊、已刪除／停權、自己等核准或已退出的。主聊天用社群名，子聊天「社群名 › 聊天名」。
+ */
+export function squareChatRows(squares, chats) {
   const out = [];
-  for (const c of res?.chats ?? []) {
+  for (const { squareChat: c, squareChatMember: me } of chats) {
     const mid = String(c?.squareChatMid ?? "");
-    if (!MID_RE.test(mid) || mid[0] !== "m") continue;
+    if (!/^m[0-9a-f]{32}$/.test(mid) || !squares.has(c.squareMid)) continue;
     if (!POSTABLE_TYPES.has(c.type)) continue;
     if (c.state !== undefined && !ALIVE.has(c.state)) continue;
-    const member = res.chatMembers?.[mid];
-    if (member?.membershipState !== undefined && !JOINED.has(member.membershipState)) continue;
-    out.push({ homeId: mid, name: c.name ?? "" });
+    if (me?.membershipState !== undefined && !JOINED.has(me.membershipState)) continue;
+    const square = squares.get(c.squareMid);
+    out.push({ homeId: mid, name: MAIN_TYPES.has(c.type) ? square : `${square} › ${c.name ?? ""}`, noteHome: String(c.squareMid) });
   }
   return out;
 }

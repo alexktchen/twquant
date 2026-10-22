@@ -91,17 +91,23 @@ export const KIND_LABEL: Record<string, string> = {
 /** 社群（OpenChat）的聊天 m…；一般群組是 c…。 */
 export const isSquare = (homeId: string): boolean => homeId.startsWith('m')
 
-/** 貼文狀態 → 文字與顏色（ok 綠、wait 灰、bad 紅）。 */
-export function statusView(
-  p: Pick<LinePostRow, 'status' | 'via'> & { home_id?: string },
-): { text: string; tone: 'ok' | 'wait' | 'bad' } {
+const VIA_TEXT: Record<string, string> = { note: '記事本＋分享', flex: '圖卡', image: '圖片＋網址', text: '文字' }
+
+/**
+ * 貼文狀態 → 文字與顏色（ok 綠、wait 灰、bad 紅）。送出時看用哪一招（via）；前面有一招失敗（last_error 有字）就是「改發」、灰色。
+ * 社群沒有 Flex、記事本關掉時發圖就是正常路線，那時 last_error 是空的、照樣綠色。
+ */
+export function statusView(p: Pick<LinePostRow, 'status' | 'via'> & { last_error?: string | null }): {
+  text: string
+  tone: 'ok' | 'wait' | 'bad'
+} {
   switch (p.status) {
-    case 'sent':
-      // 社群本來就不發 Flex（LIFF 分享不支援社群）：發圖＋網址是正常路線
-      if (p.via === 'image' && p.home_id && isSquare(p.home_id)) return { text: '已發（圖片＋網址）', tone: 'ok' }
-      // 群組改發圖片：看得到圖、點了不會開網站（網址另一行）；改發文字：連圖都沒有
-      if (p.via === 'image') return { text: '已發（改發圖片＋網址）', tone: 'wait' }
-      return { text: p.via === 'text' ? '已發（改發文字）' : '已發', tone: p.via === 'text' ? 'wait' : 'ok' }
+    case 'sent': {
+      const via = VIA_TEXT[p.via ?? ''] ?? p.via ?? ''
+      if (p.via === 'text') return { text: '已發（改發文字）', tone: 'wait' } // 連圖都沒有
+      if (p.last_error) return { text: `已發（改發${via}）`, tone: 'wait' }
+      return { text: p.via === 'flex' || !via ? '已發' : `已發（${via}）`, tone: 'ok' }
+    }
     case 'queued':
       return { text: '排隊中', tone: 'wait' }
     case 'expired':

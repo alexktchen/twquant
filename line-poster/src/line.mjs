@@ -11,7 +11,7 @@
 import { loginWithAuthToken, loginWithQR } from "@evex/linejs";
 import { MemoryStorage } from "@evex/linejs/storage";
 
-import { chatKind, joinedSquareChats } from "./chat.mjs";
+import { chatKind, squareChatMidsIn, squareChatRows } from "./chat.mjs";
 import { guardObsUpload } from "./obs.mjs";
 
 export const DEFAULT_DEVICE = process.env.LINE_DEVICE || "ANDROIDSECONDARY";
@@ -154,26 +154,50 @@ export async function listGroups(client) {
   const { chats } = await client.base.talk.getChats({ chatMids: member });
   return (chats ?? [])
     .filter((c) => c.type === "GROUP" || c.type === 0 || String(c.chatMid ?? "").startsWith("c"))
-    .map((c) => ({ homeId: String(c.chatMid), name: c.chatName ?? "" }));
+    .map((c) => ({ homeId: String(c.chatMid), name: c.chatName ?? "", noteHome: String(c.chatMid) })); // 群組的記事本就在群組上
 }
 
+const EVENT_PAGES_MAX = 10; // 事件流最多翻幾頁（new_erp 同一個值）
+const SQUARE_CHATS_MAX = 60; // 最多問幾間聊天（每間一次 getSquareChat）
+
 /**
- * 加入中的社群聊天（m…）。社群要先用手機以這支帳號加入（每個社群各自取暱稱）；這裡不會自己加入，
- * 也不會自己接受邀請——社群通常有規矩（禁廣告、禁機器人），要不要進去是人決定的。
+ * 加入中的社群聊天（m…，主聊天與子聊天），每列帶 noteHome＝所屬社群（s…，記事本在那裡）。
+ * ⚠ 不用 getJoinedSquareChats：LINE 已經下架、回 NOT_IMPLEMENTED（new_erp 2026-09-24／09-25）。改成：
+ *   加入中的社群（getJoinedSquares）＋ 自己的事件流（fetchMyEvents）裡出現過的聊天 → 逐間 getSquareChat 問屬於哪個社群、
+ *   什麼種類、自己還在不在。社群要先用手機以這支帳號加入；這裡不會自己加入，也不接受社群邀請——社群通常有規矩（禁廣告、
+ *   禁機器人），要不要進去是人決定的。
  */
 export async function listSquareChats(client) {
-  const out = [];
-  const seen = new Set();
+  const squares = new Map();
+  const seenTokens = new Set();
   let token;
   for (;;) {
-    const res = await client.base.square.getJoinedSquareChats({
-      request: { limit: 100, ...(token ? { continuationToken: token } : {}) },
-    });
-    out.push(...joinedSquareChats(res));
-    token = res?.continuationToken;
-    if (!token || seen.has(token)) return out;
-    seen.add(token);
+    const r = await client.base.square.getJoinedSquares(token ? { continuationToken: token } : {});
+    for (const sq of r?.squares ?? []) if (sq?.mid) squares.set(String(sq.mid), sq.name ?? "");
+    token = r?.continuationToken;
+    if (!token || seenTokens.has(token)) break;
+    seenTokens.add(token);
   }
+  if (!squares.size) return [];
+  const mids = new Set();
+  token = undefined;
+  for (let page = 0; page < EVENT_PAGES_MAX; page++) {
+    const r = await client.base.square.fetchMyEvents({ limit: 200, ...(token ? { continuationToken: token } : {}) });
+    squareChatMidsIn(r, mids);
+    token = r?.continuationToken;
+    if (!token) break;
+  }
+  if (mids.size > SQUARE_CHATS_MAX) log(`事件流裡有 ${mids.size} 間社群聊天，只問前 ${SQUARE_CHATS_MAX} 間`);
+  const chats = [];
+  for (const mid of [...mids].slice(0, SQUARE_CHATS_MAX)) {
+    try {
+      chats.push(await client.base.square.getSquareChat({ squareChatMid: mid }));
+    } catch (e) {
+      // 被刪掉、被踢出的聊天會問不到：這間不列（帳號已經不在裡面），其他照列
+      log(`getSquareChat(${mid}) 失敗，這間不列：${e?.message ?? e}`);
+    }
+  }
+  return squareChatRows(squares, chats);
 }
 
 // ── 發訊息 ─────────────────────────────────────────────────────────────────

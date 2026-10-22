@@ -55,8 +55,10 @@ test('T-423 分頁與顯示：?tab=line 認得；狀態、時間、群組摘要'
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=line'), 'line')
   assert.deepEqual(statusView({ status: 'sent', via: 'flex' }), { text: '已發', tone: 'ok' })
   assert.deepEqual(statusView({ status: 'sent', via: 'text' }), { text: '已發（改發文字）', tone: 'wait' })
-  assert.deepEqual(statusView({ status: 'sent', via: 'image' }), { text: '已發（改發圖片＋網址）', tone: 'wait' }) // AC13
-  assert.deepEqual(statusView({ status: 'sent', via: 'image', home_id: `m${'0'.repeat(32)}` }), { text: '已發（圖片＋網址）', tone: 'ok' }) // AC14 社群不發 Flex
+  assert.deepEqual(statusView({ status: 'sent', via: 'image', last_error: '圖卡發不出去，改發圖片：liff' }), { text: '已發（改發圖片＋網址）', tone: 'wait' }) // AC13
+  assert.deepEqual(statusView({ status: 'sent', via: 'image', last_error: null }), { text: '已發（圖片＋網址）', tone: 'ok' }) // AC14 社群不發 Flex：發圖是正常路線
+  assert.deepEqual(statusView({ status: 'sent', via: 'note', last_error: null }), { text: '已發（記事本＋分享）', tone: 'ok' }) // AC15
+  assert.deepEqual(statusView({ status: 'sent', via: 'flex', last_error: '記事本發不出去，改發圖卡：x' }), { text: '已發（改發圖卡）', tone: 'wait' })
   assert.ok(isSquare(`m${'0'.repeat(32)}`) && !isSquare(`c${'0'.repeat(32)}`))
   assert.equal(statusView({ status: 'unknown', via: null }).tone, 'bad')
   assert.equal(statusView({ status: 'queued', via: null }).text, '排隊中')

@@ -234,3 +234,11 @@ def render_card(card: Card, style: LineCardStyle, fonts: Fonts) -> tuple[bytes, 
     buf = io.BytesIO()
     small.save(buf, format="PNG", optimize=True)
     return buf.getvalue(), w, int(height)
+
+
+def to_jpeg(png: bytes, quality: int) -> bytes:
+    """PNG 圖卡轉 JPEG（記事本上傳只吃 JPEG；圖卡是深底不透明，直接轉 RGB 不會有透明邊）。"""
+    out = io.BytesIO()
+    with Image.open(io.BytesIO(png)) as im:
+        im.convert("RGB").save(out, format="JPEG", quality=quality, optimize=True)
+    return out.getvalue()

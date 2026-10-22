@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { chatKind, joinedSquareChats } from "./chat.mjs";
+import { chatKind, squareChatMidsIn, squareChatRows } from "./chat.mjs";
 import { deliver } from "./deliver.mjs";
 
 const C = `c${"a".repeat(32)}`;
@@ -15,32 +15,46 @@ test("chatKind：c… 一般群組、m… 社群聊天；個人、社群本身�
   }
 });
 
-test("joinedSquareChats：只留能發的社群聊天（主聊天、子聊天），私訊、已刪除、等核准、已退出都不算", () => {
-  const chat = (n, over = {}) => ({ squareChatMid: M(n), squareMid: `s${"0".repeat(32)}`, type: "OPEN", state: "ALIVE", name: `聊天${n}`, ...over });
+const S = (n) => `s${String(n).repeat(32)}`;
+
+test("squareChatMidsIn：事件流整包走一遍撿聊天 mid（結構很多種），只收 m…", () => {
   const res = {
-    chats: [
-      chat(1, { type: "SQUARE_DEFAULT", name: "台股研究社" }),
-      chat(2), // 子聊天
-      chat(3, { type: 2, state: 0 }), // enum 解成數字也認
-      chat(4, { type: "ONE_ON_ONE" }),
-      chat(5, { state: "DELETED" }),
-      chat(6),
-      chat(7),
-      { squareChatMid: `s${"9".repeat(32)}`, type: "OPEN", name: "社群本身" },
+    events: [
+      { payload: { notifiedCreateSquareChatMember: { chat: { squareChatMid: M(1), squareMid: S(1) } } } },
+      { payload: { notificationMessage: { squareChatMid: M(2), squareMessage: { message: { to: M(2) } } } } },
+      { payload: { deep: [[{ squareChatMid: M(1) }]] } }, // 重複的只算一次
+      { payload: { squareChatMid: "u123" } }, // 不是聊天
     ],
-    chatMembers: {
-      [M(6)]: { squareChatMid: M(6), membershipState: "JOIN_RESERVED" },
-      [M(7)]: { squareChatMid: M(7), membershipState: "LEFT" },
-      [M(2)]: { squareChatMid: M(2), membershipState: 1 },
-    },
   };
-  assert.deepEqual(joinedSquareChats(res), [
-    { homeId: M(1), name: "台股研究社" },
-    { homeId: M(2), name: "聊天2" },
-    { homeId: M(3), name: "聊天3" },
+  assert.deepEqual([...squareChatMidsIn(res)], [M(1), M(2)]);
+  const into = new Set([M(3)]);
+  squareChatMidsIn({ events: [] }, into);
+  assert.deepEqual([...into], [M(3)]); // 可以跨頁累積
+  assert.deepEqual([...squareChatMidsIn(undefined)], []);
+});
+
+test("squareChatRows：只留能發的聊天；主聊天用社群名、子聊天「社群 › 聊天」；記事本在所屬社群", () => {
+  const squares = new Map([[S(1), "台股研究社"]]);
+  const chat = (n, over = {}, me = undefined) => ({
+    squareChat: { squareChatMid: M(n), squareMid: S(1), type: "OPEN", state: "ALIVE", name: `聊天${n}`, ...over },
+    squareChatMember: me,
+  });
+  const rows = squareChatRows(squares, [
+    chat(1, { type: "SQUARE_DEFAULT", name: "x" }),
+    chat(2, {}, { membershipState: "JOINED" }),
+    chat(3, { type: 2, state: 0 }), // enum 解成數字也認
+    chat(4, { type: "ONE_ON_ONE" }),
+    chat(5, { state: "DELETED" }),
+    chat(6, {}, { membershipState: "JOIN_RESERVED" }),
+    chat(7, {}, { membershipState: 2 }), // LEFT
+    chat(8, { squareMid: S(9) }), // 已退出的社群
   ]);
-  assert.deepEqual(joinedSquareChats({}), []);
-  assert.deepEqual(joinedSquareChats(undefined), []);
+  assert.deepEqual(rows, [
+    { homeId: M(1), name: "台股研究社", noteHome: S(1) },
+    { homeId: M(2), name: "台股研究社 › 聊天2", noteHome: S(1) },
+    { homeId: M(3), name: "台股研究社 › 聊天3", noteHome: S(1) },
+  ]);
+  assert.deepEqual(squareChatRows(new Map(), [chat(1)]), []);
 });
 
 test("deliver：社群（沒有 Flex 訊息）直接發圖＋一行網址，不碰 LIFF、沒有圖卡錯誤", async () => {

@@ -86,6 +86,10 @@ class LineGroupConfig(BaseConfig):
     card_url_base: str = Field(pattern=r"^https://.*/$")
     liff_id: str
     footer: str
+    via_note: bool
+    note_jpeg_quality: int = Field(ge=50, le=95)
+    post_gap_seconds: float = Field(ge=0)
+    max_posts_per_run: int = Field(ge=1)
     fallback_image: bool
     image_caption: str = Field(min_length=1)
     fallback_text: bool

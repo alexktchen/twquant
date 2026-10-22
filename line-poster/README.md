@@ -1,8 +1,8 @@
 # line-poster — LINE 群組每日圖卡（T-423／D-204）
 
-用一支**備用 LINE 帳號**在一般群組的**聊天**發一張圖卡，點圖打開網站；也能發**社群（OpenChat）**的聊天（見下面「社群」）。每天四種：每日名單、族群資金流入、
-盤前晨報、盤後快訊（開關與點圖打開哪一頁在 `configs/line_group.yaml`）。登入方式照
-[lt-foods/new_erp](https://github.com/lt-foods/new_erp) 的 `tools/line-note-scraper`。
+用一支**備用 LINE 帳號**，在一般群組與**社群（OpenChat）**的**記事本**發一篇圖卡貼文，再**分享到聊天**。每天四種：每日名單、族群資金流入、
+盤前晨報、盤後快訊（開關與點圖打開哪一頁在 `configs/line_group.yaml`）。登入、記事本發文與分享照
+[lt-foods/new_erp](https://github.com/lt-foods/new_erp)（`supabase/functions/_shared/lineNote.ts`、`tools/line-note-scraper`）。
 
 > ⚠️ 走的是 LINE **非官方**客戶端協定（[linejs](https://github.com/evex-dev/linejs)），違反 LINE 使用條款、帳號可能被停權。
 > **只能用備用帳號**，不要用本人或公司主帳號。
@@ -15,12 +15,18 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 
 1. 排程寫好名單／晨報後，Python 畫一張 PNG 圖卡（深色、同網站配色），存在雲端 `web.line_cards`。
    網站 `/pub/line-card/<32 位亂數>` 把它公開給 LINE 的伺服器抓（`/pub` 不經 Cloudflare Access，網址猜不到）。
-2. 轉接器用 LIFF 分享（`api.line.me/message/v3/share`，手機上 LIFF「分享給好友」那一條）發一則
-   **Flex 訊息**：整則就是那張圖，點圖打開網站（`kinds.*.link`）。
-3. Flex 發不出去（LIFF 出問題，沒填自己的 `liff_id` 時幾乎都是）→ **直接發那張圖**（一般圖片訊息，不需要 LIFF），
+2. **記事本＋分享**（`via_note`，`src/note.mjs`）：在記事本發一篇（那張圖轉 JPEG＋摘要＋網址，網址在記事本裡點得開），
+   再用 LINE 的「分享貼文」卡片分享到聊天（同手機上按「分享到聊天」）。群組的記事本在群組上；社群的記事本在整個社群上，
+   主聊天、子聊天共用一篇。網站標「記事本＋分享」。
+   - 不用 linejs 內建的 `timeline.createPost`（網址寫死 LEGY 閘道、`fetch failed`）；自己打記事本 REST，第一次依序試 host × 路徑 × channel，
+     **只用唯讀的 list 探路**，打通了才發文、分享（不然探路途中會發出好幾篇）。
+   - 分享時被 LINE 叫停：那篇記在 `web.line_posts.note_post_id`，下一輪只分享、不再發一篇。
+   - 每篇之間等 `post_gap_seconds`（20 秒）：同帳號連發十幾篇會被擋（`code=701`）。一次最多 `max_posts_per_run` 筆，多的接著送。
+3. 記事本不通 → 用 LIFF 分享（`api.line.me/message/v3/share`）發一則 **Flex 訊息**：整則就是那張圖，點圖打開網站（`kinds.*.link`）。社群沒有這招。
+4. Flex 也發不出去（LIFF 出問題，沒填自己的 `liff_id` 時幾乎都是）→ **直接發那張圖**（一般圖片訊息，不需要 LIFF），
    後面再發一行「看完整內容：網址」。一般圖片點了只是放大、不會開網站，所以網址另外給。網站標「改發圖片＋網址」。
    圖由 Python 從 `web.line_cards` 讀出放進請求，轉接器不用去抓網站。開關 `configs/line_group.yaml` 的 `fallback_image`。
-4. 圖也發不出去 → 改發一則「摘要＋網址」的文字訊息，網站標「改發文字」。
+5. 圖也發不出去 → 改發一則「摘要＋網址」的文字訊息，網站標「改發文字」。
 
 ## 第一次設定
 
@@ -53,9 +59,10 @@ stdin 一份 JSON、stdout 一行一個事件（NDJSON）、QR 與錯誤細節�
 ## 社群（OpenChat）
 
 1. 用備用帳號的**手機**加入社群（每個社群各自取暱稱）。轉接器**不會自己加入、也不接受社群邀請**——社群多半禁廣告、禁機器人，要不要進去由人決定。
-2. 網站「LINE 群組」分頁按「同步群組」：社群的主聊天與子聊天會跟群組列在一起、標「社群」，勾了就發。
-   私訊、已刪除／停權、還在等管理員核准、已退出的聊天不列。
-3. 社群收到的是**那張圖＋一行「看完整內容：網址」**：LIFF 分享不支援社群，所以不發 Flex（點圖開網站那種），網站標「已發（圖片＋網址）」。
+2. 網站「LINE 群組」分頁按「同步群組」：社群的主聊天與子聊天（「社群 › 聊天」）會跟群組列在一起、標「社群」，勾了就發。
+   私訊、已刪除／停權、還在等管理員核准、已退出的聊天不列。清單來自加入的社群（`getJoinedSquares`）＋自己的事件流
+   （`fetchMyEvents`）＋逐間 `getSquareChat`——**`getJoinedSquareChats` 已被 LINE 下架**（回 `NOT_IMPLEMENTED`，new_erp 實測）。
+3. 社群收到的是**社群記事本的一篇＋分享卡片**。記事本不通時改發**那張圖＋一行「看完整內容：網址」**（LIFF 分享不支援社群，沒有 Flex），
    圖走 obs 的 reqseq 上傳（伺服器收到就自己發那則訊息），文字走 `square.sendMessage`；社群的訊息不加密。
 
 ⚠️ 社群發太快或被檢舉，LINE 會限制這支帳號使用社群（`code=403 您已被限制使用社群`，轉接器會停 10 分鐘）；管理員也可能把帳號踢出。
