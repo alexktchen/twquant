@@ -623,9 +623,11 @@ def test_ac15_more_than_one_run_worth_keeps_going() -> None:
     try:
         _login(conn)
         _queue(conn, "picks", ["c1", "c2", "c3"])
-        ok = lambda *ids: lg.AdapterOutput(  # noqa: E731
-            0, sending=ids, results=tuple({"id": i, "sent": True, "via": "note"} for i in ids)
-        )
+
+        def ok(*ids: int) -> lg.AdapterOutput:
+            results = tuple({"id": i, "sent": True, "via": "note"} for i in ids)
+            return lg.AdapterOutput(0, sending=ids, results=results)
+
         runner = FakeRunner(ok(1, 2), ok(3))
         res = lg.send_due(conn, cfg, runner, now_fn=lambda: NOW, sleep=lambda s: None)
         assert [len(c[1]["jobs"]) for c in runner.calls] == [2, 1]
