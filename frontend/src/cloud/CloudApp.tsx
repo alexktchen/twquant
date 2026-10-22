@@ -27,7 +27,7 @@ import {
   searchStocks,
   setTracked,
 } from './api'
-import { GUEST_LINES, LOGIN_URL, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
+import { GUEST_LINES, LOGIN_PAGE, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
@@ -402,7 +402,7 @@ export default function CloudApp() {
         </div>
         {guest ? (
           <div className="cq-user">
-            <a className="cq-login" href={LOGIN_URL}>
+            <a className="cq-login" href={LOGIN_PAGE}>
               登入
             </a>
           </div>
@@ -435,6 +435,7 @@ export default function CloudApp() {
           <WarRoom
             refresh={refresh}
             features={features}
+            signedIn={email !== null}
             watchSids={watchSids}
             onPicks={(code) => {
               if (code) {
@@ -468,6 +469,7 @@ export default function CloudApp() {
         ) : (
           <NewsPage
             refresh={refresh}
+            signedIn={email !== null}
             onStock={(sid, name) => {
               setWatchSel({ sid, name })
               setTab('watch')
@@ -1643,7 +1645,7 @@ function Gate({
         <img src="/icon-192.png" alt="" width="52" height="52" />
         <h2>{title}</h2>
         <p>{text}</p>
-        <a className="cq-google" href={LOGIN_URL}>
+        <a className="cq-google" href={LOGIN_PAGE}>
           登入／註冊
         </a>
         <div className="cq-gate-ways">

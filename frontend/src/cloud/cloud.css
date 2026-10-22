@@ -402,6 +402,11 @@
 .cq-gate-ways { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; color: var(--mute); font-size: 13.5px; }
 .cq-gate-ways span { margin: 0 4px; }
 .cq-gate-ways svg { width: 16px; height: 16px; }
+/* T-433 廣告版位：只在登入後的內容頁底部，標「廣告」，跟按鈕保持距離（AdSense 誤點政策） */
+.cq-ad { margin: 14px 12px 4px; padding: 8px 10px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.cq-war .cq-ad { margin: 4px 0 0; }
+.cq-news .cq-ad { margin: 20px 0 0; }
+.cq-ad-label { display: block; margin-bottom: 4px; color: var(--mute); font-size: 12px; }
 @media (max-width: 820px) {
   /* 手機名單上限 60vh，矮螢幕或橫放時放不下登入卡片：沒登入時改成固定高度的名單區 */
   .cq-list-guest { max-height: none; }
