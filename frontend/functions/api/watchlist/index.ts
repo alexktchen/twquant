@@ -1,9 +1,12 @@
-// GET /api/watchlist：登入者的追蹤股，照使用者排的順序；每檔附最新收盤、漲跌與三個模型最新一天的分數。
+// GET /api/watchlist：登入者的追蹤股，照使用者排的順序；每檔附最新收盤、漲跌與三個模型最新一天的分數，
+// 與今天起 10 天內的除權息、法說會、月營收待公布（events；T-430／D-208，從首頁行事曆搬來，跟名單列同一套規則 _lib/risks.ts）。
 // PUT /api/watchlist：存順序，內容 { order: [代號…] }（由上到下）。不在清單上的代號略過；
 // 清單上卻沒列到的（例：另一台裝置剛加入的）保留原位置——新加入的本來就排最上面。
 import { fail, guarded, json, type Env } from '../../_lib/db'
 import { accessEmail } from '../../_lib/identity'
+import { CALENDAR_KINDS, readRisks } from '../../_lib/risks'
 import { loadScores } from '../../_lib/scores-db'
+import { taipeiDay } from '../../_lib/warroom'
 import { ORDER_BODY_MAX, WATCH_MAX, latestDate, parseOrder, sameOrigin, watchItems } from '../../_lib/watchlist'
 import { ensureWatchlist } from '../../_lib/watchlist-db'
 
@@ -26,7 +29,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) =>
           ) p`
       : []
     const scores = await loadScores(db, ids)
-    return json({ max: WATCH_MAX, date: latestDate(scores.days), items: watchItems(list, px, scores) })
+    const events = await readRisks(db, taipeiDay(Date.now()), ids, CALENDAR_KINDS)
+    const items = watchItems(list, px, scores).map((w) => ({ ...w, events: events.get(w.sid) ?? null }))
+    return json({ max: WATCH_MAX, date: latestDate(scores.days), items })
   })
 
 export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {

@@ -105,6 +105,11 @@ function riskBadge(r: Risk): Badge {
   return { key: `risk-${r.kind}-${r.date ?? ''}`, icon: RISK_ICON[r.kind], short, label, title: t.title, tone: RISK_TONE[r.kind] }
 }
 
+/** 追蹤股的行事曆標記（T-430／D-208：除權息、法說會、營收待公布；跟名單列同一種小標，從首頁行事曆搬來）。 */
+export function eventBadges(events: Risk[] | null | undefined): Badge[] {
+  return (events ?? []).map(riskBadge)
+}
+
 /** 一檔名單股的全部標記（依嚴重度排：紅、黃、藍、灰、橘）。 */
 export function pickBadges(p: {
   new?: boolean

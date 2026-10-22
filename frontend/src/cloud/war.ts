@@ -116,22 +116,9 @@ export type WarRoomData = {
   /** 同一天分上市、上櫃（D-199）；新表還沒有 → null；舊的伺服器沒有這欄 → undefined */
   market_split?: MarketSplit
   taifex: Taifex | null
-  /** sids：今天名單上的股票（三條線合起來；行事曆標「名單」用） */
+  /** sids：今天名單上的股票（三條線合起來；T-430 拿掉首頁行事曆後網站沒用到，API 照給） */
   picks: { date: string; lines: { code: string; name: string; n: number; new: number }[]; sids?: string[] } | null
   news: { since: string; items: NewsItem[] }
-  calendar: {
-    conferences: { date: string; stock_id: string; name: string | null; conf_time: string; summary: string | null }[]
-    dividends: {
-      date: string
-      stock_id: string
-      name: string | null
-      kind: 'cash' | 'stock' | 'both'
-      cash_dividend: number | null
-      stock_ratio: number | null
-      rights_ratio: number | null
-    }[]
-    revenue: { date: string; days: number }
-  }
 }
 
 const MINUS = '−'
@@ -322,68 +309,6 @@ export function breadth(up: number, down: number, flat: number): { up: number; d
 export function tone(x: number | null | undefined): 'up' | 'down' | 'flat' {
   if (x === null || x === undefined || x === 0) return 'flat'
   return x > 0 ? 'up' : 'down'
-}
-
-/** 行事曆的一筆（除權息或法說會合在一起排）。 */
-export type CalendarItem = {
-  key: string
-  date: string
-  kind: 'cash' | 'stock' | 'both' | 'conf'
-  stock_id: string
-  name: string | null
-  conf_time: string | null
-  summary: string | null
-  dividend: { cash_dividend: number | null; stock_ratio: number | null; rights_ratio: number | null } | null
-}
-
-/** 除權息與法說會合成一串，依日期、（法說會）時間、代號排。 */
-export function calendarItems(cal: WarRoomData['calendar']): CalendarItem[] {
-  const divs: CalendarItem[] = cal.dividends.map((d) => ({
-    key: `d${d.date}${d.stock_id}`,
-    date: d.date,
-    kind: d.kind,
-    stock_id: d.stock_id,
-    name: d.name,
-    conf_time: null,
-    summary: null,
-    dividend: { cash_dividend: d.cash_dividend, stock_ratio: d.stock_ratio, rights_ratio: d.rights_ratio },
-  }))
-  const confs: CalendarItem[] = cal.conferences.map((c) => ({
-    key: `c${c.date}${c.stock_id}${c.conf_time}`,
-    date: c.date,
-    kind: 'conf',
-    stock_id: c.stock_id,
-    name: c.name,
-    conf_time: c.conf_time,
-    summary: c.summary,
-    dividend: null,
-  }))
-  const order = (x: CalendarItem) => `${x.date}|${x.kind === 'conf' ? '1' : '0'}|${x.conf_time ?? ''}|${x.stock_id}`
-  return [...divs, ...confs].sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0))
-}
-
-/** 行事曆搜尋：股號開頭相符或股名含關鍵字（不分大小寫，例：「00694」「富邦」「b」）；空字串＝全部相符。 */
-export function calendarMatch(it: { stock_id: string; name: string | null }, q: string): boolean {
-  const k = q.trim().toLowerCase()
-  if (!k) return true
-  return it.stock_id.toLowerCase().startsWith(k) || (it.name ?? '').toLowerCase().includes(k)
-}
-
-/** 名單股、追蹤股的排前面，其餘照原順序（依日期）。 */
-export function mineFirst<T extends { stock_id: string }>(items: T[], mine: (sid: string) => boolean): T[] {
-  return [...items.filter((x) => mine(x.stock_id)), ...items.filter((x) => !mine(x.stock_id))]
-}
-
-/** 每天幾檔除權息、幾場法說會（收起時的摘要）。 */
-export function calendarDays(items: CalendarItem[]): { date: string; dividends: number; conferences: number }[] {
-  const out = new Map<string, { date: string; dividends: number; conferences: number }>()
-  for (const it of items) {
-    const d = out.get(it.date) ?? { date: it.date, dividends: 0, conferences: 0 }
-    if (it.kind === 'conf') d.conferences += 1
-    else d.dividends += 1
-    out.set(it.date, d)
-  }
-  return [...out.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
 }
 
 /** 往後數 n 個平日（只跳週末、不知道國定假日，所以呼叫端要寫「約」）。 */

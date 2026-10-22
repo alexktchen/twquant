@@ -1,5 +1,5 @@
 // 首頁戰情室（T-379／D-188）：開盤前一頁看完——今日一句話（晨報）、昨晚國際大事、市場氛圍、國際行情、期貨籌碼、大盤體檢、
-// 法人與融資、昨日消息、今天名單速覽、名單成績、行事曆、族群熱力圖。
+// 法人與融資、昨日消息、今天名單速覽、名單成績。行事曆與族群熱力圖 T-430／D-208 搬走（族群→「盤勢」分頁，法說會等→追蹤股與名單股的小標）。
 // 使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置，卡也要可以縮起來，縮起來後內容要可以輪播」——
 // 卡片照版面（useHomeLayout，登入後存在帳號）排；每張卡點標題收起，收起時輪播重點；「編輯版面」拖曳或 ▲▼ 換位置。
 // 只供看盤：這一頁的任何數字都不進選股、不進模型。
@@ -9,9 +9,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { visibleLayout, type Feature } from './access'
 import { fetchMarketLive, fetchScorecard, fetchWarroom, fetchWarroomNews } from './api'
 import { BriefCard } from './BriefCard'
-import { CalendarCard } from './CalendarCard'
 import { HeadlinesCard } from './HeadlinesCard'
-import { ChipsCard, HeatCard, IntlCard, MarketCard, PicksCard, ScoreHomeCard, TaifexCard } from './HomeCards'
+import { ChipsCard, IntlCard, MarketCard, PicksCard, ScoreHomeCard, TaifexCard } from './HomeCards'
 import { LayoutEditor } from './LayoutEditor'
 import { HomeMoodCard } from './MoodCard'
 import { NewsCard } from './NewsCard'
@@ -67,7 +66,6 @@ export function WarRoom({
   refresh,
   features,
   watchSids,
-  listed,
   onPicks,
   onNews,
   onScore,
@@ -76,10 +74,8 @@ export function WarRoom({
   refresh: number
   /** 這個帳號能用的功能：沒有 picks／score 就不顯示名單卡、名單成績卡 */
   features: Feature[]
-  /** 追蹤股代號（登入後才有）：昨日消息多一個「追蹤」篩選、行事曆標「追蹤」 */
+  /** 追蹤股代號（登入後才有）：昨日消息多一個「追蹤」篩選 */
   watchSids: string[]
-  /** 名單日期與各族群在名單上的股票（族群熱力圖標「在名單」用） */
-  listed: { date: string; sids: Map<string, string[]> } | null
   onPicks: (line?: string) => void
   /** 切到新聞分頁（T-400） */
   onNews: () => void
@@ -140,8 +136,6 @@ export function WarRoom({
   const mv = useMemo(() => marketView(m, live, data?.market_split ?? null), [m, live, data])
   const b = data?.brief ?? null
   const shownBrief = shown ?? b
-  const listedSids = useMemo(() => new Set(data?.picks?.sids ?? []), [data])
-  const watchSet = useMemo(() => new Set(watchSids), [watchSids])
 
   const fold = (id: CardId) => ({ collapsed: layout.collapsed.includes(id), onToggle: () => toggle(id) })
   const card: Record<CardId, () => ReactNode> = {
@@ -176,8 +170,6 @@ export function WarRoom({
     ),
     picks: () => <PicksCard picks={data?.picks ?? null} onPicks={onPicks} {...fold('picks')} />,
     score: () => <ScoreHomeCard lines={SCORE_LINES} scores={scores} onScore={onScore} {...fold('score')} />,
-    cal: () => <CalendarCard calendar={data?.calendar ?? null} listedSids={listedSids} watchSids={watchSet} onStock={onStock} {...fold('cal')} />,
-    heat: () => <HeatCard refresh={refresh} listed={listed} onStock={onStock} {...fold('heat')} />,
   }
 
   return (

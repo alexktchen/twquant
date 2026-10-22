@@ -41,7 +41,7 @@ import { Kpi, Section } from './Section'
 import { ScoreBars, ReviewTiles, StanceChip, TopPickCard } from './Review'
 import { DIMS, REVIEW_NOTE, topOf, type Review } from './pickreview'
 import { blurbTitle, type Blurb } from './blurb'
-import { pickBadges, rowBadges, type Badge } from './badges'
+import { eventBadges, pickBadges, rowBadges, type Badge } from './badges'
 import { BadgeChip } from './Icon'
 import { BadgeLegend } from './Legend'
 import { TradesPanel } from './TradesPanel'
@@ -50,6 +50,7 @@ import { StockFacts } from './StockFacts'
 import { bucketText, refBar, refFor, refText, type RefRow } from './reference'
 import { exampleText, similarBar, similarText, spanText, type Similar } from './similar'
 import { WarRoom } from './WarRoom'
+import { GroupsPage } from './GroupsPage'
 import { NewsPage } from './NewsPage'
 import { tabFromUrl, withoutTab, type Tab } from './tabs'
 import { LineGroupPage } from './LineGroupPage'
@@ -69,6 +70,8 @@ import { newsMarkers, type NewsCount, type StockNewsDay } from './news'
 const WATCH_RELOGIN = '登入身分驗證失敗，請登出再登入一次'
 // 從背景回到前景時，距離上次重抓至少隔多久才再抓
 const REFRESH_MIN_MS = 30_000
+// 追蹤股一列最多幾個行事曆小標（三個模型分數已經佔一排）
+const WATCH_EVENTS_MAX = 2
 const watchError = (e: Error) => (e instanceof LoginRequired ? WATCH_RELOGIN : e.message)
 
 export default function CloudApp() {
@@ -220,8 +223,8 @@ export default function CloudApp() {
   }, [refresh, guest, canPicks])
 
   useEffect(() => {
-    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；首頁也抓（熱力圖標「在名單」）；沒有名單權限不抓（T-429）
-    if (guest || !canPicks || (tab !== 'picks' && tab !== 'home')) return
+    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；盤勢也抓（熱力圖標「在名單」，T-430 從首頁搬過來）；沒有名單權限不抓（T-429）
+    if (guest || !canPicks || (tab !== 'picks' && tab !== 'group')) return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
     setErr('')
@@ -367,6 +370,9 @@ export default function CloudApp() {
           <button className={tab === 'news' ? 'on' : ''} onClick={() => setTab('news')}>
             新聞
           </button>
+          <button className={tab === 'group' ? 'on' : ''} onClick={() => setTab('group')}>
+            盤勢
+          </button>
           {canPicks && (
             <button className={tab === 'picks' ? 'on' : ''} onClick={() => setTab('picks')}>
               每日名單
@@ -430,7 +436,6 @@ export default function CloudApp() {
             refresh={refresh}
             features={features}
             watchSids={watchSids}
-            listed={listedGroups}
             onPicks={(code) => {
               if (code) {
                 setLine(code)
@@ -463,6 +468,28 @@ export default function CloudApp() {
         ) : (
           <NewsPage
             refresh={refresh}
+            onStock={(sid, name) => {
+              setWatchSel({ sid, name })
+              setTab('watch')
+            }}
+          />
+        )
+      ) : tab === 'group' ? (
+        // 盤勢（T-430／D-208）：族群資金熱力圖從首頁搬來；有名單權限的人，名單上的族群標「名單 N」
+        guest ? (
+          <main className="cq-body">
+            <aside className="cq-list cq-list-guest">
+              <div className="cq-rows">
+                <Gate title="登入後看族群資金" text="每個族群今天拿到多少資金、漲跌家數，點一個族群看成交金額最大的幾檔。" />
+              </div>
+            </aside>
+            <section className="cq-detail" />
+          </main>
+        ) : (
+          <GroupsPage
+            refresh={refresh}
+            listed={listedGroups}
+            withMood={false}
             onStock={(sid, name) => {
               setWatchSel({ sid, name })
               setTab('watch')
@@ -540,7 +567,7 @@ export default function CloudApp() {
               </div>
               <details className="cq-note cq-fold">
                 <summary>說明</summary>
-                追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。非投資建議。
+                追蹤股存在你的帳號，手機和電腦看到同一份，最多 {watch?.max ?? 100} 檔。評分每個交易日收盤後更新；盤中價格來自證交所，約延遲 5 秒。藍色小標＝今天起 10 天內的法說會、除權息、月營收待公布（滑過或長按看細節）。非投資建議。
               </details>
               {!guest && <TradesPanel trades={trades} err={tradesErr} lineName={lineName} onAdd={addTrade} onDelete={removeTrade} />}
             </aside>
@@ -854,6 +881,8 @@ function WatchRow({
   onClick: () => void
 }) {
   const t = trend(live.chg)
+  // 行事曆（T-430）：法說會、除權息、營收待公布跟名單列同一種小標，最多兩個、其餘 +N
+  const { shown, more } = rowBadges(eventBadges(w.events), WATCH_EVENTS_MAX)
   return (
     <li className={on ? 'on cq-row' : 'cq-row'} onClick={onClick}>
       <div className="cq-name">
@@ -867,6 +896,14 @@ function WatchRow({
               {g.text}
             </span>
           ))}
+          {shown.map((b) => (
+            <BadgeChip key={b.key} b={b} compact />
+          ))}
+          {more > 0 && (
+            <span className="cq-b cq-b-more" title="點進個股頁看行事曆">
+              +{more}
+            </span>
+          )}
         </small>
       </div>
       <span className="cq-pxcol">

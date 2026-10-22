@@ -1,9 +1,11 @@
 // 首頁版面（使用者 2026-10-17：「每張卡可以自由移動位子，依照使用者帳號儲存擺置位置，卡也要可以縮起來，縮起來後內容要可以輪播」）。
 // 版面＝卡片由上到下的順序＋哪幾張收起。登入後存在帳號（/api/layout），換裝置也一樣；這台瀏覽器另存一份，打開時先照它排，
 // 帳號那份讀回來再換上。純函式，供 node 單元測試。
-import { CAL_KEY, HEADS_KEY, HEAT_KEY, MOOD_KEY, NEWS_KEY, loadPref, openPref } from './prefs.ts'
+// T-430／D-208：行事曆與族群資金搬出首頁（族群資金→「盤勢」分頁；法說會、除權息改標在追蹤股與名單股上）；
+// 存過的版面裡的 cal、heat 讀回來時當不認得的代號丟掉。
+import { HEADS_KEY, MOOD_KEY, NEWS_KEY, loadPref, openPref } from './prefs.ts'
 
-export type CardId = 'brief' | 'heads' | 'mood' | 'intl' | 'taifex' | 'market' | 'chips' | 'news' | 'picks' | 'score' | 'cal' | 'heat'
+export type CardId = 'brief' | 'heads' | 'mood' | 'intl' | 'taifex' | 'market' | 'chips' | 'news' | 'picks' | 'score'
 
 /** 首頁的卡：預設順序、電腦版是否橫跨整排（wide）、預設收起與否。 */
 export const HOME_CARDS: { id: CardId; title: string; wide: boolean; collapsed: boolean }[] = [
@@ -17,8 +19,6 @@ export const HOME_CARDS: { id: CardId; title: string; wide: boolean; collapsed: 
   { id: 'news', title: '昨日消息', wide: true, collapsed: false },
   { id: 'picks', title: '今日名單', wide: false, collapsed: false },
   { id: 'score', title: '名單成績', wide: false, collapsed: false },
-  { id: 'cal', title: '行事曆', wide: false, collapsed: true },
-  { id: 'heat', title: '族群資金與熱力圖', wide: true, collapsed: false },
 ]
 
 export type Layout = { order: CardId[]; collapsed: CardId[] }
@@ -83,7 +83,7 @@ export const LAYOUT_KEY = 'twquant.layout'
 
 /**
  * 打開首頁時的版面：這台瀏覽器存過版面就用它；沒有的話用預設順序，收起與否沿用以前各卡分別記的展開／收起
- * （改版前的五個鍵），免得改版後使用者原本收起的卡又全打開。
+ * （改版前各卡的鍵；行事曆、熱力圖兩張已搬走，只剩三個），免得改版後使用者原本收起的卡又全打開。
  */
 export function initialLayout(stored: string | null, legacy: (key: string) => string | null): Layout {
   if (stored) {
@@ -98,8 +98,6 @@ export function initialLayout(stored: string | null, legacy: (key: string) => st
     ['heads', HEADS_KEY],
     ['mood', MOOD_KEY],
     ['news', NEWS_KEY],
-    ['cal', CAL_KEY],
-    ['heat', HEAT_KEY],
   ]
   const collapsed = new Set(base.collapsed)
   for (const [id, key] of legacyKeys) {

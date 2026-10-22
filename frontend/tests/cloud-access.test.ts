@@ -113,7 +113,7 @@ test('T-429 AC4 前端：分頁、名單、日期、K 線推薦日、名單成�
   const app = read('src/cloud/CloudApp.tsx')
   assert.match(app, /\{canPicks && \(\s*<button className=\{tab === 'picks'/)
   assert.match(app, /\{features\.includes\('score'\) && \(\s*<button className=\{tab === 'score'/)
-  assert.match(app, /if \(guest \|\| !canPicks \|\| \(tab !== 'picks' && tab !== 'home'\)\) return/)
+  assert.match(app, /if \(guest \|\| !canPicks \|\| \(tab !== 'picks' && tab !== 'group'\)\) return/) // T-430：盤勢分頁標「名單」要用
   assert.match(app, /if \(guest \|\| !canPicks\) return\s*let stale = false\s*fetchPickDates\(\)/)
   assert.equal(app.match(/fetchPickDates\(\)/g)?.length, 1)
   assert.match(app, /showPicks \? fetchStockPicks\(sid\) : Promise\.resolve/)
