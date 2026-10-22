@@ -1,4 +1,4 @@
-// GET /api/picks/dates?limit=250：有名單的日期，新到舊；附 counts[日期][線別]＝檔數、since[線別]＝第一天。只給 admin（T-429）。
+// GET /api/picks/dates?limit=250：有名單的日期，新到舊；附 counts[日期][線別]＝檔數、since[線別]＝第一天。只給 admin（T-430）。
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { denied } from '../../_lib/gate'

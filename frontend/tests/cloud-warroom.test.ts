@@ -24,7 +24,7 @@ test('T-379：昨日消息——名單股的全留、其他只留全市場重要
   assert.deepEqual(newsTags('今天天氣很好'), [])
 })
 
-// T-430／D-208：首頁行事曆拿掉後，月營收截止日（revenueDeadline）跟著刪；個股的「營收待公布」在 _lib/risks.ts（cloud-risks.test.ts 守著）
+// T-431／D-209：首頁行事曆拿掉後，月營收截止日（revenueDeadline）跟著刪；個股的「營收待公布」在 _lib/risks.ts（cloud-risks.test.ts 守著）
 test('T-379：台北日期、加天數', () => {
   assert.equal(taipeiDay(Date.parse('2026-10-16T16:30:00Z')), '2026-10-17')
   assert.equal(addDays('2026-12-31', 1), '2027-01-01')

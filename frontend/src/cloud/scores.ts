@@ -33,7 +33,7 @@ export type WatchItem = {
   close: number | null
   chg: number | null
   models: ModelScore[]
-  /** 今天起 10 天內的除權息、法說會、月營收待公布（T-430）；沒有 → null；舊後端沒有這欄 → undefined */
+  /** 今天起 10 天內的除權息、法說會、月營收待公布（T-431）；沒有 → null；舊後端沒有這欄 → undefined */
   events?: Risk[] | null
 }
 export type WatchList = { max: number; date: string | null; items: WatchItem[] }

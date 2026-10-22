@@ -102,7 +102,7 @@ def test_ac3_pipeline_runs_the_forecast_step_in_cloud_too() -> None:
     assert 'PipelineStep("除權息預告"' in source
     scfg = load_config(_ROOT / "configs" / "serving.yaml", ServingConfig)
     assert "除權息預告" not in scfg.cloud.skip_pipeline_steps
-    # 網站的「往後除權息」讀預告表、不讀事後才有的 corporate_events。T-430 起首頁沒有行事曆，
+    # 網站的「往後除權息」讀預告表、不讀事後才有的 corporate_events。T-431 起首頁沒有行事曆，
     # 預告改標在名單股與追蹤股上（_lib/risks.ts）；個股頁行事曆另見 stocks/[sid]/calendar.ts。
     api = (_ROOT / "frontend" / "functions" / "_lib" / "risks.ts").read_text(encoding="utf-8")
     assert "serving.dividend_calendar" in api and "serving.corporate_events" not in api

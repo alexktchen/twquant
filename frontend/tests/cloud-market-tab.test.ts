@@ -1,4 +1,4 @@
-// T-430／D-208（使用者 2026-10-22：「行事曆跟族群資金移到其他分頁」→「一個盤勢的分頁，法說那些整合到追蹤股跟推薦股」）：
+// T-431／D-209（使用者 2026-10-22：「行事曆跟族群資金移到其他分頁」→「一個盤勢的分頁，法說那些整合到追蹤股跟推薦股」）：
 // 族群資金熱力圖從首頁搬到「盤勢」分頁；首頁行事曆拿掉，法說會、除權息、營收待公布改標在追蹤股（新）與名單股（T-387 已有）上。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -11,7 +11,7 @@ import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 
-test('T-430 AC1 盤勢分頁：每個人都看得到；?tab=group（族群資金通知、LINE 族群圖卡）直接開它；熱力圖在這裡、名單股照樣標', () => {
+test('T-431 AC1 盤勢分頁：每個人都看得到；?tab=group（族群資金通知、LINE 族群圖卡）直接開它；熱力圖在這裡、名單股照樣標', () => {
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=group'), 'group')
   assert.ok(tabAllowed('group', []))
   const app = read('src/cloud/CloudApp.tsx')
@@ -21,7 +21,7 @@ test('T-430 AC1 盤勢分頁：每個人都看得到；?tab=group（族群資金
   assert.ok(app.indexOf(">\n            新聞\n") < app.indexOf(">\n            盤勢\n"))
 })
 
-test('T-430 AC2 首頁沒有行事曆與族群熱力圖；首頁 API 不再查行事曆', () => {
+test('T-431 AC2 首頁沒有行事曆與族群熱力圖；首頁 API 不再查行事曆', () => {
   const ids = HOME_CARDS.map((c) => c.id as string)
   assert.ok(!ids.includes('cal') && !ids.includes('heat'))
   const war = read('src/cloud/WarRoom.tsx')
@@ -30,7 +30,7 @@ test('T-430 AC2 首頁沒有行事曆與族群熱力圖；首頁 API 不再查�
   assert.doesNotMatch(api, /dividend_calendar|conference_calendar|calendar:/)
 })
 
-test('T-430 AC3 追蹤股的行事曆：只查除權息、法說會、營收三張表，只回這三種（處置、注意不算行事曆）', async () => {
+test('T-431 AC3 追蹤股的行事曆：只查除權息、法說會、營收三張表，只回這三種（處置、注意不算行事曆）', async () => {
   const asked: string[] = []
   const rows: Record<string, unknown[]> = {
     disposition_stocks: [{ stock_id: '2330', effective_start: '2026-11-01', effective_end: '2026-11-20', reason: 'x', match_minutes: 5 }],
@@ -62,7 +62,7 @@ test('T-430 AC3 追蹤股的行事曆：只查除權息、法說會、營收三�
   assert.deepEqual(all.get('2330')?.map((r) => r.kind), ['attention', 'dividend', 'disposition'])
 })
 
-test('T-430 AC3 追蹤清單 API 每檔附 events（今天起，台北日期）；追蹤列畫跟名單列同一種小標', () => {
+test('T-431 AC3 追蹤清單 API 每檔附 events（今天起，台北日期）；追蹤列畫跟名單列同一種小標', () => {
   const api = read('functions/api/watchlist/index.ts')
   assert.match(api, /readRisks\(db, taipeiDay\(Date\.now\(\)\), ids, CALENDAR_KINDS\)/)
   assert.match(api, /events: events\.get\(w\.sid\) \?\? null/)

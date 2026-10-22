@@ -1,4 +1,4 @@
-// GET /api/scorecard/trades?line=CORE：這條線每一筆新進名單的結果（新到舊）。只給 admin（T-429／D-207）。
+// GET /api/scorecard/trades?line=CORE：這條線每一筆新進名單的結果（新到舊）。只給 admin（T-430／D-208）。
 import { fail, guarded, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { denied } from '../../_lib/gate'

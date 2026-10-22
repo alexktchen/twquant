@@ -1,6 +1,6 @@
 // 網站的分頁，與推播通知點開時要開哪一個。
 // T-379／D-188：首頁改成戰情室（home），原本的「盤勢」分頁併進首頁。
-// T-430／D-208：族群資金又搬回自己的「盤勢」分頁（group）——族群資金通知與 LINE 族群圖卡帶的 ?tab=group 直接開這頁。
+// T-431／D-209：族群資金又搬回自己的「盤勢」分頁（group）——族群資金通知與 LINE 族群圖卡帶的 ?tab=group 直接開這頁。
 
 // line＝「LINE 群組」（T-423）：只有有權限的角色看得到分頁（_lib/roles.ts）
 export type Tab = 'home' | 'news' | 'group' | 'picks' | 'score' | 'watch' | 'line'

@@ -14,7 +14,7 @@ export type RiskKind = 'disposition' | 'disposition_soon' | 'attention' | 'divid
 export type Risk = { kind: RiskKind; date: string | null; text: string; detail: string | null }
 
 export const ALL_RISK_KINDS: readonly RiskKind[] = ['disposition', 'disposition_soon', 'attention', 'dividend', 'conference', 'revenue']
-/** 行事曆那幾種（T-430／D-208：追蹤股列只標這些；處置、注意是交易狀態，不是行事曆）。 */
+/** 行事曆那幾種（T-431／D-209：追蹤股列只標這些；處置、注意是交易狀態，不是行事曆）。 */
 export const CALENDAR_KINDS: readonly RiskKind[] = ['dividend', 'conference', 'revenue']
 
 export type Disp = { stock_id: string; effective_start: string; effective_end: string; reason: string | null; match_minutes: number | null }

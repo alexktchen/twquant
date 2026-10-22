@@ -103,7 +103,7 @@ export default function CloudApp() {
   const [err, setErr] = useState<string>('')
   const [guest, setGuest] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
-  // 這個帳號能用哪些功能（T-423：有 line 才顯示「LINE 群組」分頁；T-429：有 picks／score 才顯示每日名單／績效）
+  // 這個帳號能用哪些功能（T-423：有 line 才顯示「LINE 群組」分頁；T-430：有 picks／score 才顯示每日名單／績效）
   const [features, setFeatures] = useState<Feature[]>([])
   // 權限讀回來了沒（讀回來之前，從網址開到要權限的分頁先空白，不閃「沒有權限」）
   const [accessKnown, setAccessKnown] = useState(false)
@@ -201,7 +201,7 @@ export default function CloudApp() {
   // 沒登入時「最新一天」用公開日期清單的第一天；登入時這個值固定 undefined，不會多抓一次
   const guestToday = guest ? dates[0] : undefined
 
-  // 名單日期清單：有名單權限才抓（T-429）；從背景回來時也重抓，隔天回來選單才有新的一天（停在最新的人名單會自動換成新的一天）
+  // 名單日期清單：有名單權限才抓（T-430）；從背景回來時也重抓，隔天回來選單才有新的一天（停在最新的人名單會自動換成新的一天）
   useEffect(() => {
     if (guest || !canPicks) return
     let stale = false
@@ -223,7 +223,7 @@ export default function CloudApp() {
   }, [refresh, guest, canPicks])
 
   useEffect(() => {
-    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；盤勢也抓（熱力圖標「在名單」，T-430 從首頁搬過來）；沒有名單權限不抓（T-429）
+    // 追蹤、績效分頁不看名單：留著上一份（K 線的推薦日圖例要用線別名稱）；盤勢也抓（熱力圖標「在名單」，T-431 從首頁搬過來）；沒有名單權限不抓（T-430）
     if (guest || !canPicks || (tab !== 'picks' && tab !== 'group')) return
     // stale：切日期、切分頁或切成沒登入後，晚到的回應一律丟掉
     let stale = false
@@ -475,7 +475,7 @@ export default function CloudApp() {
           />
         )
       ) : tab === 'group' ? (
-        // 盤勢（T-430／D-208）：族群資金熱力圖從首頁搬來；有名單權限的人，名單上的族群標「名單 N」
+        // 盤勢（T-431／D-209）：族群資金熱力圖從首頁搬來；有名單權限的人，名單上的族群標「名單 N」
         guest ? (
           <main className="cq-body">
             <aside className="cq-list cq-list-guest">
@@ -881,7 +881,7 @@ function WatchRow({
   onClick: () => void
 }) {
   const t = trend(live.chg)
-  // 行事曆（T-430）：法說會、除權息、營收待公布跟名單列同一種小標，最多兩個、其餘 +N
+  // 行事曆（T-431）：法說會、除權息、營收待公布跟名單列同一種小標，最多兩個、其餘 +N
   const { shown, more } = rowBadges(eventBadges(w.events), WATCH_EVENTS_MAX)
   return (
     <li className={on ? 'on cq-row' : 'cq-row'} onClick={onClick}>
@@ -1226,7 +1226,7 @@ function Detail({
   /** 看過去某天的名單時的日期：報價列停在那天，不顯示即時價 */
   asOf?: string
   lineNames: Record<string, string>
-  /** 有名單權限（T-429）：K 線標推薦日；沒有就不問被推薦日、圖例也不列線別 */
+  /** 有名單權限（T-430）：K 線標推薦日；沒有就不問被推薦日、圖例也不列線別 */
   showPicks: boolean
   tracked: boolean
   onTrack?: (sid: string, on: boolean) => Promise<void>

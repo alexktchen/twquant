@@ -1,5 +1,5 @@
 // GET /api/stocks/:sid/scores：三個模型最近幾個打分日的分數與名次，加上最新一天在哪條線的名單上、族群。
-// 「在哪條線的名單上」只給 admin（T-429／D-207）；其他人 lists 是空的。
+// 「在哪條線的名單上」只給 admin（T-430／D-208）；其他人 lists 是空的。
 import { fail, guarded, json, type Env } from '../../../_lib/db'
 import { allowed, gatedKey } from '../../../_lib/gate'
 import { groupsFor } from '../../../_lib/groups'

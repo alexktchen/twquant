@@ -1,6 +1,6 @@
 """網頁推播（T-348）：雲端排程寫好當天名單後，發「今日名單已更新」給開了通知的裝置；
 名單上同族群兩檔以上、而且那個族群當天資金流入時，另發一則族群資金通知（T-354）。
-這兩種都跟名單有關，只發給 configs/push.yaml 的 list_recipients（＝網站 admin，T-429／D-207）。
+這兩種都跟名單有關，只發給 configs/push.yaml 的 list_recipients（＝網站 admin，T-430／D-208）。
 
 上半部是純函數（組訊息、檢查推播網址、統計發送結果）；下半部連資料庫。實際發送的函式由呼叫端注入，
 測試不連網。訂閱存在雲端的 web.push_subscriptions（網站 /api/push 寫入，見 frontend/functions/_lib/push.ts）。
@@ -60,7 +60,7 @@ def host_allowed(endpoint: str, hosts: Sequence[str]) -> bool:
 
 
 def for_recipients(subs: Sequence[Subscription], recipients: Sequence[str]) -> list[Subscription]:
-    """只留收件人帳號的訂閱（T-429：名單只給 admin，名單通知也是）；email 不分大小寫。"""
+    """只留收件人帳號的訂閱（T-430：名單只給 admin，名單通知也是）；email 不分大小寫。"""
     allow = {r.strip().lower() for r in recipients}
     return [s for s in subs if s.email.strip().lower() in allow]
 

@@ -4,11 +4,11 @@ import test from 'node:test'
 import { CARD_ID_RE, LAYOUT_MAX_CARDS, parseLayout } from '../functions/_lib/layout.ts'
 import { HOME_CARDS, defaultLayout, initialLayout, normalizeLayout, sameLayout, toggleCollapsed, withOrder, type CardId } from '../src/cloud/layout.ts'
 import { CAL_KEY, HEADS_KEY, HEAT_KEY, MOOD_KEY, NEWS_KEY } from '../src/cloud/prefs.ts'
-// T-430／D-208：行事曆（cal）、族群熱力圖（heat）搬出首頁；下面原本拿它們當例子的地方改用還在首頁的卡，檢查的事情不變
+// T-431／D-209：行事曆（cal）、族群熱力圖（heat）搬出首頁；下面原本拿它們當例子的地方改用還在首頁的卡，檢查的事情不變
 
 const ids = HOME_CARDS.map((c) => c.id)
 
-test('使用者 2026-10-17：首頁版面預設——每張卡一次、新聞頭條預設收起；T-430 起沒有行事曆與熱力圖', () => {
+test('使用者 2026-10-17：首頁版面預設——每張卡一次、新聞頭條預設收起；T-431 起沒有行事曆與熱力圖', () => {
   const d = defaultLayout()
   assert.deepEqual(d.order, ids)
   assert.equal(new Set(d.order).size, d.order.length)
@@ -28,7 +28,7 @@ test('使用者 2026-10-17：存起來的版面——不認得的丟掉、重複
   assert.deepEqual([...l.order].sort(), [...ids].sort())
   // 收起：存的（chips、mood）＋新插入的卡用預設（heads 預設收起）
   assert.deepEqual(new Set(l.collapsed), new Set(['chips', 'mood', 'heads']))
-  // T-430 以前存的版面還有 cal、heat：讀回來當不認得的丟掉
+  // T-431 以前存的版面還有 cal、heat：讀回來當不認得的丟掉
   const old = normalizeLayout({ order: ['heat', 'cal', ...ids], collapsed: ['cal', 'heat', 'news'] })
   assert.deepEqual(old.order, ids)
   assert.deepEqual(old.collapsed, ['news'])

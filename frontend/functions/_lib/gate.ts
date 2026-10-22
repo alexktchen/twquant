@@ -1,4 +1,4 @@
-// 端點依角色擋人（T-429／D-207）：每日名單與績效只給 admin（_lib/roles.ts）。前端藏分頁只是方便，真正擋人的是這裡。
+// 端點依角色擋人（T-430／D-208）：每日名單與績效只給 admin（_lib/roles.ts）。前端藏分頁只是方便，真正擋人的是這裡。
 // 一定要在讀暫存（cached）之前判斷：暫存是不分使用者的，先讀暫存會把 admin 的回應交給別人。
 import { fail } from './db.ts'
 import { accessEmail } from './identity.ts'

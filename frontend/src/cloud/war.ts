@@ -116,7 +116,7 @@ export type WarRoomData = {
   /** 同一天分上市、上櫃（D-199）；新表還沒有 → null；舊的伺服器沒有這欄 → undefined */
   market_split?: MarketSplit
   taifex: Taifex | null
-  /** sids：今天名單上的股票（三條線合起來；T-430 拿掉首頁行事曆後網站沒用到，API 照給） */
+  /** sids：今天名單上的股票（三條線合起來；T-431 拿掉首頁行事曆後網站沒用到，API 照給） */
   picks: { date: string; lines: { code: string; name: string; n: number; new: number }[]; sids?: string[] } | null
   news: { since: string; items: NewsItem[] }
 }

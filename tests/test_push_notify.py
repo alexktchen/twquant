@@ -297,7 +297,7 @@ def test_ac7_t354_pg_hot_groups_and_not_ready() -> None:
         conn.close()
 
 
-# ── 名單通知只給 admin（T-429／D-207）──────────────────────────────────────
+# ── 名單通知只給 admin（T-430／D-208）──────────────────────────────────────
 
 
 def test_t429_ac5_list_notifications_only_for_recipients() -> None:

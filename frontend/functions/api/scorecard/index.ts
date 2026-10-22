@@ -1,4 +1,4 @@
-// GET /api/scorecard?line=CORE：這條線的名單績效——模擬帳戶的淨值曲線、與 0050 對照、逐筆統計（不含逐筆明細）。只給 admin（T-429／D-207）。
+// GET /api/scorecard?line=CORE：這條線的名單績效——模擬帳戶的淨值曲線、與 0050 對照、逐筆統計（不含逐筆明細）。只給 admin（T-430／D-208）。
 import { fail, guarded, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { denied } from '../../_lib/gate'

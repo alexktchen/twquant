@@ -1,4 +1,4 @@
-// T-429／D-207：每日名單與績效只給 admin（使用者 2026-10-22：「可以把每日名單跟績效變成admin才能看到的功能」）。
+// T-430／D-208：每日名單與績效只給 admin（使用者 2026-10-22：「可以把每日名單跟績效變成admin才能看到的功能」）。
 // 後端每支端點自己擋、暫存在擋之後；首頁與個股評分依權限分開暫存；前端沒權限就沒有分頁、首頁卡與名單標記。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -31,7 +31,7 @@ async function signer(kid: string) {
 const NOW = Date.UTC(2026, 9, 22, 8, 0, 0)
 const req = (token?: string) => new Request('https://twquant.pages.dev/api/picks', { headers: token ? { [JWT_HEADER]: token } : {} })
 
-test('T-429 AC1 角色：admin（目前 cktalex@gmail.com）才能用每日名單與績效；前端認得的功能與後端相同', () => {
+test('T-430 AC1 角色：admin（目前 cktalex@gmail.com）才能用每日名單與績效；前端認得的功能與後端相同', () => {
   assert.deepEqual(ROLE_MEMBERS.admin, ['cktalex@gmail.com'])
   assert.deepEqual(FEATURE_ROLES.picks, ['admin'])
   assert.deepEqual(FEATURE_ROLES.score, ['admin'])
@@ -44,7 +44,7 @@ test('T-429 AC1 角色：admin（目前 cktalex@gmail.com）才能用每日名�
   assert.deepEqual([...FEATURES].sort(), Object.keys(FEATURE_ROLES).sort())
 })
 
-test('T-429 AC2 擋人：沒權杖 401、不是 admin 403、admin 放行；只看驗過的權杖', async () => {
+test('T-430 AC2 擋人：沒權杖 401、不是 admin 403、admin 放行；只看驗過的權杖', async () => {
   const s = await signer('kid-t429-gate')
   const opts = { fetchImpl: s.certs, now: NOW }
   assert.equal(await denied(req(await s.sign('cktalex@gmail.com')), 'picks', opts), null)
@@ -62,7 +62,7 @@ test('T-429 AC2 擋人：沒權杖 401、不是 admin 403、admin 放行；只�
   assert.notEqual(gatedKey('/api/warroom', true), gatedKey('/api/warroom', false))
 })
 
-test('T-429 AC2 每支名單／績效端點都自己擋，而且在讀暫存之前擋', () => {
+test('T-430 AC2 每支名單／績效端點都自己擋，而且在讀暫存之前擋', () => {
   const gated: [string, string][] = [
     ['functions/api/picks/index.ts', 'picks'],
     ['functions/api/picks/dates.ts', 'picks'],
@@ -80,7 +80,7 @@ test('T-429 AC2 每支名單／績效端點都自己擋，而且在讀暫存之�
   assert.match(read('functions/api/picks/dates.ts'), /if \(publicDetail !== undefined \|\| dates\.length === 0\) return json\(\{ dates \}\)/)
 })
 
-test('T-429 AC3 首頁與個股評分：沒有名單權限就不讀名單（名單速覽、「名單」標記、在哪條線上）', () => {
+test('T-430 AC3 首頁與個股評分：沒有名單權限就不讀名單（名單速覽、「名單」標記、在哪條線上）', () => {
   const war = read('functions/api/warroom/index.ts')
   assert.match(war, /const full = await allowed\(ctx\.request, 'picks'\)/)
   assert.match(war, /const pickDates = withPicks\s*\? await readRows/)
@@ -91,7 +91,7 @@ test('T-429 AC3 首頁與個股評分：沒有名單權限就不讀名單（名�
   assert.match(scores, /handle\(String\(ctx\.params\.sid\), ctx\.env, full\)/)
 })
 
-test('T-429 AC4 前端：沒權限沒有分頁與首頁卡，開到了只寫一句話', () => {
+test('T-430 AC4 前端：沒權限沒有分頁與首頁卡，開到了只寫一句話', () => {
   assert.ok(tabAllowed('home', []) && tabAllowed('news', []) && tabAllowed('watch', []))
   for (const t of ['picks', 'score', 'line'] as const) assert.ok(!tabAllowed(t, []), t)
   assert.ok(tabAllowed('picks', ['picks']) && tabAllowed('score', ['score']) && tabAllowed('line', ['line']))
@@ -109,11 +109,11 @@ test('T-429 AC4 前端：沒權限沒有分頁與首頁卡，開到了只寫一�
   assert.deepEqual(visibleLayout(base, ['picks']).order, base.order.filter((id) => id !== 'score'))
 })
 
-test('T-429 AC4 前端：分頁、名單、日期、K 線推薦日、名單成績都要權限才顯示或去抓', () => {
+test('T-430 AC4 前端：分頁、名單、日期、K 線推薦日、名單成績都要權限才顯示或去抓', () => {
   const app = read('src/cloud/CloudApp.tsx')
   assert.match(app, /\{canPicks && \(\s*<button className=\{tab === 'picks'/)
   assert.match(app, /\{features\.includes\('score'\) && \(\s*<button className=\{tab === 'score'/)
-  assert.match(app, /if \(guest \|\| !canPicks \|\| \(tab !== 'picks' && tab !== 'group'\)\) return/) // T-430：盤勢分頁標「名單」要用
+  assert.match(app, /if \(guest \|\| !canPicks \|\| \(tab !== 'picks' && tab !== 'group'\)\) return/) // T-431：盤勢分頁標「名單」要用
   assert.match(app, /if \(guest \|\| !canPicks\) return\s*let stale = false\s*fetchPickDates\(\)/)
   assert.equal(app.match(/fetchPickDates\(\)/g)?.length, 1)
   assert.match(app, /showPicks \? fetchStockPicks\(sid\) : Promise\.resolve/)

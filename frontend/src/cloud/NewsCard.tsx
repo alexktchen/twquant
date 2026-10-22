@@ -1,6 +1,6 @@
 // 首頁「昨日消息」（T-379／D-188）：預設看名單股；點一則就地展開內文；可收起（收起時輪播名單股的公告）。
 // 2026-10-18 改版（地鐵告示）：每則＝時間、代號名稱（名單／追蹤小標）、主旨一行、類別色塊；說明移到 title。
-// T-429：沒有名單權限的帳號沒有「名單股」這一格，預設看全部。
+// T-430：沒有名單權限的帳號沒有「名單股」這一格，預設看全部。
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { CardFrame } from './CardFrame'

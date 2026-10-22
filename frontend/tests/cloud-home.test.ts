@@ -11,7 +11,7 @@ test('使用者 2026-10-18「像地鐵告示」：每張首頁卡一條路線色
     assert.ok(TONE_NAME[m.tone])
   }
   const tones = new Set(Object.values(CARD_META).map((m) => m.tone))
-  // T-430：族群（粉）那張熱力圖搬到「盤勢」分頁，首頁剩四條路線
+  // T-431：族群（粉）那張熱力圖搬到「盤勢」分頁，首頁剩四條路線
   assert.deepEqual([...tones].sort(), ['event', 'list', 'quote', 'view'])
 })
 

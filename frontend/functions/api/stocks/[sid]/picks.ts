@@ -1,4 +1,4 @@
-// GET /api/stocks/:sid/picks：某檔被推薦過的日子（K 線標記）。只給 admin（T-429／D-207）。
+// GET /api/stocks/:sid/picks：某檔被推薦過的日子（K 線標記）。只給 admin（T-430／D-208）。
 import { fail, guarded, json, type Env } from '../../../_lib/db'
 import { denied } from '../../../_lib/gate'
 import { SID_RE } from '../../../_lib/picks'

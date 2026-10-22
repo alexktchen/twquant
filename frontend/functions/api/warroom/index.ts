@@ -1,8 +1,8 @@
 // GET /api/warroom：首頁戰情室（T-379／D-188）——晨報（另回有晨報的日期，給歷史切換；某天內容走 /api/warroom/brief）、大盤體檢（D-199 起附上市／上櫃）、期交所盤後、今天名單速覽、昨日重大訊息。
-// 行事曆 T-430／D-208 搬出首頁（法說會、除權息改標在追蹤股與名單股上），這裡不再查。
+// 行事曆 T-431／D-209 搬出首頁（法說會、除權息改標在追蹤股與名單股上），這裡不再查。
 // 同一種權限看到都一樣（追蹤股的消息另由 /api/warroom/news 查）：同一執行個體 60 秒暫存。任何一張表還沒建 → 那一塊是 null，不擋其他。
 // 即時的美股、台指期、類股強弱與族群資金照舊走 /api/mood/*、/api/groups。
-// 名單速覽（picks）與昨日消息的「名單」標記只給 admin（T-429／D-207）：其他人 picks 是 null、消息照一般規則挑。
+// 名單速覽（picks）與昨日消息的「名單」標記只給 admin（T-430／D-208）：其他人 picks 是 null、消息照一般規則挑。
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { allowed, gatedKey } from '../../_lib/gate'

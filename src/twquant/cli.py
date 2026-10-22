@@ -2385,7 +2385,7 @@ def notify_picks(
         if lines is None:
             typer.echo(f"{day} 還沒有名單，不發")
             return
-        # 名單只給 admin（T-429）：通知也只發給 list_recipients
+        # 名單只給 admin（T-430）：通知也只發給 list_recipients
         subs = pn.for_recipients(pn.load_subscriptions(conn), cfg.list_recipients)
         allowed = [s for s in subs if pn.host_allowed(s.endpoint, cfg.allowed_hosts)]
         if len(allowed) != len(subs):
@@ -2444,7 +2444,7 @@ def notify_groups(
         if not hot:
             typer.echo(f"{day} 名單上沒有同族群 {cfg.group_min_picks} 檔以上又資金流入的族群，不發")
             return
-        # 內文寫了名單上的股票：跟名單一樣只給 admin（T-429）
+        # 內文寫了名單上的股票：跟名單一樣只給 admin（T-430）
         subs = [
             s
             for s in pn.for_recipients(pn.load_subscriptions(conn), cfg.list_recipients)
