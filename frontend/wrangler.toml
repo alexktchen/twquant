@@ -1,7 +1,8 @@
 # Cloudflare Pages（T-332）：前端靜態檔＋functions/ 底下的 API（直接連 Supabase）。
 # 部署：VITE_APP_MODE=cloud npm run build && npx wrangler pages deploy
 # 祕密：npx wrangler pages secret put TWQUANT_PG_DSN --project-name twquant
-# 登出（/api/logout）另需 CF_ACCESS_API_TOKEN（可撤銷 Access 使用者的 token）與 CF_ACCOUNT_ID，同樣用 pages secret put
+# 登入（T-435，Supabase Auth）：SUPABASE_URL（驗 Bearer 權杖用的 JWKS 位址）、SUPABASE_JWT_SECRET（只有舊專案 HS256 才要），pages secret put；
+# 瀏覽器那邊的 VITE_SUPABASE_URL／VITE_SUPABASE_ANON_KEY 在建置時給（deploy-web.yml）
 # 新聞服務（T-400／D-200）：NEWS_API_URL（https://<新聞專案代號>.supabase.co/functions/v1/api）、NEWS_API_KEY（同新聞服務的祕密 NEWS_API_KEY），pages secret put；沒設時新聞分頁顯示「新聞服務還沒設定」
 # 即時報價備援（選填）：FUGLE_API_KEY（富果行情 API 金鑰），GitHub repo secret 設了，deploy-web 會自動寫進來
 name = "twquant"

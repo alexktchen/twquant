@@ -24,7 +24,7 @@ test('T-423 AC9 權限：只有 line_admin（目前 cktalex@gmail.com）能用 L
 test('T-423 AC9 權限：每個 LINE 端點都自己擋（不只靠前端藏分頁）', () => {
   for (const f of ['../functions/api/line/index.ts', '../functions/api/line/groups/[id].ts', '../functions/api/line/login.ts', '../functions/api/line/sync.ts', '../functions/api/line/post.ts']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8')
-    assert.match(src, /accessEmail\(request\)/, f) // 身分來自驗過的權杖，不信標頭
+    assert.match(src, /userEmail\(request, env\)/, f) // 身分來自驗過的權杖，不信標頭
     assert.match(src, /can\(email, 'line'\)/, f)
     assert.match(src, /fail\(403, '沒有權限'\)/, f)
   }

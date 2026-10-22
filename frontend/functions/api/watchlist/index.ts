@@ -3,7 +3,7 @@
 // PUT /api/watchlist：存順序，內容 { order: [代號…] }（由上到下）。不在清單上的代號略過；
 // 清單上卻沒列到的（例：另一台裝置剛加入的）保留原位置——新加入的本來就排最上面。
 import { fail, guarded, json, type Env } from '../../_lib/db'
-import { accessEmail } from '../../_lib/identity'
+import { userEmail } from '../../_lib/identity'
 import { CALENDAR_KINDS, readRisks } from '../../_lib/risks'
 import { loadScores } from '../../_lib/scores-db'
 import { taipeiDay } from '../../_lib/warroom'
@@ -12,7 +12,7 @@ import { ensureWatchlist } from '../../_lib/watchlist-db'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) =>
   guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     await ensureWatchlist(db)
     const list = await db<{ sid: string; name: string | null; added_at: string }[]>`
@@ -47,7 +47,7 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
   const order = parseOrder(body)
   if (order === null) return fail(400, `順序要是 1～${WATCH_MAX} 個不重複的股票代號`)
   return guarded(env, async (db) => {
-    const email = await accessEmail(request)
+    const email = await userEmail(request, env)
     if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
     await ensureWatchlist(db)
     await db`

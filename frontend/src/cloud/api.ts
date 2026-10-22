@@ -1,6 +1,7 @@
 // 雲端版（T-332）的 API：每日名單、日期清單、個股 K 線與被推薦的日子。
 import { apiUrl } from '../api'
-import { LoginRequired, logoutDestination, needsLogin } from './auth'
+import { LoginRequired, loginReason, needsLogin } from './auth'
+import { getToken } from './session-client'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
@@ -21,35 +22,31 @@ import type { LineGroupRow, LineLogin, LineStatus } from './linegroup'
 
 const OFFLINE = '連線中斷，請重新整理頁面'
 
-// redirect: 'manual'：沒登入時 Access 會把 /api 導去登入頁，攔下來改丟 LoginRequired，畫面切成預覽模式。
+// 每個 /api 請求帶 Supabase 的 Bearer 權杖（T-435；快到期會先換新）；/pub 公開不用帶。
+// redirect: 'manual'：過渡期 Access 會把沒登入的 /api 導去登入頁，攔下來改丟 LoginRequired，畫面切成預覽模式。
 async function get<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   let res: Response
   try {
+    const token = path.startsWith('/pub/') ? null : await getToken()
+    const headers: Record<string, string> = { accept: 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }
     // /pub 的資料每個人都一樣（新聞、日期），讓瀏覽器照伺服器給的 max-age 留一下；其他一律 no-store（登出後不能留在快取裡）
-    const init: RequestInit = { method, headers: { accept: 'application/json' }, redirect: 'manual', cache: path.startsWith('/pub/') ? 'default' : 'no-store' }
+    const init: RequestInit = { method, headers, redirect: 'manual', cache: path.startsWith('/pub/') ? 'default' : 'no-store' }
     // 只有存順序（PUT）帶內容
     if (body !== undefined) {
-      init.headers = { accept: 'application/json', 'content-type': 'application/json' }
+      headers['content-type'] = 'application/json'
       init.body = JSON.stringify(body)
     }
     res = await fetch(apiUrl(path), init)
   } catch {
     throw new Error(OFFLINE)
   }
-  if (needsLogin(res)) throw new LoginRequired()
+  if (needsLogin(res)) throw new LoginRequired(loginReason(res))
   if (!(res.headers.get('content-type') ?? '').includes('json')) throw new Error(`${res.status} ${res.statusText}`)
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail ?? `${res.status} ${res.statusText}`)
   }
   return (await res.json()) as T
-}
-
-/** 登出後要去的網址（規則見 auth.ts logoutDestination）。redirect: 'manual'：登入過期時 Access 的導向要攔下來判斷，
- *  不能讓瀏覽器跟著跳到 cloudflareaccess.com（跨網域會被擋成網路錯誤，分不出是過期還是斷線）。 */
-export async function logoutTarget(): Promise<string> {
-  const res = await fetch('/api/logout', { method: 'POST', redirect: 'manual', cache: 'no-store' }).catch(() => null)
-  return logoutDestination(res, window.location.origin)
 }
 
 /** 目前登入的 email；沒登入時丟 LoginRequired。 */

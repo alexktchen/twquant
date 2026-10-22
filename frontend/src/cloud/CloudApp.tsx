@@ -22,12 +22,12 @@ import {
   fetchTrades,
   saveTrade,
   deleteTrade,
-  logoutTarget,
   saveWatchOrder,
   searchStocks,
   setTracked,
 } from './api'
 import { GUEST_LINES, LOGIN_PAGE, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
+import { clearSession, completeOAuth, hasSession, signOut } from './session-client'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
@@ -150,8 +150,11 @@ export default function CloudApp() {
       .catch((e: Error) => setTradesErr(watchError(e)))
 
   useEffect(() => {
+    // 先把 Google 登入回來的 ?code= 換成登入狀態（T-435），再問 /api/me 這是誰。
     // 身分只用來顯示頭像；本機開發的後端沒有 /api/me，那時不顯示即可。確定登入了才抓追蹤股
-    fetchMe()
+    completeOAuth()
+      .catch((e: Error) => setNotice(e.message))
+      .then(() => fetchMe())
       .then((m) => {
         setEmail(m.email)
         fetchAccess()
@@ -168,6 +171,11 @@ export default function CloudApp() {
       })
       .catch((e: Error) => {
         if (!(e instanceof LoginRequired)) return
+        if (hasSession()) {
+          // 本機有 Supabase 登入卻被擋：被導走＝/api 還在 Cloudflare Access 後面（過渡期，管理者還沒關）；被拒＝權杖失效
+          if (e.reason === 'redirect') setNotice('登入系統切換中：/api 還在 Cloudflare Access 保護下，管理者關掉後重新整理即可')
+          else clearSession()
+        }
         setGuest(true)
         setTab((t) => guestTab(t, explicitTab))
         // 日期是公開資訊（只有日期、沒有股票）：沒登入時追蹤分頁的評分日與預覽用
@@ -733,7 +741,7 @@ export default function CloudApp() {
   )
 }
 
-/** 登入身分與登出（Cloudflare Access）。沒開 Access 時整塊不顯示。 */
+/** 登入身分與登出（Supabase Auth，T-435）。沒登入時整塊不顯示。 */
 function User({ email, push, onBell }: { email: string | null; push: PushState | null; onBell: () => void }) {
   if (!email) return null
   return (
@@ -746,10 +754,10 @@ function User({ email, push, onBell }: { email: string | null; push: PushState |
       <span className="cq-avatar">{email.slice(0, 1).toUpperCase()}</span>
       <span className="cq-email">{email}</span>
       <a
-        href="/cdn-cgi/access/logout"
+        href="/"
         onClick={(e) => {
           e.preventDefault()
-          logoutTarget().then((to) => window.location.assign(to))
+          signOut().finally(() => window.location.assign('/'))
         }}
       >
         登出

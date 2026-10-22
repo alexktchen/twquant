@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { afterLogin, me } from '../functions/_lib/auth.ts'
-import { EMAIL_HEADER } from '../functions/_lib/logout.ts'
-import { LOGIN_URL, LoginRequired, guestCandles, guestDay, logoutDestination, needsLogin, teamLogout } from '../src/cloud/auth.ts'
+import { LoginRequired, guestCandles, guestDay, needsLogin } from '../src/cloud/auth.ts'
 
 const res = (type: string, status: number, ct: string) => ({
   type,
@@ -11,7 +9,7 @@ const res = (type: string, status: number, ct: string) => ({
   headers: new Headers({ 'content-type': ct }),
 })
 
-test('T-332 沒登入：Access 的導向、401／403、拿到 HTML 登入頁都算要登入', () => {
+test('T-332 沒登入：Access 的導向、401／403、拿到 HTML 登入頁都算要登入；LoginRequired 記得是被導走還是被拒', () => {
   assert.equal(needsLogin(res('opaqueredirect', 0, '')), true)
   assert.equal(needsLogin(res('basic', 401, 'application/json')), true)
   assert.equal(needsLogin(res('basic', 403, 'text/html')), true)
@@ -19,8 +17,10 @@ test('T-332 沒登入：Access 的導向、401／403、拿到 HTML 登入頁都�
   assert.equal(needsLogin(res('basic', 200, 'application/json; charset=utf-8')), false)
   assert.equal(needsLogin(res('basic', 404, 'application/json')), false)
   assert.equal(needsLogin(res('basic', 500, 'text/html')), false)
-  assert.ok(new LoginRequired() instanceof Error)
-  assert.ok(LOGIN_URL.startsWith('/api/'), '登入入口必須在受 Access 保護的 /api 底下')
+  assert.ok(new LoginRequired('denied') instanceof Error)
+  // T-435 過渡期：有 Supabase 登入卻被 Cloudflare Access 導走（redirect）＝管理者還沒關 Access；401（denied）＝權杖失效
+  assert.equal(new LoginRequired('redirect').reason, 'redirect')
+  assert.equal(new LoginRequired('denied').reason, 'denied')
 })
 
 test('T-332 沒登入：假名單每天每條線固定、切日期會變、代號不是真股票', () => {
@@ -44,34 +44,4 @@ test('T-332 沒登入：假名單每天每條線固定、切日期會變、代�
   const bars = guestCandles()
   assert.deepEqual(bars, guestCandles())
   for (const b of bars) assert.ok(b.h >= Math.max(b.o, b.c) && b.l <= Math.min(b.o, b.c))
-})
-
-test('T-332 登入：/api/me 只回 Access 給的 email，/api/login 登入後轉回首頁', async () => {
-  const anon = me(new Request('https://twquant.pages.dev/api/me'))
-  assert.equal(anon.status, 401)
-  const ok = me(new Request('https://twquant.pages.dev/api/me', { headers: { [EMAIL_HEADER]: 'a@example.com' } }))
-  assert.equal(ok.status, 200)
-  assert.equal(ok.headers.get('cache-control'), 'no-store')
-  assert.deepEqual(await ok.json(), { email: 'a@example.com' })
-  const back = afterLogin(new Request('https://twquant.pages.dev/api/login'))
-  assert.equal(back.status, 302)
-  assert.equal(back.headers.get('location'), 'https://twquant.pages.dev/')
-})
-
-test('登出去哪：撤銷成功或登入早已過期 → 先清 Cloudflare 登入網域的 cookie 再回首頁；撤銷失敗、斷線才走本站的 Cloudflare 登出頁', () => {
-  const origin = 'https://twquant.pages.dev'
-  const team = 'https://twquant-pages.cloudflareaccess.com/cdn-cgi/access/logout?returnTo=https%3A%2F%2Ftwquant.pages.dev%2F'
-  const json = new Headers({ 'content-type': 'application/json' })
-  const res = (status: number, type = 'basic') => ({ type, status, ok: status >= 200 && status < 300, headers: json })
-  assert.equal(teamLogout(origin), team)
-  assert.equal(logoutDestination(res(200), origin), team)
-  // 登入過期：Access 把 POST /api/logout 導去登入頁（manual 模式下是 opaqueredirect），或回 401／403
-  assert.equal(logoutDestination({ type: 'opaqueredirect', status: 0, ok: false, headers: new Headers() }, origin), team)
-  assert.equal(logoutDestination(res(401), origin), team)
-  assert.equal(logoutDestination(res(403), origin), team)
-  // 還登入著但撤銷失敗：要走 Cloudflare 的登出頁，確保登得出去
-  assert.equal(logoutDestination(res(502), origin), '/cdn-cgi/access/logout')
-  assert.equal(logoutDestination(null, origin), '/cdn-cgi/access/logout')
-  // 預覽網址導回自己
-  assert.ok(teamLogout('https://abc.twquant.pages.dev').endsWith('returnTo=https%3A%2F%2Fabc.twquant.pages.dev%2F'))
 })

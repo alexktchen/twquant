@@ -1,22 +1,18 @@
 // 登入狀態判斷與沒登入時的預覽資料（純函式，方便測試）。
-// 資料 API 受 Cloudflare Access 保護：沒登入或登入過期時會被導去登入頁。
-// 前端用 redirect: 'manual' 攔下這個導向，畫面改成模糊的假名單＋登入按鈕。
+// 登入是 Supabase Auth（T-435／D-210，session-client.ts）：每個 /api 請求帶 Bearer 權杖，沒登入或過期時 API 回 401。
+// 過渡期 /api 可能還在 Cloudflare Access 後面：它會把請求導去登入頁，前端用 redirect: 'manual' 攔下這個導向。
 import type { Pick, PicksDay } from './format'
 
-export const LOGIN_URL = '/api/login'
-
-/** 本站的深色登入／註冊頁（T-432）。Access 的登入卡片固定白色、改不了，網站裡的登入按鈕都先到這裡。 */
+/** 本站的深色登入／註冊頁（T-432；T-435 起由 LoginPage.tsx 畫）。 */
 export const LOGIN_PAGE = '/login'
-/** Google 入口：Cloudflare 上可另設一個只開 Google、開 Instant Auth 的 Access 應用，直接跳 Google、不經白色卡片；
- *  沒設時這個路徑仍歸主應用保護，照樣走 Cloudflare 的登入頁。 */
-export const GOOGLE_LOGIN_URL = '/api/login/google'
-/** Email 驗證碼入口：Cloudflare 的一次性驗證碼只能在它自己的登入頁輸入。 */
-export const EMAIL_LOGIN_URL = LOGIN_URL
 
 export class LoginRequired extends Error {
-  constructor() {
+  /** redirect＝被 Cloudflare Access 導走（管理者還沒關掉 /api 的 Access）；denied＝API 回 401／403（沒登入或權杖失效） */
+  readonly reason: 'redirect' | 'denied'
+  constructor(reason: 'redirect' | 'denied') {
     super('需要登入')
     this.name = 'LoginRequired'
+    this.reason = reason
   }
 }
 
@@ -26,27 +22,8 @@ export function needsLogin(res: { type: string; status: number; ok: boolean; hea
   return res.ok && !(res.headers.get('content-type') ?? '').includes('json')
 }
 
-/** Cloudflare Access 的登入網域（Zero Trust 組織）。 */
-export const ACCESS_TEAM = 'https://twquant-pages.cloudflareaccess.com'
-
-/** 登入網域的登出：刪掉那邊的登入 cookie（CF_Authorization、CF_Session…）再導回本站首頁。
- *  只清本站 cookie 的話，那邊會留著已撤銷的登入；下次按「登入」，Cloudflare 拿它換通行證，
- *  換到的是作廢的，就跳出「Current authentication token is expired」（2026-10-13 使用者回報）。
- *  沒有 cookie 時一樣直接導回來，不會出現錯誤頁（2026-10-13 實測）。 */
-export const teamLogout = (origin: string): string =>
-  `${ACCESS_TEAM}/cdn-cgi/access/logout?returnTo=${encodeURIComponent(`${origin}/`)}`
-
-/** 按登出後要去哪：
- *  - 伺服器撤銷登入成功，或登入早就過期（Access 把登出請求導去登入頁、或 401／403）→ 登入網域登出後回首頁；
- *  - 其他失敗（撤銷失敗、斷線）→ 本站的 Cloudflare 登出頁，確保還登入著的人一定登得出去。 */
-export function logoutDestination(
-  res: { type: string; status: number; ok: boolean; headers: Headers } | null,
-  origin: string,
-): string {
-  if (res === null) return '/cdn-cgi/access/logout'
-  if (res.ok || needsLogin(res)) return teamLogout(origin)
-  return '/cdn-cgi/access/logout'
-}
+/** 被擋的原因（給 LoginRequired）：401／403 是被拒，其餘是被導去登入頁。 */
+export const loginReason = (res: { status: number }): 'redirect' | 'denied' => (res.status === 401 || res.status === 403 ? 'denied' : 'redirect')
 
 const GUEST_NAMES = ['登入後查看', '範例股票', '示範名單', '模型選股', '每日更新', '收盤產生', '範例資料', '登入查看', '示範股票', '範例名單']
 

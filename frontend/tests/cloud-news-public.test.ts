@@ -76,7 +76,7 @@ test('T-434 AC5 沒登入的新聞頁：不去抓核可清單、搜尋停用並�
 test('T-434 AC6 公開頁與搜尋引擎：介紹頁說新聞不用登入；首頁有 description；登入頁不再說新聞要登入', () => {
   assert.match(read('public/about.html'), /新聞.{0,12}不用登入/)
   assert.match(read('index.html'), /<meta name="description" content="[^"]{20,}"/)
-  const login = read('public/login.html')
+  const login = read('src/cloud/LoginPage.tsx')
   assert.ok(!/<b>新聞<\/b>/.test(login), '新聞已公開，登入頁不該把它列成登入後才有的功能')
   assert.match(login, /新聞搜尋/)
 })

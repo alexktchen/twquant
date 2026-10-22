@@ -113,6 +113,6 @@ const handle = async (env: Env, withPicks: boolean): Promise<Response> =>
 
 // 有沒有名單權限分開暫存（_lib/gate.ts）
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
-  const full = await allowed(ctx.request, 'picks')
+  const full = await allowed(ctx.request, 'picks', ctx.env)
   return cached(gatedKey(cacheKey(ctx.request), full), async () => handle(ctx.env, full))
 }

@@ -1,13 +1,13 @@
 // PUT /api/line/groups/:id：勾／取消要發的群組（T-423）。只收本站送出的請求、只有 line 功能的角色能改。
 import { fail, guarded, json, type Env } from '../../../_lib/db'
-import { accessEmail } from '../../../_lib/identity'
+import { userEmail } from '../../../_lib/identity'
 import { HOME_ID_RE, parseToggle, setGroupEnabled } from '../../../_lib/line-admin'
 import { can } from '../../../_lib/roles'
 import { sameOrigin } from '../../../_lib/watchlist'
 
 export const onRequestPut: PagesFunction<Env> = async ({ request, env, params }) => {
   if (!sameOrigin(request)) return fail(403, '只接受本站送出的請求')
-  const email = await accessEmail(request)
+  const email = await userEmail(request, env)
   if (email === null) return fail(401, '登入身分驗證失敗，請重新登入')
   if (!can(email, 'line')) return fail(403, '沒有權限')
   const id = String(params.id ?? '')
