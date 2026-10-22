@@ -1,4 +1,4 @@
-// T-434／D-211（使用者 2026-10-22：「首頁那邊的名單跟該擋的都要擋」）：首頁「今日一句話」（晨報／盤後快訊）不能露出名單。
+// T-435／D-212（使用者 2026-10-22：「首頁那邊的名單跟該擋的都要擋」）：首頁「今日一句話」（晨報／盤後快訊）不能露出名單。
 // 新的晨報不讀名單（tests/test_morning_brief.py 守著）；已經存起來的舊晨報，沒有名單權限的人讀到的是拿掉名單痕跡的版本。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -31,7 +31,7 @@ const old = {
   adr_premium: 0.28,
 }
 
-test('T-434 AC1 舊晨報給沒有名單權限的人：名單檔數、「名單」標記、只因在名單才挑進來的公告與提到它的句子都拿掉', () => {
+test('T-435 AC1 舊晨報給沒有名單權限的人：名單檔數、「名單」標記、只因在名單才挑進來的公告與提到它的句子都拿掉', () => {
   const s = scrubBrief(old)!
   assert.equal(s.rule_text, '美股收紅；資金流入 半導體、航運。')
   assert.deepEqual(s.facts, [
@@ -48,7 +48,7 @@ test('T-434 AC1 舊晨報給沒有名單權限的人：名單檔數、「名單�
   assert.equal(s.adr_premium, 0.28) // 其他欄位照舊
 })
 
-test('T-434 AC1 新晨報（不讀名單）原樣通過；null、舊資料沒有的欄位不出錯；規則句只剩名單時用沒資料的句子', () => {
+test('T-435 AC1 新晨報（不讀名單）原樣通過；null、舊資料沒有的欄位不出錯；規則句只剩名單時用沒資料的句子', () => {
   const clean = { ...old, rule_text: '美股收紅。', bullets: ['【研判】台股可望開高'], risk_note: '外資持續調節', facts: ['2026-10-20 加權指數 -1.23%，收 27,000 點'] }
   assert.deepEqual(scrubBrief(clean), clean)
   assert.equal(scrubBrief(null), null)
@@ -60,7 +60,7 @@ test('T-434 AC1 新晨報（不讀名單）原樣通過；null、舊資料沒有
   assert.equal(headline.headline, null) // 網站就改顯示規則句
 })
 
-test('T-434 AC2 首頁與晨報歷史兩支端點：沒有名單權限就給拿掉痕跡的版本，兩種內容分開暫存', () => {
+test('T-435 AC2 首頁與晨報歷史兩支端點：沒有名單權限就給拿掉痕跡的版本，兩種內容分開暫存', () => {
   const war = read('functions/api/warroom/index.ts')
   assert.match(war, /const brief = withPicks \? latest : scrubBrief\(latest\)/)
   const hist = read('functions/api/warroom/brief.ts')
@@ -70,7 +70,7 @@ test('T-434 AC2 首頁與晨報歷史兩支端點：沒有名單權限就給拿�
   assert.equal(hist.match(/cached\(/g)?.length, 1)
 })
 
-test('T-434 AC3 沒登入時首頁的說明也不提名單（名單只給 admin；族群資金已搬到盤勢）', () => {
+test('T-435 AC3 沒登入時首頁的說明也不提名單（名單只給 admin；族群資金已搬到盤勢）', () => {
   const app = read('src/cloud/CloudApp.tsx')
   const gate = /<Gate title="登入後看今日戰情" text="([^"]*)"/.exec(app)
   assert.ok(gate)

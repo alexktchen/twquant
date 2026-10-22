@@ -3,7 +3,7 @@
 // 同一種權限看到都一樣（追蹤股的消息另由 /api/warroom/news 查）：同一執行個體 60 秒暫存。任何一張表還沒建 → 那一塊是 null，不擋其他。
 // 即時的美股、台指期、類股強弱與族群資金照舊走 /api/mood/*、/api/groups。
 // 名單速覽（picks）與昨日消息的「名單」標記只給 admin（T-430／D-208）：其他人 picks 是 null、消息照一般規則挑；
-// 晨報裡的名單痕跡（舊晨報才有）也拿掉（T-434／D-211，_lib/brief-scrub.ts）。
+// 晨報裡的名單痕跡（舊晨報才有）也拿掉（T-435／D-212，_lib/brief-scrub.ts）。
 import { guarded, json, type Env } from '../../_lib/db'
 import { cached, cacheKey } from '../../_lib/cache'
 import { allowed, gatedKey } from '../../_lib/gate'

@@ -235,7 +235,7 @@ def _night() -> NightFuture:
 
 
 # ── AC-1：收資料——昨天那一列、族群流向、公告只留全市場重要類別、ADR 折溢價 ─────────────────
-# T-434／D-211：晨報每個人共用，名單只給 admin → 晨報不讀名單（資料庫裡有名單也一樣）
+# T-435／D-212：晨報每個人共用，名單只給 admin → 晨報不讀名單（資料庫裡有名單也一樣）
 def test_ac1_gather_builds_inputs_from_pg_and_quotes() -> None:
     inp = gather(_conn(), "serving", DAY, CFG, CATS, fetch_quote=_quote, fetch_night=_night)
     assert inp.market_date == MDATE and inp.market is not None and inp.market["up"] == 543
@@ -290,7 +290,7 @@ def test_ac2_rule_text_cites_inputs_and_skips_missing() -> None:
     assert "前一交易日加權 -1.23%，漲跌家數 543：1238，漲停 40、跌停 2，量能 1.27 倍均量" in text
     assert "外資賣超 250 億（連 4 日賣超）" in text
     assert "外資期貨淨空單 93,675 口，P/C 未平倉比 68%" in text
-    assert "資金流入 半導體、航運" in text and "名單" not in text  # T-434：不寫各線檔數
+    assert "資金流入 半導體、航運" in text and "名單" not in text  # T-435：不寫各線檔數
     for casual in ("昨天", "是 20 日平均的", "連賣"):
         assert casual not in text
     empty = MorningInputs(day=DAY, market_date=None, market=None, taifex=None)
@@ -410,7 +410,7 @@ def test_ac5_facts_are_formatted_with_units_and_direction() -> None:
     )
     assert any(x.startswith("台積電 ADR 對台股收盤溢價 28.0%") for x in f)
     assert any("重大訊息 8084" in x and x.endswith("（變更交易／下市）") for x in f)
-    assert not any("名單" in x for x in f)  # T-434：事實裡沒有名單（檔數、「名單」標記都沒有）
+    assert not any("名單" in x for x in f)  # T-435：事實裡沒有名單（檔數、「名單」標記都沒有）
 
 
 def test_ac5_check_brief_rejects_wrong_headline_and_null_risk() -> None:
