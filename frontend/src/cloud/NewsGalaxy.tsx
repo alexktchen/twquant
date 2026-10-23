@@ -12,9 +12,9 @@
 // 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一度幾則（「幾度」＝隔幾層關係，跟新聞關係圖的講法一樣）。
 // 時間軸（T-443；使用者 2026-10-23 看「台中恐怖島」截圖：「有辦法也有時間軸嗎」→「我先做7天版」）：右下 ⏱ 打開，圖下面（桌機蓋在圖的下緣）一排每 3 小時一格的長條、
 // 播放鍵與拉桿；拉到某一刻＝之後的光點不畫、亮點只算到那時候；「累積／當時」切換；那一格的新聞列在底下，點了選那顆。全用快照算，不打 API。
-import { Clock, ExternalLink, Maximize, Maximize2, Minimize, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
+import { Clock, ExternalLink, Flame, Maximize, Maximize2, Minimize, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
-import { fetchNewsGalaxy, leaveGalaxyPresence, sendGalaxyPresence } from './api'
+import { fetchGalaxyTrend, fetchNewsGalaxy, leaveGalaxyPresence, recordGalaxySearch, sendGalaxyPresence } from './api'
 import { PRESENCE_BEAT_S, viewerId, viewersText } from './galaxy-presence'
 import { GalaxyFocus } from './GalaxyFocus'
 import { TL_LIST, TL_STEP_MS, buildTimeline, tlAlpha, tlBinLabel, tlBinMax, tlDayTicks, tlHubCounts, type TlMode } from './galaxy-timeline'
@@ -36,6 +36,8 @@ import {
   hubPath,
   hubRadius,
   hubTypeLabel,
+  trendHubs,
+  unseenHubs,
   inspectorAt,
   hubWeb,
   parseQuery,
@@ -105,6 +107,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const [full, setFull] = useState(false)
   // 同時幾個人在看（T-445）：null＝還沒拿到或讀不到（就不顯示）
   const [viewers, setViewers] = useState<number | null>(null)
+  // 大家都在搜（T-446）：伺服器的排行（亮點 id 與幾個分頁）；讀不到就是空的、不顯示
+  const [trend, setTrend] = useState<{ days: number; items: { hub: string; n: number }[] }>({ days: 0, items: [] })
   /** 正在拖檢視框：哪根手指、按下時離框左上角多遠 */
   const inspDrag = useRef<{ id: number; dx: number; dy: number } | null>(null)
   // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）；webAt／pathAt：牽連線從什麼時候開始畫（像 graphify 的「路徑逐段點亮」）
@@ -137,6 +141,20 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     live.current.pathAt = performance.now()
   }, [path])
 
+  /**
+   * 選了亮點就記下來給「大家都在搜」（不記打的字；寫不進去不影響搜尋）。
+   * 搜尋、在圖上點亮點或名字、點檢視框與路徑的籌碼都算（使用者 2026-10-23：「在星雲圖上面點也算搜尋」）；
+   * 這個分頁送過的不再送（伺服器本來就同分頁同天只算一次，省請求）。
+   */
+  const recorded = useRef(new Set<string>())
+  const record = (hubs: string[]) => {
+    const fresh = unseenHubs(recorded.current, hubs)
+    if (fresh.length) recordGalaxySearch(viewerId(), fresh).catch(() => undefined)
+  }
+  useEffect(() => {
+    if (sel?.kind === 'hub') record([sel.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel])
   /** 搜尋列裡選一個：亮點＝飛到它、畫牽連；新聞＝選那顆 */
   const pick = (hit: SearchHit) => {
     setPath(null)
@@ -159,6 +177,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         setOpen(false)
         return
       }
+      record([a!.id, b!.id])
       const p = hubPath(data, graph, a!.id, b!.id)
       setPath(p)
       setPathMsg(p ? '' : `近 ${data.days} 天沒有新聞把「${a!.label}」和「${b!.label}」連在一起`)
@@ -176,6 +195,18 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     setPath(null)
     setPathMsg('')
   }
+
+  // 大家都在搜：打開搜尋框才去拿（伺服器與瀏覽器都暫存 60 秒）
+  useEffect(() => {
+    if (!open) return
+    let stale = false
+    fetchGalaxyTrend()
+      .then((t) => !stale && setTrend(t))
+      .catch(() => undefined) // 讀不到就不列，搜尋照常
+    return () => {
+      stale = true
+    }
+  }, [open])
 
   // 心跳：看得到這頁才送，切到背景或關掉就送 leave（別人那邊立刻少一個）
   useEffect(() => {
@@ -833,6 +864,28 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
             <button type="button" className="gx-search-x" onClick={clearSearch} aria-label="清除">
               <X size={16} aria-hidden="true" />
             </button>
+          )}
+          {open && terms.length === 0 && trendHubs(data, trend.items).length > 0 && (
+            <div className="gx-hits gx-trend">
+              <p className="gx-hit-tip">
+                <Flame size={14} aria-hidden="true" />
+                大家都在搜<small>近 {trend.days} 天</small>
+              </p>
+              <div className="gx-trend-chips">
+                {trendHubs(data, trend.items).map((t, i) => (
+                  <button
+                    key={t.hub.id}
+                    type="button"
+                    className={`gx-chip ${hubClass(t.hub.type)}`}
+                    title={`近 ${trend.days} 天有 ${t.n} 個人搜過`}
+                    onClick={() => pick({ kind: 'hub', hub: t.hub })}
+                  >
+                    <b>{i + 1}</b>
+                    {t.hub.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {open && terms.length > 0 && (
             <ul className="gx-hits">

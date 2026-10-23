@@ -309,6 +309,24 @@ export function parseQuery(q: string): string[] {
     .slice(0, 2)
 }
 
+/** 「大家都在搜」最多列幾個 */
+export const TREND_SHOW = 8
+
+/**
+ * 「大家都在搜」（T-446）：伺服器給的排行只留目前星雲圖裡有的亮點（亂送的 id、已經不在快照裡的都不列），照原本順序，最多 max 個。
+ */
+export function trendHubs(d: GalaxyData, items: { hub: string; n: number }[], max = TREND_SHOW): { hub: GalaxyHub; n: number }[] {
+  const byId = new Map(d.hubs.map((h) => [h.id, h]))
+  return items.flatMap((it) => (byId.has(it.hub) ? [{ hub: byId.get(it.hub)!, n: it.n }] : [])).slice(0, max)
+}
+
+/** 這個分頁還沒記過的亮點（順手記進 seen）：同一個亮點一個分頁只送一次「大家都在搜」。 */
+export function unseenHubs(seen: Set<string>, hubs: string[]): string[] {
+  const fresh = [...new Set(hubs)].filter((h) => !seen.has(h))
+  for (const h of fresh) seen.add(h)
+  return fresh
+}
+
 export type SearchHit = { kind: 'hub'; hub: GalaxyHub } | { kind: 'item'; item: GalaxyItem }
 
 const fold = (s: string) => s.toLowerCase()
