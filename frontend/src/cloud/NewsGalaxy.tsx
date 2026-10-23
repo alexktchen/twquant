@@ -18,6 +18,7 @@ import {
   DRAG_RAD,
   ORIGIN,
   REF_S,
+  clusterFocus,
   clusterLabelAt,
   density,
   depthAlpha,
@@ -35,6 +36,7 @@ import {
   parseQuery,
   pickAt,
   pivotScreenY,
+  labelAt,
   placeLabels,
   project,
   qFromYawPitch,
@@ -47,13 +49,17 @@ import {
   type Proj,
   type Quat,
   type SearchHit,
+  type LabelBox,
   type Vec3,
   type View,
 } from './news-galaxy'
 import { shortWhen, taipeiDay } from './news'
 import './news-galaxy.css'
 
-type Sel = { kind: 'item' | 'hub'; id: string } | null
+/** 選了什麼：新聞光點、亮點、或主題（點主題名；id＝主題編號的字串） */
+type Sel = { kind: 'item' | 'hub' | 'cluster'; id: string } | null
+/** 「單獨看」看誰：亮點或主題 */
+type FocusTarget = { kind: 'hub' | 'cluster'; id: string }
 const COL: Record<string, string> = { tw: '255,122,89', intl: '127,178,255', hubtw: '255,150,110', abroad: '140,185,255', cluster: '45,212,191', sel: '255,210,63' }
 const HOME_ROT: Quat = qFromYawPitch(0.5, -0.3)
 
@@ -77,7 +83,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const [err, setErr] = useState('')
   const [sel, setSel] = useState<Sel>(null)
   const [auto, setAuto] = useState(true)
-  const [focus, setFocus] = useState<string | null>(null)
+  const [focus, setFocus] = useState<FocusTarget | null>(null)
   // 搜尋（T-436）：q＝打的字、open＝下拉列著；path＝兩個詞找到的路徑、pathMsg＝找不到時的一句話
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
@@ -179,6 +185,10 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     const INSP_W = 320
     /** 路徑逐段點亮（像 graphify 的 demo）：每一步隔 HOP 秒開始、花 DRAW 秒畫到底；一個亮點的牽連線 WEB_DRAW 秒從中心射出去 */
     const HOP = 0.45, DRAW = 0.35, WEB_DRAW = 0.5
+    /** 選了主題時亮幾個它最常提到的亮點 */
+    const TOPIC_HUBS = 8
+    /** 這一格畫出來、看得清楚的標籤範圍（點擊時判斷點到哪個；暗掉的不算） */
+    let labelBoxes: LabelBox[] = []
     const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
     /** 亮點被點亮那一下彈一下（半徑倍率），之後縮回 */
     const pop = (since: number) => (since < 0 ? 1 : 1 + 0.7 * Math.exp(-since * 4))
@@ -248,7 +258,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         if (qSame(rot, goal.q) > 1 - 1e-7 && Math.abs(view.s - goal.s) < 0.5) goal = null
       }
       if (lv.sel) {
-        const o = lv.sel.kind === 'item' ? items[itemIdx.get(lv.sel.id) ?? -1] : hubs[hubIdx.get(lv.sel.id) ?? -1]
+        const s = lv.sel
+        const o = s.kind === 'item' ? items[itemIdx.get(s.id) ?? -1] : s.kind === 'cluster' ? clusters.find((c) => String(c.k) === s.id) : hubs[hubIdx.get(s.id) ?? -1]
         if (o) pivotGoal = o
       }
       pivot.x = ease(pivot.x, pivotGoal.x, dt, 6)
@@ -275,6 +286,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       } else if (sel?.kind === 'hub') {
         relItems = new Set(items.filter((x) => x.m.includes(sel.id)).map((x) => x.id))
         relHubs = new Set([sel.id])
+      } else if (sel?.kind === 'cluster') {
+        // 主題：這個主題的新聞全亮，亮點只亮它們最常提到的那幾個（全部連線會糊成一片）
+        const mine = items.filter((x) => String(x.k) === sel.id)
+        const cnt = new Map<string, number>()
+        for (const x of mine) for (const m of new Set(x.m)) if (hubIdx.has(m)) cnt.set(m, (cnt.get(m) ?? 0) + 1)
+        relItems = new Set(mine.map((x) => x.id))
+        relHubs = new Set([...cnt].sort((a, b) => b[1] - a[1]).slice(0, TOPIC_HUBS).map(([id]) => id))
       }
       // 牽連（T-436）：兩個詞的路徑 → 只亮路徑上的亮點與把相鄰兩個連起來的新聞；否則選了亮點就連同它牽連的亮點一起亮
       const pathIds = lv.path && lv.path.ids.every((id) => hubIdx.has(id)) ? lv.path.ids : null
@@ -307,6 +325,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           if (!relItems!.has(items[i].id)) return
           hs.forEach((h) => {
             if (sel?.kind === 'hub' && hubs[h].id !== sel.id) return
+            if (sel?.kind === 'cluster' && !relHubs?.has(hubs[h].id)) return
             ctx.moveTo(pos[i][0], pos[i][1])
             ctx.lineTo(P.hubs[h][0], P.hubs[h][1])
           })
@@ -369,7 +388,10 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       // 標籤避讓：主題（手機少放）→ 亮點；放大後放得下更多
       const phone = W < 600, zf = Math.sqrt(view.s / home.s)
       const center = { x: view.x, y: view.y }
-      const cWant = [...cEls].sort((a, b) => b.c.n - a.c.n).slice(0, phone ? Math.round(8 * zf) : 16)
+      // 選中的主題名一定放、放最前面（使用者 2026-10-23：「點有底線的標籤要可以點」）
+      const selKey = sel?.kind === 'cluster' ? `c${sel.id}` : sel?.kind === 'hub' ? `h${sel.id}` : ''
+      const selC = sel?.kind === 'cluster' ? cEls.filter((x) => String(x.c.k) === sel.id) : []
+      const cWant = [...cEls].filter((x) => !selC.includes(x)).sort((a, b) => b.c.n - a.c.n).slice(0, phone ? Math.round(8 * zf) : 16)
       // 牽連到的亮點名字優先放（中心那顆最先），其餘照平常的順序
       const hot = relHubs ? hEls.filter((x) => relHubs!.has(x.h.id)).sort((a, b) => Number(b.h.id === sel?.id) - Number(a.h.id === sel?.id)) : []
       const hWant = hEls.filter((x) => !relHubs?.has(x.h.id)).slice(0, phone ? Math.round(7 * zf) : 16)
@@ -379,28 +401,28 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         return { key: `h${h.id}`, x: p[0], y: p[1] + hubSize(h.n) * p[3] + 10, w, h: hh, e }
       }
       // 牽連到的亮點名字最優先（主題名也讓路），再來主題名，最後其餘亮點
-      const want = [
-        ...hot.map(hubWant),
-        ...cWant.map(({ c, e }) => {
-          const at = clusterLabelAt(P.clusters[clusters.indexOf(c)], center)
-          const [w, h] = sizes.get(e)!
-          return { key: `c${c.k}`, x: at.x, y: at.y, w, h, e }
-        }),
-        ...hWant.map(hubWant),
-      ]
+      const clusterWant = ({ c, e }: { c: (typeof clusters)[number]; e: HTMLElement }) => {
+        const at = clusterLabelAt(P.clusters[clusters.indexOf(c)], center)
+        const [w, h] = sizes.get(e)!
+        return { key: `c${c.k}`, x: at.x, y: at.y, w, h, e }
+      }
+      const want = [...selC.map(clusterWant), ...hot.map(hubWant), ...cWant.map(clusterWant), ...hWant.map(hubWant)]
       const placed = placeLabels(want, W, H)
       for (const { e } of [...cEls, ...hEls]) e.style.visibility = 'hidden'
       ctx.strokeStyle = 'rgba(230,220,215,0.35)'
       ctx.lineWidth = 0.8
       ctx.beginPath()
+      const boxes: LabelBox[] = []
       for (const w of want) {
         const at = placed.get(w.key)
         if (!at) continue
         w.e.style.visibility = 'visible'
         w.e.style.left = `${at.x}px`
         w.e.style.top = `${at.y}px`
-        w.e.classList.toggle('dim', !!relItems && !(w.key.startsWith('h') && relHubs?.has(w.key.slice(1))))
-        w.e.classList.toggle('on', sel?.kind === 'hub' && w.key === `h${sel.id}`)
+        const dim = !!relItems && w.key !== selKey && !(w.key.startsWith('h') && relHubs?.has(w.key.slice(1)))
+        w.e.classList.toggle('dim', dim)
+        w.e.classList.toggle('on', w.key === selKey)
+        if (!dim) boxes.push({ key: w.key, x: at.x, y: at.y, w: w.w, h: w.h })
         if (w.key.startsWith('c')) {
           const p = P.clusters[clusters.findIndex((c) => `c${c.k}` === w.key)]
           ctx.moveTo(p[0], p[1])
@@ -408,6 +430,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         }
       }
       ctx.stroke()
+      labelBoxes = boxes
       // 牽連線中點寫則數（路徑每一步；一個亮點的牽連只寫跟中心的那幾條）
       const counts: [string, string, number][] = pathIds ? pathIds.slice(1).map((id, i) => [pathIds[i], id, lv.path!.n[i]]) : web ? web.edges.filter((e) => e.deg === 1).map((e) => [e.a, e.b, e.n]) : []
       if (counts.length) {
@@ -428,7 +451,12 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       }
       // 選取的那顆畫框；檢視框跟著它（窄畫面貼在下緣）
       if (sel && insp) {
-        const p = sel.kind === 'item' ? P.items[items.findIndex((x) => x.id === sel.id)] : P.hubs[hubIdx.get(sel.id) ?? -1]
+        const p =
+          sel.kind === 'item'
+            ? P.items[items.findIndex((x) => x.id === sel.id)]
+            : sel.kind === 'cluster'
+              ? P.clusters[clusters.findIndex((c) => String(c.k) === sel.id)]
+              : P.hubs[hubIdx.get(sel.id) ?? -1]
         if (p) {
           if (sel.kind === 'item') {
             ctx.strokeStyle = '#ffd23f'
@@ -504,6 +532,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       drag = null
       if (was === 1 && moved < 6 && !(e.target as HTMLElement).closest('.gx-insp,.gx-ctl,.gx-search,.gx-path')) {
         const [x, y] = xy(e)
+        // 先看是不是點到標籤（主題名、亮點名），再找光點
+        const lk = labelAt(x, y, labelBoxes)
+        if (lk) {
+          setSel(lk.startsWith('c') ? { kind: 'cluster', id: lk.slice(1) } : { kind: 'hub', id: lk.slice(1) })
+          setPath(null)
+          return
+        }
         const hit = pickAt(
           x,
           y,
@@ -543,6 +578,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const today = taipeiDay(new Date().toISOString())
   const item = sel?.kind === 'item' ? data.items.find((x) => x.id === sel.id) : null
   const hub = sel?.kind === 'hub' ? data.hubs.find((h) => h.id === sel.id) : null
+  const topic = sel?.kind === 'cluster' ? data.clusters.find((c) => String(c.k) === sel.id) : null
+  const topicF = topic ? clusterFocus(data, topic.k) : null
   const hubById = new Map(data.hubs.map((h) => [h.id, h]))
   const terms = parseQuery(q)
   // 新聞光點的內容：桌機放在圖裡的檢視框，手機放在圖外面那排（使用者 2026-10-23：「有時候會擋到星雲圖？全都改成第一張」）
@@ -679,8 +716,8 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
             </button>
           </div>
         )}
-        {(item || hub) && (
-          <div className={`gx-insp${hub ? ' hub' : ''}`} ref={inspRef}>
+        {(item || hub || topic) && (
+          <div className={`gx-insp${hub || topic ? ' hub' : ''}`} ref={inspRef}>
             <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
               <X size={16} aria-hidden="true" />
             </button>
@@ -727,7 +764,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                     ))}
                 </div>
                 <div className="gx-acts">
-                  <button className="gx-focus" onClick={() => setFocus(hub.id)}>
+                  <button className="gx-focus" onClick={() => setFocus({ kind: 'hub', id: hub.id })}>
                     <Maximize2 size={14} aria-hidden="true" />
                     單獨看 {hub.n} 則
                   </button>
@@ -736,6 +773,49 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                       開個股頁
                     </button>
                   )}
+                </div>
+              </>
+            )}
+            {topic && topicF && (
+              <>
+                <div className="gx-h">
+                  <span>主題</span>
+                  <b>{topicF.total} 則</b>
+                </div>
+                <p className="gx-t">{topic.name}</p>
+                {topicF.related.length > 0 && (
+                  <div className="gx-chips gx-web">
+                    <span className="gx-web-h">常被提到</span>
+                    {topicF.related.slice(0, 8).map((r) => (
+                      <button
+                        key={r.hub.id}
+                        type="button"
+                        className={`gx-chip ${hubClass(r.hub.type)}`}
+                        title={`這個主題有 ${r.n} 則提到${r.hub.label}；點了換看${r.hub.label}`}
+                        onClick={() => setSel({ kind: 'hub', id: r.hub.id })}
+                      >
+                        {r.hub.label}
+                        <small>{r.n}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="gx-news">
+                  {data.items
+                    .filter((x) => x.k === topic.k)
+                    .sort((a, b) => (a.t < b.t ? 1 : -1))
+                    .slice(0, 3)
+                    .map((x) => (
+                      <p key={x.id} className="gx-row">
+                        {shortWhen(x.t, today)}　{x.title}
+                      </p>
+                    ))}
+                </div>
+                <div className="gx-acts">
+                  <button className="gx-focus" onClick={() => setFocus({ kind: 'cluster', id: String(topic.k) })}>
+                    <Maximize2 size={14} aria-hidden="true" />
+                    單獨看 {topicF.total} 則
+                  </button>
                 </div>
               </>
             )}
@@ -761,7 +841,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
         </div>
       </div>
-      {(hub || item) && (
+      {(hub || item || topic) && (
         <div className={`gx-bar${item ? ' news' : ''}`}>
           <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
             <X size={16} aria-hidden="true" />
@@ -773,7 +853,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
                 {hub.label}
                 <small>{hub.n} 則</small>
               </span>
-              <button className="gx-focus" onClick={() => setFocus(hub.id)}>
+              <button className="gx-focus" onClick={() => setFocus({ kind: 'hub', id: hub.id })}>
                 <Maximize2 size={14} aria-hidden="true" />
                 單獨看 {hub.n} 則
               </button>
@@ -784,21 +864,33 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
               )}
             </>
           )}
+          {topic && topicF && (
+            <>
+              <span className="gx-bar-name topic">
+                {topic.name}
+                <small>主題・{topicF.total} 則</small>
+              </span>
+              <button className="gx-focus" onClick={() => setFocus({ kind: 'cluster', id: String(topic.k) })}>
+                <Maximize2 size={14} aria-hidden="true" />
+                單獨看 {topicF.total} 則
+              </button>
+            </>
+          )}
         </div>
       )}
       {focus && (
         <GalaxyFocus
           data={data}
-          hubId={focus}
+          target={focus}
           onRecenter={(id) => {
-            setFocus(id)
+            setFocus({ kind: 'hub', id })
             setSel({ kind: 'hub', id })
           }}
           onClose={() => setFocus(null)}
           onStock={onStock}
         />
       )}
-      <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放；點一顆看細節，它會移到中間、之後繞著它轉。要快速讀新聞用上面三張卡或「清單」。</p>
+      <p className="gx-help">光點＝一則新聞，靠在一起＝內容相近；亮點＝被很多則提到的股票、主題。拖曳旋轉、兩指縮放；點一顆或點主題名看細節，它會移到中間、之後繞著它轉。要快速讀新聞用上面三張卡或「清單」。</p>
     </section>
   )
 }

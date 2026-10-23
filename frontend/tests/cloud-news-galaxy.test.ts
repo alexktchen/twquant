@@ -4,6 +4,7 @@ import {
   DRAG_RAD,
   FOCUS_RELATED,
   REF_S,
+  clusterFocus,
   clusterLabelAt,
   density,
   depthAlpha,
@@ -14,6 +15,7 @@ import {
   hubClass,
   hubFocus,
   hubRadius,
+  labelAt,
   pickAt,
   pivotScreenY,
   placeLabels,
@@ -277,4 +279,32 @@ test('T-437 AC4 只補問沒問過的：任一個實體沒問過那則就要問'
   assert.deepEqual(evidenceNeeded(['a', 'b'], ['tw:2330', 'us:NVDA'], fetched), ['a', 'b'], '換成兩個都提到：輝達還沒問過')
   assert.deepEqual(evidenceNeeded([], ['tw:2330'], fetched), [])
   assert.ok(EVIDENCE_BATCH >= 20)
+})
+
+test('T-441 AC1 點到標籤：點在框內（含手指留的邊）就算，疊在一起取後放的；框外 → null', () => {
+  const boxes = [
+    { key: 'c1', x: 100, y: 100, w: 80, h: 20 },
+    { key: 'h:tw:2330', x: 130, y: 105, w: 60, h: 20 },
+  ]
+  assert.equal(labelAt(70, 100, boxes), 'c1')
+  assert.equal(labelAt(130, 105, boxes), 'h:tw:2330', '重疊的地方取後放的')
+  assert.equal(labelAt(80, 114, boxes, 6), 'c1', '下緣外 4px 仍在手指邊內')
+  assert.equal(labelAt(80, 130, boxes, 6), null)
+  assert.equal(labelAt(0, 0, []), null)
+})
+
+test('T-441 AC2 單獨看主題：只列這個主題的新聞、同一件事只留最新一則；常一起出現＝這些新聞提到的亮點；給亮點只留也提到它的；找不到 → null', () => {
+  const f = clusterFocus(focusData, 1)!
+  assert.equal(f.cluster.name, '台積電產能布局')
+  assert.equal(f.total, 3)
+  assert.equal(f.shown, 3)
+  assert.deepEqual(f.groups.map((g) => g.name), ['台積電產能布局'], '只有自己這一組')
+  assert.deepEqual(f.groups[0].rows.map((r) => [r.item.id, r.n]), [['b', 2], ['c', 1]], 'a、b 同一件事只留新的 b')
+  assert.deepEqual(f.groups[0].rows[0].others.map((h) => h.label), ['台積電', '輝達', 'AI'], '主題沒有中心亮點，提到的全列')
+  assert.deepEqual(f.related.map((r) => [r.hub.label, r.n]), [['台積電', 3], ['輝達', 2], ['AI', 1], ['聯發科', 1]])
+  const w = clusterFocus(focusData, 1, 'tw:2454')!
+  assert.equal(w.total, 3, '總數不變')
+  assert.deepEqual(w.groups.flatMap((g) => g.rows.map((r) => r.item.id)), ['c'])
+  assert.deepEqual(w.groups[0].rows[0].others.map((h) => h.label), ['台積電'], '不重複列選的那個')
+  assert.equal(clusterFocus(focusData, 99), null)
 })

@@ -191,12 +191,28 @@ export type HubFocus = { hub: GalaxyHub; total: number; related: { hub: GalaxyHu
  * 「常一起出現」＝這些新聞裡還提到哪些亮點、各幾則。給 withId → 只留同時提到兩個的。找不到亮點 → null。
  */
 export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = null): HubFocus | null {
-  const byId = new Map(d.hubs.map((h) => [h.id, h]))
-  const hub = byId.get(hubId)
+  const hub = d.hubs.find((h) => h.id === hubId)
   if (!hub) return null
-  const all = d.items.filter((it) => it.m.includes(hubId))
+  return { hub, ...focusOf(d, d.items.filter((it) => it.m.includes(hubId)), hubId, withId) }
+}
+
+export type ClusterFocus = Omit<HubFocus, 'hub'> & { cluster: GalaxyCluster }
+
+/**
+ * 單獨看一個主題（使用者 2026-10-23：「點有底線的標籤要可以點」）：這個主題的新聞（同一件事只留最新一則），
+ * 「常一起出現」＝這些新聞最常提到哪些亮點。給 withId → 只留也提到那個亮點的。找不到主題 → null。
+ */
+export function clusterFocus(d: GalaxyData, k: number, withId: string | null = null): ClusterFocus | null {
+  const cluster = d.clusters.find((c) => c.k === k)
+  if (!cluster) return null
+  return { cluster, ...focusOf(d, d.items.filter((it) => it.k === k), null, withId) }
+}
+
+/** 單獨看的共同部分：all＝要列的新聞；selfId＝中心亮點（不列進「常一起出現」與每則的其他亮點），主題沒有 */
+function focusOf(d: GalaxyData, all: GalaxyItem[], selfId: string | null, withId: string | null): Omit<HubFocus, 'hub'> {
+  const byId = new Map(d.hubs.map((h) => [h.id, h]))
   const co = new Map<string, number>()
-  for (const it of all) for (const m of new Set(it.m)) if (m !== hubId && byId.has(m)) co.set(m, (co.get(m) ?? 0) + 1)
+  for (const it of all) for (const m of new Set(it.m)) if (m !== selfId && byId.has(m)) co.set(m, (co.get(m) ?? 0) + 1)
   const related = [...co]
     .map(([id, n]) => ({ hub: byId.get(id)!, n }))
     .sort((a, b) => b.n - a.n || b.hub.n - a.hub.n || a.hub.label.localeCompare(b.hub.label))
@@ -211,12 +227,11 @@ export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = n
   const groups = new Map<number, FocusRow[]>()
   for (const g of events.values()) {
     const item = g[0]
-    const others = [...new Set(item.m)].filter((m) => m !== hubId && m !== withId && byId.has(m)).map((m) => byId.get(m)!)
+    const others = [...new Set(item.m)].filter((m) => m !== selfId && m !== withId && byId.has(m)).map((m) => byId.get(m)!)
     groups.set(item.k, [...(groups.get(item.k) ?? []), { item, n: g.length, srcs: [...new Set(g.map((x) => x.src))], others }])
   }
   const names = new Map(d.clusters.map((c) => [c.k, c.name]))
   return {
-    hub,
     total: all.length,
     related,
     shown: picked.length,
@@ -224,6 +239,21 @@ export function hubFocus(d: GalaxyData, hubId: string, withId: string | null = n
       .map(([k, rows]) => ({ k, name: names.get(k) ?? '其他', rows }))
       .sort((a, b) => b.rows.length - a.rows.length || newest(a.rows[0].item, b.rows[0].item)),
   }
+}
+
+/** 畫面上一個標籤的範圍（中心與寬高），點擊時用來判斷點到哪個標籤 */
+export type LabelBox = { key: string; x: number; y: number; w: number; h: number }
+
+/**
+ * 點到哪個標籤（使用者 2026-10-23：「點有底線的標籤要可以點」）：點在標籤框內（四周多 pad 給手指）就算；
+ * 疊在一起時後放的在上面，從後往前找。都沒點到 → null。
+ */
+export function labelAt(x: number, y: number, boxes: LabelBox[], pad = 6): string | null {
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    const b = boxes[i]
+    if (Math.abs(x - b.x) <= b.w / 2 + pad && Math.abs(y - b.y) <= b.h / 2 + pad) return b.key
+  }
+  return null
 }
 
 // ── 搜尋與牽連（T-436；使用者 2026-10-22：「想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」，像 graphify 的圖）──
