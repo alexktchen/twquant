@@ -91,7 +91,7 @@ test('D-176 AC10: 日期、比例、金額格式', () => {
 })
 
 test('D-176 AC10: API 只收登記過的線別，回應直接用資料庫的 JSON 文字', async () => {
-  assert.ok(lineOk('CORE') && lineOk('QUIET') && lineOk('QUIETV'))
+  assert.ok(lineOk('CORE') && lineOk('QUIET') && lineOk('QUIETV') && lineOk('BREAKOUT'))
   assert.ok(!lineOk(null) && !lineOk('core') && !lineOk("CORE';--") && !lineOk(''))
   const a = rawJson('{"code":"CORE"}')
   assert.equal(a.headers.get('content-type'), 'application/json; charset=utf-8')

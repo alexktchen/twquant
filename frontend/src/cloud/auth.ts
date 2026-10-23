@@ -66,6 +66,7 @@ export const GUEST_LINES = [
   { code: 'CORE', name: '大盤精選', n: 15 },
   { code: 'QUIET', name: '潛伏飆股', n: 15 },
   { code: 'QUIETV', name: '高分爆量', n: 3 }, // D-174：多數日子很少或沒有
+  { code: 'BREAKOUT', name: '帶量突破', n: 3 }, // D-215：兩個條件都要齊，多數日子很少
 ]
 
 /** 沒登入時某一天的假名單（三條線，股票全是假的）；日期是公開的真實交易日，股票全是假的。 */

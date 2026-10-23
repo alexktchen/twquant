@@ -1,0 +1,29 @@
+# D-215（2026-10-23，使用者貼群組截圖：「幫我寫成一個策略上架」）：第四條線「帶量突破」，**上線觀察、不是通過的策略**。
+# 群組成員每天晚上掃圖挑「收盤帶量突破前高」的股票，這裡把可複製的那兩個條件做成每天自動列出來：
+#   突破：收盤 ≥ 前 60 個交易日最高價（不含當天）× 1.005（price.breakout_high_60d ≥ 0.005）
+#   帶量：當天成交量 ≥ 前 20 個交易日平均（不含當天）× 2.0（volume.vol_ratio_20d ≥ 2.0），量比高者在前
+# 沒有模型分數；15 個位子、抱滿 20 日（與潛伏飆股同口徑）；母體用成交金額 2,000 萬的絕對下限（見 universe 註解）。大多數大跌日沒有符合的股票（pick_board.yaml allow_empty）。
+# 2027-03 在第二保留期判讀（configs/holdout2_breakout.yaml 守著指紋），開啟前不得修改；要改門檻＝另立登記。
+name: breakout_v20
+description: 帶量突破：收盤突破前 60 日最高價 0.5% 以上、成交量 ≥ 前 20 日均量 2 倍；量比高者在前、15 格、抱滿 20 日
+trial_scope: info:breakout_screen
+universe:
+  markets: [TWSE, TPEX]
+  # 流動性用絕對下限不用「前 30%」：群組的例子達航（4577）10/19 兩個條件都過（+3.7%、6.6 倍），
+  # 但 20 日成交金額中位數 2,857 萬，在那天前 30% 的門檻（5,174 萬）之下，會被整個擋掉。
+  # 2,000 萬＝既有策略選股池的下限（configs/screener.yaml liquidity_floor_twd）；每格 66 萬、參與率 5% 夠成交。
+  min_adv_twd: 20000000
+  min_adv_pctl: null
+  min_price: 10.0
+signals:
+  - factor: volume.vol_ratio_20d # 排序用：量比愈大愈前面（群組清單就是按成交量排）
+    weight: 1.0
+slots:
+  n: 15
+  entry_threshold: 2.0 # 量比 ≥ 2.0 才是候選（高分爆量用 1.5；這條沒有模型把關，訂高一級）
+  require:
+    - factor: price.breakout_high_60d
+      min_value: 0.005 # 收盤高出前 60 日最高價 0.5% 以上（同 box_breakout_60d 的 break_buffer）；資料不足＝不列
+exit_rules:
+  - kind: time_stop
+    sessions: 20

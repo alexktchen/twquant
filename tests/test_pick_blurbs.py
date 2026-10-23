@@ -414,7 +414,7 @@ def test_ac5_wiring() -> None:
     pull = (_ROOT / "scripts" / "pull_cloud_to_local.py").read_text(encoding="utf-8")
     assert '"pick_blurbs"' in pull
     assert (
-        CFG.lines == ["CORE", "QUIET", "QUIETV"]
+        CFG.lines == ["CORE", "QUIET", "QUIETV", "BREAKOUT"]
         and "建議" in CFG.advice_terms
         and "處置" in CFG.state_terms
     )

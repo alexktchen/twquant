@@ -68,11 +68,20 @@ class HoldoutEntry(BaseConfig):
 
     code: str = Field(min_length=1)
     strategy: str = Field(min_length=1)  # configs/strategies/<strategy>.yaml
-    model_id: str = Field(min_length=1)
-    model_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # D-215：純規則的線沒有模型——兩個都省略；有模型就兩個都要
+    model_id: str | None = Field(default=None, min_length=1)
+    model_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     strategy_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     costs_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     capital_twd: float = Field(gt=0.0)
+
+    @model_validator(mode="after")
+    def _model_fields_together(self) -> HoldoutEntry:
+        if (self.model_id is None) != (self.model_sha256 is None):
+            raise ValueError(
+                f"{self.code}：model_id 與 model_sha256 要一起給（純規則的線兩個都不給）"
+            )
+        return self
 
 
 class HoldoutRegistration(BaseConfig):

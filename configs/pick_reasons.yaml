@@ -20,6 +20,12 @@ core_signals: # 大盤精選的規則因子與權重（同 lw_e0_ctrl.yaml 的 s
   price.mom_60d: 0.25
   volume.turnover_z_20d: 0.25
   price.rs_market_20d: 0.15
+# D-215：其他規則線各自的因子與權重（鍵＝pick_board.yaml 的 code）；沒列的規則線用 core_signals。
+# 帶量突破：兩個條件各一句（量比、突破幅度），權重只決定先後。
+line_signals:
+  BREAKOUT:
+    volume.vol_ratio_20d: 0.5
+    price.breakout_high_60d: 0.5
 
 factors:
   fundamental.revenue_accel: { kind: pp, pos: "營收成長加速（年增率比上月多 {v} 個百分點）", neg: "營收成長放慢（年增率比上月少 {v} 個百分點）" }
@@ -34,6 +40,8 @@ factors:
   price.vol_20d: { kind: rank, pos: "近 20 日波動在全市場{v}" }
   volume.turnover_z_20d: { kind: sd, pos: "成交量高於 20 日平均（{v} 個標準差）", neg: "成交量低於 20 日平均（{v} 個標準差）" }
   volume.vol_ratio_5d: { kind: times, pos: "成交量是前 5 日平均的 {v} 倍" }
+  volume.vol_ratio_20d: { kind: times, pos: "成交量是前 20 日平均的 {v} 倍" }
+  price.breakout_high_60d: { kind: pct1, pos: "收盤站上前 60 日最高價（高出 {v}）", neg: "收盤在前 60 日最高價之下 {v}" }
   price.atr_14: { kind: pct1, pos: "每日真實波幅約 {v}" }
   price.parkinson_20: { kind: rank, pos: "高低價振幅在全市場{v}" }
   price.garman_klass_20: { kind: rank, pos: "日內波動在全市場{v}" }

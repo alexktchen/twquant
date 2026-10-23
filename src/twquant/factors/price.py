@@ -398,3 +398,36 @@ def at_low_20(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .select("date", "stock_id", "value")
         .collect()
     )
+
+
+@factor(
+    name="price.breakout_high_60d",
+    category="price",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=70,
+    params={"window": 60},
+    anchor_invariant=True,
+)
+def breakout_high_60d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """收盤對前 window 個交易日最高價（不含當天）的距離＝close ÷ 前高 − 1（D-215）。
+
+    > 0 是收盤站上前高（「帶量突破」線的突破條件），< 0 是還在前高之下。前高用最高價不用收盤
+    ——壓力是上影線。之前有最高價的日子不滿 window 天（新股、長期停牌）不給值。
+    """
+    raw = params.get("window", 60)
+    window = int(raw) if isinstance(raw, int | float | str) else 60
+    prices = (
+        view.table("prices_daily")
+        .filter(pl.col("high") > 0)
+        .select("date", "stock_id", "high", "close")
+        .sort(["stock_id", "date"])
+    )
+    prior_high = pl.col("high").shift(1).rolling_max(window, min_samples=window).over("stock_id")
+    return (
+        prices.with_columns(_ph=prior_high)
+        .with_columns(value=safe_ratio(pl.col("close"), pl.col("_ph")) - 1.0)
+        .select("date", "stock_id", "value")
+        .drop_nulls("value")
+        .collect()
+    )

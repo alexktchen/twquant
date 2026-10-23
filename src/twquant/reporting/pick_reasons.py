@@ -58,7 +58,20 @@ class PickReasonsConfig(BaseConfig):
     top_n: int = Field(ge=1)
     model_line_exclude_prefix: str = Field(min_length=1)
     core_signals: dict[str, float]
+    # D-215：其他規則線各自的因子與權重（鍵＝線別代碼）；沒列的規則線用 core_signals
+    line_signals: dict[str, dict[str, float]] = Field(default_factory=dict)
     factors: dict[str, Phrase]
+
+    def rule_signals(self, line: str) -> dict[str, float]:
+        """規則線的因子與權重：`line_signals` 有這條線就用它，否則是大盤精選的 `core_signals`。"""
+        return self.line_signals.get(line, self.core_signals)
+
+    def rule_factors(self) -> list[str]:
+        """所有規則線會用到的因子（讀原始值用），去重、排序。"""
+        names = set(self.core_signals)
+        for sig in self.line_signals.values():
+            names |= set(sig)
+        return sorted(names)
 
 
 @dataclass(frozen=True)
@@ -161,11 +174,13 @@ def model_reasons(
 
 
 def rule_reasons(
-    values: Mapping[str, tuple[float | None, float | None]], cfg: PickReasonsConfig
+    values: Mapping[str, tuple[float | None, float | None]],
+    cfg: PickReasonsConfig,
+    signals: Mapping[str, float] | None = None,
 ) -> list[Reason]:
-    """規則線（大盤精選）的理由：規則因子依「權重 × 全市場百分位」由高到低，取 top_n 個。缺值的跳過。"""
+    """規則線的理由：規則因子（預設大盤精選的 core_signals）依「權重 × 全市場百分位」由高到低，取 top_n 個。缺值的跳過。"""
     rows: list[Reason] = []
-    for f, w in cfg.core_signals.items():
+    for f, w in (cfg.core_signals if signals is None else signals).items():
         value, pct = values.get(f, (None, None))
         text = phrase(cfg.factors[f], value, pct)
         if text is None or pct is None:
@@ -233,8 +248,9 @@ def rule_rows(
     """規則線每一檔的理由列：規則因子＋排序模型（串接閘門）的全市場百分位（有的話，當「前提」s=0）。"""
     out: list[Row] = []
     for p in picks:
-        vals = {f: raw.get((p.stock_id, f), (None, None)) for f in cfg.core_signals}
-        reasons = rule_reasons(vals, cfg)
+        signals = cfg.rule_signals(p.line)
+        vals = {f: raw.get((p.stock_id, f), (None, None)) for f in signals}
+        reasons = rule_reasons(vals, cfg, signals)
         pct = gates.get(p.model_id or "", {}).get(p.stock_id)
         if pct is not None:
             top = max(1, round((1.0 - pct) * 100))
