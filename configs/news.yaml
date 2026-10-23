@@ -327,6 +327,11 @@ graph:
 
 # 反向看圖（使用者 2026-10-20：「那有反向看圖的地方嗎？像是每日推薦股有關的新聞」）：某一檔連得到哪些新聞（src/stocknews.ts）。
 # 跟單則關係圖同一套線與算法；個股頁與名單只算到二度（SPEC-017 §6）。
+# 單獨看的證據句（T-437／D-214）：/v1/evidence 一次最多問幾則新聞、幾個實體（鏡像 news-service/config/news.json 早已有這段，這裡補上）
+evidence:
+  max_ids: 80
+  max_entities: 8
+
 stock_news:
   stock_max_degree: 2
   stock_days: 7          # 個股頁列近 7 天

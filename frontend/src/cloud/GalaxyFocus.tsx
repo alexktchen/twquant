@@ -1,5 +1,6 @@
 // 星雲圖「單獨看」（使用者 2026-10-21：「我可以針對這樣的選擇把它再單獨拎出來閱讀嗎? 可以快速看到關聯」）：
 // 點一個亮點 → 檢視框的「單獨看」→ 跟新聞閱讀卡同一種卡（手機從底部升起、桌機置中）。
+// 點主題名也能單獨看（T-441，使用者 2026-10-23：「點有底線的標籤要可以點」）：列這個主題的新聞，「常被提到」＝它最常提到的亮點。
 // 由上到下：這個亮點 → 常一起出現（點一個＝只看同時提到兩個的，再點一次取消；「改看」換成以它為中心）→ 提到它的新聞照主題分組。
 // 同一件事只列最新一則、標幾家報；每組先列幾則，其餘按「再看」。手機的返回手勢＝關閉。
 // 證據句（T-437；使用者：「如果我想要用在工作上我要怎麼定位那段字？」）：標題裡的名字標色；名字不在標題裡（在摘要、或英文原文對到別名）
@@ -7,18 +8,19 @@
 import { ExternalLink, Layers, Network, X } from 'lucide-react'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { fetchNewsEvidence } from './api'
-import { EVIDENCE_BATCH, FOCUS_GROUP_ROWS, FOCUS_ROW_HUBS, evidenceNeeded, evidenceParts, hubClass, hubFocus, hubTypeLabel, type GalaxyData, type TextPart } from './news-galaxy'
+import { EVIDENCE_BATCH, FOCUS_GROUP_ROWS, FOCUS_ROW_HUBS, clusterFocus, evidenceNeeded, evidenceParts, hubClass, hubFocus, hubTypeLabel, type GalaxyData, type TextPart } from './news-galaxy'
 import { shortWhen, taipeiDay } from './news'
 
 export function GalaxyFocus({
   data,
-  hubId,
+  target,
   onRecenter,
   onClose,
   onStock,
 }: {
   data: GalaxyData
-  hubId: string
+  /** 看誰：亮點（id＝亮點 id）或主題（id＝主題編號的字串） */
+  target: { kind: 'hub' | 'cluster'; id: string }
   onRecenter: (id: string) => void
   onClose: () => void
   onStock: (sid: string, name: string) => void
@@ -29,16 +31,20 @@ export function GalaxyFocus({
   closeRef.current = onClose
   const cardRef = useRef<HTMLElement>(null)
   const today = taipeiDay(new Date().toISOString())
-  const f = hubFocus(data, hubId, withId)
+  const f = target.kind === 'hub' ? hubFocus(data, target.id, withId) : clusterFocus(data, Number(target.id), withId)
+  /** 中心亮點（看主題時沒有）與標題 */
+  const self = f && 'hub' in f ? f.hub : null
+  const name = f ? ('hub' in f ? f.hub.label : f.cluster.name) : ''
   // 證據句：ev＝{新聞 id: {實體 id: 那段字}}；fetched＝每個實體已經問過哪些新聞，換「兩個都提到」時只補問新的
   const [ev, setEv] = useState<Record<string, Record<string, string>>>({})
   const fetched = useRef(new Map<string, Set<string>>())
-  const entities = withId ? [hubId, withId] : [hubId]
+  const entities = [...(self ? [self.id] : []), ...(withId ? [withId] : [])]
   const rowIds = f ? f.groups.flatMap((g) => g.rows.map((r) => r.item.id)) : []
   const idsKey = rowIds.join(','), entKey = entities.join(',')
   useEffect(() => {
     let stale = false
-    const ents = entKey.split(','), ids = idsKey ? idsKey.split(',') : []
+    const ents = entKey ? entKey.split(',') : [], ids = idsKey ? idsKey.split(',') : []
+    if (!ents.length) return // 看主題又沒選亮點：沒有名字要找證據
     const need = evidenceNeeded(ids, ents, fetched.current)
     if (!need.length) return
     for (const e of ents) {
@@ -101,18 +107,23 @@ export function GalaxyFocus({
 
   if (!f) return null
   const withHub = withId ? data.hubs.find((h) => h.id === withId) : null
-  const marks = [f.hub, ...(withHub ? [withHub] : [])].map((h) => ({ label: h.label, cls: hubClass(h.type) }))
+  const named = [...(self ? [self] : []), ...(withHub ? [withHub] : [])]
+  const marks = named.map((h) => ({ label: h.label, cls: hubClass(h.type) }))
   // 普通字用 Fragment 不用 span：標題那個 span 的 CSS（-webkit-box 兩行截斷）會套到裡面的 span，名字就被擠到下一行
   const render = (parts: TextPart[]) => parts.map((p, i) => (p.cls ? <mark key={i} className={`gxf-mk ${p.cls}`}>{p.t}</mark> : <Fragment key={i}>{p.t}</Fragment>))
 
   return (
     <div className="cq-sheet-backdrop cq-reader-backdrop" onClick={close}>
-      <article ref={cardRef} className="cq-sheet cq-reader gxf" role="dialog" aria-modal="true" aria-label={`單獨看 ${f.hub.label}`} onClick={(e) => e.stopPropagation()}>
+      <article ref={cardRef} className="cq-sheet cq-reader gxf" role="dialog" aria-modal="true" aria-label={`單獨看 ${name}`} onClick={(e) => e.stopPropagation()}>
         <header className="cq-reader-top">
-          <span className={`gxf-type ${hubClass(f.hub.type)}`}>
-            {hubTypeLabel(f.hub.type)}
-            {f.hub.type === 'tw' && f.hub.sub ? ` ${f.hub.sub}` : ''}
-          </span>
+          {self ? (
+            <span className={`gxf-type ${hubClass(self.type)}`}>
+              {hubTypeLabel(self.type)}
+              {self.type === 'tw' && self.sub ? ` ${self.sub}` : ''}
+            </span>
+          ) : (
+            <span className="gxf-type topic">主題</span>
+          )}
           <span className="cq-reader-src">近 {data.days} 天</span>
           <button className="cq-icon-btn" aria-label="關閉" onClick={close}>
             <X size={20} aria-hidden="true" />
@@ -120,15 +131,15 @@ export function GalaxyFocus({
         </header>
 
         <h2 className="cq-reader-title gxf-title">
-          {f.hub.label}
+          {name}
           <small>{f.total} 則</small>
         </h2>
-        {f.hub.type === 'tw' && f.hub.sub && (
+        {self && self.type === 'tw' && self.sub && (
           <div className="cq-reader-actions">
             <button
               onClick={() => {
                 close()
-                onStock(f.hub.sub!, f.hub.label)
+                onStock(self.sub!, self.label)
               }}
             >
               開個股頁
@@ -140,7 +151,8 @@ export function GalaxyFocus({
           <section className="cq-reader-sec">
             <h3>
               <Network size={15} aria-hidden="true" />
-              常一起出現<small>點一個只看兩個都提到的</small>
+              {self ? '常一起出現' : '常被提到'}
+              <small>{self ? '點一個只看兩個都提到的' : '點一個只看提到它的'}</small>
             </h3>
             <div className="gxf-rel">
               {f.related.map((r) => (
@@ -161,7 +173,7 @@ export function GalaxyFocus({
         {withHub && (
           <div className="gxf-with">
             <span>
-              <b>{f.hub.label}</b>＋<b>{withHub.label}</b>　{f.shown} 則
+              <b>{name}</b>＋<b>{withHub.label}</b>　{f.shown} 則
             </span>
             <button onClick={() => recenter(withHub.id)}>改看{withHub.label}</button>
             <button className="cq-icon-btn" aria-label="看全部" onClick={() => pickWith(withHub.id)}>
@@ -193,7 +205,7 @@ export function GalaxyFocus({
                         <ExternalLink size={12} aria-hidden="true" />
                       </small>
                     </a>
-                    {[f.hub, ...(withHub ? [withHub] : [])]
+                    {named
                       .filter((h) => !r.item.title.includes(h.label) && ev[r.item.id]?.[h.id])
                       .map((h) => (
                         <p key={h.id} className="gxf-ev" title="比對名字時存下的那段字（標題或摘要）">
