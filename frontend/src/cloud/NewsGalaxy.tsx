@@ -37,6 +37,7 @@ import {
   hubRadius,
   hubTypeLabel,
   trendHubs,
+  unseenHubs,
   inspectorAt,
   hubWeb,
   parseQuery,
@@ -140,13 +141,22 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     live.current.pathAt = performance.now()
   }, [path])
 
-  /** 搜尋列裡選一個：亮點＝飛到它、畫牽連；新聞＝選那顆 */
-  /** 搜尋選了亮點就記下來給「大家都在搜」（不記打的字；寫不進去不影響搜尋） */
+  /**
+   * 選了亮點就記下來給「大家都在搜」（不記打的字；寫不進去不影響搜尋）。
+   * 搜尋、在圖上點亮點或名字、點檢視框與路徑的籌碼都算（使用者 2026-10-23：「在星雲圖上面點也算搜尋」）；
+   * 這個分頁送過的不再送（伺服器本來就同分頁同天只算一次，省請求）。
+   */
+  const recorded = useRef(new Set<string>())
   const record = (hubs: string[]) => {
-    recordGalaxySearch(viewerId(), hubs).catch(() => undefined)
+    const fresh = unseenHubs(recorded.current, hubs)
+    if (fresh.length) recordGalaxySearch(viewerId(), fresh).catch(() => undefined)
   }
+  useEffect(() => {
+    if (sel?.kind === 'hub') record([sel.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel])
+  /** 搜尋列裡選一個：亮點＝飛到它、畫牽連；新聞＝選那顆 */
   const pick = (hit: SearchHit) => {
-    if (hit.kind === 'hub') record([hit.hub.id])
     setPath(null)
     setPathMsg('')
     setOpen(false)

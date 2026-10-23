@@ -320,6 +320,13 @@ export function trendHubs(d: GalaxyData, items: { hub: string; n: number }[], ma
   return items.flatMap((it) => (byId.has(it.hub) ? [{ hub: byId.get(it.hub)!, n: it.n }] : [])).slice(0, max)
 }
 
+/** 這個分頁還沒記過的亮點（順手記進 seen）：同一個亮點一個分頁只送一次「大家都在搜」。 */
+export function unseenHubs(seen: Set<string>, hubs: string[]): string[] {
+  const fresh = [...new Set(hubs)].filter((h) => !seen.has(h))
+  for (const h of fresh) seen.add(h)
+  return fresh
+}
+
 export type SearchHit = { kind: 'hub'; hub: GalaxyHub } | { kind: 'item'; item: GalaxyItem }
 
 const fold = (s: string) => s.toLowerCase()

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { TREND_BODY_MAX, TREND_DAYS, TREND_DDL, TREND_MAX_HUBS, TREND_PURGE_DAYS, parseSearch } from '../functions/_lib/search-trend.ts'
-import { TREND_SHOW, trendHubs, type GalaxyData } from '../src/cloud/news-galaxy.ts'
+import { TREND_SHOW, trendHubs, unseenHubs, type GalaxyData } from '../src/cloud/news-galaxy.ts'
 
 const ID = '0123456789abcdef0123456789abcdef'
 
@@ -66,4 +66,14 @@ test('T-446 AC3 只記哪天、哪個分頁、哪個亮點：不記身分與打�
   assert.match(ep, /AT TIME ZONE 'Asia\/Taipei'/, '日期用台北')
   const api = readFileSync(new URL('../src/cloud/api.ts', import.meta.url), 'utf-8')
   assert.match(api, /recordGalaxySearch = \(id: string, hubs: string\[\]\)/, '前端只送分頁 id 與亮點 id')
+})
+
+test('T-446 AC4 在圖上點也算（使用者：「在星雲圖上面點也算搜尋」）：選到亮點就記，同一個分頁同一個亮點只送一次；路徑只補沒送過的那個', () => {
+  const seen = new Set<string>()
+  assert.deepEqual(unseenHubs(seen, ['tw:2330']), ['tw:2330'], '第一次點台積電')
+  assert.deepEqual(unseenHubs(seen, ['tw:2330']), [], '再點一次不送')
+  assert.deepEqual(unseenHubs(seen, ['tw:2330', 'us:NVDA']), ['us:NVDA'], '路徑：台積電送過了，只補輝達')
+  assert.deepEqual(unseenHubs(seen, ['th:ai', 'th:ai']), ['th:ai'])
+  const src = readFileSync(new URL('../src/cloud/NewsGalaxy.tsx', import.meta.url), 'utf-8')
+  assert.match(src, /if \(sel\?\.kind === 'hub'\) record\(\[sel\.id\]\)/, '任何方式選到亮點（點圖、點名字、籌碼、搜尋）都記')
 })
