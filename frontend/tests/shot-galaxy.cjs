@@ -111,6 +111,22 @@ function fakeGalaxy() {
     await page.getByRole('button', { name: /單獨看/ }).first().click()
     await page.waitForTimeout(1200)
     await page.locator('.gxf').screenshot({ path: path.join(out, `${name}-6-focus.png`) })
+    if (m) {
+      // 抽屜（T-442）：固定高度、上面看得到圖；拖把手往下推到只露出頭、再拉回全開
+      await page.screenshot({ path: path.join(out, `${name}-6a-sheet-page.png`) })
+      const grip = await page.locator('.cq-sheet-grip').boundingBox()
+      const gx = grip.x + grip.width / 2, gy = grip.y + grip.height / 2
+      await page.mouse.move(gx, gy)
+      await page.mouse.down()
+      for (let i = 1; i <= 12; i++) await page.mouse.move(gx, gy + i * 40, { steps: 2 })
+      await page.waitForTimeout(80)
+      await page.mouse.up()
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: path.join(out, `${name}-6b-sheet-peek.png`) })
+      await page.locator('.cq-sheet-grip').click()
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: path.join(out, `${name}-6c-sheet-back.png`) })
+    }
     await page.locator('.gxf-rel .cq-news-ent').nth(2).click() // 兩個都提到
     await page.waitForTimeout(1200)
     await page.locator('.gxf').screenshot({ path: path.join(out, `${name}-7-focus-with.png`) })

@@ -10,6 +10,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { fetchNewsEvidence } from './api'
 import { EVIDENCE_BATCH, FOCUS_GROUP_ROWS, FOCUS_ROW_HUBS, clusterFocus, evidenceNeeded, evidenceParts, hubClass, hubFocus, hubTypeLabel, type GalaxyData, type TextPart } from './news-galaxy'
 import { shortWhen, taipeiDay } from './news'
+import { SheetGrip } from './SheetGrip'
 
 export function GalaxyFocus({
   data,
@@ -115,6 +116,7 @@ export function GalaxyFocus({
   return (
     <div className="cq-sheet-backdrop cq-reader-backdrop" onClick={close}>
       <article ref={cardRef} className="cq-sheet cq-reader gxf" role="dialog" aria-modal="true" aria-label={`單獨看 ${name}`} onClick={(e) => e.stopPropagation()}>
+        <SheetGrip sheetRef={cardRef} onClose={close} />
         <header className="cq-reader-top">
           {self ? (
             <span className={`gxf-type ${hubClass(self.type)}`}>
