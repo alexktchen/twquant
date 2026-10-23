@@ -5,6 +5,11 @@
 // line＝「LINE 群組」（T-423）：只有有權限的角色看得到分頁（_lib/roles.ts）
 export type Tab = 'home' | 'news' | 'group' | 'picks' | 'score' | 'watch' | 'line'
 const TABS: readonly Tab[] = ['home', 'news', 'group', 'picks', 'score', 'watch', 'line']
+/**
+ * 星雲圖的公開專屬連結（T-445；使用者 2026-10-23：「讓不登入也有一個專屬連結可以看到我的星雲圖，可以直接導航到全景這一頁 我主要想要去推廣」）：
+ * https://twquant.pages.dev/galaxy ＝新聞頁、一打開就是全景。Pages 找不到檔案就回 index.html（同 /login），所以不用另外設路由。
+ */
+export const GALAXY_PATH = '/galaxy'
 /** 舊網址的分頁名 → 現在的分頁 */
 const ALIASES: Record<string, Tab> = {}
 
@@ -12,7 +17,9 @@ const ALIASES: Record<string, Tab> = {}
 export function tabFromUrl(href: string): Tab | null {
   let tab: string | null
   try {
-    tab = new URL(href).searchParams.get('tab')
+    const u = new URL(href)
+    tab = u.searchParams.get('tab')
+    if (tab === null && u.pathname === GALAXY_PATH) return 'news'
   } catch {
     return null
   }
@@ -30,7 +37,8 @@ export function withoutTab(href: string): string {
 /** 新聞頁一打開就是星雲圖（?view=galaxy；舊網址 /api/prototype/galaxy 轉到這裡）。 */
 export function galaxyFromUrl(href: string): boolean {
   try {
-    return new URL(href).searchParams.get('view') === 'galaxy'
+    const u = new URL(href)
+    return u.pathname === GALAXY_PATH || u.searchParams.get('view') === 'galaxy'
   } catch {
     return false
   }

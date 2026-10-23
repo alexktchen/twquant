@@ -15,6 +15,7 @@ import {
   hubClass,
   hubFocus,
   hubRadius,
+  inspectorAt,
   labelAt,
   pickAt,
   pivotScreenY,
@@ -307,4 +308,12 @@ test('T-441 AC2 單獨看主題：只列這個主題的新聞、同一件事只�
   assert.deepEqual(w.groups.flatMap((g) => g.rows.map((r) => r.item.id)), ['c'])
   assert.deepEqual(w.groups[0].rows[0].others.map((h) => h.label), ['台積電'], '不重複列選的那個')
   assert.equal(clusterFocus(focusData, 99), null)
+})
+
+test('T-444 AC1 檢視框預設在右上角；拖過就放拖到的地方，但夾在圖裡、下緣留給時間軸', () => {
+  assert.deepEqual(inspectorAt(1360, 900, 320, 300, null), { x: 1360 - 320 - 10, y: 10 })
+  assert.deepEqual(inspectorAt(1360, 900, 320, 300, { x: 400, y: 120 }), { x: 400, y: 120 })
+  assert.deepEqual(inspectorAt(1360, 900, 320, 300, { x: 1300, y: -40 }), { x: 1360 - 320 - 8, y: 8 }, '拖出右邊、上面就夾回來')
+  assert.deepEqual(inspectorAt(1360, 900, 320, 300, { x: -50, y: 800 }, 260), { x: 8, y: 900 - 260 - 300 }, '下緣讓給時間軸')
+  assert.deepEqual(inspectorAt(300, 200, 320, 300, null), { x: 8, y: 8 }, '圖比框小就貼左上')
 })

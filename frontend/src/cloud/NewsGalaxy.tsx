@@ -12,9 +12,10 @@
 // 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一度幾則（「幾度」＝隔幾層關係，跟新聞關係圖的講法一樣）。
 // 時間軸（T-443；使用者 2026-10-23 看「台中恐怖島」截圖：「有辦法也有時間軸嗎」→「我先做7天版」）：右下 ⏱ 打開，圖下面（桌機蓋在圖的下緣）一排每 3 小時一格的長條、
 // 播放鍵與拉桿；拉到某一刻＝之後的光點不畫、亮點只算到那時候；「累積／當時」切換；那一格的新聞列在底下，點了選那顆。全用快照算，不打 API。
-import { Clock, ExternalLink, Maximize2, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchNewsGalaxy } from './api'
+import { Clock, ExternalLink, Maximize, Maximize2, Minimize, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { fetchNewsGalaxy, leaveGalaxyPresence, sendGalaxyPresence } from './api'
+import { PRESENCE_BEAT_S, viewerId, viewersText } from './galaxy-presence'
 import { GalaxyFocus } from './GalaxyFocus'
 import { TL_LIST, TL_STEP_MS, buildTimeline, tlAlpha, tlBinLabel, tlBinMax, tlDayTicks, tlHubCounts, type TlMode } from './galaxy-timeline'
 import {
@@ -35,6 +36,7 @@ import {
   hubPath,
   hubRadius,
   hubTypeLabel,
+  inspectorAt,
   hubWeb,
   parseQuery,
   pickAt,
@@ -98,8 +100,15 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
   const inspRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
+  // 全螢幕（T-445）：能用瀏覽器全螢幕就用（桌機、Android）；iPhone 不支援一般元素全螢幕，就只用 CSS 鋪滿整個視窗
+  const [full, setFull] = useState(false)
+  // 同時幾個人在看（T-445）：null＝還沒拿到或讀不到（就不顯示）
+  const [viewers, setViewers] = useState<number | null>(null)
+  /** 正在拖檢視框：哪根手指、按下時離框左上角多遠 */
+  const inspDrag = useRef<{ id: number; dx: number; dy: number } | null>(null)
   // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）；webAt／pathAt：牽連線從什麼時候開始畫（像 graphify 的「路徑逐段點亮」）
-  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0, tl: null as { cursor: number; mode: TlMode } | null, tlOf: [] as number[] })
+  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0, inspPos: null as { x: number; y: number } | null, tl: null as { cursor: number; mode: TlMode } | null, tlOf: [] as number[] })
   const timeline = useMemo(() => (data ? buildTimeline(data.items, data.built, data.days) : null), [data])
   const graph = useMemo(() => (data ? hubGraph(data) : null), [data])
   const web = useMemo(() => (data && graph && sel?.kind === 'hub' ? hubWeb(data, graph, sel.id) : null), [data, graph, sel])
@@ -166,6 +175,67 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     setOpen(false)
     setPath(null)
     setPathMsg('')
+  }
+
+  // 心跳：看得到這頁才送，切到背景或關掉就送 leave（別人那邊立刻少一個）
+  useEffect(() => {
+    const id = viewerId()
+    let timer = 0, alive = true, on = false
+    const beat = () =>
+      sendGalaxyPresence(id)
+        .then((r) => alive && setViewers(r.n))
+        .catch(() => alive && setViewers(null)) // 讀不到就不顯示人數，星雲圖照常
+    const start = () => {
+      if (on) return
+      on = true
+      void beat()
+      timer = window.setInterval(beat, PRESENCE_BEAT_S * 1000)
+    }
+    const stop = () => {
+      if (!on) return
+      on = false
+      window.clearInterval(timer)
+      leaveGalaxyPresence(id)
+    }
+    const onVis = () => (document.visibilityState === 'visible' ? start() : stop())
+    onVis()
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pagehide', stop)
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pagehide', stop)
+      stop()
+    }
+  }, [])
+
+  // 全螢幕：按 Esc 或瀏覽器自己退出全螢幕 → 跟著退；鋪滿時頁面不捲
+  useEffect(() => {
+    const onChange = () => !document.fullscreenElement && setFull(false)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+  useEffect(() => {
+    if (!full) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // 「單獨看」開著時 Esc 先關它
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.gxf') && setFull(false)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [full])
+  const toggleFull = () => {
+    if (full) {
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+      setFull(false)
+      return
+    }
+    setFull(true)
+    // 不支援或被擋（iPhone）就只用 CSS 鋪滿，不算錯
+    sectionRef.current?.requestFullscreen?.().catch(() => undefined)
   }
 
   useEffect(() => {
@@ -492,13 +562,12 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
             ctx.strokeRect(p[0] - 9, p[1] - 9, 18, 18)
           }
           const w = insp.offsetWidth, h = insp.offsetHeight
-          let x = dock ? (W - w) / 2 : p[0] + 18, y = dock ? H - 50 - h : p[1] - h - 14
-          if (x + w > W - 8) x = p[0] - w - 18
-          if (x < 8) x = 8
-          if (y < 8) y = p[1] + 18
-          if (y + h > H - 50) y = Math.max(8, H - 50 - h)
-          insp.style.left = `${x}px`
-          insp.style.top = `${y}px`
+          // 桌機：右上角或使用者拖到的地方（不再跟著選的那顆跑、不蓋牽連線）；時間軸蓋在圖的下緣，框不要壓到它
+          const tl = stage.parentElement?.querySelector<HTMLElement>('.gx-tl')
+          const tlTop = tl ? tl.getBoundingClientRect().top - stage.getBoundingClientRect().top : H
+          const at = dock ? { x: (W - w) / 2, y: H - 50 - h } : inspectorAt(W, H, w, h, lv.inspPos, Math.max(50, H - tlTop + 8))
+          insp.style.left = `${at.x}px`
+          insp.style.top = `${at.y}px`
         }
       }
       raf = requestAnimationFrame(draw)
@@ -704,9 +773,35 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       </div>
     )
   })()
+  // 拖檢視框（使用者 2026-10-23：「彈窗可以動態移動」）：抓上面那條或標題拖；雙擊上面那條回右上角
+  const onInspDown = (e: RPointerEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement, el = inspRef.current
+    if (!el || !t.closest('.gx-h,.gx-t') || t.closest('button,a')) return
+    el.setPointerCapture(e.pointerId)
+    inspDrag.current = { id: e.pointerId, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop }
+    el.classList.add('moving')
+    e.preventDefault()
+  }
+  const onInspMove = (e: RPointerEvent<HTMLDivElement>) => {
+    const d = inspDrag.current
+    if (d?.id === e.pointerId) live.current.inspPos = { x: e.clientX - d.dx, y: e.clientY - d.dy }
+  }
+  const onInspUp = (e: RPointerEvent<HTMLDivElement>) => {
+    if (inspDrag.current?.id !== e.pointerId) return
+    inspDrag.current = null
+    inspRef.current?.classList.remove('moving')
+  }
   return (
-    <section className="gx">
-      <p className="gx-sum">{galaxySummary(data)}</p>
+    <section className={`gx${full ? ' full' : ''}`} ref={sectionRef}>
+      <p className="gx-sum">
+        {galaxySummary(data)}
+        {viewers !== null && (
+          <span className="gx-live" title="現在開著星雲圖的人數（含你）">
+            <i aria-hidden="true" />
+            {viewersText(viewers)}
+          </span>
+        )}
+      </p>
       <div className="gx-stage" ref={stageRef}>
         <canvas ref={canvasRef} />
         <div ref={labelsRef} />
@@ -801,7 +896,19 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </div>
         )}
         {(item || hub || topic) && (
-          <div className={`gx-insp${hub || topic ? ' hub' : ''}`} ref={inspRef}>
+          <div
+            className={`gx-insp${hub || topic ? ' hub' : ''}`}
+            ref={inspRef}
+            onPointerDown={onInspDown}
+            onPointerMove={onInspMove}
+            onPointerUp={onInspUp}
+            onPointerCancel={onInspUp}
+            onDoubleClick={(e) => {
+              // 拖的時候框抓住了指標，雙擊的 target 會是整個框，所以用座標判斷是不是點在上面那條
+              const r = inspRef.current?.querySelector('.gx-h')?.getBoundingClientRect()
+              if (r && e.clientY >= r.top && e.clientY <= r.bottom) live.current.inspPos = null
+            }}
+          >
             <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
               <X size={16} aria-hidden="true" />
             </button>
@@ -920,11 +1027,14 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           <button onClick={() => { live.current.zoom = 1 / 1.5; setAuto(false) }} aria-label="縮小">
             <Minus size={17} aria-hidden="true" />
           </button>
-          <button onClick={() => { live.current.reset += 1; live.current.sel = null; setSel(null) }} aria-label="回到一開始" title="回到一開始">
+          <button onClick={() => { live.current.reset += 1; live.current.sel = null; live.current.inspPos = null; setSel(null) }} aria-label="回到一開始" title="回到一開始">
             <Undo2 size={17} aria-hidden="true" />
           </button>
           <button className={tl.on ? 'on' : ''} onClick={toggleTl} aria-pressed={tl.on} aria-label="時間軸" title="時間軸（開／關）">
             <Clock size={17} aria-hidden="true" />
+          </button>
+          <button className={full ? 'on' : ''} onClick={toggleFull} aria-pressed={full} aria-label={full ? '離開全螢幕' : '全螢幕'} title={full ? '離開全螢幕（Esc）' : '全螢幕'}>
+            {full ? <Minimize size={17} aria-hidden="true" /> : <Maximize size={17} aria-hidden="true" />}
           </button>
         </div>
       </div>

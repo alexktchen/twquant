@@ -98,6 +98,22 @@ export const ease = (a: number, b: number, dt: number, rate = 8): number => b + 
  * 那顆改放在框上方空間的正中，不被框蓋住、手指從中間拖也不會拖到框。bottom＝下緣留給按鈕的高度。
  */
 export const dockInspector = (W: number, inspW: number): boolean => W < 2 * (inspW + 26)
+/**
+ * 檢視框放哪（使用者 2026-10-23：「標籤可以放到右上嗎」「還是說彈窗可以動態移動」；原本跟著選的那顆、會蓋住牽連線）：
+ * 預設在圖的右上角；使用者拖過就放在拖到的地方。都夾在圖裡（下緣留 bottom 給按鈕列或時間軸）。回左上角座標。
+ */
+export function inspectorAt(
+  W: number,
+  H: number,
+  w: number,
+  h: number,
+  user: { x: number; y: number } | null,
+  bottom = 50,
+  pad = 10,
+): { x: number; y: number } {
+  const x0 = user ? user.x : W - w - pad, y0 = user ? user.y : pad
+  return { x: Math.min(Math.max(x0, 8), Math.max(8, W - w - 8)), y: Math.min(Math.max(y0, 8), Math.max(8, H - bottom - h)) }
+}
 export const pivotScreenY = (H: number, inspH: number | null, bottom = 50, top = 40): number => (inspH === null ? H / 2 : Math.max(top, (H - bottom - inspH) / 2))
 
 /** 遠的淡：深度 −1.15～1.15 對到 0.4～1。 */

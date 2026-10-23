@@ -36,6 +36,10 @@
   position: absolute; z-index: 5; width: min(320px, calc(100% - 20px)); background: rgba(4, 4, 5, .95); border: 1px solid #e9ddd8;
   box-shadow: 0 10px 40px rgba(0, 0, 0, .6); padding: 9px 12px 12px; cursor: default;
 }
+/* 檢視框可以拖（上面那條與標題是把手）；預設在圖的右上角 */
+.gx-insp .gx-h, .gx-insp .gx-t { cursor: grab; user-select: none; touch-action: none; }
+.gx-insp.moving, .gx-insp.moving .gx-h, .gx-insp.moving .gx-t { cursor: grabbing; }
+.gx-insp.moving { box-shadow: 0 14px 50px rgba(0, 0, 0, .75); border-color: #ffd23f; }
 .gx-h { display: flex; justify-content: space-between; gap: 8px; padding: 0 22px 5px 0; margin-bottom: 7px; border-bottom: 1px solid #3a3133; font-size: 12.5px; color: #9c8f8a; }
 .gx-h b { color: #ffd23f; font-weight: 600; }
 .gx-t { margin: 0 0 8px; font-size: 15px; line-height: 1.45; font-weight: 600; color: #f3e9e4; }
@@ -192,3 +196,17 @@
 .gxf-ev-dot.tw { background: #d95926; } .gxf-ev-dot.abroad { background: #3987e5; } .gxf-ev-dot.cluster { background: #199e70; }
 .gxf-ents { display: flex; flex-wrap: wrap; gap: 2px 14px; padding-bottom: 10px; }
 .cq .gxf-ents .cq-news-ent { font-size: 13px; color: #b8bcc6; }
+
+/* 推廣（T-445）：同時幾個人在看（摘要那行尾巴、綠點會呼吸）；全螢幕（瀏覽器全螢幕或 iPhone 上用 CSS 鋪滿視窗） */
+.gx-live { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: #8ff0b0; white-space: nowrap; }
+.gx-live i { width: 7px; height: 7px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 6px #3ddc84; animation: gx-live 2s ease-in-out infinite; }
+@keyframes gx-live { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .gx-live i { animation: none; } }
+.gx.full {
+  position: fixed; inset: 0; z-index: 2000; margin: 0; padding: 8px 0 0; display: flex; flex-direction: column; overflow: hidden;
+  background: #050506; padding-bottom: env(safe-area-inset-bottom);
+}
+.gx.full .gx-sum { flex: none; max-width: none; padding-top: env(safe-area-inset-top); }
+.gx.full .gx-stage { flex: 1 1 auto; height: auto; min-height: 0; margin: 0 8px 8px; }
+.gx.full .gx-bar, .gx.full .gx-tl { flex: none; }
+.gx.full .gx-help { display: none; }
