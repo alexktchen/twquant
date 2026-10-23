@@ -79,6 +79,53 @@
 .gx-bar-name.tw { color: #ffb199; } .gx-bar-name.abroad { color: #b9d3ff; } .gx-bar-name.cluster { color: #8ff0df; }
 .cq .gx-bar .gx-go { margin-top: 0; }
 
+/* 時間軸（T-443）：每 3 小時一格的長條（台灣橘在下、國際藍在上）、播放、拉桿、每天刻度、那一格的新聞。
+   桌機蓋在圖的下緣（負邊距拉上去，留 56px 給按鈕列與圖例）；手機放在圖外面正下方（跟 .gx-bar 一樣，不擋圖） */
+.gx-tl {
+  position: relative; z-index: 4; box-sizing: border-box; height: 204px; margin: -260px 26px 56px; padding: 10px 12px 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto auto auto auto; column-gap: 18px;
+  border: 1px solid #5a4b45; border-radius: 12px; background: rgba(5, 5, 6, .92); color: #f3e9e4; cursor: default;
+}
+.gx-tl-head, .gx-tl-bars, .gx-tl-range, .gx-tl-axis { grid-column: 1; }
+.gx-tl-n { grid-column: 2; grid-row: 1; align-self: center; }
+.gx-tl-list { grid-column: 2; grid-row: 2 / 5; min-height: 0; }
+.gx-tl-head { display: flex; align-items: center; gap: 10px; padding-right: 30px; }
+.cq .gx-tl-play { width: 38px; height: 38px; border-radius: 50%; background: #f3e9e4; color: #120705; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.gx-tl-now { font: 700 18px/1.2 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; color: #ff9b6a; letter-spacing: .02em; white-space: nowrap; }
+.gx-tl-mode { display: inline-flex; gap: 6px; margin-left: auto; }
+.cq .gx-tl-mode button { height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid #5a4b45; color: #c9bdb8; font-size: 13.5px; background: none; }
+.cq .gx-tl-mode button.on { color: #ffd23f; border-color: #ffd23f; background: rgba(255, 210, 63, .12); }
+.cq .gx-tl .gx-x { top: 6px; right: 6px; }
+.gx-tl-bars { display: flex; align-items: flex-end; gap: 1px; height: 64px; margin-top: 10px; padding-bottom: 1px; border-bottom: 1px solid #3a3133; }
+.cq .gx-tl-bar { flex: 1; min-width: 0; min-height: 2px; display: flex; flex-direction: column; padding: 0; background: none; border-radius: 2px 2px 0 0; overflow: hidden; opacity: .95; }
+.gx-tl-bar i { display: block; min-height: 0; }
+.gx-tl-bar i.tw { background: #ff7a59; }
+.gx-tl-bar i.intl { background: #7fb2ff; }
+.cq .gx-tl-bar.fut { opacity: .22; }
+.cq .gx-tl-bar.cur { outline: 1px solid #ffd23f; outline-offset: 1px; box-shadow: 0 0 8px rgba(255, 210, 63, .5); }
+.gx-tl-range { display: block; width: 100%; height: 28px; margin: 4px 0 0; accent-color: #ff7a59; cursor: pointer; }
+.gx-tl-axis { position: relative; height: 16px; font: 12px/16px ui-monospace, Menlo, Consolas, monospace; color: #9c8f8a; }
+.gx-tl-axis span { position: absolute; transform: translateX(-2px); white-space: nowrap; }
+.gx-tl-axis span::before { content: ''; position: absolute; left: 1px; top: -5px; width: 1px; height: 4px; background: #5a4b45; }
+.gx-tl-n { margin: 6px 0 0; font-size: 14px; font-weight: 700; color: #f3e9e4; }
+.gx-tl-n small { margin-left: 8px; font-weight: 500; font-size: 12.5px; color: #9c8f8a; }
+.gx-tl-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.gx-tl-list li { border-top: 1px solid #2a2325; }
+.gx-tl-list li:first-child { border-top: 0; }
+.cq .gx-tl-item { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 4px 6px 16px; background: none; text-align: left; position: relative; }
+.gx-tl-item::before { content: ''; position: absolute; left: 3px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #ff7a59; box-shadow: 0 0 6px #ff7a59; }
+.gx-tl-item.intl::before { background: #7fb2ff; box-shadow: 0 0 6px #7fb2ff; }
+.gx-tl-item small { font-size: 12px; color: #9c8f8a; }
+.gx-tl-item span { font-size: 14px; line-height: 1.4; color: #f3e9e4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cq .gx-tl-item.on span { color: #ffd23f; }
+.gx-tl-more { padding: 6px 4px; font-size: 12.5px; color: #9c8f8a; }
+@media (max-width: 820px) {
+  .gx-tl { display: block; height: auto; margin: 8px 16px 0; }
+  .gx-tl-list { margin-top: 4px; max-height: 150px; }
+  .gx-tl-bars { height: 52px; }
+  .gx-tl-now { font-size: 16px; }
+}
+
 /* 搜尋與牽連（T-436）：左上角搜尋框（跟新聞頁搜尋框同一個殼、黑底）；下拉列亮點與新聞；路徑列在它下面。
    亮點之間的牽連線畫在 canvas（黃，越粗則數越多）；檢視框裡「一起被提到」的籌碼可以點了換看 */
 .gx-search {
