@@ -177,6 +177,12 @@ export const fetchNewsSummary = (id: string) => get<NewsSummary>(`/pub/news/summ
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */
 export const fetchNewsGalaxy = () => get<GalaxyData>('/pub/news/galaxy')
 
+/** 星雲圖「大家都在搜」（T-446）：近 days 天被最多分頁搜過的亮點 id 與幾個分頁。 */
+export const fetchGalaxyTrend = () => get<{ days: number; items: { hub: string; n: number }[] }>('/pub/galaxy-search')
+
+/** 記一次搜尋（選了哪幾個亮點；不記打的字）。 */
+export const recordGalaxySearch = (id: string, hubs: string[]) => get<{ ok: boolean }>('/pub/galaxy-search', 'POST', { id, hubs })
+
 /** 星雲圖心跳（T-445）：回同時幾個人在看（含自己）。 */
 export const sendGalaxyPresence = (id: string) => get<{ n: number }>('/pub/galaxy-presence', 'POST', { id })
 
