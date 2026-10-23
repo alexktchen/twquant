@@ -10,10 +10,13 @@
 // 搜尋與牽連（T-436；使用者 2026-10-22：「想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」，像 graphify）：
 // 左上角搜尋框，打字就列符合的股票、主題、新聞；選一個＝飛到它、畫出它跟誰牽連（同一則新聞一起被提到＝一條線，越粗則數越多）；
 // 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一度幾則（「幾度」＝隔幾層關係，跟新聞關係圖的講法一樣）。
-import { ExternalLink, Maximize2, Minus, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
+// 時間軸（T-443；使用者 2026-10-23 看「台中恐怖島」截圖：「有辦法也有時間軸嗎」→「我先做7天版」）：右下 ⏱ 打開，圖下面（桌機蓋在圖的下緣）一排每 3 小時一格的長條、
+// 播放鍵與拉桿；拉到某一刻＝之後的光點不畫、亮點只算到那時候；「累積／當時」切換；那一格的新聞列在底下，點了選那顆。全用快照算，不打 API。
+import { Clock, ExternalLink, Maximize2, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchNewsGalaxy } from './api'
 import { GalaxyFocus } from './GalaxyFocus'
+import { TL_LIST, TL_STEP_MS, buildTimeline, tlAlpha, tlBinLabel, tlBinMax, tlDayTicks, tlHubCounts, type TlMode } from './galaxy-timeline'
 import {
   DRAG_RAD,
   ORIGIN,
@@ -89,12 +92,15 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const [open, setOpen] = useState(false)
   const [path, setPath] = useState<HubPath | null>(null)
   const [pathMsg, setPathMsg] = useState('')
+  // 時間軸（T-443）：on＝打開；cursor＝「現在」在第幾格；mode 累積／當時；playing＝自動往前走
+  const [tl, setTl] = useState<{ on: boolean; cursor: number; mode: TlMode; playing: boolean }>({ on: false, cursor: 0, mode: 'cum', playing: false })
   const stageRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
   const inspRef = useRef<HTMLDivElement>(null)
   // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）；webAt／pathAt：牽連線從什麼時候開始畫（像 graphify 的「路徑逐段點亮」）
-  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0 })
+  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0, tl: null as { cursor: number; mode: TlMode } | null, tlOf: [] as number[] })
+  const timeline = useMemo(() => (data ? buildTimeline(data.items, data.built, data.days) : null), [data])
   const graph = useMemo(() => (data ? hubGraph(data) : null), [data])
   const web = useMemo(() => (data && graph && sel?.kind === 'hub' ? hubWeb(data, graph, sel.id) : null), [data, graph, sel])
   const hits = useMemo(() => (data ? searchGalaxy(data, q) : []), [data, q])
@@ -102,6 +108,19 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   live.current.auto = auto
   live.current.web = web
   live.current.path = path ? { ids: path.hubs.map((h) => h.id), n: path.n } : null
+  live.current.tl = tl.on ? { cursor: tl.cursor, mode: tl.mode } : null
+  live.current.tlOf = timeline?.of ?? []
+  // 播放：每 TL_STEP_MS 往前一格，走到底停
+  const lastBin = timeline ? timeline.bins.length - 1 : 0
+  useEffect(() => {
+    if (!tl.playing) return
+    const id = setInterval(() => setTl((s) => (s.cursor >= lastBin ? { ...s, playing: false } : { ...s, cursor: s.cursor + 1 })), TL_STEP_MS)
+    return () => clearInterval(id)
+  }, [tl.playing, lastBin])
+  /** 打開／關掉時間軸：打開時「現在」放在最後一格（跟沒開一樣，全都看得到），再往回拉 */
+  const toggleTl = () => setTl((s) => ({ on: !s.on, cursor: lastBin, mode: s.mode, playing: false }))
+  /** 播放：已經在最後一格就從頭播 */
+  const playTl = () => setTl((s) => (s.playing ? { ...s, playing: false } : { ...s, playing: true, cursor: s.cursor >= lastBin ? 0 : s.cursor }))
   useEffect(() => {
     live.current.webAt = performance.now()
   }, [web])
@@ -363,10 +382,16 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       }
       // 新聞光點
       const r0 = Math.min(9, Math.max(3.4, 5.5 * Math.sqrt(view.s / REF_S)))
+      // 時間軸（T-443）：還沒發生的光點不畫；亮點只算到那時候被幾則提到，0 則的不畫、名字也藏
+      const tlv = lv.tl, tlOf = lv.tlOf
+      const tlHub = tlv ? tlHubCounts(items, tlOf, tlv.cursor) : null
+      const hubN = (h: (typeof hubs)[number]) => (tlHub ? (tlHub.get(h.id) ?? 0) : h.n)
       items.forEach((it, i) => {
         const p = P.items[i], on = !relItems || relItems.has(it.id)
+        const ta = tlv ? tlAlpha(tlOf[i], tlv.cursor, tlv.mode) : 1
+        if (!ta) return
         const tw = 0.75 + 0.25 * Math.sin(tt * 1.3 + seed[i][0] * 40)
-        ctx.globalAlpha = (on ? k : 0.12 * k) * tw * depthAlpha(p[2])
+        ctx.globalAlpha = (on ? k : 0.12 * k) * tw * ta * depthAlpha(p[2])
         const r = r0 * p[3] * (it.m.length ? 1.15 : 0.9)
         ctx.drawImage(relItems?.has(it.id) ? SP.sel : SP[it.kind === 'intl' ? 'intl' : 'tw'], pos[i][0] - r, pos[i][1] - r, r * 2, r * 2)
       })
@@ -377,7 +402,9 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         const pi = pathIds ? pathIds.indexOf(h.id) : -1
         const since = pi >= 0 ? litFor(pi) : web && h.id !== web.hub.id && relHubs?.has(h.id) ? webEl - WEB_DRAW : 1
         const on = (!relHubs || relHubs.has(h.id)) && since >= 0
-        const r = hubSize(h.n) * p[3] * (1 + 0.06 * Math.sin(tt * 2 + i)) * pop(since)
+        const n = hubN(h)
+        if (!n) return
+        const r = hubSize(n) * p[3] * (1 + 0.06 * Math.sin(tt * 2 + i)) * pop(since)
         ctx.globalAlpha = (on ? 0.75 : 0.12) * Math.max(0.45, k) * depthAlpha(p[2])
         const c = hubClass(h.type)
         ctx.drawImage(c === 'tw' ? SP.hubtw : c === 'abroad' ? SP.abroad : SP.cluster, p[0] - r, p[1] - r, r * 2, r * 2)
@@ -393,12 +420,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       const selC = sel?.kind === 'cluster' ? cEls.filter((x) => String(x.c.k) === sel.id) : []
       const cWant = [...cEls].filter((x) => !selC.includes(x)).sort((a, b) => b.c.n - a.c.n).slice(0, phone ? Math.round(8 * zf) : 16)
       // 牽連到的亮點名字優先放（中心那顆最先），其餘照平常的順序
-      const hot = relHubs ? hEls.filter((x) => relHubs!.has(x.h.id)).sort((a, b) => Number(b.h.id === sel?.id) - Number(a.h.id === sel?.id)) : []
-      const hWant = hEls.filter((x) => !relHubs?.has(x.h.id)).slice(0, phone ? Math.round(7 * zf) : 16)
+      const hNow = tlHub ? hEls.filter((x) => hubN(x.h) > 0) : hEls
+      const hot = relHubs ? hNow.filter((x) => relHubs!.has(x.h.id)).sort((a, b) => Number(b.h.id === sel?.id) - Number(a.h.id === sel?.id)) : []
+      const hWant = hNow.filter((x) => !relHubs?.has(x.h.id)).slice(0, phone ? Math.round(7 * zf) : 16)
       const hubWant = ({ h, e }: { h: (typeof hubs)[number]; e: HTMLElement }) => {
         const p = P.hubs[hubIdx.get(h.id)!]
         const [w, hh] = sizes.get(e)!
-        return { key: `h${h.id}`, x: p[0], y: p[1] + hubSize(h.n) * p[3] + 10, w, h: hh, e }
+        return { key: `h${h.id}`, x: p[0], y: p[1] + hubSize(hubN(h)) * p[3] + 10, w, h: hh, e }
       }
       // 牽連到的亮點名字最優先（主題名也讓路），再來主題名，最後其餘亮點
       const clusterWant = ({ c, e }: { c: (typeof clusters)[number]; e: HTMLElement }) => {
@@ -497,7 +525,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     const onDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement
       if (!t.closest('.gx-search')) setOpen(false)
-      if (t.closest('.gx-insp,.gx-ctl,.gx-search,.gx-path')) return
+      if (t.closest('.gx-insp,.gx-ctl,.gx-search,.gx-path,.gx-tl')) return
       goal = null
       stage.setPointerCapture(e.pointerId)
       pts.set(e.pointerId, xy(e))
@@ -539,11 +567,13 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           setPath(null)
           return
         }
+        const tlv = live.current.tl, tlOf = live.current.tlOf
+        const tlHub = tlv ? tlHubCounts(items, tlOf, tlv.cursor) : null
         const hit = pickAt(
           x,
           y,
-          hubs.map((h, i) => ({ id: h.id, p: P.hubs[i], r: hubSize(h.n) * P.hubs[i][3] })),
-          items.map((it, i) => ({ id: it.id, p: P.items[i] })),
+          hubs.map((h, i) => ({ id: h.id, p: P.hubs[i], r: hubSize(tlHub ? (tlHub.get(h.id) ?? 0) : h.n) * P.hubs[i][3] })).filter((h) => h.r > 0),
+          items.map((it, i) => ({ id: it.id, p: P.items[i] })).filter((_, i) => !tlv || tlAlpha(tlOf[i], tlv.cursor, tlv.mode) > 0),
         )
         setSel(hit)
         if (hit) setPath(null) // 點了別的，就不再畫兩個詞的路徑
@@ -620,6 +650,60 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       </a>
     </>
   ) : null
+  // 時間軸面板（T-443）：播放、現在哪一格、累積／當時；每 3 小時一格的長條（台灣橘在下、國際藍在上）、拉桿、每天的刻度；那一格的新聞
+  const tlPanel = timeline && (() => {
+    const bins = timeline.bins, max = tlBinMax(bins), cur = bins[tl.cursor] ?? bins[bins.length - 1]
+    const ticks = tlDayTicks(timeline)
+    const rows = cur.idx.map((i) => data.items[i]).sort((a, b) => (a.t < b.t ? 1 : -1))
+    return (
+      <div className="gx-tl" role="region" aria-label="時間軸">
+        <div className="gx-tl-head">
+          <button className="gx-tl-play" onClick={playTl} aria-label={tl.playing ? '暫停' : '播放'} title={tl.playing ? '暫停' : '播放（從頭或從現在往前走）'}>
+            {tl.playing ? <Pause size={18} aria-hidden="true" /> : <Play size={18} aria-hidden="true" />}
+          </button>
+          <b className="gx-tl-now">{tlBinLabel(cur.at)}</b>
+          <span className="gx-tl-mode" role="group" aria-label="顯示方式">
+            <button className={tl.mode === 'cum' ? 'on' : ''} onClick={() => setTl((s) => ({ ...s, mode: 'cum' }))} aria-pressed={tl.mode === 'cum'} title="到這時候為止的都亮">累積</button>
+            <button className={tl.mode === 'at' ? 'on' : ''} onClick={() => setTl((s) => ({ ...s, mode: 'at' }))} aria-pressed={tl.mode === 'at'} title="只亮這 3 小時的，之前的淡掉">當時</button>
+          </span>
+          <button className="gx-x" onClick={toggleTl} aria-label="關掉時間軸">
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="gx-tl-bars" aria-hidden="true">
+          {bins.map((b, i) => (
+            <button key={b.at} type="button" tabIndex={-1} className={`gx-tl-bar${i === tl.cursor ? ' cur' : i > tl.cursor ? ' fut' : ''}`} style={{ height: `${((b.tw + b.intl) / max) * 100}%` }} onClick={() => setTl((s) => ({ ...s, cursor: i, playing: false }))}>
+              <i className="intl" style={{ flex: b.intl }} />
+              <i className="tw" style={{ flex: b.tw }} />
+            </button>
+          ))}
+        </div>
+        <input type="range" className="gx-tl-range" min={0} max={bins.length - 1} value={tl.cursor} onChange={(e) => setTl((s) => ({ ...s, cursor: Number(e.target.value), playing: false }))} aria-label="現在到哪一刻" aria-valuetext={tlBinLabel(cur.at)} />
+        <div className="gx-tl-axis" aria-hidden="true">
+          {ticks.map((t) => (
+            <span key={t.i} style={{ left: `${(t.i / bins.length) * 100}%` }}>{t.label}</span>
+          ))}
+        </div>
+        <p className="gx-tl-n">
+          {tlBinLabel(cur.at)} 共 {cur.idx.length} 則
+          {cur.tw > 0 && cur.intl > 0 && <small>台灣 {cur.tw}・國際 {cur.intl}</small>}
+        </p>
+        {rows.length > 0 && (
+          <ul className="gx-tl-list">
+            {rows.slice(0, TL_LIST).map((x) => (
+              <li key={x.id}>
+                <button type="button" className={`gx-tl-item ${x.kind}${sel?.id === x.id ? ' on' : ''}`} onClick={() => { setAuto(false); setPath(null); setSel({ kind: 'item', id: x.id }) }}>
+                  <small>{shortWhen(x.t, today)}・{x.src}</small>
+                  <span>{x.title}</span>
+                </button>
+              </li>
+            ))}
+            {rows.length > TL_LIST && <li className="gx-tl-more">還有 {rows.length - TL_LIST} 則，點長條旁的光點看</li>}
+          </ul>
+        )}
+      </div>
+    )
+  })()
   return (
     <section className="gx">
       <p className="gx-sum">{galaxySummary(data)}</p>
@@ -839,8 +923,12 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           <button onClick={() => { live.current.reset += 1; live.current.sel = null; setSel(null) }} aria-label="回到一開始" title="回到一開始">
             <Undo2 size={17} aria-hidden="true" />
           </button>
+          <button className={tl.on ? 'on' : ''} onClick={toggleTl} aria-pressed={tl.on} aria-label="時間軸" title="時間軸（開／關）">
+            <Clock size={17} aria-hidden="true" />
+          </button>
         </div>
       </div>
+      {tl.on && timeline && tlPanel}
       {(hub || item || topic) && (
         <div className={`gx-bar${item ? ' news' : ''}`}>
           <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
