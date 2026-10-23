@@ -36,6 +36,8 @@ export type BadgeIcon =
   | 'newspaper'
   | 'box'
   | 'flag'
+  | 'nShape'
+  | 'gauge'
 
 export type Badge = {
   key: string
@@ -68,7 +70,9 @@ export const BADGE_LEGEND: { icon: BadgeIcon; tone: BadgeTone; label: string; me
   { icon: 'sparkles', tone: 'good', label: '新上榜', meaning: '今天才進這條線的名單' },
   { icon: 'flame', tone: 'good', label: '連續上榜', meaning: '連續在名單上的天數' },
   { icon: 'rocket', tone: 'good', label: '飆漲機率', meaning: '潛伏飆股模型估的 20 日內漲 +30% 機率' },
+  { icon: 'gauge', tone: 'good', label: '量比', meaning: '今天成交量是前 20 個交易日平均的幾倍（帶量突破這條線照它排序）' },
   { icon: 'box', tone: 'good', label: '箱型突破', meaning: '前 60 個交易日只在 12% 以內窄幅整理，今天收盤帶量突破箱頂（已還原除權息）' },
+  { icon: 'nShape', tone: 'good', label: 'N字突破', meaning: '先急漲兩成以上，拉回一次（回檔不超過旗桿八成），今天收盤再過前高（已還原除權息）' },
   { icon: 'flag', tone: 'good', label: '旗型突破', meaning: '先急漲兩成以上（旗桿），再整理量縮、回檔不深（旗面），今天收盤突破前高（已還原除權息）' },
   { icon: 'newspaper', tone: 'event', label: '相關新聞', meaning: '近 3 天提到它、或經供應商／族群連到它的新聞則數；點一下跳到個股頁的「相關新聞」看是哪幾則' },
 ]
@@ -159,11 +163,14 @@ export function pickBadges(p: {
   if (p.news && nn > 0)
     out.push({ key: 'news', icon: 'newspaper', short: `${nn}`, label: '相關新聞', title: `近 3 天直接提到 ${p.news.direct} 則、經供應商或族群連到 ${p.news.indirect} 則；點一下看是哪幾則`, tone: 'event' })
   const pt = patternTag(p.pattern)
-  if (pt && p.pattern) out.push({ key: `pattern-${p.pattern.kind}`, icon: p.pattern.kind, short: `+${Math.round(p.pattern.over * 1000) / 10}%`, label: pt.label, title: pt.title, tone: 'good' })
+  if (pt && p.pattern) out.push({ key: `pattern-${p.pattern.kind}`, icon: p.pattern.kind === 'n' ? 'nShape' : p.pattern.kind, short: `+${Math.round(p.pattern.over * 1000) / 10}%`, label: pt.label, title: pt.title, tone: 'good' })
   if (p.new) out.push({ key: 'new', icon: 'sparkles', short: null, label: '新上榜', title: '今天才進這條線的名單', tone: 'good' })
   const streak = p.streak ?? 0
   if (streak > (p.recent?.length ?? 0)) out.push({ key: 'streak', icon: 'flame', short: `${streak}天`, label: '連續上榜', title: `連續 ${streak} 個交易日在名單上`, tone: 'good' })
-  if (typeof p.score === 'number' && p.line !== 'CORE')
+  // 分數的意思依線而定：潛伏兩條線是模型機率；帶量突破是量比（D-215），不是機率
+  if (typeof p.score === 'number' && p.line === 'BREAKOUT')
+    out.push({ key: 'volratio', icon: 'gauge', short: `${p.score.toFixed(1)}倍`, label: '量比', title: '今天成交量是前 20 個交易日平均的幾倍（這條線照量比排序）', tone: 'good' })
+  else if (typeof p.score === 'number' && p.line !== 'CORE')
     out.push({ key: 'prob', icon: 'rocket', short: `${Math.round(p.score * 100)}%`, label: '飆漲機率', title: '潛伏飆股模型估的 20 個交易日內漲 +30% 的機率', tone: 'good' })
   return out.sort((a, b) => TONE_ORDER[a.tone] - TONE_ORDER[b.tone])
 }

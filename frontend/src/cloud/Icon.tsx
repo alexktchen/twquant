@@ -1,5 +1,5 @@
 // 標記圖示（lucide，MIT 授權；線條一致、單色，隨顏色類別上色）。代號定義在 badges.ts。
-import { ArrowDownToLine, Ban, ChevronsDown, Coins, FileClock, Flag, Flame, Mic, Newspaper, Rocket, Sparkles, Square, TrendingDown, TriangleAlert, UserMinus, Users, type LucideIcon } from 'lucide-react'
+import { ArrowDownToLine, Ban, ChevronsDown, Coins, FileClock, Flag, Flame, Gauge, Mic, Newspaper, Rocket, Sparkles, Square, TrendingDown, TrendingUp, TriangleAlert, UserMinus, Users, type LucideIcon } from 'lucide-react'
 import type { Badge, BadgeIcon } from './badges'
 
 const ICONS: Record<BadgeIcon, LucideIcon> = {
@@ -20,6 +20,8 @@ const ICONS: Record<BadgeIcon, LucideIcon> = {
   newspaper: Newspaper,
   box: Square,
   flag: Flag,
+  nShape: TrendingUp,
+  gauge: Gauge,
 }
 
 export function Icon({ name, size = 14 }: { name: BadgeIcon; size?: number }) {

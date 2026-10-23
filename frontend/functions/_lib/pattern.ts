@@ -1,5 +1,6 @@
 // 名單上每檔的型態標記（T-440／D-215 §四，使用者 2026-10-23：「可以在個股標是箱型或旗型」）：
-// 今天收盤突破前 60 個交易日最高價的股票，再看突破前的長相是「箱型」（窄幅整理）還是「旗型」（急漲後整理量縮）。
+// 今天收盤突破前 60 個交易日最高價的股票，再看突破前的長相是「旗型」（急漲後整理量縮）、「N 字」（急漲後拉回一次再過前高）
+// 還是「箱型」（窄幅整理）；依這個順序判，互斥。
 // 只供看盤，不改名單、不進模型。純函數放這裡供 node 單元測試；/api/picks 讀資料庫後呼叫。
 import type { sql } from './db.ts'
 import { type Adj } from './weak.ts'
@@ -18,6 +19,9 @@ export const FLAG_MIN = 5
 export const FLAG_MAX = 40
 /** 旗面最低價回檔不能超過旗桿漲幅的這個比例。 */
 export const RETRACE_MAX = 0.5
+/** N 字：急漲後拉回一次（不限量），回檔不超過旗桿的這個比例、拉回 N_MIN～FLAG_MAX 天，再過前高；旗型是其中整理量縮、回檔不到一半的那種。 */
+export const N_RETRACE_MAX = 0.8
+export const N_MIN = 3
 /** 個股行情往回抓幾個日曆天：要涵蓋 WINDOW 個交易日（含春節長假）。 */
 export const PRICE_LOOKBACK_DAYS = 110
 
@@ -25,6 +29,7 @@ export type Ohlcv = { date: string; high: number | null; low: number | null; clo
 export type Pattern =
   | { kind: 'box'; over: number; width: number; days: number }
   | { kind: 'flag'; over: number; pole: number; days: number }
+  | { kind: 'n'; over: number; pole: number; days: number; retrace: number }
 
 const ok = (b: Ohlcv) =>
   b.high !== null && b.low !== null && b.close !== null && b.volume !== null && b.high > 0 && b.low > 0 && b.close > 0
@@ -61,12 +66,15 @@ export function pattern(bars: Ohlcv[], events: Adj[], target: string): Pattern |
   const poleLow = Math.min(...lows.slice(poleStart, t + 1))
   const poleGain = hi / poleLow - 1
   const flagDays = prior.length - 1 - t
-  if (poleGain >= POLE_MIN && flagDays >= FLAG_MIN && flagDays <= FLAG_MAX) {
+  if (poleGain >= POLE_MIN && flagDays >= N_MIN && flagDays <= FLAG_MAX) {
     const flagLow = Math.min(...lows.slice(t + 1))
     const retrace = (hi - flagLow) / (hi - poleLow)
     const poleVol = mean(prior.slice(poleStart, t + 1).map((b) => b.volume as number))
     const flagVol = mean(prior.slice(t + 1).map((b) => b.volume as number))
-    if (retrace <= RETRACE_MAX && flagVol <= poleVol) return { kind: 'flag', over, pole: poleGain, days: flagDays }
+    if (flagDays >= FLAG_MIN && retrace <= RETRACE_MAX && flagVol <= poleVol)
+      return { kind: 'flag', over, pole: poleGain, days: flagDays }
+    // N 字：拉回一次（回檔不超過旗桿八成，低點自然高於起漲點）再過前高；量不管
+    if (retrace <= N_RETRACE_MAX) return { kind: 'n', over, pole: poleGain, days: flagDays, retrace }
   }
   const width = hi / lo - 1
   if (width <= BOX_WIDTH) return { kind: 'box', over, width, days: WINDOW }
