@@ -198,7 +198,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       labelsEl.append(e)
       return e
     }
-    const cEls = clusters.map((c) => ({ c, e: mk(`gx-lbl${bigK.has(c.k) ? ' hot' : ''}`, c.name, `/ ${c.n}`) }))
+    const cEls = clusters.map((c) => ({ c, e: mk(`gx-lbl${bigK.has(c.k) ? ' hot' : ''}`, c.name, String(c.n)) }))
     const hEls = hubLabels.map((h) => ({ h, e: mk(`gx-lbl hub ${hubClass(h.type)}`, h.label, String(h.n)) }))
     const sizes = new Map<HTMLElement, [number, number]>()
     for (const { e } of [...cEls, ...hEls]) sizes.set(e, [e.offsetWidth, e.offsetHeight])
@@ -400,6 +400,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
         w.e.style.left = `${at.x}px`
         w.e.style.top = `${at.y}px`
         w.e.classList.toggle('dim', !!relItems && !(w.key.startsWith('h') && relHubs?.has(w.key.slice(1))))
+        w.e.classList.toggle('on', sel?.kind === 'hub' && w.key === `h${sel.id}`)
         if (w.key.startsWith('c')) {
           const p = P.clusters[clusters.findIndex((c) => `c${c.k}` === w.key)]
           ctx.moveTo(p[0], p[1])
