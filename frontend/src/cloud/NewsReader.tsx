@@ -26,6 +26,7 @@ import {
   type SimilarNews,
 } from './news'
 import { classOf } from './news-graph'
+import { SheetGrip } from './SheetGrip'
 
 export function NewsReader({
   row,
@@ -93,6 +94,7 @@ export function NewsReader({
     }
   }, [row.id, wantSummary])
 
+  const cardRef = useRef<HTMLElement>(null)
   /** 自己按的關閉：把打開時推的那筆歷史退掉（popstate 會再呼叫 onClose） */
   function close() {
     if ((window.history.state as { newsReader?: string } | null)?.newsReader === row.id) window.history.back()
@@ -107,7 +109,8 @@ export function NewsReader({
 
   return (
     <div className="cq-sheet-backdrop cq-reader-backdrop" onClick={close}>
-      <article className="cq-sheet cq-reader" role="dialog" aria-modal="true" aria-label="新聞" onClick={(e) => e.stopPropagation()}>
+      <article ref={cardRef} className="cq-sheet cq-reader" role="dialog" aria-modal="true" aria-label="新聞" onClick={(e) => e.stopPropagation()}>
+        <SheetGrip sheetRef={cardRef} onClose={close} />
         <header className="cq-reader-top">
           <span className={`cq-news-kind ${row.kind ?? 'tw'}`}>
             {row.kind === 'intl' ? <Globe size={13} aria-hidden="true" /> : <MapPin size={13} aria-hidden="true" />}
