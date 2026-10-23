@@ -9,6 +9,8 @@ import type { InsiderFlag } from './insider.ts'
 import { insiderTag } from './insider.ts'
 import type { Risk } from './risks.ts'
 import { riskTag } from './risks.ts'
+import type { Pattern } from './pattern.ts'
+import { patternTag } from './pattern.ts'
 import type { Weak } from './weak.ts'
 import type { NewsCount } from './news.ts'
 import { weakTags } from './weak.ts'
@@ -32,6 +34,8 @@ export type BadgeIcon =
   | 'flame'
   | 'rocket'
   | 'newspaper'
+  | 'box'
+  | 'flag'
 
 export type Badge = {
   key: string
@@ -64,6 +68,8 @@ export const BADGE_LEGEND: { icon: BadgeIcon; tone: BadgeTone; label: string; me
   { icon: 'sparkles', tone: 'good', label: '新上榜', meaning: '今天才進這條線的名單' },
   { icon: 'flame', tone: 'good', label: '連續上榜', meaning: '連續在名單上的天數' },
   { icon: 'rocket', tone: 'good', label: '飆漲機率', meaning: '潛伏飆股模型估的 20 日內漲 +30% 機率' },
+  { icon: 'box', tone: 'good', label: '箱型突破', meaning: '前 60 個交易日只在 12% 以內窄幅整理，今天收盤帶量突破箱頂（已還原除權息）' },
+  { icon: 'flag', tone: 'good', label: '旗型突破', meaning: '先急漲兩成以上（旗桿），再整理量縮、回檔不深（旗面），今天收盤突破前高（已還原除權息）' },
   { icon: 'newspaper', tone: 'event', label: '相關新聞', meaning: '近 3 天提到它、或經供應商／族群連到它的新聞則數；點一下跳到個股頁的「相關新聞」看是哪幾則' },
 ]
 
@@ -124,6 +130,8 @@ export function pickBadges(p: {
   down_risk?: DownRisk | null
   /** 近 3 天的相關新聞則數（反向看圖）；新聞服務沒回 → 沒有這個標記 */
   news?: NewsCount | null
+  /** 型態（T-440）：今天突破前 60 日高點的股票是箱型還是旗型；沒有、舊後端沒有這欄 → 沒有這個標記 */
+  pattern?: Pattern | null
 }): Badge[] {
   const out: Badge[] = []
   for (const r of p.risks ?? []) out.push(riskBadge(r))
@@ -150,6 +158,8 @@ export function pickBadges(p: {
   const nn = p.news ? p.news.direct + p.news.indirect : 0
   if (p.news && nn > 0)
     out.push({ key: 'news', icon: 'newspaper', short: `${nn}`, label: '相關新聞', title: `近 3 天直接提到 ${p.news.direct} 則、經供應商或族群連到 ${p.news.indirect} 則；點一下看是哪幾則`, tone: 'event' })
+  const pt = patternTag(p.pattern)
+  if (pt && p.pattern) out.push({ key: `pattern-${p.pattern.kind}`, icon: p.pattern.kind, short: `+${Math.round(p.pattern.over * 1000) / 10}%`, label: pt.label, title: pt.title, tone: 'good' })
   if (p.new) out.push({ key: 'new', icon: 'sparkles', short: null, label: '新上榜', title: '今天才進這條線的名單', tone: 'good' })
   const streak = p.streak ?? 0
   if (streak > (p.recent?.length ?? 0)) out.push({ key: 'streak', icon: 'flame', short: `${streak}天`, label: '連續上榜', title: `連續 ${streak} 個交易日在名單上`, tone: 'good' })

@@ -17,18 +17,8 @@ if TYPE_CHECKING:
     from twquant.data.warehouse import PitView
 
 
-@factor(
-    name="volume.vol_ratio_5d",
-    category="volume",
-    direction=1,
-    tables=["prices_daily"],
-    lookback_days=8,
-    params={"window": 5},
-)
-def vol_ratio_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
-    """量比 = 今日成交量 / 前 N 日均量（不含今日；異常放量偏多，STRATEGY §1-5）。"""
-    raw = params.get("window", 5)
-    window = int(raw) if isinstance(raw, int | float | str) else 5
+def _vol_ratio(view: PitView, window: int) -> pl.DataFrame:
+    """量比 = 今日成交量 / 前 window 日均量（不含今日）。"""
     px = view.table("prices_daily").select("date", "stock_id", "volume").sort(["stock_id", "date"])
     prev_avg = (
         pl.col("volume").shift(1).rolling_mean(window).over("stock_id")
@@ -42,6 +32,39 @@ def vol_ratio_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
         .drop_nulls("value")
         .collect()
     )
+
+
+@factor(
+    name="volume.vol_ratio_5d",
+    category="volume",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=8,
+    params={"window": 5},
+)
+def vol_ratio_5d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """量比 = 今日成交量 / 前 N 日均量（不含今日；異常放量偏多，STRATEGY §1-5）。"""
+    raw = params.get("window", 5)
+    window = int(raw) if isinstance(raw, int | float | str) else 5
+    return _vol_ratio(view, window)
+
+
+@factor(
+    name="volume.vol_ratio_20d",
+    category="volume",
+    direction=1,
+    tables=["prices_daily"],
+    lookback_days=25,
+    params={"window": 20},
+)
+def vol_ratio_20d(view: PitView, params: dict[str, object]) -> pl.DataFrame:
+    """20 日量比 = 今日成交量 / 前 20 日均量（不含今日）；「帶量突破」線的帶量條件（D-215）。
+
+    與 `vol_ratio_5d` 同一個算法、只差窗口；另外註冊是為了物化與「為什麼選它」的句型都以因子名為鍵。
+    """
+    raw = params.get("window", 20)
+    window = int(raw) if isinstance(raw, int | float | str) else 20
+    return _vol_ratio(view, window)
 
 
 @factor(

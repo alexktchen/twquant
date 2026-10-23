@@ -31,7 +31,7 @@ test('T-332 沒登入：假名單每天每條線固定、切日期會變、代�
   assert.deepEqual(
     day.lines.map((l) => [l.code, l.name, l.picks.length]),
     // D-174（使用者 2026-10-11 決定）第三條「高分爆量」：多數日子很少，假名單只放 3 檔
-    [['CORE', '大盤精選', 15], ['QUIET', '潛伏飆股', 15], ['QUIETV', '高分爆量', 3]],
+    [['CORE', '大盤精選', 15], ['QUIET', '潛伏飆股', 15], ['QUIETV', '高分爆量', 3], ['BREAKOUT', '帶量突破', 3]],
   )
   for (const l of day.lines) {
     assert.equal(new Set(l.picks.map((p) => p.sid)).size, l.picks.length, '代號不重複（React key）')

@@ -268,7 +268,7 @@ export function PicksCard({ picks, onPicks, ...fold }: { picks: WarRoomData['pic
 }
 
 /** 分數還沒讀到時顯示的線別名稱（跟 K 線圖例同一套）。 */
-const LINE_FALLBACK: Record<string, string> = { CORE: '大盤精選', QUIET: '潛伏飆股', VOLUME: '高分爆量' }
+const LINE_FALLBACK: Record<string, string> = { CORE: '大盤精選', QUIET: '潛伏飆股', QUIETV: '高分爆量', BREAKOUT: '帶量突破' }
 
 export function ScoreHomeCard({
   lines,

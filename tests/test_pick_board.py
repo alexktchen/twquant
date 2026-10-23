@@ -184,8 +184,8 @@ def test_ac4_api_serves_the_saved_board_and_is_empty_before_the_first_run(tmp_pa
 
 def test_ac5_board_config_loads_and_points_at_real_strategies() -> None:
     cfg = load_config(ROOT / "pick_board.yaml", PickBoardConfig)
-    # D-163 兩條正式線＋D-174（使用者 2026-10-11 決定）第三條「高分爆量（驗證中）」
-    assert [s.code for s in cfg.strategies] == ["CORE", "QUIET", "QUIETV"]
+    # D-163 兩條正式線＋D-174（使用者 2026-10-11 決定）第三條「高分爆量（驗證中）」＋D-215 第四條「帶量突破」
+    assert [s.code for s in cfg.strategies] == ["CORE", "QUIET", "QUIETV", "BREAKOUT"]
     for s in cfg.strategies:
         assert (ROOT / "strategies" / f"{s.config}.yaml").exists(), s.config
 
@@ -294,7 +294,7 @@ def test_ac8_missing_close_on_the_buy_day_raises() -> None:
 
 
 def test_d174_only_threshold_line_allows_empty_list() -> None:
-    """D-174：只有「高分爆量」宣告當天可以沒有股票；兩條正式線空名單仍是錯誤。"""
+    """D-174／D-215：只有「高分爆量」「帶量突破」宣告當天可以沒有股票；兩條正式線空名單仍是錯誤。"""
     from twquant.config import load_config
     from twquant.reporting.pick_board import PickBoardConfig
 
@@ -303,4 +303,5 @@ def test_d174_only_threshold_line_allows_empty_list() -> None:
         "CORE": False,
         "QUIET": False,
         "QUIETV": True,
+        "BREAKOUT": True,
     }

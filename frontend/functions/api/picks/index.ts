@@ -19,6 +19,7 @@ import { readReviews } from '../../_lib/reviews'
 import { readReasons } from '../../_lib/reasons'
 import { readReference } from '../../_lib/reference'
 import { readSimilar } from '../../_lib/similar'
+import { readPattern } from '../../_lib/pattern'
 import { readDrop, readWeak } from '../../_lib/weak'
 import { DATE_RE, LINES, RECENT_WINDOW, STREAK_LOOKBACK, annotate, change, linesForDay, recentFlags, type PickRow } from '../../_lib/picks'
 import { cached, cacheKey } from '../../_lib/cache'
@@ -48,6 +49,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const groups = await groupsFor(db, target, meta)
     const reasons = await readReasons(db, target)
     const weak = await readWeak(db, target, sids)
+    const patterns = await readPattern(db, target, sids)
     const insider = await readInsider(db, target, sids)
     const holders = await readHolders(db, target, sids)
     const stopHit = await readStopHit(db, target, sids)
@@ -104,6 +106,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
             recent: recentFlags(r.stock_id, recentLists),
             chg6: change(c, startClose.get(r.stock_id) ?? null),
             weak: weak.get(r.stock_id) ?? null,
+            pattern: patterns.get(r.stock_id) ?? null,
             insider: insider.get(r.stock_id) ?? null,
             holders: holders.get(r.stock_id) ?? null,
             stop_hit: stopHit.get(r.stock_id) ?? null,

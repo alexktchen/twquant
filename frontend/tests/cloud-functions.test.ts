@@ -27,12 +27,14 @@ test('T-332 AC10: 近 6 日方格舊到新、沒打分的日子是 null（與 Py
 })
 
 
-test('D-174：登記過的線一律列出（沒有股票的那天名單為空），第三條線在最後', () => {
-  assert.deepEqual(linesForDay(['QUIET']), ['CORE', 'QUIET', 'QUIETV'])
-  assert.deepEqual(linesForDay([]), ['CORE', 'QUIET', 'QUIETV'])
-  assert.deepEqual(linesForDay(['ZZZ', 'CORE']), ['CORE', 'QUIET', 'QUIETV', 'ZZZ'])
+test('D-174／D-215：登記過的線一律列出（沒有股票的那天名單為空），第三、四條線在正式兩條之後', () => {
+  assert.deepEqual(linesForDay(['QUIET']), ['CORE', 'QUIET', 'QUIETV', 'BREAKOUT'])
+  assert.deepEqual(linesForDay([]), ['CORE', 'QUIET', 'QUIETV', 'BREAKOUT'])
+  assert.deepEqual(linesForDay(['ZZZ', 'CORE']), ['CORE', 'QUIET', 'QUIETV', 'BREAKOUT', 'ZZZ'])
   const v = LINES.find((l) => l.code === 'QUIETV')
   assert.ok(v && v.note && v.note.includes('驗證中'))
+  const b = LINES.find((l) => l.code === 'BREAKOUT')
+  assert.ok(b && b.name === '帶量突破' && b.note && b.note.includes('前 60 個交易日最高價') && b.note.includes('2 倍'))
 })
 
 test('日期選單檔數：把每天每條線的檔數與每條線的第一天整理好', () => {

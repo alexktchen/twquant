@@ -4142,7 +4142,7 @@ def _pick_reasons_for_day(day: dt.date) -> str:
             rows += model_rows(day, quiet, got, raw, model_id, cfg, tol=1e-6)
         if rule:
             sids = sorted({p.stock_id for p in rule})
-            raw = read_factor_raw(conn, scfg.pg_schema, day, list(cfg.core_signals), sids)
+            raw = read_factor_raw(conn, scfg.pg_schema, day, cfg.rule_factors(), sids)
             gates = {
                 m: read_rank_pct(conn, scfg.pg_schema, day, m, sids)
                 for m in sorted({p.model_id for p in rule if p.model_id})

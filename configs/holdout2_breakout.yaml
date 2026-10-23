@@ -1,0 +1,14 @@
+# D-215（2026-10-23，使用者：「幫我寫成一個策略上架」）：第四條線「帶量突破」登記進第二保留期（D-109）。
+# 純規則、沒有模型，所以沒有 model_id／model_sha256；策略與成本指紋由 tests/test_breakout_line.py 守著。
+# 另立一份登記（holdout2.yaml、holdout2_quiet_threshold.yaml、holdout2_quiet_volume.yaml 開啟前都不得修改）。
+# 判讀方式寫在 D-215 §五；開啟最早 2027-03-01。
+registration: D-215
+holdout_start: 2026-09-09
+opens_on: 2027-03-01
+min_sessions: 120
+entries:
+  - code: BREAKOUT-V20
+    strategy: breakout_v20
+    strategy_fingerprint: f01341f0a40da02101c99de9dcec9a14b6ec9eda69ed234a31d25a376c691bfd
+    costs_fingerprint: 39cbc2ffc1256aa05f86653412834a126189834500cbc6ae709024cb128c40f0
+    capital_twd: 10000000

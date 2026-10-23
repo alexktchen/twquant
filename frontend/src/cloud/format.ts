@@ -2,6 +2,7 @@
 import type { Group } from './group'
 import type { Reason } from './reasons'
 import type { DropStats, Weak } from './weak'
+import type { Pattern } from './pattern'
 import type { InsiderFlag } from './insider'
 import type { HoldersFlag } from './holders'
 import type { StopHit } from './stophit'
@@ -49,6 +50,8 @@ export type Pick = {
   blurb?: Blurb | null
   /** 四面向評分與首選（T-394／D-196）：AI 1～5 分；那天沒算、舊後端沒有這欄 → null／undefined */
   review?: Review | null
+  /** 型態（T-440）：今天突破前 60 日高點的是箱型還是旗型；沒有、舊後端沒有這欄 → null／undefined */
+  pattern?: Pattern | null
 }
 /** note：這條線的補充說明（例：驗證中）；沒有就不顯示。ref：歷史同區間參考（D-179）的列，還沒算或舊後端沒有這欄 */
 export type Line = { code: string; name: string; note?: string | null; picks: Pick[]; ref?: RefRow[] }
