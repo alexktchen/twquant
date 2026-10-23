@@ -176,6 +176,19 @@ export const fetchNewsEvidence = (ids: string[], entities: string[]) => get<News
 export const fetchNewsSummary = (id: string) => get<NewsSummary>(`/pub/news/summary?id=${encodeURIComponent(id)}`)
 /** 新聞全景星雲圖（T-418）：排程算好的最新一筆 */
 export const fetchNewsGalaxy = () => get<GalaxyData>('/pub/news/galaxy')
+
+/** 星雲圖心跳（T-445）：回同時幾個人在看（含自己）。 */
+export const sendGalaxyPresence = (id: string) => get<{ n: number }>('/pub/galaxy-presence', 'POST', { id })
+
+/**
+ * 關掉／切走星雲圖：sendBeacon 是瀏覽器專門給「頁面正在關」用的（keepalive fetch 在換頁時實測會掉），不支援才退回 keepalive fetch。
+ * 送不到也沒關係（90 秒後自動不算），所以不回結果、不丟錯。
+ */
+export function leaveGalaxyPresence(id: string): void {
+  const url = apiUrl('/pub/galaxy-presence'), body = JSON.stringify({ id, leave: true })
+  if (navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) return
+  fetch(url, { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body }).catch(() => undefined)
+}
 /** 個股頁 K 線上的新聞標記（T-419） */
 export const fetchStockNewsDays = (sid: string) => get<StockNewsDays>(`/pub/news/stock-days?id=${encodeURIComponent(`tw:${sid}`)}`)
 /** 新聞三張卡（T-417） */

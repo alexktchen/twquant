@@ -196,3 +196,17 @@
 .gxf-ev-dot.tw { background: #d95926; } .gxf-ev-dot.abroad { background: #3987e5; } .gxf-ev-dot.cluster { background: #199e70; }
 .gxf-ents { display: flex; flex-wrap: wrap; gap: 2px 14px; padding-bottom: 10px; }
 .cq .gxf-ents .cq-news-ent { font-size: 13px; color: #b8bcc6; }
+
+/* 推廣（T-445）：同時幾個人在看（摘要那行尾巴、綠點會呼吸）；全螢幕（瀏覽器全螢幕或 iPhone 上用 CSS 鋪滿視窗） */
+.gx-live { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: #8ff0b0; white-space: nowrap; }
+.gx-live i { width: 7px; height: 7px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 6px #3ddc84; animation: gx-live 2s ease-in-out infinite; }
+@keyframes gx-live { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .gx-live i { animation: none; } }
+.gx.full {
+  position: fixed; inset: 0; z-index: 2000; margin: 0; padding: 8px 0 0; display: flex; flex-direction: column; overflow: hidden;
+  background: #050506; padding-bottom: env(safe-area-inset-bottom);
+}
+.gx.full .gx-sum { flex: none; max-width: none; padding-top: env(safe-area-inset-top); }
+.gx.full .gx-stage { flex: 1 1 auto; height: auto; min-height: 0; margin: 0 8px 8px; }
+.gx.full .gx-bar, .gx.full .gx-tl { flex: none; }
+.gx.full .gx-help { display: none; }

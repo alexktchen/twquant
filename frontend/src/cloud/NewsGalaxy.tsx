@@ -12,9 +12,10 @@
 // 打兩個詞（例：「台積電 輝達」）＝找兩個之間怎麼牽在一起，路徑畫成粗黃線、上面列出每一度幾則（「幾度」＝隔幾層關係，跟新聞關係圖的講法一樣）。
 // 時間軸（T-443；使用者 2026-10-23 看「台中恐怖島」截圖：「有辦法也有時間軸嗎」→「我先做7天版」）：右下 ⏱ 打開，圖下面（桌機蓋在圖的下緣）一排每 3 小時一格的長條、
 // 播放鍵與拉桿；拉到某一刻＝之後的光點不畫、亮點只算到那時候；「累積／當時」切換；那一格的新聞列在底下，點了選那顆。全用快照算，不打 API。
-import { Clock, ExternalLink, Maximize2, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
+import { Clock, ExternalLink, Maximize, Maximize2, Minimize, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
-import { fetchNewsGalaxy } from './api'
+import { fetchNewsGalaxy, leaveGalaxyPresence, sendGalaxyPresence } from './api'
+import { PRESENCE_BEAT_S, viewerId, viewersText } from './galaxy-presence'
 import { GalaxyFocus } from './GalaxyFocus'
 import { TL_LIST, TL_STEP_MS, buildTimeline, tlAlpha, tlBinLabel, tlBinMax, tlDayTicks, tlHubCounts, type TlMode } from './galaxy-timeline'
 import {
@@ -99,6 +100,11 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
   const inspRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
+  // 全螢幕（T-445）：能用瀏覽器全螢幕就用（桌機、Android）；iPhone 不支援一般元素全螢幕，就只用 CSS 鋪滿整個視窗
+  const [full, setFull] = useState(false)
+  // 同時幾個人在看（T-445）：null＝還沒拿到或讀不到（就不顯示）
+  const [viewers, setViewers] = useState<number | null>(null)
   /** 正在拖檢視框：哪根手指、按下時離框左上角多遠 */
   const inspDrag = useRef<{ id: number; dx: number; dy: number } | null>(null)
   // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）；webAt／pathAt：牽連線從什麼時候開始畫（像 graphify 的「路徑逐段點亮」）
@@ -169,6 +175,67 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     setOpen(false)
     setPath(null)
     setPathMsg('')
+  }
+
+  // 心跳：看得到這頁才送，切到背景或關掉就送 leave（別人那邊立刻少一個）
+  useEffect(() => {
+    const id = viewerId()
+    let timer = 0, alive = true, on = false
+    const beat = () =>
+      sendGalaxyPresence(id)
+        .then((r) => alive && setViewers(r.n))
+        .catch(() => alive && setViewers(null)) // 讀不到就不顯示人數，星雲圖照常
+    const start = () => {
+      if (on) return
+      on = true
+      void beat()
+      timer = window.setInterval(beat, PRESENCE_BEAT_S * 1000)
+    }
+    const stop = () => {
+      if (!on) return
+      on = false
+      window.clearInterval(timer)
+      leaveGalaxyPresence(id)
+    }
+    const onVis = () => (document.visibilityState === 'visible' ? start() : stop())
+    onVis()
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pagehide', stop)
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pagehide', stop)
+      stop()
+    }
+  }, [])
+
+  // 全螢幕：按 Esc 或瀏覽器自己退出全螢幕 → 跟著退；鋪滿時頁面不捲
+  useEffect(() => {
+    const onChange = () => !document.fullscreenElement && setFull(false)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+  useEffect(() => {
+    if (!full) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // 「單獨看」開著時 Esc 先關它
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.gxf') && setFull(false)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [full])
+  const toggleFull = () => {
+    if (full) {
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+      setFull(false)
+      return
+    }
+    setFull(true)
+    // 不支援或被擋（iPhone）就只用 CSS 鋪滿，不算錯
+    sectionRef.current?.requestFullscreen?.().catch(() => undefined)
   }
 
   useEffect(() => {
@@ -725,8 +792,16 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
     inspRef.current?.classList.remove('moving')
   }
   return (
-    <section className="gx">
-      <p className="gx-sum">{galaxySummary(data)}</p>
+    <section className={`gx${full ? ' full' : ''}`} ref={sectionRef}>
+      <p className="gx-sum">
+        {galaxySummary(data)}
+        {viewers !== null && (
+          <span className="gx-live" title="現在開著星雲圖的人數（含你）">
+            <i aria-hidden="true" />
+            {viewersText(viewers)}
+          </span>
+        )}
+      </p>
       <div className="gx-stage" ref={stageRef}>
         <canvas ref={canvasRef} />
         <div ref={labelsRef} />
@@ -957,6 +1032,9 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </button>
           <button className={tl.on ? 'on' : ''} onClick={toggleTl} aria-pressed={tl.on} aria-label="時間軸" title="時間軸（開／關）">
             <Clock size={17} aria-hidden="true" />
+          </button>
+          <button className={full ? 'on' : ''} onClick={toggleFull} aria-pressed={full} aria-label={full ? '離開全螢幕' : '全螢幕'} title={full ? '離開全螢幕（Esc）' : '全螢幕'}>
+            {full ? <Minimize size={17} aria-hidden="true" /> : <Maximize size={17} aria-hidden="true" />}
           </button>
         </div>
       </div>

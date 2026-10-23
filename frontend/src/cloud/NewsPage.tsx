@@ -34,7 +34,7 @@ import {
 } from './news'
 import { classOf, type NewsGraph as NewsGraphData } from './news-graph'
 import { NewsDigest } from './NewsDigest'
-import { galaxyFromUrl, withoutView } from './tabs'
+import { GALAXY_PATH, galaxyFromUrl, withoutView } from './tabs'
 import { NewsReview } from './NewsReview'
 import { NewsReader } from './NewsReader'
 import { NewsSearchResults } from './NewsSimilar'
@@ -79,6 +79,10 @@ export function NewsPage({
   const [jumpToGalaxy] = useState(() => galaxyFromUrl(window.location.href))
   const [mode, setMode] = useState<'list' | 'galaxy'>(jumpToGalaxy ? 'galaxy' : 'list')
   const galaxyRef = useRef<HTMLDivElement>(null)
+  // 從專屬連結 /galaxy 進來、切到清單：網址回 /（不然重新整理又跳回全景）
+  useEffect(() => {
+    if (mode === 'list' && window.location.pathname === GALAXY_PATH) window.history.replaceState(null, '', '/' + window.location.search + window.location.hash)
+  }, [mode])
   useEffect(() => {
     if (!jumpToGalaxy) return
     window.history.replaceState(null, '', withoutView(window.location.href))
