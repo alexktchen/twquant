@@ -1,4 +1,4 @@
-/* 新聞全景（T-418）：黑底發光星雲；標籤是黑底白框等寬字（影片的樣子）；最大三團黃框；按鈕在右下 */
+/* 新聞全景（T-418）：黑底發光星雲；標籤樣式見下面 .gx-lbl；按鈕在右下 */
 /* 滿版（使用者 2026-10-21）：圖不受 920px 新聞欄限制、桌機高到只留 140px；上下兩行字仍對齊新聞欄。
    滾輪在圖上是縮放、手指在圖上是旋轉，所以左右各留 16px 能捲頁的邊（使用者：「星雲圖左右留一點給 scrollbar」） */
 .gx { margin-top: 12px; padding-bottom: 48px; }
@@ -10,16 +10,27 @@
 }
 .gx-stage:active { cursor: grabbing; }
 .gx-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* 標籤（使用者 2026-10-23：「標籤可以改一下樣式嗎」）：原本是等寬字＋白框黑底（影片的樣子），改成跟網站同字型的圓角籤——
+   亮點依類別上色（台股橘、國際藍、主題青），框線用同色淡化；主題名是細字加字距，前三大黃色發光；選中的亮點黃框；暗掉的幾乎隱形不擋畫面 */
 .gx-lbl {
   position: absolute; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none; visibility: hidden;
-  background: rgba(5, 5, 6, .82); border: 1px solid #d8cbc5; color: #f3e9e4; padding: 2px 7px;
-  font: 13px/1.4 ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", monospace; letter-spacing: .03em;
+  display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 9px; border-radius: 999px;
+  background: rgba(8, 7, 9, .78); border: 1px solid rgba(243, 233, 228, .22); color: #f3e9e4;
+  font: 600 13px/1.5 -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif; letter-spacing: .01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  transition: opacity .25s ease;
 }
-.gx-lbl small { color: #9c8f8a; margin-left: 6px; font-size: 12.5px; }
-.gx-lbl.hot { border-color: #ffd23f; color: #ffd23f; box-shadow: 0 0 12px rgba(255, 210, 63, .25); }
-.gx-lbl.hub { border-color: #6b5a54; background: rgba(5, 5, 6, .7); font-size: 12.5px; padding: 1px 6px; }
-.gx-lbl.hub.tw { color: #ffb199; } .gx-lbl.hub.abroad { color: #b9d3ff; } .gx-lbl.hub.cluster { color: #8ff0df; }
-.gx-lbl.dim { opacity: .18; }
+.gx-lbl small { margin: 0; font-size: 11.5px; font-weight: 500; color: #9c8f8a; font-variant-numeric: tabular-nums; }
+/* 主題名：沒有底、只有淡淡一條下線，字距拉開跟亮點區分 */
+.gx-lbl:not(.hub) { padding: 1px 2px 2px; border-radius: 0; border-width: 0 0 1px; border-color: rgba(243, 233, 228, .35); background: none; backdrop-filter: none; -webkit-backdrop-filter: none; font-weight: 500; letter-spacing: .08em; color: #d8cbc5; }
+.gx-lbl.hot { color: #ffd23f; border-color: rgba(255, 210, 63, .7); font-weight: 700; text-shadow: 0 0 10px rgba(255, 210, 63, .45), 0 1px 2px rgba(0, 0, 0, .8); }
+.gx-lbl.hot small { color: rgba(255, 210, 63, .7); }
+.gx-lbl.hub.tw { color: #ffb199; border-color: rgba(255, 122, 89, .45); }
+.gx-lbl.hub.abroad { color: #b9d3ff; border-color: rgba(127, 178, 255, .45); }
+.gx-lbl.hub.cluster { color: #8ff0df; border-color: rgba(45, 212, 191, .45); }
+.gx-lbl.hub.on { color: #ffd23f; border-color: #ffd23f; background: rgba(20, 16, 6, .92); box-shadow: 0 0 14px rgba(255, 210, 63, .35); }
+.gx-lbl.hub.on small { color: rgba(255, 210, 63, .75); }
+.gx-lbl.dim { opacity: .1; }
 .gx-insp {
   position: absolute; z-index: 5; width: min(320px, calc(100% - 20px)); background: rgba(4, 4, 5, .95); border: 1px solid #e9ddd8;
   box-shadow: 0 10px 40px rgba(0, 0, 0, .6); padding: 9px 12px 12px; cursor: default;

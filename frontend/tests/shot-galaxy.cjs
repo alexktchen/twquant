@@ -72,10 +72,10 @@ function fakeGalaxy() {
     await page.route('**/api/access', (r) => r.fulfill({ json: { features: [] } }))
     await page.route('**/api/watchlist', (r) => r.fulfill({ json: { max: 20, date: null, items: [] } }))
     await page.route('**/api/trades', (r) => r.fulfill({ json: { today: '2026-10-22', items: [], max: 50 } }))
-    await page.route('**/api/news/items**', (r) => r.fulfill({ json: { items: [], next: null } }))
-    await page.route('**/api/news/health', (r) => r.fulfill({ json: { now: '2026-10-22T10:30:00Z', last_ok_at: '2026-10-22T10:30:00Z', stale: false, sources: [] } }))
-    await page.route('**/api/news/digest', (r) => r.fulfill({ json: { as_of: '2026-10-22T10:30:00Z', base_days: 7, topics: { items: [], everywhere: [] }, multi: [], hot: [] } }))
-    await page.route('**/api/news/galaxy', (r) => r.fulfill({ json: galaxy }))
+    await page.route('**/news/items**', (r) => r.fulfill({ json: { items: [], next: null } }))
+    await page.route('**/news/health', (r) => r.fulfill({ json: { now: '2026-10-22T10:30:00Z', last_ok_at: '2026-10-22T10:30:00Z', stale: false, sources: [] } }))
+    await page.route('**/news/digest', (r) => r.fulfill({ json: { as_of: '2026-10-22T10:30:00Z', base_days: 7, topics: { items: [], everywhere: [] }, multi: [], hot: [] } }))
+    await page.route('**/news/galaxy', (r) => r.fulfill({ json: galaxy }))
     // 證據句（T-437）：每則對每個問到的實體都回一段「命中字前後各 20 字」
     await page.route('**/news/evidence**', (r) => {
       const u = new URL(r.request().url())
