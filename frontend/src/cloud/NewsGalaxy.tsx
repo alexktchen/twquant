@@ -13,7 +13,7 @@
 // 時間軸（T-443；使用者 2026-10-23 看「台中恐怖島」截圖：「有辦法也有時間軸嗎」→「我先做7天版」）：右下 ⏱ 打開，圖下面（桌機蓋在圖的下緣）一排每 3 小時一格的長條、
 // 播放鍵與拉桿；拉到某一刻＝之後的光點不畫、亮點只算到那時候；「累積／當時」切換；那一格的新聞列在底下，點了選那顆。全用快照算，不打 API。
 import { Clock, ExternalLink, Maximize2, Minus, Pause, Play, Plus, RotateCw, Search, Undo2, X } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { fetchNewsGalaxy } from './api'
 import { GalaxyFocus } from './GalaxyFocus'
 import { TL_LIST, TL_STEP_MS, buildTimeline, tlAlpha, tlBinLabel, tlBinMax, tlDayTicks, tlHubCounts, type TlMode } from './galaxy-timeline'
@@ -35,6 +35,7 @@ import {
   hubPath,
   hubRadius,
   hubTypeLabel,
+  inspectorAt,
   hubWeb,
   parseQuery,
   pickAt,
@@ -98,8 +99,10 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
   const inspRef = useRef<HTMLDivElement>(null)
+  /** 正在拖檢視框：哪根手指、按下時離框左上角多遠 */
+  const inspDrag = useRef<{ id: number; dx: number; dy: number } | null>(null)
   // fit：搜尋選了東西就拉近到看得清牽連的比例（數字變了就做一次）；webAt／pathAt：牽連線從什麼時候開始畫（像 graphify 的「路徑逐段點亮」）
-  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0, tl: null as { cursor: number; mode: TlMode } | null, tlOf: [] as number[] })
+  const live = useRef({ sel: null as Sel, auto: true, reset: 0, zoom: 1, fit: 0, web: null as HubWeb | null, path: null as { ids: string[]; n: number[] } | null, webAt: 0, pathAt: 0, inspPos: null as { x: number; y: number } | null, tl: null as { cursor: number; mode: TlMode } | null, tlOf: [] as number[] })
   const timeline = useMemo(() => (data ? buildTimeline(data.items, data.built, data.days) : null), [data])
   const graph = useMemo(() => (data ? hubGraph(data) : null), [data])
   const web = useMemo(() => (data && graph && sel?.kind === 'hub' ? hubWeb(data, graph, sel.id) : null), [data, graph, sel])
@@ -492,13 +495,12 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
             ctx.strokeRect(p[0] - 9, p[1] - 9, 18, 18)
           }
           const w = insp.offsetWidth, h = insp.offsetHeight
-          let x = dock ? (W - w) / 2 : p[0] + 18, y = dock ? H - 50 - h : p[1] - h - 14
-          if (x + w > W - 8) x = p[0] - w - 18
-          if (x < 8) x = 8
-          if (y < 8) y = p[1] + 18
-          if (y + h > H - 50) y = Math.max(8, H - 50 - h)
-          insp.style.left = `${x}px`
-          insp.style.top = `${y}px`
+          // 桌機：右上角或使用者拖到的地方（不再跟著選的那顆跑、不蓋牽連線）；時間軸蓋在圖的下緣，框不要壓到它
+          const tl = stage.parentElement?.querySelector<HTMLElement>('.gx-tl')
+          const tlTop = tl ? tl.getBoundingClientRect().top - stage.getBoundingClientRect().top : H
+          const at = dock ? { x: (W - w) / 2, y: H - 50 - h } : inspectorAt(W, H, w, h, lv.inspPos, Math.max(50, H - tlTop + 8))
+          insp.style.left = `${at.x}px`
+          insp.style.top = `${at.y}px`
         }
       }
       raf = requestAnimationFrame(draw)
@@ -704,6 +706,24 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
       </div>
     )
   })()
+  // 拖檢視框（使用者 2026-10-23：「彈窗可以動態移動」）：抓上面那條或標題拖；雙擊上面那條回右上角
+  const onInspDown = (e: RPointerEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement, el = inspRef.current
+    if (!el || !t.closest('.gx-h,.gx-t') || t.closest('button,a')) return
+    el.setPointerCapture(e.pointerId)
+    inspDrag.current = { id: e.pointerId, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop }
+    el.classList.add('moving')
+    e.preventDefault()
+  }
+  const onInspMove = (e: RPointerEvent<HTMLDivElement>) => {
+    const d = inspDrag.current
+    if (d?.id === e.pointerId) live.current.inspPos = { x: e.clientX - d.dx, y: e.clientY - d.dy }
+  }
+  const onInspUp = (e: RPointerEvent<HTMLDivElement>) => {
+    if (inspDrag.current?.id !== e.pointerId) return
+    inspDrag.current = null
+    inspRef.current?.classList.remove('moving')
+  }
   return (
     <section className="gx">
       <p className="gx-sum">{galaxySummary(data)}</p>
@@ -801,7 +821,19 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           </div>
         )}
         {(item || hub || topic) && (
-          <div className={`gx-insp${hub || topic ? ' hub' : ''}`} ref={inspRef}>
+          <div
+            className={`gx-insp${hub || topic ? ' hub' : ''}`}
+            ref={inspRef}
+            onPointerDown={onInspDown}
+            onPointerMove={onInspMove}
+            onPointerUp={onInspUp}
+            onPointerCancel={onInspUp}
+            onDoubleClick={(e) => {
+              // 拖的時候框抓住了指標，雙擊的 target 會是整個框，所以用座標判斷是不是點在上面那條
+              const r = inspRef.current?.querySelector('.gx-h')?.getBoundingClientRect()
+              if (r && e.clientY >= r.top && e.clientY <= r.bottom) live.current.inspPos = null
+            }}
+          >
             <button className="gx-x" onClick={() => setSel(null)} aria-label="關閉">
               <X size={16} aria-hidden="true" />
             </button>
@@ -920,7 +952,7 @@ export function NewsGalaxy({ onStock }: { onStock: (sid: string, name: string) =
           <button onClick={() => { live.current.zoom = 1 / 1.5; setAuto(false) }} aria-label="縮小">
             <Minus size={17} aria-hidden="true" />
           </button>
-          <button onClick={() => { live.current.reset += 1; live.current.sel = null; setSel(null) }} aria-label="回到一開始" title="回到一開始">
+          <button onClick={() => { live.current.reset += 1; live.current.sel = null; live.current.inspPos = null; setSel(null) }} aria-label="回到一開始" title="回到一開始">
             <Undo2 size={17} aria-hidden="true" />
           </button>
           <button className={tl.on ? 'on' : ''} onClick={toggleTl} aria-pressed={tl.on} aria-label="時間軸" title="時間軸（開／關）">
