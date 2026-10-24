@@ -46,7 +46,7 @@ export function createGame(ctx) {
   function startRound(issue, hero, waveNo, isFinal) {
     clearRound(); Object.assign(G, { phase: 'round', t: 0, approval: RC.startApproval, issue, waveNo, final: !!isFinal, kills: 0, leaked: 0, raids: 0, surges: 0, spawnedTotal: 0, speed: 1, paused: false, windLeft: 0, surgeT: 0, log: [], ultCd: 0, focusCd: 0 });
     const hw = people.makeWalker('citizen', goalCenter.clone().add(new THREE.Vector3(0, 0.03, 1.1)), hero.cls); hw.pose = 'wave'; hw.nick = hero.nick; hw.cfg = C.heroes[hero.cls]; hw.cd = 0; hw.route = null; hw.s = 0;
-    hw.sprite = textSprite(hero.nick || hw.cfg.name, { bg: '#1f4e79', fg: '#fff8f4', size: 0.34 }); scene.add(hw.sprite); G.hero = hw;
+    hw.sprite = textSprite(hero.nick || hw.cfg.name, { bg: '#1f4e79', fg: '#fff8f4', size: 0.3 }); hw.sprite.userData.w0 = hw.sprite.scale.x; hw.sprite.userData.h0 = hw.sprite.scale.y; scene.add(hw.sprite); G.hero = hw;
     people.build([...G.residents, hw]);
     buildSchedule(issue); G.raidT = RC.raid.minGap + Math.random() * (RC.raid.maxGap - RC.raid.minGap); G.windT = RC.windShift.minGap + Math.random() * (RC.windShift.maxGap - RC.windShift.minGap);
     addLog(`第 ${waveNo} 波開始：${issue.tag}「${issue.title}」，${G.queue.length} 隻從 ${issue.routes.map(r => C.landings[r].name).join('、')} 登陸`, G.final ? 'bad' : '');

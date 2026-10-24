@@ -19,7 +19,7 @@ export const CONFIG = {
     projSpeed: 9,
   },
   // 居民（原本就住在島上的人）：平常在步道上散步，有敵人時會走過去勸退。
-  residents: { perIsland: 5, speed: 0.6, engageRadius: 9, meleeRange: 0.45, dps: 9, maxPerTarget: 3, roles: ['citizen','elder','child','parent','officeworker','youth','cyclist','worker','hiker'] },
+  residents: { perIsland: 7, speed: 0.6, engageRadius: 9, meleeRange: 0.45, dps: 9, maxPerTarget: 3, roles: ['citizen','elder','child','parent','officeworker','youth','cyclist','worker','hiker'] },
   // 英雄（登入者）：點島嶼就走過去，自動攻擊射程內的敵人。
   heroes: {
     chief:     { name: '里長伯',   icon: '🧓', color: 0x1f4e79, dmg: 16, rate: 0.55, range: 3.2, style: 'ball',  speed: 1.1, desc: '人面廣，中距離穩定輸出。' },
