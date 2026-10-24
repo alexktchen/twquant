@@ -89,3 +89,29 @@ rclone copy <data_dir>/archive/daily gdrive:twquant-archive/daily/ --progress
 
 本機(或任何有 docker 的機器)照 §3 還原 base dump,再從 Drive 抓 daily/ 後按日期
 順序逐日 `archive-restore` 補到目標日期,`TWQUANT_PG_DSN` 指向還原庫即可。
+
+## 7. 新聞歷史語料（news_hist，2026-10-24 起；使用者之後要關本機）
+
+本機 PG schema `news_hist` 是新聞研究的語料（SPEC-018／D-201）：鉅亨網 2021 起、MOPS 公告、雲端拉回的新聞、提及、
+**Ollama 全語料情緒標籤 105.8 萬對（本機 GPU 跑了 66 小時，最難重做）**、類型標籤。不在全史 base dump 的日常範圍，另外備份：
+
+| 檔案（`data/archive/news_hist/`） | 內容 | 大小 |
+|---|---|---|
+| `news_hist-core-YYYYMMDD.dump` | `pg_dump -Fc -n news_hist`，**不含**向量與可重算的快取表的資料（embeddings、pair_embeddings、item_stock_sim、mention_scans 只有表結構） | 約 0.5 GB |
+| `news_hist-embeddings-YYYYMMDD.npy`＋`-ids.txt.gz`＋`.json` | 新聞向量（bge-m3，float16 矩陣＋「item_id<tab>模型」清單＋sha256）；`scripts/news_hist_export_vectors.py` 產生 | 約 1.5 GB |
+
+不備份 `pair_embeddings`（只給 D-205 情緒小模型用，判定沒過；要的話用 `news sentiment-pair-embed` 從核心資料重算）。
+`pg_dump` 會把 halfvec 寫成文字，向量那份壓完 7.9 GB，所以向量改存二進位。
+
+```bash
+# 產生（本機 docker PG）
+docker exec twquant-pg-1 pg_dump -U twquant -d twquant -Fc -Z 6 -n news_hist   --exclude-table-data=news_hist.embeddings --exclude-table-data=news_hist.pair_embeddings   --exclude-table-data=news_hist.item_stock_sim --exclude-table-data=news_hist.mention_scans   -f /tmp/news_hist-core-YYYYMMDD.dump
+docker cp twquant-pg-1:/tmp/news_hist-core-YYYYMMDD.dump D:/project/twquant/data/archive/news_hist/
+uv run python scripts/news_hist_export_vectors.py --out D:/project/twquant/data/archive/news_hist
+# 上傳
+rclone copy D:/project/twquant/data/archive/news_hist gdrive:twquant-archive/news_hist/ --progress
+# 還原：pg_restore 核心 dump（要有 pgvector 的映像）；向量讀 npy＋ids 逐批 insert 回 news_hist.embeddings
+```
+
+⚠ 2026-10-24 發現這台電腦的 `%APPDATA%cloneclone.conf` 不見了（資料夾從 10/10 起是空的；GitHub Secret `RCLONE_CONF` 還在但讀不到）。
+上傳前要由使用者本人重跑 §4 的 `rclone config create gdrive drive scope=drive.file`。
