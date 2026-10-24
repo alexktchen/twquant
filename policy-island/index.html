@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>萬安政策島 TD</title>
-<meta name="description" content="非官方自製的 3D 政策島塔防：登入成為英雄，和所有人一起阻擋一波波喊著護樹、拆圓環的青鳥青蛙網軍，守住信義區市政府。">
+<meta name="description" content="非官方自製的 3D 政策島塔防：登入成為英雄，和島上的居民一起阻擋一波波喊著護樹、拆圓環的青鳥青蛙網軍，守住信義區市政府。">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
@@ -12,132 +12,101 @@
 </head>
 <body>
 <!-- artifact:body:start -->
-<div class="wrap">
-  <header class="brand">
-    <div>
-      <div class="future">TAIPEI <span>HOLD THE LINE.</span></div>
-      <h1 id="siteName">萬安政策島</h1>
-      <div class="proj"><em>3D TD</em> <span id="siteSub">守住市政府</span></div>
-    </div>
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
+<main id="app">
+  <div id="labels" aria-hidden="true"></div>
+  <div id="stage" aria-label="3D 台北政策島：青鳥、青蛙等網軍沿步道與橋撲向市政府，居民與英雄前往阻擋"></div>
+  <header class="brand panel">
+    <div class="future">TAIPEI <span>HOLD THE LINE.</span></div>
+    <h1 id="siteName">萬安政策島</h1>
+    <div class="proj"><em>3D TD</em> <span id="siteSub">守住市政府</span></div>
     <div class="tag" id="siteTag">非官方・網友自製</div>
   </header>
-
-  <section class="gstrip" aria-label="全體戰績">
-    <div><b id="gWaves">0</b><span>波綠營攻擊已阻擋</span></div>
+  <section class="gstrip panel" aria-label="全體戰績">
+    <div><b id="gWaves">0</b><span>波攻擊已阻擋</span></div>
     <div><b id="gBlocked">0</b><span>隻網軍被擋下</span></div>
-    <div><b id="gHeroes">0</b><span>位英雄參戰</span></div>
+    <div><b id="gHeroes">0</b><span>位英雄</span></div>
     <div class="cd" id="gCountdown">總攻擊倒數</div>
   </section>
-
-  <section class="hud" aria-label="城市狀態">
-    <div class="stat"><div class="k">剩餘時間</div><div class="v" id="timer">3:00</div><div class="k2" id="waveLabel">—</div></div>
-    <div class="stat"><div class="k">預算</div><div class="v"><span id="money">0</span><small>億</small></div><div class="k2" id="enemies"></div></div>
-    <div class="stat"><div class="k">市民滿意度</div><div class="v"><span id="approval">100</span><small>%</small></div><div class="meter"><i id="approvalBar"></i></div></div>
-    <div class="stat issue"><div class="k">議題</div><div class="v small" id="issueLabel">在大廳選議題出戰</div></div>
-    <div class="controls">
-      <button id="btnPause" type="button" aria-pressed="false" disabled>暫停</button>
-      <button id="btnSpeed" type="button" aria-pressed="false" disabled>2×</button>
-    </div>
+  <section class="hud panel" id="hudPanel" aria-label="城市狀態">
+    <div class="row"><span class="k">剩餘</span><b id="timer">3:00</b><span class="k2" id="waveLabel">大廳</span></div>
+    <div class="row"><span class="k">滿意度</span><b><span id="approval">100</span>%</b><span class="meter"><i id="approvalBar"></i></span></div>
+    <div class="k2" id="enemies"></div>
+    <div class="btns"><button id="btnPause" type="button" aria-pressed="false" disabled>暫停</button><button id="btnSpeed" type="button" aria-pressed="false" disabled>2×</button><button id="btnHome" type="button" title="回到全景（H）">全景</button><button id="btnFull" type="button">⤢ 全螢幕</button></div>
   </section>
+  <section class="hero panel" id="heroPanel" hidden>
+    <div class="eyebrow">HERO・英雄</div>
+    <h2 id="heroName"></h2>
+    <p class="note" id="focusCd"></p>
+    <button id="btnUlt" type="button" class="ult">🙌 台北人站出來（Q）</button>
+  </section>
+  <section class="logp panel" id="logPanel">
+    <button id="btnLogToggle" type="button" class="eyebrow">CITY LOG・城市日誌 ▾</button>
+    <ul class="log" id="log"></ul>
+  </section>
+  <aside class="card panel" id="card" hidden aria-label="政策內容">
+    <button class="close" id="btnCardClose" type="button" aria-label="關閉">×</button>
+    <div class="eyebrow" id="cardTag"></div>
+    <h2 id="cardTitle"></h2>
+    <p class="where" id="cardWhere"></p>
+    <p class="lead" id="cardSummary"></p>
+    <ul id="cardFacts"></ul>
+    <p class="note" id="cardStatus"></p>
+    <button id="btnCardFly" type="button">看這座島</button>
+  </aside>
+  <div class="banner" id="banner"></div>
+  <div class="hint" id="hint"></div>
 
-  <div class="layout">
-    <section class="stage-wrap">
-      <div class="stage" id="stage" aria-label="3D 台北政策島：青鳥、青蛙等網軍沿河道撲向信義區市政府"></div>
-      <div class="banner" id="banner"></div>
-      <div class="hint" id="hint"></div>
-
-      <div class="overlay" id="lobby">
-        <div class="box lobby">
-          <div class="lobby-head">
-            <div class="eyebrow">LOBBY・出戰大廳</div>
-            <h2>一格政見，守一座城。</h2>
-            <p class="lead">每一場約 3 分鐘。青鳥、青蛙、鸚鵡、毛蟲、變色龍、鍵盤鼠會依當天的議題，從淡水河、關渡、基隆河、景美溪撲向市政府。你是登入的英雄，和所有進來的人一起把這一波擋下來。</p>
-            <p class="count" id="countdown"></p>
-          </div>
-          <div class="lobby-grid">
-            <div class="col">
-              <h3>1・你的英雄</h3>
-              <label class="field">暱稱<input id="nick" type="text" maxlength="24" placeholder="會顯示在排行榜" autocomplete="nickname"></label>
-              <div class="classes" id="classes"></div>
-              <p class="note" id="mine"></p>
-              <p class="note" id="modeNote"></p>
-            </div>
-            <div class="col">
-              <h3>2・這一波的議題</h3>
-              <div class="issues" id="issues"></div>
-            </div>
-            <div class="col">
-              <h3>全體戰績</h3>
-              <div class="lobby-stats" id="lobbyStats"></div>
-              <h3>英雄榜</h3>
-              <ol class="board" id="board"></ol>
-            </div>
-          </div>
-          <button id="btnGo" class="go" type="button">出戰！守住這一波</button>
-          <details class="admin" id="adminBox" hidden>
-            <summary>新增議題攻擊（編輯者）</summary>
-            <form id="issueForm" class="issue-form">
-              <label>代號<input name="iid" required placeholder="例如 metro-fare"></label>
-              <label>標題<input name="title" required maxlength="20" placeholder="例如 捷運票價"></label>
-              <label>標籤<input name="tag" maxlength="16" placeholder="#捷運票價"></label>
-              <label>起始日<input name="startsAt" type="date"></label>
-              <label>強度<input name="intensity" type="number" step="0.1" min="0.5" max="4" value="1.2"></label>
-              <label>魔王<select name="boss"><option value="">無</option><option value="bigv">側翼大 V</option><option value="frogking">大青蛙王</option></select></label>
-              <label class="wide">動物組合（動物:權重，逗號分隔）<input name="mix" value="bird:2, frog:2, mouse:1" placeholder="bird:2, frog:1"></label>
-              <label class="wide">口號（逗號分隔）<input name="chants" placeholder="票價漲了, 出來面對"></label>
-              <label class="wide">一句話描述<input name="desc" maxlength="60"></label>
-              <fieldset class="wide"><legend>路線</legend><label><input type="checkbox" name="routes" value="west" checked>淡水河</label><label><input type="checkbox" name="routes" value="north" checked>關渡</label><label><input type="checkbox" name="routes" value="east">基隆河</label><label><input type="checkbox" name="routes" value="south">景美溪</label></fieldset>
-              <button type="submit">新增</button><span id="issueMsg" class="note"></span>
-            </form>
-          </details>
-        </div>
+  <div class="overlay" id="lobby">
+    <div class="box lobby">
+      <div class="lobby-head">
+        <div class="eyebrow">LOBBY・出戰大廳</div>
+        <h2>一格政見，守一座城。</h2>
+        <p class="lead">十二座島就是台北十二個行政區，政策散落在各島上，點建築可以看內容。每一場約 3 分鐘：青鳥、青蛙、鸚鵡、毛蟲、變色龍、鍵盤鼠依當天的議題，從淡水河、關渡、基隆河、景美溪登陸，沿著步道和橋走向信義區市政府。島上的居民會自己跑去擋，你是登入的英雄，點島嶼就能帶著居民一起守。</p>
+        <p class="count" id="countdown"></p>
       </div>
-
-      <div class="overlay" id="endOverlay" hidden>
-        <div class="box">
-          <div class="eyebrow">RESULT</div>
-          <h2 id="endTitle">第 1 波已阻擋！</h2>
-          <p class="lead" id="endText"></p>
-          <p class="global" id="endGlobal"></p>
-          <p class="note" id="endStats"></p>
-          <div class="btns"><button id="btnAgain" type="button" class="go">再守一波</button><button id="btnLobby" type="button">回大廳</button></div>
-        </div>
+      <div class="lobby-grid">
+        <div class="col"><h3>1・你的英雄</h3><label class="field">暱稱<input id="nick" type="text" maxlength="24" placeholder="會顯示在排行榜" autocomplete="nickname"></label><div class="classes" id="classes"></div><p class="note" id="mine"></p><p class="note" id="modeNote"></p></div>
+        <div class="col"><h3>2・這一波的議題</h3><div class="issues" id="issues"></div></div>
+        <div class="col"><h3>全體戰績</h3><div class="lobby-stats" id="lobbyStats"></div><h3>英雄榜</h3><ol class="board" id="board"></ol></div>
       </div>
-    </section>
-
-    <aside class="side">
-      <div class="panel" id="heroPanel" hidden>
-        <div class="eyebrow">HERO・英雄</div>
-        <h2 id="heroName"></h2>
-        <p class="note" id="focusCd"></p>
-        <button id="btnUlt" type="button" class="ult">🙌 台北人站出來</button>
-        <p class="note">大招：全場敵人扣 60% 血並減速。快捷鍵 Q。</p>
-      </div>
-      <div class="panel">
-        <div class="eyebrow">THE POLICY INDEX</div>
-        <h2>把政績，蓋起來。</h2>
-        <div class="tw" id="palette"></div>
-      </div>
-      <div class="panel sel" id="selPanel" hidden>
-        <div class="eyebrow">SELECTED</div>
-        <h2 id="selName"></h2>
-        <div id="selRows"></div>
-        <div class="act"><button class="up" id="btnUpgrade" type="button">升級</button><button id="btnSell" type="button">拆除</button></div>
-      </div>
-      <div class="panel">
-        <div class="eyebrow">CITY LOG・城市日誌</div>
-        <ul class="log" id="log"></ul>
-      </div>
-    </aside>
+      <button id="btnGo" class="go" type="button">出戰！守住這一波</button>
+      <details class="admin" id="adminBox" hidden>
+        <summary>後台：政策與議題（編輯者）</summary>
+        <h3>政策建築</h3>
+        <form id="policyForm" class="issue-form">
+          <label class="wide">選一筆編輯，或新增<select id="pSel"></select></label>
+          <label>代號<input name="pid" required placeholder="例如 metro-east"></label><label>標題<input name="ptitle" required maxlength="20"></label><label>標籤<input name="ptag" maxlength="16" placeholder="#交通"></label>
+          <label>建築外型<select name="pModel" id="pModel"></select></label><label class="wide2">行政區<select name="pDistrict" id="pDistrict"></select></label>
+          <label class="wide">一句話摘要<input name="psummary" maxlength="120"></label><label class="wide">重點（逗號分隔，最多 6 條）<input name="pfacts"></label>
+          <button type="submit">儲存政策</button><span id="pMsg" class="note"></span>
+        </form>
+        <h3>議題攻擊</h3>
+        <form id="issueForm" class="issue-form">
+          <label class="wide">選一筆編輯，或新增<select id="iSel"></select></label>
+          <label>代號<input name="iid" required placeholder="例如 metro-fare"></label><label>標題<input name="title" required maxlength="20" placeholder="例如 捷運票價"></label><label>標籤<input name="tag" maxlength="16" placeholder="#捷運票價"></label>
+          <label>起始日<input name="startsAt" type="date"></label><label>強度<input name="intensity" type="number" step="0.1" min="0.5" max="4" value="1.2"></label><label>魔王<select name="boss"><option value="">無</option><option value="bigv">側翼大 V</option><option value="frogking">大青蛙王</option></select></label>
+          <label class="wide">動物組合（動物:權重，逗號分隔）<input name="mix" value="bird:2, frog:2, mouse:1"></label><label class="wide">口號（逗號分隔）<input name="chants" placeholder="票價漲了, 出來面對"></label><label class="wide">一句話描述<input name="desc" maxlength="60"></label>
+          <fieldset class="wide"><legend>登陸方向</legend><label><input type="checkbox" name="routes" value="west" checked>淡水河</label><label><input type="checkbox" name="routes" value="north" checked>關渡</label><label><input type="checkbox" name="routes" value="east">基隆河</label><label><input type="checkbox" name="routes" value="south">景美溪</label></fieldset>
+          <button type="submit">新增</button><span id="issueMsg" class="note"></span>
+        </form>
+      </details>
+      <p class="foot" id="disclaimer"></p>
+    </div>
   </div>
-  <p class="foot" id="disclaimer"></p>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/config.js"></script>
+  <div class="overlay" id="endOverlay" hidden>
+    <div class="box">
+      <div class="eyebrow">RESULT</div>
+      <h2 id="endTitle">第 1 波已阻擋！</h2>
+      <p class="lead" id="endText"></p>
+      <p class="global" id="endGlobal"></p>
+      <p class="note" id="endStats"></p>
+      <div class="btns2"><button id="btnAgain" type="button" class="go">再守一波</button><button id="btnLobby" type="button">回大廳</button></div>
+    </div>
+  </div>
+</main>
 <script src="js/store.js"></script>
-<script src="js/world.js"></script>
-<script src="js/game.js"></script>
-<script src="js/ui.js"></script>
+<script type="module" src="js/main.js"></script>
 <!-- artifact:body:end -->
 </body>
 </html>

@@ -1,11 +1,11 @@
 /* 共享狀態轉接器。
-   - 在 claude.ai artifact 裡：用 db / user 能力，heroes/<uid> 每人一份（只有本人能寫），issues/<id> 由編輯者新增。
+   - 在 claude.ai artifact 裡：用 db / user 能力，heroes/<uid> 每人一份（只有本人能寫），issues/<id>、policies/<id> 由編輯者新增。
    - 其他地方（本機、拆出去的靜態站）：退回 localStorage，只記本機。拆站時把 remote 部分換成 Supabase/Firebase 即可，介面不變。
    介面：init(), onGlobal(fn), onLeaderboard(fn), hero(), saveHero(patch), recordRound(result), listIssues(), addIssue(issue), identity */
 window.PIStore = (function () {
   const LS_HERO = 'pi.hero.v1';
   const state = { db: null, user: null, uid: null, canWrite: null, canEdit: false, me: { name: '', avatarUrl: '', color: '' },
-    hero: null, heroes: [], issuesRemote: [], subs: { global: [], leaderboard: [], issues: [] }, mode: 'local' };
+    hero: null, heroes: [], issuesRemote: [], policiesRemote: [], subs: { global: [], leaderboard: [], issues: [], policies: [] }, mode: 'local' };
   const safe = (fn, d) => { try { return fn(); } catch (e) { return d; } };
   const loadLocalHero = () => safe(() => JSON.parse(localStorage.getItem(LS_HERO) || 'null'), null);
   const saveLocalHero = (h) => safe(() => localStorage.setItem(LS_HERO, JSON.stringify(h)), null);
@@ -13,6 +13,7 @@ window.PIStore = (function () {
     if (ch === 'global') { const g = totals(); state.subs.global.forEach(fn => fn(g)); }
     if (ch === 'leaderboard') state.subs.leaderboard.forEach(fn => fn(leaderboard()));
     if (ch === 'issues') state.subs.issues.forEach(fn => fn(listIssues()));
+    if (ch === 'policies') state.subs.policies.forEach(fn => fn(listPolicies()));
   }
   function totals() {
     const list = state.mode === 'remote' ? state.heroes : (state.hero ? [state.hero] : []);
@@ -25,6 +26,11 @@ window.PIStore = (function () {
   function listIssues() {
     const byId = new Map(PI_CONFIG.issues.map(i => [i.id, i]));
     for (const i of state.issuesRemote) byId.set(i.id, { ...byId.get(i.id), ...i });
+    return [...byId.values()];
+  }
+  function listPolicies() {
+    const byId = new Map(PI_CONFIG.policies.map(i => [i.id, i]));
+    for (const i of state.policiesRemote) byId.set(i.id, { ...byId.get(i.id), ...i });
     return [...byId.values()];
   }
   async function init() {
@@ -46,10 +52,11 @@ window.PIStore = (function () {
         emit('global'); emit('leaderboard');
       }, err => { console.warn('[store] heroes', err); state.mode = 'local'; emit('global'); emit('leaderboard'); });
       db.collection('issues').limit(200).onSnapshot(snap => { state.issuesRemote = snap.docs.map(d => ({ id: d.id, ...d.data() })); emit('issues'); }, err => console.warn('[store] issues', err));
+      db.collection('policies').limit(500).onSnapshot(snap => { state.policiesRemote = snap.docs.map(d => ({ id: d.id, ...d.data() })); emit('policies'); }, err => console.warn('[store] policies', err));
     }
     return finishInit();
   }
-  function finishInit() { emit('global'); emit('leaderboard'); emit('issues'); return state; }
+  function finishInit() { emit('global'); emit('leaderboard'); emit('issues'); emit('policies'); return state; }
   function hero() { return state.hero; }
   async function saveHero(patch) {
     state.hero = { ...(state.hero || { rounds: 0, kills: 0, finals: 0 }), ...patch };
@@ -67,11 +74,16 @@ window.PIStore = (function () {
     const h = state.hero || { rounds: 0, kills: 0, finals: 0 };
     await saveHero({ rounds: (h.rounds || 0) + 1, kills: (h.kills || 0) + r.kills, finals: (h.finals || 0) + (r.final ? 1 : 0), lastIssue: r.issueId });
   }
+  async function addPolicy(policy) {
+    if (!(state.db && state.canEdit)) throw new Error('只有編輯者可以新增政策');
+    await state.db.doc('policies/' + policy.id).set(policy);
+  }
   async function addIssue(issue) {
     if (!(state.db && state.canEdit)) throw new Error('只有編輯者可以新增議題');
     await state.db.doc('issues/' + issue.id).set(issue);
   }
-  return { init, hero, saveHero, recordRound, listIssues, addIssue, totals, leaderboard,
+  return { init, hero, saveHero, recordRound, listIssues, addIssue, listPolicies, addPolicy, totals, leaderboard,
+    onPolicies: fn => { state.subs.policies.push(fn); fn(listPolicies()); },
     onGlobal: fn => { state.subs.global.push(fn); fn(totals()); },
     onLeaderboard: fn => { state.subs.leaderboard.push(fn); fn(leaderboard()); },
     onIssues: fn => { state.subs.issues.push(fn); fn(listIssues()); },
