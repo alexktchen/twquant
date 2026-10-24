@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ALLOWED, proxy, SUMMARY_TIMEOUT_MS, UPSTREAM_TIMEOUT_MS, upstreamUrl } from '../functions/_lib/news-proxy.ts'
-import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, needsSummary, nextUntil, readerSummary, shown, shownTime, splitSimilar, taipeiHm, timeLabel, titleKey, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
+import { ageLabel, appendPage, dayTitle, groupByDay, healthLine, mentionChips, needsSummary, nextUntil, readerSummary, shown, shownTime, sentimentMark, splitSimilar, stockMood, taipeiHm, timeLabel, titleKey, type NewsHealth, type NewsRow } from '../src/cloud/news.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
 const BASE = 'https://abc.supabase.co/functions/v1/api/'
@@ -315,3 +315,13 @@ test('T-429 AC6：點開才翻摘要——proxy 只轉 id、逾時給長一點�
   assert.deepEqual(readerSummary(en, 'error'), { text: 'Shares rose 4%.', lang: 'en', note: '摘要暫時翻不了，先顯示英文摘要' })
   assert.deepEqual(readerSummary({ ...en, summary_zh: '股價上漲4%。' }, null), { text: '股價上漲4%。', lang: 'zh', note: null }, '不用另外翻的照 shown()')
 })
+
+test('D-205 A：情緒小標好＝紅、壞＝綠、中性與還沒判斷不標；個股風向只數好壞', () => {
+  assert.equal(sentimentMark(1)?.cls, 'good')
+  assert.equal(sentimentMark(-1)?.text, '壞')
+  assert.equal(sentimentMark(0), null)
+  assert.equal(sentimentMark(null), null)
+  assert.equal(sentimentMark(undefined), null)
+  assert.deepEqual(stockMood([{ sentiment: 1 }, { sentiment: -1 }, { sentiment: 1 }, { sentiment: 0 }, { sentiment: null }, {}]), { good: 2, bad: 1 })
+})
+

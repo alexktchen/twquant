@@ -19,6 +19,7 @@ import {
   mentionChips,
   NEWS_TYPES,
   NEWS_TYPE_LABEL,
+  sentimentMark,
   type NewsType,
   nextUntil,
   reviewLeft,
@@ -338,11 +339,19 @@ export function NewsPage({
                         </span>
                         {hasGraph && (
                           <span className="cq-news-ents">
-                            {ents.chips.map((m) => (
-                              <span key={m.id} className={`cq-news-ent ${classOf(m.type)}`}>
-                                {m.label}
-                              </span>
-                            ))}
+                            {ents.chips.map((m) => {
+                              const mk = sentimentMark(r.sentiment?.[m.id])
+                              return (
+                                <span key={m.id} className={`cq-news-ent ${classOf(m.type)}`}>
+                                  {m.label}
+                                  {mk && (
+                                    <em className={`cq-sent ${mk.cls}`} title={mk.title}>
+                                      {mk.text}
+                                    </em>
+                                  )}
+                                </span>
+                              )
+                            })}
                             {ents.more > 0 && <span className="cq-news-ent-more">+{ents.more}</span>}
                           </span>
                         )}

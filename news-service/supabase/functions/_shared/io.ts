@@ -7,6 +7,7 @@ import type { Pending, SummaryDeps, SummaryItem, TranslateDeps } from '../../../
 import type { CooccurDeps, CooccurEdge, PairCount } from '../../../src/cooccur.ts'
 import type { EntityType } from '../../../src/graph.ts'
 import type { TypeDeps } from '../../../src/types.ts'
+import type { SentimentConfig, SentimentDeps, SentimentStock } from '../../../src/sentiment.ts'
 import { embedText, parseEmbedReply, vecLiteral, type EmbedConfig, type EmbedDeps, type EmbedSource, type NearCluster, type Neighbor } from '../../../src/embed.ts'
 import { sha256Hex } from '../../../src/ingest.ts'
 
@@ -70,9 +71,20 @@ export function pgStore(sql: Sql): NewsStore {
 
 /** 這個 UTC 日（Workers AI 免費額度的日界）新聞這邊已用的 Neurons：翻譯、向量、搜尋共用（D-200 §五）。 */
 export const usedNeurons = (sql: Sql) => async (day: string): Promise<number> => {
+  // 情緒（task＝news_sentiment）有自己的上限（D-218），不算進翻譯／向量的額度
   const [r] = await sql<{ n: number }[]>`
     select coalesce(sum(neurons), 0)::float8 as n from news.llm_usage
-    where ts >= (${day}::date)::timestamp at time zone 'UTC' and ts < ((${day}::date) + 1)::timestamp at time zone 'UTC'`
+    where ts >= (${day}::date)::timestamp at time zone 'UTC' and ts < ((${day}::date) + 1)::timestamp at time zone 'UTC'
+      and task <> 'news_sentiment'`
+  return r.n
+}
+
+/** 某一個 task 這個 UTC 日用了多少 Neurons。 */
+export const usedTaskNeurons = (sql: Sql, task: string) => async (day: string): Promise<number> => {
+  const [r] = await sql<{ n: number }[]>`
+    select coalesce(sum(neurons), 0)::float8 as n from news.llm_usage
+    where ts >= (${day}::date)::timestamp at time zone 'UTC' and ts < ((${day}::date) + 1)::timestamp at time zone 'UTC'
+      and task = ${task}`
   return r.n
 }
 
@@ -379,3 +391,45 @@ export function typeDeps(sql: Sql, version: string): TypeDeps {
     },
   }
 }
+
+/** 新聞情緒（D-205 走 A）：近 window_hours、有台股提及、這一版內容還沒判斷過的新聞；英文要翻完標題才問（用譯文）。 */
+export function sentimentDeps(sql: Sql, cfg: SentimentConfig, ruleVersion: string): SentimentDeps {
+  return {
+    now: () => new Date(),
+    pending: async (limit, windowHours, promptVersion) => {
+      const rows = await sql<{ item_id: string; content_sha: string; title: string; summary: string | null; stocks: SentimentStock[] }[]>`
+        select i.id as item_id, coalesce(v.content_sha, i.content_sha) as content_sha,
+               coalesce(t.title_zh, v.title_orig, i.title_orig) as title,
+               case when i.lang = 'en' then nullif(t.summary_zh, '') else coalesce(v.summary_orig, i.summary_orig) end as summary,
+               json_agg(json_build_object('id', e.id, 'label', e.label) order by e.id) as stocks
+        from news.raw_items i
+        left join lateral (
+          select title_orig, summary_orig, content_sha from news.raw_item_versions
+          where item_id = i.id order by seen_at desc limit 1
+        ) v on true
+        left join news.translations t
+          on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha) and t.status = 'ok'
+        join news.mentions m
+          on m.item_id = i.id and m.content_sha = coalesce(v.content_sha, i.content_sha)
+         and m.rule_version = ${ruleVersion} and m.entity_id like 'tw:%'
+        join news.entities e on e.id = m.entity_id and e.valid_to is null
+        where i.first_seen_at > now() - make_interval(hours => ${windowHours})
+          and (i.lang <> 'en' or t.item_id is not null)
+          and not exists (
+            select 1 from news.item_sentiment s
+            where s.item_id = i.id and s.content_sha = coalesce(v.content_sha, i.content_sha) and s.prompt_version = ${promptVersion}
+          )
+        group by i.id, v.content_sha, i.content_sha, t.title_zh, v.title_orig, i.title_orig, i.lang, t.summary_zh, v.summary_orig, i.summary_orig, i.first_seen_at
+        order by i.first_seen_at desc, i.id
+        limit ${limit}`
+      return rows
+    },
+    usedToday: usedTaskNeurons(sql, 'news_sentiment'),
+    ai: (body) => workersAi(cfg.model)(body),
+    save: async (rows, usage) => {
+      if (rows.length > 0) await sql`insert into news.item_sentiment ${sql(rows)} on conflict do nothing`
+      if (usage.length > 0) await sql`insert into news.llm_usage ${sql(usage)}`
+    },
+  }
+}
+

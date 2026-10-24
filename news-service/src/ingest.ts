@@ -11,6 +11,7 @@ import { parseCnyes, parseFeed, type FeedItem } from './feed.ts'
 import type { EdgeType, GraphConfig } from './graph.ts'
 import { validateMentionConfig, type MentionConfig } from './mention.ts'
 import { validateTranslateConfig, type TranslateConfig } from './translate.ts'
+import { validateSentimentConfig, type SentimentConfig } from './sentiment.ts'
 
 export type Source = {
   id: string
@@ -44,6 +45,8 @@ export type NewsConfig = {
   embed: EmbedConfig
   storage: StorageConfig
   digest: DigestConfig
+  /** D-205 走 A／D-218：新聞情緒（ingest 第七步） */
+  sentiment: SentimentConfig
 }
 
 export type NewsGraphConfig = GraphConfig & {
@@ -97,6 +100,7 @@ export function validateConfig(x: unknown): NewsConfig {
   validateEmbedConfig(c!.embed)
   validateStorageConfig(c!.storage)
   validateDigestConfig(c!.digest)
+  validateSentimentConfig(c!.sentiment)
   return c as NewsConfig
 }
 

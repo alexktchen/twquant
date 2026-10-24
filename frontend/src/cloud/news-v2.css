@@ -286,3 +286,12 @@ button.cq-news-type.on { border-color: currentColor; box-shadow: inset 0 0 0 1px
   /* 只露出頭時裡面不能捲，不然手指一滑把內容捲走了 */
   .cq-sheet.cq-reader.peek { overflow: hidden; }
 }
+
+/* 新聞情緒小標（D-205 走 A）：好＝紅、壞＝綠（台股漲紅跌綠）、中性不標 */
+em.cq-sent { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 4px; font-style: normal; font-size: 12px; font-weight: 700; line-height: 1.5; vertical-align: 1px; }
+em.cq-sent.good { color: var(--up, #f6465d); background: rgba(246, 70, 93, .15); }
+em.cq-sent.bad { color: var(--down, #0ecb81); background: rgba(14, 203, 129, .15); }
+.cq-sn-title em.cq-sent { margin: 0 6px 0 0; }
+.cq-sn-mood { margin: 0 0 6px; font-size: 14px; color: var(--mute); display: flex; align-items: center; gap: 4px; }
+.cq-sn-mood em.cq-sent { font-size: 13px; padding: 1px 6px; }
+
