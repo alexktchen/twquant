@@ -495,3 +495,22 @@ types:
     - {id: policy, label: 政策事故, hint: 法規、裁罰、管制、利率、匯率、關稅、央行、工安、火災、停工、資安、天災, from: [regulation, macro, incident]}
     - {id: market, label: 盤勢行情, hint: 大盤漲跌、外資買賣超、個股漲停跌停、盤前盤後, from: [market]}
     - {id: other, label: 其他, from: [other]}
+
+# 新聞情緒（D-205 §三 走 A、D-218，2026-10-24）：ingest 第七步，雲端 qwen3 判斷「這則新聞對它提到的每檔台股」好／壞／中性。
+# 本機的情緒小模型（D-205 B）判定沒過，本機之後要關機，所以每則新聞進來就問一次雲端 AI（一則一次問完它提到的台股）。
+# 額度自己記帳（task＝news_sentiment），從 llm.yaml 的 1,000 緩衝撥 700，不跟翻譯、向量搶（D-218）。
+# 估計：近 3 天平均一天 261 則新聞、383 對（新聞×股票），每則約 350 輸入 token → 一天約 650 Neurons。
+sentiment:
+  model: "@cf/qwen/qwen3-30b-a3b-fp8"
+  system_suffix: " /no_think"
+  # 提示詞改了要換版本：同一版內容會用新版本重問（舊列留著）
+  prompt_version: "2026-10-24.1"
+  per_run_limit: 40
+  # 只問近 48 小時進來的新聞（網站看近期；不回補舊的，省額度）
+  window_hours: 48
+  max_stocks: 8
+  max_tokens: 300
+  daily_neurons: 700
+  input_neurons_per_1m: 4625
+  output_neurons_per_1m: 30475
+
