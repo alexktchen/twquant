@@ -4,11 +4,12 @@ export const CONFIG = {
   site: {
     name: '萬安政策島', sub: 'TD・守住市政府', tag: '非官方・網友自製', waveWord: '波攻擊',
     credit: '島嶼、人物與場景的做法參考 puma.taipei 的「HEART 政策島」互動頁，重新實作。',
-    disclaimer: '這是網友自製的塔防小遊戲，不是台北市政府或任何競選團隊的官方內容。政策摘要整理自公開報導、僅供遊戲參考，細節以官方資訊為準；地標與建築只是象徵性迷你模型，議題、數值、動物與路線純屬遊戲設定，與任何真實人物或團體無關。',
+    disclaimer: '這是網友自製的塔防小遊戲，不是台北市政府或任何競選團隊的官方內容。政策摘要整理自公開報導、僅供遊戲參考，細節以官方資訊為準；地標與建築只是象徵性迷你模型，議題、數值、動物與路線純屬遊戲設定。市長角色是 Q 版遊戲 NPC，台詞取自政策摘要，不代表本人發言。',
   },
   election: { date: '2026-11-28', tz: 'Asia/Taipei', finalIssueId: 'final' },
   round: {
-    seconds: 180, bossAt: 140, surgeAt: 158, surgeEvery: 1.5, surgePct: 0.35, surgeBelowApproval: 40, wipeAt: 176,
+    seconds: 180, autoNextSeconds: 8, dayStart: 420, dayEnd: 1050, // 一場的天色從 07:00 走到 17:30，不進入夜晚
+    bossAt: 140, surgeAt: 158, surgeEvery: 1.5, surgePct: 0.35, surgeBelowApproval: 40, wipeAt: 176,
     startApproval: 100, approvalFloor: 1,
     baseSpawn: 26, bursts: [ { from: 3, to: 45, share: 0.35 }, { from: 55, to: 98, share: 0.35 }, { from: 106, to: 138, share: 0.30 } ],
     windShift: { minGap: 30, maxGap: 55, duration: 5, speedMul: 1.5 },
@@ -18,11 +19,13 @@ export const CONFIG = {
     focusDmgMul: 3, focusCooldown: 1.4, ultCooldown: 45, ultPct: 0.6, ultSlow: 0.6, ultSlowTime: 3,
     projSpeed: 9,
   },
+  // 市長 NPC：依行政區順序巡迴每棟政策建築宣傳；回合中每次演講 +滿意度，附近居民會停下來揮手
+  mayor: { name: '蔣萬安市長', speed: 0.5, speechSeconds: 5.5, pauseSeconds: 0.8, approach: 0.45, sloganMax: 22, approvalPerSpeech: 2, cheerRadius: 2.2 },
   // 居民（原本就住在島上的人）：平常在步道上散步，有敵人時會走過去勸退。
   residents: { perIsland: 7, speed: 0.6, engageRadius: 9, meleeRange: 0.45, dps: 9, maxPerTarget: 3, roles: ['citizen','elder','child','parent','officeworker','youth','cyclist','worker','hiker'] },
   // 英雄（登入者）：點島嶼就走過去，自動攻擊射程內的敵人。
   heroes: {
-    chief:     { name: '里長伯',   icon: '🧓', color: 0x1f4e79, dmg: 16, rate: 0.55, range: 3.2, style: 'ball',  speed: 1.1, desc: '人面廣，中距離穩定輸出。' },
+    chief:     { name: '里長伯',   icon: '🧓', color: 0xdb6a41, dmg: 16, rate: 0.55, range: 3.2, style: 'ball',  speed: 1.1, desc: '人面廣，中距離穩定輸出。' },
     driver:    { name: '公車司機', icon: '🚌', color: 0x2f6f9f, dmg: 10, rate: 0.3,  range: 3.0, style: 'bus',   speed: 1.2, desc: '班次密，連發。' },
     fireman:   { name: '消防員',   icon: '🚒', color: 0xc9452f, dmg: 18, rate: 0.7,  range: 2.8, style: 'water', slow: 0.5, slowTime: 1.6, speed: 1.1, desc: '水柱打到會減速。' },
     volunteer: { name: '志工媽媽', icon: '🧺', color: 0xc97d97, dmg: 9,  rate: 0.6,  range: 2.8, style: 'ball',  regen: 0.4, rally: 1.3, speed: 1.05, desc: '每秒回一點滿意度，身邊居民攻擊 +30%。' },
@@ -54,6 +57,8 @@ export const CONFIG = {
     { id: 'daan',     number: 10, axial: [0, 3],  name: '大安區', ground: 'garden',     landmark: 'park' },
     { id: 'xinyi',    number: 11, axial: [1, 3],  name: '信義區', ground: 'granite',    landmark: 'cityhall', goal: true },
     { id: 'wenshan',  number: 12, axial: [0, 4],  name: '文山區', ground: 'forest',     landmark: 'gondola' },
+    // 社子島：獨立在士林西側的河口沙洲，不跟其他島相鄰，只靠一座陸橋連到士林
+    { id: 'shezi',    number: 13, axial: [-1, 1], offset: [-1.9, -0.8], detached: true, link: 'shilin', name: '社子島', ground: 'garden', landmark: 'wetland' },
   ],
   // 敵人從河口登陸的區（四個方向），再沿步道與橋走向信義區市政府。
   landings: { west: { island: 'wanhua', name: '淡水河' }, north: { island: 'beitou', name: '關渡' }, east: { island: 'nangang', name: '基隆河' }, south: { island: 'wenshan', name: '景美溪' } },
@@ -85,7 +90,7 @@ export const CONFIG = {
     { id: 'final',      title: '大選前夜總攻擊', tag: '#總攻擊', startsAt: null, intensity: 2.2, routes: ['west','north','east','south'], boss: 'frogking', boss2: 'bigv', mix: { bird: 3, frog: 3, parrot: 2, caterpillar: 1, chameleon: 1, mouse: 4 }, chants: ['總攻擊!!','護樹!!','拆圓環!!','下台!!','最後一夜','全軍出動'], desc: '四面八方、所有動物、兩隻魔王。一樣守得下來。' },
   ],
   raidTags: ['#護樹','#拆圓環','#出來面對','#台北不順','#洗版中'],
-  palette: { coral: 0x1f4e79, ink: 0x211d1d, cream: 0xfff8f4, yellow: 0xfcea8b, green: 0x8fb37a, stone: 0xd9cbb4, accent: 0xdb6a41 },
+  palette: { coral: 0xdb6a41, ink: 0x211d1d, cream: 0xfff8f4, yellow: 0xfcea8b, green: 0x8fb37a, stone: 0xd9cbb4, accent: 0xdb6a41 },
   ui: { logMax: 30, leaderboardMax: 10, heroesQueryLimit: 1000 },
 };
 window.PI_CONFIG = CONFIG;

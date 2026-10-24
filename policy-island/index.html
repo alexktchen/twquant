@@ -23,6 +23,7 @@
     <div class="tag" id="siteTag">非官方・網友自製</div>
   </header>
   <section class="gstrip panel" aria-label="全體戰績">
+    <div class="online"><i class="dot"></i><b id="gOnline">1</b><span>人在線</span></div>
     <div><b id="gWaves">0</b><span>波攻擊已阻擋</span></div>
     <div><b id="gBlocked">0</b><span>隻網軍被擋下</span></div>
     <div><b id="gHeroes">0</b><span>位英雄</span></div>
@@ -62,13 +63,13 @@
       <div class="lobby-head">
         <div class="eyebrow">LOBBY・出戰大廳</div>
         <h2>一格政見，守一座城。</h2>
-        <p class="lead">十二座島就是台北十二個行政區，政策散落在各島上，點建築可以看內容。每一場約 3 分鐘：青鳥、青蛙、鸚鵡、毛蟲、變色龍、鍵盤鼠依當天的議題，從淡水河、關渡、基隆河、景美溪登陸，沿著步道和橋走向信義區市政府。島上的居民會自己跑去擋，你是登入的英雄，點島嶼就能帶著居民一起守。</p>
+        <p class="lead">十二座島就是台北十二個行政區，政策散落在各島上，點建築可以看內容；蔣萬安市長 NPC 會在各島巡迴宣傳政績，點他也能看他正在講的政策。每一場約 3 分鐘：青鳥、青蛙、鸚鵡、毛蟲、變色龍、鍵盤鼠依當天的議題，從淡水河、關渡、基隆河、景美溪登陸，沿著步道和橋走向信義區市政府。島上的居民會自己跑去擋，你是登入的英雄，點島嶼就能帶著居民一起守。</p>
         <p class="count" id="countdown"></p>
       </div>
       <div class="lobby-grid">
         <div class="col"><h3>1・你的英雄</h3><label class="field">暱稱<input id="nick" type="text" maxlength="24" placeholder="會顯示在排行榜" autocomplete="nickname"></label><div class="classes" id="classes"></div><p class="note" id="mine"></p><p class="note" id="modeNote"></p></div>
-        <div class="col"><h3>2・這一波的議題</h3><div class="issues" id="issues"></div></div>
-        <div class="col"><h3>全體戰績</h3><div class="lobby-stats" id="lobbyStats"></div><h3>英雄榜</h3><ol class="board" id="board"></ol></div>
+        <div class="col"><h3>2・下一波來襲</h3><div class="issues" id="issues"></div><p class="note">議題自動輪替，每一波都不一樣，不用選。</p></div>
+        <div class="col"><h3>全體戰績</h3><div class="lobby-stats" id="lobbyStats"></div><h3>現在在線</h3><p class="note" id="onlineList"></p><h3>英雄榜</h3><ol class="board" id="board"></ol></div>
       </div>
       <button id="btnGo" class="go" type="button">出戰！守住這一波</button>
       <details class="admin" id="adminBox" hidden>
@@ -101,6 +102,7 @@
       <p class="lead" id="endText"></p>
       <p class="global" id="endGlobal"></p>
       <p class="note" id="endStats"></p>
+      <p class="next" id="endNext"></p>
       <div class="btns2"><button id="btnAgain" type="button" class="go">再守一波</button><button id="btnLobby" type="button">回大廳</button></div>
     </div>
   </div>

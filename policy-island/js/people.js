@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mulberry } from './env.js';
-export const ROLE_LABEL = { citizen: '市民', elder: '長者', child: '學童', parent: '家長', cyclist: '通勤族', officeworker: '上班族', youth: '年輕人', worker: '工地人員', hiker: '登山客', hero: '英雄' };
+export const ROLE_LABEL = { mayor: '市長', citizen: '市民', elder: '長者', child: '學童', parent: '家長', cyclist: '通勤族', officeworker: '上班族', youth: '年輕人', worker: '工地人員', hiker: '登山客', hero: '英雄' };
 const SKIN = [0xf3cfae, 0xe6b48f, 0xcf9670, 0xf0c4a0], HAIR = [0x2e2522, 0x4a3426, 0x1f1d22, 0x6b4a33], CASUAL = [0x6f7fb5, 0x58a6a6, 0xe8c547, 0xf2a1a1, 0x8fb37a, 0xb58fd0];
 export function createPeople(scene, colors, heroCfgs) {
   const G = { leg: new RoundedBoxGeometry(1, 1, 1, 2, 0.3), body: new THREE.CapsuleGeometry(0.5, 0.6, 4, 10), arm: new RoundedBoxGeometry(1, 1, 1, 2, 0.35), head: new THREE.SphereGeometry(0.5, 16, 12), cap: new THREE.SphereGeometry(0.5, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), eye: new THREE.SphereGeometry(0.5, 8, 6), box: new RoundedBoxGeometry(1, 1, 1, 2, 0.2), cyl: new THREE.CylinderGeometry(0.5, 0.5, 1, 10), cone: new THREE.ConeGeometry(0.5, 1, 14), torus: new THREE.TorusGeometry(0.5, 0.09, 6, 18), shadow: new THREE.CircleGeometry(0.5, 20) };
@@ -16,6 +16,7 @@ export function createPeople(scene, colors, heroCfgs) {
     let shirt = CASUAL[Math.floor(rnd() * CASUAL.length)], pants = [0x3b3a42, 0x4a5a78, 0x6b5a4a][Math.floor(rnd() * 3)]; let sc = 1;
     if (role === 'child') sc = 0.78; if (role === 'elder') hair = 0xd9d4cc; if (role === 'worker') shirt = 0x4a5a78;
     if (H) { sc = 1.16; shirt = 0xfbfbf7; pants = 0x2f3a4a; hair = 0x241c1a; }
+    const MAYOR = role === 'mayor'; if (MAYOR) { sc = 1.22; shirt = 0xfbfbf7; pants = 0x2a3346; hair = 0x1c1817; }
     const add = (g, off, s, c, ch = null, r = null) => P.push({ g, off, s, c, ch, r });
     add('leg', [-0.032, 0.065, 0], [0.05, 0.13, 0.058], pants, 'legL'); add('leg', [0.032, 0.065, 0], [0.05, 0.13, 0.058], pants, 'legR');
     const shoe = H ? 0xf6f4ef : 0x2a2524; add('box', [-0.032, 0.012, 0.012], [0.055, 0.025, 0.085], shoe, 'legL'); add('box', [0.032, 0.012, 0.012], [0.055, 0.025, 0.085], shoe, 'legR');
@@ -24,20 +25,20 @@ export function createPeople(scene, colors, heroCfgs) {
     add('arm', [-0.077, 0.205, 0], [0.034, 0.1, 0.038], shirt, 'armL'); add('arm', [0.077, 0.205, 0], [0.034, 0.1, 0.038], shirt, 'armR');
     add('eye', [-0.077, 0.15, 0], [0.034, 0.034, 0.034], skin, 'armL'); add('eye', [0.077, 0.15, 0], [0.034, 0.034, 0.034], skin, 'armR');
     add('cyl', [0, 0.268, 0], [0.05, 0.03, 0.05], skin);
-    if (!H) { add('box', [0, 0.157, 0], [0.139, 0.016, 0.119], 0x3b3a42); add('box', [0, 0.255, 0.035], [0.075, 0.022, 0.05], 0xfbfbf7); }
+    if (!H && !MAYOR) { add('box', [0, 0.157, 0], [0.139, 0.016, 0.119], 0x3b3a42); add('box', [0, 0.255, 0.035], [0.075, 0.022, 0.05], 0xfbfbf7); }
     add('head', [0, 0.345, 0], [0.19, 0.178, 0.172], skin, 'head');
-    const hatted = ['child', 'cyclist', 'hiker', 'worker'].includes(role) || (H && ['chief', 'driver', 'fireman'].includes(heroCls));
+    const hatted = ['child', 'cyclist', 'hiker', 'worker'].includes(role) || (H && ['chief', 'driver', 'fireman'].includes(heroCls)) || MAYOR;
     add('cap', [0, 0.352, -0.006], [0.206, hatted ? 0.17 : 0.19, 0.204], hair, 'head', [-0.32, 0, 0]);
     if (!hatted) { const styles = role === 'elder' ? ['short', 'bun', 'short'] : role === 'youth' ? ['beanie', 'long', 'pony', 'puff'] : ['short', 'long', 'bun', 'pony', 'short', 'puff']; const st = styles[Math.floor(rnd() * styles.length)];
       if (st === 'long') add('box', [0, 0.31, -0.07], [0.19, 0.13, 0.05], hair, 'head', [0.12, 0, 0]); if (st === 'bun') add('eye', [0, 0.44, -0.07], [0.075, 0.07, 0.07], hair, 'head'); if (st === 'pony') add('eye', [0, 0.33, -0.115], [0.055, 0.1, 0.05], hair, 'head', [0.35, 0, 0]);
       if (st === 'puff') for (const [dx, dy] of [[-0.07, 0.4], [0.07, 0.4], [0, 0.435]]) add('eye', [dx, dy, -0.02], [0.09, 0.08, 0.09], hair, 'head');
-      if (st === 'beanie') { add('cap', [0, 0.376, -0.008], [0.222, 0.17, 0.218], [0x1f4e79, 0x58a6a6, 0xe8c547, 0x6f7fb5][Math.floor(rnd() * 4)], 'head', [-0.2, 0, 0]); add('eye', [0, 0.465, -0.02], [0.045, 0.045, 0.045], 0xfff8f0, 'head'); } }
+      if (st === 'beanie') { add('cap', [0, 0.376, -0.008], [0.222, 0.17, 0.218], [0xdb6a41, 0x58a6a6, 0xe8c547, 0x6f7fb5][Math.floor(rnd() * 4)], 'head', [-0.2, 0, 0]); add('eye', [0, 0.465, -0.02], [0.045, 0.045, 0.045], 0xfff8f0, 'head'); } }
     add('eye', [-0.036, 0.348, 0.081], [0.021, 0.027, 0.012], 0x221c1c, 'head'); add('eye', [0.036, 0.348, 0.081], [0.021, 0.027, 0.012], 0x221c1c, 'head');
     add('eye', [-0.056, 0.324, 0.074], [0.024, 0.013, 0.008], 0xf2a1a1, 'head'); add('eye', [0.056, 0.324, 0.074], [0.024, 0.013, 0.008], 0xf2a1a1, 'head');
     add('eye', [-0.03, 0.356, 0.089], [0.008, 0.008, 0.004], 0xffffff, 'head'); add('eye', [0.042, 0.356, 0.089], [0.008, 0.008, 0.004], 0xffffff, 'head');
     add('box', [0, 0.318, 0.084], [0.026, 0.007, 0.004], 0x8a4a3a, 'head');
     // 隨身物：背包、肩背包、提袋
-    if (!H) { const r2 = rnd(); const bagC = [0xdb6a41, 0x58a6a6, 0xe8c547, 0x6f7fb5, 0x3b3a42][Math.floor(rnd() * 5)];
+    if (!H && !MAYOR) { const r2 = rnd(); const bagC = [0xdb6a41, 0x58a6a6, 0xe8c547, 0x6f7fb5, 0x3b3a42][Math.floor(rnd() * 5)];
       if (r2 < 0.18 && role !== 'child' && role !== 'hiker' && role !== 'youth') add('box', [0, 0.215, -0.072], [0.1, 0.12, 0.05], bagC);
       else if (r2 < 0.36) { add('box', [0.083, 0.165, 0.01], [0.028, 0.07, 0.075], bagC); add('box', [0.01, 0.235, 0.005], [0.15, 0.01, 0.012], bagC, null, [0, 0, -0.75]); }
       else if (r2 < 0.5) { add('box', [-0.085, 0.1, 0.02], [0.045, 0.06, 0.03], 0xfbfbf7, 'armL'); add('box', [-0.085, 0.14, 0.02], [0.004, 0.025, 0.02], bagC, 'armL'); } }
@@ -51,6 +52,12 @@ export function createPeople(scene, colors, heroCfgs) {
       case 'officeworker': add('cyl', [0.1, 0.16, 0.03], [0.03, 0.05, 0.03], 0xf6efe3, 'armR'); break;
       case 'youth': add('box', [0, 0.21, -0.07], [0.1, 0.1, 0.05], 0x2f3a46); break;
     }
+    if (MAYOR) { // 市長：整齊側分短髮、白襯衫捲袖、深色西裝褲、藍領帶、黑皮鞋、肩帶與宣傳台
+      add('box', [-0.055, 0.405, 0.04], [0.11, 0.05, 0.1], hair, 'head', [0, 0, 0.25]); add('box', [0.03, 0.418, 0.035], [0.12, 0.035, 0.1], hair, 'head', [0, 0, -0.08]); add('box', [-0.09, 0.35, 0.01], [0.03, 0.08, 0.12], hair, 'head'); add('box', [0.09, 0.35, 0.01], [0.03, 0.08, 0.12], hair, 'head');
+      add('box', [0, 0.23, 0.058], [0.022, 0.06, 0.006], 0x2f5f9a); add('box', [0, 0.18, 0.06], [0.03, 0.05, 0.006], 0x2f5f9a); add('box', [0, 0.257, 0.054], [0.06, 0.018, 0.01], 0xfbfbf7);
+      add('box', [0, 0.157, 0], [0.139, 0.016, 0.119], 0x1c1817); for (const sx of [-1, 1]) add('box', [sx * 0.077, 0.172, 0], [0.04, 0.018, 0.042], 0xfbfbf7, sx < 0 ? 'armL' : 'armR');
+      add('box', [0.005, 0.205, 0.004], [0.03, 0.16, 0.122], 0xdb6a41, null, [0, 0, 0.7]); add('eye', [-0.035, 0.235, 0.064], [0.03, 0.03, 0.01], 0xfcea8b);
+      add('box', [0, 0.035, 0], [0.24, 0.07, 0.18], 0xb48560, 'soap'); add('box', [0, 0.04, 0.091], [0.15, 0.035, 0.004], 0xfff1de, 'soap'); add('cyl', [0.095, 0.15, 0.06], [0.03, 0.06, 0.03], 0x3b3a42, 'armR'); add('cone', [0.095, 0.19, 0.06], [0.05, 0.05, 0.05], 0xdb6a41, 'armR', [Math.PI, 0, 0]); }
     if (H) { const c = H.color;
       add('box', [0, 0.205, 0.004], [0.13, 0.112, 0.106], c); add('box', [0, 0.235, 0.058], [0.03, 0.05, 0.004], 0xfbfbf7);
       if (heroCls === 'chief') { add('cap', [0, 0.39, 0], [0.205, 0.12, 0.195], c, 'head'); add('cyl', [0, 0.39, 0.06], [0.2, 0.008, 0.12], c, 'head'); add('cone', [0.1, 0.2, 0.1], [0.07, 0.1, 0.07], 0xfbfbf7, 'armR', [1.4, 0, 0]); }
@@ -76,7 +83,7 @@ export function createPeople(scene, colors, heroCfgs) {
   function update(dt, time, zoom = 1) {
     for (const [pi, w] of people.entries()) {
       const p = w.pos; const moving = w.moving ? 1 : 0; const ph = (time * 9 + w.phase * 20) * (moving || (w.pose === 'fight' ? 1 : 0)); const bob = moving ? Math.abs(Math.sin(ph)) * 0.012 : 0; const sc = w.plan.scale * 0.8 * zoom;
-      const lift = w.pose === 'wave' && w.hero ? 0.0 : 0;
+      const lift = w.onBox ? 0.07 * sc : 0;
       dummy.position.set(p.x, p.y + bob + lift, p.z); dummy.rotation.set(0, w.yaw, 0); dummy.scale.setScalar(sc); dummy.updateMatrix(); base.copy(dummy.matrix);
       for (const pt of w.plan.parts) { let ang = 0, axis = 'x';
         if (moving) { if (pt.ch === 'legL') ang = Math.sin(ph) * 0.55; if (pt.ch === 'legR') ang = -Math.sin(ph) * 0.55; if (pt.ch === 'armL') ang = -Math.sin(ph) * 0.45; if (pt.ch === 'armR') ang = Math.sin(ph) * 0.45; }
@@ -85,6 +92,7 @@ export function createPeople(scene, colors, heroCfgs) {
         if (w.pose === 'wave' && pt.ch === 'armR') { axis = 'z'; ang = 2.5 + Math.sin(time * 5 + w.phase * 9) * 0.35; }
         if (!pt.L0) pt.L0 = new THREE.Matrix4().compose(new THREE.Vector3(...pt.off), pt.r ? new THREE.Quaternion().setFromEuler(new THREE.Euler(...pt.r)) : new THREE.Quaternion(), new THREE.Vector3(...pt.s));
         local.copy(pt.L0); if (pt.ch === 'wheelX') local.multiply(rot.makeRotationY(Math.PI / 2));
+        if (pt.ch === 'soap') { if (!w.onBox) local.makeScale(0, 0, 0); else local.premultiply(rot.makeTranslation(0, -0.07, 0)); }
         if (ang && pivots[pt.ch] !== undefined) { const py = pivots[pt.ch]; const px = axis === 'z' && (pt.ch === 'armL' || pt.ch === 'armR') ? (pt.ch === 'armL' ? -0.077 : 0.077) : 0; piv.makeTranslation(px, py, 0); unpiv.makeTranslation(-px, -py, 0); if (axis === 'z') rot.makeRotationZ(ang); else rot.makeRotationX(ang); tmp.multiplyMatrices(piv, rot).multiply(unpiv).multiply(local); local.copy(tmp); }
         tmp.multiplyMatrices(base, local); meshes[pt.g].mesh.setMatrixAt(pt.idx, tmp); }
       dummy.position.set(p.x, p.y + 0.02, p.z); dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(0.2 * sc); dummy.updateMatrix(); shadowMesh.setMatrixAt(pi, dummy.matrix);

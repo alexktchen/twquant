@@ -1,11 +1,11 @@
 /* 共享狀態轉接器。
-   - 在 claude.ai artifact 裡：用 db / user 能力，heroes/<uid> 每人一份（只有本人能寫），issues/<id>、policies/<id> 由編輯者新增。
+   - 在 claude.ai artifact 裡：用 db / user 能力，heroes/<uid> 每人一份（只有本人能寫），issues/<id>、policies/<id> 由編輯者新增；room 的 presence 算線上人數。
    - 其他地方（本機、拆出去的靜態站）：退回 localStorage，只記本機。拆站時把 remote 部分換成 Supabase/Firebase 即可，介面不變。
    介面：init(), onGlobal(fn), onLeaderboard(fn), hero(), saveHero(patch), recordRound(result), listIssues(), addIssue(issue), identity */
 window.PIStore = (function () {
   const LS_HERO = 'pi.hero.v1';
   const state = { db: null, user: null, uid: null, canWrite: null, canEdit: false, me: { name: '', avatarUrl: '', color: '' },
-    hero: null, heroes: [], issuesRemote: [], policiesRemote: [], subs: { global: [], leaderboard: [], issues: [], policies: [] }, mode: 'local' };
+    hero: null, heroes: [], issuesRemote: [], policiesRemote: [], subs: { global: [], leaderboard: [], issues: [], policies: [], online: [] }, mode: 'local', room: null, online: 1, onlineNames: [] };
   const safe = (fn, d) => { try { return fn(); } catch (e) { return d; } };
   const loadLocalHero = () => safe(() => JSON.parse(localStorage.getItem(LS_HERO) || 'null'), null);
   const saveLocalHero = (h) => safe(() => localStorage.setItem(LS_HERO, JSON.stringify(h)), null);
@@ -14,6 +14,7 @@ window.PIStore = (function () {
     if (ch === 'leaderboard') state.subs.leaderboard.forEach(fn => fn(leaderboard()));
     if (ch === 'issues') state.subs.issues.forEach(fn => fn(listIssues()));
     if (ch === 'policies') state.subs.policies.forEach(fn => fn(listPolicies()));
+    if (ch === 'online') state.subs.online.forEach(fn => fn(state.online, state.onlineNames));
   }
   function totals() {
     const list = state.mode === 'remote' ? state.heroes : (state.hero ? [state.hero] : []);
@@ -37,7 +38,8 @@ window.PIStore = (function () {
     state.hero = loadLocalHero();
     const claude = window.claude;
     if (!claude || typeof claude.use !== 'function') return finishInit();
-    const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+    const [db, user, room] = await Promise.all([claude.use('db'), claude.use('user'), claude.use('room')]);
+    if (room) { state.room = room; room.onPeers(ch => { const viewers = ch.peers.filter(p => p.kind === 'viewer'); state.online = Math.max(1, viewers.length); state.onlineNames = viewers.map(p => (p.presence && typeof p.presence.nick === 'string') ? p.presence.nick.slice(0, 24) : '').filter(Boolean); emit('online'); }, err => console.warn('[store] room', err)); }
     state.db = db; state.user = user;
     if (user) {
       const me = await user.me();
@@ -56,7 +58,8 @@ window.PIStore = (function () {
     }
     return finishInit();
   }
-  function finishInit() { emit('global'); emit('leaderboard'); emit('issues'); emit('policies'); return state; }
+  function finishInit() { emit('global'); emit('leaderboard'); emit('issues'); emit('policies'); emit('online'); return state; }
+  function setPresence(patch) { if (state.room) state.room.presence(patch).catch(e => console.warn('[store] presence', e && e.code)); }
   function hero() { return state.hero; }
   async function saveHero(patch) {
     state.hero = { ...(state.hero || { rounds: 0, kills: 0, finals: 0 }), ...patch };
@@ -84,6 +87,7 @@ window.PIStore = (function () {
   }
   return { init, hero, saveHero, recordRound, listIssues, addIssue, listPolicies, addPolicy, totals, leaderboard,
     onPolicies: fn => { state.subs.policies.push(fn); fn(listPolicies()); },
+    onOnline: fn => { state.subs.online.push(fn); fn(state.online, state.onlineNames); }, setPresence,
     onGlobal: fn => { state.subs.global.push(fn); fn(totals()); },
     onLeaderboard: fn => { state.subs.leaderboard.push(fn); fn(leaderboard()); },
     onIssues: fn => { state.subs.issues.push(fn); fn(listIssues()); },

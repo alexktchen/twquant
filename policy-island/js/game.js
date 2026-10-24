@@ -26,6 +26,7 @@ export function createGame(ctx) {
   function updateResidents(dt) {
     const targets = new Map();
     for (const w of G.residents) {
+      if ((w.state === 'idle' || w.state === 'home') && w.cheer > 0 && !(G.phase === 'round' && G.enemies.length)) { w.cheer -= dt; w.pose = w.cheer > 0 ? 'wave' : null; w.moving = false; continue; }
       if (w.state === 'idle' || w.state === 'home') {
         if (G.phase === 'round' && G.enemies.length) { let best = null, bd = RS.engageRadius; for (const e of G.enemies) { if (e.dead) continue; const n = targets.get(e) || e.defenders || 0; if (n >= RS.maxPerTarget) continue; const d = d2(e, w.pos); if (d < bd) { bd = d; best = e; } } if (best) { best.defenders = (best.defenders || 0) + 1; w.target = best; w.state = 'engage'; w.route = routeTo(w.pos, graph.nearestNode(ev(best))); w.s = 0; w.pose = null; continue; } }
         if (w.route) { walk(w, dt, RS.speed); } else { w.wait -= dt; if (w.wait <= 0) { const ring = graph.ringIndex.get(w.home); const next = ring[(ring.indexOf(w.node) + (Math.random() < 0.5 ? 1 : 11)) % 12]; w.route = makeRoute([w.pos.clone(), graph.nodes[next].p.clone()]); w.s = 0; w.node = next; w.wait = 1 + Math.random() * 3; w.state = 'idle'; } }
@@ -42,12 +43,29 @@ export function createGame(ctx) {
     }
   }
   function release(w) { if (w.target) w.target.defenders = Math.max(0, (w.target.defenders || 0) - 1); w.target = null; w.pose = null; w.state = 'home'; const ring = graph.ringIndex.get(w.home); w.node = ring[Math.floor(Math.random() * 12)]; w.route = routeTo(w.pos, w.node); w.s = 0; }
+  // ── 市長 NPC：依行政區順序巡迴每棟政策建築，站上宣傳台講政績 ──
+  const MC = C.mayor; let stops = [];
+  function setStops(list) { stops = [...list].sort((a, b) => a.order - b.order || a.pos.x - b.pos.x); if (G.mayor && G.mayor.stop >= stops.length) G.mayor.stop = 0; }
+  function spawnMayor() { const m = people.makeWalker('mayor', goalCenter.clone().add(new THREE.Vector3(0.6, 0.03, 1.0))); m.stop = 0; m.wait = 2; m.route = null; m.s = 0; m.state = 'walk'; m.yaw = 0;
+    m.sprite = textSprite(MC.name, { bg: '#db6a41', fg: '#fff8f4', size: 0.28 }); m.sprite.userData.w0 = m.sprite.scale.x; m.sprite.userData.h0 = m.sprite.scale.y; scene.add(m.sprite);
+    m.hit = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), new THREE.MeshBasicMaterial({ visible: false })); scene.add(m.hit); G.mayor = m; return m; }
+  function slogan(pol) { const first = String(pol.summary || '').split(/[，。、；]/)[0]; const t = `${pol.title}！${first}`; return t.length > MC.sloganMax ? t.slice(0, MC.sloganMax) + '…' : t; }
+  function setBubble(m, txt) { if (m.bubble) { scene.remove(m.bubble); m.bubble = null; } if (!txt) return; m.bubble = textSprite('📣 ' + txt, { bg: '#fff8f4', fg: '#211d1d', size: 0.26 }); m.bubble.userData.w0 = m.bubble.scale.x; m.bubble.userData.h0 = m.bubble.scale.y; scene.add(m.bubble); }
+  function updateMayor(dt, zoom = 1) { const m = G.mayor; if (!m || !stops.length) return;
+    if (m.state === 'walk') { if (!m.route) { m.wait -= dt; if (m.wait > 0) return; const st = stops[m.stop % stops.length]; const node = graph.nodeNear(st.island, st.pos); const np = graph.nodes[node].p; const front = np.clone().lerp(st.pos.clone().setY(np.y), MC.approach); m.route = makeRoute([m.pos.clone(), ...routeTo(m.pos, node).pts.slice(1), front]); m.s = 0; m.onBox = false; m.pose = null; }
+      if (walk(m, dt, MC.speed)) { const st = stops[m.stop % stops.length]; m.state = 'speech'; m.speechT = MC.speechSeconds; m.onBox = true; m.pose = 'wave'; m.yaw = Math.atan2(st.pos.x - m.pos.x, st.pos.z - m.pos.z) + Math.PI; setBubble(m, slogan(st.pol)); m.current = st;
+        const dn = (islands.find(i => i.id === st.island) || {}).name || ''; addLog(`${MC.name}在${dn}宣傳「${st.pol.title}」`, 'good');
+        if (G.phase === 'round') { G.approval = Math.min(RC.startApproval, G.approval + MC.approvalPerSpeech); floatText(`+${MC.approvalPerSpeech}% 滿意度`, m.pos.x, TOP + 1.1, m.pos.z, { bg: '#fcea8b' }); emit('hud'); }
+        for (const w of G.residents) if ((w.state === 'idle' || w.state === 'home') && d2(w.pos, m.pos) < MC.cheerRadius) { w.cheer = MC.speechSeconds; w.yaw = Math.atan2(m.pos.x - w.pos.x, m.pos.z - w.pos.z); } } }
+    else if (m.state === 'speech') { m.speechT -= dt; if (m.speechT <= 0) { m.state = 'walk'; m.onBox = false; m.pose = null; m.stop = (m.stop + 1) % stops.length; m.wait = MC.pauseSeconds; setBubble(m, null); } }
+    m.hit.position.set(m.pos.x, m.pos.y + 0.3, m.pos.z);
+    if (m.bubble) { m.bubble.position.set(m.pos.x, m.pos.y + 0.95 * zoom + (m.onBox ? 0.1 : 0), m.pos.z); m.bubble.scale.set(m.bubble.userData.w0 * zoom, m.bubble.userData.h0 * zoom, 1); } }
   // ── 一場 ──
   function startRound(issue, hero, waveNo, isFinal) {
     clearRound(); Object.assign(G, { phase: 'round', t: 0, approval: RC.startApproval, issue, waveNo, final: !!isFinal, kills: 0, leaked: 0, raids: 0, surges: 0, spawnedTotal: 0, speed: 1, paused: false, windLeft: 0, surgeT: 0, log: [], ultCd: 0, focusCd: 0 });
     const hw = people.makeWalker('citizen', goalCenter.clone().add(new THREE.Vector3(0, 0.03, 1.1)), hero.cls); hw.pose = 'wave'; hw.nick = hero.nick; hw.cfg = C.heroes[hero.cls]; hw.cd = 0; hw.route = null; hw.s = 0;
-    hw.sprite = textSprite(hero.nick || hw.cfg.name, { bg: '#1f4e79', fg: '#fff8f4', size: 0.3 }); hw.sprite.userData.w0 = hw.sprite.scale.x; hw.sprite.userData.h0 = hw.sprite.scale.y; scene.add(hw.sprite); G.hero = hw;
-    people.build([...G.residents, hw]);
+    hw.sprite = textSprite(hero.nick || hw.cfg.name, { bg: '#db6a41', fg: '#fff8f4', size: 0.3 }); hw.sprite.userData.w0 = hw.sprite.scale.x; hw.sprite.userData.h0 = hw.sprite.scale.y; scene.add(hw.sprite); G.hero = hw;
+    people.build([...G.residents, G.mayor, hw].filter(Boolean));
     buildSchedule(issue); G.raidT = RC.raid.minGap + Math.random() * (RC.raid.maxGap - RC.raid.minGap); G.windT = RC.windShift.minGap + Math.random() * (RC.windShift.maxGap - RC.windShift.minGap);
     addLog(`第 ${waveNo} 波開始：${issue.tag}「${issue.title}」，${G.queue.length} 隻從 ${issue.routes.map(r => C.landings[r].name).join('、')} 登陸`, G.final ? 'bad' : '');
     if (G.final) emit('banner', '⚠ 大選前夜總攻擊：四面八方全軍出動', 4);
@@ -58,7 +76,7 @@ export function createGame(ctx) {
     if (issue.boss) G.queue.push({ t: RC.bossAt, type: issue.boss, path: issue.routes[0] }); if (issue.boss2) G.queue.push({ t: RC.bossAt + 6, type: issue.boss2, path: issue.routes[issue.routes.length - 1] }); G.queue.sort((a, b) => a.t - b.t); }
   function clearRound() { for (const e of G.enemies) animals.remove(e.obj); for (const p of G.projs) scene.remove(p.obj); for (const b of G.beams) scene.remove(b.obj); for (const f of G.floats) scene.remove(f.obj); for (const r of G.rings) scene.remove(r.obj); if (G.hero && G.hero.sprite) scene.remove(G.hero.sprite); G.enemies = []; G.projs = []; G.beams = []; G.floats = []; G.rings = []; G.queue = []; enemyHits.length = 0; for (const w of G.residents) { w.target = null; if (w.state !== 'idle') { w.state = 'home'; w.pose = null; w.route = null; } } }
   function endRound() { G.phase = 'result'; const res = { waveNo: G.waveNo, kills: G.kills, leaked: G.leaked, approval: Math.round(G.approval), raids: G.raids, surges: G.surges, issueId: G.issue.id, issueTitle: G.issue.title, tag: G.issue.tag, final: G.final, hero: { nick: G.hero.nick, cls: G.hero.cls } }; addLog(`第 ${G.waveNo} 波守住了。擊退 ${G.kills} 隻，滿意度 ${res.approval}%`, 'good'); if (G.hero) G.hero.pose = 'wave'; emit('end', res); }
-  function backToLobby() { clearRound(); G.phase = 'lobby'; G.hero = null; people.build([...G.residents]); emit('hud'); emit('hero'); }
+  function backToLobby() { clearRound(); G.phase = 'lobby'; G.hero = null; people.build([...G.residents, G.mayor].filter(Boolean)); emit('hud'); emit('hero'); }
   // ── 敵人 ──
   function landingRoute(routeId) { const land = C.landings[routeId]; const lc = centers.get(land.island); const away = lc.clone().sub(goalCenter).setY(0).normalize(); const ring = graph.ringIndex.get(land.island); let best = ring[0], bd = -1e9; for (const n of ring) { const d = graph.nodes[n].p.clone().sub(lc).dot(away); if (d > bd) { bd = d; best = n; } } const goalNode = graph.nodeNear(goalIsland.id, graph.nodes[best].p); const ids = graph.shortest(best, goalNode); const start = graph.nodes[best].p.clone().add(away.clone().multiplyScalar(2.6)); start.y = TOP + 0.03; return makeRoute([start, ...ids.map(n => graph.nodes[n].p.clone()), goalCenter.clone().setY(TOP + 0.03)]); }
   const routeCache = {};
@@ -73,9 +91,9 @@ export function createGame(ctx) {
   function heroGoTo(islandId, point) { const H = G.hero; if (!H || G.phase !== 'round') return; const node = point ? graph.nodeNear(islandId, point) : graph.ringIndex.get(islandId)[0]; H.route = routeTo(H.pos, node); H.s = 0; H.pose = null; H.manual = 8; emit('hint', `${H.nick} 前往「${islands.find(i => i.id === islandId).name}」（8 秒內不會自己跑掉）`); }
   // 英雄自動找怪：射程內沒敵人就往最前面（最接近市政府）的敵人走
   function heroAuto(dt) { const H = G.hero; H.manual = Math.max(0, (H.manual || 0) - dt); H.think = (H.think || 0) - dt; if (H.manual > 0 || H.think > 0) return; H.think = 0.8; let best = null; for (const e of G.enemies) if (!e.dead && (!best || e.prog / e.route.total > best.prog / best.route.total)) best = e; if (!best) { if (!H.route && d2(H.pos, goalCenter) > 2.2) { H.route = routeTo(H.pos, graph.nodeNear(goalIsland.id, H.pos)); H.s = 0; } return; } if (d2(best, H.pos) <= H.cfg.range * 0.85) { H.route = null; H.moving = false; return; } H.route = routeTo(H.pos, graph.nearestNode(ev(best))); H.s = 0; H.pose = null; }
-  function focusStrike(e) { if (G.focusCd > 0 || !G.hero) return; const H = G.hero.cfg; G.focusCd = RC.focusCooldown; beam(G.hero.pos.clone().add(new THREE.Vector3(0, 0.45, 0)), new THREE.Vector3(e.x, TOP + 0.3, e.z), H.color); damage(e, H.dmg * RC.focusDmgMul); floatText('重擊', e.x, TOP + 0.9, e.z, { bg: '#1f4e79', fg: '#fff' }); emit('hero'); }
+  function focusStrike(e) { if (G.focusCd > 0 || !G.hero) return; const H = G.hero.cfg; G.focusCd = RC.focusCooldown; beam(G.hero.pos.clone().add(new THREE.Vector3(0, 0.45, 0)), new THREE.Vector3(e.x, TOP + 0.3, e.z), H.color); damage(e, H.dmg * RC.focusDmgMul); floatText('重擊', e.x, TOP + 0.9, e.z, { bg: '#db6a41', fg: '#fff' }); emit('hero'); }
   function ultimate() { if (G.phase !== 'round' || G.ultCd > 0) return; G.ultCd = RC.ultCooldown; ring(G.hero.pos.x, G.hero.pos.z, 0.5, 0xfcea8b, 14); for (const e of [...G.enemies]) { damage(e, e.maxHp * RC.ultPct); if (!e.dead) { e.slow = Math.max(e.slow, RC.ultSlow); e.slowT = RC.ultSlowTime; } } emit('banner', '🙌 台北人站出來！', 2.5); addLog('英雄大招：台北人站出來', 'good'); emit('hero'); }
-  function surge() { G.surges++; ring(goalCenter.x, goalCenter.z, 0.5, 0x1f4e79, 16); for (const e of [...G.enemies]) damage(e, e.maxHp * RC.surgePct); if (G.surges === 1) { emit('banner', '🏙️ 全民護城！每座島的居民都出來了', 3); addLog('全民護城啟動：居民一起把網軍請出去', 'good'); } }
+  function surge() { G.surges++; ring(goalCenter.x, goalCenter.z, 0.5, 0xdb6a41, 16); for (const e of [...G.enemies]) damage(e, e.maxHp * RC.surgePct); if (G.surges === 1) { emit('banner', '🏙️ 全民護城！每座島的居民都出來了', 3); addLog('全民護城啟動：居民一起把網軍請出去', 'good'); } }
   function ring(x, z, r, color, grow) { const m = new THREE.Mesh(new THREE.RingGeometry(r * 0.8, r, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide })); m.rotation.x = -Math.PI / 2; m.position.set(x, TOP + 0.06, z); scene.add(m); G.rings.push({ obj: m, ttl: 1.2, grow }); }
   function beam(a, b, color) { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 })); scene.add(l); G.beams.push({ obj: l, ttl: 0.22 }); }
   const projGeo = new THREE.SphereGeometry(0.05, 8, 8), busGeo = new THREE.BoxGeometry(0.16, 0.08, 0.08);
@@ -84,7 +102,8 @@ export function createGame(ctx) {
   function nearest(src, R) { let best = null; for (const e of G.enemies) if (!e.dead && d2(e, src) <= R && (!best || e.prog > best.prog)) best = e; return best; }
   function raid() { G.raids++; const routeId = G.issue.routes[Math.floor(Math.random() * G.issue.routes.length)]; const tag = C.raidTags[Math.floor(Math.random() * C.raidTags.length)]; const n = RC.raid.size + Math.floor(G.t / 30); for (let i = 0; i < n; i++) G.queue.push({ t: G.t + i * 0.3, type: 'mouse', path: routeId }); G.queue.sort((a, b) => a.t - b.t); emit('banner', `🐭 網軍突襲 ${tag}　從${C.landings[routeId].name}登陸`, 3); addLog(`網軍突襲 ${tag}：${C.landings[routeId].name}方向冒出一群帳號`, 'raid'); }
   // ── 主迴圈 ──
-  function step(dt) {
+  function step(dt, zoom = 1) {
+    updateMayor(dt, zoom);
     if (G.phase !== 'round') { updateResidents(dt); return; }
     G.t += dt;
     while (G.queue.length && G.queue[0].t <= G.t) { const q = G.queue.shift(); spawn(q.type, q.path); }
@@ -117,5 +136,5 @@ export function createGame(ctx) {
     if (G.t >= RC.seconds || (!G.queue.length && !G.enemies.length && G.t > RC.bossAt + 4)) endRound();
   }
   function onPick(hit) { if (G.phase !== 'round') return; if (hit.enemy && !hit.enemy.dead) { focusStrike(hit.enemy); return; } if (hit.island) heroGoTo(hit.island, hit.point); }
-  return { G, spawnResidents, startRound, backToLobby, step, onPick, ultimate, enemyHits, goalCenter };
+  return { G, spawnResidents, spawnMayor, setStops, startRound, backToLobby, step, onPick, ultimate, enemyHits, goalCenter };
 }

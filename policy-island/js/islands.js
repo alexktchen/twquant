@@ -11,8 +11,8 @@ export function insideHex(x, z, ri) { const ax = Math.abs(x), az = Math.abs(z); 
 const TONE = { granite: 0xd9cbb4, lawn: 0xb9cd98, gravel: 0xc7b08f, street: 0xcfc3b2, meadow: 0xbccf9c, terracotta: 0xdcb79a, garden: 0xb4c993, forest: 0x9fb683, rubber: 0xe2a46f, boardwalk: 0xc9a27c, ringtile: 0xf4f1ec, schoolyard: 0xc9785a, softpad: 0xb9d6e6, courtyard: 0xd9b08c };
 const SHALLOW = { granite: 0xb9d9d6, lawn: 0xa9d6e0, gravel: 0xc9c4a8, street: 0x9fc7cf, schoolyard: 0xd8d4a4, forest: 0x8fb89a, softpad: 0xd9cfc6, terracotta: 0xd9c3a8, garden: 0xa9cfa8, meadow: 0x9fcfbf, boardwalk: 0x8fc0d6, rubber: 0xbfd0e6, courtyard: 0xb9c6d6 };
 const RING_TINT = { granite: 0xe3d3b8, lawn: 0xbfd6df, gravel: 0xc9b89a, street: 0xb9b3ab, schoolyard: 0xf1dc9a, forest: 0xa98e6c, softpad: 0xf2d2d6, terracotta: 0xe6b796, garden: 0xdfe6cf, meadow: 0xd9866a, boardwalk: 0xc9a27c, rubber: 0x8fc6c4, courtyard: 0xe6cfb0 };
-const EDGE_BLOCKS = { granite: [0xe9e2d6, 0xd9cbb4, 0xf4efe6], lawn: [0xbfd6df, 0x9fc4c6, 0xe6f0ef], gravel: [0x1f4e79, 0xf2efe8, 0xe8c547], street: [0xe8c547, 0x3b3a42], schoolyard: [0xe8c547, 0x58a6a6, 0xdb6a41, 0xf3e2c6], forest: [0x8a6e52, 0x6f8a62, 0x9cc27a], softpad: [0xf2b5c6, 0x9fc4e6, 0xf6e3a6, 0xc4e2c4], terracotta: [0xd08a64, 0xf2d0b4, 0xc27c58], garden: [0x8db86f, 0xdfe6cf, 0xf2b5c6], meadow: [0xc8775a, 0xffffff, 0xe8c547], boardwalk: [0xc9a27c, 0xb48560, 0xe6cfb0], rubber: [0xe8c547, 0x58a6a6, 0xdb6a41, 0xf3e2c6, 0x1f4e79], courtyard: [0xc77b5c, 0xe9d8c0, 0x3f5a8a] };
-const BAND = { granite: ['blocks', '#d8ccb8', '#bfae95'], lawn: ['glass', '#9fc4c6', '#e6f0ef'], gravel: ['hoarding', '#1f4e79', '#f2efe8'], street: ['hazard', '#e8c547', '#3b3a42'], schoolyard: ['mural', '#e8c547', '#58a6a6'], forest: ['moss', '#6f8a62', '#9cc27a'], softpad: ['pastel', '#f2b5c6', '#9fc4e6'], terracotta: ['tiles', '#d08a64', '#f2d0b4'], garden: ['ivy', '#8db86f', '#b4c993'], meadow: ['stripe', '#c8775a', '#ffffff'], boardwalk: ['timber', '#9a7a5a', '#c9a27c'], rubber: ['graffiti', '#e7a383', '#58a6a6'], courtyard: ['blocks', '#c77b5c', '#e9d8c0'] };
+const EDGE_BLOCKS = { granite: [0xe9e2d6, 0xd9cbb4, 0xf4efe6], lawn: [0xbfd6df, 0x9fc4c6, 0xe6f0ef], gravel: [0xdb6a41, 0xf2efe8, 0xe8c547], street: [0xe8c547, 0x3b3a42], schoolyard: [0xe8c547, 0x58a6a6, 0xdb6a41, 0xf3e2c6], forest: [0x8a6e52, 0x6f8a62, 0x9cc27a], softpad: [0xf2b5c6, 0x9fc4e6, 0xf6e3a6, 0xc4e2c4], terracotta: [0xd08a64, 0xf2d0b4, 0xc27c58], garden: [0x8db86f, 0xdfe6cf, 0xf2b5c6], meadow: [0xc8775a, 0xffffff, 0xe8c547], boardwalk: [0xc9a27c, 0xb48560, 0xe6cfb0], rubber: [0xe8c547, 0x58a6a6, 0xdb6a41, 0xf3e2c6, 0xdb6a41], courtyard: [0xc77b5c, 0xe9d8c0, 0x3f5a8a] };
+const BAND = { granite: ['blocks', '#d8ccb8', '#bfae95'], lawn: ['glass', '#9fc4c6', '#e6f0ef'], gravel: ['hoarding', '#db6a41', '#f2efe8'], street: ['hazard', '#e8c547', '#3b3a42'], schoolyard: ['mural', '#e8c547', '#58a6a6'], forest: ['moss', '#6f8a62', '#9cc27a'], softpad: ['pastel', '#f2b5c6', '#9fc4e6'], terracotta: ['tiles', '#d08a64', '#f2d0b4'], garden: ['ivy', '#8db86f', '#b4c993'], meadow: ['stripe', '#c8775a', '#ffffff'], boardwalk: ['timber', '#9a7a5a', '#c9a27c'], rubber: ['graffiti', '#e7a383', '#58a6a6'], courtyard: ['blocks', '#c77b5c', '#e9d8c0'] };
 function groundTexture(type) {
   const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'); const rnd = mulberry(type.length * 97 + 3);
   g.fillStyle = '#' + TONE[type].toString(16).padStart(6, '0'); g.fillRect(0, 0, 256, 256);
@@ -40,7 +40,7 @@ function bandTexture(type) {
     case 'glass': for (let x = 0; x < 512; x += 32) { g.fillStyle = b; g.fillRect(x + 2, 6, 26, 52); g.fillStyle = '#3e7c8c'; g.fillRect(x, 0, 2, 64); } break;
     case 'hoarding': case 'stripe': for (let x = 0; x < 512; x += 32) { g.fillStyle = (x / 32) % 2 ? a : b; g.fillRect(x, 0, 32, 64); } break;
     case 'hazard': g.fillStyle = b; for (let x = -64; x < 576; x += 32) { g.beginPath(); g.moveTo(x, 64); g.lineTo(x + 16, 64); g.lineTo(x + 48, 0); g.lineTo(x + 32, 0); g.fill(); } break;
-    case 'mural': case 'graffiti': case 'pastel': for (let k = 0; k < 40; k++) { g.fillStyle = [a, b, '#fcea8b', '#1f4e79', '#ffffff', '#6f7fb5'][k % 6]; g.beginPath(); g.arc(rnd() * 512, rnd() * 64, 6 + rnd() * 14, 0, Math.PI * 2); g.fill(); } break;
+    case 'mural': case 'graffiti': case 'pastel': for (let k = 0; k < 40; k++) { g.fillStyle = [a, b, '#fcea8b', '#db6a41', '#ffffff', '#6f7fb5'][k % 6]; g.beginPath(); g.arc(rnd() * 512, rnd() * 64, 6 + rnd() * 14, 0, Math.PI * 2); g.fill(); } break;
     case 'moss': case 'ivy': for (let x = 0; x < 512; x += 6) { g.fillStyle = b; const h = 10 + rnd() * 40; g.fillRect(x, 0, 5, h); g.beginPath(); g.arc(x + 2.5, h, 3.5, 0, Math.PI * 2); g.fill(); } break;
     case 'timber': for (let x = 0; x < 512; x += 24) { g.fillStyle = rnd() < 0.5 ? a : b; g.fillRect(x + 1, 0, 22, 64); } break;
   }
@@ -57,7 +57,8 @@ function hexRing(rOut, rIn) { const s = new THREE.Shape(), h = new THREE.Path();
 
 export function buildIslands(scene, islands, kit, colors) {
   const centers = new Map(), axialMap = new Map(), views = new Map(), tops = [];
-  for (const i of islands) { centers.set(i.id, axialToWorld(...i.axial)); axialMap.set(i.axial.join(','), i.id); }
+  const detached = new Set(islands.filter(i => i.detached).map(i => i.id));
+  for (const i of islands) { const w = axialToWorld(...i.axial); if (i.offset) { w.x += i.offset[0]; w.z += i.offset[1]; } centers.set(i.id, w); if (!i.detached) axialMap.set(i.axial.join(','), i.id); }
   const topMats = {}; for (const i of islands) if (!topMats[i.ground]) topMats[i.ground] = new THREE.MeshStandardMaterial({ map: groundTexture(i.ground), roughness: 0.92 });
   const cliffMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   const ringTex = groundTexture('ringtile'); const curbMat = new THREE.MeshStandardMaterial({ color: 0xe4d6c3, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
@@ -77,7 +78,7 @@ export function buildIslands(scene, islands, kit, colors) {
     const foam = new THREE.Mesh(hexRing(R + 0.16, R - 0.02), foamMat); foam.position.set(c.x, WATER_Y + 0.012, c.z); scene.add(foam);
     const pts = Array.from({ length: 7 }, (_, k) => { const [x, z] = hexVertex(c.x, c.z, R + 0.01, k); return new THREE.Vector3(x, TOP + 0.07, z); });
     const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: colors.accent })); outline.visible = false; scene.add(outline);
-    const nb = []; for (const [dq, dr] of NEIGHBORS) { const id = axialMap.get([i.axial[0] + dq, i.axial[1] + dr].join(',')); nb.push({ id: id || null, dq, dr }); } neighbors.set(i.id, nb);
+    const nb = []; for (const [dq, dr] of NEIGHBORS) { const id = i.detached ? null : axialMap.get([i.axial[0] + dq, i.axial[1] + dr].join(',')); nb.push({ id: id || null, dq, dr }); } neighbors.set(i.id, nb);
     views.set(i.id, { top, cliff, outline, center: c });
     // 島緣：一圈彩色圓角積木（島的辨識色）
     { const cols = EDGE_BLOCKS[i.ground] || [0xf4efe6, 0xd9cbb4]; let n = 0; for (let e = 0; e < 6; e++) { const [ax, az] = hexVertex(c.x, c.z, R, e), [bx, bz] = hexVertex(c.x, c.z, R, e + 1); const mx = (ax + bx) / 2 - c.x, mz = (az + bz) / 2 - c.z, ml = Math.hypot(mx, mz); const yaw = Math.atan2(-(bz - az), bx - ax); const N = 7, L = Math.hypot(bx - ax, bz - az);
@@ -94,16 +95,34 @@ export function buildIslands(scene, islands, kit, colors) {
     for (let s = 0; s <= 8; s++) { const t = s / 8, pnt = pa.clone().lerp(pb, t); kit.hbox(pnt.x, TOP + 0.03 + Math.sin(t * Math.PI) * arch, pnt.z, 0.3, 0.035, len / 9 + 0.01, s % 2 ? deck[0] : deck[1], null, [Math.cos(t * Math.PI) * -arch * 2, yaw, 0]); }
     for (const side of [-1, 1]) { const ox = Math.cos(yaw) * 0.15 * side, oz = -Math.sin(yaw) * 0.15 * side; for (let s = 0; s <= 4; s++) { const t = s / 4, pnt = pa.clone().lerp(pb, t); kit.hbox(pnt.x + ox, TOP + 0.13 + Math.sin(t * Math.PI) * arch, pnt.z + oz, 0.022, 0.16, 0.022, colors.cream); } kit.hbox(mid.x + ox, TOP + 0.21 + arch * 0.66, mid.z + oz, 0.02, 0.02, len, 0x9a7454, null, [0, yaw, 0]); }
   }
-  return { centers, neighbors, views, bridges, tops };
+  // 陸橋：獨立島與指定的島之間，取兩島步道環上最近的一對節點，做一座有拱架、橋墩、欄杆、燈的人行陸橋
+  const ringPts = (id) => { const c = centers.get(id), out = []; for (let k = 0; k < 6; k++) { const [vx, vz] = hexVertex(c.x, c.z, RING_R, k), [wx, wz] = hexVertex(c.x, c.z, RING_R, k + 1); out.push(new THREE.Vector3(vx, TOP + 0.03, vz), new THREE.Vector3((vx + wx) / 2, TOP + 0.03, (vz + wz) / 2)); } return out; };
+  const links = [];
+  for (const i of islands) { if (!i.link || !centers.has(i.link)) continue; let best = null; for (const a of ringPts(i.id)) for (const b of ringPts(i.link)) { const d = a.distanceTo(b); if (!best || d < best.d) best = { a, b, d }; } const { a: pa, b: pb } = best; links.push({ a: i.id, b: i.link, pa, pb });
+    const len = pa.distanceTo(pb), dir = pb.clone().sub(pa).normalize(), yaw = Math.atan2(dir.x, dir.z), side = new THREE.Vector3(dir.z, 0, -dir.x); const N = Math.max(8, Math.round(len / 0.22));
+    for (let s2 = 0; s2 < N; s2++) { const t = (s2 + 0.5) / N, q = pa.clone().lerp(pb, t); kit.hbox(q.x, TOP + 0.04, q.z, 0.46, 0.04, len / N + 0.005, s2 % 2 ? 0xd4a07e : 0xc49470, null, [0, yaw, 0]); }
+    kit.hbox((pa.x + pb.x) / 2, TOP + 0.0, (pa.z + pb.z) / 2, 0.5, 0.06, len, 0xe4d6c3, null, [0, yaw, 0]);
+    for (const sgn of [-1, 1]) { const o = side.clone().multiplyScalar(0.24 * sgn); const M = Math.round(len / 0.3);
+      for (let k = 0; k <= M; k++) { const q = pa.clone().lerp(pb, k / M).add(o); kit.hbox(q.x, TOP + 0.13, q.z, 0.025, 0.18, 0.025, 0xfff8f4); }
+      const mid = pa.clone().lerp(pb, 0.5).add(o); kit.hbox(mid.x, TOP + 0.22, mid.z, 0.03, 0.03, len, colors.accent, null, [0, yaw, 0]);
+      // 拱架：一節節方塊沿拋物線排起來，吊索垂到橋面
+      const A = 14, H = Math.min(1.1, 0.25 + len * 0.18); let prev = null;
+      for (let k = 0; k <= A; k++) { const t = k / A; const q = pa.clone().lerp(pb, t).add(o); q.y = TOP + 0.22 + Math.sin(t * Math.PI) * H; if (prev) { const m2 = prev.clone().lerp(q, 0.5), seg = q.distanceTo(prev); const pitch = Math.atan2(q.y - prev.y, Math.hypot(q.x - prev.x, q.z - prev.z)); kit.part('box', [m2.x, m2.y, m2.z], [0.05, 0.05, seg + 0.01], 0xfff8f4, [-pitch, yaw, 0]); }
+        if (k > 0 && k < A && k % 2 === 0) { kit.hbox(q.x, (q.y + TOP + 0.22) / 2, q.z, 0.012, q.y - TOP - 0.22, 0.012, 0x9a8a7a); }
+        if (k % 4 === 2) kit.bulb(q.x, q.y + 0.05, q.z, 0.05, 0xfff0c2); prev = q; } }
+    for (let k = 1; k < 4; k++) { const q = pa.clone().lerp(pb, k / 4); kit.cyl(q.x, (TOP - 0.02 + WATER_Y - 0.4) / 2, q.z, 0.16, TOP - 0.02 - (WATER_Y - 0.4), 0xd9cbb4); kit.cyl(q.x, WATER_Y + 0.02, q.z, 0.3, 0.04, 0xf6fbfa); }
+    for (const end of [pa, pb]) { kit.cyl(end.x + side.x * 0.3, TOP + 0.3, end.z + side.z * 0.3, 0.05, 0.6, colors.accent); kit.cyl(end.x - side.x * 0.3, TOP + 0.3, end.z - side.z * 0.3, 0.05, 0.6, colors.accent); } }
+  return { centers, neighbors, views, bridges, tops, links };
 }
 // 行人路網：每島 12 個環節點（頂點 + 邊中點），橋連接邊中點。
-export function buildGraph(islands, centers, neighbors) {
+export function buildGraph(islands, centers, neighbors, links = []) {
   const nodes = [], adj = [], ringIndex = new Map();
   const add = (p, island) => { nodes.push({ p, island }); adj.push([]); return nodes.length - 1; };
   const link = (a, b) => { const d = nodes[a].p.distanceTo(nodes[b].p); adj[a].push([b, d]); adj[b].push([a, d]); };
   for (const i of islands) { const c = centers.get(i.id), ids = []; for (let k = 0; k < 6; k++) { const [vx, vz] = hexVertex(c.x, c.z, RING_R, k), [wx, wz] = hexVertex(c.x, c.z, RING_R, k + 1); ids.push(add(new THREE.Vector3(vx, TOP + 0.03, vz), i.id)); ids.push(add(new THREE.Vector3((vx + wx) / 2, TOP + 0.03, (vz + wz) / 2), i.id)); } for (let k = 0; k < 12; k++) link(ids[k], ids[(k + 1) % 12]); ringIndex.set(i.id, ids); }
   const midFor = (id, dq, dr) => { const c = centers.get(id), [dx, dz] = dirOf(dq, dr), ids = ringIndex.get(id); let best = null, bd = 1e9; for (let k = 1; k < 12; k += 2) { const p = nodes[ids[k]].p, d = (p.x - c.x - dx * 2) ** 2 + (p.z - c.z - dz * 2) ** 2; if (d < bd) { bd = d; best = ids[k]; } } return best; };
   for (const [id, nb] of neighbors) for (const n of nb) if (n.id && id < n.id) link(midFor(id, n.dq, n.dr), midFor(n.id, -n.dq, -n.dr));
+  for (const L of links) link(nodeNear(L.a, L.pa), nodeNear(L.b, L.pb));
   function shortest(a, b) { const dist = new Array(nodes.length).fill(Infinity), prev = new Array(nodes.length).fill(-1), done = new Array(nodes.length).fill(false); dist[a] = 0;
     for (;;) { let u = -1, best = Infinity; for (let i = 0; i < nodes.length; i++) if (!done[i] && dist[i] < best) { best = dist[i]; u = i; } if (u < 0 || u === b) break; done[u] = true; for (const [v, w] of adj[u]) if (dist[u] + w < dist[v]) { dist[v] = dist[u] + w; prev[v] = u; } }
     const path = []; for (let v = b; v >= 0; v = prev[v]) path.unshift(v); return path[0] === a ? path : [a]; }
