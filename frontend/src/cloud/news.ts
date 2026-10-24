@@ -22,6 +22,8 @@ export type NewsRow = {
   summary_zh?: string | null
   /** 這則提到的實體（T-402，一度；台股在前、再國外、再族群／主題）。舊的服務沒有這欄 → undefined */
   mentions?: NewsMention[]
+  /** 新聞情緒（D-205 走 A）：台股 id（tw:2330）→ 1 好、0 中性、−1 壞；還沒判斷的不在裡面；舊服務 → undefined */
+  sentiment?: Record<string, number>
   /** 新聞類型（T-421）：財報展望／訂單產品／擴廠併購／政策事故／盤勢行情／其他；還沒分類或舊服務 → null／undefined */
   type?: NewsType | null
 }
@@ -192,6 +194,8 @@ export type StockNewsItem = {
   /** 路徑上有 AI 草擬、還沒核可的線 */
   draft: boolean
   path: StockNewsStep[]
+  /** 新聞情緒（D-205 走 A）：這則對這一檔 1 好、0 中性、−1 壞；還沒判斷 null；舊服務 undefined */
+  sentiment?: number | null
 }
 export type StockNews = { id: string; days: number; items: StockNewsItem[]; quiet?: Quiet | null }
 export type NewsCount = { direct: number; indirect: number }
@@ -390,3 +394,23 @@ export const stepDay = (s: ThreadStep): string => {
   const d = new Date(Date.parse(s.first_seen_at) + 8 * 3600_000)
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
 }
+
+/** 新聞情緒小標（D-205 走 A）：好＝紅、壞＝綠（台股漲紅跌綠的習慣）、中性不標。 */
+export type SentimentMark = { cls: 'good' | 'bad'; text: '好' | '壞'; title: string }
+export function sentimentMark(label: number | null | undefined): SentimentMark | null {
+  if (label === 1) return { cls: 'good', text: '好', title: '這則新聞對這檔是好消息（雲端 AI 判斷，不是股價預測）' }
+  if (label === -1) return { cls: 'bad', text: '壞', title: '這則新聞對這檔是壞消息（雲端 AI 判斷，不是股價預測）' }
+  return null
+}
+
+/** 個股頁的風向：近 N 則直接提到這檔的新聞裡，幾則好、幾則壞（中性與還沒判斷的不算）。 */
+export function stockMood(items: { sentiment?: number | null }[]): { good: number; bad: number } {
+  let good = 0
+  let bad = 0
+  for (const it of items) {
+    if (it.sentiment === 1) good += 1
+    else if (it.sentiment === -1) bad += 1
+  }
+  return { good, bad }
+}
+

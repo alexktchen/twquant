@@ -144,6 +144,16 @@ Deno.serve(async (req) => {
               left join news.translations t on t.item_id = i.id and t.content_sha = coalesce(v.content_sha, i.content_sha) and t.status = 'ok'
               where i.id = any(${links.map((l) => l.item_id)})`
       const byId = new Map(metaRows.map((r) => [r.id, r]))
+      // 新聞情緒（D-205 走 A）：這則對「這一檔」好／中性／壞；只看現行提示詞版本、最新那一版內容判斷的
+      const stockSent =
+        links.length === 0
+          ? []
+          : await sql<{ item_id: string; label: number }[]>`
+              select distinct on (s.item_id) s.item_id, s.label from news.item_sentiment s
+              where s.item_id = any(${links.map((l) => l.item_id)}) and s.entity_id = ${ids[0]}
+                and s.prompt_version = ${cfg.sentiment.prompt_version}
+              order by s.item_id, s.created_at desc`
+      const sentById = new Map(stockSent.map((r) => [r.item_id, r.label]))
       // 直接提到的在前；同一種裡新的在前
       const items = links
         .filter((l) => byId.has(l.item_id))
@@ -160,6 +170,7 @@ Deno.serve(async (req) => {
             score: Number(l.score.toFixed(4)),
             draft: l.draft,
             path: l.path,
+            sentiment: sentById.get(r.id) ?? null,
           }
         })
         .sort((a, b) => a.degree - b.degree || (b.first_seen_at ?? '').localeCompare(a.first_seen_at ?? ''))
@@ -494,6 +505,18 @@ Deno.serve(async (req) => {
         if (shaOf.get(m.item_id) !== m.content_sha) continue
         mentionsOf.set(m.item_id, [...(mentionsOf.get(m.item_id) ?? []), { id: m.id, type: m.type, label: m.label }])
       }
+      // 新聞情緒（D-205 走 A）：這一版內容、現行提示詞版本；還沒判斷的不列
+      const srows =
+        ids.length === 0
+          ? []
+          : await sql<{ item_id: string; entity_id: string; content_sha: string; label: number }[]>`
+              select item_id, entity_id, content_sha, label from news.item_sentiment
+              where item_id = any(${ids}) and prompt_version = ${cfg.sentiment.prompt_version}`
+      const sentOf = new Map<string, Record<string, number>>()
+      for (const s of srows) {
+        if (shaOf.get(s.item_id) !== s.content_sha) continue
+        sentOf.set(s.item_id, { ...(sentOf.get(s.item_id) ?? {}), [s.entity_id]: s.label })
+      }
       const items = rows.map((r) => ({
         id: r.id,
         source: r.source,
@@ -514,6 +537,8 @@ Deno.serve(async (req) => {
         type: r.type,
         // 台股在前、再國外、再族群／主題，最多 graph.mentions_per_item 個；沒有 → []
         mentions: itemMentions(mentionsOf.get(r.id) ?? [], cfg.graph.mentions_per_item),
+        // 新聞情緒（D-205 走 A）：台股 id → 1 好、0 中性、−1 壞；還沒判斷的不在裡面
+        sentiment: sentOf.get(r.id) ?? {},
       }))
       return json({ api_version: API_VERSION, items })
     }
