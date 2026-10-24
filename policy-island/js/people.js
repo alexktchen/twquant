@@ -16,10 +16,10 @@ export function createPeople(scene, colors, heroCfgs) {
     let shirt = CASUAL[Math.floor(rnd() * CASUAL.length)], pants = [0x3b3a42, 0x4a5a78, 0x6b5a4a][Math.floor(rnd() * 3)]; let sc = 1;
     if (role === 'child') sc = 0.78; if (role === 'elder') hair = 0xd9d4cc; if (role === 'worker') shirt = 0x4a5a78;
     if (H) { sc = 1.16; shirt = 0xfbfbf7; pants = 0x2f3a4a; hair = 0x241c1a; }
-    const MAYOR = role === 'mayor'; if (MAYOR) { sc = 1.22; shirt = 0xfbfbf7; pants = 0x2a3346; hair = 0x1c1817; }
+    const MAYOR = role === 'mayor'; if (MAYOR) { sc = 1.22; shirt = 0x26365c; pants = 0x26365c; hair = 0x15110f; }
     const add = (g, off, s, c, ch = null, r = null) => P.push({ g, off, s, c, ch, r });
     add('leg', [-0.032, 0.065, 0], [0.05, 0.13, 0.058], pants, 'legL'); add('leg', [0.032, 0.065, 0], [0.05, 0.13, 0.058], pants, 'legR');
-    const shoe = H ? 0xf6f4ef : 0x2a2524; add('box', [-0.032, 0.012, 0.012], [0.055, 0.025, 0.085], shoe, 'legL'); add('box', [0.032, 0.012, 0.012], [0.055, 0.025, 0.085], shoe, 'legR');
+    const shoe = H ? 0xf6f4ef : role === 'mayor' ? 0x3a2a22 : 0x2a2524; add('box', [-0.032, 0.012, 0.012], [0.055, 0.025, 0.085], shoe, 'legL'); add('box', [0.032, 0.012, 0.012], [0.055, 0.025, 0.085], shoe, 'legR');
     add('body', [0, 0.2, 0], [0.135, 0.11, 0.115], shirt);
     if (role === 'worker') { add('box', [0, 0.205, 0.003], [0.128, 0.11, 0.104], 0xf2a33a); add('box', [0, 0.2, 0], [0.13, 0.014, 0.106], 0xf5f5ef); }
     add('arm', [-0.077, 0.205, 0], [0.034, 0.1, 0.038], shirt, 'armL'); add('arm', [0.077, 0.205, 0], [0.034, 0.1, 0.038], shirt, 'armR');
@@ -28,7 +28,7 @@ export function createPeople(scene, colors, heroCfgs) {
     if (!H && !MAYOR) { add('box', [0, 0.157, 0], [0.139, 0.016, 0.119], 0x3b3a42); add('box', [0, 0.255, 0.035], [0.075, 0.022, 0.05], 0xfbfbf7); }
     add('head', [0, 0.345, 0], [0.19, 0.178, 0.172], skin, 'head');
     const hatted = ['child', 'cyclist', 'hiker', 'worker'].includes(role) || (H && ['chief', 'driver', 'fireman'].includes(heroCls)) || MAYOR;
-    add('cap', [0, 0.352, -0.006], [0.206, hatted ? 0.17 : 0.19, 0.204], hair, 'head', [-0.32, 0, 0]);
+    add('cap', [0, 0.352, -0.006], [0.206, MAYOR ? 0.18 : hatted ? 0.17 : 0.19, 0.204], hair, 'head', [MAYOR ? -0.36 : -0.32, 0, 0]);
     if (!hatted) { const styles = role === 'elder' ? ['short', 'bun', 'short'] : role === 'youth' ? ['beanie', 'long', 'pony', 'puff'] : ['short', 'long', 'bun', 'pony', 'short', 'puff']; const st = styles[Math.floor(rnd() * styles.length)];
       if (st === 'long') add('box', [0, 0.31, -0.07], [0.19, 0.13, 0.05], hair, 'head', [0.12, 0, 0]); if (st === 'bun') add('eye', [0, 0.44, -0.07], [0.075, 0.07, 0.07], hair, 'head'); if (st === 'pony') add('eye', [0, 0.33, -0.115], [0.055, 0.1, 0.05], hair, 'head', [0.35, 0, 0]);
       if (st === 'puff') for (const [dx, dy] of [[-0.07, 0.4], [0.07, 0.4], [0, 0.435]]) add('eye', [dx, dy, -0.02], [0.09, 0.08, 0.09], hair, 'head');
@@ -52,12 +52,22 @@ export function createPeople(scene, colors, heroCfgs) {
       case 'officeworker': add('cyl', [0.1, 0.16, 0.03], [0.03, 0.05, 0.03], 0xf6efe3, 'armR'); break;
       case 'youth': add('box', [0, 0.21, -0.07], [0.1, 0.1, 0.05], 0x2f3a46); break;
     }
-    if (MAYOR) { // 市長：整齊側分短髮、白襯衫捲袖、深色西裝褲、藍領帶、黑皮鞋、肩帶與宣傳台
-      add('box', [-0.055, 0.405, 0.04], [0.11, 0.05, 0.1], hair, 'head', [0, 0, 0.25]); add('box', [0.03, 0.418, 0.035], [0.12, 0.035, 0.1], hair, 'head', [0, 0, -0.08]); add('box', [-0.09, 0.35, 0.01], [0.03, 0.08, 0.12], hair, 'head'); add('box', [0.09, 0.35, 0.01], [0.03, 0.08, 0.12], hair, 'head');
-      add('box', [0, 0.23, 0.058], [0.022, 0.06, 0.006], 0x2f5f9a); add('box', [0, 0.18, 0.06], [0.03, 0.05, 0.006], 0x2f5f9a); add('box', [0, 0.257, 0.054], [0.06, 0.018, 0.01], 0xfbfbf7);
-      add('box', [0, 0.157, 0], [0.139, 0.016, 0.119], 0x1c1817); for (const sx of [-1, 1]) add('box', [sx * 0.077, 0.172, 0], [0.04, 0.018, 0.042], 0xfbfbf7, sx < 0 ? 'armL' : 'armR');
-      add('box', [0.005, 0.205, 0.004], [0.03, 0.16, 0.122], 0xdb6a41, null, [0, 0, 0.7]); add('eye', [-0.035, 0.235, 0.064], [0.03, 0.03, 0.01], 0xfcea8b);
-      add('box', [0, 0.035, 0], [0.24, 0.07, 0.18], 0xb48560, 'soap'); add('box', [0, 0.04, 0.091], [0.15, 0.035, 0.004], 0xfff1de, 'soap'); add('cyl', [0.095, 0.15, 0.06], [0.03, 0.06, 0.03], 0x3b3a42, 'armR'); add('cone', [0.095, 0.19, 0.06], [0.05, 0.05, 0.05], 0xdb6a41, 'armR', [Math.PI, 0, 0]); }
+    if (MAYOR) { // 市長：西裝頭（左側分線、頂部往後梳出蓬度、兩側修短）、濃眉；深藍西裝外套蓋到臀部、寬翻領、白襯衫開領不打領帶、胸袋巾；左手麥克風，演講時右手握拳
+      const hp = P.find(q => q.g === 'head'); hp.s = [0.18, 0.19, 0.17];
+      // 圓潤的頭髮體積：前額往右上梳起的蓬度、頭頂往後順、左側分線處略低
+      add('eye', [0.02, 0.424, 0.05], [0.16, 0.07, 0.11], hair, 'head', [-0.35, 0, -0.18]);
+      add('eye', [0.01, 0.428, -0.01], [0.19, 0.065, 0.16], hair, 'head', [0.05, 0, -0.06]);
+      add('eye', [0, 0.41, -0.07], [0.2, 0.07, 0.12], hair, 'head', [0.35, 0, 0]);
+      add('eye', [-0.062, 0.405, 0.04], [0.06, 0.04, 0.1], hair, 'head', [-0.2, 0, 0.3]);
+      for (const sx of [-1, 1]) add('box', [sx * 0.038, 0.372, 0.086], [0.04, 0.01, 0.005], hair, 'head', [0, 0, sx * -0.12]);
+      add('box', [0, 0.165, 0], [0.142, 0.07, 0.122], 0x26365c);
+      for (const sx of [-1, 1]) { add('box', [sx * 0.074, 0.245, 0], [0.05, 0.03, 0.06], 0x26365c); }
+      add('box', [0, 0.232, 0.057], [0.044, 0.07, 0.006], 0xfbfbf7); for (const sx of [-1, 1]) add('box', [sx * 0.021, 0.262, 0.057], [0.032, 0.016, 0.006], 0xfbfbf7, null, [0, 0, sx * 0.6]);
+      for (const sx of [-1, 1]) { add('box', [sx * 0.033, 0.218, 0.06], [0.026, 0.1, 0.006], 0x34477a, null, [0, 0, sx * -0.4]); add('box', [sx * 0.048, 0.25, 0.058], [0.022, 0.03, 0.006], 0x34477a, null, [0, 0, sx * 0.7]); }
+      add('box', [0.042, 0.232, 0.062], [0.02, 0.012, 0.004], 0xfbfbf7); for (const yy of [0.172, 0.148]) add('eye', [0.004, yy, 0.062], [0.009, 0.009, 0.005], 0x0f1626);
+      add('cyl', [-0.085, 0.13, 0.05], [0.022, 0.08, 0.022], 0x222222, 'armL', [0.5, 0, 0]); add('eye', [-0.085, 0.175, 0.075], [0.038, 0.038, 0.038], 0x3b3a42, 'armL');
+      add('eye', [0.077, 0.148, 0], [0.04, 0.04, 0.04], 0xf0c4a0, 'armR');
+      add('box', [0, 0.035, 0], [0.24, 0.07, 0.18], 0xb48560, 'soap'); add('box', [0, 0.04, 0.091], [0.15, 0.035, 0.004], 0xfff1de, 'soap'); }
     if (H) { const c = H.color;
       add('box', [0, 0.205, 0.004], [0.13, 0.112, 0.106], c); add('box', [0, 0.235, 0.058], [0.03, 0.05, 0.004], 0xfbfbf7);
       if (heroCls === 'chief') { add('cap', [0, 0.39, 0], [0.205, 0.12, 0.195], c, 'head'); add('cyl', [0, 0.39, 0.06], [0.2, 0.008, 0.12], c, 'head'); add('cone', [0.1, 0.2, 0.1], [0.07, 0.1, 0.07], 0xfbfbf7, 'armR', [1.4, 0, 0]); }

@@ -47,8 +47,14 @@ export function createGame(ctx) {
   const MC = C.mayor; let stops = [];
   function setStops(list) { stops = [...list].sort((a, b) => a.order - b.order || a.pos.x - b.pos.x); if (G.mayor && G.mayor.stop >= stops.length) G.mayor.stop = 0; }
   function spawnMayor() { const m = people.makeWalker('mayor', goalCenter.clone().add(new THREE.Vector3(0.6, 0.03, 1.0))); m.stop = 0; m.wait = 2; m.route = null; m.s = 0; m.state = 'walk'; m.yaw = 0;
-    m.sprite = textSprite(MC.name, { bg: '#db6a41', fg: '#fff8f4', size: 0.28 }); m.sprite.userData.w0 = m.sprite.scale.x; m.sprite.userData.h0 = m.sprite.scale.y; scene.add(m.sprite);
+    m.sprite = mayorTag(MC.name); scene.add(m.sprite);
     m.hit = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), new THREE.MeshBasicMaterial({ visible: false })); scene.add(m.hit); G.mayor = m; return m; }
+  function mayorTag(name) { const cv = document.createElement('canvas'); const g2 = cv.getContext('2d'); const font = '900 40px "Noto Sans TC", sans-serif', fontB = '900 30px "Noto Sans TC", sans-serif'; g2.font = font; const tw = Math.ceil(g2.measureText(name).width); g2.font = fontB; const bw = Math.ceil(g2.measureText('🎙 市長').width) + 26;
+    cv.width = bw + tw + 50; cv.height = 84; g2.beginPath(); g2.roundRect(3, 3, cv.width - 6, 64, 32); g2.fillStyle = '#fcea8b'; g2.fill(); g2.lineWidth = 5; g2.strokeStyle = '#211d1d'; g2.stroke();
+    g2.beginPath(); g2.moveTo(cv.width / 2 - 12, 66); g2.lineTo(cv.width / 2 + 12, 66); g2.lineTo(cv.width / 2, 82); g2.closePath(); g2.fillStyle = '#211d1d'; g2.fill();
+    g2.beginPath(); g2.roundRect(12, 12, bw, 46, 23); g2.fillStyle = '#db6a41'; g2.fill(); g2.font = fontB; g2.fillStyle = '#fff8f4'; g2.textAlign = 'center'; g2.textBaseline = 'middle'; g2.fillText('🎙 市長', 12 + bw / 2, 36);
+    g2.font = font; g2.fillStyle = '#211d1d'; g2.fillText(name.replace(/市長$/, ''), 12 + bw + (cv.width - bw - 24) / 2, 37);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true })); const h = 0.3; sp.scale.set(h * cv.width / cv.height, h, 1); sp.renderOrder = 13; sp.userData.w0 = sp.scale.x; sp.userData.h0 = sp.scale.y; return sp; }
   function slogan(pol) { const first = String(pol.summary || '').split(/[，。、；]/)[0]; const t = `${pol.title}！${first}`; return t.length > MC.sloganMax ? t.slice(0, MC.sloganMax) + '…' : t; }
   function setBubble(m, txt) { if (m.bubble) { scene.remove(m.bubble); m.bubble = null; } if (!txt) return; m.bubble = textSprite('📣 ' + txt, { bg: '#fff8f4', fg: '#211d1d', size: 0.26 }); m.bubble.userData.w0 = m.bubble.scale.x; m.bubble.userData.h0 = m.bubble.scale.y; scene.add(m.bubble); }
   function updateMayor(dt, zoom = 1) { const m = G.mayor; if (!m || !stops.length) return;

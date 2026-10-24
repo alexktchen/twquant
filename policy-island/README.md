@@ -48,6 +48,14 @@ artifact 版大廳底部「後台：政策與議題（編輯者）」只有 arti
 
 拆成正式站時把 `store.js` 的 remote 分支換成 Supabase / Firebase（介面：`init / onGlobal / onLeaderboard / onIssues / onPolicies / saveHero / recordRound / addIssue / addPolicy`），其餘不用動。
 
+## 共享後端（Supabase）
+claude.ai artifact 只有登入的訪客才拿得到共享資料，無痕視窗（未登入）看不到線上人數與總戰績。公開站要用自己的後端：
+1. 建一個 Supabase 專案；Authentication → Sign In / Providers → 打開 **Allow anonymous sign-ins**。
+2. SQL Editor 貼上 `supabase/schema.sql` 執行（建 heroes / policies / issues 三張表與權限）。
+3. 把 Project Settings → API 的 **Project URL** 與 **anon public key** 填進 `js/backend.js`，推上去就生效。
+   - anon key 是公開金鑰，權限由 RLS 控制，可以進 repo；**service_role key 絕對不要放**。
+4. 生效後：每位訪客匿名登入拿到自己的 id，戰績寫進 heroes；線上人數用 Realtime presence；政策與議題從 policies / issues 讀（在 Supabase Table Editor 新增）。
+
 ## 部署到 Cloudflare Pages
 純靜態、免 build。Cloudflare 後台 → Workers & Pages → Create → Pages → Connect to Git → 選這個 repo；Framework preset 選 None、Build command 留空、Build output directory 填 `/`。之後推 main 就自動上線。`_headers` 已設好快取。
 

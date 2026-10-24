@@ -21,7 +21,7 @@ export function createUI({ game, callbacks, overview, flyTo, placePolicies, rend
     $('onlineList').textContent = online > 1 ? `${online} 人一起守城${onlineNames.length ? '：' + onlineNames.slice(0, 12).join('、') : ''}` : '目前只有你，邀朋友一起來守。';
     $('lobbyStats').innerHTML = `<div><b>${fmt(online)}</b><span>人在線</span></div><div><b>${fmt(globals.waves)}</b><span>${C.site.waveWord}已阻擋</span></div><div><b>${fmt(globals.blocked)}</b><span>隻網軍被擋下</span></div><div><b>${fmt(globals.heroes)}</b><span>位英雄參戰</span></div>`.replace(/<div><b>[^<]*<\/b><span>位英雄參戰<\/span><\/div>$/, '');
     $('mine').textContent = h.rounds ? `你已經守了 ${h.rounds} 波、擊退 ${fmt(h.kills)} 隻。` : '你還沒出戰過。';
-    $('modeNote').textContent = S.state.mode === 'remote' ? (S.state.canWrite === false ? '目前只能瀏覽：你的戰績不會計入共享總數。' : '戰績會計入所有人的共享總數。') : '本機模式：戰績只存在這個瀏覽器。';
+    $('modeNote').textContent = S.state.mode === 'supabase' ? '已連線：戰績與線上人數和所有人共享。' : S.state.mode === 'remote' ? (S.state.canWrite === false ? '目前只能瀏覽：你的戰績不會計入共享總數。' : '戰績會計入所有人的共享總數。') : '本機模式：沒有連到共享後端，戰績只存在這個瀏覽器。';
     $('adminBox').hidden = !(S.state.canEdit && S.state.mode === 'remote'); }
   function renderBoard(list) { $('board').innerHTML = list.length ? list.map((h, i) => `<li><span class="rank">${i + 1}</span><span class="who">${esc(h.nick || '匿名英雄')} <small>${C.heroes[h.cls] ? C.heroes[h.cls].icon : ''}</small></span><b>${fmt(h.kills)}</b><small>${h.rounds || 0} 波</small></li>`).join('') : '<li class="empty">還沒有人出戰。第一個就是你。</li>'; }
   function renderStrip() { $('gOnline').textContent = fmt(online); $('gWaves').textContent = fmt(globals.waves); $('gBlocked').textContent = fmt(globals.blocked); $('gHeroes').textContent = fmt(globals.heroes); const d = daysToEve(); $('gCountdown').textContent = d > 0 ? `總攻擊倒數 ${d} 天` : '總攻擊之夜'; }

@@ -60,7 +60,7 @@ button,input,select{font:inherit;color:inherit} button{cursor:pointer} button:fo
   .logp,.hint{display:none} .banner{top:76px;font-size:12px;padding:6px 12px}
   .nameplate{font-size:11px;padding:2px 8px} .nameplate.river{font-size:10px}
   .lobby-grid{grid-template-columns:1fr} .issue-form{grid-template-columns:1fr 1fr} .overlay .box{padding:16px} .overlay h2{font-size:22px}
-  .card{top:auto;bottom:70px;left:50%;transform:translateX(-50%);max-height:45vh} }
+  }
 @media (prefers-reduced-motion: reduce){ .banner{transition:none} }
 
 .card{left:max(14px,var(--sa-l));top:150px;width:300px;max-width:calc(100vw - 28px);padding:14px 16px;max-height:calc(100vh - 260px);overflow:auto}
@@ -73,3 +73,18 @@ button,input,select{font:inherit;color:inherit} button{cursor:pointer} button:fo
 .issues .rotation{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px} .issues .rotation span{font-size:11px;font-weight:700;color:var(--muted);background:#f3e7de;border-radius:999px;padding:2px 8px}
 .overlay .next{margin:8px 0 0;font-size:13px;color:var(--coral)} .lobby-stats{grid-template-columns:repeat(3,1fr)}
 @media (max-width:900px){ .gstrip>div.online{display:flex!important} .gstrip>div:nth-child(2){display:flex!important} .gstrip>div:nth-child(3),.gstrip>div:nth-child(4){display:none} }
+
+/* 手機：政策卡改成底部抽屜，左右各留 10px，一定在畫面內（放在桌機 .card 規則之後才不會被覆蓋） */
+@media (max-width:900px){
+  .card{top:auto;left:max(10px,var(--sa-l));right:max(10px,var(--sa-r));bottom:calc(64px + env(safe-area-inset-bottom,0px));width:auto;max-width:none;transform:none;max-height:52vh;padding:14px 16px 12px;border-radius:18px;overflow:auto;-webkit-overflow-scrolling:touch;z-index:5}
+  .card h2{font-size:17px;padding-right:28px} .card .lead{font-size:13px} .card ul{font-size:12px}
+  .card .close{right:6px;top:4px;width:36px;height:36px;font-size:22px}
+}
+/* 手機大廳：介紹收成三行、英雄兩欄、出戰按鈕黏在底部 */
+@media (max-width:900px){
+  .overlay{padding:10px} .overlay .box.lobby{padding:16px 14px 0}
+  .overlay .box.lobby .lead{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:13px}
+  .classes{grid-template-columns:1fr 1fr} .classes .cls{grid-template-columns:28px 1fr;padding:6px} .classes .cls .ic{font-size:18px} .classes small{display:none}
+  .overlay .box.lobby .go{position:sticky;bottom:0;margin:12px -14px 0;width:calc(100% + 28px);border-radius:0 0 22px 22px!important;padding:14px;box-shadow:0 -6px 16px #fff8f4}
+  .overlay .box.lobby .foot{margin-bottom:12px}
+}
