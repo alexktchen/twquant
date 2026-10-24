@@ -1,0 +1,6 @@
+# Cloudflare Workers 靜態資源不要上傳的檔案（說明、SQL、工具腳本）
+README.md
+supabase
+scripts
+.gitignore
+.git

@@ -1,0 +1,10 @@
+# Cloudflare Pages 快取設定：three.js 版本固定，可長快取；自己的程式改了要立刻生效，所以短快取。
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+/js/*
+  Cache-Control: public, max-age=300
+/css/*
+  Cache-Control: public, max-age=300
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
