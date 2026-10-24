@@ -22,11 +22,11 @@ export const CONFIG = {
   residents: { perIsland: 5, speed: 0.6, engageRadius: 9, meleeRange: 0.45, dps: 9, maxPerTarget: 3, roles: ['citizen','elder','child','parent','officeworker','youth','cyclist','worker','hiker'] },
   // 英雄（登入者）：點島嶼就走過去，自動攻擊射程內的敵人。
   heroes: {
-    chief:     { name: '里長伯',   icon: '🧓', color: 0x1f4e79, dmg: 16, rate: 0.55, range: 3.2, style: 'ball',  speed: 0.8, desc: '人面廣，中距離穩定輸出。' },
-    driver:    { name: '公車司機', icon: '🚌', color: 0x2f6f9f, dmg: 10, rate: 0.3,  range: 3.0, style: 'bus',   speed: 0.9, desc: '班次密，連發。' },
-    fireman:   { name: '消防員',   icon: '🚒', color: 0xc9452f, dmg: 18, rate: 0.7,  range: 2.8, style: 'water', slow: 0.5, slowTime: 1.6, speed: 0.85, desc: '水柱打到會減速。' },
-    volunteer: { name: '志工媽媽', icon: '🧺', color: 0xc97d97, dmg: 9,  rate: 0.6,  range: 2.8, style: 'ball',  regen: 0.4, rally: 1.3, speed: 0.8, desc: '每秒回一點滿意度，身邊居民攻擊 +30%。' },
-    engineer:  { name: '工程師',   icon: '💻', color: 0x4a3f8f, dmg: 22, rate: 1.0,  range: 3.2, style: 'zap',   chain: 3, speed: 0.75, desc: '台北通連鎖電擊，一次打 3 隻。' },
+    chief:     { name: '里長伯',   icon: '🧓', color: 0x1f4e79, dmg: 16, rate: 0.55, range: 3.2, style: 'ball',  speed: 1.1, desc: '人面廣，中距離穩定輸出。' },
+    driver:    { name: '公車司機', icon: '🚌', color: 0x2f6f9f, dmg: 10, rate: 0.3,  range: 3.0, style: 'bus',   speed: 1.2, desc: '班次密，連發。' },
+    fireman:   { name: '消防員',   icon: '🚒', color: 0xc9452f, dmg: 18, rate: 0.7,  range: 2.8, style: 'water', slow: 0.5, slowTime: 1.6, speed: 1.1, desc: '水柱打到會減速。' },
+    volunteer: { name: '志工媽媽', icon: '🧺', color: 0xc97d97, dmg: 9,  rate: 0.6,  range: 2.8, style: 'ball',  regen: 0.4, rally: 1.3, speed: 1.05, desc: '每秒回一點滿意度，身邊居民攻擊 +30%。' },
+    engineer:  { name: '工程師',   icon: '💻', color: 0x4a3f8f, dmg: 22, rate: 1.0,  range: 3.2, style: 'zap',   chain: 3, speed: 1.0, desc: '台北通連鎖電擊，一次打 3 隻。' },
   },
   // 攻擊方動物（model: bird / frog / worm / lizard / mouse）
   animals: {
@@ -46,7 +46,7 @@ export const CONFIG = {
     { id: 'shilin',   number: 2,  axial: [0, 1],  name: '士林區', ground: 'lawn',       landmark: 'palace' },
     { id: 'neihu',    number: 3,  axial: [1, 1],  name: '內湖區', ground: 'lawn',       landmark: 'techcampus' },
     { id: 'datong',   number: 4,  axial: [-1, 2], name: '大同區', ground: 'courtyard',  landmark: 'oldstreet' },
-    { id: 'zhongshan',number: 5,  axial: [0, 2],  name: '中山區', ground: 'street',     landmark: 'bigtree' },
+    { id: 'zhongshan',number: 5,  axial: [0, 2],  name: '中山區', ground: 'street',     landmark: 'grandhotel' },
     { id: 'songshan', number: 6,  axial: [1, 2],  name: '松山區', ground: 'street',     landmark: 'airport' },
     { id: 'nangang',  number: 7,  axial: [2, 2],  name: '南港區', ground: 'gravel',     landmark: 'expo' },
     { id: 'wanhua',   number: 8,  axial: [-2, 3], name: '萬華區', ground: 'terracotta', landmark: 'temple' },
