@@ -8,7 +8,8 @@ import { detectPending } from '../../../src/mention.ts'
 import { embedPending } from '../../../src/embed.ts'
 import { translatePending } from '../../../src/translate.ts'
 import { typePending, validateTypeWeights } from '../../../src/types.ts'
-import { authorized, cooccurDeps, db, embedDeps, fetchFeed, json, mentionDeps, pgStore, translateDeps, typeDeps } from '../_shared/io.ts'
+import { sentimentPending } from '../../../src/sentiment.ts'
+import { authorized, cooccurDeps, db, embedDeps, fetchFeed, json, mentionDeps, pgStore, sentimentDeps, translateDeps, typeDeps } from '../_shared/io.ts'
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void }
 
@@ -41,6 +42,9 @@ async function run(runId: string): Promise<void> {
     // 第六步（T-421）：新聞類型——本機訓好的探針對向量算一次，不花額度；舊新聞第一次部署後幾輪補完
     const ty = await typePending(validateTypeWeights(typeWeights), cfg.embed.per_run_limit * 5, typeDeps(sql, typeWeights.version))
     console.log(`news types ${runId}：${JSON.stringify(ty)}`)
+    // 第七步（D-205 走 A／D-218）：情緒——雲端 qwen3 判斷這則新聞對它提到的每檔台股是好、壞還是中性；自己的額度上限
+    const se = await sentimentPending(cfg.sentiment, sentimentDeps(sql, cfg.sentiment, cfg.mention.rule_version))
+    console.log(`news sentiment ${runId}：${JSON.stringify(se)}`)
     if (trError !== null) throw trError
   } finally {
     await sql.end({ timeout: 5 })

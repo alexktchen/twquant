@@ -11,6 +11,7 @@ import {
   NEWS_TYPE_LABEL,
   READER_RELATED,
   mentionChips,
+  sentimentMark,
   needsSummary,
   readerSummary,
   shortWhen,
@@ -144,6 +145,11 @@ export function NewsReader({
                   title="開個股頁"
                 >
                   {m.label}
+                  {sentimentMark(row.sentiment?.[m.id]) && (
+                    <em className={`cq-sent ${sentimentMark(row.sentiment?.[m.id])!.cls}`} title={sentimentMark(row.sentiment?.[m.id])!.title}>
+                      {sentimentMark(row.sentiment?.[m.id])!.text}
+                    </em>
+                  )}
                 </button>
               ) : (
                 <span key={m.id} className={`cq-news-ent ${classOf(m.type)}`}>

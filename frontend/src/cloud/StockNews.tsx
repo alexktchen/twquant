@@ -5,7 +5,7 @@ import { Network, Newspaper } from 'lucide-react'
 import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { fetchNewsGraph, fetchStockNews } from './api'
 import type { NewsGraph as NewsGraphData } from './news-graph'
-import { STOCK_NEWS_SHOWN, pathText, shouldJumpToNews, stockNewsSummary, taipeiHm, taipeiDay, type StockNews as StockNewsData } from './news'
+import { STOCK_NEWS_SHOWN, pathText, sentimentMark, shouldJumpToNews, stockMood, stockNewsSummary, taipeiHm, taipeiDay, type StockNews as StockNewsData } from './news'
 import { Section } from './Section'
 
 const NewsGraph = lazy(() => import('./NewsGraph').then((m) => ({ default: m.NewsGraph })))
@@ -58,6 +58,16 @@ export function StockNews({ sid, refresh, onStock, focus = 0 }: { sid: string; r
       {data.items.length === 0 ? (
         <p className="cq-sn-empty">近 {data.days} 天沒有提到它、也沒有經過供應商或族群連到它的新聞。</p>
       ) : (
+        <>
+        {(() => {
+          const mood = stockMood(data.items.filter((x) => x.degree === 1))
+          return mood.good + mood.bad > 0 ? (
+            <p className="cq-sn-mood" title="直接提到這一檔的新聞裡，雲端 AI 判斷是好消息、壞消息的則數（中性不算；不是股價預測）">
+              近 {data.days} 天風向：<em className="cq-sent good">好 {mood.good}</em>
+              <em className="cq-sent bad">壞 {mood.bad}</em>
+            </p>
+          ) : null
+        })()}
         <ul className="cq-sn">
           {items.map((it) => (
             <li key={it.id}>
@@ -66,6 +76,11 @@ export function StockNews({ sid, refresh, onStock, focus = 0 }: { sid: string; r
               </span>
               <div className="cq-sn-body">
                 <a href={it.url} target="_blank" rel="noopener noreferrer" className="cq-sn-title">
+                  {sentimentMark(it.sentiment) && (
+                    <em className={`cq-sent ${sentimentMark(it.sentiment)!.cls}`} title={sentimentMark(it.sentiment)!.title}>
+                      {sentimentMark(it.sentiment)!.text}
+                    </em>
+                  )}
                   {it.title_zh ?? it.title}
                 </a>
                 <small>
@@ -80,6 +95,7 @@ export function StockNews({ sid, refresh, onStock, focus = 0 }: { sid: string; r
             </li>
           ))}
         </ul>
+        </>
       )}
       {data.items.length > STOCK_NEWS_SHOWN && (
         <button className="cq-hc-link cq-sn-more" onClick={() => setAll(!all)}>

@@ -594,5 +594,17 @@
         ]
       }
     ]
+  },
+  "sentiment": {
+    "model": "@cf/qwen/qwen3-30b-a3b-fp8",
+    "system_suffix": " /no_think",
+    "prompt_version": "2026-10-24.1",
+    "per_run_limit": 40,
+    "window_hours": 48,
+    "max_stocks": 8,
+    "max_tokens": 300,
+    "daily_neurons": 700,
+    "input_neurons_per_1m": 4625,
+    "output_neurons_per_1m": 30475
   }
 }
