@@ -33,5 +33,6 @@ topics:
   seed: 7
   centers_file: news_topics_2026-10-21.1.npz   # 放 <data_dir>/models/，不進版控；版本寫在 news_features.topic_version
 
-# 用哪一版情緒探針分數（news_hist.sentiment_scores.version）；空＝還沒有情緒，sent_* 全 null（T-413 過門檻後填）
-sentiment_version: ""
+# 用哪一版情緒分數（news_hist.sentiment_scores.version）；空＝沒有情緒、sent_* 全 null。
+# 2026-10-24：探針沒過（T-413），改用 Ollama 全語料標籤（method=llm、提示詞版本 2026-10-21.1，103.6 萬對）
+sentiment_version: "2026-10-21.1"
