@@ -1,0 +1,71 @@
+/* 小台模擬（T-450／D-220）：地鐵告示——顏色分類、大字、少字；做多紅、放空綠（台股漲紅跌綠） */
+.cq-fu { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 32px; }
+.cq-fu-mode { padding: 0; max-width: 360px; }
+.cq-fu-mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; }
+.cq-fu-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mute); }
+.cq-fu-pick select {
+  flex: 1; max-width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font-size: 15px;
+}
+.cq-fu-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cq-fu-day { font-size: 17px; margin-right: 4px; }
+.cq-fu-warn { --c: #f0b90b; }
+.cq-fu-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cq-fu .cq-kpi { background: var(--tile, #16181f); border-radius: 10px; padding: 10px 12px; gap: 3px; }
+.cq-fu .cq-kpi-value { font-size: 24px; }
+.cq-fu .cq-kpi-sub { white-space: normal; }
+.cq-fu-chart { height: 360px; }
+.cq-fu-legend { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.cq-fu-legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-left: 6px; }
+.cq-fu-scrub { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.cq-fu-scrub input { flex: 1; accent-color: var(--accent); }
+.cq-fu-scrub b { font-size: 17px; font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; }
+.cq-fu-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+}
+.cq-fu-speed { padding: 0; flex: none; }
+.cq-fu-speed button { padding: 6px 10px; flex: none; font-size: 14px; }
+/* 提示列：拉到的那一刻最近發生的事；剛發生的買賣點亮起來（做多紅、放空綠） */
+.cq-fu-now {
+  display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 12px; margin-bottom: 8px;
+  border-radius: 8px; background: var(--bg); font-size: 15px; border-left: 4px solid var(--line);
+}
+.cq-fu-now time { color: var(--mute); font-variant-numeric: tabular-nums; }
+.cq-fu-now.fresh { font-weight: 600; }
+.cq-fu-now.fresh.long { border-left-color: var(--up); background: color-mix(in srgb, var(--up) 12%, var(--bg)); }
+.cq-fu-now.fresh.short { border-left-color: var(--down); background: color-mix(in srgb, var(--down) 12%, var(--bg)); }
+.cq-fu-play {
+  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(255, 122, 0, .16); color: var(--accent);
+}
+.cq-fu-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cq-fu-events li {
+  display: grid; grid-template-columns: 72px auto auto 1fr; align-items: center; gap: 8px;
+  padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px;
+}
+.cq-fu-events time { color: var(--mute); font-variant-numeric: tabular-nums; }
+.cq-fu-k-signal { --c: #f0b90b; }
+.cq-fu-k-fill { --c: var(--line-event, #3d9bff); }
+.cq-fu-k-exit { --c: #a78bfa; }
+.cq-fu-k-check { --c: #9aa0ac; }
+.cq-fu-k-info { --c: #9aa0ac; }
+.cq-fu-sleeve { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.cq-fu-sleeve.long, .cq-fu-trades td.long { color: var(--up); }
+.cq-fu-sleeve.short, .cq-fu-trades td.short { color: var(--down); }
+.cq-fu-trades { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+.cq-fu-trades th { text-align: left; color: var(--mute); font-weight: 500; font-size: 13.5px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.cq-fu-trades td { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.cq-fu-trades td.up { color: var(--up); }
+.cq-fu-trades td.down { color: var(--down); }
+.cq-fu-foot { color: var(--mute); font-size: 13.5px; line-height: 1.6; margin: 4px 0 0; }
+
+@media (max-width: 820px) {
+  .cq-fu-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cq-fu-chart { height: 280px; }
+  .cq-fu-events li { grid-template-columns: 64px auto 1fr; }
+  .cq-fu-events .cq-fu-sleeve { display: none; }
+  .cq-fu-trades th:nth-child(4), .cq-fu-trades td:nth-child(4) { display: none; }
+  .cq-fu-scrub { flex-wrap: wrap; }
+  .cq-fu-scrub input { order: 5; flex-basis: 100%; }
+}

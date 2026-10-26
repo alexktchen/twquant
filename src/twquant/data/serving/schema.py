@@ -937,6 +937,37 @@ WARRANT_SUMMARY_SPEC = TableSpec(
     indexes=(("underlying_id", "date"),),
 )
 
+# 小台模擬單（T-450／D-220）：一個交易日一列，payload 是網站「小台模擬」分頁的整份狀態（盤中每 15 秒覆蓋、收盤定稿）。
+# 寫入者是使用者電腦上的 research/momentum_scalping/scripts/fubon_live.py（富邦即時行情；或 --replay-day 的期交所重算），
+# 它不 import twquant，用同一句建表語句（tests/test_futures_paper_store.py 守著）。source＝fubon_live｜taifex_replay。
+# 富邦行情不得轉傳 → 網站只給 admin（functions/_lib/roles.ts 的 futures）。sync/rebuild/prune 都不碰。
+FUTURES_PAPER_SPEC = TableSpec(
+    "futures_paper",
+    (
+        ("day", "date"),
+        ("source", "text"),
+        ("status", "text"),  # live｜closed
+        ("payload", "jsonb"),
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("day",),
+    snapshot=True,  # 沒有 date 分區
+)
+
+# 小台模擬的秒級復盤（T-450／D-220，使用者：「我想要秒級的復盤」）：一個交易日一列，收盤後才寫。
+# payload＝08:45:00 起有成交的每一秒的最後成交價與 VWAP（×10），三個陣列都是差分整數；一天約 1.6 萬點、106 KB。
+# 只有逐筆的日子才有（富邦即時錄到的、期交所近 30 日逐筆重算的）；更早只有 1 分 K。寫入者同 FUTURES_PAPER_SPEC。
+FUTURES_PAPER_SECONDS_SPEC = TableSpec(
+    "futures_paper_seconds",
+    (
+        ("day", "date"),
+        ("payload", "jsonb"),
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("day",),
+    snapshot=True,
+)
+
 # 易跌標記（T-391／D-193）：D-192 模型對當天大盤精選 15 檔的機率，機率最高 5 檔 flagged。只給人看；小表全史保留。
 PICK_DOWN_RISK_SPEC = TableSpec(
     "pick_down_risk",
@@ -1073,6 +1104,8 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     WARRANT_DAILY_SPEC,
     WARRANT_SUMMARY_SPEC,
     PICK_DOWN_RISK_SPEC,
+    FUTURES_PAPER_SPEC,
+    FUTURES_PAPER_SECONDS_SPEC,
     BROKER_DAYTRADE_EVENTS_SPEC,
     MAIN_FORCE_DAILY_SPEC,
 )

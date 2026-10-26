@@ -5,6 +5,7 @@ import { getToken } from './session-client'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
+import type { FuturesDay, FuturesDayRow, SecondsPayload } from './futures'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
@@ -146,6 +147,16 @@ export const fetchMoodClose = () => get<{ close: CloseMood | null }>('/api/mood/
 /** 市場氛圍期貨與美股版（D-186）：台指期日盤／夜盤、加權現貨、美股四大指數；stale＝有來源沒更新到、給的是上一份。 */
 export const fetchMoodGlobal = () => get<{ global: GlobalMood; stale: boolean; errors: string[] }>('/api/mood/global')
 export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?line=${encodeURIComponent(line)}`)
+
+/** 小台模擬（T-450／D-220）：那一天的整份狀態（不給日期＝最新一天）。只給 admin。 */
+export const fetchFuturesDay = (day?: string) =>
+  get<FuturesDay>(day ? `/api/futures?day=${encodeURIComponent(day)}` : '/api/futures')
+
+/** 小台模擬有紀錄的交易日（新到舊）。只給 admin。 */
+export const fetchFuturesDays = () => get<{ days: FuturesDayRow[] }>('/api/futures/days').then((r) => r.days)
+
+/** 小台模擬那一天的秒級復盤資料；沒有（只有 1 分 K）→ 後端回 404，呼叫端改用 1 分 K。只給 admin。 */
+export const fetchFuturesSeconds = (day: string) => get<SecondsPayload>(`/api/futures/seconds?day=${encodeURIComponent(day)}`)
 
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')

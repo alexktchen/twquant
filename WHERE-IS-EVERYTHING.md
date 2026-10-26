@@ -197,6 +197,7 @@ worktree 那份的內容已在 2026-09-06 全部合併回主 checkout。
 | **洞悉證據包** | `data/insights/<insight_run_id>.json`（正本）；副本在 PG `serving.insight_packs`（T-373，網站讀這裡） | 2026-10-17 本機實測約 20 份（run mlscore_20261007）；雲端每晚 30 份 |
 | **重大訊息主旨** | PG `serving.mops_announcements`（T-371，只存主旨；每日步驟回補 35 天；雲端留 25 個交易日） | 本機 2026-10-17 起；雲端合併後第一班建表 |
 | 重大訊息全文（研究快照） | 本機 PG `serving.material_news`（2026-09-28 事件研究 D-166／D-168；52 萬則、2019-12～2026-09-28、948 MB；寫它的程式不在任何分支） | 凍結，沒有每日更新 |
+| **小台模擬單**（T-450／D-220） | 雲端 PG `serving.futures_paper`（一天一列，網站「小台模擬」分頁讀它，只給 admin）＋ `serving.futures_paper_seconds`（秒級復盤，收盤後寫）；寫入者是研究分支 `research/momentum_scalping/scripts/fubon_live.py --upload`（使用者電腦，富邦即時行情）；原始逐筆與五檔只在本機 `data/research_ms/fubon_live/<日>/`（富邦規範不得轉傳） | 每交易日約 20 KB |
 | 執行日誌 | `data/*.log`、`data/*/run.log` | — |
 | **PG 供應層** | `postgresql://twquant:twquant@localhost:5433/twquant`，schema `serving` | 約 27GB |
 

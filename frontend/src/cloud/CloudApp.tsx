@@ -32,6 +32,7 @@ import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
+import { FuturesPage } from './FuturesPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, type Group } from './group'
 import { cardReasons, factorsNote, mark, primaryModel, type Reason } from './reasons'
@@ -394,6 +395,11 @@ export default function CloudApp() {
               績效
             </button>
           )}
+          {features.includes('futures') && (
+            <button className={tab === 'futures' ? 'on' : ''} onClick={() => setTab('futures')}>
+              小台模擬
+            </button>
+          )}
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
             追蹤
           </button>
@@ -507,6 +513,8 @@ export default function CloudApp() {
         </main>
       ) : tab === 'line' ? (
         <LineGroupPage refresh={refresh} />
+      ) : tab === 'futures' ? (
+        <FuturesPage refresh={refresh} />
       ) : tab === 'score' ? (
         <ScorecardPage
           line={GUEST_LINES.some((l) => l.code === line) ? line : 'CORE'}

@@ -1,0 +1,17 @@
+// 小台模擬（T-450／D-220）：serving.futures_paper 一個交易日一列，payload 是網站要的整份狀態。
+// 寫入者是使用者電腦上的 research/momentum_scalping/scripts/fubon_live.py（富邦即時行情；盤中每 15 秒覆蓋、收盤定稿）。
+// 富邦行情不得轉傳 → 兩支端點都只給 admin，而且不進 60 秒暫存（盤中每 15 秒就變，暫存會讓畫面落後）。
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** ?day= 是不是 YYYY-MM-DD（只檢查格式，有沒有那一天交給資料庫）。 */
+export const dayOk = (day: string): boolean => DAY_RE.test(day)
+
+/** 還沒有任何紀錄：表還沒建，或電腦上的程式還沒寫過任何一天。 */
+export const NOT_READY = '還沒有小台模擬紀錄：電腦上的錄製程式（fubon_live.py --upload）開盤後就會寫進來。'
+
+/** 這天沒有秒級資料：只有逐筆的日子才有（富邦即時錄到的、期交所近 30 日逐筆重算的），而且收盤後才寫。 */
+export const NO_SECONDS = '這天沒有秒級資料（只有 1 分 K）'
+
+/** 日期清單一次最多給幾天（約一年的交易日）。 */
+export const DAYS_LIMIT = 250
