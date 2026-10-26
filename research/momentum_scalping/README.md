@@ -1,5 +1,7 @@
 # Momentum_Scalping 研究與紙上交易（research 分支，不併入 main）
 
+**接手請先讀 [`HANDOFF-2026-10-26.md`](HANDOFF-2026-10-26.md)。**
+
 這裡放的是 2026-10 這一輪的研究：檢驗 PTT 文章分享的 [seromitama/Momentum_Scalping](https://github.com/seromitama/Momentum_Scalping)（台股動能當沖），以及之後延伸出來的台指期多空、做空研究。
 
 - **只放程式、事前登記、結果摘要、紙上交易帳本。**
@@ -26,7 +28,7 @@
 | `intraday_bidir` ORB、VWAP、噪音區（小台 29 天） | 9 組都不及格 |
 | `combo` 各取其優組合 | 樣本外 16 天 −68,374 元，不成立；只有「噪音區只放空」在 2 年資料上是正的，但不顯著 |
 | `short_futures` 期貨籌碼濾網 | 4 個都不及格；L1（大額特定法人最偏空）最接近：+11.8 bp，CI −0.8～+25.0 |
-| `short_stock` 個股漲停隔天放空 | 資料下載中，結果待補 |
+| `short_stock` 個股漲停隔天放空 | 已登記；雲端被證交所擋、資料沒抓齊，改在本機跑（見交接文件 3.2） |
 
 ## 紙上交易（往前走的樣本外）
 
