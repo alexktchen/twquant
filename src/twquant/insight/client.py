@@ -41,6 +41,8 @@ HttpPost = Callable[[str, dict[str, str], bytes, float], bytes]
 
 _CF_API = "https://api.cloudflare.com/client/v4/accounts"
 _ENV_ANTHROPIC = "ANTHROPIC_API_KEY"
+# 拒答時由 Anthropic 伺服器依拒答類別改用它建議的備援模型重跑（fallbacks="default" 專用的 beta 標頭）
+_ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _ENV_CF_ACCOUNT = "CLOUDFLARE_ACCOUNT_ID"
 _ENV_CF_TOKEN = "CLOUDFLARE_AI_TOKEN"
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -237,7 +239,9 @@ def _utc_day(now: dt.datetime) -> dt.date:
 def _anthropic_backend(api_key: str | None) -> Backend:
     """真正的 Anthropic SDK backend（僅生產用，CI 無 key 不會走到）。
 
-    依 claude-api skill：messages.parse + output_format + adaptive thinking + prompt cache。
+    依 claude-api skill：messages.parse + output_format + adaptive thinking + prompt cache，
+    加上伺服器端拒答備援（fallbacks="default"；整條鏈都拒答才回 refusal）。
+    思考 token 也算在 max_tokens 裡，呼叫端給的上限要留思考的空間。
     """
 
     def backend(
@@ -246,19 +250,26 @@ def _anthropic_backend(api_key: str | None) -> Backend:
         import anthropic  # 延遲匯入：離線/測試不需要此套件
 
         client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.parse(
+        resp = client.beta.messages.parse(
             model=model_id,
             max_tokens=max_tokens,
             thinking={"type": "adaptive"},
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user}],
             output_format=schema,
+            betas=[_ANTHROPIC_FALLBACK_BETA],
+            # 目前鎖定的 SDK 型別只認陣列形式；"default" 純量照 claude-api skill 用 extra_body 帶
+            extra_body={"fallbacks": "default"},
         )
         if getattr(resp, "stop_reason", None) == "refusal":
             details = getattr(resp, "stop_details", None)
             raise LlmRefusal(str(getattr(details, "category", None) or "unknown"))
         usage = resp.usage
-        return resp.parsed_output, int(usage.input_tokens), int(usage.output_tokens)
+        # input_tokens 不含寫入／讀取快取的部分（system 有 cache_control）；全部算進輸入，日預算寧可多算不少算
+        cached = int(getattr(usage, "cache_creation_input_tokens", 0) or 0) + int(
+            getattr(usage, "cache_read_input_tokens", 0) or 0
+        )
+        return resp.parsed_output, int(usage.input_tokens) + cached, int(usage.output_tokens)
 
     return backend
 

@@ -353,7 +353,7 @@ def test_ac4_table_routing_workflow_and_cron() -> None:
     assert sch.spec_of("morning_brief").pk == ("date",)
     assert (
         load_llm_config(_ROOT / "configs" / "llm.yaml").model_for("morning_brief").provider
-        == "cloudflare"
+        == "anthropic"  # D-219：由 Cloudflare qwen3 改 Claude
     )
     wf = (_ROOT / ".github" / "workflows" / "morning-brief.yml").read_text(encoding="utf-8")
     assert (
