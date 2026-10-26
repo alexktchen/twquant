@@ -37,6 +37,7 @@ jobs:
       # 「缺席：未設定 CLOUDFLARE_AI_TOKEN」、證據包照存，不擋名單。帳號 ID 與部署網站用的同一個 Secret。
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # 沒設 secret 時是空字串 → Claude 路由的任務離線略過
     steps:
       - uses: actions/checkout@v4
 
