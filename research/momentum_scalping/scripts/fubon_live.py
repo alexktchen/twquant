@@ -51,6 +51,8 @@ DSN_ENV = "TWQUANT_SUPABASE_DSN"
 # 與 twquant serving schema 的 FUTURES_PAPER_SPEC 產生的建表語句相同（tests/test_futures_paper_store.py 守著那邊）
 TABLE_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_paper" '
              "(day date, source text, status text, payload jsonb, updated_at timestamptz, PRIMARY KEY (day))")
+SECONDS_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_paper_seconds" '
+               "(day date, payload jsonb, updated_at timestamptz, PRIMARY KEY (day))")
 FIELDS = ["day", "sleeve", "side", "signal_time", "entry_time", "entry_price", "exit_time", "exit_price",
           "exit_reason", "points", "net_pnl", "source"]
 
@@ -107,6 +109,8 @@ class LiveCombo:
         self.trades = []
         self.events = []         # 網站時間軸：[{"time", "kind", "sleeve", "text"}]，time 是盤中時間
         self.bars = {}           # "HH:MM" -> [開, 高, 低, 收, 那分鐘結束時的 VWAP]
+        self.secs = {}           # 08:45:00 起第幾秒 -> [那一秒最後成交價, 那一秒結束時的 VWAP]（秒級復盤）
+        self.t0 = clock(day, B.SESSION_OPEN)
         self.noise_seen = []     # 已經檢查過的噪音區時點
         self.orb_box = None      # 開盤 5 分鐘：{"open", "close", "high", "low", "side"}
         self.orb_state = "waiting"
@@ -125,6 +129,7 @@ class LiveCombo:
         self.vol += size
         self.vwap.append(self.pv / self.vol)
         i = len(self.t) - 1
+        self.secs[(t_us - self.t0) // M.US] = [price, self.vwap[-1]]
         key = M.us_to_dt(t_us).strftime("%H:%M")
         bar = self.bars.get(key)
         if bar is None:
@@ -239,6 +244,20 @@ class LiveCombo:
         word = "賣出" if side > 0 else "回補"
         self.note(xt, "exit", sleeve, f"模擬{word} {xp:.0f}（{REASON_TEXT.get(reason, reason)}），這筆淨 {net:+,.0f} 元")
 
+    def seconds_payload(self) -> dict:
+        """秒級復盤：每一秒（有成交的那幾秒）最後成交價與 VWAP；三個陣列都是差分整數（VWAP ×10），省空間。"""
+        keys = sorted(self.secs)
+        price = [self.secs[k][0] for k in keys]
+        if any(x != int(x) for x in price):
+            raise ValueError(f"{self.day} 小台成交價有小數，秒級資料的整數編碼不適用")
+        vw = [round(self.secs[k][1] * 10) for k in keys]
+
+        def delta(xs):
+            return [b - a for a, b in zip([0, *xs[:-1]], xs)]
+
+        return {"version": 1, "day": str(self.day), "t0": B.SESSION_OPEN + ":00", "s": delta(keys),
+                "p": delta([int(x) for x in price]), "w": delta(vw)}
+
     # ── 網站狀態 ──
     def mark(self, sleeve: str, last):
         """子帳戶現況：部位、已實現、現在平倉的話（含滑價與成本）。"""
@@ -331,9 +350,19 @@ class Uploader:
                     self.conn.close()
                     self.conn = None
 
-    def flush(self, payload: dict) -> None:
-        """收盤定稿：同步寫一次，失敗要讓呼叫端知道。"""
+    def flush(self, payload: dict, seconds: dict | None = None) -> None:
+        """收盤定稿：同步寫一次（含秒級復盤資料），失敗要讓呼叫端知道。"""
         self.write(payload)
+        if seconds is None:
+            return
+        body = json.dumps(seconds, ensure_ascii=False, allow_nan=False)
+        with self.conn.cursor() as cur:
+            cur.execute(SECONDS_DDL)
+            cur.execute(
+                'INSERT INTO "serving"."futures_paper_seconds" (day, payload, updated_at) VALUES (%s, %s::jsonb, %s) '
+                "ON CONFLICT (day) DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at",
+                (seconds["day"], body, payload["updated_at"]))
+        self.conn.commit()
 
 
 def env_value(path: Path, key: str) -> str:
@@ -404,8 +433,10 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
         key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
         snap["official"] = rows
         snap["official_match"] = sorted(map(key, live.trades)) == sorted(map(key, rows))
-        uploader.flush(snap)
+        seconds = live.seconds_payload()
+        uploader.flush(snap, seconds)
         (out / "payload.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+        (out / "seconds.json").write_text(json.dumps(seconds), encoding="utf-8")
         log(f"定稿已寫進雲端（{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致，請查'}）")
 
 
