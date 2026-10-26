@@ -31,15 +31,9 @@ def read_env(path: Path) -> dict:
     return env
 
 
-def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--env", required=True, help=".env 的絕對路徑")
-    p.add_argument("--day", required=True, help="要抓的交易日 yyyy-MM-dd")
-    p.add_argument("--month", required=True, help="合約月份 yyyyMM，例如 202609")
-    p.add_argument("--product", default="MXF")
-    args = p.parse_args()
-
-    env = read_env(Path(args.env))
+def connect(env_path: Path):
+    """登入並開行情，回傳 sdk。登入資訊只從 .env 讀。"""
+    env = read_env(env_path)
     need = ["FUBON_ID", "FUBON_CERT_PATH"]
     missing = [k for k in need if not env.get(k)]
     if not env.get("FUBON_API_KEY") and not env.get("FUBON_PASSWORD"):
@@ -61,9 +55,20 @@ def main() -> int:
         mode = "密碼"
     if not result.is_success:
         raise SystemExit(f"登入失敗（{mode}）：{result.message}")
-    print(f"登入成功（{mode}），帳號數：{len(result.data)}")
-
+    print(f"登入成功（{mode}），帳號數：{len(result.data)}", flush=True)
     sdk.init_realtime()
+    return sdk
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--env", required=True, help=".env 的絕對路徑")
+    p.add_argument("--day", required=True, help="要抓的交易日 yyyy-MM-dd")
+    p.add_argument("--month", required=True, help="合約月份 yyyyMM，例如 202609")
+    p.add_argument("--product", default="MXF")
+    args = p.parse_args()
+
+    sdk = connect(Path(args.env))
     futopt = sdk.marketdata.rest_client.futopt
     payload = futopt.historical.candles(**{
         "product": args.product, "contractMonth": args.month, "timeframe": "1", "session": "regular",
