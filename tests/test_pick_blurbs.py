@@ -401,7 +401,8 @@ def test_ac4_compose_checks_each_pick_and_falls_back(tmp_path: Path) -> None:
 def test_ac5_wiring() -> None:
     spec = sch.spec_of("pick_blurbs")
     assert spec.pk == ("date", "line", "stock_id") and "source" in spec.column_names
-    assert load_llm_config(_ROOT / "configs" / "llm.yaml").tasks["pick_blurb"] == "cf_qwen3"
+    # D-219：由 cf_qwen3 改 Claude
+    assert load_llm_config(_ROOT / "configs" / "llm.yaml").tasks["pick_blurb"] == "opus"
     cli = (_ROOT / "src" / "twquant" / "cli.py").read_text(encoding="utf-8")
     assert (
         cli.index('PipelineStep("內部人申讓"')

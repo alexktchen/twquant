@@ -50,8 +50,9 @@ _CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 
 # 洞悉分析在 pipeline 的參數：N 為 D-081(b) 的事前登記值；窗口與 sector-flows 預設一致。
 _INSIGHT_TOP_N = 30
-# 晨報（T-377）模型輸出上限：三到六點＋標題，1,200 token 綽綽有餘；qwen3 推理已關
-_MORNING_BRIEF_MAX_TOKENS = 1200
+# 晨報（T-377）模型輸出上限：三到六點＋標題本身 1,200 token 就夠；D-219 改 Claude 後思考也算在內
+# （原 1200 → 16000，只按實際用量計費）
+_MORNING_BRIEF_MAX_TOKENS = 16000
 # 紙上交易的行情回看：前收與 20 日 ADV 中位數都在這個窗內（D-142／T-280）。
 _PAPER_LOOKBACK_DAYS = 90
 _SECTOR_WINDOW = 20

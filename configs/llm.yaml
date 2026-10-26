@@ -1,6 +1,9 @@
 # 洞悉層 LLM 設定（SPEC-008 §3 / MODEL-POLICY / D-185）。程式碼不得寫死模型字串，一律查此檔。
 usd_twd: 32.0                 # 匯率，估成本用
-daily_budget_twd: 300.0       # 日累計成本上限，超過當日停用洞悉層 + WARN
+# 日累計成本上限，超過當日停用洞悉層 + WARN。2026-10-26 接 Claude API 前由 300 降到 30（使用者要求設上限）：
+# 晨報＋名單一句話改用 Claude 約一天 7 元。用量記錄 data/llm_log 在雲端每次執行都是新的，
+# 所以雲端實際是「每次執行」上限（晨報、每日流程兩次，一天最多約 3 倍）；總額的硬上限靠 Anthropic Console 的每月花費上限。
+daily_budget_twd: 30.0
 # Cloudflare Workers AI 免費額度每日 10,000 Neurons（UTC 00:00 重置）。D-207 靜態分配（2026-10-22）：新聞服務 4,000
 # （configs/news.yaml translate.daily_neurons，自己記帳）、這裡 Python 各任務合計 5,000、留 1,000 緩衝
 # （D-200 §五 原本是新聞 2,500／Python 6,500；更早 D-185 §4 是 9,000）。
@@ -24,7 +27,7 @@ tasks:
   daily_brief: cf_qwen3       # 便宜快、格式固定
   advisor: opus               # 策略調整提案，最強推理（沒排程、錯誤成本高，留 Claude）
   explainer: opus             # 異常解釋，錯誤成本高
-  morning_brief: cf_qwen3     # 06:30 晨報（T-377／D-188）；一天一次、約 3k 進 400 出
+  morning_brief: opus         # 06:30 晨報（T-377／D-188）；一天一次、約 3k 進 400 出。D-219 由 cf_qwen3 改 Claude
   pick_review: cf_qwen3        # 名單四面向評分、觀點、結論（一檔一次，約 1.3k 進 300 出）與首選（一條線一次，約 4k 進 80 出）（T-394／D-196）
-  pick_blurb: cf_qwen3         # 名單每檔一句話（T-393／D-195）；一條線一次呼叫，約 2.5k 進 800 出
+  pick_blurb: opus             # 名單每檔一句話（T-393／D-195）；一條線一次呼叫，約 2.5k 進 800 出。D-219 由 cf_qwen3 改 Claude
   candidate_analysis: cf_qwen3  # 每日候選證據分析；N=30／晚（D-081b）。D-081a 的 opus 路由由 D-185 暫改

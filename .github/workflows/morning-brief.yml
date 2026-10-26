@@ -33,6 +33,7 @@ jobs:
       # 模型晨報走 Cloudflare Workers AI（D-185）；沒設就只有規則那一句
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # 沒設 secret 時是空字串 → Claude 路由的任務離線略過
       # 晨報接新聞（2026-10-20）：新聞庫（另一個 Supabase 專案）的多家同報事件當事實句
       TWQUANT_NEWS_DSN: ${{ secrets.TWQUANT_NEWS_DSN }}
     steps:
