@@ -1,0 +1,69 @@
+// 小台模擬截圖（手動檢查用，T-450）：node tests/shot-futures.cjs <baseUrl> <outDir> <mockDir>
+// mockDir 由 fubon_live.py 的期交所重播產生：<day>_live.json（停在 11:30）、<day>_closed.json、<day>_seconds.json、days.json。其他 /api/* 回空的。
+const { chromium } = require('playwright')
+const fs = require('node:fs')
+const path = require('node:path')
+
+;(async () => {
+  const [base, out, mock] = process.argv.slice(2)
+  const load = (f) => JSON.parse(fs.readFileSync(path.join(mock, f), 'utf8'))
+  const days = load('days.json')
+  const live = load(`${days.days[0].day}_live.json`)
+  live.updated_at = new Date(Date.now() - 8000).toISOString() // 盤中：8 秒前剛更新
+  const b = await chromium.launch()
+  for (const [w, h, m, name] of [[390, 844, true, 'm-futures'], [1360, 900, false, 'd-futures']]) {
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: m ? 2 : 1, isMobile: m, hasTouch: m })
+    const page = await ctx.newPage()
+    page.on('pageerror', (e) => console.log('pageerror:', String(e.stack || e).slice(0, 600)))
+    await page.route('**/api/**', (r) => r.fulfill({ json: {} }))
+    await page.route('**/api/layout', (r) => r.fulfill({ json: { layout: null } }))
+    await page.route('**/api/me', (r) => r.fulfill({ json: { email: 'cktalex@gmail.com' } }))
+    await page.route('**/api/access', (r) => r.fulfill({ json: { features: ['futures'] } }))
+    await page.route('**/api/watchlist', (r) => r.fulfill({ json: { max: 20, date: null, items: [] } }))
+    await page.route('**/api/trades', (r) => r.fulfill({ json: { today: '2026-10-22', items: [], max: 50 } }))
+    await page.route('**/news/**', (r) => r.fulfill({ json: { items: [], next: null } }))
+    await page.route('**/api/futures/days', (r) => r.fulfill({ json: days }))
+    await page.route('**/api/futures?day=*', (r) => {
+      const d = new URL(r.request().url()).searchParams.get('day')
+      r.fulfill({ json: load(`${d}_closed.json`) })
+    })
+    await page.route('**/api/futures', (r) => r.fulfill({ json: live }))
+    await page.route('**/api/futures/seconds?day=*', (r) => {
+      const d = new URL(r.request().url()).searchParams.get('day')
+      r.fulfill({ json: load(`${d}_seconds.json`) })
+    })
+    await page.goto(`${base}/?tab=futures`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1500)
+    const btn = page.getByRole('button', { name: '同意並進入' })
+    if ((await btn.count()) > 0) {
+      await page.locator('input[type="checkbox"]').first().check()
+      await btn.click()
+    }
+    await page.screenshot({ path: path.join(out, `${name}-0-first.png`) })
+    await page.waitForSelector('.cq-fu-chart canvas', { timeout: 15000 })
+    await page.waitForTimeout(1200)
+    await page.screenshot({ path: path.join(out, `${name}-1-live.png`), fullPage: true })
+    await page.getByRole('button', { name: /復盤/ }).click()
+    await page.waitForSelector('.cq-fu-scrub input', { timeout: 15000 })
+    await page.waitForTimeout(1000)
+    await page.screenshot({ path: path.join(out, `${name}-2-replay-close.png`), fullPage: true })
+    // 秒級：拉回開盤，按「下一個買賣點」→ 停在 08:50:01 買進那一秒；再按 → 09:05:41 停損賣出
+    const slider = page.locator('.cq-fu-scrub input')
+    await slider.fill('0')
+    await page.waitForTimeout(400)
+    await page.getByRole('button', { name: '下一個買賣點' }).click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: path.join(out, `${name}-3-replay-buy.png`), fullPage: true })
+    await page.getByRole('button', { name: '下一個買賣點' }).click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: path.join(out, `${name}-4-replay-stop.png`), fullPage: true })
+    // 300 倍速播 2 秒（盤中約 10 分鐘）
+    await page.getByRole('button', { name: '300×' }).click()
+    await page.getByRole('button', { name: '播放' }).click()
+    await page.waitForTimeout(2000)
+    await page.screenshot({ path: path.join(out, `${name}-5-playing.png`), fullPage: true })
+    await ctx.close()
+  }
+  await b.close()
+  console.log('done')
+})()

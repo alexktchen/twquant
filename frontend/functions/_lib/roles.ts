@@ -6,7 +6,7 @@
 // 每日名單（picks）與績效（score）只給它。推播的收件人在 configs/push.yaml recipients，跟 admin 名單相同（tests/test_push_notify.py 守著）。
 
 export type Role = 'admin' | 'line_admin'
-export type Feature = 'line' | 'picks' | 'score'
+export type Feature = 'line' | 'picks' | 'score' | 'futures'
 
 /** 角色 → 成員 email（小寫） */
 export const ROLE_MEMBERS: Readonly<Record<Role, readonly string[]>> = {
@@ -16,11 +16,13 @@ export const ROLE_MEMBERS: Readonly<Record<Role, readonly string[]>> = {
 
 /** 功能 → 哪些角色能用。line＝「LINE 群組」分頁：發文帳號狀態、勾要發的群組、看發了什麼；
  *  picks＝每日名單：名單本身、哪天上過名單（K 線標記）、「在名單上」的各種標記、首頁「今日名單」；
- *  score＝績效：名單照規則操作的模擬帳戶與逐筆、首頁「名單成績」。 */
+ *  score＝績效：名單照規則操作的模擬帳戶與逐筆、首頁「名單成績」；
+ *  futures＝小台模擬（T-450／D-220）：富邦即時行情跑的小台模擬單。富邦行情不得轉傳，只能給自己看。 */
 export const FEATURE_ROLES: Readonly<Record<Feature, readonly Role[]>> = {
   line: ['line_admin'],
   picks: ['admin'],
   score: ['admin'],
+  futures: ['admin'],
 }
 
 /** 這個 email 有哪些角色（沒登入或不在名單上 → 空）。 */

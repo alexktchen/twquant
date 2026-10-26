@@ -3,8 +3,9 @@
 // T-431／D-209：族群資金又搬回自己的「盤勢」分頁（group）——族群資金通知與 LINE 族群圖卡帶的 ?tab=group 直接開這頁。
 
 // line＝「LINE 群組」（T-423）：只有有權限的角色看得到分頁（_lib/roles.ts）
-export type Tab = 'home' | 'news' | 'group' | 'picks' | 'score' | 'watch' | 'line'
-const TABS: readonly Tab[] = ['home', 'news', 'group', 'picks', 'score', 'watch', 'line']
+// futures＝「小台模擬」（T-450／D-220）：只給 admin
+export type Tab = 'home' | 'news' | 'group' | 'picks' | 'score' | 'watch' | 'line' | 'futures'
+const TABS: readonly Tab[] = ['home', 'news', 'group', 'picks', 'score', 'watch', 'line', 'futures']
 /**
  * 星雲圖的公開專屬連結（T-445；使用者 2026-10-23：「讓不登入也有一個專屬連結可以看到我的星雲圖，可以直接導航到全景這一頁 我主要想要去推廣」）：
  * https://twquant.pages.dev/galaxy ＝新聞頁、一打開就是全景。Pages 找不到檔案就回 index.html（同 /login），所以不用另外設路由。

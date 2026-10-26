@@ -4,7 +4,7 @@ import type { CardId, Layout } from './layout.ts'
 import type { Tab } from './tabs.ts'
 
 /** 與 functions/_lib/roles.ts 的 Feature 相同（tests/cloud-access.test.ts 守著） */
-export const FEATURES = ['line', 'picks', 'score'] as const
+export const FEATURES = ['line', 'picks', 'score', 'futures'] as const
 export type Feature = (typeof FEATURES)[number]
 
 /** 要權限才看得到的分頁 → 功能、分頁名稱 */
@@ -12,6 +12,7 @@ const TAB_FEATURE: Partial<Record<Tab, { feature: Feature; title: string }>> = {
   picks: { feature: 'picks', title: '每日名單' },
   score: { feature: 'score', title: '績效' },
   line: { feature: 'line', title: 'LINE 群組' },
+  futures: { feature: 'futures', title: '小台模擬' },
 }
 
 /** 要權限才看得到的首頁卡 */
