@@ -38,8 +38,8 @@ def urls(market: str, day: str):
             "daytrade": f"https://www.tpex.org.tw/web/stock/trading/intraday_trading/intraday_trading_list_result.php?l=zh-tw&d={roc}"}
 
 
-def fetch(url: str, path: Path, pause: float) -> str:
-    for attempt in range(6):
+def fetch(url: str, path: Path, pause: float, attempts: int = 6, backoff: float = 60.0) -> str:
+    for attempt in range(attempts):
         tmp = path.with_suffix(".part")
         r = subprocess.run(["curl", "-sS", "-m", "60", "-A", "Mozilla/5.0", "-o", str(tmp), "-w", "%{http_code}", url],
                            capture_output=True, text=True)
@@ -53,7 +53,7 @@ def fetch(url: str, path: Path, pause: float) -> str:
             if isinstance(payload, dict):
                 tmp.replace(path)
                 return str(payload.get("stat", ""))[:20]
-        wait = 60 * (attempt + 1)
+        wait = min(backoff * (attempt + 1), 1800)
         print(f"  retry {path.name} code={code} wait {wait}s", flush=True)
         time.sleep(wait)
     raise SystemExit(f"下載失敗：{url}")
@@ -67,6 +67,8 @@ def main() -> int:
     p.add_argument("--calendar", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--pause", type=float, default=2.2)
+    p.add_argument("--attempts", type=int, default=6, help="被擋時最多重試幾次（每次等更久，最長 30 分鐘）")
+    p.add_argument("--kinds", default="quotes,daytrade", help="要抓哪些：quotes、daytrade，逗號分隔")
     args = p.parse_args()
     out = Path(args.out) / args.market
     out.mkdir(parents=True, exist_ok=True)
@@ -74,10 +76,12 @@ def main() -> int:
     print(f"{args.market}: {len(days)} 個交易日", flush=True)
     for k, day in enumerate(days, 1):
         for kind, url in urls(args.market, day).items():
+            if kind not in args.kinds.split(","):
+                continue
             path = out / f"{day}_{kind}.json"
             if path.exists():
                 continue
-            stat = fetch(url, path, args.pause)
+            stat = fetch(url, path, args.pause, args.attempts)
             if kind == "quotes" and stat.lower() not in {"ok", ""}:
                 print(f"  {day} {kind} stat={stat}", flush=True)
         if k % 100 == 0:
