@@ -1,0 +1,355 @@
+{
+  "cost_pct": 0.33,
+  "dt_ratio_median": 0.32851755772366553,
+  "missing_files": {},
+  "events": 1508143,
+  "rules": {
+    "A1 漲停隔日（主要）": {
+      "explore": {
+        "n": 14143,
+        "days": 1441,
+        "win_rate": 56.2,
+        "mean_net_pct": -0.362,
+        "ci_low": -0.6,
+        "ci_high": -0.136,
+        "mean_gross_pct": 0.82,
+        "mean_no_penalty_pct": 0.49,
+        "locked_pct": 12.18
+      },
+      "validate": {
+        "n": 19444,
+        "days": 1157,
+        "win_rate": 53.7,
+        "mean_net_pct": -0.836,
+        "ci_low": -1.183,
+        "ci_high": -0.544,
+        "mean_gross_pct": 0.608,
+        "mean_no_penalty_pct": 0.278,
+        "locked_pct": 15.93
+      },
+      "validate_twse": {
+        "n": 10274,
+        "days": 1124,
+        "win_rate": 52.2,
+        "mean_net_pct": -1.01,
+        "ci_low": -1.44,
+        "ci_high": -0.647,
+        "mean_gross_pct": 0.424,
+        "mean_no_penalty_pct": 0.094,
+        "locked_pct": 15.78
+      },
+      "validate_tpex": {
+        "n": 9170,
+        "days": 1142,
+        "win_rate": 55.3,
+        "mean_net_pct": -0.642,
+        "ci_low": -0.899,
+        "ci_high": -0.399,
+        "mean_gross_pct": 0.815,
+        "mean_no_penalty_pct": 0.485,
+        "locked_pct": 16.1
+      },
+      "yearly": {
+        "2022": [
+          2477,
+          -0.353
+        ],
+        "2023": [
+          2638,
+          -0.353
+        ],
+        "2024": [
+          4099,
+          -0.645
+        ],
+        "2025": [
+          4032,
+          -1.219
+        ],
+        "2026": [
+          6198,
+          -1.114
+        ]
+      },
+      "judged_on": "validate_tpex",
+      "passed": false,
+      "passed_combined": false
+    },
+    "A2 漲停隔日且開高 ≥2%": {
+      "explore": {
+        "n": 6351,
+        "days": 1278,
+        "win_rate": 55.6,
+        "mean_net_pct": -0.774,
+        "ci_low": -1.059,
+        "ci_high": -0.499,
+        "mean_gross_pct": 1.11,
+        "mean_no_penalty_pct": 0.78,
+        "locked_pct": 22.2
+      },
+      "validate": {
+        "n": 9173,
+        "days": 1117,
+        "win_rate": 55.2,
+        "mean_net_pct": -0.966,
+        "ci_low": -1.215,
+        "ci_high": -0.732,
+        "mean_gross_pct": 1.211,
+        "mean_no_penalty_pct": 0.881,
+        "locked_pct": 26.39
+      },
+      "validate_twse": {
+        "n": 4666,
+        "days": 1005,
+        "win_rate": 54.1,
+        "mean_net_pct": -1.114,
+        "ci_low": -1.421,
+        "ci_high": -0.806,
+        "mean_gross_pct": 1.081,
+        "mean_no_penalty_pct": 0.751,
+        "locked_pct": 26.64
+      },
+      "validate_tpex": {
+        "n": 4507,
+        "days": 1039,
+        "win_rate": 56.3,
+        "mean_net_pct": -0.813,
+        "ci_low": -1.081,
+        "ci_high": -0.535,
+        "mean_gross_pct": 1.346,
+        "mean_no_penalty_pct": 1.016,
+        "locked_pct": 26.14
+      },
+      "yearly": {
+        "2022": [
+          1090,
+          -0.527
+        ],
+        "2023": [
+          1318,
+          -0.515
+        ],
+        "2024": [
+          2103,
+          -0.875
+        ],
+        "2025": [
+          1777,
+          -1.008
+        ],
+        "2026": [
+          2885,
+          -1.378
+        ]
+      },
+      "judged_on": "validate_tpex",
+      "passed": false,
+      "passed_combined": false
+    },
+    "A3 漲停隔日且開平盤以下": {
+      "explore": {
+        "n": 3544,
+        "days": 1141,
+        "win_rate": 55.0,
+        "mean_net_pct": -0.036,
+        "ci_low": -0.367,
+        "ci_high": 0.276,
+        "mean_gross_pct": 0.46,
+        "mean_no_penalty_pct": 0.13,
+        "locked_pct": 2.37
+      },
+      "validate": {
+        "n": 5081,
+        "days": 981,
+        "win_rate": 49.3,
+        "mean_net_pct": -1.089,
+        "ci_low": -2.05,
+        "ci_high": -0.327,
+        "mean_gross_pct": -0.412,
+        "mean_no_penalty_pct": -0.742,
+        "locked_pct": 4.96
+      },
+      "validate_twse": {
+        "n": 2796,
+        "days": 785,
+        "win_rate": 46.8,
+        "mean_net_pct": -1.335,
+        "ci_low": -2.451,
+        "ci_high": -0.376,
+        "mean_gross_pct": -0.664,
+        "mean_no_penalty_pct": -0.994,
+        "locked_pct": 4.86
+      },
+      "validate_tpex": {
+        "n": 2285,
+        "days": 803,
+        "win_rate": 52.3,
+        "mean_net_pct": -0.789,
+        "ci_low": -1.469,
+        "ci_high": -0.198,
+        "mean_gross_pct": -0.104,
+        "mean_no_penalty_pct": -0.433,
+        "locked_pct": 5.08
+      },
+      "yearly": {
+        "2022": [
+          677,
+          -0.693
+        ],
+        "2023": [
+          582,
+          -0.12
+        ],
+        "2024": [
+          894,
+          -0.591
+        ],
+        "2025": [
+          1195,
+          -2.286
+        ],
+        "2026": [
+          1733,
+          -1.001
+        ]
+      },
+      "judged_on": "validate_tpex",
+      "passed": false,
+      "passed_combined": false
+    },
+    "A4 非漲停隔日、開高 5%～9.5%": {
+      "explore": {
+        "n": 2830,
+        "days": 939,
+        "win_rate": 48.7,
+        "mean_net_pct": -2.188,
+        "ci_low": -2.682,
+        "ci_high": -1.684,
+        "mean_gross_pct": 0.544,
+        "mean_no_penalty_pct": 0.214,
+        "locked_pct": 34.31
+      },
+      "validate": {
+        "n": 4681,
+        "days": 879,
+        "win_rate": 48.0,
+        "mean_net_pct": -2.001,
+        "ci_low": -2.555,
+        "ci_high": -1.51,
+        "mean_gross_pct": 0.729,
+        "mean_no_penalty_pct": 0.399,
+        "locked_pct": 34.29
+      },
+      "validate_twse": {
+        "n": 2878,
+        "days": 721,
+        "win_rate": 48.2,
+        "mean_net_pct": -1.941,
+        "ci_low": -2.523,
+        "ci_high": -1.413,
+        "mean_gross_pct": 0.721,
+        "mean_no_penalty_pct": 0.392,
+        "locked_pct": 33.32
+      },
+      "validate_tpex": {
+        "n": 1803,
+        "days": 613,
+        "win_rate": 47.9,
+        "mean_net_pct": -2.096,
+        "ci_low": -2.717,
+        "ci_high": -1.51,
+        "mean_gross_pct": 0.742,
+        "mean_no_penalty_pct": 0.412,
+        "locked_pct": 35.83
+      },
+      "yearly": {
+        "2022": [
+          524,
+          -1.056
+        ],
+        "2023": [
+          481,
+          -2.079
+        ],
+        "2024": [
+          653,
+          -1.668
+        ],
+        "2025": [
+          976,
+          -3.497
+        ],
+        "2026": [
+          2047,
+          -1.617
+        ]
+      },
+      "judged_on": "validate_tpex",
+      "passed": false,
+      "passed_combined": false
+    },
+    "A5 漲停隔日、上市、前日當沖比 ≥ 中位數": {
+      "explore": {
+        "n": 3669,
+        "days": 986,
+        "win_rate": 58.1,
+        "mean_net_pct": -0.28,
+        "ci_low": -0.642,
+        "ci_high": 0.06,
+        "mean_gross_pct": 0.921,
+        "mean_no_penalty_pct": 0.592,
+        "locked_pct": 12.46
+      },
+      "validate": {
+        "n": 6171,
+        "days": 1091,
+        "win_rate": 54.4,
+        "mean_net_pct": -0.852,
+        "ci_low": -1.106,
+        "ci_high": -0.599,
+        "mean_gross_pct": 0.595,
+        "mean_no_penalty_pct": 0.265,
+        "locked_pct": 15.96
+      },
+      "validate_twse": {
+        "n": 6171,
+        "days": 1091,
+        "win_rate": 54.4,
+        "mean_net_pct": -0.852,
+        "ci_low": -1.106,
+        "ci_high": -0.599,
+        "mean_gross_pct": 0.595,
+        "mean_no_penalty_pct": 0.265,
+        "locked_pct": 15.96
+      },
+      "validate_tpex": {
+        "n": 0
+      },
+      "yearly": {
+        "2022": [
+          802,
+          -1.148
+        ],
+        "2023": [
+          858,
+          -0.676
+        ],
+        "2024": [
+          1360,
+          -0.717
+        ],
+        "2025": [
+          1267,
+          -0.68
+        ],
+        "2026": [
+          1884,
+          -1.019
+        ]
+      },
+      "judged_on": "validate_twse",
+      "passed": false,
+      "passed_combined": false
+    }
+  }
+}

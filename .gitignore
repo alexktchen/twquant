@@ -24,3 +24,6 @@ scripts/.run_*.running.sh
 
 # Supabase CLI link 的暫存（專案代號、pooler 網址）
 news-service/supabase/.temp/
+
+# 富邦 SDK 在執行目錄自動寫的紀錄檔，含個資，絕不進版控
+research/momentum_scalping/**/log/

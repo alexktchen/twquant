@@ -22,11 +22,15 @@ def main():
     res = json.loads((base / "result.json").read_text(encoding="utf-8"))
     P.setup_font()
     fig = plt.figure(figsize=(13, 6.6), dpi=110)
-    g = fig.add_gridspec(1, 2, width_ratios=[1.25, 1], wspace=0.35, top=0.8, bottom=0.12, left=0.2, right=0.97)
+    g = fig.add_gridspec(1, 2, width_ratios=[1.25, 1], wspace=0.3, top=0.8, bottom=0.12, left=0.25, right=0.97)
     ax = fig.add_subplot(g[0, 0])
-    rows = [(name, r) for name, r in res["rules"].items() if r["validate"]["n"]]
+    # 判定用的那一段（補充：A1～A4 看上櫃、A5 看上市）；舊結果沒有 judged_on 就用合併
+    seg = {"validate_tpex": "上櫃", "validate_twse": "上市", "validate": "合併"}
+    # 微軟正黑體沒有「≥」，換成 Big5 也有的「≧」
+    rows = [(f"{name.replace('≥', '≧')}（{seg[r.get('judged_on', 'validate')]}）", r) for name, r in res["rules"].items()
+            if r[r.get("judged_on", "validate")]["n"]]
     for k, (name, r) in enumerate(rows):
-        v = r["validate"]
+        v = r[r.get("judged_on", "validate")]
         ax.hlines(k, v["ci_low"], v["ci_high"], color=P.INK_2, linewidth=1.3)
         ax.plot([v["mean_net_pct"]], [k], marker="o", markersize=8, color=P.GAIN if v["mean_net_pct"] > 0 else P.LOSS,
                 markeredgecolor=P.SURFACE, zorder=3)
@@ -47,7 +51,7 @@ def main():
                  color=P.INK_2)
     ax2.set_xticks(range(len(years)), years)
     ax2.axhline(0, color=P.MUTED, linewidth=0.9)
-    ax2.set_title("A1 驗證期分年度（每筆平均淨%）", loc="left", fontsize=10, color=P.INK)
+    ax2.set_title("A1 驗證期分年度（上市＋上櫃合併，每筆平均淨%）", loc="left", fontsize=10, color=P.INK)
     for x in (ax, ax2):
         x.tick_params(labelsize=8.5, length=0)
         x.grid(color=P.GRID, linewidth=0.6)
@@ -55,10 +59,12 @@ def main():
             x.spines[side].set_visible(False)
         x.spines["left"].set_color(P.GRID)
         x.spines["bottom"].set_color(P.GRID)
-    v = res["rules"]["A1 漲停隔日（主要）"]["validate"]
+    a1r = res["rules"]["A1 漲停隔日（主要）"]
+    judged = a1r.get("judged_on", "validate")
+    v = a1r[judged]
     verdict = "及格" if res["rules"]["A1 漲停隔日（主要）"]["passed"] else "不及格"
     fig.text(0.02, 0.965, f"{a.title}主要規則 A1 {verdict}", fontsize=15, fontweight="bold", color=P.INK, va="top")
-    fig.text(0.02, 0.915, f"A1 驗證期 2022–2026：{v['n']} 筆、勝率 {v['win_rate']}%、平均 {v['mean_net_pct']:+.2f}%，"
+    fig.text(0.02, 0.915, f"A1 驗證期 2022–2026（{seg[judged]}）：{v['n']} 筆、勝率 {v['win_rate']}%、平均 {v['mean_net_pct']:+.2f}%，"
              f"CI {v['ci_low']:+.2f}～{v['ci_high']:+.2f}（以交易日群集重抽）｜每筆成本 {res['cost_pct']}%，收盤鎖漲停另扣 7%",
              fontsize=10, color=P.INK_2, va="top")
     fig.savefig(base / "short_stock.png")
