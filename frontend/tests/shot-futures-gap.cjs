@@ -54,7 +54,7 @@ const path = require('node:path')
     await page.locator('.cq-fu-cal-view button', { hasText: '開高走低' }).click()
     await page.waitForTimeout(300)
     await page.locator('.cq-fu-cal').screenshot({ path: path.join(out, `${name}-2b-calendar-gap.png`) })
-    await page.locator('.cq-fu-cal-view button', { hasText: '合計' }).click()
+    await page.locator('.cq-fu-cal-view button', { hasText: '帳戶' }).click()
     // 拉回開盤 → 下一個買賣點三次：08:50:01 突破買、09:08:06 停損賣、09:22:01 開高走低三條同時放空
     await page.locator('.cq-fu-scrub input').fill('0')
     await page.waitForTimeout(400)
@@ -67,7 +67,7 @@ const path = require('node:path')
     await page.getByRole('button', { name: '下一個買賣點' }).click()
     await page.waitForTimeout(800)
     await page.screenshot({ path: path.join(out, `${name}-4-replay-gapfill.png`), fullPage: true })
-    // 舊資料（10-22，沒有開高走低）：點日曆的格子
+    // 點日曆的另一天（10-22）
     await page.getByRole('button', { name: '2026-10-22' }).click()
     await page.waitForTimeout(1200)
     await page.screenshot({ path: path.join(out, `${name}-5-old-day.png`), fullPage: true })

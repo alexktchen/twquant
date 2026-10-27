@@ -4,6 +4,7 @@
 // 三個商品都跑同一套固定組合「ORB 只做多 + 噪音區只放空」的模擬單（只記帳、不送委託；10-27「也要有模擬單」），成本照各自的合約。
 // T-452（10-27「abc 也新增成一個策略加到前端」）：第二個策略「開高走低」＝A 開高失守、B 跌破開盤區間、C 補缺口，各 1 口只放空。
 // T-453（10-27「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」）：不切換，兩個策略同一個畫面；復盤上面是每日損益日曆。
+// T-454（10-27「多空都持有一口就好」）：上面的數字、圖上買賣點、成交明細是實際帳戶（多空各最多 1 口，先到先做、同時要空 A 優先）；各策略與日曆可看每條各 1 口的對照。
 // 資料來自使用者電腦上的富邦即時行情（fubon_live.py），富邦行情不得轉傳 → 只給 admin。
 import {
   Activity,
@@ -50,12 +51,12 @@ import {
   STRATEGY_NAME,
   STALE_AFTER_S,
   addSeconds,
+  accountSide,
   allFillTimes,
   barsAt,
   change,
   chartMarks,
   chartTime,
-  comboSummary,
   compactYuan,
   dayAt,
   dayPnl,
@@ -88,6 +89,7 @@ import {
   type QuotePayload,
   type QuoteProduct,
   type Seconds,
+  type Sleeve,
   type SleeveState,
   type Strategy,
 } from './futures'
@@ -416,13 +418,14 @@ function NowBar({ view }: { view: { events: FuturesEvent[]; cut: string } }) {
 }
 
 /** 時間軸上的小標：固定組合寫子帳戶；開高走低寫策略名（文字裡已經有 A、B、C）。 */
-function eventChip(e: FuturesEvent & { strategy?: Strategy }): { text: string; cls: string } | null {
+function eventChip(e: FuturesEvent & { strategy?: Strategy | 'account' }): { text: string; cls: string } | null {
+  if (e.strategy === 'account') return { text: '帳戶', cls: 'acct' }
   if (e.strategy === 'gap') return { text: STRATEGY_NAME.gap, cls: 'gap' }
   if (e.sleeve) return { text: SLEEVE_NAME[e.sleeve], cls: e.sleeve === 'ORB_LONG' ? 'long' : 'short' }
   return null
 }
 
-function Timeline({ events, newestFirst }: { events: (FuturesEvent & { strategy?: Strategy })[]; newestFirst: boolean }) {
+function Timeline({ events, newestFirst }: { events: (FuturesEvent & { strategy?: Strategy | 'account' })[]; newestFirst: boolean }) {
   const rows = newestFirst ? [...events].reverse() : events
   if (rows.length === 0) return <p className="cq-empty">還沒有事件：開盤後才有。</p>
   return (
@@ -494,12 +497,12 @@ function PriceKpi({ p, prevClose }: { p: number | null; prevClose: number | null
   )
 }
 
-/** 每日損益日曆（T-453）：一個月一張、週一到週五；格子是那天的損益（合計／固定組合／開高走低可切），點一下打開那天的復盤。 */
+/** 每日損益日曆（T-453）：一個月一張、週一到週五；格子是那天的損益（帳戶／固定組合／開高走低可切，T-454 起預設看帳戶），點一下打開那天的復盤。 */
 function PnlCalendar({ days, value, onPick }: { days: PnlRow[]; value: string | null; onPick: (d: string) => void }) {
   const months = useMemo(() => monthsOf(days), [days])
   const byDay = useMemo(() => new Map(days.map((d) => [d.day, d])), [days])
   const [month, setMonth] = useState<string | null>(null)
-  const [view, setView] = useState<CalView>('all')
+  const [view, setView] = useState<CalView>('account')
   if (days.length === 0) return null
   const shown = month ?? (value ?? days[0].day).slice(0, 7)
   const i = months.indexOf(shown)
@@ -641,13 +644,15 @@ type BodyProps = { data: FuturesDay; secs: Seconds | null; player: ReturnType<ty
 /** 各策略、各子帳戶在那一刻：一列一個子帳戶（名字、現在在做什麼、損益）。 */
 function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; cut: string }) {
   const g = data.gap_fail ?? null
-  const row = (key: string, side: 'long' | 'short', st: SleeveState, sub: string) => {
+  const row = (key: Sleeve, side: 'long' | 'short', st: SleeveState, sub: string) => {
     const v = st.realized + (st.open_pnl ?? 0)
+    const skipped = view.skipped.filter((l) => l.sleeve === key).length
     return (
       <li key={key}>
         <div>
-          <b className={`cq-fu-sleeve ${side}`}>{SLEEVE_NAME[key as keyof typeof SLEEVE_NAME]}</b>
+          <b className={`cq-fu-sleeve ${side}`}>{SLEEVE_NAME[key]}</b>
           <span>{sub}</span>
+          {skipped > 0 && <em className="cq-fu-skip">帳戶沒做{skipped > 1 ? ` ${skipped} 筆` : ''}：當時已經有{side === 'long' ? '多' : '空'}單</em>}
         </div>
         <b className={`cq-fu-pnl ${tone(v)}`}>{yuan(v)}</b>
       </li>
@@ -678,7 +683,7 @@ function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; c
   )
 }
 
-/** 模擬單的畫面（小台；大台、微台那一天有模擬單時也用它）：兩個策略合在一起——數字卡、江波圖＋買賣點、各策略、時間軸、成交明細。 */
+/** 模擬單的畫面（小台；大台、微台那一天有模擬單時也用它）：上面是實際帳戶（數字卡、圖上買賣點、成交明細），各策略是每條各 1 口的對照。 */
 function PaperBody({ data, secs, player, mode, now }: BodyProps) {
   const cut = mode === 'replay' ? player.cut : '23:59'
   const view = useMemo(() => dayAt(data, cut, secs), [data, cut, secs])
@@ -686,22 +691,29 @@ function PaperBody({ data, secs, player, mode, now }: BodyProps) {
   const stopShown = data.orb.stop !== null && data.orb.entry_time !== null && data.orb.entry_time.slice(0, cut.length) <= cut
   const levels = useMemo(() => {
     const orb = stopShown && data.orb.stop !== null ? [{ price: data.orb.stop, title: 'ORB 停損' }] : []
-    return g && view.gap ? [...orb, ...gapLevels(data, g, view.gap)] : orb
-  }, [stopShown, data, g, view.gap])
+    return g ? [...orb, ...gapLevels(data, g, view.account)] : orb
+  }, [stopShown, data, g, view.account])
   const jumps = useMemo(() => allFillTimes(data), [data])
-  // 復盤拉到 cut：只列那之前已經平倉的交易（不劇透後面）
-  const done = [...data.trades, ...(g?.trades ?? [])]
+  // 復盤拉到 cut：只列那之前帳戶已經平倉的交易（不劇透後面）
+  const done = view.accountTrades
     .filter((t) => t.exit_time.slice(0, cut.length) <= cut)
     .sort((a, b) => (a.entry_time < b.entry_time ? -1 : a.entry_time > b.entry_time ? 1 : 0))
+  const long = accountSide(view.account, 1)
+  const short = accountSide(view.account, -1)
   const cost = costOf(data)
   const name = PRODUCT_NAME[data.product ?? 'MTX']
   return (
     <>
       <StatusBadges data={data} mode={mode} now={now} secs={secs} gap={g ?? undefined} />
       <div className="cq-tiles cq-fu-tiles">
-        <Kpi label="今天合計" value={yuan(view.total)} tone={tone(view.total)} sub={mode === 'replay' ? `兩個策略・到 ${cut}` : '兩個策略・已實現＋現在平倉的話'} />
-        <Kpi label={STRATEGY_NAME.combo} value={yuan(view.combo.total)} tone={tone(view.combo.total)} sub={comboSummary(view.combo)} />
-        <Kpi label={STRATEGY_NAME.gap} value={view.gap ? yuan(view.gap.total) : '—'} tone={view.gap ? tone(view.gap.total) : 'na'} sub={gapSummary(g, view.gap)} />
+        <Kpi
+          label="帳戶合計"
+          value={yuan(view.account.total)}
+          tone={tone(view.account.total)}
+          sub={mode === 'replay' ? `多空各最多 1 口・到 ${cut}` : '多空各最多 1 口・已實現＋現在平倉的話'}
+        />
+        <Kpi label="多單" value={yuan(long.value)} tone={tone(long.value)} sub={long.text} />
+        <Kpi label="空單" value={yuan(short.value)} tone={tone(short.value)} sub={short.text} />
         <PriceKpi p={view.price} prevClose={data.prev_close} />
       </div>
       <Section
@@ -717,13 +729,13 @@ function PaperBody({ data, secs, player, mode, now }: BodyProps) {
         <FuturesChart day={data.day} bars={view.bars} secs={secs} pos={player.pos} noiseLb={data.noise_lb} levels={levels} fills={view.fills} />
         {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={jumps} />}
       </Section>
-      <Section icon={Layers} title="各策略">
+      <Section icon={Layers} title="各策略" meta="每條各 1 口的對照">
         <StrategyBoard data={data} view={view} cut={cut} />
       </Section>
       <Section icon={ListOrdered} title="時間軸" meta={`${view.events.length} 件`}>
         <Timeline events={view.events} newestFirst={mode === 'live'} />
       </Section>
-      <Section icon={ReceiptText} title="成交明細" fold summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
+      <Section icon={ReceiptText} title="帳戶成交明細" fold summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
         <Trades trades={done} />
       </Section>
       <Section icon={BookOpen} title="規則與成本" fold summary="只記帳、不下單">
@@ -737,7 +749,12 @@ function PaperBody({ data, secs, player, mode, now }: BodyProps) {
           C 補缺口：進場同 A，碰到昨收就回補。九年歷史的回測還沒跑（等富邦 1 分 K），以前光是「開高就空」長期是不賺的。
         </p>
         <p className="cq-fu-foot">
-          每個子帳戶各 1 口{name}，13:44 全部平倉；{name}每點 {cost.point_value} 元、每邊手續費 {cost.commission} 元
+          <b>帳戶</b>：多單、空單各最多 1 口{name}。誰先出訊號誰先做，同一秒照 A、B、C、噪音區的順序（多單只有開盤突破一條）；
+          同方向已經有 1 口時，後來的訊號整筆不做，不會等前一口出場再補進。上面的數字、圖上的買賣點、成交明細是這個帳戶；
+          「各策略」和日曆的固定組合／開高走低是每條各做 1 口的對照。
+        </p>
+        <p className="cq-fu-foot">
+          13:44 全部平倉；{name}每點 {cost.point_value} 元、每邊手續費 {cost.commission} 元
           {data.product && data.product !== 'MTX' ? '（假設）' : ''}、滑價 1 點、期交稅十萬分之二。只記帳、沒有送任何委託。
           秒級復盤只有逐筆的日子才有（富邦即時錄到的、期交所近 30 個交易日）；更早只有 1 分 K。富邦行情只供本人使用，不對外顯示。
         </p>
