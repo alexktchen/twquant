@@ -64,6 +64,9 @@ QUOTES_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_quotes" '
 QUOTES_SECONDS_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_quotes_seconds" '
                       "(day date, product text, payload jsonb, updated_at timestamptz, PRIMARY KEY (day, product))")
 QUOTE_PRODUCTS = {"TXF": "TX", "TMF": "TMF"}  # 網站行情：富邦代號 → 期交所代號（大台、微台）
+# 模擬單成本（每點幾元、每邊手續費）。小台是原研究的數字；大台、微台照合約規格，手續費是假設（使用者 2026-10-27「也要有模擬單」）
+PAPER_COST = {"MTX": (B.POINT_VALUE, B.COMMISSION), "TX": (200, 60.0), "TMF": (10, 15.0)}
+PRODUCT_NAME = {"MTX": "小台", "TX": "大台", "TMF": "微台"}
 FIELDS = ["day", "sleeve", "side", "signal_time", "entry_time", "entry_price", "exit_time", "exit_price",
           "exit_reason", "points", "net_pnl", "source"]
 
@@ -117,8 +120,10 @@ def encode_seconds(day: date, secs: dict, what: str) -> dict:
 class LiveCombo:
     """單執行緒、只看已到的逐筆：ORB 只做多 + NOISE 只放空，兩個子帳戶各 1 口。"""
 
-    def __init__(self, day: date, contract: str, prev_close: float, history, log):
+    def __init__(self, day: date, contract: str, prev_close: float, history, log, product: str = PRODUCT_TAIFEX):
         self.day, self.contract, self.prev_close, self.log = day, contract, prev_close, log
+        self.product = product
+        self.point_value, self.commission = PAPER_COST[product]
         self.t, self.p, self.vwap = [], [], []
         self.pv = self.vol = 0.0
         self.sigma = {m: statistics.fmean(abs(h.p[h.last_before(h.at(m))] / h.open - 1) for h in history)
@@ -270,7 +275,7 @@ class LiveCombo:
     def book(self, sleeve, side, signal_t, entry, exit_, reason) -> None:
         (et, ep), (xt, xp) = entry, exit_
         points = side * (xp - ep)
-        net = points * B.POINT_VALUE - 2 * B.COMMISSION - B.TAX * (ep + xp) * B.POINT_VALUE
+        net = points * self.point_value - 2 * self.commission - B.TAX * (ep + xp) * self.point_value
         row = {"day": str(self.day), "sleeve": sleeve, "side": side, "signal_time": hms(signal_t), "entry_time": hms(et),
                "entry_price": ep, "exit_time": hms(xt), "exit_price": xp, "exit_reason": reason,
                "points": round(points, 2), "net_pnl": round(net, 1), "source": "live"}
@@ -279,7 +284,9 @@ class LiveCombo:
         self.note(xt, "exit", sleeve, f"模擬{word} {xp:.0f}（{REASON_TEXT.get(reason, reason)}），這筆淨 {net:+,.0f} 元")
 
     def seconds_payload(self) -> dict:
-        return encode_seconds(self.day, self.secs, "小台")
+        out = encode_seconds(self.day, self.secs, PRODUCT_NAME[self.product])
+        out["product"] = self.product
+        return out
 
     # ── 網站狀態 ──
     def mark(self, sleeve: str, last):
@@ -293,7 +300,7 @@ class LiveCombo:
         open_pnl = None
         if side and last is not None:
             xp = last - side * B.SLIP
-            open_pnl = round(side * (xp - entry) * B.POINT_VALUE - 2 * B.COMMISSION - B.TAX * (entry + xp) * B.POINT_VALUE, 1)
+            open_pnl = round(side * (xp - entry) * self.point_value - 2 * self.commission - B.TAX * (entry + xp) * self.point_value, 1)
         return {"position": side, "entry_price": entry, "realized": realized, "open_pnl": open_pnl}
 
     def snapshot(self, status: str, source: str, symbol_: str, updated_at: datetime):
@@ -320,6 +327,8 @@ class LiveCombo:
             "orb": orb, "noise_lb": lb_plan, "noise": self.noise_seen, "sleeves": sleeves,
             "events": self.events, "trades": self.trades, "total": round(total, 1),
             "official": None, "official_match": None, "note": self.disabled,
+            "product": self.product, "name": PRODUCT_NAME[self.product], "volume": int(self.vol),
+            "point_value": self.point_value, "commission": self.commission,
         }
 
 
@@ -506,9 +515,17 @@ def backfill(futopt, symbol_: str, log):
     return rows
 
 
-def history_days(folder: Path, day: date):
-    """期交所逐筆：今天之前最後 14 個交易日（B.Day）與今天主力合約的昨收來源。"""
-    raw = F.read_taifex(folder, PRODUCT_TAIFEX)
+def now_us_start() -> int:
+    return int(time.time() * M.US)
+
+
+def open_us_of(day: date) -> int:
+    return clock(day, B.SESSION_OPEN)
+
+
+def history_days(folder: Path, day: date, product: str = PRODUCT_TAIFEX, raw=None):
+    """期交所逐筆：今天之前最後 14 個交易日（B.Day）與今天主力合約的昨收來源。raw 有給就不重讀。"""
+    raw = raw if raw is not None else F.read_taifex(folder, product)
     names = [d for d in sorted(raw) if d < str(day)]
     if len(names) < B.NOISE_LOOKBACK:
         raise SystemExit(f"{folder} 在 {day} 之前只有 {len(names)} 天逐筆，噪音區需要 {B.NOISE_LOOKBACK} 天")
@@ -516,15 +533,25 @@ def history_days(folder: Path, day: date):
     return days, raw[names[-1]], names[-1]
 
 
-def official(day: date, tick_csv: Path, folder: Path, history_raw_last, contract: str):
-    """收盤後：用逐筆引擎重算（與 forward_paper 同一套函數）。"""
-    tmp = tick_csv.parent / "official_input"
-    tmp.mkdir(exist_ok=True)
-    shutil.copy(tick_csv, tmp / f"Daily_{day:%Y_%m_%d}.csv")
-    today = F.read_taifex(tmp, PRODUCT_TAIFEX)[str(day)]
+def official(day: date, tick_csv, folder: Path, history_raw_last, contract: str, product: str = PRODUCT_TAIFEX,
+             today=None, hist=None):
+    """收盤後：用逐筆引擎重算（與 forward_paper 同一套函數）。大台、微台的損益照各自的合約成本重算（價格與出場原因不變）。"""
+    if today is None:
+        tmp = tick_csv.parent / "official_input"
+        tmp.mkdir(exist_ok=True)
+        shutil.copy(tick_csv, tmp / f"Daily_{day:%Y_%m_%d}.csv")
+        today = F.read_taifex(tmp, product)[str(day)]
     prev = history_raw_last["closes"].get(today["contract"])
     d = B.Day(str(day), today, prev)
-    hist, _, _ = history_days(folder, day)
+    if hist is None:
+        hist, _, _ = history_days(folder, day, product)
+    pv, fee = PAPER_COST[product]
+
+    def net_of(t):
+        if product == PRODUCT_TAIFEX:
+            return t["net_pnl"]
+        return round(t["points"] * pv - 2 * fee - B.TAX * (t["entry_price"] + t["exit_price"]) * pv, 1)
+
     rows = []
     for t in B.run_orb(d)[0]:
         if t["side"] > 0:
@@ -535,7 +562,7 @@ def official(day: date, tick_csv: Path, folder: Path, history_raw_last, contract
     return [{"day": str(day), "sleeve": s, "side": t["side"], "signal_time": t["signal_time"][11:19],
              "entry_time": t["entry_time"][11:19], "entry_price": t["entry_price"], "exit_time": t["exit_time"][11:19],
              "exit_price": t["exit_price"], "exit_reason": t["exit_reason"], "points": t["points"],
-             "net_pnl": t["net_pnl"], "source": "official"} for s, t in rows], today["contract"]
+             "net_pnl": net_of(t), "source": "official"} for s, t in rows], today["contract"]
 
 
 def write_rows(path: Path, rows) -> None:
@@ -574,27 +601,49 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
         log(f"定稿已寫進雲端（{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致，請查'}）")
 
 
+def quote_day(day: date, fubon: str, code: str, raw, log=lambda m: None):
+    """期交所逐筆重算大台／微台的一天：前面有 14 天就跑模擬單（含收盤重算），不夠就只有行情。回傳 (payload, 秒級)。"""
+    info = raw[str(day)]
+    names = [d for d in sorted(raw) if d < str(day)]
+    prev = raw[names[-1]]["closes"].get(info["contract"]) if names else None
+    when = datetime.fromisoformat(f"{day}T13:50:00").replace(tzinfo=M.TPE)
+    sym = symbol(fubon, info["contract"])
+    if len(names) < B.NOISE_LOOKBACK or prev is None:
+        tracker = QuoteTracker(day, code, info["contract"], prev)
+        for t_us, _, price, size in info["ticks"]:
+            tracker.on_tick(t_us, price, size)
+        return tracker.snapshot("closed", "taifex_replay", sym, when), tracker.seconds_payload()
+    hist = [B.Day(n, raw[n], None) for n in names[-B.NOISE_LOOKBACK:]]
+    live = LiveCombo(day, info["contract"], prev, hist, log, product=code)
+    for t_us, _, price, size in info["ticks"]:
+        live.on_tick(t_us, price, size)
+    live.decide(clock(day, "13:50"), wall=True)
+    snap = live.snapshot("closed", "taifex_replay", sym, when)
+    rows, _ = official(day, None, None, raw[names[-1]], info["contract"], code, today=info, hist=hist)
+    key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
+    snap["official"] = rows
+    snap["official_match"] = sorted(map(key, live.trades)) == sorted(map(key, rows))
+    return snap, live.seconds_payload()
+
+
 def replay_quotes(args) -> int:
-    """不連富邦：用期交所逐筆另存（taifex_ticks）重算那天的大台、微台行情；--upload 寫進網站。"""
-    day = date.fromisoformat(args.replay_quotes)
+    """不連富邦：用期交所逐筆另存（taifex_ticks）重算大台、微台（行情＋模擬單）；--upload 寫進網站。
+    --replay-quotes 可以給一天、逗號分隔的幾天，或 all（另存裡的每一天；每個商品只讀一次檔）。"""
     root = Path(args.history).parent / "taifex_ticks"
     uploader = Uploader(env_value(Path(args.env), DSN_ENV), print) if args.upload else None
     for fubon, code in QUOTE_PRODUCTS.items():
         raw = F.read_taifex(root / code, code)
-        if str(day) not in raw:
-            raise SystemExit(f"{root / code} 沒有 {day} 的一般盤逐筆")
-        info = raw[str(day)]
-        prev, _ = quote_prev_close(root, code, day, info["contract"])
-        tracker = QuoteTracker(day, code, info["contract"], prev)
-        for t_us, _, price, size in info["ticks"]:
-            tracker.on_tick(t_us, price, size)
-        snap = tracker.snapshot("closed", "taifex_replay", symbol(fubon, info["contract"]),
-                                datetime.fromisoformat(f"{day}T13:50:00").replace(tzinfo=M.TPE))
-        secs = tracker.seconds_payload()
-        if uploader is not None:
-            uploader.flush_quote(snap, secs)
-        print(f"{day} {QuoteTracker.NAME[code]} {info['contract']}：{len(snap['bars'])} 根 1 分 K、{len(secs['s']):,} 個秒點"
-              + ("，已寫進雲端" if uploader is not None else ""))
+        wanted = sorted(raw) if args.replay_quotes == "all" else args.replay_quotes.split(",")
+        for name in wanted:
+            if name not in raw:
+                raise SystemExit(f"{root / code} 沒有 {name} 的一般盤逐筆")
+            snap, secs = quote_day(date.fromisoformat(name), fubon, code, raw)
+            if uploader is not None:
+                uploader.flush_quote(snap, secs)
+            paper = "trades" in snap
+            tail = (f"模擬單 {len(snap['trades'])} 筆、合計 {snap['total']:+,.0f} 元、"
+                    f"{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致'}") if paper else "只有行情（前面不足 14 天）"
+            print(f"{name} {PRODUCT_NAME[code]} {snap['contract']}：{tail}" + ("，已寫進雲端" if uploader is not None else ""))
     return 0
 
 
@@ -633,7 +682,7 @@ def main() -> int:
     p.add_argument("--out", required=True, help="資料根目錄（repo 外）；每天一個子資料夾")
     p.add_argument("--history", required=True, help="期交所逐筆工作資料夾（底下 csv/ 是 Daily_*.csv；前 14 天與昨收）")
     p.add_argument("--replay-day", help="檢查用：重播這天的期交所逐筆，不連富邦")
-    p.add_argument("--replay-quotes", help="重算這天的大台、微台行情（期交所逐筆另存），配 --upload 放上網站")
+    p.add_argument("--replay-quotes", help="重算大台、微台（行情＋模擬單）：一天、逗號分隔的幾天或 all；配 --upload 放上網站")
     p.add_argument("--upload", action="store_true", help="狀態寫進雲端 serving.futures_paper（網站「小台模擬」）")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 排程視窗是 cp950，印「⚠」會當掉
@@ -725,14 +774,26 @@ def main() -> int:
     for t_us, price, size, _ in filled or []:
         live.on_tick(t_us, price, size)
     ticks_root = Path(args.history).parent / "taifex_ticks"
-    quotes = {}
+    quotes, quote_raw = {}, {}
     for fubon, code in QUOTE_PRODUCTS.items():
         qs = symbol(fubon, near)
-        prev, prev_day = quote_prev_close(ticks_root, code, day, near)
-        quotes[qs] = QuoteTracker(day, code, near, prev)
-        log(f"{QuoteTracker.NAME[code]} {qs}：昨收 {prev if prev is not None else '（沒有期交所逐筆，網站不顯示漲跌）'}（{prev_day}）")
+        raw_q = F.read_taifex(ticks_root / code, code) if (ticks_root / code).exists() else {}
+        quote_raw[qs] = raw_q
+        names_q = [d for d in sorted(raw_q) if d < str(day)]
+        prev = raw_q[names_q[-1]]["closes"].get(near) if names_q else None
+        if len(names_q) >= B.NOISE_LOOKBACK and prev is not None:
+            hist_q = [B.Day(n, raw_q[n], None) for n in names_q[-B.NOISE_LOOKBACK:]]
+            quotes[qs] = LiveCombo(day, near, prev, hist_q, log, product=code)
+            kind = "行情＋模擬單"
+        else:
+            quotes[qs] = QuoteTracker(day, code, near, prev)
+            kind = "只有行情（期交所逐筆不足 14 天）"
+        log(f"{PRODUCT_NAME[code]} {qs}：{kind}，昨收 {prev}（{names_q[-1] if names_q else '—'}）")
         for t_us, price, size, _ in filled_all.get(qs) or []:
             quotes[qs].on_tick(t_us, price, size)
+        if isinstance(quotes[qs], LiveCombo) and now_us_start() > open_us_of(day) + OPEN_SLACK_S * M.US and (
+                not quotes[qs].t or quotes[qs].t[0] > open_us_of(day) + OPEN_SLACK_S * M.US):
+            quotes[qs].disable(now_us_start(), "開盤那段沒有錄到（補抓失敗或不完整）")
     open_us = clock(day, B.SESSION_OPEN)
     now_us = int(time.time() * M.US)
     if now_us > open_us + OPEN_SLACK_S * M.US and (not live.t or live.t[0] > open_us + OPEN_SLACK_S * M.US):
@@ -774,6 +835,9 @@ def main() -> int:
                     elif sym in quotes:
                         quotes[sym].on_tick(t_us, price, size)
         live.decide(int(time.time() * M.US), wall=True)
+        for tracker in quotes.values():
+            if isinstance(tracker, LiveCombo):
+                tracker.decide(int(time.time() * M.US), wall=True)
         if uploader is not None and (len(live.events) != pushed_events or time.time() - pushed_at >= UPLOAD_EVERY_S):
             uploader.push(live.snapshot("live", "fubon_live", main_sym, datetime.now(M.TPE)))
             for qs, tracker in quotes.items():
@@ -801,10 +865,18 @@ def main() -> int:
            (uploader, "fubon_live", main_sym) if uploader is not None else None)
     for qs, tracker in quotes.items():
         snap = tracker.snapshot("closed", "fubon_live", qs, datetime.now(M.TPE))
+        has_ticks = bool(tracker.t) if isinstance(tracker, LiveCombo) else tracker.last is not None
+        if isinstance(tracker, LiveCombo) and has_ticks:
+            names_q = [d for d in sorted(quote_raw[qs]) if d < str(day)]
+            rows, _ = official(day, tick_csv, None, quote_raw[qs][names_q[-1]], near, tracker.product,
+                               hist=[B.Day(n, quote_raw[qs][n], None) for n in names_q[-B.NOISE_LOOKBACK:]])
+            key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
+            snap["official"] = rows
+            snap["official_match"] = sorted(map(key, tracker.trades)) == sorted(map(key, rows))
         (out / f"quotes_{tracker.product}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
-        if uploader is not None and tracker.last is not None:
+        if uploader is not None and has_ticks:
             uploader.flush_quote(snap, tracker.seconds_payload())
-            log(f"{QuoteTracker.NAME[tracker.product]}行情定稿已寫進雲端")
+            log(f"{PRODUCT_NAME[tracker.product]}定稿已寫進雲端")
     return 0
 
 
