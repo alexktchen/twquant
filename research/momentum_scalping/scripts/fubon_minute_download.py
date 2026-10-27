@@ -9,7 +9,8 @@ fubon_minute_download.py — 用富邦 API 逐月下載小台（MXF）各月合�
 原始回應原封不動存成 JSON，只存本機（富邦行情使用規範禁止轉傳）。
 
 用法：python fubon_minute_download.py --env D:/project/twquant/.env --out D:/project/twquant/data/research_ms/fubon_1m
-      [--first 201706] [--last 202612] [--continuous]   # --continuous：過期合約查不到時的退路，改抓 1! 與 2!
+      [--product MXF|TXF|TMF] [--first 201706] [--last 202612] [--continuous]   # --continuous：過期合約查不到時的退路，改抓 1! 與 2!
+      小台 MXF、大台 TXF 的 1 分 K 自 2017-06 起；微台 TMF 2024-07-29 才上市，--first 預設跟著改成 202408。
 """
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fubon_check as C  # noqa: E402
 
-PRODUCT, FIELDS = "MXF", "open,high,low,close,volume,average,transaction"
+FIELDS = "open,high,low,close,volume,average,transaction"
+FIRST_MONTH = {"MXF": "201706", "TXF": "201706", "TMF": "202408"}  # 各商品第一個抓的月合約
 PAUSE, RATE_LIMIT_WAIT, ATTEMPTS, EXPIRY_GRACE_DAYS = 1.1, 65.0, 6, 7
 
 
@@ -75,10 +77,13 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--env", required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--first", default="201706", help="第一個月合約 yyyyMM")
+    p.add_argument("--product", default="MXF", choices=sorted(FIRST_MONTH), help="MXF 小台、TXF 大台、TMF 微台")
+    p.add_argument("--first", default=None, help="第一個月合約 yyyyMM（預設：小台、大台 201706，微台 202408）")
     p.add_argument("--last", default=None, help="最後一個月合約 yyyyMM（預設：今天往後 1 個月）")
     p.add_argument("--continuous", action="store_true", help="改抓連續合約 1! 與 2!（退路）")
     args = p.parse_args()
+    product = args.product
+    args.first = args.first or FIRST_MONTH[product]
     today = date.today()
     last = args.last or "{}{:02d}".format(*add_month(today.year, today.month, 1))
     out = Path(args.out)
@@ -98,16 +103,16 @@ def main() -> int:
 
     empty = 0
     for k, (contract, name, (a, b)) in enumerate(jobs, 1):
-        path = out / f"{PRODUCT}_{name}.json"
+        path = out / f"{product}_{name}.json"
         # 還沒到期的合約，最後一段每次重抓（資料還在長）
         if path.exists() and b < today - timedelta(days=1):
             continue
-        payload = query(futopt, {"product": PRODUCT, "contractMonth": contract, "timeframe": "1", "session": "regular",
+        payload = query(futopt, {"product": product, "contractMonth": contract, "timeframe": "1", "session": "regular",
                                  "from": f"{a:%Y-%m-%d}", "to": f"{b:%Y-%m-%d}", "sort": "asc", "fields": FIELDS})
         bars = payload.get("data") or []
         empty += not bars
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        print(f"[{k}/{len(jobs)}] {PRODUCT} {contract} {a}～{b}：{len(bars)} 根", flush=True)
+        print(f"[{k}/{len(jobs)}] {product} {contract} {a}～{b}：{len(bars)} 根", flush=True)
     print(f"done，空回應 {empty} 個", flush=True)
     return 0
 

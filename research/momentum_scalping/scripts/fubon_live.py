@@ -42,6 +42,9 @@ import ms_replay as M  # noqa: E402
 
 MONTH_CODE = "ABCDEFGHIJKL"
 PRODUCT_TAIFEX = "MTX"
+# 富邦代號 → 期交所商品代號：小台（模擬單用）、大台、微台（2024-07-29 上市）
+FUBON_PRODUCTS = ("MXF", "TXF", "TMF")
+TAIFEX_CODE = {"MXF": "MTX", "TXF": "TX", "TMF": "TMF"}
 LOGIN_UNTIL, START_AT, STOP_AT = "09:30", "08:25", "13:47"
 REASON_TEXT = {"STOP": "停損", "TARGET": "停利", "EOD": "收盤前", "EXIT": "回到下緣之上", "FLIP": "反手"}
 OPEN_SLACK_S = 60              # 第一筆成交晚於 08:45 這麼多秒＝開盤沒錄到，當天不做模擬單
@@ -535,12 +538,20 @@ def main() -> int:
         P.sync_ticks(Path(args.history))
     except SystemExit as exc:
         log(f"⚠ 期交所逐筆更新失敗（{exc}），用現有檔案；請確認下面的「昨收日期」是前一個交易日")
+    import taifex_archive as A  # 大台、微台的期交所逐筆另存一份（期交所只留 30 個交易日）
+
+    try:
+        A.archive_all(Path(args.history), Path(args.history).parent / "taifex_ticks", log)
+    except SystemExit as exc:
+        log(f"⚠ 大台／微台期交所逐筆另存失敗：{exc}")
     history = Path(args.history) / "csv"
     hist, last_raw, last_day = history_days(history, day)
     prev_close = last_raw["closes"].get(near)
     if prev_close is None:
         raise SystemExit(f"{last_day} 的逐筆裡沒有 {near} 的收盤價，算不出噪音區")
-    symbols = {symbol("MXF", near): near, symbol("MXF", nxt): nxt, symbol("TXF", near): near}
+    # 小台（模擬單用）、大台、微台：近月與次月逐筆；近月五檔
+    symbols = {symbol(p, m): m for p in FUBON_PRODUCTS for m in (near, nxt)}
+    near_syms = [symbol(p, near) for p in FUBON_PRODUCTS]
     main_sym = symbol("MXF", near)
     log(f"交易日 {day}；主力 {near}（{main_sym}），昨收 {prev_close:.0f}（{last_day}）；錄 {', '.join(symbols)}")
 
@@ -572,20 +583,22 @@ def main() -> int:
         futopt.connect()
         for s in symbols:
             futopt.subscribe({"channel": "trades", "symbol": s})
-        futopt.subscribe({"channel": "books", "symbol": main_sym})
+        for s in near_syms:
+            futopt.subscribe({"channel": "books", "symbol": s})
         state["connected"] = True
-        log("已訂閱：" + "、".join(symbols) + f"（逐筆）＋ {main_sym}（五檔）")
+        log("已訂閱：" + "、".join(symbols) + f"（逐筆）＋ {'、'.join(near_syms)}（五檔）")
 
     subscribe()
     live = LiveCombo(day, near, prev_close, hist, log)
     uploader = Uploader(env_value(Path(args.env), DSN_ENV), log) if args.upload else None
     pushed_at, pushed_events = 0.0, -1
     rest = sdk.marketdata.rest_client.futopt
-    filled = backfill(rest, main_sym, log)
-    last_t = 0
+    # 三個商品的近月都補抓（小台先，模擬單要用）；補抓過的成交之後推送來就跳過
+    filled_all = {s: backfill(rest, s, log) for s in near_syms}
+    filled = filled_all[main_sym]
+    last_t = {s: max(r[0] for r in rows) for s, rows in filled_all.items() if rows}
     for t_us, price, size, _ in filled or []:
         live.on_tick(t_us, price, size)
-        last_t = max(last_t, t_us)
     open_us = clock(day, B.SESSION_OPEN)
     now_us = int(time.time() * M.US)
     if now_us > open_us + OPEN_SLACK_S * M.US and (not live.t or live.t[0] > open_us + OPEN_SLACK_S * M.US):
@@ -598,8 +611,9 @@ def main() -> int:
     tw = csv.writer(tickf)
     if tick_csv.stat().st_size == 0:
         tw.writerow(["成交日期", "商品代號", "到期月份(週別)", "成交時間", "成交價格", "成交數量(B+S)"])
-    for t_us, price, size, _ in filled or []:
-        tw.writerow([f"{day:%Y%m%d}", PRODUCT_TAIFEX, near, M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
+    for s, rows in filled_all.items():
+        for t_us, price, size, _ in rows or []:
+            tw.writerow([f"{day:%Y%m%d}", TAIFEX_CODE[s[:3]], near, M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
     stop_at = datetime.fromisoformat(f"{day}T{STOP_AT}:00").replace(tzinfo=M.TPE)
     n_ticks = 0
     while datetime.now(M.TPE) < stop_at:
@@ -614,11 +628,11 @@ def main() -> int:
             data = body.get("data") or {}
             if body.get("event") == "data" and body.get("channel") == "trades" and not data.get("isTrial"):
                 sym, t_us = data.get("symbol"), int(data["time"])
-                if sym == main_sym and t_us <= last_t:
+                if t_us <= last_t.get(sym, 0):
                     continue  # 補抓已經算過的成交（用成交時間判斷，查詢與推送的序號不一定同一套）
                 for tr in data.get("trades") or []:
                     price, size = float(tr["price"]), float(tr["size"])
-                    tw.writerow([f"{day:%Y%m%d}", PRODUCT_TAIFEX if sym.startswith("MXF") else "TX", symbols.get(sym, sym),
+                    tw.writerow([f"{day:%Y%m%d}", TAIFEX_CODE.get(sym[:3], sym[:3]), symbols.get(sym, sym),
                                  M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
                     if sym == main_sym:
                         live.on_tick(t_us, price, size)
