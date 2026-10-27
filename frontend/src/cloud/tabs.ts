@@ -3,7 +3,7 @@
 // T-431／D-209：族群資金又搬回自己的「盤勢」分頁（group）——族群資金通知與 LINE 族群圖卡帶的 ?tab=group 直接開這頁。
 
 // line＝「LINE 群組」（T-423）：只有有權限的角色看得到分頁（_lib/roles.ts）
-// futures＝「小台模擬」（T-450／D-220）：只給 admin
+// futures＝「台指期」（T-450／T-451／D-220；小台模擬單＋大台、微台行情）：只給 admin
 export type Tab = 'home' | 'news' | 'group' | 'picks' | 'score' | 'watch' | 'line' | 'futures'
 const TABS: readonly Tab[] = ['home', 'news', 'group', 'picks', 'score', 'watch', 'line', 'futures']
 /**

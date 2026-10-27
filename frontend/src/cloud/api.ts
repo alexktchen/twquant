@@ -5,7 +5,7 @@ import { getToken } from './session-client'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
-import type { FuturesDay, FuturesDayRow, SecondsPayload } from './futures'
+import type { FuturesDay, FuturesDayRow, QuoteDay, QuoteDayRow, QuoteProduct, SecondsPayload } from './futures'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
@@ -157,6 +157,18 @@ export const fetchFuturesDays = () => get<{ days: FuturesDayRow[] }>('/api/futur
 
 /** 小台模擬那一天的秒級復盤資料；沒有（只有 1 分 K）→ 後端回 404，呼叫端改用 1 分 K。只給 admin。 */
 export const fetchFuturesSeconds = (day: string) => get<SecondsPayload>(`/api/futures/seconds?day=${encodeURIComponent(day)}`)
+
+/** 大台／微台那一天的行情（不給日期＝最新一天）。只給 admin（T-451）。 */
+export const fetchQuoteDay = (product: QuoteProduct, day?: string) =>
+  get<QuoteDay>(`/api/futures/quotes?product=${product}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
+
+/** 大台／微台有行情的交易日（新到舊）。 */
+export const fetchQuoteDays = (product: QuoteProduct) =>
+  get<{ days: QuoteDayRow[] }>(`/api/futures/quotes/days?product=${product}`).then((r) => r.days)
+
+/** 大台／微台那一天的秒級復盤資料；沒有 → 404，呼叫端改用 1 分 K。 */
+export const fetchQuoteSeconds = (product: QuoteProduct, day: string) =>
+  get<SecondsPayload>(`/api/futures/quotes/seconds?product=${product}&day=${encodeURIComponent(day)}`)
 
 /** 首頁戰情室（T-379）：晨報、大盤體檢、期貨籌碼、名單速覽、昨日消息、行事曆。 */
 export const fetchWarroom = () => get<WarRoomData>('/api/warroom')
