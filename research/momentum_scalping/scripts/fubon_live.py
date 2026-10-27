@@ -58,6 +58,12 @@ TABLE_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_paper" '
              "(day date, source text, status text, payload jsonb, updated_at timestamptz, PRIMARY KEY (day))")
 SECONDS_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_paper_seconds" '
                "(day date, payload jsonb, updated_at timestamptz, PRIMARY KEY (day))")
+QUOTES_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_quotes" '
+              "(day date, product text, source text, status text, payload jsonb, updated_at timestamptz, "
+              "PRIMARY KEY (day, product))")
+QUOTES_SECONDS_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_quotes_seconds" '
+                      "(day date, product text, payload jsonb, updated_at timestamptz, PRIMARY KEY (day, product))")
+QUOTE_PRODUCTS = {"TXF": "TX", "TMF": "TMF"}  # 網站行情：富邦代號 → 期交所代號（大台、微台）
 FIELDS = ["day", "sleeve", "side", "signal_time", "entry_time", "entry_price", "exit_time", "exit_price",
           "exit_reason", "points", "net_pnl", "source"]
 
@@ -91,6 +97,21 @@ def clock(day: date, hhmm: str) -> int:
 
 def hms(t_us: int) -> str:
     return M.us_to_dt(t_us).strftime("%H:%M:%S.%f")[:-3]
+
+
+def encode_seconds(day: date, secs: dict, what: str) -> dict:
+    """秒級復盤：每一秒（有成交的那幾秒）最後成交價與 VWAP；三個陣列都是差分整數（VWAP ×10），省空間。"""
+    keys = sorted(secs)
+    price = [secs[k][0] for k in keys]
+    if any(x != int(x) for x in price):
+        raise ValueError(f"{day} {what}成交價有小數，秒級資料的整數編碼不適用")
+    vw = [round(secs[k][1] * 10) for k in keys]
+
+    def delta(xs):
+        return [b - a for a, b in zip([0, *xs[:-1]], xs)]
+
+    return {"version": 1, "day": str(day), "t0": B.SESSION_OPEN + ":00", "s": delta(keys),
+            "p": delta([int(x) for x in price]), "w": delta(vw)}
 
 
 class LiveCombo:
@@ -258,18 +279,7 @@ class LiveCombo:
         self.note(xt, "exit", sleeve, f"模擬{word} {xp:.0f}（{REASON_TEXT.get(reason, reason)}），這筆淨 {net:+,.0f} 元")
 
     def seconds_payload(self) -> dict:
-        """秒級復盤：每一秒（有成交的那幾秒）最後成交價與 VWAP；三個陣列都是差分整數（VWAP ×10），省空間。"""
-        keys = sorted(self.secs)
-        price = [self.secs[k][0] for k in keys]
-        if any(x != int(x) for x in price):
-            raise ValueError(f"{self.day} 小台成交價有小數，秒級資料的整數編碼不適用")
-        vw = [round(self.secs[k][1] * 10) for k in keys]
-
-        def delta(xs):
-            return [b - a for a, b in zip([0, *xs[:-1]], xs)]
-
-        return {"version": 1, "day": str(self.day), "t0": B.SESSION_OPEN + ":00", "s": delta(keys),
-                "p": delta([int(x) for x in price]), "w": delta(vw)}
+        return encode_seconds(self.day, self.secs, "小台")
 
     # ── 網站狀態 ──
     def mark(self, sleeve: str, last):
@@ -313,6 +323,62 @@ class LiveCombo:
         }
 
 
+class QuoteTracker:
+    """大台、微台的網站行情：每分鐘 K（含 VWAP）、每秒最後成交價；不做模擬單。"""
+
+    NAME = {"TX": "大台", "TMF": "微台"}
+
+    def __init__(self, day: date, product: str, contract: str, prev_close):
+        self.day, self.product, self.contract, self.prev_close = day, product, contract, prev_close
+        self.t0 = clock(day, B.SESSION_OPEN)
+        self.lo, self.hi = clock(day, "08:45"), clock(day, "13:45") + 999_999
+        self.bars, self.secs = {}, {}
+        self.pv = self.vol = 0.0
+        self.first = self.last = self.last_t = None
+
+    def on_tick(self, t_us: int, price: float, size: float) -> None:
+        if not self.lo <= t_us <= self.hi:
+            return
+        self.pv += price * size
+        self.vol += size
+        vwap = self.pv / self.vol
+        if self.first is None:
+            self.first = price
+        self.last, self.last_t = price, t_us
+        self.secs[(t_us - self.t0) // M.US] = [price, vwap]
+        key = M.us_to_dt(t_us).strftime("%H:%M")
+        bar = self.bars.get(key)
+        if bar is None:
+            self.bars[key] = [price, price, price, price, vwap]
+        else:
+            bar[1], bar[2], bar[3], bar[4] = max(bar[1], price), min(bar[2], price), price, vwap
+
+    def snapshot(self, status: str, source: str, symbol_: str, updated_at: datetime) -> dict:
+        return {"version": 1, "day": str(self.day), "product": self.product, "name": self.NAME.get(self.product, self.product),
+                "source": source, "status": status, "contract": self.contract, "symbol": symbol_,
+                "updated_at": updated_at.isoformat(timespec="seconds"),
+                "last_tick": hms(self.last_t)[:8] if self.last_t else None, "last_price": self.last,
+                "prev_close": self.prev_close, "open": self.first, "volume": int(self.vol),
+                "bars": [[k, *(round(x, 1) for x in v)] for k, v in sorted(self.bars.items())]}
+
+    def seconds_payload(self) -> dict:
+        out = encode_seconds(self.day, self.secs, self.NAME.get(self.product, self.product))
+        out["product"] = self.product
+        return out
+
+
+def quote_prev_close(ticks_root: Path, code: str, day: date, contract: str):
+    """期交所逐筆另存（taifex_ticks/<代號>）裡，今天之前最後一個交易日、同一個合約的一般盤收盤；沒有回 None。"""
+    folder = ticks_root / code
+    if not folder.exists():
+        return None, None
+    raw = F.read_taifex(folder, code)
+    names = [d for d in sorted(raw) if d < str(day)]
+    if not names:
+        return None, None
+    return raw[names[-1]]["closes"].get(contract), names[-1]
+
+
 class Uploader:
     """把最新狀態寫進雲端 serving.futures_paper（背景執行緒、只留最新一份；失敗記錄後下次再試，不擋錄製）。"""
 
@@ -322,25 +388,53 @@ class Uploader:
         import psycopg  # 只有上傳才需要
 
         self.psycopg, self.dsn, self.log = psycopg, dsn, log
-        self.box: "queue.Queue[dict]" = queue.Queue(maxsize=1)
+        self.pending: dict = {}  # 鍵（"paper" 或 商品代號）→ (寫入函式, 最新一份)
+        self.cv = threading.Condition()
         self.conn = None
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
-    def push(self, payload: dict) -> None:
-        try:
-            self.box.get_nowait()
-        except queue.Empty:
-            pass
-        self.box.put(payload)
+    def push(self, payload: dict, key: str = "paper") -> None:
+        writer = self.write if key == "paper" else self.write_quote
+        with self.cv:
+            self.pending[key] = (writer, payload)
+            self.cv.notify()
 
-    def write(self, payload: dict) -> None:
+    def connect(self) -> None:
         if self.conn is None or self.conn.closed:
             self.conn = self.psycopg.connect(self.dsn, prepare_threshold=None, connect_timeout=10)
             with self.conn.cursor() as cur:
                 cur.execute('CREATE SCHEMA IF NOT EXISTS "serving"')
                 cur.execute(TABLE_DDL)
+                cur.execute(QUOTES_DDL)
             self.conn.commit()
+
+    def write_quote(self, payload: dict) -> None:
+        self.connect()
+        body = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO "serving"."futures_quotes" (day, product, source, status, payload, updated_at) '
+                "VALUES (%s, %s, %s, %s, %s::jsonb, %s) ON CONFLICT (day, product) DO UPDATE SET source = EXCLUDED.source, "
+                "status = EXCLUDED.status, payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at "
+                "WHERE NOT (futures_quotes.source = 'fubon_live' AND EXCLUDED.source = 'taifex_replay')",
+                (payload["day"], payload["product"], payload["source"], payload["status"], body, payload["updated_at"]))
+        self.conn.commit()
+
+    def flush_quote(self, payload: dict, seconds: dict) -> None:
+        """大台／微台收盤定稿：同步寫一次（含秒級），失敗要讓呼叫端知道。"""
+        self.write_quote(payload)
+        body = json.dumps(seconds, ensure_ascii=False, allow_nan=False)
+        with self.conn.cursor() as cur:
+            cur.execute(QUOTES_SECONDS_DDL)
+            cur.execute(
+                'INSERT INTO "serving"."futures_quotes_seconds" (day, product, payload, updated_at) VALUES (%s, %s, %s::jsonb, %s) '
+                "ON CONFLICT (day, product) DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at",
+                (seconds["day"], seconds["product"], body, payload["updated_at"]))
+        self.conn.commit()
+
+    def write(self, payload: dict) -> None:
+        self.connect()
         body = json.dumps(payload, ensure_ascii=False, allow_nan=False)
         with self.conn.cursor() as cur:
             # 期交所重算的復盤不覆蓋富邦即時錄到的那一天
@@ -354,14 +448,18 @@ class Uploader:
 
     def run(self) -> None:
         while True:
-            payload = self.box.get()
-            try:
-                self.write(payload)
-            except Exception as exc:  # noqa: BLE001  # 記錄後丟掉這份、等下一份；不讓上傳問題停掉盤中錄製
-                self.log(f"⚠ 寫雲端失敗：{exc}")
-                if self.conn is not None:
-                    self.conn.close()
-                    self.conn = None
+            with self.cv:
+                while not self.pending:
+                    self.cv.wait()
+                jobs, self.pending = list(self.pending.values()), {}
+            for writer, payload in jobs:
+                try:
+                    writer(payload)
+                except Exception as exc:  # noqa: BLE001  # 記錄後丟掉這份、等下一份；不讓上傳問題停掉盤中錄製
+                    self.log(f"⚠ 寫雲端失敗：{exc}")
+                    if self.conn is not None:
+                        self.conn.close()
+                        self.conn = None
 
     def flush(self, payload: dict, seconds: dict | None = None) -> None:
         """收盤定稿：同步寫一次（含秒級復盤資料），失敗要讓呼叫端知道。"""
@@ -476,6 +574,30 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
         log(f"定稿已寫進雲端（{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致，請查'}）")
 
 
+def replay_quotes(args) -> int:
+    """不連富邦：用期交所逐筆另存（taifex_ticks）重算那天的大台、微台行情；--upload 寫進網站。"""
+    day = date.fromisoformat(args.replay_quotes)
+    root = Path(args.history).parent / "taifex_ticks"
+    uploader = Uploader(env_value(Path(args.env), DSN_ENV), print) if args.upload else None
+    for fubon, code in QUOTE_PRODUCTS.items():
+        raw = F.read_taifex(root / code, code)
+        if str(day) not in raw:
+            raise SystemExit(f"{root / code} 沒有 {day} 的一般盤逐筆")
+        info = raw[str(day)]
+        prev, _ = quote_prev_close(root, code, day, info["contract"])
+        tracker = QuoteTracker(day, code, info["contract"], prev)
+        for t_us, _, price, size in info["ticks"]:
+            tracker.on_tick(t_us, price, size)
+        snap = tracker.snapshot("closed", "taifex_replay", symbol(fubon, info["contract"]),
+                                datetime.fromisoformat(f"{day}T13:50:00").replace(tzinfo=M.TPE))
+        secs = tracker.seconds_payload()
+        if uploader is not None:
+            uploader.flush_quote(snap, secs)
+        print(f"{day} {QuoteTracker.NAME[code]} {info['contract']}：{len(snap['bars'])} 根 1 分 K、{len(secs['s']):,} 個秒點"
+              + ("，已寫進雲端" if uploader is not None else ""))
+    return 0
+
+
 def replay(args) -> int:
     """不連富邦：用期交所逐筆重播一天，檢查即時引擎和逐筆引擎是否一致。"""
     day = date.fromisoformat(args.replay_day)
@@ -511,6 +633,7 @@ def main() -> int:
     p.add_argument("--out", required=True, help="資料根目錄（repo 外）；每天一個子資料夾")
     p.add_argument("--history", required=True, help="期交所逐筆工作資料夾（底下 csv/ 是 Daily_*.csv；前 14 天與昨收）")
     p.add_argument("--replay-day", help="檢查用：重播這天的期交所逐筆，不連富邦")
+    p.add_argument("--replay-quotes", help="重算這天的大台、微台行情（期交所逐筆另存），配 --upload 放上網站")
     p.add_argument("--upload", action="store_true", help="狀態寫進雲端 serving.futures_paper（網站「小台模擬」）")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 排程視窗是 cp950，印「⚠」會當掉
@@ -519,6 +642,8 @@ def main() -> int:
     os.chdir(root)  # 富邦 SDK 的 log/ 寫在這裡，不會進 repo
     if args.replay_day:
         return replay(args)
+    if args.replay_quotes:
+        return replay_quotes(args)
 
     day = datetime.now(M.TPE).date()
     out = root / str(day)
@@ -599,6 +724,15 @@ def main() -> int:
     last_t = {s: max(r[0] for r in rows) for s, rows in filled_all.items() if rows}
     for t_us, price, size, _ in filled or []:
         live.on_tick(t_us, price, size)
+    ticks_root = Path(args.history).parent / "taifex_ticks"
+    quotes = {}
+    for fubon, code in QUOTE_PRODUCTS.items():
+        qs = symbol(fubon, near)
+        prev, prev_day = quote_prev_close(ticks_root, code, day, near)
+        quotes[qs] = QuoteTracker(day, code, near, prev)
+        log(f"{QuoteTracker.NAME[code]} {qs}：昨收 {prev if prev is not None else '（沒有期交所逐筆，網站不顯示漲跌）'}（{prev_day}）")
+        for t_us, price, size, _ in filled_all.get(qs) or []:
+            quotes[qs].on_tick(t_us, price, size)
     open_us = clock(day, B.SESSION_OPEN)
     now_us = int(time.time() * M.US)
     if now_us > open_us + OPEN_SLACK_S * M.US and (not live.t or live.t[0] > open_us + OPEN_SLACK_S * M.US):
@@ -637,9 +771,13 @@ def main() -> int:
                     if sym == main_sym:
                         live.on_tick(t_us, price, size)
                         n_ticks += 1
+                    elif sym in quotes:
+                        quotes[sym].on_tick(t_us, price, size)
         live.decide(int(time.time() * M.US), wall=True)
         if uploader is not None and (len(live.events) != pushed_events or time.time() - pushed_at >= UPLOAD_EVERY_S):
             uploader.push(live.snapshot("live", "fubon_live", main_sym, datetime.now(M.TPE)))
+            for qs, tracker in quotes.items():
+                uploader.push(tracker.snapshot("live", "fubon_live", qs, datetime.now(M.TPE)), tracker.product)
             pushed_at, pushed_events = time.time(), len(live.events)
         if not state["connected"]:
             log("連線中斷，重新連線")
@@ -661,6 +799,12 @@ def main() -> int:
     log(f"收盤：{main_sym} 收到 {n_ticks:,} 筆成交；原始訊息已壓縮成 {raw_path.name}.gz")
     finish(day, out, live, tick_csv, history, last_raw, log,
            (uploader, "fubon_live", main_sym) if uploader is not None else None)
+    for qs, tracker in quotes.items():
+        snap = tracker.snapshot("closed", "fubon_live", qs, datetime.now(M.TPE))
+        (out / f"quotes_{tracker.product}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+        if uploader is not None and tracker.last is not None:
+            uploader.flush_quote(snap, tracker.seconds_payload())
+            log(f"{QuoteTracker.NAME[tracker.product]}行情定稿已寫進雲端")
     return 0
 
 
