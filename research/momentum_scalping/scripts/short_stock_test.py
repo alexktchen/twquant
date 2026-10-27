@@ -168,6 +168,10 @@ def describe(trades):
             "locked_pct": round(sum(t["locked"] for t in trades) / len(trades) * 100, 2)}
 
 
+def passes(s) -> bool:
+    return s["n"] >= 100 and s["mean_net_pct"] > 0 and s["ci_low"] > 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--raw", required=True)
@@ -202,24 +206,32 @@ def main() -> int:
             "explore": describe(ex), "validate": s,
             "validate_twse": describe([e for e in va if e["market"] == "twse"]),
             "validate_tpex": describe([e for e in va if e["market"] == "tpex"]),
-            "yearly": {y: (len(v), round(statistics.fmean(v) * 100, 3)) for y, v in sorted(yearly.items())},
-            "passed": s["n"] >= 100 and s["mean_net_pct"] > 0 and s["ci_low"] > 0}
+            "yearly": {y: (len(v), round(statistics.fmean(v) * 100, 3)) for y, v in sorted(yearly.items())}}
+        # 補充（2026-10-26 09:21）：主要判定改用上櫃；A5 只有上市。合併結果照報，只當參考。
+        judged_on = "validate_twse" if name.startswith("A5") else "validate_tpex"
+        result["rules"][name]["judged_on"] = judged_on
+        result["rules"][name]["passed"] = passes(result["rules"][name][judged_on])
+        result["rules"][name]["passed_combined"] = passes(s)
     (out / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     lines = ["# 測試 A：個股過熱池「隔天開盤放空、收盤回補」", "",
              f"照 PREREGISTRATION.md 一次跑完。每筆成本 {result['cost_pct']}%；收盤鎖漲停時另扣 7%（回補不到）。",
-             f"缺檔：{missing or '無'}。A5 的當沖比門檻（探索期中位數）：{dt_median}", "",
-             "| 規則 | 探索期 n / 平均淨% | 驗證期 n（天數）/ 勝率 / 平均淨% | 驗證期 95% CI（以天群集） | 不扣 7% 時 | 收盤鎖漲停比例 | 上市 / 上櫃 平均淨% | 及格 |",
-             "|---|---|---|---|---|---|---|---|"]
+             f"缺檔：{missing or '無'}。A5 的當沖比門檻（探索期中位數）：{dt_median}",
+             "及格與否：A1～A4 看驗證期**上櫃**，A5 看驗證期**上市**（見 PREREGISTRATION.md 補充）；表中「合併」只當參考。", "",
+             "| 規則 | 探索期 n / 平均淨% | 驗證期合併 n（天數）/ 勝率 / 平均淨% | 合併 95% CI（以天群集） | 不扣 7% 時 | 收盤鎖漲停比例 | 上市 / 上櫃 平均淨% | 判定用的那一段 n / 平均淨% / 95% CI | 及格 |",
+             "|---|---|---|---|---|---|---|---|---|"]
     for name, r in result["rules"].items():
         e, v, tw, tp = r["explore"], r["validate"], r["validate_twse"], r["validate_tpex"]
+        j = r[r["judged_on"]]
+        judged = (f"{'上市' if r['judged_on'] == 'validate_twse' else '上櫃'} {j['n']} / {j['mean_net_pct']:+.2f} / "
+                  f"{j['ci_low']:+.2f} ～ {j['ci_high']:+.2f}") if j["n"] else "0"
         if not v["n"]:
-            lines.append(f"| {name} | {e['n']} | 0 | — | — | — | — | ❌ |")
+            lines.append(f"| {name} | {e['n']} | 0 | — | — | — | — | {judged} | ❌ |")
             continue
         lines.append(f"| {name} | {e['n']} / {e.get('mean_net_pct', 0):+.2f} | {v['n']}（{v['days']}）/ {v['win_rate']}% / {v['mean_net_pct']:+.2f} | "
                      f"{v['ci_low']:+.2f} ～ {v['ci_high']:+.2f} | {v['mean_no_penalty_pct']:+.2f} | {v['locked_pct']}% | "
                      f"{tw.get('mean_net_pct', float('nan')):+.2f}（{tw['n']}）/ {tp.get('mean_net_pct', float('nan')):+.2f}（{tp['n']}） | "
-                     f"{'✅' if r['passed'] else '❌'} |")
+                     f"{judged} | {'✅' if r['passed'] else '❌'} |")
     lines += ["", "## 驗證期分年度（筆數, 平均淨%）", ""]
     for name, r in result["rules"].items():
         lines.append(f"- {name}：" + "；".join(f"{y} {n} 筆 {m:+.2f}" for y, (n, m) in r["yearly"].items()))

@@ -56,11 +56,17 @@ EXIT = {
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 
 
+CJK_FONTS = ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # Linux（雲端）
+             "C:/Windows/Fonts/msjh.ttc",                     # Windows 微軟正黑體
+             "/System/Library/Fonts/PingFang.ttc")            # macOS
+
+
 def setup_font() -> None:
-    for path in ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",):
+    for path in CJK_FONTS:
         if Path(path).exists():
             font_manager.fontManager.addfont(path)
             plt.rcParams["font.family"] = font_manager.FontProperties(fname=path).get_name()
+            break
     plt.rcParams.update({"axes.unicode_minus": False, "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,
                          "savefig.facecolor": SURFACE, "axes.edgecolor": GRID, "text.color": INK,
                          "axes.labelcolor": INK_2, "xtick.color": MUTED, "ytick.color": MUTED})
