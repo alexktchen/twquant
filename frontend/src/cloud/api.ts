@@ -5,7 +5,7 @@ import { getToken } from './session-client'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
-import type { FuturesDay, FuturesDayRow, QuoteDay, QuoteDayRow, QuoteProduct, SecondsPayload } from './futures'
+import type { FuturesDay, FuturesDayRow, QuoteDayRow, QuotePayload, QuoteProduct, SecondsPayload } from './futures'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
@@ -160,7 +160,7 @@ export const fetchFuturesSeconds = (day: string) => get<SecondsPayload>(`/api/fu
 
 /** 大台／微台那一天的行情（不給日期＝最新一天）。只給 admin（T-451）。 */
 export const fetchQuoteDay = (product: QuoteProduct, day?: string) =>
-  get<QuoteDay>(`/api/futures/quotes?product=${product}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
+  get<QuotePayload>(`/api/futures/quotes?product=${product}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
 
 /** 大台／微台有行情的交易日（新到舊）。 */
 export const fetchQuoteDays = (product: QuoteProduct) =>

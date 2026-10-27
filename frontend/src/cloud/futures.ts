@@ -62,6 +62,12 @@ export type FuturesDay = {
   total: number
   official: FuturesTrade[] | null
   official_match: boolean | null
+  /** 大台、微台的模擬單才有（T-451）；小台沒有就是 MTX、每點 50 元、手續費 30 元 */
+  product?: Product
+  name?: string
+  volume?: number
+  point_value?: number
+  commission?: number
 }
 
 export type FuturesDayRow = { day: string; source: string; status: string; total: number | null; match: boolean | null }
@@ -85,7 +91,11 @@ export type QuoteDay = {
   volume: number
   bars: [string, number, number, number, number, number][]
 }
-export type QuoteDayRow = { day: string; source: string; status: string }
+export type QuoteDayRow = { day: string; source: string; status: string; total?: number | null; match?: boolean | null }
+
+/** 大台／微台那一天：前面夠 14 天就有模擬單（同小台的整份狀態），不夠就只有行情。 */
+export type QuotePayload = QuoteDay | (FuturesDay & { product: QuoteProduct; name: string; volume: number })
+export const isPaper = (d: QuotePayload | FuturesDay): d is FuturesDay => 'sleeves' in d
 
 /** 網站上的三個商品：小台（模擬單）、大台、微台。 */
 export type Product = 'MTX' | QuoteProduct
@@ -109,16 +119,23 @@ export const REASON_TEXT: Record<string, string> = {
   FLIP: '反手',
 }
 
-// 「現在平倉的話」的估算：與 intraday_bidir_test.py 相同（小台每點 50 元、每邊滑價 1 點、手續費 30 元、期交稅十萬分之二）
-const POINT_VALUE = 50
+// 「現在平倉的話」的估算：與 intraday_bidir_test.py 相同（每邊滑價 1 點、期交稅十萬分之二）；
+// 每點幾元、手續費照商品（小台 50 元／30 元；大台、微台看那一天的資料，fubon_live.py 的 PAPER_COST）
 const SLIP = 1
-const COMMISSION = 30
 const TAX = 0.00002
+export type Cost = { point_value: number; commission: number }
+export const MTX_COST: Cost = { point_value: 50, commission: 30 }
+
+/** 那一天的成本（資料裡沒寫＝小台）。 */
+export const costOf = (d: { point_value?: number; commission?: number }): Cost => ({
+  point_value: d.point_value ?? MTX_COST.point_value,
+  commission: d.commission ?? MTX_COST.commission,
+})
 
 /** 現在用 price 平倉的淨損益（含出場滑價、來回手續費與期交稅）。 */
-export function closeNowPnl(side: 1 | -1, entry: number, price: number): number {
+export function closeNowPnl(side: 1 | -1, entry: number, price: number, cost: Cost = MTX_COST): number {
   const exit = price - side * SLIP
-  return side * (exit - entry) * POINT_VALUE - 2 * COMMISSION - TAX * (entry + exit) * POINT_VALUE
+  return side * (exit - entry) * cost.point_value - 2 * cost.commission - TAX * (entry + exit) * cost.point_value
 }
 
 /** 差分加回去。 */
@@ -217,7 +234,7 @@ export function replayAt(d: FuturesDay, cut: string, secs: Seconds | null = null
         fills.push({ time: entered.time, sleeve: s, side: open.side, price: open.entry, kind: 'entry' })
       }
     }
-    const openPnl = open && price !== null ? Math.round(closeNowPnl(open.side, open.entry, price)) : null
+    const openPnl = open && price !== null ? Math.round(closeNowPnl(open.side, open.entry, price, costOf(d))) : null
     sleeves[s] = { position: open ? open.side : 0, entry_price: open ? open.entry : null, realized: Math.round(realized), open_pnl: openPnl }
   }
   const total = SLEEVES.reduce((a, s) => a + sleeves[s].realized + (sleeves[s].open_pnl ?? 0), 0)
