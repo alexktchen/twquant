@@ -8,21 +8,32 @@ import { FEATURES, lockedText, tabAllowed } from '../src/cloud/access.ts'
 import {
   STALE_AFTER_S,
   addSeconds,
+  MTX_COST,
+  STRATEGY_NAME,
   barsAt,
   change,
+  chartMarks,
   chartTime,
+  costOf,
+  isPaper,
   decodeSeconds,
   fillTimes,
+  gapBook,
+  gapLevels,
+  gapSub,
   lastAtOrBefore,
   closeNowPnl,
   minuteOf,
   replayAt,
+  replayBook,
   shouldPoll,
   staleSeconds,
   taipeiNow,
   tone,
   yuan,
   type FuturesDay,
+  type FuturesTrade,
+  type GapFail,
 } from '../src/cloud/futures.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
@@ -246,4 +257,202 @@ test('T-451 AC5 分頁改名「台指期」，上面切小台・模擬單／大�
   assert.match(page, /\{ key: 'TX', label: '大台' \}/)
   assert.match(page, /\{ key: 'TMF', label: '微台' \}/)
   assert.match(read('src/cloud/CloudApp.tsx'), /onClick=\{\(\) => setTab\('futures'\)\}>\s*台指期/)
+})
+
+// ── 大台、微台也有模擬單（使用者 2026-10-27：「也要有模擬單」） ───────────────────────────────
+test('T-451 AC6 現在平倉的話照各自合約：大台每點 200 元、微台 10 元；資料沒寫成本＝小台', () => {
+  assert.deepEqual(costOf({}), MTX_COST)
+  assert.deepEqual(costOf({ point_value: 200, commission: 60 }), { point_value: 200, commission: 60 })
+  // 同一筆空單（46763 → 現價 46753）：小台 296.48、大台 1305.93（fubon_live.py 同一條公式）
+  assert.ok(Math.abs(closeNowPnl(-1, 46763, 46753) - 296.483) < 0.01)
+  assert.ok(Math.abs(closeNowPnl(-1, 46763, 46753, { point_value: 200, commission: 60 }) - 1305.932) < 0.01)
+  const tx = { ...day(), product: 'TX' as const, name: '大台', volume: 1, point_value: 200, commission: 60 }
+  assert.equal(replayAt(tx, '11:29').sleeves.NOISE_SHORT.open_pnl, Math.round(closeNowPnl(-1, 46763, 46753, costOf(tx))))
+})
+
+test('T-451 AC6 大台／微台那天有模擬單就用小台同一個畫面；前面不足 14 天只有行情', () => {
+  assert.ok(isPaper(day()))
+  const quoteOnly = { version: 1 as const, day: '2026-09-10', product: 'TX' as const, name: '大台', source: 'taifex_replay' as const, status: 'closed' as const, contract: '202609', symbol: 'TXFI6', updated_at: '2026-09-10T13:50:00+08:00', last_tick: '13:45:00', last_price: 1, prev_close: null, open: 1, volume: 1, bars: [] }
+  assert.ok(!isPaper(quoteOnly))
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /\{data && isPaper\(data\) && <PaperBody /)
+  assert.match(page, /\{data && !isPaper\(data\) && at && \(/)
+  // 日期清單有模擬單的日子多合計與一致與否（同小台）
+  assert.match(read('functions/api/futures/quotes/days.ts'), /\(payload->>'total'\)::float8 AS total/)
+})
+
+// ── 開高走低（T-452，使用者 2026-10-27：「abc 也新增成一個策略加到前端」） ───────────────────────
+const gapTrade = (sleeve: 'GAP_A' | 'GAP_B' | 'GAP_C', exit_time: string, exit_price: number, exit_reason: string, net_pnl: number): FuturesTrade => ({
+  day: '2026-10-27',
+  sleeve,
+  side: -1,
+  signal_time: '09:22:00.000',
+  entry_time: '09:22:01.000',
+  entry_price: 46479,
+  exit_time,
+  exit_price,
+  exit_reason,
+  points: 46479 - exit_price,
+  net_pnl,
+  source: 'live',
+})
+
+/** 2026-10-27 的真實走勢縮寫（fubon_live.py 用期交所逐筆重播）：開高 +0.56%，09:22 A、B、C 同時放空，C 10:23 補完缺口，A、B 收盤回補。 */
+function gapDay(): FuturesDay {
+  const rule = (target: number | null) => ({ state: 'closed' as const, stop: 46848, target, signal_time: '09:22:00', entry_price: 46479, entry_time: '09:22:01' })
+  const flat = (realized: number) => ({ position: 0 as const, entry_price: null, realized, open_pnl: null })
+  const g: GapFail = {
+    version: 1,
+    names: { GAP_A: 'A 開高失守', GAP_B: 'B 跌破開盤區間', GAP_C: 'C 補缺口' },
+    threshold_pct: 0.526,
+    gap_pct: 0.558,
+    active: true,
+    range: { high: 46848, low: 46505 },
+    rules: { GAP_A: rule(null), GAP_B: rule(null), GAP_C: rule(46262) },
+    sleeves: { GAP_A: flat(17947.4), GAP_B: flat(17947.4), GAP_C: flat(10897.3) },
+    events: [
+      { time: '08:45:00', kind: 'info', sleeve: null, text: '開高 +0.56%（門檻 +0.526%）→ 等跌破再放空' },
+      { time: '09:00:00', kind: 'info', sleeve: 'GAP_B', text: '開盤區間（08:45～08:59）高 46848、低 46505' },
+      { time: '09:22:00', kind: 'signal', sleeve: 'GAP_A', text: '09:22 價格 46483 跌破開盤 46520 → A、C 模擬放空' },
+      { time: '09:22:00', kind: 'signal', sleeve: 'GAP_B', text: '09:22 價格 46483 跌破開盤區間低點 46505 → B 模擬放空' },
+      { time: '09:22:01', kind: 'fill', sleeve: 'GAP_A', text: 'A 開高失守：模擬放空 46479' },
+      { time: '09:22:01', kind: 'fill', sleeve: 'GAP_C', text: 'C 補缺口：模擬放空 46479' },
+      { time: '09:22:01', kind: 'fill', sleeve: 'GAP_B', text: 'B 跌破開盤區間：模擬放空 46479' },
+      { time: '10:23:28', kind: 'signal', sleeve: 'GAP_C', text: 'C 補缺口：補完缺口 46262' },
+      { time: '10:23:29', kind: 'exit', sleeve: 'GAP_C', text: 'C 補缺口：模擬回補 46258（停利）' },
+      { time: '13:44:01', kind: 'exit', sleeve: 'GAP_A', text: 'A 開高失守：模擬回補 46117（收盤前）' },
+      { time: '13:44:01', kind: 'exit', sleeve: 'GAP_B', text: 'B 跌破開盤區間：模擬回補 46117（收盤前）' },
+    ],
+    trades: [
+      gapTrade('GAP_C', '10:23:29.000', 46258, 'TARGET', 10897.3),
+      gapTrade('GAP_A', '13:44:01.000', 46117, 'EOD', 17947.4),
+      gapTrade('GAP_B', '13:44:01.000', 46117, 'EOD', 17947.4),
+    ],
+    total: 46792.1,
+  }
+  return {
+    ...day(),
+    day: '2026-10-27',
+    status: 'closed',
+    open: 46520,
+    prev_close: 46262,
+    bars: [
+      ['08:45', 46520, 46560, 46505, 46540, 46530],
+      ['08:51', 46799, 46848, 46789, 46799, 46700],
+      ['09:00', 46720, 46759, 46627, 46673, 46690],
+      ['09:21', 46525, 46537, 46483, 46483, 46650],
+      ['09:22', 46484, 46507, 46450, 46475, 46640],
+      ['10:00', 46400, 46420, 46380, 46410, 46560],
+      ['10:23', 46300, 46310, 46255, 46262, 46500],
+      ['13:44', 46102, 46120, 46070, 46077, 46400],
+    ],
+    gap_fail: g,
+  }
+}
+
+/** 同一天 10:00 盤中的樣子：三條都還持空，trades 還沒有。 */
+function gapLive(): FuturesDay {
+  const d = gapDay()
+  const g = d.gap_fail!
+  const open = { position: -1 as const, entry_price: 46479, realized: 0, open_pnl: -3655 }
+  return {
+    ...d,
+    status: 'live',
+    bars: d.bars.slice(0, 6),
+    gap_fail: {
+      ...g,
+      rules: { GAP_A: { ...g.rules.GAP_A, state: 'open' }, GAP_B: { ...g.rules.GAP_B, state: 'open' }, GAP_C: { ...g.rules.GAP_C, state: 'open' } },
+      sleeves: { GAP_A: open, GAP_B: open, GAP_C: open },
+      events: g.events.slice(0, 7),
+      trades: [],
+    },
+  }
+}
+
+test('T-452 AC1 舊資料沒有開高走低 → 帳本是 null、畫面提示重新上傳；有的話就是 A、B、C 三個子帳戶', () => {
+  assert.equal(gapBook(day()), null)
+  assert.deepEqual(gapBook(gapDay())!.sleeves, ['GAP_A', 'GAP_B', 'GAP_C'])
+  assert.match(read('src/cloud/FuturesPage.tsx'), /要用電腦上的錄製程式重新上傳一次才有/)
+})
+
+test('T-452 AC2 復盤：拉到某一刻只算那之前的 A、B、C 成交；持倉用「現在平倉的話」，平倉後變已實現', () => {
+  const d = gapDay()
+  const book = gapBook(d)!
+  const before = replayBook(d, book, '09:21')
+  assert.deepEqual(before.events.map((e) => e.time), ['08:45:00', '09:00:00'])
+  assert.deepEqual(before.fills, [])
+  assert.equal(before.total, 0)
+  const holding = replayBook(d, book, '10:00')
+  for (const s of ['GAP_A', 'GAP_B', 'GAP_C'] as const)
+    assert.deepEqual(holding.sleeves[s], { position: -1, entry_price: 46479, realized: 0, open_pnl: Math.round(closeNowPnl(-1, 46479, 46410)) })
+  const filled = replayBook(d, book, '10:23')
+  assert.equal(filled.sleeves.GAP_C.realized, Math.round(10897.3))
+  assert.equal(filled.sleeves.GAP_A.position, -1)
+  assert.equal(replayBook(d, book, '23:59').total, Math.round(17947.4) * 2 + Math.round(10897.3))
+})
+
+test('T-452 AC2 盤中還沒回補的空單：trades 裡沒有，從 sleeves 補上，成交時間到了才出現', () => {
+  const d = gapLive()
+  const book = gapBook(d)!
+  assert.equal(replayBook(d, book, '09:21').sleeves.GAP_A.position, 0)
+  const v = replayBook(d, book, '23:59')
+  assert.deepEqual(v.fills.map((f) => [f.sleeve, f.kind, f.price]), [['GAP_A', 'entry', 46479], ['GAP_B', 'entry', 46479], ['GAP_C', 'entry', 46479]])
+  assert.equal(v.sleeves.GAP_B.open_pnl, Math.round(closeNowPnl(-1, 46479, 46410)))
+})
+
+test('T-452 AC3 數字卡的白話狀態只用那一刻知道的事（不劇透）', () => {
+  const d = gapDay()
+  const g = d.gap_fail!
+  const at = (s: 'GAP_A' | 'GAP_B' | 'GAP_C', cut: string, day = d, gap = g) => gapSub(day, gap, s, replayBook(day, gapBook(day)!, cut).sleeves[s], cut)
+  assert.equal(at('GAP_A', '08:55'), '等跌破開盤 46520')
+  assert.equal(at('GAP_B', '08:55'), '09:00 定開盤區間')
+  assert.equal(at('GAP_B', '09:10'), '等跌破 46505')
+  assert.match(at('GAP_A', '10:00'), /^持空 1 口 @ 46479（現在平倉 /)
+  assert.equal(at('GAP_A', '23:59'), '已平倉，這邊 +17,947')
+  // 沒有開高：開盤就知道，整天都是「今天不做」
+  const flat = { ...g, active: false, gap_pct: 0.12 }
+  assert.equal(at('GAP_A', '09:00', { ...d, gap_fail: flat }, flat), '沒有開高（+0.12%），今天不做')
+  // C 在進場那一刻缺口已經補完 → 不做；但訊號之前看不出來
+  const skipped = { ...g, rules: { ...g.rules, GAP_C: { ...g.rules.GAP_C, state: 'skipped' as const, entry_price: null, entry_time: null } }, trades: g.trades.filter((t) => t.sleeve !== 'GAP_C') }
+  const dc = { ...d, gap_fail: skipped }
+  assert.equal(at('GAP_C', '09:10', dc, skipped), '等跌破開盤 46520')
+  assert.equal(at('GAP_C', '09:30', dc, skipped), '缺口已經補完，不做')
+  // 整天沒等到訊號：收盤才說
+  const none = { ...g, rules: { ...g.rules, GAP_A: { ...g.rules.GAP_A, state: 'none' as const, signal_time: null, entry_price: null, entry_time: null } }, trades: [] }
+  const dn = { ...d, gap_fail: none }
+  assert.equal(at('GAP_A', '12:00', dn, none), '等跌破開盤 46520')
+  assert.equal(at('GAP_A', '13:44', dn, none), '今天沒等到訊號')
+})
+
+test('T-452 AC4 圖上的買賣點：同一刻同價合成一個、標出是哪幾條；水平線只畫那一刻已經知道的', () => {
+  const d = gapDay()
+  const book = gapBook(d)!
+  assert.deepEqual(
+    chartMarks(replayBook(d, book, '23:59:59').fills, true).map((m) => [m.time, m.text]),
+    [['09:22:01', 'ABC 空 46479'], ['10:23:29', 'C 補 46258'], ['13:44:01', 'AB 補 46117']],
+  )
+  // 固定組合沒有代號；1 分 K 時比到分鐘
+  assert.deepEqual(chartMarks(replayAt(day(), '09:10').fills, false).map((m) => [m.time, m.text]), [['08:50', '買 47319'], ['09:05', '賣 47135']])
+  const g = d.gap_fail!
+  const lv = (cut: string) => gapLevels(d, g, replayBook(d, book, cut)).map((l) => `${l.title} ${l.price}`)
+  assert.deepEqual(lv('08:55'), ['開盤 46520', '昨收 46262'])
+  assert.deepEqual(lv('10:00'), ['開盤 46520', '昨收 46262', 'B 區間低 46505', 'ABC 停損 46848'])
+  assert.deepEqual(lv('23:59'), ['開盤 46520', '昨收 46262', 'B 區間低 46505'])
+  assert.deepEqual(gapLevels(d, { ...g, active: false }, replayBook(d, book, '10:00')), [])
+})
+
+test('T-452 AC5 成本照合約：大台的開高走低用大台的每點金額與手續費', () => {
+  const tx = { ...gapLive(), product: 'TX' as const, name: '大台', volume: 1, point_value: 200, commission: 60 }
+  assert.equal(replayBook(tx, gapBook(tx)!, '10:00').sleeves.GAP_A.open_pnl, Math.round(closeNowPnl(-1, 46479, 46410, costOf(tx))))
+})
+
+test('T-452 AC6 上面切「固定組合／開高走低」；交易日下拉照策略顯示合計；兩支日期端點多回開高走低合計', () => {
+  assert.deepEqual(STRATEGY_NAME, { combo: '固定組合', gap: '開高走低' })
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /const STRATEGIES: Strategy\[\] = \['combo', 'gap'\]/)
+  assert.match(page, /strategy === 'gap' \? <GapBody \{\.\.\.props\} \/> : <ComboBody \{\.\.\.props\} \/>/)
+  assert.match(page, /strategy === 'gap' \? d\.gap_total : d\.total/)
+  for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
+    assert.match(read(f), /\(payload->'gap_fail'->>'total'\)::float8 AS gap_total/)
+  assert.deepEqual(fillTimes(gapBook(gapDay())!), ['09:22:01', '09:22:01', '09:22:01', '10:23:29', '13:44:01', '13:44:01'])
 })

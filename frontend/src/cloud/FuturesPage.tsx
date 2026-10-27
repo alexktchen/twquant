@@ -1,7 +1,8 @@
 // 台指期分頁（T-450／T-451／D-220）：小台模擬單＋大台、微台行情；每個商品都有盤中與復盤。
 // 使用者 2026-10-26：「這個可以在我網站即時模擬出來嗎？」「畫面可以是復盤模式跟盤中模式」「我想要秒級的復盤」
 // 「買進賣出的點位要在復盤過程標出來」；10-27：「我也要微台跟大台的資料」「放到網站」。
-// 小台：固定組合「ORB 只做多 + 噪音區只放空」的模擬單（只記帳、不送委託）。大台、微台：只有行情，不做模擬單。
+// 三個商品都跑同一套固定組合「ORB 只做多 + 噪音區只放空」的模擬單（只記帳、不送委託；10-27「也要有模擬單」），成本照各自的合約。
+// T-452（10-27「abc 也新增成一個策略加到前端」）：上面多切「固定組合／開高走低」；開高走低＝A 開高失守、B 跌破開盤區間、C 補缺口，各 1 口只放空。
 // 資料來自使用者電腦上的富邦即時行情（fubon_live.py），富邦行情不得轉傳 → 只給 admin。
 import { Activity, History, ListOrdered, Pause, Play, Radio, ReceiptText, SkipBack, SkipForward } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -24,19 +25,29 @@ import {
 import { fetchFuturesDay, fetchFuturesDays, fetchFuturesSeconds, fetchQuoteDay, fetchQuoteDays, fetchQuoteSeconds } from './api'
 import { price } from './format'
 import {
+  GAP_SLEEVES,
   PRODUCT_NAME,
   REASON_TEXT,
   SLEEVES,
   SLEEVE_NAME,
+  STRATEGY_NAME,
   STALE_AFTER_S,
   addSeconds,
   barsAt,
   change,
+  chartMarks,
   chartTime,
   decodeSeconds,
   fillTimes,
+  gapBook,
+  gapLevels,
+  gapSub,
   lastAtOrBefore,
+  costOf,
+  isPaper,
   replayAt,
+  replayBook,
+  signedPct,
   shouldPoll,
   staleSeconds,
   tone,
@@ -44,14 +55,16 @@ import {
   type FuturesDay,
   type FuturesDayRow,
   type FuturesEvent,
+  type Fill,
   type FuturesTrade,
+  type GapFail,
   type Product,
-  type QuoteDay,
   type QuoteDayRow,
+  type QuotePayload,
   type QuoteProduct,
-  type ReplayView,
   type Seconds,
   type SleeveState,
+  type Strategy,
 } from './futures'
 import { Kpi, Section } from './Section'
 import './futures.css'
@@ -115,13 +128,13 @@ type ChartProps = {
   pos: number
   /** 噪音區下緣（小台）；大台、微台沒有 */
   noiseLb: [string, number][]
-  /** ORB 停損線（小台、進場後才畫） */
-  stopLine: number | null
-  /** 買賣點（小台）；大台、微台沒有 */
-  fills: ReplayView['fills']
+  /** 水平線：固定組合是 ORB 停損（進場後才畫）；開高走低是開盤、昨收、區間低與持倉的停損 */
+  levels: { price: number; title: string }[]
+  /** 買賣點（有模擬單才有） */
+  fills: readonly Fill[]
 }
 
-function FuturesChart({ day, bars, secs, pos, noiseLb, stopLine, fills }: ChartProps) {
+function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills }: ChartProps) {
   const box = useRef<HTMLDivElement>(null)
   const parts = useRef<{
     chart: IChartApi
@@ -202,18 +215,18 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, stopLine, fills }: ChartP
     p.frame.setData(anchor === null ? [] : [{ time: t(SESSION[0]), value: anchor }, { time: t(SESSION[SESSION.length - 1]), value: anchor }])
     for (const l of p.lines) p.px.removePriceLine(l)
     p.lines = []
-    if (stopLine !== null)
-      p.lines.push(p.px.createPriceLine({ price: stopLine, color: MUTE, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'ORB 停損' }))
-    // 買賣點：成交的那一秒（1 分 K 時是那一分鐘）、成交價的位置
-    const marks: SeriesMarker<Time>[] = fills.map((f) => {
-      const long = f.side > 0
-      const time = t(secs ? f.time.slice(0, 8) : f.time.slice(0, 5))
-      if (f.kind === 'entry')
-        return { time, position: 'atPriceBottom', price: f.price, shape: long ? 'arrowUp' : 'arrowDown', color: long ? UP : DOWN, text: `${long ? '買' : '空'} ${f.price.toFixed(0)}` }
-      return { time, position: 'atPriceTop', price: f.price, shape: 'circle', color: MUTE, text: `${long ? '賣' : '補'} ${f.price.toFixed(0)}` }
+    for (const l of levels)
+      p.lines.push(p.px.createPriceLine({ price: l.price, color: MUTE, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: l.title }))
+    // 買賣點：成交的那一秒（1 分 K 時是那一分鐘）、成交價的位置；同一刻同價的合成一個（開高走低 A、B、C 常同時進場）
+    const marks: SeriesMarker<Time>[] = chartMarks(fills, secs !== null).map((m) => {
+      const long = m.side > 0
+      const time = t(m.time)
+      if (m.kind === 'entry')
+        return { time, position: 'atPriceBottom', price: m.price, shape: long ? 'arrowUp' : 'arrowDown', color: long ? UP : DOWN, text: m.text }
+      return { time, position: 'atPriceTop', price: m.price, shape: 'circle', color: MUTE, text: m.text }
     })
     p.marks.setMarkers(marks)
-  }, [day, bars, secs, secTimes, pos, noiseLb, stopLine, fills])
+  }, [day, bars, secs, secTimes, pos, noiseLb, levels, fills])
 
   useEffect(() => {
     parts.current?.chart.timeScale().fitContent()
@@ -328,7 +341,7 @@ type Badged = {
   official_match?: boolean | null
 }
 
-function StatusBadges({ data, mode, now, secs }: { data: Badged; mode: Mode; now: Date; secs: Seconds | null }) {
+function StatusBadges({ data, mode, now, secs, gap }: { data: Badged; mode: Mode; now: Date; secs: Seconds | null; gap?: GapFail }) {
   const stale = staleSeconds(data.updated_at, now)
   return (
     <div className="cq-fu-badges">
@@ -347,6 +360,11 @@ function StatusBadges({ data, mode, now, secs }: { data: Badged; mode: Mode; now
       ) : (
         <span className="cq-cat cq-cat-list">已收盤</span>
       )}
+      {gap && gap.active !== null && (
+        <span className={`cq-cat ${gap.active ? 'cq-cat-event' : 'cq-cat-mute'}`}>
+          {gap.active ? `開高 ${signedPct(gap.gap_pct)}` : `沒有開高 ${signedPct(gap.gap_pct)}・今天不做`}
+        </span>
+      )}
       {data.official_match != null && (
         <span className={`cq-cat ${data.official_match ? 'cq-cat-mute' : 'cq-fu-warn'}`}>
           {data.official_match ? '收盤重算一致' : '收盤重算不一致，以重算為準'}
@@ -357,12 +375,12 @@ function StatusBadges({ data, mode, now, secs }: { data: Badged; mode: Mode; now
 }
 
 /** 提示列：拉到的那一刻最近發生的事；買賣點剛發生（盤中 60 秒內）就亮起來。 */
-function NowBar({ view }: { view: ReplayView }) {
+function NowBar({ view }: { view: { events: FuturesEvent[]; cut: string } }) {
   const last = view.events[view.events.length - 1]
   if (!last) return <div className="cq-fu-now">08:50 開盤 5 分鐘收完才有第一個訊號</div>
   const trade = last.kind === 'fill' || last.kind === 'exit'
   const fresh = trade && view.cut.length > 5 && secOf(view.cut) - secOf(last.time) <= FRESH_S
-  const side = last.sleeve === 'ORB_LONG' ? 'long' : last.sleeve === 'NOISE_SHORT' ? 'short' : ''
+  const side = last.sleeve === 'ORB_LONG' ? 'long' : last.sleeve ? 'short' : ''
   return (
     <div className={`cq-fu-now${fresh ? ` fresh ${side}` : ''}`}>
       <time>{last.time}</time>
@@ -440,7 +458,17 @@ function PriceKpi({ p, prevClose }: { p: number | null; prevClose: number | null
 }
 
 /** 交易日下拉：小台列合計損益，大台、微台只列日期。 */
-function DayPick({ days, value, onPick }: { days: { day: string; source: string; total?: number | null }[]; value: string | null; onPick: (d: string) => void }) {
+function DayPick({
+  days,
+  value,
+  onPick,
+  strategy,
+}: {
+  days: { day: string; source: string; total?: number | null; gap_total?: number | null }[]
+  value: string | null
+  onPick: (d: string) => void
+  strategy: Strategy
+}) {
   if (days.length === 0) return null
   return (
     <label className="cq-fu-pick">
@@ -449,7 +477,7 @@ function DayPick({ days, value, onPick }: { days: { day: string; source: string;
         {days.map((d) => (
           <option key={d.day} value={d.day}>
             {d.day}
-            {d.total == null ? '' : `（${yuan(d.total)}）`}
+            {(strategy === 'gap' ? d.gap_total : d.total) == null ? '' : `（${yuan((strategy === 'gap' ? d.gap_total : d.total) as number)}）`}
             {d.source === 'fubon_live' ? '' : '・期交所重算'}
           </option>
         ))}
@@ -492,7 +520,7 @@ function useLive<T>(enabled: boolean, load: () => Promise<T>, refresh: number) {
 }
 
 /** 小台：模擬單（盤中＋復盤）。 */
-function PaperView({ mode, refresh }: { mode: Mode; refresh: number }) {
+function PaperView({ mode, refresh, strategy }: { mode: Mode; refresh: number; strategy: Strategy }) {
   const [days, setDays] = useState<FuturesDayRow[] | null>(null)
   const [pick, setPick] = useState<string | null>(null)
   const [replay, setReplay] = useState<{ d: FuturesDay; s: Seconds | null } | null>(null)
@@ -529,72 +557,149 @@ function PaperView({ mode, refresh }: { mode: Mode; refresh: number }) {
     }
   }, [mode, replayDay, setPlaying, setPos])
 
-  const cut = mode === 'replay' && data ? player.cut : '23:59'
-  const view = useMemo(() => (data ? replayAt(data, cut, secs) : null), [data, cut, secs])
-  // 復盤拉到 cut：只列那之前已經平倉的交易（不劇透後面）
-  const done = data ? data.trades.filter((t) => t.exit_time.slice(0, cut.length) <= cut) : []
   const error = err ?? (mode === 'live' ? live.err : null)
 
   return (
     <>
-      {mode === 'replay' && days !== null && <DayPick days={days} value={replayDay} onPick={setPick} />}
+      {mode === 'replay' && days !== null && <DayPick days={days} value={replayDay} onPick={setPick} strategy={strategy} />}
       {error && <p className="cq-empty">{error}</p>}
-      {data && view && (
-        <>
-          <StatusBadges data={data} mode={mode} now={live.now} secs={secs} />
-          <div className="cq-tiles cq-fu-tiles">
-            <Kpi label="今天合計" value={yuan(view.total)} tone={tone(view.total)} sub={mode === 'replay' ? `到 ${cut}` : '已實現＋現在平倉的話'} />
-            {SLEEVES.map((s) => {
-              const st = view.sleeves[s]
-              const v = st.realized + (st.open_pnl ?? 0)
-              return <Kpi key={s} label={SLEEVE_NAME[s]} value={yuan(v)} tone={tone(v)} sub={sleeveSub(st, s === 'ORB_LONG' ? 1 : -1)} />
-            })}
-            <PriceKpi p={view.price} prevClose={data.prev_close} />
-          </div>
-          <Section
-            icon={Activity}
-            title="江波圖"
-            meta={
-              <span className="cq-fu-legend">
-                <i style={{ background: PRICE }} />價 <i style={{ background: VWAP }} />VWAP <i style={{ background: DOWN }} />噪音區下緣
-              </span>
-            }
-          >
-            {mode === 'replay' && <NowBar view={view} />}
-            <FuturesChart
-              day={data.day}
-              bars={view.bars}
-              secs={secs}
-              pos={player.pos}
-              noiseLb={data.noise_lb}
-              stopLine={data.orb.stop !== null && data.orb.entry_time !== null && data.orb.entry_time.slice(0, cut.length) <= cut ? data.orb.stop : null}
-              fills={view.fills}
-            />
-            {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={fillTimes(data)} />}
-          </Section>
-          <Section icon={ListOrdered} title="時間軸" meta={`${view.events.length} 件`}>
-            <Timeline events={view.events} newestFirst={mode === 'live'} />
-          </Section>
-          <Section icon={ReceiptText} title="成交明細" fold summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
-            <Trades trades={done} />
-          </Section>
-          <p className="cq-fu-foot">
-            只記帳、沒有送任何委託。規則 2026-10-26 凍結：開盤 5 分鐘收紅才做多（停損在那 5 分鐘低點、停利 10 倍）；
-            噪音區每 30 分鐘檢查一次，跌破下緣又在 VWAP 之下才放空；各 1 口小台，13:44 全部平倉；每邊滑價 1 點、手續費 30 元、期交稅十萬分之二。
-            秒級復盤只有逐筆的日子才有（富邦即時錄到的、期交所近 30 個交易日）；更早只有 1 分 K。富邦行情只供本人使用，不對外顯示。
-          </p>
-        </>
-      )}
+      {data && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} strategy={strategy} />}
       {!error && !data && <p className="cq-empty">讀取中…</p>}
     </>
   )
 }
 
-/** 大台、微台：只有行情（盤中＋復盤），不做模擬單。換商品時由呼叫端用 key 整個重建。 */
-function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mode; refresh: number }) {
+type BodyProps = { data: FuturesDay; secs: Seconds | null; player: ReturnType<typeof usePlayer>; mode: Mode; now: Date }
+
+/** 模擬單的畫面（小台；大台、微台那一天有模擬單時也用它）：照上面選的策略。 */
+function PaperBody({ strategy, ...props }: BodyProps & { strategy: Strategy }) {
+  return strategy === 'gap' ? <GapBody {...props} /> : <ComboBody {...props} />
+}
+
+/** 固定組合：數字卡、江波圖＋買賣點、時間軸、成交明細。 */
+function ComboBody({ data, secs, player, mode, now }: BodyProps) {
+  const cut = mode === 'replay' ? player.cut : '23:59'
+  const view = useMemo(() => replayAt(data, cut, secs), [data, cut, secs])
+  const stopShown = data.orb.stop !== null && data.orb.entry_time !== null && data.orb.entry_time.slice(0, cut.length) <= cut
+  const levels = useMemo(() => (stopShown && data.orb.stop !== null ? [{ price: data.orb.stop, title: 'ORB 停損' }] : []), [stopShown, data.orb.stop])
+  // 復盤拉到 cut：只列那之前已經平倉的交易（不劇透後面）
+  const done = data.trades.filter((t) => t.exit_time.slice(0, cut.length) <= cut)
+  const cost = costOf(data)
+  const name = PRODUCT_NAME[data.product ?? 'MTX']
+  return (
+    <>
+      <StatusBadges data={data} mode={mode} now={now} secs={secs} />
+      <div className="cq-tiles cq-fu-tiles">
+        <Kpi label="今天合計" value={yuan(view.total)} tone={tone(view.total)} sub={mode === 'replay' ? `到 ${cut}` : '已實現＋現在平倉的話'} />
+        {SLEEVES.map((s) => {
+          const st = view.sleeves[s]
+          const v = st.realized + (st.open_pnl ?? 0)
+          return <Kpi key={s} label={SLEEVE_NAME[s]} value={yuan(v)} tone={tone(v)} sub={sleeveSub(st, s === 'ORB_LONG' ? 1 : -1)} />
+        })}
+        <PriceKpi p={view.price} prevClose={data.prev_close} />
+      </div>
+      <Section
+        icon={Activity}
+        title={`${name}江波圖`}
+        meta={
+          <span className="cq-fu-legend">
+            <i style={{ background: PRICE }} />價 <i style={{ background: VWAP }} />VWAP <i style={{ background: DOWN }} />噪音區下緣
+          </span>
+        }
+      >
+        {mode === 'replay' && <NowBar view={view} />}
+        <FuturesChart
+          day={data.day}
+          bars={view.bars}
+          secs={secs}
+          pos={player.pos}
+          noiseLb={data.noise_lb}
+          levels={levels}
+          fills={view.fills}
+        />
+        {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={fillTimes(data)} />}
+      </Section>
+      <Section icon={ListOrdered} title="時間軸" meta={`${view.events.length} 件`}>
+        <Timeline events={view.events} newestFirst={mode === 'live'} />
+      </Section>
+      <Section icon={ReceiptText} title="成交明細" fold summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
+        <Trades trades={done} />
+      </Section>
+      <p className="cq-fu-foot">
+        只記帳、沒有送任何委託。規則 2026-10-26 凍結（小台、大台、微台同一套，一個參數都沒改）：開盤 5 分鐘收紅才做多（停損在那 5 分鐘低點、停利 10 倍）；
+        噪音區每 30 分鐘檢查一次，跌破下緣又在 VWAP 之下才放空；各 1 口{name}，13:44 全部平倉。
+        {name}每點 {cost.point_value} 元、每邊手續費 {cost.commission} 元{data.product && data.product !== 'MTX' ? '（假設）' : ''}、滑價 1 點、期交稅十萬分之二。
+        秒級復盤只有逐筆的日子才有（富邦即時錄到的、期交所近 30 個交易日）；更早只有 1 分 K。富邦行情只供本人使用，不對外顯示。
+      </p>
+    </>
+  )
+}
+
+/** 開高走低：開高（≥ 門檻）的日子等跌破再放空；A、B、C 各 1 口，數字卡、圖上的開盤／昨收／區間低與停損、時間軸、成交明細。 */
+function GapBody({ data, secs, player, mode, now }: BodyProps) {
+  const cut = mode === 'replay' ? player.cut : '23:59'
+  const g = data.gap_fail
+  const book = useMemo(() => gapBook(data), [data])
+  const view = useMemo(() => (book ? replayBook(data, book, cut, secs) : null), [data, book, cut, secs])
+  const levels = useMemo(() => (g && view ? gapLevels(data, g, view) : NO_LEVELS), [data, g, view])
+  const badged = { ...data, official_match: null }
+  if (!g || !book || !view)
+    return (
+      <>
+        <StatusBadges data={badged} mode={mode} now={now} secs={secs} />
+        <p className="cq-empty">這一天的資料還沒有開高走低：2026-10-27 之前上傳的，要用電腦上的錄製程式重新上傳一次才有。</p>
+      </>
+    )
+  const done = g.trades.filter((t) => t.exit_time.slice(0, cut.length) <= cut)
+  const cost = costOf(data)
+  const name = PRODUCT_NAME[data.product ?? 'MTX']
+  return (
+    <>
+      <StatusBadges data={badged} mode={mode} now={now} secs={secs} gap={g} />
+      <div className="cq-tiles cq-fu-tiles cq-fu-tiles-5">
+        <Kpi label="今天合計" value={yuan(view.total)} tone={tone(view.total)} sub={mode === 'replay' ? `到 ${cut}` : '已實現＋現在平倉的話'} />
+        {GAP_SLEEVES.map((s) => {
+          const st = view.sleeves[s]
+          const v = st.realized + (st.open_pnl ?? 0)
+          return <Kpi key={s} label={SLEEVE_NAME[s]} value={yuan(v)} tone={tone(v)} sub={gapSub(data, g, s, st, cut)} />
+        })}
+        <PriceKpi p={view.price} prevClose={data.prev_close} />
+      </div>
+      <Section
+        icon={Activity}
+        title={`${name}江波圖`}
+        meta={
+          <span className="cq-fu-legend">
+            <i style={{ background: PRICE }} />價 <i style={{ background: VWAP }} />VWAP <i style={{ background: MUTE }} />關鍵價
+          </span>
+        }
+      >
+        {mode === 'replay' && <NowBar view={view} />}
+        <FuturesChart day={data.day} bars={view.bars} secs={secs} pos={player.pos} noiseLb={NO_LB} levels={levels} fills={view.fills} />
+        {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={fillTimes(book)} />}
+      </Section>
+      <Section icon={ListOrdered} title="時間軸" meta={`${view.events.length} 件`}>
+        <Timeline events={view.events} newestFirst={mode === 'live'} />
+      </Section>
+      <Section icon={ReceiptText} title="成交明細" fold summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
+        <Trades trades={done} />
+      </Section>
+      <p className="cq-fu-foot">
+        只記帳、沒有送任何委託。只在開高的日子做：開盤比昨收高 {g.threshold_pct.toFixed(3)}% 以上（過去 1998～2015 年開盤漲幅排前 20% 的門檻）。
+        A 開高失守：08:50 起，某一分鐘收在開盤價之下就放空，停損放在當天到那時的最高價；B 跌破開盤區間：09:00 起收破 08:45～08:59 的最低價就放空，停損放在那段的最高價；
+        C 補缺口：進場同 A，碰到昨收就回補。各 1 口{name}，沒出場的 13:44 回補；{name}每點 {cost.point_value} 元、每邊手續費 {cost.commission} 元
+        {data.product && data.product !== 'MTX' ? '（假設）' : ''}、滑價 1 點、期交稅十萬分之二。
+        這是往前走的模擬單；九年歷史的回測還沒跑（等富邦 1 分 K），以前光是「開高就空」長期是不賺的。富邦行情只供本人使用，不對外顯示。
+      </p>
+    </>
+  )
+}
+
+/** 大台、微台：那一天有模擬單就跟小台同一個畫面，前面不足 14 天就只有行情。換商品時由呼叫端用 key 整個重建。 */
+function QuoteView({ product, mode, refresh, strategy }: { product: QuoteProduct; mode: Mode; refresh: number; strategy: Strategy }) {
   const [days, setDays] = useState<QuoteDayRow[] | null>(null)
   const [pick, setPick] = useState<string | null>(null)
-  const [replay, setReplay] = useState<{ q: QuoteDay; s: Seconds | null } | null>(null)
+  const [replay, setReplay] = useState<{ q: QuotePayload; s: Seconds | null } | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const live = useLive(mode === 'live', () => fetchQuoteDay(product), refresh)
 
@@ -637,9 +742,10 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
 
   return (
     <>
-      {mode === 'replay' && days !== null && <DayPick days={days} value={replayDay} onPick={setPick} />}
+      {mode === 'replay' && days !== null && <DayPick days={days} value={replayDay} onPick={setPick} strategy={strategy} />}
       {error && <p className="cq-empty">{error}</p>}
-      {data && at && (
+      {data && isPaper(data) && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} strategy={strategy} />}
+      {data && !isPaper(data) && at && (
         <>
           <StatusBadges data={data} mode={mode} now={live.now} secs={secs} />
           <div className="cq-tiles cq-fu-tiles">
@@ -657,11 +763,11 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
               </span>
             }
           >
-            <FuturesChart day={data.day} bars={at.bars} secs={secs} pos={player.pos} noiseLb={NO_LB} stopLine={null} fills={NO_FILLS} />
+            <FuturesChart day={data.day} bars={at.bars} secs={secs} pos={player.pos} noiseLb={NO_LB} levels={NO_LEVELS} fills={NO_FILLS} />
             {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={null} />}
           </Section>
           <p className="cq-fu-foot">
-            {PRODUCT_NAME[product]}只有行情、不做模擬單（模擬單只跑小台）。秒級復盤只有逐筆的日子才有。富邦行情只供本人使用，不對外顯示。
+            這一天前面的逐筆不足 14 天（噪音區要用前 14 天的波動），只有行情、沒有模擬單。秒級復盤只有逐筆的日子才有。富邦行情只供本人使用，不對外顯示。
           </p>
         </>
       )}
@@ -672,7 +778,10 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
 
 /** 大台、微台的圖沒有噪音區與買賣點：用固定的空陣列，免得每次重畫都當成新資料。 */
 const NO_LB: [string, number][] = []
-const NO_FILLS: ReplayView['fills'] = []
+const NO_FILLS: readonly Fill[] = []
+const NO_LEVELS: { price: number; title: string }[] = []
+
+const STRATEGIES: Strategy[] = ['combo', 'gap']
 
 const PRODUCTS: { key: Product; label: string }[] = [
   { key: 'MTX', label: '小台・模擬單' },
@@ -683,12 +792,20 @@ const PRODUCTS: { key: Product; label: string }[] = [
 export function FuturesPage({ refresh }: { refresh: number }) {
   const [product, setProduct] = useState<Product>('MTX')
   const [mode, setMode] = useState<Mode>('live')
+  const [strategy, setStrategy] = useState<Strategy>('combo')
   return (
     <main className="cq-body cq-fu">
       <div className="cq-seg cq-fu-product">
         {PRODUCTS.map((p) => (
           <button key={p.key} className={product === p.key ? 'on' : ''} onClick={() => setProduct(p.key)}>
             {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="cq-seg cq-fu-strategy">
+        {STRATEGIES.map((k) => (
+          <button key={k} className={strategy === k ? 'on' : ''} onClick={() => setStrategy(k)}>
+            {STRATEGY_NAME[k]}
           </button>
         ))}
       </div>
@@ -701,9 +818,9 @@ export function FuturesPage({ refresh }: { refresh: number }) {
         </button>
       </div>
       {product === 'MTX' ? (
-        <PaperView mode={mode} refresh={refresh} />
+        <PaperView mode={mode} refresh={refresh} strategy={strategy} />
       ) : (
-        <QuoteView key={product} product={product} mode={mode} refresh={refresh} />
+        <QuoteView key={product} product={product} mode={mode} refresh={refresh} strategy={strategy} />
       )}
     </main>
   )

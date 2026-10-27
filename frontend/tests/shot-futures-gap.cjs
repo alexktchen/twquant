@@ -1,0 +1,77 @@
+// 台指期「開高走低」截圖（手動檢查用，T-452）：node tests/shot-futures-gap.cjs <baseUrl> <outDir> <mockDir>
+// mockDir：fubon_live.py 期交所重播 2026-10-27 產生的 2026-10-27_{live,closed,seconds}.json、TX／TMF 同名檔、days.json，
+// 加上沒有開高走低的舊格式 2026-10-22_closed.json（看「要重新上傳」的提示）。其他 /api/* 回空的。
+const { chromium } = require('playwright')
+const fs = require('node:fs')
+const path = require('node:path')
+
+;(async () => {
+  const [base, out, mock] = process.argv.slice(2)
+  const load = (f) => JSON.parse(fs.readFileSync(path.join(mock, f), 'utf8'))
+  const days = load('days.json')
+  const fresh = (j) => ({ ...j, updated_at: new Date(Date.now() - 8000).toISOString() })
+  const b = await chromium.launch()
+  for (const [w, h, m, name] of [[390, 844, true, 'm-gap'], [1360, 900, false, 'd-gap']]) {
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: m ? 2 : 1, isMobile: m, hasTouch: m })
+    const page = await ctx.newPage()
+    page.on('pageerror', (e) => console.log('pageerror:', String(e.stack || e).slice(0, 600)))
+    await page.route('**/api/**', (r) => r.fulfill({ json: {} }))
+    await page.route('**/api/layout', (r) => r.fulfill({ json: { layout: null } }))
+    await page.route('**/api/me', (r) => r.fulfill({ json: { email: 'cktalex@gmail.com' } }))
+    await page.route('**/api/access', (r) => r.fulfill({ json: { features: ['futures'] } }))
+    await page.route('**/api/watchlist', (r) => r.fulfill({ json: { max: 20, date: null, items: [] } }))
+    await page.route('**/api/trades', (r) => r.fulfill({ json: { today: '2026-10-27', items: [], max: 50 } }))
+    await page.route('**/news/**', (r) => r.fulfill({ json: { items: [], next: null } }))
+    await page.route('**/api/futures/days', (r) => r.fulfill({ json: days }))
+    await page.route('**/api/futures?day=*', (r) => r.fulfill({ json: load(`${new URL(r.request().url()).searchParams.get('day')}_closed.json`) }))
+    await page.route('**/api/futures', (r) => r.fulfill({ json: fresh(load('2026-10-27_live.json')) }))
+    await page.route('**/api/futures/seconds?day=*', (r) => r.fulfill({ json: load(`${new URL(r.request().url()).searchParams.get('day')}_seconds.json`) }))
+    await page.route('**/api/futures/quotes?product=*', (r) => {
+      const u = new URL(r.request().url())
+      const p = u.searchParams.get('product'), d = u.searchParams.get('day')
+      r.fulfill({ json: d ? load(`${p}_${d}_closed.json`) : fresh(load(`${p}_2026-10-27_live.json`)) })
+    })
+    await page.route('**/api/futures/quotes/days?product=*', (r) => r.fulfill({ json: load(`${new URL(r.request().url()).searchParams.get('product')}_days.json`) }))
+    await page.route('**/api/futures/quotes/seconds?product=*', (r) => {
+      const u = new URL(r.request().url())
+      r.fulfill({ json: load(`${u.searchParams.get('product')}_${u.searchParams.get('day')}_seconds.json`) })
+    })
+    await page.goto(`${base}/?tab=futures`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1500)
+    const btn = page.getByRole('button', { name: '同意並進入' })
+    if ((await btn.count()) > 0) {
+      await page.locator('input[type="checkbox"]').first().check()
+      await btn.click()
+    }
+    await page.getByRole('button', { name: '開高走低' }).click()
+    await page.waitForSelector('.cq-fu-chart canvas', { timeout: 15000 })
+    await page.waitForTimeout(1200)
+    await page.screenshot({ path: path.join(out, `${name}-1-live.png`), fullPage: true })
+    await page.getByRole('button', { name: /復盤/ }).click()
+    await page.waitForSelector('.cq-fu-scrub input', { timeout: 15000 })
+    await page.waitForTimeout(1000)
+    await page.screenshot({ path: path.join(out, `${name}-2-replay-close.png`), fullPage: true })
+    // 拉回開盤 → 下一個買賣點：09:22:01 三條同時放空；再兩次 → 10:23:29 C 補完缺口
+    await page.locator('.cq-fu-scrub input').fill('0')
+    await page.waitForTimeout(400)
+    await page.getByRole('button', { name: '下一個買賣點' }).click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: path.join(out, `${name}-3-replay-entry.png`), fullPage: true })
+    await page.getByRole('button', { name: '下一個買賣點' }).click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: path.join(out, `${name}-4-replay-gapfill.png`), fullPage: true })
+    // 舊資料（10-22，沒有開高走低）
+    await page.locator('.cq-fu-pick select').selectOption('2026-10-22')
+    await page.waitForTimeout(1200)
+    await page.screenshot({ path: path.join(out, `${name}-5-old-day.png`), fullPage: true })
+    // 大台：今天只開高 +0.50%，沒到門檻
+    await page.getByRole('button', { name: '大台' }).click()
+    await page.getByRole('button', { name: /盤中/ }).click()
+    await page.waitForSelector('.cq-fu-chart canvas', { timeout: 15000 })
+    await page.waitForTimeout(1200)
+    await page.screenshot({ path: path.join(out, `${name}-6-tx-flat.png`), fullPage: true })
+    await ctx.close()
+  }
+  await b.close()
+  console.log('done')
+})()
