@@ -8,9 +8,12 @@ import { FEATURES, lockedText, tabAllowed } from '../src/cloud/access.ts'
 import {
   STALE_AFTER_S,
   addSeconds,
+  MTX_COST,
   barsAt,
   change,
   chartTime,
+  costOf,
+  isPaper,
   decodeSeconds,
   fillTimes,
   lastAtOrBefore,
@@ -246,4 +249,26 @@ test('T-451 AC5 分頁改名「台指期」，上面切小台・模擬單／大�
   assert.match(page, /\{ key: 'TX', label: '大台' \}/)
   assert.match(page, /\{ key: 'TMF', label: '微台' \}/)
   assert.match(read('src/cloud/CloudApp.tsx'), /onClick=\{\(\) => setTab\('futures'\)\}>\s*台指期/)
+})
+
+// ── 大台、微台也有模擬單（使用者 2026-10-27：「也要有模擬單」） ───────────────────────────────
+test('T-451 AC6 現在平倉的話照各自合約：大台每點 200 元、微台 10 元；資料沒寫成本＝小台', () => {
+  assert.deepEqual(costOf({}), MTX_COST)
+  assert.deepEqual(costOf({ point_value: 200, commission: 60 }), { point_value: 200, commission: 60 })
+  // 同一筆空單（46763 → 現價 46753）：小台 296.48、大台 1305.93（fubon_live.py 同一條公式）
+  assert.ok(Math.abs(closeNowPnl(-1, 46763, 46753) - 296.483) < 0.01)
+  assert.ok(Math.abs(closeNowPnl(-1, 46763, 46753, { point_value: 200, commission: 60 }) - 1305.932) < 0.01)
+  const tx = { ...day(), product: 'TX' as const, name: '大台', volume: 1, point_value: 200, commission: 60 }
+  assert.equal(replayAt(tx, '11:29').sleeves.NOISE_SHORT.open_pnl, Math.round(closeNowPnl(-1, 46763, 46753, costOf(tx))))
+})
+
+test('T-451 AC6 大台／微台那天有模擬單就用小台同一個畫面；前面不足 14 天只有行情', () => {
+  assert.ok(isPaper(day()))
+  const quoteOnly = { version: 1 as const, day: '2026-09-10', product: 'TX' as const, name: '大台', source: 'taifex_replay' as const, status: 'closed' as const, contract: '202609', symbol: 'TXFI6', updated_at: '2026-09-10T13:50:00+08:00', last_tick: '13:45:00', last_price: 1, prev_close: null, open: 1, volume: 1, bars: [] }
+  assert.ok(!isPaper(quoteOnly))
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /\{data && isPaper\(data\) && <PaperBody /)
+  assert.match(page, /\{data && !isPaper\(data\) && at && \(/)
+  // 日期清單有模擬單的日子多合計與一致與否（同小台）
+  assert.match(read('functions/api/futures/quotes/days.ts'), /\(payload->>'total'\)::float8 AS total/)
 })
