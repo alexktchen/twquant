@@ -44,6 +44,8 @@ MONTH_CODE = "ABCDEFGHIJKL"
 PRODUCT_TAIFEX = "MTX"
 LOGIN_UNTIL, START_AT, STOP_AT = "09:30", "08:25", "13:47"
 REASON_TEXT = {"STOP": "停損", "TARGET": "停利", "EOD": "收盤前", "EXIT": "回到下緣之上", "FLIP": "反手"}
+OPEN_SLACK_S = 60              # 第一筆成交晚於 08:45 這麼多秒＝開盤沒錄到，當天不做模擬單
+BACKFILL_LIMIT = 500           # 補抓當天逐筆：每頁幾筆（富邦日內行情每分鐘最多 300 次）
 DECISION_GRACE_S = 3.0          # 到了決策時點、還沒收到之後的成交時，最多再等幾秒才用手上的逐筆決策
 RECONNECT_WAIT_S = 5.0
 UPLOAD_EVERY_S = 15.0         # 盤中多久寫一次雲端（有新事件時立刻寫）
@@ -114,6 +116,12 @@ class LiveCombo:
         self.noise_seen = []     # 已經檢查過的噪音區時點
         self.orb_box = None      # 開盤 5 分鐘：{"open", "close", "high", "low", "side"}
         self.orb_state = "waiting"
+        self.disabled = None     # 開盤沒錄到 → 原因；之後只錄資料、不做任何決策
+
+    def disable(self, t_us: int, reason: str) -> None:
+        if self.disabled is None:
+            self.disabled = reason
+            self.note(t_us, "info", None, f"{reason}：今天只錄資料、不做模擬單")
 
     def note(self, t_us: int, kind: str, sleeve, text: str) -> None:
         self.events.append({"time": hms(t_us)[:8], "kind": kind, "sleeve": sleeve, "text": text})
@@ -148,6 +156,8 @@ class LiveCombo:
 
     # ── 決策：時點 T 只看 T 之前的成交；收到 T 之後的第一筆（或等過寬限）才決定 ──
     def decide(self, now_us: int, wall: bool) -> None:
+        if self.disabled is not None:
+            return
         ready = (lambda T: now_us >= T + DECISION_GRACE_S * M.US) if wall else (lambda T: now_us >= T)
         if not self.orb_done and self.t and ready(self.orb_at):
             self.orb_done = True
@@ -296,7 +306,7 @@ class LiveCombo:
             "bars": [[k, *(round(x, 1) for x in v)] for k, v in sorted(self.bars.items())],
             "orb": orb, "noise_lb": lb_plan, "noise": self.noise_seen, "sleeves": sleeves,
             "events": self.events, "trades": self.trades, "total": round(total, 1),
-            "official": None, "official_match": None,
+            "official": None, "official_match": None, "note": self.disabled,
         }
 
 
@@ -370,6 +380,29 @@ def env_value(path: Path, key: str) -> str:
         if line.strip().startswith(f"{key}="):
             return line.split("=", 1)[1].strip().strip('"').strip("'")
     raise SystemExit(f"{path} 沒有 {key}")
+
+
+def backfill(futopt, symbol_: str, log):
+    """富邦當天逐筆查詢（一般盤、不含試撮）：回傳 [(t_us, price, size, serial)]，依時間排序。失敗回 None。"""
+    rows, offset = [], 0
+    try:
+        while True:
+            page = futopt.intraday.trades(symbol=symbol_, offset=offset, limit=BACKFILL_LIMIT)
+            data = (page or {}).get("data") or []
+            for tr in data:
+                if tr.get("isTrial"):
+                    continue
+                rows.append((int(tr["time"]), float(tr["price"]), float(tr["size"]), int(tr.get("serial") or 0)))
+            if len(data) < BACKFILL_LIMIT:
+                break
+            offset += len(data)
+            time.sleep(0.25)
+    except Exception as exc:  # noqa: BLE001  # 補抓失敗 → 呼叫端照「開盤沒錄到」處理，不會用不完整的資料做決策
+        log(f"⚠ 補抓當天逐筆失敗：{exc}")
+        return None
+    rows.sort(key=lambda r: (r[0], r[3]))
+    log(f"補抓當天逐筆：{symbol_} {len(rows):,} 筆" + (f"（{hms(rows[0][0])}～{hms(rows[-1][0])}）" if rows else ""))
+    return rows
 
 
 def history_days(folder: Path, day: date):
@@ -547,13 +580,26 @@ def main() -> int:
     live = LiveCombo(day, near, prev_close, hist, log)
     uploader = Uploader(env_value(Path(args.env), DSN_ENV), log) if args.upload else None
     pushed_at, pushed_events = 0.0, -1
+    rest = sdk.marketdata.rest_client.futopt
+    filled = backfill(rest, main_sym, log)
+    last_t = 0
+    for t_us, price, size, _ in filled or []:
+        live.on_tick(t_us, price, size)
+        last_t = max(last_t, t_us)
+    open_us = clock(day, B.SESSION_OPEN)
+    now_us = int(time.time() * M.US)
+    if now_us > open_us + OPEN_SLACK_S * M.US and (not live.t or live.t[0] > open_us + OPEN_SLACK_S * M.US):
+        live.disable(now_us, "開盤那段沒有錄到（補抓失敗或不完整）")
     raw_path = out / f"raw_{day:%Y%m%d}.jsonl"
     tick_csv = out / f"Daily_{day:%Y_%m_%d}_fubon.csv"
     rawf = raw_path.open("a", encoding="utf-8")
-    tickf = tick_csv.open("a", newline="", encoding="utf-8")
+    # 補抓成功＝手上有今天從開盤起的完整逐筆 → 重寫整份（程式中途重啟也不會重複）；失敗就接著寫
+    tickf = tick_csv.open("w" if filled else "a", newline="", encoding="utf-8")
     tw = csv.writer(tickf)
     if tick_csv.stat().st_size == 0:
         tw.writerow(["成交日期", "商品代號", "到期月份(週別)", "成交時間", "成交價格", "成交數量(B+S)"])
+    for t_us, price, size, _ in filled or []:
+        tw.writerow([f"{day:%Y%m%d}", PRODUCT_TAIFEX, near, M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
     stop_at = datetime.fromisoformat(f"{day}T{STOP_AT}:00").replace(tzinfo=M.TPE)
     n_ticks = 0
     while datetime.now(M.TPE) < stop_at:
@@ -568,6 +614,8 @@ def main() -> int:
             data = body.get("data") or {}
             if body.get("event") == "data" and body.get("channel") == "trades" and not data.get("isTrial"):
                 sym, t_us = data.get("symbol"), int(data["time"])
+                if sym == main_sym and t_us <= last_t:
+                    continue  # 補抓已經算過的成交（用成交時間判斷，查詢與推送的序號不一定同一套）
                 for tr in data.get("trades") or []:
                     price, size = float(tr["price"]), float(tr["size"])
                     tw.writerow([f"{day:%Y%m%d}", PRODUCT_TAIFEX if sym.startswith("MXF") else "TX", symbols.get(sym, sym),
