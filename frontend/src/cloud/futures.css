@@ -1,7 +1,7 @@
 /* 小台模擬（T-450／D-220）：地鐵告示——顏色分類、大字、少字；做多紅、放空綠（台股漲紅跌綠） */
 .cq-fu { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 32px; }
-.cq-fu-mode, .cq-fu-product { padding: 0; max-width: 420px; }
-.cq-fu-product button { font-size: 16px; font-weight: 600; }
+.cq-fu-mode, .cq-fu-product, .cq-fu-strategy { padding: 0; max-width: 420px; }
+.cq-fu-product button, .cq-fu-strategy button { font-size: 16px; font-weight: 600; }
 .cq-fu-mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; }
 .cq-fu-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mute); }
 .cq-fu-pick select {
@@ -12,6 +12,8 @@
 .cq-fu-day { font-size: 17px; margin-right: 4px; }
 .cq-fu-warn { --c: #f0b90b; }
 .cq-fu-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* 開高走低：合計＋A、B、C＋最新價 */
+.cq-fu-tiles.cq-fu-tiles-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .cq-fu .cq-kpi { background: var(--tile, #16181f); border-radius: 10px; padding: 10px 12px; gap: 3px; }
 .cq-fu .cq-kpi-value { font-size: 24px; }
 .cq-fu .cq-kpi-sub { white-space: normal; }
@@ -62,7 +64,7 @@
 .cq-fu-foot { color: var(--mute); font-size: 13.5px; line-height: 1.6; margin: 4px 0 0; }
 
 @media (max-width: 820px) {
-  .cq-fu-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cq-fu-tiles, .cq-fu-tiles.cq-fu-tiles-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cq-fu-chart { height: 280px; }
   .cq-fu-events li { grid-template-columns: 64px auto 1fr; }
   .cq-fu-events .cq-fu-sleeve { display: none; }

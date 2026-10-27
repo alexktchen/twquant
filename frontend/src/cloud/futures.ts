@@ -1,9 +1,17 @@
 // 小台模擬（T-450／D-220）：資料型別與純函式（盤中、復盤共用；node 單元測試 tests/cloud-futures.test.ts）。
 // 資料由使用者電腦上的 research/momentum_scalping/scripts/fubon_live.py 寫進 serving.futures_paper；
 // 欄位改了要兩邊一起改（那支程式的 LiveCombo.snapshot）。規則 2026-10-26 凍結：ORB 只做多 + 噪音區只放空，各 1 口小台。
+// T-452：另一個策略「開高走低」（A 開高失守、B 跌破開盤區間、C 補缺口，studies/gap_fail）在同一份狀態的 gap_fail（GapFail.snapshot）。
 
-export type Sleeve = 'ORB_LONG' | 'NOISE_SHORT'
-export const SLEEVES: readonly Sleeve[] = ['ORB_LONG', 'NOISE_SHORT']
+/** 兩個策略：固定組合（ORB 只做多 + 噪音區只放空）、開高走低（A、B、C 三條只放空）。 */
+export type Strategy = 'combo' | 'gap'
+export const STRATEGY_NAME: Record<Strategy, string> = { combo: '固定組合', gap: '開高走低' }
+
+export type ComboSleeve = 'ORB_LONG' | 'NOISE_SHORT'
+export type GapSleeve = 'GAP_A' | 'GAP_B' | 'GAP_C'
+export type Sleeve = ComboSleeve | GapSleeve
+export const SLEEVES: readonly ComboSleeve[] = ['ORB_LONG', 'NOISE_SHORT']
+export const GAP_SLEEVES: readonly GapSleeve[] = ['GAP_A', 'GAP_B', 'GAP_C']
 
 export type FuturesEvent = {
   time: string // HH:MM:SS（盤中時間，不是寫入時間）
@@ -30,6 +38,35 @@ export type FuturesTrade = {
 export type SleeveState = { position: -1 | 0 | 1; entry_price: number | null; realized: number; open_pnl: number | null }
 
 export type OrbBox = { open: number; close: number; high: number; low: number; side: -1 | 0 | 1 }
+
+/** 開高走低每一條的狀態（同 fubon_live.py 的 GapFail.snapshot）：none＝收盤都沒等到訊號。 */
+export type GapRule = {
+  state: 'waiting' | 'pending' | 'open' | 'closed' | 'skipped' | 'cancelled' | 'none'
+  stop: number | null
+  /** 只有 C：昨收 */
+  target: number | null
+  signal_time: string | null
+  entry_price: number | null
+  entry_time: string | null
+}
+
+export type GapFail = {
+  version: 1
+  names: Record<GapSleeve, string>
+  /** 開高門檻（%），跳空研究探索期 80 分位 */
+  threshold_pct: number
+  /** 開盤跳空（%）；還沒開盤 → null */
+  gap_pct: number | null
+  /** 今天是不是開高日；還沒開盤 → null */
+  active: boolean | null
+  /** B 的開盤區間（08:45～08:59），09:00 才有 */
+  range: { high: number; low: number } | null
+  rules: Record<GapSleeve, GapRule>
+  sleeves: Record<GapSleeve, SleeveState>
+  trades: FuturesTrade[]
+  events: FuturesEvent[]
+  total: number
+}
 
 export type FuturesDay = {
   version: 1
@@ -68,9 +105,12 @@ export type FuturesDay = {
   volume?: number
   point_value?: number
   commission?: number
+  /** 開高走低（T-452）：2026-10-27 之後上傳的才有 */
+  gap_fail?: GapFail
 }
 
-export type FuturesDayRow = { day: string; source: string; status: string; total: number | null; match: boolean | null }
+/** gap_total：開高走低的合計（那天的資料沒有開高走低 → null） */
+export type FuturesDayRow = { day: string; source: string; status: string; total: number | null; match: boolean | null; gap_total?: number | null }
 
 /** 大台、微台行情（T-451，/api/futures/quotes）：只有行情，沒有模擬單。欄位同 fubon_live.py 的 QuoteTracker.snapshot。 */
 export type QuoteProduct = 'TX' | 'TMF'
@@ -91,7 +131,7 @@ export type QuoteDay = {
   volume: number
   bars: [string, number, number, number, number, number][]
 }
-export type QuoteDayRow = { day: string; source: string; status: string; total?: number | null; match?: boolean | null }
+export type QuoteDayRow = { day: string; source: string; status: string; total?: number | null; match?: boolean | null; gap_total?: number | null }
 
 /** 大台／微台那一天：前面夠 14 天就有模擬單（同小台的整份狀態），不夠就只有行情。 */
 export type QuotePayload = QuoteDay | (FuturesDay & { product: QuoteProduct; name: string; volume: number })
@@ -108,7 +148,16 @@ export type SecondsPayload = { version: 1; day: string; t0: string; s: number[];
 export type Seconds = { label: string[]; price: number[]; vwap: number[] }
 
 /** 子帳戶的白話名稱（地鐵告示：名字短、顏色分類）。 */
-export const SLEEVE_NAME: Record<Sleeve, string> = { ORB_LONG: '開盤突破・只做多', NOISE_SHORT: '噪音區・只放空' }
+export const SLEEVE_NAME: Record<Sleeve, string> = {
+  ORB_LONG: '開盤突破・只做多',
+  NOISE_SHORT: '噪音區・只放空',
+  GAP_A: 'A 開高失守',
+  GAP_B: 'B 跌破開盤區間',
+  GAP_C: 'C 補缺口',
+}
+
+/** 圖上買賣點前面的代號：開高走低三條同時進場時看得出是哪幾條。 */
+export const SLEEVE_TAG: Record<Sleeve, string> = { ORB_LONG: '', NOISE_SHORT: '', GAP_A: 'A', GAP_B: 'B', GAP_C: 'C' }
 
 /** 出場原因（同 fubon_live.py 的 REASON_TEXT）。 */
 export const REASON_TEXT: Record<string, string> = {
@@ -178,8 +227,8 @@ export function addSeconds(hhmmss: string, sec: number): string {
   return `${pad(Math.floor(t / 3600))}:${pad(Math.floor(t / 60) % 60)}:${pad(t % 60)}`
 }
 
-/** 買賣點（成交、平倉）的時間，照先後；復盤的「上一個／下一個買賣點」用。 */
-export const fillTimes = (d: FuturesDay): string[] =>
+/** 買賣點（成交、平倉）的時間，照先後；復盤的「上一個／下一個買賣點」用（給那一天或某個策略的帳本）。 */
+export const fillTimes = (d: { events: FuturesEvent[] }): string[] =>
   d.events.filter((e) => e.kind === 'fill' || e.kind === 'exit').map((e) => e.time.slice(0, 8))
 
 /** HH:MM → 當天第幾分鐘。 */
@@ -195,40 +244,51 @@ export function chartTime(day: string, time: string): number {
 /** 盤中時間有沒有在 cut 之前：cut 是 HH:MM（含那一分鐘）或 HH:MM:SS（含那一秒），比到 cut 的精度。 */
 const within = (time: string, cut: string): boolean => time.slice(0, cut.length) <= cut
 
-export type ReplayView = {
+export type Fill<S extends Sleeve = Sleeve> = { time: string; sleeve: S; side: 1 | -1; price: number; kind: 'entry' | 'exit' }
+
+export type ReplayView<S extends Sleeve = ComboSleeve> = {
   cut: string
   bars: FuturesDay['bars']
   events: FuturesEvent[]
   price: number | null
   /** 每個子帳戶在 cut 那一刻：部位、進場價、已實現、現在平倉的話 */
-  sleeves: Record<Sleeve, SleeveState>
+  sleeves: Record<S, SleeveState>
   total: number
   /** 已經發生的成交（圖上的標記） */
-  fills: { time: string; sleeve: Sleeve; side: 1 | -1; price: number; kind: 'entry' | 'exit' }[]
+  fills: Fill<S>[]
 }
+
+/** 一個策略的帳本：有哪些子帳戶、成交、最新部位、時間軸。 */
+export type Book<S extends Sleeve> = { sleeves: readonly S[]; trades: FuturesTrade[]; states: Record<S, SleeveState>; events: FuturesEvent[] }
+
+export const comboBook = (d: FuturesDay): Book<ComboSleeve> => ({ sleeves: SLEEVES, trades: d.trades, states: d.sleeves, events: d.events })
+
+/** 開高走低的帳本；那一天的資料沒有（10-27 之前上傳的）→ null。 */
+export const gapBook = (d: FuturesDay): Book<GapSleeve> | null =>
+  d.gap_fail ? { sleeves: GAP_SLEEVES, trades: d.gap_fail.trades, states: d.gap_fail.sleeves, events: d.gap_fail.events } : null
 
 /**
  * 復盤：拉到 cut（HH:MM 或 HH:MM:SS）那一刻看得到什麼。只用 cut 之前的 K 棒、事件與成交，沒有偷看後面。
  * 秒級時：價格用那一秒以前最後一筆；那一分鐘還沒走完的 K 棒不算（它含了 cut 之後的成交）。
- * 還在盤中的那一天，最後一筆還沒出場的部位在 trades 裡沒有，從 sleeves 補上。
+ * 還在盤中的那一天，最後一筆還沒出場的部位在 trades 裡沒有，從 states 補上。
  */
-export function replayAt(d: FuturesDay, cut: string, secs: Seconds | null = null): ReplayView {
+export function replayBook<S extends Sleeve>(d: FuturesDay, book: Book<S>, cut: string, secs: Seconds | null = null): ReplayView<S> {
   const { bars, price } = barsAt(d.bars, cut, secs)
-  const fills: ReplayView['fills'] = []
-  const sleeves = {} as Record<Sleeve, SleeveState>
-  for (const s of SLEEVES) {
+  const fills: Fill<S>[] = []
+  const sleeves = {} as Record<S, SleeveState>
+  for (const s of book.sleeves) {
     let realized = 0
     let open: { side: 1 | -1; entry: number } | null = null
-    for (const t of d.trades.filter((x) => x.sleeve === s)) {
+    for (const t of book.trades.filter((x) => x.sleeve === s)) {
       if (within(t.entry_time, cut)) fills.push({ time: t.entry_time, sleeve: s, side: t.side, price: t.entry_price, kind: 'entry' })
       if (within(t.exit_time, cut)) {
         realized += t.net_pnl
         fills.push({ time: t.exit_time, sleeve: s, side: t.side, price: t.exit_price, kind: 'exit' })
       } else if (within(t.entry_time, cut)) open = { side: t.side, entry: t.entry_price }
     }
-    const live = d.sleeves[s]
+    const live = book.states[s]
     if (open === null && live.position !== 0 && live.entry_price !== null) {
-      const entered = [...d.events].reverse().find((e) => e.sleeve === s && e.kind === 'fill')
+      const entered = [...book.events].reverse().find((e) => e.sleeve === s && e.kind === 'fill')
       if (entered && within(entered.time, cut)) {
         open = { side: live.position as 1 | -1, entry: live.entry_price }
         fills.push({ time: entered.time, sleeve: s, side: open.side, price: open.entry, kind: 'entry' })
@@ -237,9 +297,70 @@ export function replayAt(d: FuturesDay, cut: string, secs: Seconds | null = null
     const openPnl = open && price !== null ? Math.round(closeNowPnl(open.side, open.entry, price, costOf(d))) : null
     sleeves[s] = { position: open ? open.side : 0, entry_price: open ? open.entry : null, realized: Math.round(realized), open_pnl: openPnl }
   }
-  const total = SLEEVES.reduce((a, s) => a + sleeves[s].realized + (sleeves[s].open_pnl ?? 0), 0)
+  const total = book.sleeves.reduce((a, s) => a + sleeves[s].realized + (sleeves[s].open_pnl ?? 0), 0)
   fills.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
-  return { cut, bars, events: d.events.filter((e) => within(e.time, cut)), price, sleeves, total, fills }
+  return { cut, bars, events: book.events.filter((e) => within(e.time, cut)), price, sleeves, total, fills }
+}
+
+/** 固定組合的復盤（T-450）。 */
+export const replayAt = (d: FuturesDay, cut: string, secs: Seconds | null = null): ReplayView<ComboSleeve> =>
+  replayBook(d, comboBook(d), cut, secs)
+
+/** 圖上的買賣點：同一刻、同價、同方向的合成一個（開高走低 A、B、C 常常同時進場），文字標出是哪幾條。 */
+export function chartMarks(fills: readonly Fill[], secs: boolean): { time: string; side: 1 | -1; price: number; kind: 'entry' | 'exit'; text: string }[] {
+  const out: { time: string; side: 1 | -1; price: number; kind: 'entry' | 'exit'; tags: string[] }[] = []
+  for (const f of fills) {
+    const time = secs ? f.time.slice(0, 8) : f.time.slice(0, 5)
+    const same = out.find((m) => m.time === time && m.price === f.price && m.kind === f.kind && m.side === f.side)
+    const tag = SLEEVE_TAG[f.sleeve]
+    if (same) {
+      if (tag) same.tags.push(tag)
+    } else out.push({ time, side: f.side, price: f.price, kind: f.kind, tags: tag ? [tag] : [] })
+  }
+  return out.map(({ tags, ...m }) => {
+    const word = m.kind === 'entry' ? (m.side > 0 ? '買' : '空') : m.side > 0 ? '賣' : '補'
+    return { ...m, text: `${tags.length ? `${tags.join('')} ` : ''}${word} ${m.price.toFixed(0)}` }
+  })
+}
+
+/**
+ * 開高走低每一條在 cut 那一刻的白話狀態（數字卡下面那行）。只用 cut 之前就知道的事：
+ * 開盤就知道有沒有開高；B 的開盤區間 09:00 才有；訊號、取消都比到 cut。
+ */
+export function gapSub(d: FuturesDay, g: GapFail, s: GapSleeve, st: SleeveState, cut: string): string {
+  if (st.position !== 0) return `持空 1 口 @ ${st.entry_price?.toFixed(0) ?? '—'}（現在平倉 ${yuan(st.open_pnl ?? 0)}）`
+  if (g.active === null || d.open === null) return '還沒開盤'
+  if (!g.active) return `沒有開高（${signedPct(g.gap_pct)}），今天不做`
+  const r = g.rules[s]
+  if (r.entry_time !== null && within(r.entry_time, cut)) return st.realized ? `已平倉，這邊 ${yuan(st.realized)}` : '已平倉'
+  if (r.signal_time !== null && within(r.signal_time, cut)) {
+    if (r.state === 'skipped') return '缺口已經補完，不做'
+    if (r.state === 'cancelled') return '訊號取消'
+    return '訊號出現，等成交'
+  }
+  if (r.state === 'none' && cut >= '13:44') return '今天沒等到訊號'
+  if (s === 'GAP_B') return cut < '09:00' || g.range === null ? '09:00 定開盤區間' : `等跌破 ${g.range.low.toFixed(0)}`
+  return `等跌破開盤 ${d.open.toFixed(0)}`
+}
+
+/** 跳空百分比的寫法：+0.56%／-0.12%。 */
+export const signedPct = (v: number | null): string => (v === null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(2)}%`)
+
+/** 開高走低圖上的水平線（只畫 cut 那一刻已經知道的）：開盤（A、C 的觸發）、昨收（C 的停利）、09:00 後的區間低點（B 的觸發）、持倉的停損。 */
+export function gapLevels(d: FuturesDay, g: GapFail, view: ReplayView<GapSleeve>): { price: number; title: string }[] {
+  if (!g.active || d.open === null) return []
+  const out = [
+    { price: d.open, title: '開盤' },
+    { price: d.prev_close, title: '昨收' },
+  ]
+  if (g.range !== null && view.cut >= '09:00') out.push({ price: g.range.low, title: 'B 區間低' })
+  const stops = new Map<number, string[]>()
+  for (const s of GAP_SLEEVES) {
+    const stop = g.rules[s].stop
+    if (view.sleeves[s].position !== 0 && stop !== null) stops.set(stop, [...(stops.get(stop) ?? []), SLEEVE_TAG[s]])
+  }
+  for (const [price, tags] of stops) out.push({ price, title: `${tags.join('')} 停損` })
+  return out
 }
 
 /**
