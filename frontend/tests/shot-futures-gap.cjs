@@ -1,4 +1,4 @@
-// 台指期「開高走低」截圖（手動檢查用，T-452）：node tests/shot-futures-gap.cjs <baseUrl> <outDir> <mockDir>
+// 台指期兩個策略合在一起＋每日損益日曆截圖（手動檢查用，T-452／T-453）：node tests/shot-futures-gap.cjs <baseUrl> <outDir> <mockDir>
 // mockDir：fubon_live.py 期交所重播 2026-10-27 產生的 2026-10-27_{live,closed,seconds}.json、TX／TMF 同名檔、days.json，
 // 加上沒有開高走低的舊格式 2026-10-22_closed.json（看「要重新上傳」的提示）。其他 /api/* 回空的。
 const { chromium } = require('playwright')
@@ -43,7 +43,6 @@ const path = require('node:path')
       await page.locator('input[type="checkbox"]').first().check()
       await btn.click()
     }
-    await page.getByRole('button', { name: '開高走低' }).click()
     await page.waitForSelector('.cq-fu-chart canvas', { timeout: 15000 })
     await page.waitForTimeout(1200)
     await page.screenshot({ path: path.join(out, `${name}-1-live.png`), fullPage: true })
@@ -51,17 +50,25 @@ const path = require('node:path')
     await page.waitForSelector('.cq-fu-scrub input', { timeout: 15000 })
     await page.waitForTimeout(1000)
     await page.screenshot({ path: path.join(out, `${name}-2-replay-close.png`), fullPage: true })
-    // 拉回開盤 → 下一個買賣點：09:22:01 三條同時放空；再兩次 → 10:23:29 C 補完缺口
+    // 日曆的「開高走低」：只看這個策略的每日損益
+    await page.locator('.cq-fu-cal-view button', { hasText: '開高走低' }).click()
+    await page.waitForTimeout(300)
+    await page.locator('.cq-fu-cal').screenshot({ path: path.join(out, `${name}-2b-calendar-gap.png`) })
+    await page.locator('.cq-fu-cal-view button', { hasText: '合計' }).click()
+    // 拉回開盤 → 下一個買賣點三次：08:50:01 突破買、09:08:06 停損賣、09:22:01 開高走低三條同時放空
     await page.locator('.cq-fu-scrub input').fill('0')
     await page.waitForTimeout(400)
-    await page.getByRole('button', { name: '下一個買賣點' }).click()
-    await page.waitForTimeout(800)
+    for (let k = 0; k < 3; k++) {
+      await page.getByRole('button', { name: '下一個買賣點' }).click()
+      await page.waitForTimeout(500)
+    }
+    await page.waitForTimeout(500)
     await page.screenshot({ path: path.join(out, `${name}-3-replay-entry.png`), fullPage: true })
     await page.getByRole('button', { name: '下一個買賣點' }).click()
     await page.waitForTimeout(800)
     await page.screenshot({ path: path.join(out, `${name}-4-replay-gapfill.png`), fullPage: true })
-    // 舊資料（10-22，沒有開高走低）
-    await page.locator('.cq-fu-pick select').selectOption('2026-10-22')
+    // 舊資料（10-22，沒有開高走低）：點日曆的格子
+    await page.getByRole('button', { name: '2026-10-22' }).click()
     await page.waitForTimeout(1200)
     await page.screenshot({ path: path.join(out, `${name}-5-old-day.png`), fullPage: true })
     // 大台：今天只開高 +0.50%，沒到門檻

@@ -156,8 +156,8 @@ export const SLEEVE_NAME: Record<Sleeve, string> = {
   GAP_C: 'C 補缺口',
 }
 
-/** 圖上買賣點前面的代號：開高走低三條同時進場時看得出是哪幾條。 */
-export const SLEEVE_TAG: Record<Sleeve, string> = { ORB_LONG: '', NOISE_SHORT: '', GAP_A: 'A', GAP_B: 'B', GAP_C: 'C' }
+/** 圖上買賣點前面的代號：兩個策略畫在同一張圖（T-453），看得出是哪一條；開高走低三條同時進場合成「ABC」。 */
+export const SLEEVE_TAG: Record<Sleeve, string> = { ORB_LONG: '突破', NOISE_SHORT: '噪音', GAP_A: 'A', GAP_B: 'B', GAP_C: 'C' }
 
 /** 出場原因（同 fubon_live.py 的 REASON_TEXT）。 */
 export const REASON_TEXT: Record<string, string> = {
@@ -319,7 +319,8 @@ export function chartMarks(fills: readonly Fill[], secs: boolean): { time: strin
   }
   return out.map(({ tags, ...m }) => {
     const word = m.kind === 'entry' ? (m.side > 0 ? '買' : '空') : m.side > 0 ? '賣' : '補'
-    return { ...m, text: `${tags.length ? `${tags.join('')} ` : ''}${word} ${m.price.toFixed(0)}` }
+    const label = tags.every((t) => t.length === 1) ? tags.join('') : tags.join('・')
+    return { ...m, text: `${label ? `${label} ` : ''}${word} ${m.price.toFixed(0)}` }
   })
 }
 
@@ -414,3 +415,115 @@ export function yuan(v: number): string {
 
 /** 漲跌色：台股漲紅跌綠。 */
 export const tone = (v: number | null): 'up' | 'down' | 'plain' => (v === null || v === 0 ? 'plain' : v > 0 ? 'up' : 'down')
+
+// ── T-453：兩個策略合在同一個畫面、每日損益日曆（使用者 2026-10-27：「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」） ──
+
+/** 時間軸上的事件標上屬於哪個策略（兩個策略合在同一條時間軸）。 */
+export type TaggedEvent = FuturesEvent & { strategy: Strategy }
+
+const byTime = <T extends { time: string }>(a: T, b: T) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0)
+
+/** 兩個策略的事件照時間排在一起；同一秒的固定組合排前面。 */
+export function mergeEvents(combo: readonly FuturesEvent[], gap: readonly FuturesEvent[]): TaggedEvent[] {
+  return [...combo.map((e) => ({ ...e, strategy: 'combo' as const })), ...gap.map((e) => ({ ...e, strategy: 'gap' as const }))].sort(byTime)
+}
+
+export type DayView = {
+  cut: string
+  bars: FuturesDay['bars']
+  price: number | null
+  combo: ReplayView<ComboSleeve>
+  /** 那一天的資料沒有開高走低（10-27 之前上傳的）→ null */
+  gap: ReplayView<GapSleeve> | null
+  /** 兩個策略合計 */
+  total: number
+  fills: Fill[]
+  events: TaggedEvent[]
+}
+
+/** 拉到 cut 那一刻，兩個策略合起來看（各自的規則同 replayBook，不劇透）。 */
+export function dayAt(d: FuturesDay, cut: string, secs: Seconds | null = null): DayView {
+  const combo = replayAt(d, cut, secs)
+  const book = gapBook(d)
+  const gap = book ? replayBook(d, book, cut, secs) : null
+  const fills: Fill[] = [...combo.fills, ...(gap?.fills ?? [])].sort(byTime)
+  return { cut, bars: combo.bars, price: combo.price, combo, gap, total: combo.total + (gap?.total ?? 0), fills, events: mergeEvents(combo.events, gap?.events ?? []) }
+}
+
+/** 兩個策略所有買賣點的時間（「上一個／下一個買賣點」）。 */
+export const allFillTimes = (d: FuturesDay): string[] => fillTimes({ events: [...d.events, ...(d.gap_fail?.events ?? [])] }).sort()
+
+/** 固定組合在那一刻的一句話：持多／持空、平倉幾筆、空手。 */
+export function comboSummary(v: ReplayView<ComboSleeve>): string {
+  const holding = SLEEVES.filter((s) => v.sleeves[s].position !== 0).map((s) => (v.sleeves[s].position > 0 ? '持多 1 口' : '持空 1 口'))
+  if (holding.length) return holding.join('、')
+  const exits = v.fills.filter((f) => f.kind === 'exit').length
+  return exits ? `平倉 ${exits} 筆` : '空手'
+}
+
+/** 開高走低在那一刻的一句話：有沒有開高、持空幾口、平倉幾筆。 */
+export function gapSummary(g: GapFail | null, v: ReplayView<GapSleeve> | null): string {
+  if (g === null || v === null) return '這一天的資料沒有（要重新上傳）'
+  if (g.active === null) return '還沒開盤'
+  if (!g.active) return `沒有開高（${signedPct(g.gap_pct)}），不做`
+  const pct = `開高 ${signedPct(g.gap_pct)}`
+  const holding = GAP_SLEEVES.filter((s) => v.sleeves[s].position !== 0).length
+  if (holding) return `${pct}・持空 ${holding} 口`
+  const exits = v.fills.filter((f) => f.kind === 'exit').length
+  return exits ? `${pct}・平倉 ${exits} 筆` : `${pct}・等跌破`
+}
+
+/** 日曆上看哪一個：兩個策略合計、只看固定組合、只看開高走低。 */
+export type CalView = 'all' | Strategy
+export const CAL_VIEWS: readonly CalView[] = ['all', 'combo', 'gap']
+export const CAL_VIEW_NAME: Record<CalView, string> = { all: '合計', combo: '固定組合', gap: '開高走低' }
+
+/** 日期清單的一列（/api/futures/days、/quotes/days）：total＝固定組合、gap_total＝開高走低。 */
+export type PnlRow = { day: string; total?: number | null; gap_total?: number | null }
+
+/** 那一天的損益：合計＝兩個策略相加（只有一邊有資料就用那一邊）；兩邊都沒有（只有行情）→ null。 */
+export function dayPnl(r: PnlRow, view: CalView): number | null {
+  const c = r.total ?? null
+  const g = r.gap_total ?? null
+  if (view === 'combo') return c
+  if (view === 'gap') return g
+  return c === null && g === null ? null : (c ?? 0) + (g ?? 0)
+}
+
+/** 一個月的週一到週五格子：一週一列、五格；不是這個月的格子是 null。月份寫 YYYY-MM。 */
+export function monthWeeks(month: string): (string | null)[][] {
+  const [y, m] = month.split('-').map(Number)
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  const weeks: (string | null)[][] = []
+  let row: (string | null)[] | null = null
+  for (let d = 1; d <= last; d++) {
+    const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+    if (wd === 0 || wd === 6) continue
+    if (row === null || wd === 1) {
+      row = [null, null, null, null, null]
+      weeks.push(row)
+    }
+    row[wd - 1] = `${month}-${pad(d)}`
+  }
+  return weeks
+}
+
+/** 有資料的月份（舊到新）。 */
+export const monthsOf = (rows: readonly PnlRow[]): string[] => [...new Set(rows.map((r) => r.day.slice(0, 7)))].sort()
+
+/** 一個月的小結：合計、賺幾天、賠幾天、有損益的天數（只有行情的日子不算）。 */
+export function monthSummary(rows: readonly PnlRow[], month: string, view: CalView): { total: number; days: number; win: number; loss: number } {
+  const vals = rows
+    .filter((r) => r.day.startsWith(month))
+    .map((r) => dayPnl(r, view))
+    .filter((v): v is number => v !== null)
+    .map((v) => Math.round(v))
+  return { total: vals.reduce((a, v) => a + v, 0), days: vals.length, win: vals.filter((v) => v > 0).length, loss: vals.filter((v) => v < 0).length }
+}
+
+/** 日曆格子裡的金額：一萬以上寫「萬」（+4.7萬），以下照寫（-3,278）。 */
+export function compactYuan(v: number): string {
+  const r = Math.round(v)
+  if (Math.abs(r) >= 10_000) return `${r > 0 ? '+' : '-'}${(Math.abs(r) / 10_000).toFixed(1)}萬`
+  return yuan(r)
+}
