@@ -1,7 +1,7 @@
 /* 小台模擬（T-450／D-220）：地鐵告示——顏色分類、大字、少字；做多紅、放空綠（台股漲紅跌綠） */
 .cq-fu { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 32px; }
-.cq-fu-mode, .cq-fu-product, .cq-fu-strategy { padding: 0; max-width: 420px; }
-.cq-fu-product button, .cq-fu-strategy button { font-size: 16px; font-weight: 600; }
+.cq-fu-mode, .cq-fu-product { padding: 0; max-width: 420px; }
+.cq-fu-product button { font-size: 16px; font-weight: 600; }
 .cq-fu-mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; }
 .cq-fu-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mute); }
 .cq-fu-pick select {
@@ -12,8 +12,6 @@
 .cq-fu-day { font-size: 17px; margin-right: 4px; }
 .cq-fu-warn { --c: #f0b90b; }
 .cq-fu-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-/* 開高走低：合計＋A、B、C＋最新價 */
-.cq-fu-tiles.cq-fu-tiles-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .cq-fu .cq-kpi { background: var(--tile, #16181f); border-radius: 10px; padding: 10px 12px; gap: 3px; }
 .cq-fu .cq-kpi-value { font-size: 24px; }
 .cq-fu .cq-kpi-sub { white-space: normal; }
@@ -44,7 +42,7 @@
 }
 .cq-fu-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .cq-fu-events li {
-  display: grid; grid-template-columns: 72px auto auto 1fr; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 72px auto 1fr; align-items: center; gap: 8px;
   padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px;
 }
 .cq-fu-events time { color: var(--mute); font-variant-numeric: tabular-nums; }
@@ -54,6 +52,9 @@
 .cq-fu-k-check { --c: #9aa0ac; }
 .cq-fu-k-info { --c: #9aa0ac; }
 .cq-fu-sleeve { font-size: 13px; font-weight: 600; white-space: nowrap; }
+/* 時間軸一件事：誰（子帳戶或策略）＋發生什麼；手機上小標在上一行 */
+.cq-fu-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.cq-fu-sleeve.gap { color: #22d3ee; }
 .cq-fu-sleeve.long, .cq-fu-trades td.long { color: var(--up); }
 .cq-fu-sleeve.short, .cq-fu-trades td.short { color: var(--down); }
 .cq-fu-trades { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -63,11 +64,43 @@
 .cq-fu-trades td.down { color: var(--down); }
 .cq-fu-foot { color: var(--mute); font-size: 13.5px; line-height: 1.6; margin: 4px 0 0; }
 
+/* T-453 各策略：一列一個子帳戶（名字、現在在做什麼、損益） */
+.cq-fu-board h4 { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 0 2px; font-size: 15px; color: var(--mute); font-weight: 600; }
+.cq-fu-board h4:first-child { margin-top: 0; }
+.cq-fu-board ul { list-style: none; margin: 0; padding: 0; }
+.cq-fu-board li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cq-fu-board li div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cq-fu-board li .cq-fu-sleeve { font-size: 15px; }
+.cq-fu-board li span { font-size: 13.5px; color: var(--mute); }
+.cq-fu-pnl { font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cq-fu-pnl.up, .cq-fu-cal-sum.up, .cq-fu-cal-cell.up b { color: var(--up); }
+.cq-fu-pnl.down, .cq-fu-cal-sum.down, .cq-fu-cal-cell.down b { color: var(--down); }
+/* T-453 每日損益日曆：週一到週五，賺的格子淡紅、賠的淡綠 */
+.cq-fu-cal { display: flex; flex-direction: column; gap: 8px; max-width: 560px; padding: 10px 12px; border-radius: 10px; background: var(--tile, #16181f); }
+.cq-fu-cal-head { display: flex; align-items: center; gap: 10px; }
+.cq-fu-cal-head > b:not(.cq-fu-cal-sum) { font-size: 17px; }
+.cq-fu-cal-head .cq-fu-btn:disabled { opacity: .35; }
+.cq-fu-cal-sum { margin-left: auto; font-size: 19px; font-variant-numeric: tabular-nums; }
+.cq-fu-cal-view { padding: 0; }
+.cq-fu-cal-note { margin: 0; color: var(--mute); font-size: 13.5px; }
+.cq-fu-cal-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.cq-fu-cal-wd { text-align: center; font-size: 13px; color: var(--mute); }
+.cq-fu-cal-cell {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 52px; padding: 6px;
+  border-radius: 8px; border: 1px solid transparent; background: var(--bg); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.cq-fu-cal-cell i { font-style: normal; font-size: 12.5px; color: var(--mute); }
+.cq-fu-cal-cell b { font-size: 14.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cq-fu-cal-cell.up { background: color-mix(in srgb, var(--up) 12%, var(--bg)); }
+.cq-fu-cal-cell.down { background: color-mix(in srgb, var(--down) 12%, var(--bg)); }
+.cq-fu-cal-cell.none, .cq-fu-cal-cell.out { background: transparent; cursor: default; }
+.cq-fu-cal-cell.none i { opacity: .45; }
+.cq-fu-cal-cell.on { border-color: var(--accent); }
+
 @media (max-width: 820px) {
-  .cq-fu-tiles, .cq-fu-tiles.cq-fu-tiles-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cq-fu-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cq-fu-chart { height: 280px; }
   .cq-fu-events li { grid-template-columns: 64px auto 1fr; }
-  .cq-fu-events .cq-fu-sleeve { display: none; }
   .cq-fu-trades th:nth-child(4), .cq-fu-trades td:nth-child(4) { display: none; }
   .cq-fu-scrub { flex-wrap: wrap; }
   .cq-fu-scrub input { order: 5; flex-basis: 100%; }

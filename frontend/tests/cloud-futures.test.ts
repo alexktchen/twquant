@@ -8,12 +8,18 @@ import { FEATURES, lockedText, tabAllowed } from '../src/cloud/access.ts'
 import {
   STALE_AFTER_S,
   addSeconds,
+  CAL_VIEW_NAME,
   MTX_COST,
   STRATEGY_NAME,
+  allFillTimes,
   barsAt,
   change,
   chartMarks,
   chartTime,
+  comboSummary,
+  compactYuan,
+  dayAt,
+  dayPnl,
   costOf,
   isPaper,
   decodeSeconds,
@@ -21,7 +27,12 @@ import {
   gapBook,
   gapLevels,
   gapSub,
+  gapSummary,
   lastAtOrBefore,
+  mergeEvents,
+  monthSummary,
+  monthWeeks,
+  monthsOf,
   closeNowPnl,
   minuteOf,
   replayAt,
@@ -372,7 +383,9 @@ function gapLive(): FuturesDay {
 test('T-452 AC1 舊資料沒有開高走低 → 帳本是 null、畫面提示重新上傳；有的話就是 A、B、C 三個子帳戶', () => {
   assert.equal(gapBook(day()), null)
   assert.deepEqual(gapBook(gapDay())!.sleeves, ['GAP_A', 'GAP_B', 'GAP_C'])
-  assert.match(read('src/cloud/FuturesPage.tsx'), /要用電腦上的錄製程式重新上傳一次才有/)
+  // T-453 起兩個策略同一個畫面：沒有開高走低的那一天，「各策略」那塊寫要重新上傳
+  assert.equal(gapSummary(null, null), '這一天的資料沒有（要重新上傳）')
+  assert.match(read('src/cloud/FuturesPage.tsx'), /<p className="cq-empty">\{gapSummary\(null, null\)\}<\/p>/)
 })
 
 test('T-452 AC2 復盤：拉到某一刻只算那之前的 A、B、C 成交；持倉用「現在平倉的話」，平倉後變已實現', () => {
@@ -431,8 +444,8 @@ test('T-452 AC4 圖上的買賣點：同一刻同價合成一個、標出是哪�
     chartMarks(replayBook(d, book, '23:59:59').fills, true).map((m) => [m.time, m.text]),
     [['09:22:01', 'ABC 空 46479'], ['10:23:29', 'C 補 46258'], ['13:44:01', 'AB 補 46117']],
   )
-  // 固定組合沒有代號；1 分 K 時比到分鐘
-  assert.deepEqual(chartMarks(replayAt(day(), '09:10').fills, false).map((m) => [m.time, m.text]), [['08:50', '買 47319'], ['09:05', '賣 47135']])
+  // 固定組合（T-453 起跟開高走低畫在同一張圖）標「突破」「噪音」；1 分 K 時比到分鐘
+  assert.deepEqual(chartMarks(replayAt(day(), '09:10').fills, false).map((m) => [m.time, m.text]), [['08:50', '突破 買 47319'], ['09:05', '突破 賣 47135']])
   const g = d.gap_fail!
   const lv = (cut: string) => gapLevels(d, g, replayBook(d, book, cut)).map((l) => `${l.title} ${l.price}`)
   assert.deepEqual(lv('08:55'), ['開盤 46520', '昨收 46262'])
@@ -446,13 +459,87 @@ test('T-452 AC5 成本照合約：大台的開高走低用大台的每點金額�
   assert.equal(replayBook(tx, gapBook(tx)!, '10:00').sleeves.GAP_A.open_pnl, Math.round(closeNowPnl(-1, 46479, 46410, costOf(tx))))
 })
 
-test('T-452 AC6 上面切「固定組合／開高走低」；交易日下拉照策略顯示合計；兩支日期端點多回開高走低合計', () => {
+test('T-452 AC6 兩個策略的名字；兩支日期端點多回開高走低合計（T-453 起不切換、改用日曆，見 T-453 AC3、AC4）', () => {
   assert.deepEqual(STRATEGY_NAME, { combo: '固定組合', gap: '開高走低' })
-  const page = read('src/cloud/FuturesPage.tsx')
-  assert.match(page, /const STRATEGIES: Strategy\[\] = \['combo', 'gap'\]/)
-  assert.match(page, /strategy === 'gap' \? <GapBody \{\.\.\.props\} \/> : <ComboBody \{\.\.\.props\} \/>/)
-  assert.match(page, /strategy === 'gap' \? d\.gap_total : d\.total/)
   for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
     assert.match(read(f), /\(payload->'gap_fail'->>'total'\)::float8 AS gap_total/)
   assert.deepEqual(fillTimes(gapBook(gapDay())!), ['09:22:01', '09:22:01', '09:22:01', '10:23:29', '13:44:01', '13:44:01'])
+})
+
+// ── 兩個策略合在一起＋每日損益日曆（T-453，使用者 2026-10-27：「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」） ──
+test('T-453 AC1 兩個策略同一個畫面：合計＝兩邊相加；買賣點、時間軸照時間排在一起，各自標屬於誰', () => {
+  const d = gapDay()
+  const v = dayAt(d, '23:59')
+  assert.equal(v.gap!.total, Math.round(17947.4) * 2 + Math.round(10897.3))
+  assert.equal(v.total, v.combo.total + v.gap!.total)
+  assert.deepEqual(v.fills.slice(0, 3).map((f) => f.sleeve), ['ORB_LONG', 'ORB_LONG', 'GAP_A'])
+  assert.deepEqual(v.events.slice(0, 3).map((e) => [e.time, e.strategy]), [['08:45:00', 'gap'], ['08:50:00', 'combo'], ['08:50:01', 'combo']])
+  // 同一秒：固定組合排前面
+  const tie = mergeEvents([{ time: '09:00:00', kind: 'info', sleeve: null, text: 'a' }], [{ time: '09:00:00', kind: 'info', sleeve: null, text: 'b' }])
+  assert.deepEqual(tie.map((e) => [e.text, e.strategy]), [['a', 'combo'], ['b', 'gap']])
+  // 舊資料沒有開高走低：合計就是固定組合
+  const old = dayAt(day(), '23:59')
+  assert.equal(old.gap, null)
+  assert.equal(old.total, old.combo.total)
+  // 上一個／下一個買賣點：兩個策略的都算
+  assert.deepEqual(allFillTimes(d), ['08:50:01', '09:05:41', '09:22:01', '09:22:01', '09:22:01', '10:23:29', '11:15:01', '13:44:01', '13:44:01'])
+})
+
+test('T-453 AC2 各策略一句話：持多／持空幾口、平倉幾筆；開高走低多寫有沒有開高', () => {
+  const d = gapDay()
+  assert.equal(comboSummary(dayAt(d, '08:45').combo), '空手')
+  assert.equal(comboSummary(dayAt(d, '09:00').combo), '持多 1 口')
+  assert.equal(comboSummary(dayAt(d, '09:10').combo), '平倉 1 筆')
+  assert.equal(comboSummary(dayAt(d, '23:59').combo), '持空 1 口')
+  const g = d.gap_fail!
+  assert.equal(gapSummary(g, dayAt(d, '09:10').gap), '開高 +0.56%・等跌破')
+  assert.equal(gapSummary(g, dayAt(d, '10:00').gap), '開高 +0.56%・持空 3 口')
+  assert.equal(gapSummary(g, dayAt(d, '23:59').gap), '開高 +0.56%・平倉 3 筆')
+  assert.equal(gapSummary({ ...g, active: false, gap_pct: 0.12 }, dayAt(d, '09:10').gap), '沒有開高（+0.12%），不做')
+  assert.equal(gapSummary({ ...g, active: null, gap_pct: null }, dayAt(d, '08:45').gap), '還沒開盤')
+})
+
+test('T-453 AC3 日曆：週一到週五一週一列；格子看合計或單一策略；只有行情的日子沒有金額；月小結', () => {
+  const oct = monthWeeks('2026-10')
+  assert.equal(oct.length, 5)
+  assert.deepEqual(oct[0], [null, null, null, '2026-10-01', '2026-10-02'])
+  assert.deepEqual(oct[4], ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'])
+  // 2026-11-01 是星期日：第一列從 11-02 星期一開始；11-30 星期一自己一列
+  const nov = monthWeeks('2026-11')
+  assert.deepEqual(nov[0], ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'])
+  assert.deepEqual(nov[nov.length - 1], ['2026-11-30', null, null, null, null])
+  const r = { day: '2026-10-27', total: -13303, gap_total: 46792.1 }
+  assert.equal(dayPnl(r, 'all'), -13303 + 46792.1)
+  assert.equal(dayPnl(r, 'combo'), -13303)
+  assert.equal(dayPnl(r, 'gap'), 46792.1)
+  assert.equal(dayPnl({ day: '2026-10-22', total: 16092, gap_total: null }, 'all'), 16092) // 舊資料只有固定組合
+  assert.equal(dayPnl({ day: '2026-09-10' }, 'all'), null) // 只有行情
+  const rows = [
+    r,
+    { day: '2026-10-21', total: -2155, gap_total: 44187 },
+    { day: '2026-10-20', total: 0, gap_total: 0 },
+    { day: '2026-10-14', total: 0, gap_total: -13123 },
+    { day: '2026-09-30', total: 5000, gap_total: 0 },
+    { day: '2026-09-10' },
+  ]
+  assert.deepEqual(monthSummary(rows, '2026-10', 'all'), { total: 33489 + 42032 - 13123, days: 4, win: 2, loss: 1 })
+  assert.deepEqual(monthSummary(rows, '2026-10', 'gap'), { total: 46792 + 44187 - 13123, days: 4, win: 2, loss: 1 })
+  assert.deepEqual(monthSummary(rows, '2026-09', 'all'), { total: 5000, days: 1, win: 1, loss: 0 })
+  assert.deepEqual(monthsOf(rows), ['2026-09', '2026-10'])
+  assert.equal(compactYuan(46792.1), '+4.7萬')
+  assert.equal(compactYuan(-13123), '-1.3萬')
+  assert.equal(compactYuan(183308), '+18.3萬')
+  assert.equal(compactYuan(-3278), '-3,278')
+  assert.equal(compactYuan(0), '0')
+  assert.deepEqual(CAL_VIEW_NAME, { all: '合計', combo: '固定組合', gap: '開高走低' })
+})
+
+test('T-453 AC4 畫面：不再切策略；復盤上面是每日損益日曆（取代下拉）；數字卡是合計＋兩個策略＋最新；各策略列出每個子帳戶', () => {
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.doesNotMatch(page, /cq-fu-strategy|STRATEGIES|<DayPick/)
+  assert.equal(page.match(/<PnlCalendar days=\{days\} value=\{replayDay\} onPick=\{setPick\} \/>/g)?.length, 2)
+  assert.match(page, /<Kpi label=\{STRATEGY_NAME\.combo\}/)
+  assert.match(page, /<Kpi label=\{STRATEGY_NAME\.gap\}/)
+  assert.match(page, /<StrategyBoard data=\{data\} view=\{view\} cut=\{cut\} \/>/)
+  assert.match(page, /jumpTimes=\{jumps\}/)
 })
