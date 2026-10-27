@@ -66,6 +66,31 @@ export type FuturesDay = {
 
 export type FuturesDayRow = { day: string; source: string; status: string; total: number | null; match: boolean | null }
 
+/** 大台、微台行情（T-451，/api/futures/quotes）：只有行情，沒有模擬單。欄位同 fubon_live.py 的 QuoteTracker.snapshot。 */
+export type QuoteProduct = 'TX' | 'TMF'
+export type QuoteDay = {
+  version: 1
+  day: string
+  product: QuoteProduct
+  name: string
+  source: 'fubon_live' | 'taifex_replay'
+  status: 'live' | 'closed'
+  contract: string
+  symbol: string
+  updated_at: string
+  last_tick: string | null
+  last_price: number | null
+  prev_close: number | null
+  open: number | null
+  volume: number
+  bars: [string, number, number, number, number, number][]
+}
+export type QuoteDayRow = { day: string; source: string; status: string }
+
+/** 網站上的三個商品：小台（模擬單）、大台、微台。 */
+export type Product = 'MTX' | QuoteProduct
+export const PRODUCT_NAME: Record<Product, string> = { MTX: '小台', TX: '大台', TMF: '微台' }
+
 /** 秒級復盤資料（/api/futures/seconds）：08:45:00 起有成交的每一秒；s／p／w 都是差分整數，w 是 VWAP×10。 */
 export type SecondsPayload = { version: 1; day: string; t0: string; s: number[]; p: number[]; w: number[] }
 
@@ -171,12 +196,7 @@ export type ReplayView = {
  * 還在盤中的那一天，最後一筆還沒出場的部位在 trades 裡沒有，從 sleeves 補上。
  */
 export function replayAt(d: FuturesDay, cut: string, secs: Seconds | null = null): ReplayView {
-  const bars = d.bars.filter((b) => (cut.length > 5 ? b[0] < cut.slice(0, 5) : b[0] <= cut))
-  let price = bars.length ? bars[bars.length - 1][4] : null
-  if (secs !== null) {
-    const i = lastAtOrBefore(secs.label, cut)
-    price = i >= 0 ? secs.price[i] : null
-  }
+  const { bars, price } = barsAt(d.bars, cut, secs)
   const fills: ReplayView['fills'] = []
   const sleeves = {} as Record<Sleeve, SleeveState>
   for (const s of SLEEVES) {
@@ -203,6 +223,26 @@ export function replayAt(d: FuturesDay, cut: string, secs: Seconds | null = null
   const total = SLEEVES.reduce((a, s) => a + sleeves[s].realized + (sleeves[s].open_pnl ?? 0), 0)
   fills.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
   return { cut, bars, events: d.events.filter((e) => within(e.time, cut)), price, sleeves, total, fills }
+}
+
+/**
+ * 拉到 cut 那一刻看得到的 K 棒與價格（小台、大台、微台共用）：
+ * 秒級時價格用那一秒以前最後一筆，那一分鐘還沒走完的 K 棒不算；1 分 K 時含 cut 那一分鐘。
+ */
+export function barsAt(all: FuturesDay['bars'], cut: string, secs: Seconds | null = null): { bars: FuturesDay['bars']; price: number | null } {
+  const bars = all.filter((b) => (cut.length > 5 ? b[0] < cut.slice(0, 5) : b[0] <= cut))
+  let price = bars.length ? bars[bars.length - 1][4] : null
+  if (secs !== null) {
+    const i = lastAtOrBefore(secs.label, cut)
+    price = i >= 0 ? secs.price[i] : null
+  }
+  return { bars, price }
+}
+
+/** 漲跌：點數與百分比（昨收沒有 → null）。 */
+export function change(price: number | null, prevClose: number | null): { pts: number; pct: number } | null {
+  if (price === null || prevClose === null || prevClose === 0) return null
+  return { pts: price - prevClose, pct: (price - prevClose) / prevClose }
 }
 
 /** 台北現在幾點幾分（不管瀏覽器在哪個時區）。 */

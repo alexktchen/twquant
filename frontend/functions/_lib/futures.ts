@@ -15,3 +15,13 @@ export const NO_SECONDS = '這天沒有秒級資料（只有 1 分 K）'
 
 /** 日期清單一次最多給幾天（約一年的交易日）。 */
 export const DAYS_LIMIT = 250
+
+/** 大台、微台行情（T-451）：期交所代號。網站只放這兩個（小台在模擬單那邊）。 */
+export const QUOTE_PRODUCTS = ['TX', 'TMF'] as const
+export type QuoteProduct = (typeof QUOTE_PRODUCTS)[number]
+
+/** ?product= 是不是大台或微台。 */
+export const productOk = (p: string | null): p is QuoteProduct => p !== null && (QUOTE_PRODUCTS as readonly string[]).includes(p)
+
+/** 還沒有大台／微台行情：電腦上的錄製程式開盤後、或 --replay-quotes 補過去的日子後才會有。 */
+export const QUOTES_NOT_READY = '還沒有這個商品的行情：電腦上的錄製程式（fubon_live.py --upload）開盤後就會寫進來。'

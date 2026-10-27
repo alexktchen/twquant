@@ -2,12 +2,14 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { DAYS_LIMIT, NOT_READY, NO_SECONDS, dayOk } from '../functions/_lib/futures.ts'
+import { DAYS_LIMIT, NOT_READY, NO_SECONDS, QUOTES_NOT_READY, dayOk, productOk } from '../functions/_lib/futures.ts'
 import { FEATURE_ROLES, can } from '../functions/_lib/roles.ts'
 import { FEATURES, lockedText, tabAllowed } from '../src/cloud/access.ts'
 import {
   STALE_AFTER_S,
   addSeconds,
+  barsAt,
+  change,
   chartTime,
   decodeSeconds,
   fillTimes,
@@ -163,7 +165,7 @@ test('T-450 AC5 分頁只給有「小台模擬」權限的人；?tab=futures 認
   assert.equal(tabFromUrl('https://twquant.pages.dev/?tab=futures'), 'futures')
   assert.ok(!tabAllowed('futures', []))
   assert.ok(tabAllowed('futures', ['futures']))
-  assert.equal(lockedText('futures', false), '這個帳號沒有「小台模擬」的權限')
+  assert.equal(lockedText('futures', false), '這個帳號沒有「台指期」的權限') // T-451 起分頁改名（小台模擬＋大台、微台）
   const app = read('src/cloud/CloudApp.tsx')
   assert.match(app, /features\.includes\('futures'\) && \(/)
   assert.match(app, /tab === 'futures' \? \(\s*<FuturesPage refresh=\{refresh\} \/>/)
@@ -204,4 +206,44 @@ test('T-450 AC6 秒級復盤：拉到某一秒——價用那一秒以前最後�
 
 test('T-450 AC6 上一個／下一個買賣點：成交與平倉的時間照先後', () => {
   assert.deepEqual(fillTimes(day()), ['08:50:01', '09:05:41', '11:15:01'])
+})
+
+// ── T-451 大台、微台行情（使用者 2026-10-27：「我也要微台跟大台的資料」「放到網站」） ─────────────────
+test('T-451 AC2 大台／微台三支端點只給 admin、在讀資料庫之前擋、不進暫存；商品只認 TX、TMF', () => {
+  for (const f of ['functions/api/futures/quotes/index.ts', 'functions/api/futures/quotes/days.ts', 'functions/api/futures/quotes/seconds.ts']) {
+    const src = read(f)
+    assert.match(src, /export const onRequestGet: PagesFunction<Env> = async \(ctx\) => \(await denied\(ctx\.request, 'futures', ctx\.env\)\) \?\? handle\(ctx\)/, f)
+    assert.ok(!src.includes('cached('), f)
+    assert.match(src, /if \(!productOk\(product\)\) return fail\(400/, f) // 先驗商品才查資料庫
+  }
+  assert.ok(productOk('TX') && productOk('TMF'))
+  assert.ok(!productOk('MTX') && !productOk(null) && !productOk("TX' OR 1=1"))
+  assert.ok(QUOTES_NOT_READY.includes('fubon_live.py --upload'))
+})
+
+test('T-451 AC3 大台／微台復盤跟小台同一套規則：拉到某一秒，價用那一秒以前最後一筆、沒走完的那一分鐘 K 棒不算', () => {
+  const bars = day().bars
+  const secs = decodeSeconds(SECS)
+  const a = barsAt(bars, '08:50:00', secs)
+  assert.deepEqual(a.bars.map((b) => b[0]), ['08:45', '08:49'])
+  assert.equal(a.price, 47320)
+  const m = barsAt(bars, '08:50')
+  assert.deepEqual(m.bars.map((b) => b[0]), ['08:45', '08:49', '08:50']) // 1 分 K：含那一分鐘
+  assert.equal(m.price, 47310)
+  assert.deepEqual(replayAt(day(), '08:50:00', secs).bars, a.bars) // 小台的 replayAt 也是用它
+})
+
+test('T-451 漲跌：點數與百分比；沒有昨收或沒有價就不算', () => {
+  const c = change(47320, 47000)
+  assert.ok(c !== null && c.pts === 320 && Math.abs(c.pct - 320 / 47000) < 1e-12)
+  assert.equal(change(null, 47000), null)
+  assert.equal(change(47320, null), null)
+})
+
+test('T-451 AC5 分頁改名「台指期」，上面切小台・模擬單／大台／微台', () => {
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /\{ key: 'MTX', label: '小台・模擬單' \}/)
+  assert.match(page, /\{ key: 'TX', label: '大台' \}/)
+  assert.match(page, /\{ key: 'TMF', label: '微台' \}/)
+  assert.match(read('src/cloud/CloudApp.tsx'), /onClick=\{\(\) => setTab\('futures'\)\}>\s*台指期/)
 })

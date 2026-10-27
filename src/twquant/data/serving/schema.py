@@ -968,6 +968,36 @@ FUTURES_PAPER_SECONDS_SPEC = TableSpec(
     snapshot=True,
 )
 
+# 大台、微台行情（T-451／D-220 修訂，使用者：「我也要微台跟大台的資料」「放到網站」）：一天一個商品一列（TX 大台、TMF 微台）。
+# payload＝每分鐘 K（含 VWAP）、最新價、昨收；盤中每 15 秒覆蓋、收盤定稿。只是行情，不做模擬單（模擬單只跑小台）。
+# 寫入者同 FUTURES_PAPER_SPEC（fubon_live.py；--replay-quotes 是期交所逐筆另存重算），建表語句一字不差。只給 admin。
+FUTURES_QUOTES_SPEC = TableSpec(
+    "futures_quotes",
+    (
+        ("day", "date"),
+        ("product", "text"),  # TX｜TMF（期交所代號）
+        ("source", "text"),
+        ("status", "text"),
+        ("payload", "jsonb"),
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("day", "product"),
+    snapshot=True,
+)
+
+# 大台、微台的秒級復盤（同 FUTURES_PAPER_SECONDS_SPEC 的編碼，多一欄 product）：收盤後才寫。
+FUTURES_QUOTES_SECONDS_SPEC = TableSpec(
+    "futures_quotes_seconds",
+    (
+        ("day", "date"),
+        ("product", "text"),
+        ("payload", "jsonb"),
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("day", "product"),
+    snapshot=True,
+)
+
 # 易跌標記（T-391／D-193）：D-192 模型對當天大盤精選 15 檔的機率，機率最高 5 檔 flagged。只給人看；小表全史保留。
 PICK_DOWN_RISK_SPEC = TableSpec(
     "pick_down_risk",
@@ -1106,6 +1136,8 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     PICK_DOWN_RISK_SPEC,
     FUTURES_PAPER_SPEC,
     FUTURES_PAPER_SECONDS_SPEC,
+    FUTURES_QUOTES_SPEC,
+    FUTURES_QUOTES_SECONDS_SPEC,
     BROKER_DAYTRADE_EVENTS_SPEC,
     MAIN_FORCE_DAILY_SPEC,
 )

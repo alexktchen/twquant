@@ -1,6 +1,7 @@
 /* 小台模擬（T-450／D-220）：地鐵告示——顏色分類、大字、少字；做多紅、放空綠（台股漲紅跌綠） */
 .cq-fu { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 32px; }
-.cq-fu-mode { padding: 0; max-width: 360px; }
+.cq-fu-mode, .cq-fu-product { padding: 0; max-width: 420px; }
+.cq-fu-product button { font-size: 16px; font-weight: 600; }
 .cq-fu-mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; }
 .cq-fu-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mute); }
 .cq-fu-pick select {

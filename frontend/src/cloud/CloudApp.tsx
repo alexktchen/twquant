@@ -397,7 +397,7 @@ export default function CloudApp() {
           )}
           {features.includes('futures') && (
             <button className={tab === 'futures' ? 'on' : ''} onClick={() => setTab('futures')}>
-              小台模擬
+              台指期
             </button>
           )}
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
