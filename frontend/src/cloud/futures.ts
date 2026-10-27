@@ -347,8 +347,8 @@ export function gapSub(d: FuturesDay, g: GapFail, s: GapSleeve, st: SleeveState,
 /** 跳空百分比的寫法：+0.56%／-0.12%。 */
 export const signedPct = (v: number | null): string => (v === null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(2)}%`)
 
-/** 開高走低圖上的水平線（只畫 cut 那一刻已經知道的）：開盤（A、C 的觸發）、昨收（C 的停利）、09:00 後的區間低點（B 的觸發）、持倉的停損。 */
-export function gapLevels(d: FuturesDay, g: GapFail, view: ReplayView<GapSleeve>): { price: number; title: string }[] {
+/** 開高走低圖上的水平線（只畫 cut 那一刻已經知道的）：開盤（A、C 的觸發）、昨收（C 的停利）、09:00 後的區間低點（B 的觸發）、持倉的停損（T-454 起給帳戶的那一刻，只畫帳戶真的持有的）。 */
+export function gapLevels(d: FuturesDay, g: GapFail, view: { cut: string; sleeves: Record<GapSleeve, SleeveState> }): { price: number; title: string }[] {
   if (!g.active || d.open === null) return []
   const out = [
     { price: d.open, title: '開盤' },
@@ -418,8 +418,8 @@ export const tone = (v: number | null): 'up' | 'down' | 'plain' => (v === null |
 
 // ── T-453：兩個策略合在同一個畫面、每日損益日曆（使用者 2026-10-27：「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」） ──
 
-/** 時間軸上的事件標上屬於哪個策略（兩個策略合在同一條時間軸）。 */
-export type TaggedEvent = FuturesEvent & { strategy: Strategy }
+/** 時間軸上的事件標上屬於哪個策略（兩個策略合在同一條時間軸）；account＝帳戶跳過的訊號（T-454）。 */
+export type TaggedEvent = FuturesEvent & { strategy: Strategy | 'account' }
 
 const byTime = <T extends { time: string }>(a: T, b: T) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0)
 
@@ -428,26 +428,130 @@ export function mergeEvents(combo: readonly FuturesEvent[], gap: readonly Future
   return [...combo.map((e) => ({ ...e, strategy: 'combo' as const })), ...gap.map((e) => ({ ...e, strategy: 'gap' as const }))].sort(byTime)
 }
 
+// ── T-454：實際帳戶，多空各最多 1 口（使用者 2026-10-27：「多空都持有一口就好」→ 同時要空時「A 優先」、「保留對照」） ──
+
+/** 每個子帳戶是多還是空。 */
+export const SIDE_OF: Record<Sleeve, 1 | -1> = { ORB_LONG: 1, NOISE_SHORT: -1, GAP_A: -1, GAP_B: -1, GAP_C: -1 }
+
+/** 帳戶同一秒有好幾條要進場時的順序：A、B、C、噪音區（多單只有開盤突破一條）。 */
+export const ACCOUNT_PRIORITY: readonly Sleeve[] = ['ORB_LONG', 'GAP_A', 'GAP_B', 'GAP_C', 'NOISE_SHORT']
+
+/** 一筆部位：已平倉的（有 trade）或還沒出場的（exit_time 是 null）。 */
+export type Leg = { sleeve: Sleeve; side: 1 | -1; entry_time: string; exit_time: string | null; trade: FuturesTrade | null }
+/** 帳戶跳過的部位；by＝當時帳戶裡同方向那一口是哪一條。 */
+export type SkippedLeg = Leg & { by: Sleeve }
+
+const sec8 = (t: string) => t.slice(0, 8)
+
+/**
+ * 帳戶多空各最多 1 口：照進場時間先到先做（同一秒照 ACCOUNT_PRIORITY），同方向還有部位時，後來的整筆跳過
+ * （不會等前一口出場再中途補進）。同一秒出場又進場算空出來了。多單、空單各算各的。
+ */
+export function pickLegs(legs: readonly Leg[]): { taken: Leg[]; skipped: SkippedLeg[] } {
+  const rank = (x: Sleeve) => ACCOUNT_PRIORITY.indexOf(x)
+  const sorted = [...legs].sort((a, b) => {
+    const ta = sec8(a.entry_time)
+    const tb = sec8(b.entry_time)
+    return ta < tb ? -1 : ta > tb ? 1 : rank(a.sleeve) - rank(b.sleeve)
+  })
+  const holding = new Map<1 | -1, Leg>()
+  const taken: Leg[] = []
+  const skipped: SkippedLeg[] = []
+  for (const leg of sorted) {
+    const h = holding.get(leg.side)
+    if (h && (h.exit_time === null || sec8(h.exit_time) > sec8(leg.entry_time))) {
+      skipped.push({ ...leg, by: h.sleeve })
+      continue
+    }
+    taken.push(leg)
+    holding.set(leg.side, leg)
+  }
+  return { taken, skipped }
+}
+
+/** 已平倉的成交 → 部位。 */
+export const closedLegs = (trades: readonly FuturesTrade[]): Leg[] =>
+  trades.map((t) => ({ sleeve: t.sleeve, side: t.side, entry_time: t.entry_time, exit_time: t.exit_time, trade: t }))
+
+const stateOf = (d: FuturesDay, s: Sleeve): SleeveState =>
+  s === 'ORB_LONG' || s === 'NOISE_SHORT' ? d.sleeves[s] : (d.gap_fail?.sleeves[s] ?? FLAT)
+
+const FLAT: SleeveState = { position: 0, entry_price: null, realized: 0, open_pnl: null }
+
+/** 那一天所有子帳戶的部位：已平倉的，加上盤中還沒出場的（進場時間取那個子帳戶最後一次成交事件）。 */
+export function dayLegs(d: FuturesDay): Leg[] {
+  const legs = closedLegs([...d.trades, ...(d.gap_fail?.trades ?? [])])
+  const events = [...d.events, ...(d.gap_fail?.events ?? [])]
+  for (const s of d.gap_fail ? [...SLEEVES, ...GAP_SLEEVES] : SLEEVES) {
+    const st = stateOf(d, s)
+    if (st.position === 0 || st.entry_price === null) continue
+    const fill = [...events].reverse().find((e) => e.sleeve === s && e.kind === 'fill')
+    if (fill) legs.push({ sleeve: s, side: st.position as 1 | -1, entry_time: fill.time, exit_time: null, trade: null })
+  }
+  return legs
+}
+
+/** 實際帳戶的帳本：只留做到的部位（每條原本的成交照舊，只是挑出帳戶做到的）；跳過的另外列。 */
+export function accountBook(d: FuturesDay): Book<Sleeve> & { skipped: SkippedLeg[] } {
+  const { taken, skipped } = pickLegs(dayLegs(d))
+  const sleeves: Sleeve[] = d.gap_fail ? [...SLEEVES, ...GAP_SLEEVES] : [...SLEEVES]
+  const states = Object.fromEntries(sleeves.map((x) => [x, FLAT])) as Record<Sleeve, SleeveState>
+  for (const l of taken) if (l.exit_time === null) states[l.sleeve] = stateOf(d, l.sleeve)
+  return { sleeves, trades: taken.flatMap((l) => (l.trade ? [l.trade] : [])), states, events: [...d.events, ...(d.gap_fail?.events ?? [])], skipped }
+}
+
+/** 帳戶跳過的訊號寫進時間軸。 */
+export function skipEvents(skipped: readonly SkippedLeg[]): TaggedEvent[] {
+  return skipped.map((l) => {
+    const word = l.side > 0 ? '多' : '空'
+    return {
+      time: sec8(l.entry_time),
+      kind: 'info' as const,
+      sleeve: l.sleeve,
+      strategy: 'account' as const,
+      text: `${SLEEVE_NAME[l.sleeve]}要${l.side > 0 ? '做多' : '放空'}，但帳戶已經有${word}單（${SLEEVE_NAME[l.by]}）→ 這筆不做`,
+    }
+  })
+}
+
+/** 帳戶一邊（多或空）在那一刻：損益、一句話（持有哪一條的 1 口、平倉幾筆、空手）。 */
+export function accountSide(v: ReplayView<Sleeve>, side: 1 | -1): { value: number; text: string } {
+  const mine = (Object.keys(v.sleeves) as Sleeve[]).filter((x) => SIDE_OF[x] === side)
+  const value = mine.reduce((a, x) => a + v.sleeves[x].realized + (v.sleeves[x].open_pnl ?? 0), 0)
+  const held = mine.find((x) => v.sleeves[x].position !== 0)
+  if (held) return { value, text: `${side > 0 ? '持多' : '持空'} 1 口・${SLEEVE_NAME[held]} @ ${v.sleeves[held].entry_price?.toFixed(0) ?? '—'}` }
+  const exits = v.fills.filter((f) => f.kind === 'exit' && SIDE_OF[f.sleeve] === side).length
+  return { value, text: exits ? `平倉 ${exits} 筆` : '空手' }
+}
+
 export type DayView = {
   cut: string
   bars: FuturesDay['bars']
   price: number | null
+  /** 每條各做 1 口的對照 */
   combo: ReplayView<ComboSleeve>
   /** 那一天的資料沒有開高走低（10-27 之前上傳的）→ null */
   gap: ReplayView<GapSleeve> | null
-  /** 兩個策略合計 */
-  total: number
+  /** 實際帳戶（多空各最多 1 口）：上面的合計、圖上的買賣點、成交明細都是它 */
+  account: ReplayView<Sleeve>
+  /** 帳戶做到的成交（全天；畫面再依 cut 篩） */
+  accountTrades: FuturesTrade[]
+  /** 到 cut 為止帳戶跳過的訊號 */
+  skipped: SkippedLeg[]
   fills: Fill[]
   events: TaggedEvent[]
 }
 
-/** 拉到 cut 那一刻，兩個策略合起來看（各自的規則同 replayBook，不劇透）。 */
+/** 拉到 cut 那一刻：實際帳戶，加上兩個策略各自的對照（規則同 replayBook，不劇透）。 */
 export function dayAt(d: FuturesDay, cut: string, secs: Seconds | null = null): DayView {
   const combo = replayAt(d, cut, secs)
   const book = gapBook(d)
   const gap = book ? replayBook(d, book, cut, secs) : null
-  const fills: Fill[] = [...combo.fills, ...(gap?.fills ?? [])].sort(byTime)
-  return { cut, bars: combo.bars, price: combo.price, combo, gap, total: combo.total + (gap?.total ?? 0), fills, events: mergeEvents(combo.events, gap?.events ?? []) }
+  const acct = accountBook(d)
+  const account = replayBook(d, acct, cut, secs)
+  const skipped = acct.skipped.filter((l) => within(l.entry_time, cut))
+  const events = [...mergeEvents(combo.events, gap?.events ?? []), ...skipEvents(skipped)].sort(byTime)
+  return { cut, bars: combo.bars, price: combo.price, combo, gap, account, accountTrades: acct.trades, skipped, fills: account.fills, events }
 }
 
 /** 兩個策略所有買賣點的時間（「上一個／下一個買賣點」）。 */
@@ -474,20 +578,31 @@ export function gapSummary(g: GapFail | null, v: ReplayView<GapSleeve> | null): 
 }
 
 /** 日曆上看哪一個：兩個策略合計、只看固定組合、只看開高走低。 */
-export type CalView = 'all' | Strategy
-export const CAL_VIEWS: readonly CalView[] = ['all', 'combo', 'gap']
-export const CAL_VIEW_NAME: Record<CalView, string> = { all: '合計', combo: '固定組合', gap: '開高走低' }
+/** 日曆上看哪一個：實際帳戶（多空各最多 1 口，T-454）、只看固定組合、只看開高走低（每條各 1 口的對照）。 */
+export type CalView = 'account' | Strategy
+export const CAL_VIEWS: readonly CalView[] = ['account', 'combo', 'gap']
+export const CAL_VIEW_NAME: Record<CalView, string> = { account: '帳戶', combo: '固定組合', gap: '開高走低' }
 
-/** 日期清單的一列（/api/futures/days、/quotes/days）：total＝固定組合、gap_total＝開高走低。 */
-export type PnlRow = { day: string; total?: number | null; gap_total?: number | null }
+/** 日期清單的一列（/api/futures/days、/quotes/days）：total＝固定組合、gap_total＝開高走低（每條各 1 口）；trades、gap_trades＝兩邊已平倉的成交（算帳戶用）。 */
+export type PnlRow = {
+  day: string
+  total?: number | null
+  gap_total?: number | null
+  trades?: FuturesTrade[] | null
+  gap_trades?: FuturesTrade[] | null
+}
 
-/** 那一天的損益：合計＝兩個策略相加（只有一邊有資料就用那一邊）；兩邊都沒有（只有行情）→ null。 */
+/** 那一天實際帳戶已平倉的損益（盤中還沒出場的不算）；沒有任何成交資料（只有行情）→ null。 */
+export function accountPnl(r: PnlRow): number | null {
+  if (r.trades == null && r.gap_trades == null) return null
+  return pickLegs(closedLegs([...(r.trades ?? []), ...(r.gap_trades ?? [])])).taken.reduce((a, l) => a + (l.trade?.net_pnl ?? 0), 0)
+}
+
+/** 那一天的損益：帳戶、固定組合或開高走低；沒有資料 → null。 */
 export function dayPnl(r: PnlRow, view: CalView): number | null {
-  const c = r.total ?? null
-  const g = r.gap_total ?? null
-  if (view === 'combo') return c
-  if (view === 'gap') return g
-  return c === null && g === null ? null : (c ?? 0) + (g ?? 0)
+  if (view === 'combo') return r.total ?? null
+  if (view === 'gap') return r.gap_total ?? null
+  return accountPnl(r)
 }
 
 /** 一個月的週一到週五格子：一週一列、五格；不是這個月的格子是 null。月份寫 YYYY-MM。 */
