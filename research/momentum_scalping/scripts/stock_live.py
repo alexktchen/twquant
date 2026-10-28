@@ -210,61 +210,6 @@ def seconds_local(secs: Dict[str, Dict[int, Tuple[float, float]]]) -> Dict[str, 
     return {sym: {"t0": "09:00:00", "s": sorted(v), "p": [v[k][0] for k in sorted(v)]} for sym, v in secs.items()}
 
 
-STATE_TEXT = {"BULL": "多頭", "NORMAL": "正常", "WEAK": "偏弱", "PANIC": "恐慌"}
-
-
-def render_html(p: Dict[str, Any]) -> str:
-    """本機看盤頁（不上雲端時用）：每 15 秒自動重新整理；只用瀏覽器打開檔案，不需要伺服器。"""
-    import html
-
-    esc = html.escape
-
-    def pct(v):
-        return "—" if v is None else f"{v:+.2f}%"
-
-    def cls(v):
-        return "" if not v else ("up" if v > 0 else "down")
-
-    def money(v):
-        return "—" if v is None else f"{v:+,.0f}"
-
-    m, a = p["market"], p["account"]
-    held = {x["symbol"] for x in p["positions"]}
-    done = {x["symbol"] for x in p["trades"]}
-    board = "".join(
-        f'<tr class="{"held" if r["symbol"] in held else ""}"><td>{r.get("rank") or ""}</td><td>{esc(r.get("name") or "")} <small>{r["symbol"]}</small>'
-        f'{" <b class=tag>持有</b>" if r["symbol"] in held else (" <i class=tag2>做過</i>" if r["symbol"] in done else "")}</td>'
-        f'<td class="{cls(r.get("change_pct"))}">{pct(r.get("change_pct"))}</td><td>{"" if r.get("score") is None else round(r["score"])}</td>'
-        f'<td>{pct(r.get("market_relative_strength"))}</td></tr>' for r in p["board"])
-    pos = "".join(
-        f'<tr><td>{esc(x["name"])} <small>{x["symbol"]}</small></td><td>{x["quantity"]} 張 @ {x["entry_price"]:g}</td><td>{x["stop"]:g}</td>'
-        f'<td>{x["last"] if x["last"] is not None else "—"}</td><td class="{cls(x["open_pnl"])}">{money(x["open_pnl"])}</td></tr>'
-        for x in p["positions"]) or '<tr><td colspan=5 class=mute>沒有持股</td></tr>'
-    trades = "".join(
-        f'<tr><td>{esc(t["name"])} <small>{t["symbol"]}</small></td><td>{t["entry_time"]} {t["entry_price"]:g}</td><td>{t["exit_time"]} {t["exit_price"]:g}</td>'
-        f'<td>{esc(E.EXIT_TEXT.get(t["exit_reason"], t["exit_reason"]))}</td><td class="{cls(t["net_pnl"])}">{t["net_pnl"]:+,.0f}</td></tr>'
-        for t in reversed(p["trades"])) or '<tr><td colspan=5 class=mute>還沒有賣出的交易</td></tr>'
-    events = "".join(f'<li><time>{e["time"]}</time> <b>{esc(e["name"])}</b> {esc(e["text"])}</li>' for e in reversed(p["events"][-60:]))
-    return f"""<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta http-equiv="refresh" content="15">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>當沖 {p["day"]} {p.get("board_time") or ""}</title>
-<style>body{{background:#111317;color:#e8eaed;font:15px/1.5 system-ui,"Microsoft JhengHei",sans-serif;margin:16px;max-width:980px}}
-h2{{font-size:17px;margin:18px 0 6px}}table{{border-collapse:collapse;width:100%}}td,th{{padding:6px 8px;border-bottom:1px solid #2a2d33;text-align:left}}
-th{{color:#9aa0ac;font-weight:500}}small,.mute{{color:#9aa0ac}}.up{{color:#ff4d4f}}.down{{color:#22c55e}}tr.held{{background:rgba(255,77,79,.10)}}
-.tag{{color:#ff4d4f;font-size:12px}}.tag2{{color:#9aa0ac;font-size:12px;font-style:normal}}.kpi{{display:flex;gap:12px;flex-wrap:wrap}}
-.kpi div{{background:#1b1e24;border-radius:10px;padding:10px 14px;min-width:150px}}.kpi b{{font-size:22px;display:block}}
-ul{{list-style:none;padding:0;margin:0}}li{{padding:5px 0;border-bottom:1px solid #2a2d33}}time{{color:#9aa0ac;margin-right:6px}}</style></head><body>
-<div><b>{p["day"]}</b>　{"盤中" if p["status"] == "live" else "已收盤"}・{p.get("board_time") or "—"} 掃描　大盤 {STATE_TEXT.get(m.get("state") or "", m.get("state") or "—")}
-　加權 <span class="{cls(m.get("taiex_pct"))}">{pct(m.get("taiex_pct"))}</span>　櫃買 <span class="{cls(m.get("tpex_pct"))}">{pct(m.get("tpex_pct"))}</span>
-　<small>更新 {p["updated_at"][11:19]}（每 15 秒自動重新整理）</small></div>
-<div class="kpi" style="margin-top:10px"><div>帳戶合計<b class="{cls(a["total"])}">{a["total"]:+,.0f}</b></div><div>已實現<b class="{cls(a["realized"])}">{a["realized"]:+,.0f}</b></div>
-<div>持股未實現<b class="{cls(a["open_pnl"])}">{a["open_pnl"]:+,.0f}</b></div><div>已賣 / 進場<b>{a["closed"]} / {a["entries"]}</b></div></div>
-<h2>強勢股榜（網友原版 Scanner 前 {len(p["board"])} 檔）</h2><table><tr><th>#</th><th>股票</th><th>漲幅</th><th>分數</th><th>比大盤</th></tr>{board}</table>
-<h2>持股</h2><table><tr><th>股票</th><th>買進</th><th>停損</th><th>現價</th><th>現在賣的話</th></tr>{pos}</table>
-<h2>成交（已扣手續費、證交稅）</h2><table><tr><th>股票</th><th>買進</th><th>賣出</th><th>原因</th><th>淨損益</th></tr>{trades}</table>
-<h2>時間軸（最新在上）</h2><ul>{events or '<li class=mute>還沒有事件</li>'}</ul>
-<p class="mute">只記帳、沒有送任何委託。富邦行情只供本人使用。</p></body></html>"""
-
-
 # --------------------------------------------------------------------------- 上傳
 class Uploader:
     """背景執行緒寫 serving.stock_paper（只留最新一份）；失敗記下來、下一份再試，不擋錄製。"""
@@ -503,7 +448,6 @@ def replay_minute(args, mods, params, config, log) -> int:
     payload = rec.payload("closed", "minute_replay", config, datetime.fromisoformat(f"{day}T13:40:00").replace(tzinfo=M.TPE))
     charts = charts_for(rec.traded, {s: mk.bars.get(s, []) for s in rec.traded}, secs)
     (out / "payload.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    (out / "board.html").write_text(render_html(payload), encoding="utf-8")
     (out / "history.json").write_text(json.dumps(rec.history(charts), ensure_ascii=False), encoding="utf-8")
     (out / "seconds.json").write_text(json.dumps(seconds_local(secs)), encoding="utf-8")
     M.write_csv(out / "trades.csv", engine.trades)
@@ -672,9 +616,6 @@ def live(args, mods, params, config, root: Path) -> int:
             tmp = out / "live_payload.json.tmp"
             tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             tmp.replace(out / "live_payload.json")
-            page = out / "board.html.tmp"
-            page.write_text(render_html(payload), encoding="utf-8")
-            page.replace(out / "board.html")
             if uploader is not None:
                 uploader.push(payload)
             pushed = now
@@ -701,7 +642,6 @@ def live(args, mods, params, config, root: Path) -> int:
     payload = rec.payload("closed", "fubon_live", config, datetime.now(M.TPE))
     history = rec.history(charts_for(rec.traded, minute_bars, secs))
     (out / "payload.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    (out / "board.html").write_text(render_html(payload), encoding="utf-8")
     (out / "history.json").write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
     (out / "seconds.json").write_text(json.dumps(seconds_local(secs)), encoding="utf-8")
     M.write_csv(out / "trades.csv", engine.trades)
