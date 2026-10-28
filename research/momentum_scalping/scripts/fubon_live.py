@@ -281,7 +281,8 @@ class GapFail:
 MS_SLEEVE = "MS_LONG"
 MS_COMMIT = "1dea51b"  # seromitama/Momentum_Scalping 用的版本（studies/ms_tmf 同一版）
 MS_SETUP_TEXT = {"MOMENTUM/INITIAL_BREAKOUT": "動能・初次突破", "MOMENTUM/FIRST_PULLBACK_REBREAK": "動能・回檔再突破",
-                 "TREND/TREND_INITIAL_ENTRY": "趨勢・初次進場"}
+                 "TREND/TREND_INITIAL_ENTRY": "趨勢・初次進場", "TREND/TREND_RESUME": "趨勢・恢復",
+                 "MOMENTUM/MOMENTUM_CONTINUATION": "動能・延續", "MOMENTUM/PERSISTENT_MOMENTUM_START": "動能・持續啟動"}
 MS_EXIT_TEXT = {"EMA_TREND_BREAK": "EMA 死叉", "HIGHER_LOW_BREAK": "跌破前低", "MOMENTUM_STRUCTURE_BREAK_FULL": "動能結構破壞",
                 "MOMENTUM_DECAY_PARTIAL": "動能衰退減碼", "EMERGENCY_STOP": "2.5% 緊急停損", "TIME_EXIT": "13:00 清倉",
                 "MARKET_TREND_INVALIDATED": "大盤轉弱", "RS_FAILURE": "強度轉弱", "UNKNOWN_STRATEGY_STOP": "停損",
