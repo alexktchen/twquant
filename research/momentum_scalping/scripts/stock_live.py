@@ -48,12 +48,19 @@ START_AT, OPEN_AT, STOP_AT, LOGIN_UNTIL = "08:30", "09:00", "13:36", "09:30"
 SNAPSHOT_EVERY_S = 30.0
 UPLOAD_EVERY_S = 15.0
 MAX_SUBSCRIPTIONS = 250       # 2026-10-28 實測一次訂 260 檔沒報錯；超過就退訂已出榜、沒持倉的
+BOARD_HISTORY_EVERY_S = 60     # 復盤的榜單幾秒存一份（掃描是 30 秒一輪）
 EVENTS_KEEP = 150             # 網站時間軸最多帶幾則（盤中每 15 秒重抓，Supabase 每月流出有上限）
 INDEX_SYMBOLS = {"TAIEX": "IX0001", "TPEX": "IX0043"}
 MS_REPO_DEFAULT = HERE.parents[3] / "Momentum_Scalping"
 SETUP_TEXT = {"MOMENTUM/INITIAL_BREAKOUT": "動能・初次突破", "MOMENTUM/FIRST_PULLBACK_REBREAK": "動能・回檔再突破",
               "MOMENTUM/MOMENTUM_CONTINUATION": "動能・延續", "MOMENTUM/PERSISTENT_MOMENTUM_START": "動能・持續啟動",
               "TREND/TREND_INITIAL_ENTRY": "趨勢・初次進場", "TREND/TREND_RESUME": "趨勢・恢復"}
+
+
+def lots(shares: Any) -> float:
+    """原版的數量是股；網站一律寫張（1 張 = 1,000 股，零股就有小數）。"""
+    v = float(shares) / 1000
+    return int(v) if v.is_integer() else round(v, 3)
 
 
 def hms(t_us: int) -> str:
@@ -104,6 +111,7 @@ class Recorder:
         self.events: List[Dict[str, Any]] = []
         self.board_history: List[list] = []   # [HH:MM:SS, [[代號, 漲幅%, 分數], ...]]（復盤：那一刻榜上有誰，照名次）
         self.names: Dict[str, str] = {}
+        self.last_board_us = 0
         self.traded: set = set()
 
     @property
@@ -116,24 +124,27 @@ class Recorder:
 
     def on_event(self, kind: str, t_us: int, info: Dict[str, Any]) -> None:
         if kind == "board":
+            if self.board_history and t_us - self.last_board_us < BOARD_HISTORY_EVERY_S * M.US:
+                return
+            self.last_board_us = t_us
             rows = []
             for r in info["board"]:
                 self.names[r["symbol"]] = r.get("name") or self.names.get(r["symbol"], "")
-                rows.append([r["symbol"], None if r.get("change_pct") is None else round(float(r["change_pct"]), 2),
-                             None if r.get("score") is None else round(float(r["score"]), 1)])
+                rows.append([r["symbol"], None if r.get("change_pct") is None else round(float(r["change_pct"]), 1),
+                             None if r.get("score") is None else round(float(r["score"]))])
             self.board_history.append([hms(t_us), rows])
             return
         sym, name = info.get("symbol"), info.get("name") or ""
         if kind == "signal":
             setup = SETUP_TEXT.get(f"{info.get('strategy')}/{info.get('setup')}", f"{info.get('strategy')}/{info.get('setup')}")
-            self.note(t_us, "signal", sym, name, f"{setup}訊號，價 {info['price']:g}、停損 {info['stop']:g} → 模擬買進 {info['quantity']} 張")
+            self.note(t_us, "signal", sym, name, f"{setup}訊號，價 {info['price']:g}、停損 {info['stop']:g} → 模擬買進 {lots(info['quantity'])} 張")
         elif kind == "fill":
             self.traded.add(sym)
-            self.note(t_us, "fill", sym, name, f"模擬買進 {info['quantity']} 張 @ {info['price']:g}，停損 {info['stop']:g}")
+            self.note(t_us, "fill", sym, name, f"模擬買進 {lots(info['quantity'])} 張 @ {info['price']:g}，停損 {info['stop']:g}")
         elif kind == "exit_signal":
-            self.note(t_us, "signal", sym, name, f"{E.EXIT_TEXT.get(info['reason'], info['reason'])}（價 {info['price']:g}）→ 賣出 {info['quantity']} 張")
+            self.note(t_us, "signal", sym, name, f"{E.EXIT_TEXT.get(info['reason'], info['reason'])}（價 {info['price']:g}）→ 賣出 {lots(info['quantity'])} 張")
         elif kind == "partial":
-            self.note(t_us, "exit", sym, name, f"減碼賣出 {info['quantity']} 張 @ {info['price']:g}（{E.EXIT_TEXT.get(info['reason'], info['reason'])}）")
+            self.note(t_us, "exit", sym, name, f"減碼賣出 {lots(info['quantity'])} 張 @ {info['price']:g}（{E.EXIT_TEXT.get(info['reason'], info['reason'])}）")
         elif kind == "closed":
             t = info
             reason = E.EXIT_TEXT.get(t["final_exit_reason"], t["final_exit_reason"])
@@ -152,7 +163,7 @@ class Recorder:
         for t in self.engine.trades:
             out.append({"symbol": t["symbol"], "name": t["name"], "market": t["market"], "strategy": t["strategy"],
                         "setup": SETUP_TEXT.get(f"{t['strategy']}/{t['setup']}", t["setup"]),
-                        "entry_time": t["entry_time"][11:19], "entry_price": t["entry_price"], "quantity": t["quantity"],
+                        "entry_time": t["entry_time"][11:19], "entry_price": t["entry_price"], "quantity": lots(t["quantity"]),
                         "stop_price": t["stop_price"], "exit_time": t["exit_time"][11:19], "exit_price": t["avg_exit_price"],
                         "exit_reason": t["final_exit_reason"], "net_pnl": t["net_pnl"], "net_ret_pct": t["net_ret_pct"],
                         "fees": t["fees"], "tax": t["tax"], "hold_minutes": t["hold_minutes"]})
@@ -191,9 +202,12 @@ def charts_for(symbols, minute_bars: Dict[str, List[tuple]], secs: Dict[str, Dic
             pv += (b[2] + b[3] + b[4]) / 3 * b[5]
             vol += b[5]
             bars.append([hms(b[0])[:5], b[1], b[2], b[3], b[4], round(pv / vol, 2) if vol else b[4]])
-        keys = sorted(secs.get(sym, {}))
-        out[sym] = {"bars": bars, "secs": {"t0": "09:00:00", "s": keys, "p": [secs[sym][k][0] for k in keys]} if keys else None}
+        out[sym] = {"bars": bars, "secs": None}  # 秒級只留本機 seconds.json（每檔約 6 萬字元，網站復盤用 1 分 K 就夠）
     return out
+
+
+def seconds_local(secs: Dict[str, Dict[int, Tuple[float, float]]]) -> Dict[str, Any]:
+    return {sym: {"t0": "09:00:00", "s": sorted(v), "p": [v[k][0] for k in sorted(v)]} for sym, v in secs.items()}
 
 
 # --------------------------------------------------------------------------- 上傳
@@ -324,10 +338,15 @@ class MinuteMarket:
 
     def __init__(self, folder: Path, day: str):
         self.day = day
+        # 母體：產業代號最完整的那份（午夜後抓的代號表可能還沒換日，產業代號全空 → 類股強弱全算不出來）
         uni_files = sorted(folder.glob("universe_*.json"))
         if not uni_files:
             raise SystemExit(f"{folder} 沒有 universe_*.json")
-        self.universe = {(r["market"], r["symbol"]): r for r in json.loads(uni_files[-1].read_text(encoding="utf-8"))}
+        best = max(uni_files, key=lambda f: sum(1 for r in json.loads(f.read_text(encoding="utf-8")) if r.get("industry")))
+        self.universe = {(r["market"], r["symbol"]): r for r in json.loads(best.read_text(encoding="utf-8"))}
+        covered = sum(1 for r in self.universe.values() if r.get("industry"))
+        if covered < 0.9 * len(self.universe):
+            raise SystemExit(f"{best.name} 只有 {covered}/{len(self.universe)} 檔有產業代號，類股強弱會算錯")
         self.bars: Dict[str, List[tuple]] = {}
         self.prev_close: Dict[str, float] = {}
         self.index_bars: Dict[str, List[tuple]] = {}
@@ -381,6 +400,11 @@ class MinuteMarket:
         return rows, index
 
 
+def window(key, ticks: List[tuple], after: int, upto: int) -> List[tuple]:
+    """某檔在 (after, upto] 之間的逐筆，帶上自己的 key（用函式綁定；寫成迴圈裡的產生器會晚綁定成最後一檔）。"""
+    return [(x[0], x[1], key, x) for x in ticks if after < x[0] <= upto]
+
+
 def replay_minute(args, mods, params, config, log) -> int:
     day = args.replay_1m
     mk = MinuteMarket(Path(args.bars), day)
@@ -388,6 +412,8 @@ def replay_minute(args, mods, params, config, log) -> int:
     rec = Recorder(day, holder, log)
     engine = E.StockEngine(mods, params, day, config, mk.universe, mk.index_daily, rec.on_event)
     holder["engine"] = engine
+    if args.assume_day_trade:  # 歷史上沒有每天的當沖資格：全部當作可以當沖（報告要寫明）
+        engine.day_trade.update({sym: True for (_m, sym) in mk.universe})
     ticks_of: Dict[str, List[tuple]] = {}
     secs: Dict[str, Dict[int, Tuple[float, float]]] = defaultdict(dict)
     t0 = E.day_start_us(day, 9, 0)
@@ -397,12 +423,7 @@ def replay_minute(args, mods, params, config, log) -> int:
     log(f"{day}：{len(mk.bars)} 檔有 1 分 K（測試資料第一天沒有昨收的不算）")
     for T in range(t0 + step, end + 1, step):
         # 先把 (last_t, T] 之間、正在看的股票的逐筆依時間餵進去
-        streams = []
-        for key in list(engine.states):
-            sym = key[1]
-            ts = ticks_of.get(sym) or []
-            lo = next((i for i, x in enumerate(ts) if x[0] > last_t), len(ts))
-            streams.append(((x[0], x[1], key, x) for x in ts[lo:] if x[0] <= T))
+        streams = [window(key, ticks_of.get(key[1]) or [], last_t, T) for key in list(engine.states)]
         for t_us, _serial, key, tick in heapq.merge(*streams, key=lambda z: (z[0], z[1], z[2])):
             engine.on_tick(key, tick)
             if key[1] in rec.traded or key in engine.positions:
@@ -428,6 +449,7 @@ def replay_minute(args, mods, params, config, log) -> int:
     charts = charts_for(rec.traded, {s: mk.bars.get(s, []) for s in rec.traded}, secs)
     (out / "payload.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     (out / "history.json").write_text(json.dumps(rec.history(charts), ensure_ascii=False), encoding="utf-8")
+    (out / "seconds.json").write_text(json.dumps(seconds_local(secs)), encoding="utf-8")
     M.write_csv(out / "trades.csv", engine.trades)
     a = payload["account"]
     log(f"{day} 重播完：掃描 {engine.scan_stats['ROUNDS']} 輪、進出榜 {engine.watch_changes['in']}／{engine.watch_changes['out']} 次、"
@@ -469,11 +491,19 @@ def live(args, mods, params, config, root: Path) -> int:
                 return 1
             time.sleep(120)
     stock = sdk.marketdata.rest_client.stock
-    tickers = {}
-    for exchange in ("TWSE", "TPEx"):
-        for r in (stock.intraday.tickers(type="EQUITY", exchange=exchange, isNormal=True).get("data") or []):
-            tickers[str(r.get("symbol"))] = (("TWSE" if exchange == "TWSE" else "TPEX"), r.get("name"), str(r.get("industry") or ""))
-    universe = {(m, s): {"symbol": s, "market": m, "name": n, "industry": ind} for s, (m, n, ind) in tickers.items() if E.COMMON.match(s)}
+    while True:  # 代號表要有今天的、而且產業代號齊（2026-10-29 00:xx 抓到的產業代號全空）
+        tickers = {}
+        for exchange in ("TWSE", "TPEx"):
+            for r in (stock.intraday.tickers(type="EQUITY", exchange=exchange, isNormal=True).get("data") or []):
+                tickers[str(r.get("symbol"))] = (("TWSE" if exchange == "TWSE" else "TPEX"), r.get("name"), str(r.get("industry") or ""))
+        universe = {(m, s): {"symbol": s, "market": m, "name": n, "industry": ind} for s, (m, n, ind) in tickers.items() if E.COMMON.match(s)}
+        covered = sum(1 for v in universe.values() if v["industry"])
+        if len(universe) >= 1500 and covered >= 0.9 * len(universe):
+            break
+        log(f"代號表還不完整（普通股 {len(universe)} 檔、有產業代號 {covered} 檔），一分鐘後重抓")
+        if datetime.now(M.TPE) >= at("09:05"):
+            raise SystemExit("09:05 代號表還不完整，今天放棄（類股強弱會算錯）")
+        time.sleep(60)
     index_daily = index_daily_from_api(stock, day)
     holder: Dict[str, Any] = {"config_view": config_view(config, params)}
     rec = Recorder(day, holder, log)
@@ -607,6 +637,7 @@ def live(args, mods, params, config, root: Path) -> int:
     history = rec.history(charts_for(rec.traded, minute_bars, secs))
     (out / "payload.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     (out / "history.json").write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
+    (out / "seconds.json").write_text(json.dumps(seconds_local(secs)), encoding="utf-8")
     M.write_csv(out / "trades.csv", engine.trades)
     a = payload["account"]
     log(f"收盤：成交 {a['closed']} 筆、淨 {a['realized']:+,.0f} 元；掃描 {engine.scan_stats['ROUNDS']} 輪；警告 {dict(engine.warnings)}")

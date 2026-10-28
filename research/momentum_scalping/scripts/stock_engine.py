@@ -132,6 +132,32 @@ class StockEngine(M.DaySimulator):
             out.append(row)
         return out
 
+    def _refresh_market_and_scan(self, t_us: int) -> None:
+        """同原系統 runtime 的分法：大盤（漲跌家數）用全市場快照；類股強弱與 Scanner 只用當下成交金額前
+        scanner.active_universe_n（預設 500）檔＝原系統 gateway.get_active_universe()。
+        冷門股的最後成交時間很舊，混進類股會讓整個類股被判「資料過時」、趨勢策略永遠不合格（2026-10-29 重播查到）。"""
+        now = M.us_to_dt(t_us)
+        now_iso = now.isoformat(timespec="microseconds")
+        rows = self._scanner_rows(now_iso)
+        active = sorted(rows, key=lambda r: (-float(r.get("turnover") or 0.0), -int(r.get("volume") or 0),
+                                             r["market"], r["symbol"]))[: int(self.sp.active_universe_n)]
+        feed = self.index_feed
+        market_data = {
+            "taiex": feed.quote(self.day, "TAIEX", t_us, now_iso), "taiex_history": feed.history(self.day, "TAIEX"),
+            "tpex": feed.quote(self.day, "TPEX", t_us, now_iso), "tpex_history": feed.history(self.day, "TPEX"),
+            "twse_rows": [r for r in rows if r["market"] == "TWSE"], "tpex_rows": [r for r in rows if r["market"] != "TWSE"],
+            "sector_map": dict(self.sector_names), "session_state": "REGULAR", "session_trade_date": self.trade_date_compact,
+            "realtime_buy_data_ready": True, "breadth_snapshot_acquired_at": {"TWSE": now_iso, "TPEX": now_iso},
+            "permission_evaluated_at": now_iso,
+        }
+        context = dict(self.market_mod.calculate_market_context(market_data, params=self.mp, now=now))
+        context["market_snapshot"] = {"snapshot_id": context.get("data_fingerprint"), "stale": False,
+                                      "publication_state": "PUBLISHED", "refreshed_at": now_iso,
+                                      "session_trade_date": self.trade_date_compact}
+        self.market_context = self._finish_context(context, active, now, now_iso)
+        self.active_count = len(active)
+        self._scan(active, now_iso)
+
     def _sector_master(self) -> List[Dict[str, Any]]:
         return [{"symbol": k[1], "sector_name": self.sector_names.get(k[1], ""), "sector_code": str(v.get("industry") or "")}
                 for k, v in self.universe.items() if v.get("industry")]
@@ -265,16 +291,17 @@ class StockEngine(M.DaySimulator):
         for key, p in self.positions.items():
             state = self.states[key]
             trade = self.open_trades.get(key)
-            qty = int(p["managed_quantity"])
+            qty = int(p["managed_quantity"])  # 股（原版的數量單位）
             entry = float(p["entry_price"])
             last = state.price
             open_pnl = None
             if last is not None:
                 exit_ = last - self._tick(last, key[1])  # 現在賣的話：吃一檔
-                amount = exit_ * qty * 1000
-                open_pnl = (exit_ - entry) * qty * 1000 - self.cost.commission(amount) - self.cost.tax(amount) - (trade.buy_fee if trade else 0)
+                amount = exit_ * qty
+                open_pnl = (exit_ - entry) * qty - self.cost.commission(amount) - self.cost.tax(amount) - (trade.buy_fee if trade else 0)
             out.append({"symbol": key[1], "market": key[0], "name": state.name, "strategy": p.get("strategy_type"),
-                        "entry_time": trade.entry_time[11:19] if trade else None, "entry_price": entry, "quantity": qty,
+                        "entry_time": trade.entry_time[11:19] if trade else None, "entry_price": entry,
+                        "quantity": int(qty / 1000) if qty % 1000 == 0 else round(qty / 1000, 3),  # 張
                         "stop": float(p.get("effective_stop_price") or 0), "last": last,
                         "open_pnl": None if open_pnl is None else round(open_pnl, 0)})
         return out
@@ -282,8 +309,11 @@ class StockEngine(M.DaySimulator):
 
 def bar_ticks(day: str, minute_bars: Sequence[Tuple[int, float, float, float, float, int]], serial0: int = 0) -> List[tuple]:
     """1 分 K → 逐筆（同 studies/ms_tmf 的還原法：開 → 極值 → 極值 → 收，每 2 秒內插、價格取到跳動單位、量平均分）。
-    minute_bars：[(那根 K 的開始時間 μs, 開, 高, 低, 收, 量張)]；回傳的 volume 是到那一筆為止的累計張數。"""
+    minute_bars：[(那根 K 的開始時間 μs, 開, 高, 低, 收, 量張)]；回傳的 volume 是到那一筆為止的累計張數。
+    買賣價：1 分 K 沒有，假設一檔價差——往上成交在賣價（買價低一檔）、往下成交在買價（賣價高一檔）、平盤沿用上一筆的那一邊。
+    原版 Trading 沒有買賣價就拒絕買進（MISSING_BID_ASK），所以重播一定要有；盤中用富邦逐筆自帶的買賣價，不經過這裡。"""
     out, serial, cum = [], serial0, 0
+    last_p, at_ask = None, False
     path_s = (0, 20, 40, 59)
     secs = list(range(0, 59, 2)) + [59]
     for t0, o, h, low, c, v in minute_bars:
@@ -300,7 +330,12 @@ def bar_ticks(day: str, minute_bars: Sequence[Tuple[int, float, float, float, fl
         sizes = [v // n + (1 if k < v % n else 0) for k in range(n)]
         for s, p, size in zip(secs, prices, sizes):
             cum += size
-            out.append((t0 + s * M.US, serial, p, size, cum, None, None))
+            if last_p is not None and p != last_p:
+                at_ask = p > last_p
+            last_p = p
+            step = tick_size(p)
+            bid, ask = (round(p - step, 2), p) if at_ask else (p, round(p + step, 2))
+            out.append((t0 + s * M.US, serial, p, size, cum, bid, ask))
             serial += 1
     return out
 

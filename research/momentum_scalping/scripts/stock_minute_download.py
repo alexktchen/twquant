@@ -105,7 +105,7 @@ def main() -> int:
     symbols = [{"symbol": s, "market": "", "name": "", "industry": ""} for s in args.symbols] if args.symbols else universe(stock, out, log)
     jobs = [(s["symbol"], a, b) for s in symbols for a, b in chunks(start, end)]
     jobs += [(ix, a, b) for ix in INDEXES for a, b in chunks(start, end)]
-    jobs += [(f"{ix}_D", date(start.year - 1, start.month, 1), end) for ix in INDEXES]  # 指數日 K（昨收、日線均線）
+    jobs += [(f"{ix}_D", start - timedelta(days=300), end) for ix in INDEXES]  # 指數日 K（昨收、日線均線；查詢區間要 < 1 年）
     done = 0
     t0 = time.time()
     for k, (sym, a, b) in enumerate(jobs, 1):
