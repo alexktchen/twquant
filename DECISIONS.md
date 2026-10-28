@@ -8226,6 +8226,12 @@ T-415 試驗的情緒三欄用 Ollama 標籤（全語料），不用這個小模
   3. **部署後**：開 `/login` 用 Google 登入一次，右上角出現 email。此時 `/api` 仍在 Access 後面，畫面會提示「登入系統切換中」→ Cloudflare Zero Trust → Access → Applications 把 `twquant.pages.dev/api/*` 那個應用**刪掉**（或 policy 改 Bypass → Everyone），重新整理就正常。這一步之後 Cloudflare Access 的登入全部失效，所有人改用新的登入；Access 的 50 人上限也就不存在了。
   4. **事後清理（另開任務）**：`identity.ts` 的 Access 後備、deploy-web 部署後檢查的 CF_ACCESS 服務權杖、`tests/shot-*.cjs` 用 `cf-access-authenticated-user-email` 標頭裝登入的寫法（`/api/me` 現在只認權杖，那些截圖腳本要改帶 Bearer）。
   沒設 `SUPABASE_URL`／`SUPABASE_ANON_KEY` 時：`/login` 寫「登入還沒設定」，API 只收 Access 的權杖，網站跟改之前一樣能用。
+- **修訂一（2026-10-28，T-457，使用者：「那我想要直接用 google 登入」）Google 登入改走 Cloudflare Access**：同日 Supabase 主專案當月流出超量、整個登入服務回 402（`exceed_egress_quota`），Supabase 的 Google provider 也一直沒開，所以 `/login` 的 Google 按鈕改到 `/api/login/google`（Cloudflare Access 的 Google），Email 驗證碼照舊走 Supabase（被限流時顯示中文「Email 登入暫停中…請先用 Google 登入」）。
+  - 路徑：`/api/login/google` → `/api/login`（換主應用通行證）→ `/`，同 T-432 的原設計（T-439 拿掉、這裡放回）。身分照舊由 `identity.ts` 驗 Access 權杖（主應用 AUD）。
+  - **要「直接」到 Google（不經 Cloudflare 的選擇卡）**：Cloudflare 要多一個 Access 應用——網域 `twquant.pages.dev/api/login/google`、只開 Google、打開 Instant Auth、Policy 照主應用（Google 登入或 cktalex@gmail.com）。AI 寫好的腳本被自動模式擋下，由使用者建；沒建時這個路徑歸主應用，先出選擇卡、點 Google 一樣能登入。
+  - 登出：沒有 Supabase 登入狀態的人（＝用 Cloudflare 登入）登出改到 `/cdn-cgi/access/logout`（Cloudflare 的登出頁），否則通行證留著、按了登出還是登入狀態。
+  - **後果**：第 3 步「刪掉 `/api/*` 的 Access 應用」**取消**（刪了 Google 登入就沒了）；Cloudflare Access 免費 50 人上限回來（Google 登入的人算人頭）。之後 Supabase 恢復、要超過 50 人時，再開 Supabase 的 Google provider、把按鈕改回 `signInWithGoogle`（`session-client.ts` 還留著）。
+
 ### D-213（2026-10-22，使用者：「我的新聞星雲圖想要像 graphify 這專案，想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」）星雲圖搜尋與牽連
 
 任務 T-436。做法為 AI 提出，使用者可推翻。參考的是 graphify（Graphify-Labs/graphify）的 graph.html：搜尋框打字列節點、點了聚焦並列出鄰居、鄰居可以再點。

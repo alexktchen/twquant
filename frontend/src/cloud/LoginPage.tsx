@@ -1,8 +1,10 @@
-// 登入／註冊頁 /login（T-432 深色頁；T-439 起登入走 Supabase Auth，不再經過 Cloudflare Access 的白色卡片）。
-// Google：整頁跳去 Google，回首頁時 CloudApp 用 ?code= 換登入狀態。Email：寄一組驗證碼（信裡也有連結），填進去就登入。
+// 登入／註冊頁 /login（T-432 深色頁）。
+// Google（T-457）：整頁到 /api/login/google，Cloudflare Access 直接跳 Google（不經白卡），回來就是登入狀態。
+// Email（T-439）：Supabase Auth 寄一組驗證碼（信裡也有連結），填進去就登入。
 // 第一次登入就自動完成註冊，不用另外填資料。
 import { useEffect, useState, type FormEvent } from 'react'
-import { authEnabled, hasSession, sendEmailCode, signInWithGoogle, verifyEmailCode } from './session-client'
+import { GOOGLE_LOGIN } from './auth'
+import { authEnabled, hasSession, sendEmailCode, verifyEmailCode } from './session-client'
 import { emailLooksValid } from './session'
 import './login.css'
 
@@ -20,15 +22,6 @@ export default function LoginPage() {
   useEffect(() => {
     if (hasSession()) window.location.replace('/')
   }, [])
-
-  const google = () => {
-    setErr('')
-    setBusy(true)
-    signInWithGoogle().catch((e: Error) => {
-      setErr(e.message)
-      setBusy(false)
-    })
-  }
 
   const send = (e: FormEvent) => {
     e.preventDefault()
@@ -113,16 +106,18 @@ export default function LoginPage() {
           <h1>登入／註冊</h1>
           <p className="lg-sub">第一次登入就自動完成註冊，不用另外填資料。</p>
 
+          {step === 'pick' && (
+            <a className="lg-btn lg-google" href={GOOGLE_LOGIN}>
+              <span className="g">
+                <GoogleMark />
+              </span>
+              使用 Google 帳號繼續
+            </a>
+          )}
           {!ready ? (
-            <p className="lg-err">登入還沒設定：網站建置時沒有給 Supabase 專案網址與金鑰（VITE_SUPABASE_URL／VITE_SUPABASE_ANON_KEY）。</p>
+            <p className="lg-hint">Email 驗證碼登入還沒設定（網站建置時沒有給 VITE_SUPABASE_URL／VITE_SUPABASE_ANON_KEY），請先用 Google 登入。</p>
           ) : step === 'pick' ? (
             <>
-              <button type="button" className="lg-btn lg-google" onClick={google} disabled={busy}>
-                <span className="g">
-                  <GoogleMark />
-                </span>
-                使用 Google 帳號繼續
-              </button>
               <div className="lg-or">或</div>
               <form className="lg-form" onSubmit={send}>
                 <input
@@ -176,7 +171,7 @@ export default function LoginPage() {
           <p className="lg-safe">
             <ShieldMark />
             <span>
-              登入由 Supabase Auth 處理，網站拿不到你的密碼，只用 Email 確認身分。詳見<a href="/privacy">隱私權政策</a>。
+              Google 登入由 Cloudflare Access 處理、Email 驗證碼由 Supabase Auth 處理，網站拿不到你的密碼，只用 Email 確認身分。詳見<a href="/privacy">隱私權政策</a>。
             </span>
           </p>
 

@@ -26,7 +26,7 @@ import {
   searchStocks,
   setTracked,
 } from './api'
-import { GUEST_LINES, LOGIN_PAGE, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
+import { ACCESS_LOGOUT, GUEST_LINES, LOGIN_PAGE, LoginRequired, guestCandles, guestDay, guestPicks } from './auth'
 import { clearSession, completeOAuth, hasSession, signOut } from './session-client'
 import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
@@ -768,7 +768,9 @@ function User({ email, push, onBell }: { email: string | null; push: PushState |
         href="/"
         onClick={(e) => {
           e.preventDefault()
-          signOut().finally(() => window.location.assign('/'))
+          // 沒有 Supabase 登入狀態＝是用 Cloudflare Access（Google 一鍵登入）登入的，要請 Cloudflare 清通行證
+          const viaAccess = !hasSession()
+          signOut().finally(() => window.location.assign(viaAccess ? ACCESS_LOGOUT : '/'))
         }}
       >
         登出
