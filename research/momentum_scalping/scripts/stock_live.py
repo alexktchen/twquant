@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-stock_live.py — 個股當沖：盤中強勢股掃描＋網友原版模擬單（只記帳，不送任何委託）。T-457／D-221。
+stock_live.py — 個股當沖：盤中強勢股掃描＋網友原版模擬單（只記帳，不送任何委託）。T-458／D-221。
 
 每 30 秒抓一次富邦全市場快照（上市、上櫃普通股）與加權、櫃買指數，交給網友原版的 Scanner 選出前 30 檔；
 前 30 檔與持倉中的股票用 WebSocket 訂逐筆，交給原版 Intraday／Trading 決定進出（stock_engine.StockEngine）。
