@@ -77,6 +77,8 @@ import {
   monthSummary,
   monthWeeks,
   monthsOf,
+  msStopAt,
+  msSub,
   costOf,
   isPaper,
   signedPct,
@@ -415,25 +417,29 @@ function StatusBadges({ data, mode, now, secs, gap }: { data: Badged; mode: Mode
 }
 
 /** 提示列：拉到的那一刻最近發生的事；買賣點剛發生（盤中 60 秒內）就亮起來。 */
-function NowBar({ view }: { view: { events: FuturesEvent[]; cut: string } }) {
+function NowBar({ view }: { view: { events: (FuturesEvent & { strategy?: Strategy | 'account' })[]; cut: string } }) {
   const last = view.events[view.events.length - 1]
   if (!last) return <div className="cq-fu-now">08:50 開盤 5 分鐘收完才有第一個訊號</div>
   const trade = last.kind === 'fill' || last.kind === 'exit'
   const fresh = trade && view.cut.length > 5 && secOf(view.cut) - secOf(last.time) <= FRESH_S
-  const side = last.sleeve === 'ORB_LONG' ? 'long' : last.sleeve ? 'short' : ''
+  const side = last.sleeve === 'ORB_LONG' || last.sleeve === 'MS_LONG' ? 'long' : last.sleeve ? 'short' : ''
   return (
     <div className={`cq-fu-now${fresh ? ` fresh ${side}` : ''}`}>
       <time>{last.time}</time>
       <span className={`cq-cat ${KIND[last.kind].cls}`}>{KIND[last.kind].text}</span>
-      <span>{last.text}</span>
+      <span>
+        {last.strategy === 'ms' && <b className="cq-fu-sleeve ms">{STRATEGY_NAME.ms}　</b>}
+        {last.text}
+      </span>
     </div>
   )
 }
 
-/** 時間軸上的小標：固定組合寫子帳戶；開高走低寫策略名（文字裡已經有 A、B、C）。 */
+/** 時間軸上的小標：固定組合寫子帳戶；開高走低、網友原版寫策略名（開高走低的文字裡已經有 A、B、C）。 */
 function eventChip(e: FuturesEvent & { strategy?: Strategy | 'account' }): { text: string; cls: string } | null {
   if (e.strategy === 'account') return { text: '帳戶', cls: 'acct' }
   if (e.strategy === 'gap') return { text: STRATEGY_NAME.gap, cls: 'gap' }
+  if (e.strategy === 'ms') return { text: STRATEGY_NAME.ms, cls: 'ms' }
   if (e.sleeve) return { text: SLEEVE_NAME[e.sleeve], cls: e.sleeve === 'ORB_LONG' ? 'long' : 'short' }
   return null
 }
@@ -885,6 +891,12 @@ function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; c
       ) : (
         <p className="cq-empty">{gapSummary(null, null)}</p>
       )}
+      {head(STRATEGY_NAME.ms, view.ms ? view.ms.total : null)}
+      {view.ms ? (
+        <ul>{row('MS_LONG', 'long', view.ms.sleeves.MS_LONG, msSub(view.ms))}</ul>
+      ) : (
+        <p className="cq-empty">這一天的資料沒有（10-28 晚上之後上傳的才有）</p>
+      )}
     </div>
   )
 }
@@ -895,15 +907,18 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
   const view = useMemo(() => dayAt(data, cut, secs), [data, cut, secs])
   const g = data.gap_fail ?? null
   const stopShown = data.orb.stop !== null && data.orb.entry_time !== null && data.orb.entry_time.slice(0, cut.length) <= cut
+  const msStop = data.ms && view.ms ? msStopAt(data.ms, view.ms) : null
   const levels = useMemo(() => {
     const orb = stopShown && data.orb.stop !== null ? [{ price: data.orb.stop, title: 'ORB 停損' }] : []
-    return g ? [...orb, ...gapLevels(data, g, view.account)] : orb
-  }, [stopShown, data, g, view.account])
+    const ms = msStop !== null ? [{ price: msStop, title: '網友 停損' }] : []
+    return g ? [...orb, ...gapLevels(data, g, view.account), ...ms] : [...orb, ...ms]
+  }, [stopShown, data, g, view.account, msStop])
   const jumps = useMemo(() => allFillTimes(data), [data])
   // 復盤拉到 cut：只列那之前帳戶已經平倉的交易（不劇透後面）
   const done = view.accountTrades
     .filter((t) => t.exit_time.slice(0, cut.length) <= cut)
     .sort((a, b) => (a.entry_time < b.entry_time ? -1 : a.entry_time > b.entry_time ? 1 : 0))
+  const msDone = (data.ms?.trades ?? []).filter((t) => t.exit_time.slice(0, cut.length) <= cut)
   const long = accountSide(view.account, 1)
   const short = accountSide(view.account, -1)
   const cost = costOf(data)
@@ -945,6 +960,11 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       <Section icon={ReceiptText} title="帳戶成交明細" fold summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
         <Trades trades={done} />
       </Section>
+      {data.ms && (
+        <Section icon={ReceiptText} title="網友原版成交明細" fold summary={`${msDone.length} 筆・${yuan(msDone.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
+          <Trades trades={msDone} />
+        </Section>
+      )}
       <Section icon={BookOpen} title="規則與成本" fold summary="只記帳、不下單">
         <p className="cq-fu-foot">
           <b>固定組合</b>（2026-10-26 凍結，小台、大台、微台同一套）：開盤 5 分鐘收紅才做多（停損在那 5 分鐘低點、停利 10 倍）；
@@ -954,6 +974,11 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
           <b>開高走低</b>：只在開盤比昨收高 {(g?.threshold_pct ?? 0.526).toFixed(3)}% 以上的日子做（過去 1998～2015 年開盤漲幅排前 20% 的門檻）。
           A 開高失守：08:50 起某一分鐘收在開盤價之下就放空，停損放在當天到那時的最高價；B 跌破開盤區間：09:00 起收破 08:45～08:59 的最低價就放空，停損放在那段的最高價；
           C 補缺口：進場同 A，碰到昨收就回補。九年歷史的回測還沒跑（等富邦 1 分 K），以前光是「開高就空」長期是不賺的。
+        </p>
+        <p className="cq-fu-foot">
+          <b>網友原版</b>：PTT 網友分享的 Momentum_Scalping，程式與參數一個都不改，只做多 1 口；每秒看一次自己畫的 1 分 K，
+          動能或趨勢突破才進場，停損放在結構低點，EMA 死叉、跌破前低、動能衰退就出場，13:00 清倉。指數期貨沒有「比大盤強」可比，這條固定當作通過；大盤濾網全開。
+          它不併進帳戶，圖上標「網友」的買賣點、各策略最後一列和日曆的「網友原版」是它自己的帳。過去兩年多的一分 K 回測另外跑，一分 K 每筆會少算約 10 點，只能當參考。
         </p>
         <p className="cq-fu-foot">
           <b>帳戶</b>：多單、空單各最多 1 口{name}。誰先出訊號誰先做，同一秒照 A、B、C、噪音區的順序（多單只有開盤突破一條）；
