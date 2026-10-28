@@ -5,9 +5,12 @@
 // T-452（10-27「abc 也新增成一個策略加到前端」）：第二個策略「開高走低」＝A 開高失守、B 跌破開盤區間、C 補缺口，各 1 口只放空。
 // T-453（10-27「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」）：不切換，兩個策略同一個畫面；復盤上面是每日損益日曆。
 // T-454（10-27「多空都持有一口就好」）：上面的數字、圖上買賣點、成交明細是實際帳戶（多空各最多 1 口，先到先做、同時要空 A 優先）；各策略與日曆可看每條各 1 口的對照。
+// T-455（10-28「可以讓我在前端介面看到錄製的資料嗎」「做成可切換的」）：「盤口與大單」區塊——主動買賣、每分鐘淨主動、五檔、大單（門檻 5／10／20／30 口可切）；
+// 展開才抓、盤中每 15 秒更新、盤中不抓每分鐘的五檔（2026-10-28 Supabase 流出超量，省流量）。
 // 資料來自使用者電腦上的富邦即時行情（fubon_live.py），富邦行情不得轉傳 → 只給 admin。
 import {
   Activity,
+  ArrowUpDown,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ColorType,
   CrosshairMode,
+  HistogramSeries,
   LineSeries,
   LineStyle,
   LineType,
@@ -38,11 +42,13 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts'
-import { fetchFuturesDay, fetchFuturesDays, fetchFuturesSeconds, fetchQuoteDay, fetchQuoteDays, fetchQuoteSeconds } from './api'
+import { fetchFlow, fetchFuturesDay, fetchFuturesDays, fetchFuturesSeconds, fetchQuoteDay, fetchQuoteDays, fetchQuoteSeconds } from './api'
 import { price } from './format'
 import {
+  BIG_THRESHOLDS,
   CAL_VIEWS,
   CAL_VIEW_NAME,
+  DEFAULT_BIG_MIN,
   GAP_SLEEVES,
   PRODUCT_NAME,
   REASON_TEXT,
@@ -54,6 +60,7 @@ import {
   accountSide,
   allFillTimes,
   barsAt,
+  bookTotals,
   change,
   chartMarks,
   chartTime,
@@ -61,10 +68,12 @@ import {
   dayAt,
   dayPnl,
   decodeSeconds,
+  flowAt,
   gapLevels,
   gapSub,
   gapSummary,
   lastAtOrBefore,
+  lots,
   monthSummary,
   monthWeeks,
   monthsOf,
@@ -75,7 +84,11 @@ import {
   staleSeconds,
   tone,
   yuan,
+  type BigMin,
+  type BookLevel,
   type CalView,
+  type Flow,
+  type OrderBook,
   type DayView,
   type FuturesDay,
   type FuturesDayRow,
@@ -633,13 +646,206 @@ function PaperView({ mode, refresh }: { mode: Mode; refresh: number }) {
     <>
       {mode === 'replay' && days !== null && <PnlCalendar days={days} value={replayDay} onPick={setPick} />}
       {error && <p className="cq-empty">{error}</p>}
-      {data && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} />}
+      {data && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} refresh={refresh} />}
       {!error && !data && <p className="cq-empty">讀取中…</p>}
     </>
   )
 }
 
-type BodyProps = { data: FuturesDay; secs: Seconds | null; player: ReturnType<typeof usePlayer>; mode: Mode; now: Date }
+/** 口數的正負寫法：+1,234 口／-56 口／0 口。 */
+const signedLots = (v: number): string => `${v > 0 ? '+' : v < 0 ? '-' : ''}${Math.abs(Math.round(v)).toLocaleString('en-US')} 口`
+
+/** 每分鐘淨主動（買 − 賣）的柱狀圖，加一條累計線；時間軸同江波圖固定 08:45～13:45。 */
+function DeltaChart({ day, minutes }: { day: string; minutes: [string, number][] }) {
+  const box = useRef<HTMLDivElement>(null)
+  const parts = useRef<{ chart: IChartApi; hist: ISeriesApi<'Histogram'>; cum: ISeriesApi<'Line'>; frame: ISeriesApi<'Line'> } | null>(null)
+  useEffect(() => {
+    if (!box.current) return
+    const chart = createChart(box.current, {
+      autoSize: true,
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: MUTE, fontSize: 12 },
+      grid: { vertLines: { color: '#1C1E25' }, horzLines: { color: '#1C1E25' } },
+      crosshair: { mode: CrosshairMode.Normal },
+      leftPriceScale: { visible: true, borderColor: '#23252D' },
+      rightPriceScale: { borderColor: '#23252D' },
+      timeScale: { borderColor: '#23252D', timeVisible: true, secondsVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: axisTime },
+      localization: { timeFormatter: crossTime, priceFormatter: (v: number) => v.toFixed(0) },
+    })
+    const hist = chart.addSeries(HistogramSeries, { priceScaleId: 'right', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } })
+    const cum = chart.addSeries(LineSeries, { priceScaleId: 'left', color: VWAP, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
+    const frame = chart.addSeries(LineSeries, {
+      color: 'rgba(0,0,0,0)',
+      lineVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
+    })
+    parts.current = { chart, hist, cum, frame }
+    return () => {
+      chart.remove()
+      parts.current = null
+    }
+  }, [day])
+  useEffect(() => {
+    const p = parts.current
+    if (!p) return
+    const t = (m: string) => chartTime(day, m) as UTCTimestamp
+    let acc = 0
+    p.hist.setData(minutes.map(([m, v]) => ({ time: t(m), value: v, color: v >= 0 ? UP : DOWN })))
+    p.cum.setData(minutes.map(([m, v]) => ({ time: t(m), value: (acc += v) })))
+    p.frame.setData([{ time: t(SESSION[0]), value: 0 }, { time: t(SESSION[SESSION.length - 1]), value: 0 }])
+    p.chart.timeScale().fitContent()
+  }, [day, minutes])
+  return <div className="cq-fu-flow-chart" ref={box} />
+}
+
+/** 五檔：賣盤在上（價高→低）、買盤在下（價高→低），口數畫成橫條；中間一行買賣盤合計。 */
+function BookTable({ book }: { book: OrderBook | null }) {
+  if (!book) return <p className="cq-empty">還沒有五檔。</p>
+  const maxLots = Math.max(1, ...book.bids.map((l) => l[1]), ...book.asks.map((l) => l[1]))
+  const t = bookTotals(book)
+  const row = (l: BookLevel, cls: 'ask' | 'bid') => (
+    <li key={`${cls}${l[0]}`} className={cls}>
+      <i style={{ width: `${(l[1] / maxLots) * 100}%` }} />
+      <b>{price(l[0])}</b>
+      <span>{l[1]}</span>
+    </li>
+  )
+  return (
+    <div className="cq-fu-book">
+      <ul>{[...book.asks].reverse().map((l) => row(l, 'ask'))}</ul>
+      <ul>
+        <li className="mid">{t ? `買盤 ${t.bid} 口・賣盤 ${t.ask} 口・買盤佔 ${Math.round(t.bidShare * 100)}%` : '—'}</li>
+      </ul>
+      <ul>{book.bids.map((l) => row(l, 'bid'))}</ul>
+    </div>
+  )
+}
+
+const BIG_PAGE = 30
+
+/** 盤口與大單（T-455）：展開才抓（省流量）；盤中每 15 秒更新、復盤照拉到的那一刻；大單門檻可切。 */
+function FlowSection({ product, day, mode, cut, refresh }: { product: Product; day: string; mode: Mode; cut: string; refresh: number }) {
+  const [open, setOpen] = useState(false)
+  const [min, setMin] = useState<BigMin>(DEFAULT_BIG_MIN[product])
+  const [flow, setFlow] = useState<Flow | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [more, setMore] = useState(false)
+  const live = mode === 'live'
+  useEffect(() => {
+    if (!open) return
+    let stop = false
+    // 盤中：大單照門檻在伺服器先篩、不抓每分鐘的五檔；復盤：抓整份一次，之後換門檻在這裡篩
+    const run = () =>
+      fetchFlow(product, live ? null : day, live ? min : BIG_THRESHOLDS[0], live)
+        .then((f) => {
+          if (stop) return
+          setFlow(f)
+          setErr(null)
+        })
+        .catch((e) => !stop && setErr(errText(e)))
+    run()
+    if (!live)
+      return () => {
+        stop = true
+      }
+    const id = setInterval(() => shouldPoll(new Date(), null) && run(), POLL_MS)
+    return () => {
+      stop = true
+      clearInterval(id)
+    }
+  }, [open, live, product, day, min, refresh])
+  const v = useMemo(() => (flow && flow.day === day ? flowAt(flow, cut, min) : null), [flow, day, cut, min])
+  const bigs = v ? [...v.big].reverse() : []
+  const shown = more ? bigs : bigs.slice(0, BIG_PAGE)
+  const summary = v ? `主動買 ${lots(v.buy)}・賣 ${lots(v.sell)}・大單 ${v.big.length} 筆` : live ? '展開才載入・盤中每 15 秒更新' : '展開才載入'
+  return (
+    <Section icon={ArrowUpDown} title="盤口與大單" fold summary={summary} onToggle={setOpen}>
+      <div className="cq-fu-flow">
+        <div className="cq-fu-flow-head">
+          <span className="cq-seg-label">大單門檻</span>
+          <div className="cq-seg cq-seg-small">
+            {BIG_THRESHOLDS.map((k) => (
+              <button
+                key={k}
+                className={min === k ? 'on' : ''}
+                onClick={() => {
+                  setMin(k)
+                  setMore(false)
+                }}
+              >
+                {k} 口
+              </button>
+            ))}
+          </div>
+          <span className="cq-fu-cal-note">{live ? '盤中每 15 秒更新' : `到 ${cut}`}</span>
+        </div>
+        {err && <p className="cq-empty">{err}</p>}
+        {!err && open && !v && <p className="cq-empty">讀取中…</p>}
+        {v && (
+          <>
+            <div className="cq-tiles cq-fu-tiles cq-fu-tiles-3">
+              <Kpi label="主動買" value={lots(v.buy)} tone="up" sub="成交在賣價＝買方追價" />
+              <Kpi label="主動賣" value={lots(v.sell)} tone="down" sub="成交在買價＝賣方追價" />
+              <Kpi label="買減賣" value={signedLots(v.delta)} tone={tone(v.delta)} sub={v.delta > 0 ? '買方比較急' : v.delta < 0 ? '賣方比較急' : '打平'} />
+            </div>
+            <DeltaChart day={day} minutes={v.minutes} />
+            <div className="cq-fu-flow-cols">
+              <div>
+                <h4>
+                  五檔 <span>{v.book ? v.book.time : '—'}</span>
+                </h4>
+                <BookTable book={v.book} />
+              </div>
+              <div>
+                <h4>
+                  大單 ≥{min} 口 <span>{v.big.length} 筆</span>
+                </h4>
+                {bigs.length === 0 ? (
+                  <p className="cq-empty">還沒有 {min} 口以上的成交。</p>
+                ) : (
+                  <table className="cq-fu-bigs">
+                    <thead>
+                      <tr>
+                        <th>時間</th>
+                        <th>價</th>
+                        <th>口</th>
+                        <th>誰主動</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shown.map((b, i) => (
+                        <tr key={`${b[0]}-${i}`}>
+                          <td>{b[0]}</td>
+                          <td>{price(b[1])}</td>
+                          <td className="lots">{b[2]}</td>
+                          <td className={b[3] > 0 ? 'up' : b[3] < 0 ? 'down' : ''}>{b[3] > 0 ? '買方' : b[3] < 0 ? '賣方' : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {!more && bigs.length > BIG_PAGE && (
+                  <button className="cq-fu-more" onClick={() => setMore(true)}>
+                    再看 {bigs.length - BIG_PAGE} 筆
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="cq-fu-foot">
+              主動買＝成交在當時的賣價（買方追價），主動賣＝成交在買價；開盤集合競價那一筆不算。柱子是每分鐘買減賣，黃線是從開盤累計。
+              五檔{live ? '是最新一份' : '是拉到那一分鐘之前最後一份'}。大單是一筆成交幾口以上，門檻自己切（小台、大台一筆 10 口約前 1%，微台 20 口）。
+              只是顯示，不影響模擬單。只有 2026-10-28 之後富邦即時錄到的日子才有。
+            </p>
+          </>
+        )}
+      </div>
+    </Section>
+  )
+}
+
+type BodyProps = { data: FuturesDay; secs: Seconds | null; player: ReturnType<typeof usePlayer>; mode: Mode; now: Date; refresh: number }
 
 /** 各策略、各子帳戶在那一刻：一列一個子帳戶（名字、現在在做什麼、損益）。 */
 function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; cut: string }) {
@@ -684,7 +890,7 @@ function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; c
 }
 
 /** 模擬單的畫面（小台；大台、微台那一天有模擬單時也用它）：上面是實際帳戶（數字卡、圖上買賣點、成交明細），各策略是每條各 1 口的對照。 */
-function PaperBody({ data, secs, player, mode, now }: BodyProps) {
+function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
   const cut = mode === 'replay' ? player.cut : '23:59'
   const view = useMemo(() => dayAt(data, cut, secs), [data, cut, secs])
   const g = data.gap_fail ?? null
@@ -729,6 +935,7 @@ function PaperBody({ data, secs, player, mode, now }: BodyProps) {
         <FuturesChart day={data.day} bars={view.bars} secs={secs} pos={player.pos} noiseLb={data.noise_lb} levels={levels} fills={view.fills} />
         {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={jumps} />}
       </Section>
+      <FlowSection product={data.product ?? 'MTX'} day={data.day} mode={mode} cut={cut} refresh={refresh} />
       <Section icon={Layers} title="各策略" meta="每條各 1 口的對照">
         <StrategyBoard data={data} view={view} cut={cut} />
       </Section>
@@ -812,7 +1019,7 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
     <>
       {mode === 'replay' && days !== null && <PnlCalendar days={days} value={replayDay} onPick={setPick} />}
       {error && <p className="cq-empty">{error}</p>}
-      {data && isPaper(data) && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} />}
+      {data && isPaper(data) && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} refresh={refresh} />}
       {data && !isPaper(data) && at && (
         <>
           <StatusBadges data={data} mode={mode} now={live.now} secs={secs} />
@@ -834,6 +1041,7 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
             <FuturesChart day={data.day} bars={at.bars} secs={secs} pos={player.pos} noiseLb={NO_LB} levels={NO_LEVELS} fills={NO_FILLS} />
             {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={null} />}
           </Section>
+          <FlowSection product={product} day={data.day} mode={mode} cut={cut} refresh={refresh} />
           <p className="cq-fu-foot">
             這一天前面的逐筆不足 14 天（噪音區要用前 14 天的波動），只有行情、沒有模擬單。秒級復盤只有逐筆的日子才有。富邦行情只供本人使用，不對外顯示。
           </p>

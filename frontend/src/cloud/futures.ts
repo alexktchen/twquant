@@ -642,3 +642,74 @@ export function compactYuan(v: number): string {
   if (Math.abs(r) >= 10_000) return `${r > 0 ? '+' : '-'}${(Math.abs(r) / 10_000).toFixed(1)}萬`
   return yuan(r)
 }
+
+// ── T-455：盤口與大單（使用者 2026-10-28：「可以讓我在前端介面看到錄製的資料嗎」「做成可切換的」） ──
+// 資料是 fubon_live.py 的 Flow.snapshot（payload 的 flow），/api/futures/flow 給；只有富邦即時錄到、2026-10-28 之後的日子才有。
+
+/** 一筆大單：[HH:MM:SS, 價, 口, 主動方向（+1 主動買、−1 主動賣、0 不明）] */
+export type BigTrade = [string, number, number, -1 | 0 | 1]
+/** 五檔的一檔：[價, 口] */
+export type BookLevel = [number, number]
+export type OrderBook = { time: string; bids: BookLevel[]; asks: BookLevel[] }
+export type Flow = {
+  version: 1
+  day: string
+  product: Product
+  /** 伺服器已經照這個門檻篩過大單 */
+  big_min: number
+  /** 每分鐘：[HH:MM, 主動買口數, 主動賣口數, 不明口數] */
+  minutes: [string, number, number, number][]
+  buy: number
+  sell: number
+  big: BigTrade[]
+  /** 最新五檔（盤中用） */
+  book: OrderBook | null
+  /** 每分鐘最後一份五檔：[HH:MM, bids, asks]（復盤用；盤中 live=1 不給） */
+  books?: [string, BookLevel[], BookLevel[]][] | null
+}
+
+/** 大單門檻可以切的幾個（一筆幾口以上）；錄製程式記 5 口以上，所以最低 5。 */
+export const BIG_THRESHOLDS = [5, 10, 20, 30] as const
+export type BigMin = (typeof BIG_THRESHOLDS)[number]
+/** 預設門檻：照各商品一筆成交的大小分布（2026-10-28 開盤 6 分鐘：小台、大台 ≥10 口約前 1%，微台 ≥20 口約前 1%） */
+export const DEFAULT_BIG_MIN: Record<Product, BigMin> = { MTX: 10, TX: 10, TMF: 20 }
+
+export type FlowView = {
+  cut: string
+  /** 到 cut 為止的主動買、主動賣口數與差 */
+  buy: number
+  sell: number
+  delta: number
+  /** 每分鐘淨主動（買 − 賣），到 cut；秒級時還沒走完的那一分鐘不算（同 barsAt） */
+  minutes: [string, number][]
+  /** 到 cut 為止、≥ min 口的大單，照時間 */
+  big: BigTrade[]
+  /** 那一刻看得到的五檔：盤中是最新一份；復盤用那一分鐘之前最後一份；沒有 → null */
+  book: OrderBook | null
+}
+
+/** 拉到 cut 那一刻的盤口與大單（不偷看後面）；min＝大單門檻。 */
+export function flowAt(f: Flow, cut: string, min: number): FlowView {
+  const minutes = f.minutes.filter((m) => (cut.length > 5 ? m[0] < cut.slice(0, 5) : m[0] <= cut))
+  const buy = minutes.reduce((a, m) => a + m[1], 0)
+  const sell = minutes.reduce((a, m) => a + m[2], 0)
+  const big = f.big.filter((b) => b[2] >= min && within(b[0], cut))
+  let book: OrderBook | null = null
+  if (f.books && f.books.length) {
+    const seen = f.books.filter((b) => (cut.length > 5 ? b[0] < cut.slice(0, 5) : b[0] <= cut))
+    const last = seen[seen.length - 1]
+    if (last) book = { time: last[0], bids: last[1], asks: last[2] }
+  } else if (cut >= '23:59' && f.book) book = f.book
+  return { cut, buy, sell, delta: buy - sell, minutes: minutes.map((m) => [m[0], m[1] - m[2]]), big, book }
+}
+
+/** 五檔合計：買盤幾口、賣盤幾口、買盤佔比（0～1）；空的 → null。 */
+export function bookTotals(b: OrderBook | null): { bid: number; ask: number; bidShare: number } | null {
+  if (!b || (!b.bids.length && !b.asks.length)) return null
+  const bid = b.bids.reduce((a, l) => a + l[1], 0)
+  const ask = b.asks.reduce((a, l) => a + l[1], 0)
+  return { bid, ask, bidShare: bid + ask ? bid / (bid + ask) : 0.5 }
+}
+
+/** 口數寫法：1,234 口。 */
+export const lots = (v: number): string => `${Math.round(v).toLocaleString('en-US')} 口`

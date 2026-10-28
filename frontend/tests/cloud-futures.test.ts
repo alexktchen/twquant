@@ -2,13 +2,15 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { DAYS_LIMIT, NOT_READY, NO_SECONDS, QUOTES_NOT_READY, dayOk, productOk } from '../functions/_lib/futures.ts'
+import { BIG_MIN_FLOOR, DAYS_LIMIT, NOT_READY, NO_FLOW, NO_SECONDS, QUOTES_NOT_READY, dayOk, flowProductOk, productOk } from '../functions/_lib/futures.ts'
 import { FEATURE_ROLES, can } from '../functions/_lib/roles.ts'
 import { FEATURES, lockedText, tabAllowed } from '../src/cloud/access.ts'
 import {
   STALE_AFTER_S,
   addSeconds,
+  BIG_THRESHOLDS,
   CAL_VIEW_NAME,
+  DEFAULT_BIG_MIN,
   MTX_COST,
   SIDE_OF,
   STRATEGY_NAME,
@@ -16,6 +18,7 @@ import {
   accountSide,
   allFillTimes,
   barsAt,
+  bookTotals,
   change,
   chartMarks,
   chartTime,
@@ -27,11 +30,13 @@ import {
   isPaper,
   decodeSeconds,
   fillTimes,
+  flowAt,
   gapBook,
   gapLevels,
   gapSub,
   gapSummary,
   lastAtOrBefore,
+  lots,
   mergeEvents,
   monthSummary,
   monthWeeks,
@@ -46,6 +51,7 @@ import {
   taipeiNow,
   tone,
   yuan,
+  type Flow,
   type FuturesDay,
   type FuturesTrade,
   type GapFail,
@@ -614,4 +620,93 @@ test('T-454 AC5 畫面：數字卡是帳戶合計、多單、空單、最新；�
   assert.match(page, /useState<CalView>\('account'\)/)
   for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
     assert.match(read(f), /payload->'trades' AS trades, payload->'gap_fail'->'trades' AS gap_trades/)
+})
+
+// ── 盤口與大單（T-455，使用者 2026-10-28：「可以讓我在前端介面看到錄製的資料嗎」「做成可切換的」） ──
+/** 2026-10-28 開盤那幾分鐘的縮寫（fubon_live.py 的 Flow.snapshot）：買賣價判主動方向、5 口以上記大單（集合競價那一筆不記）、每分鐘最後一份五檔。 */
+function flow(): Flow {
+  return {
+    version: 1,
+    day: '2026-10-28',
+    product: 'MTX',
+    big_min: 5,
+    minutes: [
+      ['08:45', 1200, 800, 100],
+      ['08:46', 300, 500, 20],
+      ['08:47', 400, 250, 10],
+      ['08:48', 150, 150, 0],
+    ],
+    buy: 2050,
+    sell: 1700,
+    big: [
+      ['08:45:12', 46945, 12, 1],
+      ['08:45:40', 46910, 7, -1],
+      ['08:46:05', 46900, 30, -1],
+      ['08:47:30', 46960, 20, 1],
+      ['08:48:10', 46950, 5, 0],
+    ],
+    book: { time: '08:48:59', bids: [[46950, 3], [46949, 8]], asks: [[46951, 2], [46952, 11]] },
+    books: [
+      ['08:45', [[46940, 1], [46939, 2]], [[46945, 2], [46948, 6]]],
+      ['08:46', [[46905, 4], [46904, 1]], [[46906, 3], [46907, 9]]],
+      ['08:47', [[46955, 2], [46954, 5]], [[46958, 1], [46960, 4]]],
+      ['08:48', [[46950, 3], [46949, 8]], [[46951, 2], [46952, 11]]],
+    ],
+  }
+}
+
+test('T-455 AC1 拉到某一刻的盤口：主動買賣只算那之前的分鐘、秒級時還沒走完的那一分鐘不算；大單照門檻與時間篩；五檔用那一分鐘之前最後一份', () => {
+  const f = flow()
+  const v = flowAt(f, '08:46', 10)
+  assert.deepEqual([v.buy, v.sell, v.delta], [1500, 1300, 200])
+  assert.deepEqual(v.minutes, [['08:45', 400], ['08:46', -200]])
+  assert.deepEqual(v.big.map((b) => b[2]), [12, 30]) // 7 口不到門檻、08:47 之後的還沒發生
+  assert.deepEqual(v.book, { time: '08:46', bids: [[46905, 4], [46904, 1]], asks: [[46906, 3], [46907, 9]] })
+  // 秒級：08:46:30 → 08:46 那一分鐘還沒走完，不算；五檔用 08:45 的；大單比到秒
+  const sec = flowAt(f, '08:46:30', 5)
+  assert.deepEqual(sec.minutes, [['08:45', 400]])
+  assert.deepEqual(sec.big.map((b) => b[0]), ['08:45:12', '08:45:40', '08:46:05'])
+  assert.equal(sec.book!.time, '08:45')
+  assert.deepEqual(flowAt(f, '23:59', 30).big.map((b) => b[2]), [30])
+  assert.deepEqual([flowAt(f, '23:59', 5).buy, flowAt(f, '23:59', 5).sell], [2050, 1700])
+})
+
+test('T-455 AC1 盤中（沒有每分鐘五檔）：拉到最新才給最新一份五檔；復盤沒拉到開盤 → 什麼都沒有', () => {
+  const live = { ...flow(), books: null }
+  assert.deepEqual(flowAt(live, '23:59', 5).book, flow().book)
+  assert.equal(flowAt(live, '08:46', 5).book, null)
+  assert.equal(flowAt(flow(), '08:44', 5).book, null)
+  assert.deepEqual(flowAt(flow(), '08:44', 5).minutes, [])
+})
+
+test('T-455 AC2 五檔合計與買盤佔比；口數寫法；門檻可切 5／10／20／30、預設照商品', () => {
+  assert.deepEqual(bookTotals(flow().book), { bid: 11, ask: 13, bidShare: 11 / 24 })
+  assert.equal(bookTotals(null), null)
+  assert.equal(bookTotals({ time: 'x', bids: [], asks: [] }), null)
+  assert.equal(lots(1234.4), '1,234 口')
+  assert.deepEqual([...BIG_THRESHOLDS], [5, 10, 20, 30])
+  assert.deepEqual(DEFAULT_BIG_MIN, { MTX: 10, TX: 10, TMF: 20 })
+  assert.equal(BIG_MIN_FLOOR, 5)
+})
+
+test('T-455 AC3 端點：盤口另走 /api/futures/flow（只給 admin、先驗商品、不進暫存；盤中不給每分鐘五檔、大單先照門檻篩）；原本的整份狀態拿掉 flow', () => {
+  const src = read('functions/api/futures/flow.ts')
+  assert.match(src, /\(await denied\(ctx\.request, 'futures', ctx\.env\)\) \?\? handle\(ctx\)/)
+  assert.doesNotMatch(src, /cache|s-maxage/)
+  assert.match(src, /flowProductOk\(product\)/)
+  assert.match(src, /jsonb_path_query_array\(f->'big', '\$\[\*\] \? \(@\[2\] >= \$m\)'/)
+  assert.match(src, /CASE WHEN \$\{live\}::boolean THEN NULL ELSE f->'books' END/)
+  assert.ok(flowProductOk('MTX') && flowProductOk('TX') && flowProductOk('TMF') && !flowProductOk('MXF') && !flowProductOk(null))
+  assert.match(NO_FLOW, /2026-10-28/)
+  for (const f of ['functions/api/futures/index.ts', 'functions/api/futures/quotes/index.ts']) assert.match(read(f), /\(payload - 'flow'\)::text AS body/)
+  assert.match(read('src/cloud/api.ts'), /\/api\/futures\/flow\?product=\$\{product\}&min=\$\{min\}\$\{live \? '&live=1' : ''\}/)
+})
+
+test('T-455 AC4 畫面：「盤口與大單」是收起的區塊、展開才抓；模擬單畫面與只有行情的畫面都有；門檻可切', () => {
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /<Section icon=\{ArrowUpDown\} title="盤口與大單" fold summary=\{summary\} onToggle=\{setOpen\}>/)
+  assert.match(page, /if \(!open\) return\r?\n/)
+  assert.equal(page.match(/<FlowSection product=/g)?.length, 2)
+  assert.match(page, /BIG_THRESHOLDS\.map\(\(k\) => \(/)
+  assert.match(read('src/cloud/Section.tsx'), /onToggle\?: \(open: boolean\) => void/)
 })

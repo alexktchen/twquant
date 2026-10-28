@@ -23,5 +23,16 @@ export type QuoteProduct = (typeof QUOTE_PRODUCTS)[number]
 /** ?product= 是不是大台或微台。 */
 export const productOk = (p: string | null): p is QuoteProduct => p !== null && (QUOTE_PRODUCTS as readonly string[]).includes(p)
 
+/** 盤口與大單（T-455，/api/futures/flow）：三個商品都有；小台在 futures_paper，大台、微台在 futures_quotes。 */
+export const FLOW_PRODUCTS = ['MTX', 'TX', 'TMF'] as const
+export type FlowProduct = (typeof FLOW_PRODUCTS)[number]
+export const flowProductOk = (p: string | null): p is FlowProduct => p !== null && (FLOW_PRODUCTS as readonly string[]).includes(p)
+
+/** 大單門檻（一筆幾口以上）：網站可切；錄製程式記的是 5 口以上，所以最低 5。 */
+export const BIG_MIN_FLOOR = 5
+
+/** 這一天沒有盤口資料：只有富邦即時錄到的日子才有（期交所重算的沒有買賣價與五檔），而且 2026-10-28 之後的錄製程式才記。 */
+export const NO_FLOW = '這一天沒有盤口資料：只有 2026-10-28 之後、富邦即時錄到的日子才有（期交所重算的沒有買賣價與五檔）。'
+
 /** 還沒有大台／微台行情：電腦上的錄製程式開盤後、或 --replay-quotes 補過去的日子後才會有。 */
 export const QUOTES_NOT_READY = '還沒有這個商品的行情：電腦上的錄製程式（fubon_live.py --upload）開盤後就會寫進來。'
