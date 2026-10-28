@@ -80,6 +80,8 @@ export default function CloudApp() {
   // 網址有沒有明寫 ?tab=：沒登入的人沒寫就落在公開的新聞頁（guestTab）
   const [explicitTab] = useState<Tab | null>(() => tabFromUrl(window.location.href))
   const [tab, setTab] = useState<Tab>(() => explicitTab ?? 'home')
+  // 手機上分頁列會左右滑：換分頁（或權限讀回來多出分頁）時把選到的那個捲進畫面
+  const tabsRef = useRef<HTMLElement>(null)
   useEffect(() => {
     if (tabFromUrl(window.location.href)) window.history.replaceState(null, '', withoutTab(window.location.href))
     // 網站已開著時點通知：背景程式（sw.js）傳來要開的網址
@@ -111,6 +113,13 @@ export default function CloudApp() {
   // 權限讀回來了沒（讀回來之前，從網址開到要權限的分頁先空白，不閃「沒有權限」）
   const [accessKnown, setAccessKnown] = useState(false)
   const canPicks = features.includes('picks')
+  useEffect(() => {
+    const nav = tabsRef.current
+    const on = nav?.querySelector<HTMLElement>('button.on')
+    if (!nav || !on || nav.scrollWidth <= nav.clientWidth) return
+    const n = nav.getBoundingClientRect(), b = on.getBoundingClientRect()
+    nav.scrollLeft += b.left - n.left - (n.width - b.width) / 2
+  }, [tab, features])
   // 追蹤股：存在帳號裡（伺服器），手機和電腦同一份
   const [watch, setWatch] = useState<WatchList | null>(null)
   const [watchErr, setWatchErr] = useState('')
@@ -375,7 +384,7 @@ export default function CloudApp() {
           <img className="cq-logo" src="/icon.svg" alt="" width="26" height="26" />
           twquant
         </div>
-        <nav className="cq-tabs">
+        <nav className="cq-tabs" ref={tabsRef}>
           <button className={tab === 'home' ? 'on' : ''} onClick={() => setTab('home')}>
             首頁
           </button>

@@ -246,7 +246,11 @@
   .cq-brand { grid-area: brand; }
   /* 右欄寬度由較寬的日期列決定，帳號要自己靠右 */
   .cq-user { grid-area: user; justify-self: end; }
-  .cq-tabs { grid-area: tabs; align-self: stretch; height: auto; }
+  /* 分頁多到超過手機寬（有每日名單、績效、台指期、LINE 群組時 8 個）：分頁列自己左右滑，
+     不然整頁被撐寬、可以往右拖，頂欄和內容一起歪掉（使用者 2026-10-29：「爆版了」） */
+  .cq-tabs { grid-area: tabs; align-self: stretch; height: auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .cq-tabs::-webkit-scrollbar { display: none; }
+  .cq-tabs button { flex: none; }
   .cq-tabs button:first-child { padding-left: 0; }
   .cq-date { grid-area: date; margin-left: 0; justify-self: end; }
   .cq-brand { font-size: 17px; }
