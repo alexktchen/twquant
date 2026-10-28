@@ -1,0 +1,42 @@
+/* 個股當沖（T-458）：強勢股榜一列一檔（名次、名字與分數、漲幅）；持有中的整列標紅邊。字 ≥ 15px（地鐵告示風格）。 */
+.cq-dt-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 4px 0 10px; }
+.cq-dt-day { font-size: 17px; margin-right: 4px; }
+.cq-dt-pct { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cq-dt-pct.up, .cq-dt-board .up, .cq-dt-days .up { color: var(--up); }
+.cq-dt-pct.down, .cq-dt-board .down, .cq-dt-days .down { color: var(--down); }
+.cq-dt-board { list-style: none; margin: 0; padding: 0; }
+.cq-dt-board li {
+  display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 10px;
+  padding: 9px 0 9px 6px; border-bottom: 1px solid var(--line); border-left: 3px solid transparent;
+}
+.cq-dt-board li.holding { border-left-color: var(--up); background: color-mix(in srgb, var(--up) 8%, transparent); }
+.cq-dt-board li.traded { border-left-color: var(--mute); }
+.cq-dt-rank { color: var(--mute); font-variant-numeric: tabular-nums; text-align: right; font-size: 15px; }
+.cq-dt-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cq-dt-name b { font-size: 16px; }
+.cq-dt-name small { color: var(--mute); font-weight: 400; font-size: 13px; }
+.cq-dt-name span { color: var(--mute); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-dt-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.cq-dt-right b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.cq-dt-tag { font-style: normal; font-size: 12.5px; padding: 1px 6px; border-radius: 6px; }
+.cq-dt-tag.holding { color: var(--up); background: color-mix(in srgb, var(--up) 16%, transparent); }
+.cq-dt-tag.traded { color: var(--mute); background: rgba(255, 255, 255, .06); }
+.cq-dt-config { list-style: none; margin: 0 0 8px; padding: 0; display: grid; grid-template-columns: 1fr; }
+.cq-dt-config li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.cq-dt-config span { color: var(--mute); }
+.cq-dt-days { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 6px; }
+.cq-dt-days button {
+  flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 10px; border-radius: 8px;
+  background: var(--card, rgba(255, 255, 255, .04)); color: var(--text); font-size: 14px; border: 1px solid transparent;
+}
+.cq-dt-days button.on { border-color: var(--accent); }
+.cq-dt-days button b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.cq-dt-scrub { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }
+.cq-dt-scrub input { flex: 1; accent-color: var(--accent); }
+.cq-dt-scrub b { font-variant-numeric: tabular-nums; font-size: 16px; min-width: 72px; text-align: right; }
+.cq-dt-syms { flex-wrap: wrap; margin-bottom: 8px; }
+.cq-dt-chart { width: 100%; height: 220px; }
+.cq-dt-note { display: flex; gap: 6px; align-items: flex-start; margin-top: 14px; }
+@media (min-width: 900px) {
+  .cq-dt-config { grid-template-columns: 1fr 1fr; column-gap: 24px; }
+}

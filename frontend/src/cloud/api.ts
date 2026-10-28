@@ -5,6 +5,7 @@ import { getToken } from './session-client'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
+import type { DayTradeDay, DayTradeHistory, DayTradeRow } from './daytrade'
 import type { Flow, FuturesDay, FuturesDayRow, Product, QuoteDayRow, QuotePayload, QuoteProduct, SecondsPayload } from './futures'
 import type { Quote } from './live'
 import type { RankRow } from './group'
@@ -251,3 +252,12 @@ export const fetchGroups = () => get<{ date: string; rows: RankRow[] }>('/api/gr
 /** 名單績效的逐筆明細（新到舊）。 */
 export const fetchScorecardTrades = (line: string) =>
   get<{ rows: TradeRow[] }>(`/api/scorecard/trades?line=${encodeURIComponent(line)}`).then((r) => r.rows)
+
+/** 個股當沖（T-458／D-221）：那一天的整份狀態（不給日期＝最新一天）。只給 admin。 */
+export const fetchDayTrade = (day?: string) => get<DayTradeDay>(day ? `/api/daytrade?day=${encodeURIComponent(day)}` : '/api/daytrade')
+
+/** 個股當沖有紀錄的交易日（新到舊）。 */
+export const fetchDayTradeDays = () => get<{ days: DayTradeRow[] }>('/api/daytrade/days').then((r) => r.days)
+
+/** 個股當沖那一天的復盤資料（收盤後才有；沒有 → 404）。 */
+export const fetchDayTradeHistory = (day: string) => get<DayTradeHistory>(`/api/daytrade/history?day=${encodeURIComponent(day)}`)

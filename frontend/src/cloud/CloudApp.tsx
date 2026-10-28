@@ -32,6 +32,7 @@ import { LINE_KEY, loadPref, savePref } from './prefs'
 import { RISK_KEY, riskAccepted, riskRecord } from './risk'
 import { RiskNotice } from './RiskNotice'
 import { ScorecardPage } from './ScorecardPage'
+import { DayTradePage } from './DayTradePage'
 import { FuturesPage } from './FuturesPage'
 import { KChart, LINE_LEGEND, MA_LEGEND } from './KChart'
 import { flowText, groupLine, groupTitle, sameGroups, type Group } from './group'
@@ -409,6 +410,11 @@ export default function CloudApp() {
               台指期
             </button>
           )}
+          {features.includes('futures') && (
+            <button className={tab === 'daytrade' ? 'on' : ''} onClick={() => setTab('daytrade')}>
+              當沖
+            </button>
+          )}
           <button className={tab === 'watch' ? 'on' : ''} onClick={() => setTab('watch')}>
             追蹤
           </button>
@@ -524,6 +530,8 @@ export default function CloudApp() {
         <LineGroupPage refresh={refresh} />
       ) : tab === 'futures' ? (
         <FuturesPage refresh={refresh} />
+      ) : tab === 'daytrade' ? (
+        <DayTradePage refresh={refresh} />
       ) : tab === 'score' ? (
         <ScorecardPage
           line={GUEST_LINES.some((l) => l.code === line) ? line : 'CORE'}
