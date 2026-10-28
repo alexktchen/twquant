@@ -8,6 +8,7 @@ fubon_live.py — 富邦即時行情：錄小台／台指逐筆與小台五檔�
 訊號在 T 發出 → 以 T + 0.5 秒後的第一筆成交價成交，買 +1 點、賣 −1 點。
 收盤後用同一個逐筆引擎（B.run_orb／B.run_noise）把錄到的逐筆重算一次，當作正式結果，並和盤中即時紀錄對照。
 另外同時跑「開高走低」三條放空規則（GapFail；studies/gap_fail，A 開高失守、B 跌破開盤區間、C 補缺口），放在 payload 的 gap_fail。
+盤口與大單（Flow，T-455）：每筆成交照當下買賣價分主動買／主動賣、5 口以上記成大單、五檔留最新與每分鐘最後一份，放在 payload 的 flow。
 
 一定要在 repo 以外的資料夾執行：富邦 SDK 會在「執行目錄」寫含個資的 log/。程式一開始就 chdir 到 --out。
 
@@ -16,6 +17,7 @@ fubon_live.py — 富邦即時行情：錄小台／台指逐筆與小台五檔�
       --history D:/project/twquant/data/research_ms/taifex_30d/csv
   檢查用（不連富邦）：加 --replay-day 2026-10-22，用 --history 裡那天的期交所逐筆重播
   --upload：把狀態寫進雲端 serving.futures_paper（網站「小台模擬」分頁讀它；DSN 取 .env 的 TWQUANT_SUPABASE_DSN）
+  收盤後重建（含盤口與大單）：--replay-raw 2026-10-28 [--env ... --upload]，讀 <out>/<日>/raw_*.jsonl(.gz)
 
 網站狀態（payload）的欄位是網站 frontend/src/cloud/futures.ts 的 FuturesDay；改這裡要一起改那裡。
 """
@@ -73,6 +75,9 @@ FIELDS = ["day", "sleeve", "side", "signal_time", "entry_time", "entry_price", "
           "exit_reason", "points", "net_pnl", "source"]
 # 開高走低三條放空規則（studies/gap_fail；使用者 2026-10-27「abc 也新增成一個策略加到前端」）
 GAP_SLEEVES = {"GAP_A": "A 開高失守", "GAP_B": "B 跌破開盤區間", "GAP_C": "C 補缺口"}
+# 盤口與大單（T-455，網站顯示用、不影響模擬單；使用者 2026-10-28「做成可切換的」：網站可切 5／10／20／30 口）
+BIG_MIN_LOTS = 5       # 一筆幾口以上記成大單；網站再照選的門檻篩
+BOOK_LEVELS = 5
 
 
 def third_wednesday(y: int, m: int) -> date:
@@ -272,6 +277,61 @@ class GapFail:
                 "rules": rules, "sleeves": sleeves, "trades": self.trades, "events": self.events, "total": round(total, 1)}
 
 
+def _px(v):
+    v = float(v)
+    return int(v) if v.is_integer() else v
+
+
+class Flow:
+    """盤口與大單（T-455；網站「盤口與大單」，只顯示、不影響模擬單）。
+
+    主動買賣：成交價 ≥ 成交當下的賣價算主動買、≤ 買價算主動賣；中間價或沒有買賣價的不算方向。
+    開盤第一筆（08:45:00 集合競價）和 13:45 那一筆（收盤）沒有主動方向，也不算大單。
+    期交所逐筆沒有買賣價也沒有五檔，重算的日子 snapshot 回 None。"""
+
+    def __init__(self, day: date):
+        self.lo, self.close = clock(day, "08:45"), clock(day, "13:45")
+        self.minutes = {}        # "HH:MM" -> [主動買口數, 主動賣口數, 其他口數]
+        self.big = []            # [HH:MM:SS, 價, 口, +1 主動買／−1 主動賣／0 不明]
+        self.book = None         # 最新五檔 {"time", "bids": [[價, 口]], "asks": [[價, 口]]}
+        self.books = {}          # "HH:MM" -> [bids, asks]：那一分鐘最後一份五檔（復盤用）
+        self.first = True
+        self.quoted = False
+
+    def on_trade(self, t_us: int, price: float, size: float, bid=None, ask=None) -> None:
+        if not self.lo <= t_us <= self.close + 999_999:
+            return
+        auction = (self.first and t_us < self.lo + M.US) or t_us >= self.close
+        self.first = False
+        if bid is not None or ask is not None:
+            self.quoted = True
+        side = 0
+        if not auction and ask is not None and price >= float(ask):
+            side = 1
+        elif not auction and bid is not None and price <= float(bid):
+            side = -1
+        row = self.minutes.setdefault(M.us_to_dt(t_us).strftime("%H:%M"), [0, 0, 0])
+        row[0 if side > 0 else 1 if side < 0 else 2] += int(size)
+        if not auction and size >= BIG_MIN_LOTS:
+            self.big.append([hms(t_us)[:8], _px(price), int(size), side])
+
+    def on_book(self, t_us: int, bids, asks) -> None:
+        if not self.lo <= t_us <= self.close + 999_999:
+            return
+        levels = lambda xs: [[_px(x["price"]), int(x["size"])] for x in xs if x.get("price") is not None][:BOOK_LEVELS]  # noqa: E731
+        b, a = levels(bids), levels(asks)
+        self.book = {"time": hms(t_us)[:8], "bids": b, "asks": a}
+        self.books[M.us_to_dt(t_us).strftime("%H:%M")] = [b, a]
+
+    def snapshot(self):
+        if not self.quoted and self.book is None:
+            return None
+        mins = sorted(self.minutes.items())
+        return {"version": 1, "big_min": BIG_MIN_LOTS, "minutes": [[k, *v] for k, v in mins],
+                "buy": sum(v[0] for _, v in mins), "sell": sum(v[1] for _, v in mins), "big": self.big,
+                "book": self.book, "books": [[k, *v] for k, v in sorted(self.books.items())]}
+
+
 class LiveCombo:
     """單執行緒、只看已到的逐筆：ORB 只做多 + NOISE 只放空，兩個子帳戶各 1 口；另外跑開高走低三條（GapFail）。"""
 
@@ -302,6 +362,7 @@ class LiveCombo:
         self.orb_state = "waiting"
         self.disabled = None     # 開盤沒錄到 → 原因；之後只錄資料、不做任何決策
         self.gap = GapFail(self)
+        self.flow = Flow(day)
 
     def disable(self, t_us: int, reason: str) -> None:
         if self.disabled is None:
@@ -313,9 +374,10 @@ class LiveCombo:
         self.log(f"[{hms(t_us)[:8]}] {text}")
 
     # ── 逐筆 ──
-    def on_tick(self, t_us: int, price: float, size: float) -> None:
+    def on_tick(self, t_us: int, price: float, size: float, bid=None, ask=None) -> None:
         if not clock(self.day, "08:45") <= t_us <= clock(self.day, "13:45") + 999_999:
             return
+        self.flow.on_trade(t_us, price, size, bid, ask)
         self.t.append(t_us)
         self.p.append(price)
         self.pv += price * size
@@ -488,8 +550,11 @@ class LiveCombo:
             "official": None, "official_match": None, "note": self.disabled,
             "product": self.product, "name": PRODUCT_NAME[self.product], "volume": int(self.vol),
             "point_value": self.point_value, "commission": self.commission,
-            "gap_fail": self.gap.snapshot(last),
+            "gap_fail": self.gap.snapshot(last), "flow": self.flow.snapshot(),
         }
+
+    def on_book(self, t_us: int, bids, asks) -> None:
+        self.flow.on_book(t_us, bids, asks)
 
     def n_events(self) -> int:
         return len(self.events) + len(self.gap.events)
@@ -507,10 +572,15 @@ class QuoteTracker:
         self.bars, self.secs = {}, {}
         self.pv = self.vol = 0.0
         self.first = self.last = self.last_t = None
+        self.flow = Flow(day)
 
-    def on_tick(self, t_us: int, price: float, size: float) -> None:
+    def on_book(self, t_us: int, bids, asks) -> None:
+        self.flow.on_book(t_us, bids, asks)
+
+    def on_tick(self, t_us: int, price: float, size: float, bid=None, ask=None) -> None:
         if not self.lo <= t_us <= self.hi:
             return
+        self.flow.on_trade(t_us, price, size, bid, ask)
         self.pv += price * size
         self.vol += size
         vwap = self.pv / self.vol
@@ -531,7 +601,7 @@ class QuoteTracker:
                 "updated_at": updated_at.isoformat(timespec="seconds"),
                 "last_tick": hms(self.last_t)[:8] if self.last_t else None, "last_price": self.last,
                 "prev_close": self.prev_close, "open": self.first, "volume": int(self.vol),
-                "bars": [[k, *(round(x, 1) for x in v)] for k, v in sorted(self.bars.items())]}
+                "bars": [[k, *(round(x, 1) for x in v)] for k, v in sorted(self.bars.items())], "flow": self.flow.snapshot()}
 
     def seconds_payload(self) -> dict:
         out = encode_seconds(self.day, self.secs, self.NAME.get(self.product, self.product))
@@ -656,7 +726,7 @@ def env_value(path: Path, key: str) -> str:
 
 
 def backfill(futopt, symbol_: str, log):
-    """富邦當天逐筆查詢（一般盤、不含試撮）：回傳 [(t_us, price, size, serial)]，依時間排序。失敗回 None。"""
+    """富邦當天逐筆查詢（一般盤、不含試撮）：回傳 [(t_us, price, size, serial, bid, ask)]，依時間排序。失敗回 None。"""
     rows, offset = [], 0
     try:
         while True:
@@ -665,7 +735,8 @@ def backfill(futopt, symbol_: str, log):
             for tr in data:
                 if tr.get("isTrial"):
                     continue
-                rows.append((int(tr["time"]), float(tr["price"]), float(tr["size"]), int(tr.get("serial") or 0)))
+                rows.append((int(tr["time"]), float(tr["price"]), float(tr["size"]), int(tr.get("serial") or 0),
+                             tr.get("bid"), tr.get("ask")))
             if len(data) < BACKFILL_LIMIT:
                 break
             offset += len(data)
@@ -856,6 +927,130 @@ def replay(args) -> int:
     return 0 if sorted(same) == sorted(off) else 1
 
 
+def setup_quotes(day: date, near: str, ticks_root: Path, log):
+    """大台、微台：期交所逐筆另存裡前面有 14 天就跑模擬單（LiveCombo），不夠就只有行情（QuoteTracker）。"""
+    quotes, quote_raw = {}, {}
+    for fubon, code in QUOTE_PRODUCTS.items():
+        qs = symbol(fubon, near)
+        raw_q = F.read_taifex(ticks_root / code, code) if (ticks_root / code).exists() else {}
+        quote_raw[qs] = raw_q
+        names_q = [d for d in sorted(raw_q) if d < str(day)]
+        prev = raw_q[names_q[-1]]["closes"].get(near) if names_q else None
+        if len(names_q) >= B.NOISE_LOOKBACK and prev is not None:
+            hist_q = [B.Day(n, raw_q[n], None) for n in names_q[-B.NOISE_LOOKBACK:]]
+            quotes[qs] = LiveCombo(day, near, prev, hist_q, log, product=code)
+            kind = "行情＋模擬單"
+        else:
+            quotes[qs] = QuoteTracker(day, code, near, prev)
+            kind = "只有行情（期交所逐筆不足 14 天）"
+        log(f"{PRODUCT_NAME[code]} {qs}：{kind}，昨收 {prev}（{names_q[-1] if names_q else '—'}）")
+    return quotes, quote_raw
+
+
+def finish_quotes(day: date, out: Path, quotes, quote_raw, tick_csv: Path, near: str, uploader, log) -> None:
+    """大台、微台收盤定稿：有模擬單的用逐筆引擎重算對照；有上傳就同步寫一次（含秒級）。"""
+    for qs, tracker in quotes.items():
+        snap = tracker.snapshot("closed", "fubon_live", qs, datetime.now(M.TPE))
+        has_ticks = bool(tracker.t) if isinstance(tracker, LiveCombo) else tracker.last is not None
+        if isinstance(tracker, LiveCombo) and has_ticks:
+            names_q = [d for d in sorted(quote_raw[qs]) if d < str(day)]
+            rows, _ = official(day, tick_csv, None, quote_raw[qs][names_q[-1]], near, tracker.product,
+                               hist=[B.Day(n, quote_raw[qs][n], None) for n in names_q[-B.NOISE_LOOKBACK:]])
+            key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
+            snap["official"] = rows
+            snap["official_match"] = sorted(map(key, tracker.trades)) == sorted(map(key, rows))
+        (out / f"quotes_{tracker.product}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+        if uploader is not None and has_ticks:
+            uploader.flush_quote(snap, tracker.seconds_payload())
+            log(f"{PRODUCT_NAME[tracker.product]}定稿已寫進雲端")
+
+
+def flow_summary(name: str, flow) -> str:
+    if flow is None:
+        return f"{name}：沒有盤口資料"
+    big = flow["big"]
+    counts = "、".join(f"≥{k} 口 {sum(b[2] >= k for b in big)} 筆" for k in (5, 10, 20, 30))
+    return (f"{name}：主動買 {flow['buy']:,} 口、主動賣 {flow['sell']:,} 口（差 {flow['buy'] - flow['sell']:+,}）；"
+            f"大單 {counts}；五檔 {len(flow['books'])} 分鐘、最新 {flow['book']['time'] if flow['book'] else '—'}")
+
+
+def replay_raw(args) -> int:
+    """收盤後用富邦錄到的原始訊息把一天重建一次（含盤口與大單，T-455）；--upload 覆蓋網站那天的小台、大台、微台。
+    原始訊息要從開盤前就開始錄（盤中才開錄、靠補抓的日子，原始訊息沒有開盤那段，不能重建）。
+    結果寫在 <out>/<日>/rebuild/，並和盤中即時錄到的模擬單（<out>/<日>/paper_live.csv）對照。"""
+    day = date.fromisoformat(args.replay_raw)
+    src = Path(args.out) / str(day)
+    raw_path = src / f"raw_{day:%Y%m%d}.jsonl"
+    gz = Path(str(raw_path) + ".gz")
+    if not raw_path.exists() and not gz.exists():
+        raise SystemExit(f"{src} 沒有原始訊息（raw_{day:%Y%m%d}.jsonl 或 .gz）")
+    out = src / "rebuild"
+    out.mkdir(exist_ok=True)
+    logs = []
+    history = Path(args.history) / "csv"
+    hist, last_raw, last_day = history_days(history, day)
+    near, _ = contracts_for(day)
+    prev_close = last_raw["closes"].get(near)
+    if prev_close is None:
+        raise SystemExit(f"{last_day} 的逐筆裡沒有 {near} 的收盤價")
+    main_sym = symbol("MXF", near)
+    live = LiveCombo(day, near, prev_close, hist, logs.append)
+    quotes, quote_raw = setup_quotes(day, near, Path(args.history).parent / "taifex_ticks", logs.append)
+    last, bad = 0, None
+    opener = (lambda: gzip.open(gz, "rt", encoding="utf-8")) if gz.exists() else (lambda: raw_path.open(encoding="utf-8"))
+    with opener() as f:
+        for line in f:
+            if bad is not None:
+                raise SystemExit(f"原始訊息中間有壞掉的一行：{bad[:80]}")
+            try:
+                body = json.loads(line)
+            except json.JSONDecodeError:
+                bad = line  # 只容許最後一行還沒寫完（錄製還在寫的檔案）
+                continue
+            data = body.get("data") or {}
+            if body.get("event") != "data" or data.get("isTrial"):
+                continue
+            sym = data.get("symbol")
+            target = live if sym == main_sym else quotes.get(sym)
+            if target is None:
+                continue
+            t_us = int(data["time"])
+            if body.get("channel") == "trades":
+                for tr in data.get("trades") or []:
+                    target.on_tick(t_us, float(tr["price"]), float(tr["size"]), tr.get("bid"), tr.get("ask"))
+                last = max(last, t_us)
+            elif body.get("channel") == "books":
+                target.on_book(t_us, data.get("bids") or [], data.get("asks") or [])
+    if bad is not None and gz.exists():
+        raise SystemExit(f"壓縮好的原始訊息最後一行壞了：{bad[:80]}")
+    open_us = clock(day, B.SESSION_OPEN)
+    if not live.t or live.t[0] > open_us + OPEN_SLACK_S * M.US:
+        raise SystemExit(f"{day} 原始訊息沒有錄到開盤（第一筆 {hms(live.t[0]) if live.t else '—'}），不能重建")
+    complete = last >= clock(day, B.EOD)
+    end = clock(day, "13:50") if complete else last
+    for tracker in [live, *quotes.values()]:
+        if isinstance(tracker, LiveCombo):
+            tracker.decide(end, wall=complete)
+    print(f"{day} 原始訊息到 {hms(last)}（{'已收盤' if complete else '還沒收盤，只檢查'}）")
+    print(flow_summary("小台", live.flow.snapshot()))
+    for tracker in quotes.values():
+        print(flow_summary(PRODUCT_NAME[tracker.product], tracker.flow.snapshot()))
+    if not complete:
+        if args.upload:
+            raise SystemExit("還沒收盤，不能上傳")
+        return 0
+    uploader = Uploader(env_value(Path(args.env), DSN_ENV), print) if args.upload else None
+    finish(day, out, live, src / f"Daily_{day:%Y_%m_%d}_fubon.csv", history, last_raw, print,
+           (uploader, "fubon_live", main_sym) if uploader is not None else None)
+    finish_quotes(day, out, quotes, quote_raw, src / f"Daily_{day:%Y_%m_%d}_fubon.csv", near, uploader, print)
+    recorded = src / "paper_live.csv"
+    if recorded.exists():
+        key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
+        same = sorted(map(key, csv.DictReader(recorded.open(encoding="utf-8")))) == sorted(map(key, live.trades))
+        print("和盤中即時錄到的模擬單" + ("一致" if same else "不一致，請查（網站以這次重建為準）"))
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--env", help=".env 絕對路徑（即時模式必填）")
@@ -863,6 +1058,7 @@ def main() -> int:
     p.add_argument("--history", required=True, help="期交所逐筆工作資料夾（底下 csv/ 是 Daily_*.csv；前 14 天與昨收）")
     p.add_argument("--replay-day", help="檢查用：重播這天的期交所逐筆，不連富邦")
     p.add_argument("--replay-quotes", help="重算大台、微台（行情＋模擬單）：一天、逗號分隔的幾天或 all；配 --upload 放上網站")
+    p.add_argument("--replay-raw", help="收盤後用富邦錄到的原始訊息重建這一天（含盤口與大單）；配 --upload 覆蓋網站那天")
     p.add_argument("--upload", action="store_true", help="狀態寫進雲端 serving.futures_paper（網站「小台模擬」）")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 排程視窗是 cp950，印「⚠」會當掉
@@ -873,6 +1069,8 @@ def main() -> int:
         return replay(args)
     if args.replay_quotes:
         return replay_quotes(args)
+    if args.replay_raw:
+        return replay_raw(args)
 
     day = datetime.now(M.TPE).date()
     out = root / str(day)
@@ -951,26 +1149,12 @@ def main() -> int:
     filled_all = {s: backfill(rest, s, log) for s in near_syms}
     filled = filled_all[main_sym]
     last_t = {s: max(r[0] for r in rows) for s, rows in filled_all.items() if rows}
-    for t_us, price, size, _ in filled or []:
-        live.on_tick(t_us, price, size)
-    ticks_root = Path(args.history).parent / "taifex_ticks"
-    quotes, quote_raw = {}, {}
-    for fubon, code in QUOTE_PRODUCTS.items():
-        qs = symbol(fubon, near)
-        raw_q = F.read_taifex(ticks_root / code, code) if (ticks_root / code).exists() else {}
-        quote_raw[qs] = raw_q
-        names_q = [d for d in sorted(raw_q) if d < str(day)]
-        prev = raw_q[names_q[-1]]["closes"].get(near) if names_q else None
-        if len(names_q) >= B.NOISE_LOOKBACK and prev is not None:
-            hist_q = [B.Day(n, raw_q[n], None) for n in names_q[-B.NOISE_LOOKBACK:]]
-            quotes[qs] = LiveCombo(day, near, prev, hist_q, log, product=code)
-            kind = "行情＋模擬單"
-        else:
-            quotes[qs] = QuoteTracker(day, code, near, prev)
-            kind = "只有行情（期交所逐筆不足 14 天）"
-        log(f"{PRODUCT_NAME[code]} {qs}：{kind}，昨收 {prev}（{names_q[-1] if names_q else '—'}）")
-        for t_us, price, size, _ in filled_all.get(qs) or []:
-            quotes[qs].on_tick(t_us, price, size)
+    for t_us, price, size, _, bid, ask in filled or []:
+        live.on_tick(t_us, price, size, bid, ask)
+    quotes, quote_raw = setup_quotes(day, near, Path(args.history).parent / "taifex_ticks", log)
+    for qs in quotes:
+        for t_us, price, size, _, bid, ask in filled_all.get(qs) or []:
+            quotes[qs].on_tick(t_us, price, size, bid, ask)
         if isinstance(quotes[qs], LiveCombo) and now_us_start() > open_us_of(day) + OPEN_SLACK_S * M.US and (
                 not quotes[qs].t or quotes[qs].t[0] > open_us_of(day) + OPEN_SLACK_S * M.US):
             quotes[qs].disable(now_us_start(), "開盤那段沒有錄到（補抓失敗或不完整）")
@@ -987,7 +1171,7 @@ def main() -> int:
     if tick_csv.stat().st_size == 0:
         tw.writerow(["成交日期", "商品代號", "到期月份(週別)", "成交時間", "成交價格", "成交數量(B+S)"])
     for s, rows in filled_all.items():
-        for t_us, price, size, _ in rows or []:
+        for t_us, price, size, *_ in rows or []:
             tw.writerow([f"{day:%Y%m%d}", TAIFEX_CODE[s[:3]], near, M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
     stop_at = datetime.fromisoformat(f"{day}T{STOP_AT}:00").replace(tzinfo=M.TPE)
     n_ticks = 0
@@ -1010,10 +1194,14 @@ def main() -> int:
                     tw.writerow([f"{day:%Y%m%d}", TAIFEX_CODE.get(sym[:3], sym[:3]), symbols.get(sym, sym),
                                  M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
                     if sym == main_sym:
-                        live.on_tick(t_us, price, size)
+                        live.on_tick(t_us, price, size, tr.get("bid"), tr.get("ask"))
                         n_ticks += 1
                     elif sym in quotes:
-                        quotes[sym].on_tick(t_us, price, size)
+                        quotes[sym].on_tick(t_us, price, size, tr.get("bid"), tr.get("ask"))
+            elif body.get("event") == "data" and body.get("channel") == "books" and not data.get("isTrial"):
+                book_of = live if data.get("symbol") == main_sym else quotes.get(data.get("symbol"))
+                if book_of is not None:
+                    book_of.on_book(int(data["time"]), data.get("bids") or [], data.get("asks") or [])
         live.decide(int(time.time() * M.US), wall=True)
         for tracker in quotes.values():
             if isinstance(tracker, LiveCombo):
@@ -1043,20 +1231,7 @@ def main() -> int:
     log(f"收盤：{main_sym} 收到 {n_ticks:,} 筆成交；原始訊息已壓縮成 {raw_path.name}.gz")
     finish(day, out, live, tick_csv, history, last_raw, log,
            (uploader, "fubon_live", main_sym) if uploader is not None else None)
-    for qs, tracker in quotes.items():
-        snap = tracker.snapshot("closed", "fubon_live", qs, datetime.now(M.TPE))
-        has_ticks = bool(tracker.t) if isinstance(tracker, LiveCombo) else tracker.last is not None
-        if isinstance(tracker, LiveCombo) and has_ticks:
-            names_q = [d for d in sorted(quote_raw[qs]) if d < str(day)]
-            rows, _ = official(day, tick_csv, None, quote_raw[qs][names_q[-1]], near, tracker.product,
-                               hist=[B.Day(n, quote_raw[qs][n], None) for n in names_q[-B.NOISE_LOOKBACK:]])
-            key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
-            snap["official"] = rows
-            snap["official_match"] = sorted(map(key, tracker.trades)) == sorted(map(key, rows))
-        (out / f"quotes_{tracker.product}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
-        if uploader is not None and has_ticks:
-            uploader.flush_quote(snap, tracker.seconds_payload())
-            log(f"{PRODUCT_NAME[tracker.product]}定稿已寫進雲端")
+    finish_quotes(day, out, quotes, quote_raw, tick_csv, near, uploader, log)
     return 0
 
 
