@@ -88,6 +88,8 @@ export function gotrueMessage(body: unknown): string {
   const b = body as Record<string, unknown>
   const code = typeof b.error_code === 'string' ? b.error_code : typeof b.error === 'string' ? b.error : ''
   const text = [b.msg, b.message, b.error_description].find(isStr) ?? ''
+  // 免費方案當月流量用完，Supabase 整個登入服務回 402（2026-10-28 碰到）
+  if (/exceed_\w+_quota|project is restricted/i.test(text)) return 'Email 登入暫停中（登入服務本月額度用完，下個計費週期恢復），請先用 Google 登入'
   if (code === 'over_email_send_rate_limit' || /rate limit/i.test(text)) return '寄信次數到上限，請幾分鐘後再試'
   if (code === 'otp_expired' || /expired or is invalid/i.test(text)) return '驗證碼錯誤或已過期，請重寄一次'
   if (code === 'invalid_grant' || /refresh token/i.test(text)) return '登入已失效，請重新登入'

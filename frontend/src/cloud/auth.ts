@@ -6,6 +6,12 @@ import type { Pick, PicksDay } from './format'
 /** 本站的深色登入／註冊頁（T-432；T-439 起由 LoginPage.tsx 畫）。 */
 export const LOGIN_PAGE = '/login'
 
+/** Google 一鍵登入（T-457）：走 Cloudflare Access 的 Google（只開 Google＋Instant Auth 的應用），不經 Supabase。 */
+export const GOOGLE_LOGIN = '/api/login/google'
+
+/** 用 Cloudflare Access 登入的人登出：Cloudflare 清掉通行證與全域登入（會顯示 Cloudflare 的登出頁）。 */
+export const ACCESS_LOGOUT = '/cdn-cgi/access/logout'
+
 export class LoginRequired extends Error {
   /** redirect＝被 Cloudflare Access 導走（管理者還沒關掉 /api 的 Access）；denied＝API 回 401／403（沒登入或權杖失效） */
   readonly reason: 'redirect' | 'denied'
