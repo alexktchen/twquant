@@ -578,15 +578,27 @@ function PnlCalendar({ days, value, onPick }: { days: PnlRow[]; value: string | 
   )
 }
 
-/** 盤中重抓：最新一天；台北 08:25～13:50 每 15 秒。load 換了（換商品）要重抓，由呼叫端用 key 重建元件。 */
+/** 分頁在不在前景。省 Supabase 流量（2026-10-28 超量）：切到別的分頁、縮小視窗就停抓，切回來立刻補抓一次。 */
+function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const on = () => setVisible(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', on)
+    return () => document.removeEventListener('visibilitychange', on)
+  }, [])
+  return visible
+}
+
+/** 盤中重抓：最新一天；台北 08:25～13:50、分頁在前景時每 15 秒。load 換了（換商品）要重抓，由呼叫端用 key 重建元件。 */
 function useLive<T>(enabled: boolean, load: () => Promise<T>, refresh: number) {
+  const visible = usePageVisible()
   const [data, setData] = useState<T | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
   const loader = useRef(load)
   loader.current = load
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !visible) return
     let stop = false
     const run = () =>
       loader
@@ -607,7 +619,7 @@ function useLive<T>(enabled: boolean, load: () => Promise<T>, refresh: number) {
       stop = true
       clearInterval(id)
     }
-  }, [enabled, refresh])
+  }, [enabled, visible, refresh])
   return { data, err, now }
 }
 
@@ -744,8 +756,10 @@ function FlowSection({ product, day, mode, cut, refresh }: { product: Product; d
   const [err, setErr] = useState<string | null>(null)
   const [more, setMore] = useState(false)
   const live = mode === 'live'
+  const visible = usePageVisible()
   useEffect(() => {
     if (!open) return
+    if (live && !visible) return
     let stop = false
     // 盤中：大單照門檻在伺服器先篩、不抓每分鐘的五檔；復盤：抓整份一次，之後換門檻在這裡篩
     const run = () =>
@@ -766,7 +780,7 @@ function FlowSection({ product, day, mode, cut, refresh }: { product: Product; d
       stop = true
       clearInterval(id)
     }
-  }, [open, live, product, day, min, refresh])
+  }, [open, live, visible, product, day, min, refresh])
   const v = useMemo(() => (flow && flow.day === day ? flowAt(flow, cut, min) : null), [flow, day, cut, min])
   const bigs = v ? [...v.big].reverse() : []
   const shown = more ? bigs : bigs.slice(0, BIG_PAGE)
