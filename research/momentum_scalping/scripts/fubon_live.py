@@ -19,6 +19,9 @@ fubon_live.py — 富邦即時行情：錄小台／台指逐筆與小台五檔�
   檢查用（不連富邦）：加 --replay-day 2026-10-22，用 --history 裡那天的期交所逐筆重播
   --upload：把狀態寫進雲端 serving.futures_paper（網站「小台模擬」分頁讀它；DSN 取 .env 的 TWQUANT_SUPABASE_DSN）
   收盤後重建（含盤口與大單）：--replay-raw 2026-10-28 [--env ... --upload]，讀 <out>/<日>/raw_*.jsonl(.gz)
+  --local（取代 --upload，2026-10-29）：先落本機 PG（DSN 取 .env 的 TWQUANT_PG_DSN）——模擬單狀態寫本機 serving.futures_*，
+      逐筆與五檔寫 market_live.ticks／books（live_store.py）；雲端由 futures_sync.py 從本機同步
+  原始訊息重灌本機逐筆與五檔：--load-raw 2026-10-28 --env ...
 
 網站狀態（payload）的欄位是網站 frontend/src/cloud/futures.ts 的 FuturesDay；改這裡要一起改那裡。
 """
@@ -58,6 +61,7 @@ DECISION_GRACE_S = 3.0          # 到了決策時點、還沒收到之後的成�
 RECONNECT_WAIT_S = 5.0
 UPLOAD_EVERY_S = 15.0         # 盤中多久寫一次雲端（有新事件時立刻寫）
 DSN_ENV = "TWQUANT_SUPABASE_DSN"
+LOCAL_DSN_ENV = "TWQUANT_PG_DSN"
 # 與 twquant serving schema 的 FUTURES_PAPER_SPEC 產生的建表語句相同（tests/test_futures_paper_store.py 守著那邊）
 TABLE_DDL = ('CREATE TABLE IF NOT EXISTS "serving"."futures_paper" '
              "(day date, source text, status text, payload jsonb, updated_at timestamptz, PRIMARY KEY (day))")
@@ -776,12 +780,12 @@ def quote_prev_close(ticks_root: Path, code: str, day: date, contract: str):
 class Uploader:
     """把最新狀態寫進雲端 serving.futures_paper（背景執行緒、只留最新一份；失敗記錄後下次再試，不擋錄製）。"""
 
-    def __init__(self, dsn: str, log):
+    def __init__(self, dsn: str, log, where: str = "雲端"):
         import threading
 
         import psycopg  # 只有上傳才需要
 
-        self.psycopg, self.dsn, self.log = psycopg, dsn, log
+        self.psycopg, self.dsn, self.log, self.where = psycopg, dsn, log, where
         self.pending: dict = {}  # 鍵（"paper" 或 商品代號）→ (寫入函式, 最新一份)
         self.cv = threading.Condition()
         self.conn = None
@@ -850,7 +854,7 @@ class Uploader:
                 try:
                     writer(payload)
                 except Exception as exc:  # noqa: BLE001  # 記錄後丟掉這份、等下一份；不讓上傳問題停掉盤中錄製
-                    self.log(f"⚠ 寫雲端失敗：{exc}")
+                    self.log(f"⚠ 寫{self.where}失敗：{exc}")
                     if self.conn is not None:
                         self.conn.close()
                         self.conn = None
@@ -875,6 +879,15 @@ def env_value(path: Path, key: str) -> str:
         if line.strip().startswith(f"{key}="):
             return line.split("=", 1)[1].strip().strip('"').strip("'")
     raise SystemExit(f"{path} 沒有 {key}")
+
+
+def state_uploader(args, log):
+    """模擬單狀態寫哪裡：--local＝本機 PG（雲端由 futures_sync.py 同步）、--upload＝直接寫雲端、都沒有＝不寫。"""
+    if args.local:
+        return Uploader(env_value(Path(args.env), LOCAL_DSN_ENV), log, "本機 PG")
+    if args.upload:
+        return Uploader(env_value(Path(args.env), DSN_ENV), log)
+    return None
 
 
 def backfill(futopt, symbol_: str, log):
@@ -1011,7 +1024,7 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
         uploader.flush(snap, seconds)
         (out / "payload.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
         (out / "seconds.json").write_text(json.dumps(seconds), encoding="utf-8")
-        log(f"定稿已寫進雲端（{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致，請查'}）")
+        log(f"定稿已寫進{uploader.where}（{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致，請查'}）")
 
 
 def quote_day(day: date, fubon: str, code: str, raw, log=lambda m: None):
@@ -1047,7 +1060,7 @@ def replay_quotes(args) -> int:
     """不連富邦：用期交所逐筆另存（taifex_ticks）重算大台、微台（行情＋模擬單）；--upload 寫進網站。
     --replay-quotes 可以給一天、逗號分隔的幾天，或 all（另存裡的每一天；每個商品只讀一次檔）。"""
     root = Path(args.history).parent / "taifex_ticks"
-    uploader = Uploader(env_value(Path(args.env), DSN_ENV), print) if args.upload else None
+    uploader = state_uploader(args, print)
     for fubon, code in QUOTE_PRODUCTS.items():
         raw = F.read_taifex(root / code, code)
         wanted = sorted(raw) if args.replay_quotes == "all" else args.replay_quotes.split(",")
@@ -1061,7 +1074,7 @@ def replay_quotes(args) -> int:
             tail = (f"模擬單 {len(snap['trades'])} 筆、合計 {snap['total']:+,.0f} 元、"
                     f"{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致'}；"
                     f"開高走低 {len(snap['gap_fail']['trades'])} 筆、合計 {snap['gap_fail']['total']:+,.0f} 元") if paper else "只有行情（前面不足 14 天）"
-            print(f"{name} {PRODUCT_NAME[code]} {snap['contract']}：{tail}" + ("，已寫進雲端" if uploader is not None else ""))
+            print(f"{name} {PRODUCT_NAME[code]} {snap['contract']}：{tail}" + (f"，已寫進{uploader.where}" if uploader is not None else ""))
     return 0
 
 
@@ -1083,8 +1096,9 @@ def replay(args) -> int:
     src = next(folder.glob(f"Daily_{day:%Y_%m_%d}.csv"))
     shutil.copy(src, tick_csv)
     final = None
-    if args.upload:
-        final = (Uploader(env_value(Path(args.env), DSN_ENV), print), "taifex_replay", symbol("MXF", info["contract"]))
+    uploader = state_uploader(args, print)
+    if uploader is not None:
+        final = (uploader, "taifex_replay", symbol("MXF", info["contract"]))
     finish(day, out, live, tick_csv, folder, last_raw, print, final)
     same = [(r["sleeve"], r["entry_price"], r["exit_price"], r["exit_reason"]) for r in live.trades]
     off = [(r["sleeve"], r["entry_price"], r["exit_price"], r["exit_reason"])
@@ -1135,7 +1149,7 @@ def finish_quotes(day: date, out: Path, quotes, quote_raw, tick_csv: Path, near:
         (out / f"quotes_{tracker.product}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
         if uploader is not None and has_ticks:
             uploader.flush_quote(snap, tracker.seconds_payload())
-            log(f"{PRODUCT_NAME[tracker.product]}定稿已寫進雲端")
+            log(f"{PRODUCT_NAME[tracker.product]}定稿已寫進{uploader.where}")
 
 
 def flow_summary(name: str, flow) -> str:
@@ -1209,10 +1223,10 @@ def replay_raw(args) -> int:
     for tracker in quotes.values():
         print(flow_summary(PRODUCT_NAME[tracker.product], tracker.flow.snapshot()))
     if not complete:
-        if args.upload:
-            raise SystemExit("還沒收盤，不能上傳")
+        if args.upload or args.local:
+            raise SystemExit("還沒收盤，不能寫定稿")
         return 0
-    uploader = Uploader(env_value(Path(args.env), DSN_ENV), print) if args.upload else None
+    uploader = state_uploader(args, print)
     finish(day, out, live, src / f"Daily_{day:%Y_%m_%d}_fubon.csv", history, last_raw, print,
            (uploader, "fubon_live", main_sym) if uploader is not None else None)
     finish_quotes(day, out, quotes, quote_raw, src / f"Daily_{day:%Y_%m_%d}_fubon.csv", near, uploader, print)
@@ -1232,11 +1246,18 @@ def main() -> int:
     p.add_argument("--replay-day", help="檢查用：重播這天的期交所逐筆，不連富邦")
     p.add_argument("--replay-quotes", help="重算大台、微台（行情＋模擬單）：一天、逗號分隔的幾天或 all；配 --upload 放上網站")
     p.add_argument("--replay-raw", help="收盤後用富邦錄到的原始訊息重建這一天（含盤口與大單）；配 --upload 覆蓋網站那天")
-    p.add_argument("--upload", action="store_true", help="狀態寫進雲端 serving.futures_paper（網站「小台模擬」）")
+    p.add_argument("--upload", action="store_true", help="狀態直接寫進雲端 serving.futures_paper（網站「小台模擬」）")
+    p.add_argument("--local", action="store_true",
+                   help="先落本機 PG：狀態寫本機 serving.futures_*、逐筆與五檔寫 market_live；雲端交給 futures_sync.py")
+    p.add_argument("--load-raw", help="把那天的富邦原始訊息重灌進本機 market_live.ticks／books（要 --env）")
     p.add_argument("--ms-repo", default=str(HERE.parents[3] / "Momentum_Scalping"),
                    help="網友原版 repo（seromitama/Momentum_Scalping，commit 1dea51b）；三個商品都跑它的模擬單")
     p.add_argument("--no-ms", action="store_true", help="不跑網友原版")
     args = p.parse_args()
+    if args.upload and args.local:
+        p.error("--upload 和 --local 只能選一個（--local 的雲端由 futures_sync.py 同步）")
+    if (args.upload or args.local or args.load_raw) and not args.env:
+        p.error("--upload／--local／--load-raw 要給 --env")
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 排程視窗是 cp950，印「⚠」會當掉
     root = Path(args.out)
     root.mkdir(parents=True, exist_ok=True)
@@ -1249,6 +1270,12 @@ def main() -> int:
         return replay_quotes(args)
     if args.replay_raw:
         return replay_raw(args)
+    if args.load_raw:
+        import live_store as L
+
+        day = date.fromisoformat(args.load_raw)
+        L.load_raw(env_value(Path(args.env), LOCAL_DSN_ENV), day, root / str(day) / f"raw_{day:%Y%m%d}.jsonl")
+        return 0
 
     day = datetime.now(M.TPE).date()
     out = root / str(day)
@@ -1320,13 +1347,25 @@ def main() -> int:
 
     subscribe()
     live = LiveCombo(day, near, prev_close, hist, log)
-    uploader = Uploader(env_value(Path(args.env), DSN_ENV), log) if args.upload else None
+    uploader = state_uploader(args, log)
+    store = None
+    if args.local:
+        import live_store as L
+
+        store = L.TickStore(env_value(Path(args.env), LOCAL_DSN_ENV), day, log)
     pushed_at, pushed_events = 0.0, -1
     rest = sdk.marketdata.rest_client.futopt
     # 三個商品的近月都補抓（小台先，模擬單要用）；補抓過的成交之後推送來就跳過
     filled_all = {s: backfill(rest, s, log) for s in near_syms}
     filled = filled_all[main_sym]
     last_t = {s: max(r[0] for r in rows) for s, rows in filled_all.items() if rows}
+    if store is not None:
+        for s, rows in filled_all.items():
+            if rows:
+                try:
+                    store.replace_backfill(s, rows)
+                except Exception as exc:  # noqa: BLE001  # 補抓那段寫不進本機 PG：記錄，收盤後 Daily_*_fubon.csv 還有
+                    log(f"⚠ 補抓的 {s} 逐筆寫本機 PG 失敗：{exc}")
     for t_us, price, size, _, bid, ask in filled or []:
         live.on_tick(t_us, price, size, bid, ask)
     quotes, quote_raw = setup_quotes(day, near, Path(args.history).parent / "taifex_ticks", log)
@@ -1369,6 +1408,8 @@ def main() -> int:
                     continue  # 補抓已經算過的成交（用成交時間判斷，查詢與推送的序號不一定同一套）
                 for tr in data.get("trades") or []:
                     price, size = float(tr["price"]), float(tr["size"])
+                    if store is not None:
+                        store.tick(sym, t_us, price, size, tr.get("bid"), tr.get("ask"))
                     tw.writerow([f"{day:%Y%m%d}", TAIFEX_CODE.get(sym[:3], sym[:3]), symbols.get(sym, sym),
                                  M.us_to_dt(t_us).strftime("%H%M%S"), price, int(size)])
                     if sym == main_sym:
@@ -1377,6 +1418,8 @@ def main() -> int:
                     elif sym in quotes:
                         quotes[sym].on_tick(t_us, price, size, tr.get("bid"), tr.get("ask"))
             elif body.get("event") == "data" and body.get("channel") == "books" and not data.get("isTrial"):
+                if store is not None:
+                    store.book(data.get("symbol"), int(data["time"]), data.get("bids") or [], data.get("asks") or [])
                 book_of = live if data.get("symbol") == main_sym else quotes.get(data.get("symbol"))
                 if book_of is not None:
                     book_of.on_book(int(data["time"]), data.get("bids") or [], data.get("asks") or [])
@@ -1403,6 +1446,11 @@ def main() -> int:
         log(f"斷線清理失敗：{exc}")
     rawf.close()
     tickf.close()
+    if store is not None:
+        res = store.close()
+        log(f"本機 PG：逐筆 {res['ticks']:,}、五檔 {res['books']:,}" + (
+            f"；⚠ 還有 {res['unwritten']:,} 筆沒寫進去、{res['dropped']:,} 筆沒收，請跑 --load-raw {day}"
+            if res["unwritten"] or res["dropped"] else ""))
     with raw_path.open("rb") as src, gzip.open(str(raw_path) + ".gz", "wb") as dst:
         shutil.copyfileobj(src, dst)
     raw_path.unlink()
