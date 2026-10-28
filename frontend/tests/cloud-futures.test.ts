@@ -716,6 +716,16 @@ test('T-455 AC4 畫面：「盤口與大單」是收起的區塊、展開才抓�
   assert.match(read('src/cloud/Section.tsx'), /onToggle\?: \(open: boolean\) => void/)
 })
 
+test('盤中重抓：分頁在背景就停（省 Supabase 流量，2026-10-29），切回前景立刻補抓', () => {
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /document\.addEventListener\('visibilitychange', on\)/)
+  // 模擬單／行情（useLive）與盤口與大單（FlowSection）兩個輪詢都要看前景
+  assert.match(page, /if \(!enabled \|\| !visible\) return/)
+  assert.match(page, /\}, \[enabled, visible, refresh\]\)/)
+  assert.match(page, /if \(live && !visible\) return/)
+  assert.match(page, /\}, \[open, live, visible, product, day, min, refresh\]\)/)
+})
+
 // ── 網友原版（T-456，使用者 2026-10-28：「先幫我加網友的策略去模擬單，還有復盤」） ──
 /** 2026-10-22 網友原版用期交所逐筆重播的兩筆（studies/ms_tmf 研究版同一天的結果，一筆不差）；第二筆還在持有的版本給盤中用。 */
 function msDay(holding = false): FuturesDay {
