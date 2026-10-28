@@ -13,6 +13,7 @@ const TAB_FEATURE: Partial<Record<Tab, { feature: Feature; title: string }>> = {
   score: { feature: 'score', title: '績效' },
   line: { feature: 'line', title: 'LINE 群組' },
   futures: { feature: 'futures', title: '台指期' },
+  daytrade: { feature: 'futures', title: '當沖' },
 }
 
 /** 要權限才看得到的首頁卡 */
