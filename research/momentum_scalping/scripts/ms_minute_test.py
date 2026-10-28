@@ -234,8 +234,11 @@ def fidelity(args, out: Path):
 def oos(args, out: Path):
     _, pv, _ = PRODUCTS[args.product]
     fid = out / f"fidelity_{args.product}.json"
-    if not fid.exists() or not json.loads(fid.read_text(encoding="utf-8"))["checks"]["passed"]:
-        raise SystemExit(f"{args.product} 保真度沒過（或還沒跑），照事前登記不跑判定")
+    if not fid.exists():
+        raise SystemExit(f"{args.product} 保真度還沒跑")
+    fid_checks = json.loads(fid.read_text(encoding="utf-8"))["checks"]
+    if not fid_checks["passed"] and not args.override_fidelity:
+        raise SystemExit(f"{args.product} 保真度沒過，照事前登記不跑判定（要照跑請給 --override-fidelity 和理由）")
     start, end = JUDGE[args.product]
     days, excluded = main_contract_days(load_minute(Path(args.bars), args.product))
     judged = [d for d in sorted(days) if start <= d <= end and not SEEN[0] <= d <= SEEN[1]]
@@ -247,7 +250,8 @@ def oos(args, out: Path):
     main = summary(res, judged, pv)
     early_s = summary(res, early, pv)
     passed = main["daily_ci"][0] > 0 and early_s["daily_mean"] > 0
-    result = {"product": args.product, "judged_first": judged[0], "judged_last": judged[-1],
+    result = {"fidelity_passed": fid_checks["passed"], "fidelity_checks": fid_checks, "override_fidelity": args.override_fidelity,
+              "product": args.product, "judged_first": judged[0], "judged_last": judged[-1],
               "excluded": {d: r for d, r in excluded.items() if start <= d}, "main": main, "early": early_s,
               "early_range": [early[0], early[-1]] if early else None, "passed": passed,
               "yearly": yearly(res, judged), "by_strategy": grouped(res, judged, "strategy_setup", pv),
@@ -270,6 +274,7 @@ def main() -> int:
     p.add_argument("--out", required=True)
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--dates", nargs="*", help="只跑這幾天（除錯用，不寫判定）")
+    p.add_argument("--override-fidelity", help="保真度沒過仍照跑：寫明誰、何時、為什麼要求（會寫進結果檔）")
     args = p.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

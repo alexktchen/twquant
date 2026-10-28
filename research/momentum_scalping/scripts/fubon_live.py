@@ -8,6 +8,7 @@ fubon_live.py — 富邦即時行情：錄小台／台指逐筆與小台五檔�
 訊號在 T 發出 → 以 T + 0.5 秒後的第一筆成交價成交，買 +1 點、賣 −1 點。
 收盤後用同一個逐筆引擎（B.run_orb／B.run_noise）把錄到的逐筆重算一次，當作正式結果，並和盤中即時紀錄對照。
 另外同時跑「開高走低」三條放空規則（GapFail；studies/gap_fail，A 開高失守、B 跌破開盤區間、C 補缺口），放在 payload 的 gap_fail。
+網友原版 Momentum_Scalping（Netizen；studies/ms_tmf，只做多 1 口、futures_replay.DayEngine 逐筆跑）放在 payload 的 ms。
 盤口與大單（Flow，T-455）：每筆成交照當下買賣價分主動買／主動賣、5 口以上記成大單、五檔留最新與每分鐘最後一份，放在 payload 的 flow。
 
 一定要在 repo 以外的資料夾執行：富邦 SDK 會在「執行目錄」寫含個資的 log/。程式一開始就 chdir 到 --out。
@@ -277,6 +278,150 @@ class GapFail:
                 "rules": rules, "sleeves": sleeves, "trades": self.trades, "events": self.events, "total": round(total, 1)}
 
 
+MS_SLEEVE = "MS_LONG"
+MS_COMMIT = "1dea51b"  # seromitama/Momentum_Scalping 用的版本（studies/ms_tmf 同一版）
+MS_SETUP_TEXT = {"MOMENTUM/INITIAL_BREAKOUT": "動能・初次突破", "MOMENTUM/FIRST_PULLBACK_REBREAK": "動能・回檔再突破",
+                 "TREND/TREND_INITIAL_ENTRY": "趨勢・初次進場"}
+MS_EXIT_TEXT = {"EMA_TREND_BREAK": "EMA 死叉", "HIGHER_LOW_BREAK": "跌破前低", "MOMENTUM_STRUCTURE_BREAK_FULL": "動能結構破壞",
+                "MOMENTUM_DECAY_PARTIAL": "動能衰退減碼", "EMERGENCY_STOP": "2.5% 緊急停損", "TIME_EXIT": "13:00 清倉",
+                "MARKET_TREND_INVALIDATED": "大盤轉弱", "RS_FAILURE": "強度轉弱", "UNKNOWN_STRATEGY_STOP": "停損",
+                "EOD_FORCED_CLOSE": "收盤前"}
+_MS = {}  # 原版模組只載入一次：{"repo", "mods", "params"}
+
+
+def ms_engine_parts(repo: Path):
+    """載入原版（預設參數）；三個商品共用（原版的快取以商品代號分開，而且每次都核對資料）。"""
+    if _MS.get("repo") != str(repo):
+        if not (repo / "intraday_v2_1.py").exists():
+            raise SystemExit(f"--ms-repo {repo} 底下沒有原版程式（git clone https://github.com/seromitama/Momentum_Scalping）")
+        mods = M.load_modules(str(repo))
+        _MS.update(repo=str(repo), mods=mods, params=M.load_parameters(mods, None, []))
+    return _MS["mods"], _MS["params"]
+
+
+def ms_config(product: str):
+    pv, fee = PAPER_COST[product]
+    return F.Config(product=product, point_value=pv, contracts=1, commission=fee, tax_rate=B.TAX, slip_ticks=1, tick=1.0,
+                    latency_us=B.LATENCY_US, eval_interval_us=1_000_000, refresh_us=30 * M.US)
+
+
+def iso_hms(iso: str) -> str:
+    return M.us_to_dt(M.parse_time_us(iso)).strftime("%H:%M:%S.%f")[:-3]
+
+
+class Netizen:
+    """網友原版 Momentum_Scalping（studies/ms_tmf）只做多 1 口的模擬單：futures_replay.DayEngine 一筆一筆跑，
+    和研究用的逐筆重播是同一份程式（2026-10-28 用 59 天逐筆比對過，一筆不差）。大盤濾網全開、「相對大盤強度」視為通過。"""
+
+    def __init__(self, live: "LiveCombo", repo: Path):
+        self.live = live
+        mods, params = ms_engine_parts(repo)
+        self.cfg = ms_config(live.product)
+        self.engine = F.DayEngine(mods, params, str(live.day), live.contract, {}, self.cfg, self.on_event)
+        self.serial = 0
+        self.events, self.trades = [], []
+        self.open = None         # 持倉中：{"entry_time", "entry_price", "stop", "signal_time", "setup"}
+        self.signal = None       # 最近一次送單的訊號（等成交）
+        self.closed = False
+
+    def note(self, t_us: int, kind: str, text: str) -> None:
+        self.events.append({"time": hms(t_us)[:8], "kind": kind, "sleeve": MS_SLEEVE, "text": text})
+        self.live.log(f"[{hms(t_us)[:8]}] 網友原版：{text}")
+
+    def on_tick(self, t_us: int, price: float, size: float) -> None:
+        if self.closed:
+            return
+        self.engine.on_tick(t_us, self.serial, price, size)
+        self.serial += 1
+
+    def close(self) -> None:
+        """收盤：還持有就用最後一筆了結（同 simulate_day；原版 13:00 就清倉，通常用不到）。"""
+        if not self.closed:
+            self.engine.close()
+            self.closed = True
+
+    def on_event(self, kind: str, t_us: int, info: dict) -> None:
+        if kind == "signal":
+            setup = MS_SETUP_TEXT.get(f"{info['strategy']}/{info['setup']}", f"{info['strategy']}/{info['setup']}")
+            self.signal = {"time": t_us, "setup": setup}
+            self.note(t_us, "signal", f"{setup}訊號，價 {info['price']:.0f}、結構停損 {info['stop']:.0f} → 模擬買進 1 口")
+        elif kind == "fill":
+            sig = self.signal or {"time": t_us, "setup": ""}
+            self.open = {"entry_time": t_us, "entry_price": info["price"], "stop": info["stop"],
+                         "signal_time": sig["time"], "setup": sig["setup"]}
+            self.note(t_us, "fill", f"模擬買進 {info['price']:.0f}，停損 {info['stop']:.0f}")
+        elif kind == "exit_signal":
+            self.note(t_us, "signal", f"{MS_EXIT_TEXT.get(info['reason'], info['reason'])}（價 {info['price']:.0f}）→ 賣出")
+        elif kind == "exit_fill" and info["left"] > 0:
+            self.note(t_us, "info", f"減碼 {info['qty']} 口 {info['price']:.0f}，還有 {info['left']} 口")
+        elif kind == "closed":
+            t = info
+            legs = json.loads(t["exit_legs"])
+            reason = t["final_exit_reason"]
+            row = {"day": str(self.live.day), "sleeve": MS_SLEEVE, "side": 1,
+                   "signal_time": hms(self.open["signal_time"]) if self.open else iso_hms(t["signal_time"]),
+                   "entry_time": iso_hms(t["entry_time"]), "entry_price": t["entry_price"],
+                   "exit_time": iso_hms(t["exit_time"]), "exit_price": legs[-1]["price"], "exit_reason": reason,
+                   "points": t["points"], "net_pnl": t["net_pnl"], "source": "live", "stop_price": t["stop_price"],
+                   "setup": self.open["setup"] if self.open else ""}
+            self.trades.append(row)
+            self.open = None
+            self.note(t_us, "exit", f"模擬賣出 {row['exit_price']:.0f}（{MS_EXIT_TEXT.get(reason, reason)}），這筆淨 {t['net_pnl']:+,.0f} 元")
+
+    def mark(self, last):
+        realized = round(sum(t["net_pnl"] for t in self.trades), 1)
+        if self.open is None:
+            return {"position": 0, "entry_price": None, "realized": realized, "open_pnl": None}
+        entry = self.open["entry_price"]
+        open_pnl = None if last is None else net_pnl(1, entry, last - B.SLIP, self.cfg.point_value, self.cfg.commission)
+        return {"position": 1, "entry_price": entry, "realized": realized, "open_pnl": open_pnl}
+
+    def snapshot(self, last) -> dict:
+        st = self.mark(last)
+        return {"version": 1, "name": "網友原版", "commit": MS_COMMIT, "sleeves": {MS_SLEEVE: st},
+                "open": None if self.open is None else {"entry_time": hms(self.open["entry_time"])[:8],
+                                                         "entry_price": self.open["entry_price"], "stop": self.open["stop"],
+                                                         "setup": self.open["setup"]},
+                "trades": self.trades, "events": self.events, "signals": sum(v for k, v in self.engine.signals.items() if k.endswith(":ACCEPTED")),
+                "total": round(st["realized"] + (st["open_pnl"] or 0), 1), "official": None, "official_match": None}
+
+
+def ms_official(day: date, today: dict, product: str) -> list:
+    """收盤重算：同一個 DayEngine 吃期交所格式的逐筆（只到秒）跑一遍；和盤中比對用。"""
+    mods, params = ms_engine_parts(Path(_MS["repo"]))
+    res = F.simulate_day(mods, params, str(day), today, {}, ms_config(product))
+    return [{"day": str(day), "sleeve": MS_SLEEVE, "side": 1, "signal_time": iso_hms(t["signal_time"]),
+             "entry_time": iso_hms(t["entry_time"]), "entry_price": t["entry_price"], "exit_time": iso_hms(t["exit_time"]),
+             "exit_price": json.loads(t["exit_legs"])[-1]["price"], "exit_reason": t["final_exit_reason"], "points": t["points"],
+             "net_pnl": t["net_pnl"], "source": "official", "stop_price": t["stop_price"]} for t in res["trades"]]
+
+
+def ms_attach_official(snap: dict, rows: list) -> None:
+    ms = snap.get("ms")
+    if ms is None:
+        return
+    key = lambda r: (float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
+    ms["official"] = rows
+    ms["official_match"] = sorted(map(key, ms["trades"])) == sorted(map(key, rows))
+
+
+def ms_summary(snap: dict) -> list:
+    ms = snap.get("ms")
+    if ms is None:
+        return []
+    lines = ["## 網友原版（只做多 1 口）", ""]
+    rows = [("盤中即時", r) for r in ms["trades"]] + [("收盤重算", r) for r in ms.get("official") or []]
+    if rows:
+        lines += ["| 來源 | 進場 | 出場 | 原因 | 淨損益 |", "|---|---|---|---|---|"]
+        lines += [f"| {src} | {r['entry_time']} {r['entry_price']:.0f} | {r['exit_time']} {r['exit_price']:.0f} | "
+                  f"{MS_EXIT_TEXT.get(r['exit_reason'], r['exit_reason'])} | {r['net_pnl']:+,.0f} |" for src, r in rows]
+        lines.append("")
+    lines.append(f"合計：盤中即時 {sum(r['net_pnl'] for r in ms['trades']):+,.0f} 元；"
+                 f"收盤重算 {sum(r['net_pnl'] for r in ms.get('official') or []):+,.0f} 元"
+                 + ("" if ms.get("official_match") is None else ("（一致）" if ms["official_match"] else "（不一致，以收盤重算為準）")))
+    return lines + [""]
+
+
 def _px(v):
     v = float(v)
     return int(v) if v.is_integer() else v
@@ -363,6 +508,7 @@ class LiveCombo:
         self.disabled = None     # 開盤沒錄到 → 原因；之後只錄資料、不做任何決策
         self.gap = GapFail(self)
         self.flow = Flow(day)
+        self.ms = Netizen(self, Path(_MS["repo"])) if _MS.get("repo") else None  # 網友原版；main() 有載入原版才跑
 
     def disable(self, t_us: int, reason: str) -> None:
         if self.disabled is None:
@@ -396,6 +542,8 @@ class LiveCombo:
         self.watch_orb(i)
         self.gap.fill_pending(i)
         self.gap.watch(i)
+        if self.ms is not None and self.disabled is None:
+            self.ms.on_tick(t_us, price, size)
 
     def last_before(self, t_us: int) -> int:
         i = bisect.bisect_left(self.t, t_us) - 1
@@ -450,6 +598,8 @@ class LiveCombo:
                 self.noise_pos = 0
                 self.note(self.eod, "signal", "NOISE_SHORT", "收盤前回補（13:44）")
         self.gap.decide(ready)
+        if self.ms is not None and ready(clock(self.day, "13:45") + M.US):
+            self.ms.close()
 
     def fill_pending(self, i: int) -> None:
         keep = []
@@ -551,13 +701,14 @@ class LiveCombo:
             "product": self.product, "name": PRODUCT_NAME[self.product], "volume": int(self.vol),
             "point_value": self.point_value, "commission": self.commission,
             "gap_fail": self.gap.snapshot(last), "flow": self.flow.snapshot(),
+            "ms": None if self.ms is None else self.ms.snapshot(last),
         }
 
     def on_book(self, t_us: int, bids, asks) -> None:
         self.flow.on_book(t_us, bids, asks)
 
     def n_events(self) -> int:
-        return len(self.events) + len(self.gap.events)
+        return len(self.events) + len(self.gap.events) + (len(self.ms.events) if self.ms is not None else 0)
 
 
 class QuoteTracker:
@@ -836,6 +987,15 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
               "兩者應該一致；不一致時以收盤重算為準，並查原因。", ""]
     write_rows(out / "gap_live.csv", live.gap.trades)
     lines += gap_summary(live.gap)
+    ms_rows = None
+    if live.ms is not None:
+        live.ms.close()
+        ms_rows = ms_official(day, F.read_taifex(tick_csv.parent / "official_input", PRODUCT_TAIFEX)[str(day)], PRODUCT_TAIFEX)
+        M.write_csv(out / "ms_live.csv", live.ms.trades)
+        M.write_csv(out / "ms_official.csv", ms_rows)
+        probe = {"ms": live.ms.snapshot(None)}
+        ms_attach_official(probe, ms_rows)
+        lines += ms_summary(probe)
     (out / "SUMMARY.md").write_text("\n".join(lines), encoding="utf-8")
     log("\n".join(lines))
     if final is not None:
@@ -844,6 +1004,8 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
         key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
         snap["official"] = rows
         snap["official_match"] = sorted(map(key, live.trades)) == sorted(map(key, rows))
+        if ms_rows is not None:
+            ms_attach_official(snap, ms_rows)
         seconds = live.seconds_payload()
         uploader.flush(snap, seconds)
         (out / "payload.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
@@ -873,6 +1035,10 @@ def quote_day(day: date, fubon: str, code: str, raw, log=lambda m: None):
     key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
     snap["official"] = rows
     snap["official_match"] = sorted(map(key, live.trades)) == sorted(map(key, rows))
+    if live.ms is not None:
+        live.ms.close()
+        snap["ms"] = live.ms.snapshot(None)
+        ms_attach_official(snap, ms_official(day, info, code))
     return snap, live.seconds_payload()
 
 
@@ -959,6 +1125,12 @@ def finish_quotes(day: date, out: Path, quotes, quote_raw, tick_csv: Path, near:
             key = lambda r: (r["sleeve"], float(r["entry_price"]), float(r["exit_price"]), r["exit_reason"])  # noqa: E731
             snap["official"] = rows
             snap["official_match"] = sorted(map(key, tracker.trades)) == sorted(map(key, rows))
+            if tracker.ms is not None:
+                tracker.ms.close()
+                snap["ms"] = tracker.ms.snapshot(None)
+                today_q = F.read_taifex(tick_csv.parent / "official_input", tracker.product)[str(day)]
+                ms_attach_official(snap, ms_official(day, today_q, tracker.product))
+                log(chr(10).join(ms_summary(snap)))
         (out / f"quotes_{tracker.product}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
         if uploader is not None and has_ticks:
             uploader.flush_quote(snap, tracker.seconds_payload())
@@ -1060,11 +1232,16 @@ def main() -> int:
     p.add_argument("--replay-quotes", help="重算大台、微台（行情＋模擬單）：一天、逗號分隔的幾天或 all；配 --upload 放上網站")
     p.add_argument("--replay-raw", help="收盤後用富邦錄到的原始訊息重建這一天（含盤口與大單）；配 --upload 覆蓋網站那天")
     p.add_argument("--upload", action="store_true", help="狀態寫進雲端 serving.futures_paper（網站「小台模擬」）")
+    p.add_argument("--ms-repo", default=str(HERE.parents[3] / "Momentum_Scalping"),
+                   help="網友原版 repo（seromitama/Momentum_Scalping，commit 1dea51b）；三個商品都跑它的模擬單")
+    p.add_argument("--no-ms", action="store_true", help="不跑網友原版")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 排程視窗是 cp950，印「⚠」會當掉
     root = Path(args.out)
     root.mkdir(parents=True, exist_ok=True)
     os.chdir(root)  # 富邦 SDK 的 log/ 寫在這裡，不會進 repo
+    if not args.no_ms:
+        ms_engine_parts(Path(args.ms_repo))  # 載不到就在開盤前停下來，不要盤中才發現
     if args.replay_day:
         return replay(args)
     if args.replay_quotes:

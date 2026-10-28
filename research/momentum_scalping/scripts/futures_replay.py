@@ -137,30 +137,40 @@ class Config:
     refresh_us: int
 
 
-def simulate_day(mods, params, day: str, data: Dict[str, Any], log_rows, cfg: Config) -> Dict[str, Any]:
-    intraday, trading, market_mod = mods["intraday"], mods["trading"], mods["market"]
-    ip, tp, mp = params["intraday"], params["trading"], params["market"]
-    intraday._STRATEGY_STATE_CACHE.clear()
-    intraday.prune_calculation_cache()
-    buffer = intraday.IncrementalEventBuffer(ip)
-    symbol, market = cfg.product, "TAIFEX"
-    candidate = {"symbol": symbol, "market": market, "trade_ready": True, "momentum_eligible": True,
-                 "trend_eligible": True, "market_relative_strength": 1.0, "day_trade_eligible": True}
-    context: Dict[str, Any] = {}
-    next_refresh = 0
-    last_eval = 0
-    position: Optional[Dict[str, Any]] = None
-    pending: Optional[Dict[str, Any]] = None
-    trade: Optional[Dict[str, Any]] = None
-    entries = 0
-    last_exit_us: Optional[int] = None
-    closed: List[Tuple[int, float]] = []
-    trades: List[Dict[str, Any]] = []
-    blocked: Counter = Counter()
-    signals: Counter = Counter()
+class DayEngine:
+    """原版一天的模擬，一筆一筆餵（盤中模擬單 fubon_live.py 用）；simulate_day 也是用它跑，兩邊結果完全相同。
 
-    def market_allows(strategy: str, t_us: int) -> Tuple[bool, str]:
-        rows = log_rows.get(day) or []
+    on_event(kind, t_us, info)：signal（送單前驗證通過、決定買進）、fill（買進成交）、exit_signal（出場訊號）、
+    exit_fill（賣出成交，一筆部位可能分兩次出）、closed（整筆平倉，info 是 finish() 的結果）。"""
+
+    def __init__(self, mods, params, day: str, contract: str, log_rows, cfg: Config, on_event=None) -> None:
+        self.intraday, self.trading, self.market_mod = mods["intraday"], mods["trading"], mods["market"]
+        self.ip, self.tp, self.mp = params["intraday"], params["trading"], params["market"]
+        self.intraday._STRATEGY_STATE_CACHE.clear()
+        self.intraday.prune_calculation_cache()
+        self.buffer = self.intraday.IncrementalEventBuffer(self.ip)
+        self.day, self.contract, self.log_rows, self.cfg = day, contract, log_rows, cfg
+        self.on_event = on_event or (lambda kind, t_us, info: None)
+        self.symbol, self.market = cfg.product, "TAIFEX"
+        self.candidate = {"symbol": self.symbol, "market": self.market, "trade_ready": True, "momentum_eligible": True,
+                          "trend_eligible": True, "market_relative_strength": 1.0, "day_trade_eligible": True}
+        self.context: Dict[str, Any] = {}
+        self.next_refresh = 0
+        self.last_eval = 0
+        self.position: Optional[Dict[str, Any]] = None
+        self.pending: Optional[Dict[str, Any]] = None
+        self.trade: Optional[Dict[str, Any]] = None
+        self.entries = 0
+        self.last_exit_us: Optional[int] = None
+        self.closed: List[Tuple[int, float]] = []
+        self.trades: List[Dict[str, Any]] = []
+        self.blocked: Counter = Counter()
+        self.signals: Counter = Counter()
+        self.n_ticks = 0
+        self.last_tick: Optional[Tuple[int, float]] = None
+
+    def market_allows(self, strategy: str, t_us: int) -> Tuple[bool, str]:
+        rows = self.log_rows.get(self.day) or []
         if not rows:
             return True, ""
         chosen = None
@@ -173,23 +183,27 @@ def simulate_day(mods, params, day: str, data: Dict[str, Any], log_rows, cfg: Co
         key = "momentum_allowed" if strategy == "MOMENTUM" else "trend_allowed"
         return (chosen.get(key) == "True"), f"MARKET_{strategy}_BLOCKED({chosen.get('market_state')})"
 
-    def cooldown_active(t_us: int) -> bool:
+    def cooldown_active(self, t_us: int) -> bool:
         consecutive, until = 0, None
-        for stamp, net in closed:
+        for stamp, net in self.closed:
             consecutive = consecutive + 1 if net < 0 else 0
-            if consecutive >= tp.max_consecutive_losses:
-                until = stamp + int(tp.loss_cooldown_minutes * 60 * M.US)
+            if consecutive >= self.tp.max_consecutive_losses:
+                until = stamp + int(self.tp.loss_cooldown_minutes * 60 * M.US)
         return until is not None and t_us < until
 
-    for t_us, serial, price, size in data["ticks"]:
+    def on_tick(self, t_us: int, serial: int, price: float, size: float) -> None:
+        cfg, tp = self.cfg, self.tp
+        self.n_ticks += 1
+        self.last_tick = (t_us, price)
         now = M.us_to_dt(t_us)
-        while t_us >= next_refresh:
-            boundary = max(next_refresh, t_us - t_us % cfg.refresh_us)
-            context = open_market_context(market_mod, mp, M.us_to_dt(boundary), day)
-            next_refresh = boundary + cfg.refresh_us
-        buffer.append_sequence([{"symbol": symbol, "market": market, "trade_date": day, "event_time": t_us,
-                                 "serial": serial, "price": price, "size": size,
-                                 "event_classification": "NEW"}], ip)
+        while t_us >= self.next_refresh:
+            boundary = max(self.next_refresh, t_us - t_us % cfg.refresh_us)
+            self.context = open_market_context(self.market_mod, self.mp, M.us_to_dt(boundary), self.day)
+            self.next_refresh = boundary + cfg.refresh_us
+        self.buffer.append_sequence([{"symbol": self.symbol, "market": self.market, "trade_date": self.day, "event_time": t_us,
+                                      "serial": serial, "price": price, "size": size,
+                                      "event_classification": "NEW"}], self.ip)
+        trade, position, pending = self.trade, self.position, self.pending
         if trade is not None:
             trade["max"] = max(trade["max"], price)
             trade["min"] = min(trade["min"], price)
@@ -199,20 +213,22 @@ def simulate_day(mods, params, day: str, data: Dict[str, Any], log_rows, cfg: Co
             if pending["side"] == "BUY":
                 fill = price + cfg.slip_ticks * cfg.tick
                 position = {
-                    "symbol": symbol, "market": market, "entry_price": fill, "quantity": pending["qty"],
+                    "symbol": self.symbol, "market": self.market, "entry_price": fill, "quantity": pending["qty"],
                     "managed_quantity": pending["qty"], "strategy_type": pending["strategy"],
                     "strategy_stop_price": pending["stop"],
                     "emergency_stop_price": fill * (1 - tp.emergency_stop_loss_pct / 100),
                     "entry_time": M.us_to_iso(t_us), "partial_exit_done": False,
                 }
-                entries += 1
+                self.entries += 1
                 fee = cfg.commission * pending["qty"] + round(fill * cfg.point_value * cfg.tax_rate) * pending["qty"]
-                trade = {"day": day, "symbol": symbol, "contract": data["contract"], "strategy": pending["strategy"],
+                trade = {"day": self.day, "symbol": self.symbol, "contract": self.contract, "strategy": pending["strategy"],
                          "setup": pending["setup"], "signal_time": M.us_to_iso(pending["decided"]),
                          "signal_price": pending["signal_price"], "entry_time": M.us_to_iso(t_us),
                          "entry_price": fill, "entry_trade_price": price, "quantity": pending["qty"],
                          "stop_price": max(pending["stop"], position["emergency_stop_price"]),
                          "costs": fee, "legs": [], "max": price, "min": price}
+                self.on_event("fill", t_us, {"price": fill, "qty": pending["qty"], "stop": trade["stop_price"],
+                                             "strategy": pending["strategy"], "setup": pending["setup"]})
             else:
                 fill = price - cfg.slip_ticks * cfg.tick
                 qty = pending["qty"]
@@ -224,43 +240,48 @@ def simulate_day(mods, params, day: str, data: Dict[str, Any], log_rows, cfg: Co
                 position["managed_quantity"] -= qty
                 if pending["reason"] == "MOMENTUM_DECAY_PARTIAL":
                     position["partial_exit_done"] = True
+                self.on_event("exit_fill", t_us, {"price": fill, "qty": qty, "reason": pending["reason"],
+                                                  "left": position["quantity"]})
                 if position["quantity"] <= 0:
-                    trades.append(finish(trade, cfg))
-                    closed.append((t_us, trades[-1]["net_pnl"]))
-                    last_exit_us = t_us
+                    self.trades.append(finish(trade, cfg))
+                    self.closed.append((t_us, self.trades[-1]["net_pnl"]))
+                    self.last_exit_us = t_us
+                    self.on_event("closed", t_us, self.trades[-1])
                     position, trade = None, None
             pending = None
+        self.trade, self.position, self.pending = trade, position, pending
 
-        if pending is not None or t_us - last_eval < cfg.eval_interval_us:
-            continue
-        last_eval = t_us
-        signal = intraday.get_signal_context(symbol=symbol, market=market, candidate=candidate,
-                                             market_context=context, quote_sequence=buffer, parameters=ip,
-                                             position=position, include_aggregates=False)
+        if pending is not None or t_us - self.last_eval < cfg.eval_interval_us:
+            return
+        self.last_eval = t_us
+        signal = self.intraday.get_signal_context(symbol=self.symbol, market=self.market, candidate=self.candidate,
+                                                  market_context=self.context, quote_sequence=self.buffer, parameters=self.ip,
+                                                  position=position, include_aggregates=False)
         if position is not None:
             if signal.get("exit_signal"):
                 fraction = float(signal.get("exit_fraction") or 1.0)
                 qty = position["quantity"]
                 if fraction < 1 and qty > 1:
                     qty = max(1, int(qty * fraction))  # 只有 1 口時減碼等於全出（同股票版只有 1 張）
-                pending = {"side": "SELL", "qty": qty, "fill_after": t_us + cfg.latency_us,
-                           "reason": str(signal.get("exit_stage") or "")}
-            continue
+                self.pending = {"side": "SELL", "qty": qty, "fill_after": t_us + cfg.latency_us,
+                                "reason": str(signal.get("exit_stage") or "")}
+                self.on_event("exit_signal", t_us, {"price": price, "qty": qty, "reason": self.pending["reason"]})
+            return
         if not signal.get("entry_signal"):
-            continue
+            return
         strategy = str(signal.get("strategy_type"))
         setup = str(signal.get("entry_setup_type") or "")
         key = f"{strategy}/{setup}"
-        signals[key] += 1
+        self.signals[key] += 1
         reasons = []
-        ok, reason = market_allows(strategy, t_us)
+        ok, reason = self.market_allows(strategy, t_us)
         if not ok:
             reasons.append(reason)
-        if entries >= tp.max_entries_per_symbol_per_day:
+        if self.entries >= tp.max_entries_per_symbol_per_day:
             reasons.append("SYMBOL_ENTRY_LIMIT")
-        if last_exit_us is not None and t_us - last_exit_us < tp.reentry_cooldown_minutes * 60 * M.US:
+        if self.last_exit_us is not None and t_us - self.last_exit_us < tp.reentry_cooldown_minutes * 60 * M.US:
             reasons.append("REENTRY_COOLDOWN")
-        if cooldown_active(t_us):
+        if self.cooldown_active(t_us):
             reasons.append("CONSECUTIVE_LOSS_COOLDOWN")
         executable = price + cfg.slip_ticks * cfg.tick
         sig = dict(signal, execution_trigger="AUTO")
@@ -272,29 +293,45 @@ def simulate_day(mods, params, day: str, data: Dict[str, Any], log_rows, cfg: Co
             reasons.append("STRUCTURAL_STOP_TOO_WIDE")
         if (price - signal_price) / signal_price * 100 > tp.max_chase_pct:
             reasons.append("CHASE_TOO_HIGH")
-        wave = trading._entry_wave_extension_revalidation(sig, executable, tp)
+        wave = self.trading._entry_wave_extension_revalidation(sig, executable, tp)
         if not wave.get("ok"):
             reasons.append(wave.get("rejection_code") or "WAVE_EXTENSION")
-        momentum = trading._entry_momentum_revalidation(sig, price, tp, now=now)
+        momentum = self.trading._entry_momentum_revalidation(sig, price, tp, now=now)
         if not momentum.get("ok"):
             reasons.extend(f"REVALIDATION:{r}" for r in momentum.get("reasons") or [])
         if reasons:
             for r in dict.fromkeys(reasons):
-                blocked[f"{key}:{r}"] += 1
-            continue
-        signals[f"{key}:ACCEPTED"] += 1
-        pending = {"side": "BUY", "qty": cfg.contracts, "fill_after": t_us + cfg.latency_us, "decided": t_us,
-                   "strategy": strategy, "setup": setup, "stop": stop, "signal_price": signal_price}
+                self.blocked[f"{key}:{r}"] += 1
+            return
+        self.signals[f"{key}:ACCEPTED"] += 1
+        self.pending = {"side": "BUY", "qty": cfg.contracts, "fill_after": t_us + cfg.latency_us, "decided": t_us,
+                        "strategy": strategy, "setup": setup, "stop": stop, "signal_price": signal_price}
+        self.on_event("signal", t_us, {"price": price, "stop": stop, "strategy": strategy, "setup": setup})
 
-    if position is not None and trade is not None:  # 收盤前仍持有：以最後成交價 − 滑價了結
-        last_price = data["ticks"][-1][2]
+    def close(self) -> None:
+        """收盤前仍持有：以最後成交價 − 滑價了結（只做一次）。"""
+        cfg = self.cfg
+        if self.position is None or self.trade is None or self.last_tick is None:
+            return
+        last_t, last_price = self.last_tick
         fill = last_price - cfg.slip_ticks * cfg.tick
-        qty = position["quantity"]
+        qty = self.position["quantity"]
+        trade = self.trade
         trade["costs"] += cfg.commission * qty + round(fill * cfg.point_value * cfg.tax_rate) * qty
-        trade["legs"].append({"time": M.us_to_iso(data["ticks"][-1][0]), "price": fill, "trade_price": last_price,
+        trade["legs"].append({"time": M.us_to_iso(last_t), "price": fill, "trade_price": last_price,
                               "quantity": qty, "reason": "EOD_FORCED_CLOSE"})
-        trades.append(finish(trade, cfg))
-    return {"day": day, "trades": trades, "signals": dict(signals), "blocked": dict(blocked),
+        self.trades.append(finish(trade, cfg))
+        self.on_event("exit_fill", last_t, {"price": fill, "qty": qty, "reason": "EOD_FORCED_CLOSE", "left": 0})
+        self.on_event("closed", last_t, self.trades[-1])
+        self.position, self.trade, self.pending = None, None, None
+
+
+def simulate_day(mods, params, day: str, data: Dict[str, Any], log_rows, cfg: Config) -> Dict[str, Any]:
+    engine = DayEngine(mods, params, day, data["contract"], log_rows, cfg)
+    for t_us, serial, price, size in data["ticks"]:
+        engine.on_tick(t_us, serial, price, size)
+    engine.close()
+    return {"day": day, "trades": engine.trades, "signals": dict(engine.signals), "blocked": dict(engine.blocked),
             "contract": data["contract"], "ticks": len(data["ticks"])}
 
 
