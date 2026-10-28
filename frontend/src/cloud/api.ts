@@ -5,7 +5,7 @@ import { getToken } from './session-client'
 import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
-import type { FuturesDay, FuturesDayRow, QuoteDayRow, QuotePayload, QuoteProduct, SecondsPayload } from './futures'
+import type { Flow, FuturesDay, FuturesDayRow, Product, QuoteDayRow, QuotePayload, QuoteProduct, SecondsPayload } from './futures'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
@@ -165,6 +165,10 @@ export const fetchQuoteDay = (product: QuoteProduct, day?: string) =>
 /** 大台／微台有行情的交易日（新到舊）。 */
 export const fetchQuoteDays = (product: QuoteProduct) =>
   get<{ days: QuoteDayRow[] }>(`/api/futures/quotes/days?product=${product}`).then((r) => r.days)
+
+/** 盤口與大單（T-455）：那一天的主動買賣、大單（≥ min 口）、五檔；live＝盤中（不帶每分鐘的五檔）。沒有 → 404。只給 admin。 */
+export const fetchFlow = (product: Product, day: string | null, min: number, live: boolean) =>
+  get<Flow>(`/api/futures/flow?product=${product}&min=${min}${live ? '&live=1' : ''}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
 
 /** 大台／微台那一天的秒級復盤資料；沒有 → 404，呼叫端改用 1 分 K。 */
 export const fetchQuoteSeconds = (product: QuoteProduct, day: string) =>

@@ -10,6 +10,7 @@ export function Section({
   fold = false,
   summary,
   id,
+  onToggle,
   children,
 }: {
   icon: LucideIcon
@@ -20,6 +21,8 @@ export function Section({
   summary?: ReactNode
   /** 錨點（例：名單上的「相關新聞」小標點了跳到這塊） */
   id?: string
+  /** fold 時展開／收起會呼叫（T-455：盤口資料展開了才抓，省流量） */
+  onToggle?: (open: boolean) => void
   children: ReactNode
 }) {
   const head = (
@@ -31,7 +34,7 @@ export function Section({
   )
   if (fold)
     return (
-      <details className="cq-sec cq-sec-fold" id={id}>
+      <details className="cq-sec cq-sec-fold" id={id} onToggle={onToggle ? (e) => onToggle(e.currentTarget.open) : undefined}>
         <summary className="cq-sec-head">{head}</summary>
         <div className="cq-sec-body">{children}</div>
       </details>
