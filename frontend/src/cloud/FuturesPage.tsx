@@ -200,8 +200,11 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills }: ChartPro
       rightPriceScale: { borderColor: '#23252D' },
       timeScale: { borderColor: '#23252D', timeVisible: true, secondsVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: axisTime },
       localization: { timeFormatter: crossTime, priceFormatter: (v: number) => v.toFixed(0) },
+      // 圖幾乎佔滿畫面寬：滾輪與上下滑要留給頁面捲動，否則游標停在圖上就捲不下去
+      handleScroll: { mouseWheel: false, vertTouchDrag: false },
+      handleScale: { mouseWheel: false },
     })
-    const lb = chart.addSeries(LineSeries, {
+    const lb =chart.addSeries(LineSeries, {
       color: DOWN,
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
@@ -676,8 +679,10 @@ function DeltaChart({ day, minutes }: { day: string; minutes: [string, number][]
       rightPriceScale: { borderColor: '#23252D' },
       timeScale: { borderColor: '#23252D', timeVisible: true, secondsVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: axisTime },
       localization: { timeFormatter: crossTime, priceFormatter: (v: number) => v.toFixed(0) },
+      handleScroll: { mouseWheel: false, vertTouchDrag: false },
+      handleScale: { mouseWheel: false },
     })
-    const hist = chart.addSeries(HistogramSeries, { priceScaleId: 'right', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } })
+    const hist =chart.addSeries(HistogramSeries, { priceScaleId: 'right', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } })
     const cum = chart.addSeries(LineSeries, { priceScaleId: 'left', color: VWAP, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
     const frame = chart.addSeries(LineSeries, {
       color: 'rgba(0,0,0,0)',
