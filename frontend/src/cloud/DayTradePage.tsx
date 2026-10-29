@@ -268,10 +268,26 @@ function MiniChart({ h, d, symbol, cut }: { h: DayTradeHistory; d: DayTradeDay; 
   return <div className="cq-dt-chart" ref={box} />
 }
 
+/** 只有榜單上雲端的日子：大盤徽章＋強勢股榜；模擬單在使用者電腦上。 */
+function BoardOnly({ d }: { d: DayTradeDay }) {
+  return (
+    <>
+      <MarketBadges d={d} />
+      <Section icon={Activity} title="強勢股榜" meta={d.board_time ? `${d.board_time} 掃描${d.status === 'closed' ? '・收盤那一份' : ''}` : '開盤後才有'}>
+        <Board d={d} />
+      </Section>
+      <p className="cq-fu-foot">
+        目前只把榜單放上網站，模擬單（持股、成交、損益）只存在你電腦上。榜單是網友原版每 30 秒現場排的前 {d.board.length || 30} 檔，進榜 {d.watch.in} 次、出榜 {d.watch.out} 次。
+      </p>
+    </>
+  )
+}
+
 function LiveView({ refresh }: { refresh: number }) {
   const { data, err } = useLiveDay(true, refresh)
   if (err) return <p className="cq-empty">{err}</p>
   if (!data) return <p className="cq-empty">讀取中…</p>
+  if (data.board_only) return <BoardOnly d={data} />
   const a = data.account
   return (
     <>
@@ -298,6 +314,19 @@ function LiveView({ refresh }: { refresh: number }) {
       </Section>
       <Rules d={data} />
     </>
+  )
+}
+
+function DayChips({ days, day, onPick }: { days: DayTradeRow[] | null; day: string | null; onPick: (d: string) => void }) {
+  return (
+    <div className="cq-dt-days">
+      {(days ?? []).slice(0, 20).map((r) => (
+        <button key={r.day} className={r.day === day ? 'on' : ''} onClick={() => onPick(r.day)}>
+          {r.day.slice(5)}
+          <b className={tone(r.total)}>{r.total === null ? '只有榜單' : yuan(r.total)}</b>
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -346,6 +375,13 @@ function ReplayView({ refresh }: { refresh: number }) {
   if (err) return <p className="cq-empty">{err}</p>
   if (days !== null && days.length === 0) return <p className="cq-empty">還沒有當沖紀錄。</p>
   if (!d) return <p className="cq-empty">讀取中…</p>
+  if (d.board_only)
+    return (
+      <>
+        <DayChips days={days} day={day} onPick={setPick} />
+        <BoardOnly d={d} />
+      </>
+    )
   const cut = times.length ? times[Math.min(pos, last)] : '23:59:59'
   const view = replayAt(d, h, cut)
   const board = h ? boardAt(h, cut) : null
@@ -353,14 +389,7 @@ function ReplayView({ refresh }: { refresh: number }) {
   const traded = [...new Set(d.trades.map((t) => t.symbol))]
   return (
     <>
-      <div className="cq-dt-days">
-        {(days ?? []).slice(0, 20).map((r) => (
-          <button key={r.day} className={r.day === day ? 'on' : ''} onClick={() => setPick(r.day)}>
-            {r.day.slice(5)}
-            <b className={tone(r.total)}>{r.total === null ? '—' : yuan(r.total)}</b>
-          </button>
-        ))}
-      </div>
+      <DayChips days={days} day={day} onPick={setPick} />
       <MarketBadges d={d} />
       <div className="cq-tiles cq-fu-tiles">
         <Kpi label="到這一刻" value={yuan(view.realized + holdingPnl)} tone={tone(view.realized + holdingPnl)} sub={`已賣 ${view.closed.length} 筆・${cut}`} />
