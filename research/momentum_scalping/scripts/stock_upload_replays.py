@@ -25,10 +25,14 @@ def main() -> int:
     p.add_argument("--env", required=True)
     p.add_argument("--root", required=True)
     p.add_argument("--days", nargs="*", help="只傳這幾天；沒給＝root 底下所有 replay_<日>")
+    p.add_argument("--live-days", nargs="*", help="富邦即時錄的那幾天（<root>/<日>/ 收盤定稿），整份狀態與復盤一起上傳（盤中只傳榜單的日子補復盤）")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     root = Path(args.root)
-    folders = [root / f"replay_{d}" for d in args.days] if args.days else sorted(root.glob("replay_*"))
+    if args.live_days:
+        folders = [root / d for d in args.live_days]
+    else:
+        folders = [root / f"replay_{d}" for d in args.days] if args.days else sorted(root.glob("replay_*"))
     if not folders:
         raise SystemExit(f"{root} 底下沒有 replay_<日>")
     uploader = L.Uploader(L.env_value(Path(args.env), L.DSN_ENV), print)
@@ -38,7 +42,8 @@ def main() -> int:
             raise SystemExit(f"{folder} 少了 payload.json 或 history.json（先跑 stock_live.py --replay-1m）")
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         history = json.loads(history_path.read_text(encoding="utf-8"))
-        if payload.get("source") != "minute_replay" or payload.get("day") != folder.name.removeprefix("replay_"):
+        want = "fubon_live" if args.live_days else "minute_replay"
+        if payload.get("source") != want or payload.get("day") != folder.name.removeprefix("replay_") or payload.get("status") != "closed":
             raise SystemExit(f"{folder} 的內容不是那一天的 1 分 K 重播：source={payload.get('source')} day={payload.get('day')}")
         uploader.flush(payload, history)
         a = payload["account"]
