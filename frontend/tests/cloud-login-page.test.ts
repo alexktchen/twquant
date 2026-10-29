@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import { afterLogin, viaMainLogin } from '../functions/_lib/auth.ts'
-import { ACCESS_LOGOUT, GOOGLE_LOGIN, LOGIN_PAGE } from '../src/cloud/auth.ts'
+import { ACCESS_LOGIN, ACCESS_LOGOUT, GOOGLE_LOGIN, LOGIN_PAGE, USE_ACCESS_CARD } from '../src/cloud/auth.ts'
 import { gotrueMessage } from '../src/cloud/session.ts'
 
 // T-432：深色登入／註冊頁 /login（React，LoginPage.tsx）。Email 驗證碼走 Supabase Auth（T-439）；
@@ -78,4 +78,18 @@ test('T-432 AC4 已登入的人開 /login 直接回首頁；登入還沒設定�
   assert.match(page, /登入還沒設定/)
   // 沒設定 Supabase 時 Google 照樣能用（T-457）
   assert.ok(page.indexOf('href={GOOGLE_LOGIN}') < page.indexOf('!ready ?'), 'Google 按鈕不要被 Supabase 設定擋住')
+})
+
+test('T-459 AC1 舊的登入畫面（使用者 2026-10-29：「我要舊的登入畫面」→ Cloudflare 的白色登入卡）：/login 直接轉 /api/login，不畫深色頁、不經 Supabase', () => {
+  assert.equal(USE_ACCESS_CARD, true)
+  assert.equal(ACCESS_LOGIN, '/api/login')
+  const main = read('src/main.tsx')
+  assert.match(main, /if \(onLogin && USE_ACCESS_CARD\) \{\s*window\.location\.replace\(ACCESS_LOGIN\)/)
+  // 轉過去之前不載入任何頁面（深色頁的程式留著，開關改回 false 就恢復）
+  assert.ok(main.indexOf('window.location.replace(ACCESS_LOGIN)') < main.indexOf("import('./cloud/LoginPage')"))
+  // /api/login 受 Cloudflare Access 保護：登入完回首頁（同 T-457 AC1）
+  const l = afterLogin(new Request('https://twquant.pages.dev/api/login'))
+  assert.equal(l.headers.get('location'), 'https://twquant.pages.dev/')
+  // 網站上的登入入口照舊都到 /login，再由這裡轉
+  assert.equal(LOGIN_PAGE, '/login')
 })
