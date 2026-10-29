@@ -48,10 +48,12 @@ START_AT, OPEN_AT, STOP_AT, LOGIN_UNTIL = "08:30", "09:00", "13:36", "09:30"
 SNAPSHOT_EVERY_S = 30.0
 UPLOAD_EVERY_S = 15.0
 MAX_SUBSCRIPTIONS = 250       # 2026-10-28 實測一次訂 260 檔沒報錯；超過就退訂已出榜、沒持倉的
+BOARD_UPLOAD_FIELDS = ("rank", "symbol", "name", "market", "sector", "score", "change_pct", "market_relative_strength",
+                       "sector_relative_strength", "distance_to_intraday_high_pct", "trade_ready")
 BOARD_HISTORY_EVERY_S = 60     # 復盤的榜單幾秒存一份（掃描是 30 秒一輪）
 EVENTS_KEEP = 150             # 網站時間軸最多帶幾則（盤中每 15 秒重抓，Supabase 每月流出有上限）
 INDEX_SYMBOLS = {"TAIEX": "IX0001", "TPEX": "IX0043"}
-MS_REPO_DEFAULT = HERE.parents[3] / "Momentum_Scalping"
+MS_REPO_DEFAULT = (HERE.parents[3] if len(HERE.parents) > 3 else HERE) / "Momentum_Scalping"  # repo 外另放一份時要給 --ms-repo
 SETUP_TEXT = {"MOMENTUM/INITIAL_BREAKOUT": "動能・初次突破", "MOMENTUM/FIRST_PULLBACK_REBREAK": "動能・回檔再突破",
               "MOMENTUM/MOMENTUM_CONTINUATION": "動能・延續", "MOMENTUM/PERSISTENT_MOMENTUM_START": "動能・持續啟動",
               "TREND/TREND_INITIAL_ENTRY": "趨勢・初次進場", "TREND/TREND_RESUME": "趨勢・恢復"}
@@ -184,6 +186,15 @@ class Recorder:
                         "closed": len(eng.trades)},
             "config": self.holder["config_view"], "watch": {"in": eng.watch_changes["in"], "out": eng.watch_changes["out"]},
         }
+
+    def board_payload(self, status: str, source: str, updated: datetime) -> Dict[str, Any]:
+        """只上傳榜單（使用者 2026-10-29：「只上傳 30 檔榜單」）：大盤狀態＋強勢股榜，模擬單只留本機。約 5 KB。"""
+        eng = self.engine
+        return {"version": 1, "day": self.day, "status": status, "source": source, "board_only": True,
+                "updated_at": updated.isoformat(timespec="seconds"),
+                "board_time": hms(eng.board_time) if eng.board_time else None, "market": self.market_view(),
+                "board": [{k: r.get(k) for k in BOARD_UPLOAD_FIELDS} for r in eng.board],
+                "watch": {"in": eng.watch_changes["in"], "out": eng.watch_changes["out"]}}
 
     def history(self, charts: Dict[str, Any]) -> Dict[str, Any]:
         """收盤後：榜單每 30 秒一份、有成交的股票的 1 分 K 與秒級（復盤用，另一張表，只有點開復盤才讀）。"""
@@ -351,25 +362,36 @@ class MinuteMarket:
         self.prev_close: Dict[str, float] = {}
         self.index_bars: Dict[str, List[tuple]] = {}
         self.index_daily: Dict[str, List[Tuple[str, float]]] = {}
-        by_sym = defaultdict(list)
+        # 一檔一檔讀，讀完只留「這一天的 K 棒」與「前一個有資料的交易日最後一根收盤」——不把十幾天全市場都放進記憶體
+        # 同一檔可能有好幾份重疊的下載（例如 10-27～10-28 與 10-15～10-28）：同一根 K 只留一份
+        files_of = defaultdict(list)
         for path in sorted((folder / "bars").glob("*.json")):
-            sym = path.name.split("_")[0]
-            if path.name.split("_")[1] == "D":
+            parts = path.name.split("_")
+            if parts[1] != "D":
+                files_of[parts[0]].append(path)
+        for sym, paths in files_of.items():
+            today: Dict[str, Any] = {}
+            prev_last = None  # (時間字串, 收盤)
+            for path in paths:
+                for c in json.loads(path.read_text(encoding="utf-8")).get("data") or []:
+                    stamp = str(c["date"])
+                    if stamp[11:16] < "09:00":
+                        continue  # 盤前的空白 K（櫃買指數 06:45 起只有量、沒有價）
+                    if "close" not in c:
+                        raise ValueError(f"{path.name} {stamp} 盤中 K 棒沒有收盤價：{c}")
+                    if stamp[:10] == day:
+                        today[stamp] = c
+                    elif stamp[:10] < day and (prev_last is None or stamp > prev_last[0]):
+                        prev_last = (stamp, float(c["close"]))
+            if not today:
                 continue
-            by_sym[sym] += json.loads(path.read_text(encoding="utf-8")).get("data") or []
-        for sym, candles in by_sym.items():
-            days = sorted({str(c["date"])[:10] for c in candles})
-            if day not in days:
-                continue
-            prev_days = [d for d in days if d < day]
             if sym in INDEX_SYMBOLS.values():
-                self.index_bars[sym] = candles_to_bars(day, candles)
+                self.index_bars[sym] = candles_to_bars(day, today.values())
                 continue
-            if not prev_days:
-                continue  # 沒有前一天就沒有昨收（測試資料的第一天）
-            prev = [c for c in candles if str(c["date"])[:10] == prev_days[-1]]
-            self.prev_close[sym] = float(sorted(prev, key=lambda c: c["date"])[-1]["close"])
-            self.bars[sym] = candles_to_bars(day, candles)
+            if prev_last is None:
+                continue  # 沒有前一天就沒有昨收（下載期間的第一天）
+            self.prev_close[sym] = prev_last[1]
+            self.bars[sym] = candles_to_bars(day, today.values())
         for name, sym in INDEX_SYMBOLS.items():
             files = sorted((folder / "bars").glob(f"{sym}_D_*.json"))
             if not files:
@@ -510,7 +532,7 @@ def live(args, mods, params, config, root: Path) -> int:
     engine = E.StockEngine(mods, params, day, config, universe, index_daily, rec.on_event)
     holder["engine"] = engine
     log(f"交易日 {day}：普通股 {len(universe)} 檔；加權昨收 {index_daily['TAIEX'][-1]}；帳戶 {holder['config_view']}")
-    uploader = Uploader(env_value(Path(args.env), DSN_ENV), log) if args.upload else None
+    uploader = Uploader(env_value(Path(args.env), DSN_ENV), log) if (args.upload or args.upload_board) else None
 
     q: "queue.Queue[str]" = queue.Queue()
     ws = sdk.marketdata.websocket_client.stock
@@ -617,7 +639,7 @@ def live(args, mods, params, config, root: Path) -> int:
             tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             tmp.replace(out / "live_payload.json")
             if uploader is not None:
-                uploader.push(payload)
+                uploader.push(rec.board_payload("live", "fubon_live", datetime.now(M.TPE)) if args.upload_board else payload)
             pushed = now
         if not state["connected"]:
             log("WebSocket 斷線，重新連線")
@@ -647,7 +669,10 @@ def live(args, mods, params, config, root: Path) -> int:
     M.write_csv(out / "trades.csv", engine.trades)
     a = payload["account"]
     log(f"收盤：成交 {a['closed']} 筆、淨 {a['realized']:+,.0f} 元；掃描 {engine.scan_stats['ROUNDS']} 輪；警告 {dict(engine.warnings)}")
-    if uploader is not None:
+    if uploader is not None and args.upload_board:
+        uploader.write(rec.board_payload("closed", "fubon_live", datetime.now(M.TPE)))
+        log("收盤榜單已寫進雲端（模擬單只在本機）")
+    elif uploader is not None:
         uploader.flush(payload, history)
         log("定稿已寫進雲端")
     return 0
@@ -659,7 +684,8 @@ def main() -> int:
     p.add_argument("--out", required=True, help="資料根目錄（repo 外）；每天一個子資料夾")
     p.add_argument("--ms-repo", default=str(MS_REPO_DEFAULT))
     p.add_argument("--account-json", help="帳戶與參數覆蓋（沒給＝網友預設）")
-    p.add_argument("--upload", action="store_true", help="寫進雲端 serving.stock_paper（網站「當沖」分頁）")
+    p.add_argument("--upload", action="store_true", help="整份狀態寫進雲端 serving.stock_paper（網站「當沖」分頁）")
+    p.add_argument("--upload-board", action="store_true", help="只把大盤狀態與 30 檔榜單寫進雲端（模擬單只留本機）")
     p.add_argument("--replay-1m", help="用 1 分 K 重播這一天（不連富邦即時）")
     p.add_argument("--bars", help="stock_minute_download.py 的輸出資料夾（--replay-1m 用）")
     p.add_argument("--assume-day-trade", action=argparse.BooleanOptionalAction, default=True,
@@ -679,6 +705,8 @@ def main() -> int:
         return replay_minute(args, mods, params, config, print)
     if not args.env:
         raise SystemExit("盤中要 --env")
+    if args.upload and args.upload_board:
+        raise SystemExit("--upload 與 --upload-board 只能選一個")
     return live(args, mods, params, config, root)
 
 
