@@ -316,6 +316,17 @@ export function msStopAt(ms: Netizen, view: { cut: string; sleeves: Record<MsSle
   return ms.open && within(ms.open.entry_time, view.cut) ? ms.open.stop : null
 }
 
+/** 網友原版在那一刻的數字卡（T-460：台指期以網友原版為主）：持倉那一格、平倉幾筆、已實現。 */
+export function msKpis(v: ReplayView<MsSleeve>): { hold: { value: string; text: string; tone: number | null }; exits: number; realized: number } {
+  const st = v.sleeves.MS_LONG
+  const exits = v.fills.filter((f) => f.kind === 'exit').length
+  const hold =
+    st.position !== 0
+      ? { value: yuan(st.open_pnl ?? 0), text: `持多 1 口 @ ${st.entry_price?.toFixed(0) ?? '—'}・現在平倉的話`, tone: st.open_pnl }
+      : { value: '空手', text: v.cut >= '13:00' ? '13:00 後不再進場' : '等動能或趨勢訊號', tone: null }
+  return { hold, exits, realized: st.realized }
+}
+
 /** 網友原版在那一刻的一句話（各策略那一列）：持多、今天平倉幾筆、還在等訊號。 */
 export function msSub(v: ReplayView<MsSleeve>): string {
   const st = v.sleeves.MS_LONG
@@ -365,15 +376,22 @@ export const replayAt = (d: FuturesDay, cut: string, secs: Seconds | null = null
   replayBook(d, comboBook(d), cut, secs)
 
 /** 圖上的買賣點：同一刻、同價、同方向的合成一個（開高走低 A、B、C 常常同時進場），文字標出是哪幾條。 */
-export function chartMarks(fills: readonly Fill[], secs: boolean): { time: string; side: 1 | -1; price: number; kind: 'entry' | 'exit'; text: string }[] {
-  const out: { time: string; side: 1 | -1; price: number; kind: 'entry' | 'exit'; tags: string[] }[] = []
+export function chartMarks(
+  fills: readonly Fill[],
+  secs: boolean,
+  primary: Sleeve | null = null,
+): { time: string; side: 1 | -1; price: number; kind: 'entry' | 'exit'; text: string; aux: boolean }[] {
+  const out: { time: string; side: 1 | -1; price: number; kind: 'entry' | 'exit'; tags: string[]; aux: boolean }[] = []
   for (const f of fills) {
     const time = secs ? f.time.slice(0, 8) : f.time.slice(0, 5)
     const same = out.find((m) => m.time === time && m.price === f.price && m.kind === f.kind && m.side === f.side)
     const tag = SLEEVE_TAG[f.sleeve]
+    // T-460：有主策略（網友原版）時，其他策略的買賣點是輔助（圖上畫灰色）；同一點合併到主策略就不算輔助
+    const aux = primary !== null && f.sleeve !== primary
     if (same) {
       if (tag) same.tags.push(tag)
-    } else out.push({ time, side: f.side, price: f.price, kind: f.kind, tags: tag ? [tag] : [] })
+      same.aux = same.aux && aux
+    } else out.push({ time, side: f.side, price: f.price, kind: f.kind, tags: tag ? [tag] : [], aux })
   }
   return out.map(({ tags, ...m }) => {
     const word = m.kind === 'entry' ? (m.side > 0 ? '買' : '空') : m.side > 0 ? '賣' : '補'
@@ -648,7 +666,7 @@ export function gapSummary(g: GapFail | null, v: ReplayView<GapSleeve> | null): 
 
 /** 日曆上看哪一個：實際帳戶（多空各最多 1 口，T-454）、只看固定組合、只看開高走低（每條各 1 口的對照）、只看網友原版（T-456）。 */
 export type CalView = 'account' | Strategy
-export const CAL_VIEWS: readonly CalView[] = ['account', 'combo', 'gap', 'ms']
+export const CAL_VIEWS: readonly CalView[] = ['ms', 'account', 'combo', 'gap'] // T-460：網友原版為主，排第一、預設看它
 export const CAL_VIEW_NAME: Record<CalView, string> = { account: '帳戶', combo: '固定組合', gap: '開高走低', ms: '網友原版' }
 
 /** 日期清單的一列（/api/futures/days、/quotes/days）：total＝固定組合、gap_total＝開高走低（每條各 1 口）；trades、gap_trades＝兩邊已平倉的成交（算帳戶用）。 */

@@ -59,6 +59,8 @@
 .cq-fu-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
 .cq-fu-sleeve.gap { color: #22d3ee; }
 .cq-fu-sleeve.ms { color: #c4b5fd; }
+/* T-460 各策略：網友原版為主，下面是輔助對照 */
+.cq-fu-auxhead { margin: 14px 0 0; padding-top: 8px; border-top: 1px dashed var(--line); color: var(--mute); font-size: 13.5px; }
 .cq-fu-sleeve.acct { color: var(--accent); }
 /* T-454 帳戶沒做的那條（當時同方向已經有 1 口） */
 .cq-fu-skip { font-style: normal; font-size: 13px; color: var(--accent); }
