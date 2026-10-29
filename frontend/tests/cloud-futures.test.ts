@@ -10,6 +10,7 @@ import {
   addSeconds,
   BIG_THRESHOLDS,
   CAL_VIEW_NAME,
+  CAL_VIEWS,
   DEFAULT_BIG_MIN,
   MTX_COST,
   SIDE_OF,
@@ -39,6 +40,7 @@ import {
   lots,
   mergeEvents,
   msBook,
+  msKpis,
   msStopAt,
   msSub,
   REASON_TEXT,
@@ -620,9 +622,9 @@ test('T-454 AC5 畫面：數字卡是帳戶合計、多單、空單、最新；�
   assert.match(page, /label="帳戶合計"/)
   assert.match(page, /<Kpi label="多單" value=\{yuan\(long\.value\)\}/)
   assert.match(page, /<Kpi label="空單" value=\{yuan\(short\.value\)\}/)
-  assert.match(page, /title="各策略" meta="每條各 1 口的對照"/)
+  assert.match(page, /title="各策略" meta=\{ms \? '網友原版為主・其他每條各 1 口的輔助對照' : '每條各 1 口的對照'\}/) // T-460
   assert.match(page, /帳戶沒做/)
-  assert.match(page, /useState<CalView>\('account'\)/)
+  assert.match(page, /useState<CalView>\('ms'\)/) // T-460 起日曆預設看網友原版
   for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
     assert.match(read(f), /payload->'trades' AS trades, payload->'gap_fail'->'trades' AS gap_trades/)
 })
@@ -839,12 +841,56 @@ test('T-456 AC5 日曆可以只看網友原版；兩支日期端點多回網友�
 
 test('T-456 AC6 畫面：各策略多一段網友原版、另有收起的「網友原版成交明細」、規則說明寫明不併進帳戶與一分 K 偏差', () => {
   const page = read('src/cloud/FuturesPage.tsx')
-  assert.match(page, /head\(STRATEGY_NAME\.ms, view\.ms \? view\.ms\.total : null\)/)
+  assert.match(page, /head\(`\$\{STRATEGY_NAME\.ms\}（主）`, view\.ms \? view\.ms\.total : null\)/) // T-460
   assert.match(page, /row\('MS_LONG', 'long', view\.ms\.sleeves\.MS_LONG, msSub\(view\.ms\)\)/)
-  assert.match(page, /title="網友原版成交明細" fold/)
-  assert.match(page, /它不併進帳戶/)
+  assert.match(page, /title="成交明細（網友原版）"/) // T-460：主策略的成交不收起
+  assert.match(page, /它不和其他策略的帳戶合併/) // T-460 改寫
   assert.match(page, /title: '網友 停損'/)
   // 上方的「現在發生什麼」也標出是網友原版（它的文字本身沒寫策略名）
   assert.match(page, /\{last\.strategy === 'ms' && <b className="cq-fu-sleeve ms">\{STRATEGY_NAME\.ms\}/)
   assert.match(read('src/cloud/futures.css'), /\.cq-fu-sleeve\.ms \{/)
+})
+
+// ── T-460：台指期以網友原版為主（使用者 2026-10-29：「把台指期的策略都以網友為主，金額賺賠也都以網友的算，其他策略都是輔助顯示」） ──
+test('T-460 AC1 數字卡：有網友原版的日子是網友原版合計、持倉、已平倉、最新；沒有的舊日子照舊是帳戶', () => {
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /label="網友原版合計"/)
+  assert.match(page, /<Kpi label="持倉" value=\{mk\.hold\.value\}/)
+  assert.match(page, /<Kpi label="已平倉" value=\{`\$\{mk\.exits\} 筆`\}/)
+  assert.ok(page.indexOf('label="網友原版合計"') < page.indexOf('label="帳戶合計"'), '網友原版在前，帳戶是沒有網友原版時的退路')
+  const hold = msKpis(dayAt(msDay(true), '09:32:00').ms!)
+  assert.equal(hold.hold.text, '持多 1 口 @ 47174・現在平倉的話')
+  assert.equal(hold.exits, 1)
+  assert.equal(hold.realized, -2904)
+  const flat = msKpis(dayAt(msDay(), '23:59').ms!)
+  assert.deepEqual([flat.hold.value, flat.hold.text, flat.exits, flat.realized], ['空手', '13:00 後不再進場', 2, -7258])
+  assert.equal(msKpis(dayAt(msDay(), '09:10:00').ms!).hold.text, '等動能或趨勢訊號')
+})
+
+test('T-460 AC2 圖上：網友原版的買賣點彩色、其他策略的灰色；同一點有網友原版就不算輔助；沒有主策略時都照舊', () => {
+  const v = dayAt(msDay(), '23:59')
+  const marks = chartMarks(v.fills, true, 'MS_LONG')
+  assert.ok(marks.filter((m) => m.text.startsWith('網友')).every((m) => !m.aux))
+  assert.ok(marks.filter((m) => !m.text.startsWith('網友')).every((m) => m.aux))
+  assert.ok(chartMarks(v.fills, true).every((m) => !m.aux))
+  const tie = chartMarks(
+    [
+      { time: '09:00:00', sleeve: 'ORB_LONG', side: 1, price: 100, kind: 'entry' },
+      { time: '09:00:00', sleeve: 'MS_LONG', side: 1, price: 100, kind: 'entry' },
+    ],
+    true,
+    'MS_LONG',
+  )
+  assert.deepEqual(tie.map((m) => [m.text, m.aux]), [['突破・網友 買 100', false]])
+  assert.match(read('src/cloud/FuturesPage.tsx'), /primary=\{ms \? 'MS_LONG' : null\}/)
+})
+
+test('T-460 AC3 其他地方：日曆網友原版排第一且預設；各策略網友原版在最上、下面標輔助；收盤重算看網友原版的；其他策略的成交收起', () => {
+  assert.deepEqual(CAL_VIEWS, ['ms', 'account', 'combo', 'gap'])
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.ok(page.indexOf('head(`${STRATEGY_NAME.ms}（主）`') < page.indexOf('head(STRATEGY_NAME.combo'))
+  assert.match(page, /以下是輔助對照/)
+  assert.match(page, /const match = ms \? ms\.official_match : data\.official_match/)
+  assert.match(page, /title=\{ms \? '其他策略帳戶成交（輔助）' : '帳戶成交明細'\}\s*fold/)
+  assert.match(page, /以網友原版為主/)
 })
