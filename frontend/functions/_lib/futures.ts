@@ -13,6 +13,22 @@ export const NOT_READY = '還沒有小台模擬紀錄：電腦上的錄製程式
 /** 這天沒有秒級資料：只有逐筆的日子才有（富邦即時錄到的、期交所近 30 日逐筆重算的），而且收盤後才寫。 */
 export const NO_SECONDS = '這天沒有秒級資料（只有 1 分 K）'
 
+/**
+ * 網友原版的 1 分 K 估算（T-462／D-220 修訂九，使用者 2026-10-29：「可以把台指期的復盤往前半年的賺賠都標出來嗎？我只要網友的策略」）：
+ * serving.futures_ms_estimate 一個商品、一天一列（total、n、trades）。只有沒有真實資料（逐筆模擬單）的日子才用它。
+ */
+export type EstimateRow = { day: string; total: number | null }
+export type DayRow = { day: string; source: string; status: string; total: number | null; match: boolean | null; ms_total: number | null; ms_est?: boolean }
+
+/** 日期清單併進估算：真實資料的日子優先（估算不蓋過真實的），新到舊，最多 limit 天。 */
+export function withEstimates(real: readonly DayRow[], est: readonly EstimateRow[], limit: number): DayRow[] {
+  const have = new Set(real.map((r) => r.day))
+  const extra: DayRow[] = est
+    .filter((e) => !have.has(e.day))
+    .map((e) => ({ day: e.day, source: 'minute_estimate', status: 'closed', total: null, match: null, ms_total: e.total, ms_est: true }))
+  return [...real, ...extra].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0)).slice(0, limit)
+}
+
 /** 日期清單一次最多給幾天（約一年的交易日）。 */
 export const DAYS_LIMIT = 250
 

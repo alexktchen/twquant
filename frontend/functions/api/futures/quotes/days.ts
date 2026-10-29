@@ -1,24 +1,25 @@
-// GET /api/futures/quotes/days?product=TX|TMF：有這個商品行情的交易日（新到舊）與來源、狀態；有模擬單的日子多合計與收盤重算是否一致。只給 admin（T-451）；gap_total＝開高走低的合計（T-452，舊資料沒有 → null）；trades、gap_trades＝兩邊已平倉的成交（T-454，日曆算帳戶多空各 1 口的損益）；ms_total＝網友原版的合計（T-456，舊資料沒有 → null）。
+// GET /api/futures/quotes/days?product=TX|TMF：有這個商品行情的交易日（新到舊）與來源、狀態；有模擬單的日子多合計與收盤重算是否一致。只給 admin（T-451）；ms_total＝網友原版的合計（T-456，舊資料沒有 → null）。T-461 起不再回開高走低的合計與算帳戶用的成交。
+// T-462：沒有逐筆的日子，併進網友原版的 1 分 K 估算（ms_est＝true），真實資料優先。
 import { fail, guarded, json, type Env } from '../../../_lib/db'
-import { DAYS_LIMIT, productOk } from '../../../_lib/futures'
+import { DAYS_LIMIT, productOk, withEstimates, type DayRow, type EstimateRow } from '../../../_lib/futures'
 import { denied } from '../../../_lib/gate'
 import { readRows } from '../../../_lib/scorecard'
-
-type Row = { day: string; source: string; status: string; total: number | null; match: boolean | null; gap_total: number | null; ms_total: number | null; trades: unknown[] | null; gap_trades: unknown[] | null }
 
 const handle: PagesFunction<Env> = async ({ request, env }) => {
   const product = new URL(request.url).searchParams.get('product')
   if (!productOk(product)) return fail(400, `沒有這個商品：${product ?? '（未指定）'}`)
   return guarded(env, async (db) => {
-    const days = await readRows(
-      () => db<Row[]>`
+    const real = await readRows(
+      () => db<DayRow[]>`
         SELECT day::text AS day, source, status, (payload->>'total')::float8 AS total,
                (payload->>'official_match')::boolean AS match,
-               (payload->'gap_fail'->>'total')::float8 AS gap_total, (payload->'ms'->>'total')::float8 AS ms_total,
-               payload->'trades' AS trades, payload->'gap_fail'->'trades' AS gap_trades FROM serving.futures_quotes
+               (payload->'ms'->>'total')::float8 AS ms_total FROM serving.futures_quotes
         WHERE product = ${product} ORDER BY day DESC LIMIT ${DAYS_LIMIT}`,
     )
-    return json({ days })
+    const est = await readRows(
+      () => db<EstimateRow[]>`SELECT day::text AS day, total FROM serving.futures_ms_estimate WHERE product = ${product} ORDER BY day DESC LIMIT ${DAYS_LIMIT}`,
+    )
+    return json({ days: withEstimates(real, est, DAYS_LIMIT) })
   })
 }
 
