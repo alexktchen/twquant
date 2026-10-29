@@ -30,7 +30,7 @@ import minute_bidir_test as MB  # noqa: E402
 import ms_replay as M  # noqa: E402
 
 # 商品：富邦代號 → (期交所代號, 每點元, 每邊手續費)
-PRODUCTS = {"TMF": ("TMF", 10, 15.0), "MXF": ("MTX", 50, 30.0)}
+PRODUCTS = {"TMF": ("TMF", 10, 15.0), "MXF": ("MTX", 50, 30.0), "TXF": ("TX", 200, 60.0)}  # 大台成本同 fubon_live.py 的 PAPER_COST
 MIN_BARS = MB.MIN_BARS
 PATH_SECONDS = (0, 20, 40, 59)      # 開 → 極值 → 極值 → 收
 STEP_SECONDS = 2                    # 每 2 秒內插一筆

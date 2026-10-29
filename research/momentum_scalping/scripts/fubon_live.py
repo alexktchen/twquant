@@ -7,7 +7,7 @@ fubon_live.py — 富邦即時行情：錄小台／台指逐筆與小台五檔�
 規則、參數、成交方式全部來自 intraday_bidir_test.py（與 paper/、forward_paper.py 同一套，2026-10-26 凍結）：
 訊號在 T 發出 → 以 T + 0.5 秒後的第一筆成交價成交，買 +1 點、賣 −1 點。
 收盤後用同一個逐筆引擎（B.run_orb／B.run_noise）把錄到的逐筆重算一次，當作正式結果，並和盤中即時紀錄對照。
-另外同時跑「開高走低」三條放空規則（GapFail；studies/gap_fail，A 開高失守、B 跌破開盤區間、C 補缺口），放在 payload 的 gap_fail。
+開高走低（GapFail，studies/gap_fail）2026-10-29 拿掉（使用者：「開高走低策略直接拿掉」；T-461／D-220 修訂八）。
 網友原版 Momentum_Scalping（Netizen；studies/ms_tmf，只做多 1 口、futures_replay.DayEngine 逐筆跑）放在 payload 的 ms。
 盤口與大單（Flow，T-455）：每筆成交照當下買賣價分主動買／主動賣、5 口以上記成大單、五檔留最新與每分鐘最後一份，放在 payload 的 flow。
 
@@ -41,7 +41,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import futures_replay as F  # noqa: E402
-import gap_fail_test as GF  # noqa: E402
 import intraday_bidir_test as B  # noqa: E402
 import ms_replay as M  # noqa: E402
 
@@ -74,8 +73,7 @@ PAPER_COST = {"MTX": (B.POINT_VALUE, B.COMMISSION), "TX": (200, 60.0), "TMF": (1
 PRODUCT_NAME = {"MTX": "小台", "TX": "大台", "TMF": "微台"}
 FIELDS = ["day", "sleeve", "side", "signal_time", "entry_time", "entry_price", "exit_time", "exit_price",
           "exit_reason", "points", "net_pnl", "source"]
-# 開高走低三條放空規則（studies/gap_fail；使用者 2026-10-27「abc 也新增成一個策略加到前端」）
-GAP_SLEEVES = {"GAP_A": "A 開高失守", "GAP_B": "B 跌破開盤區間", "GAP_C": "C 補缺口"}
+
 # 盤口與大單（T-455，網站顯示用、不影響模擬單；使用者 2026-10-28「做成可切換的」：網站可切 5／10／20／30 口）
 BIG_MIN_LOTS = 5       # 一筆幾口以上記成大單；網站再照選的門檻篩
 BOOK_LEVELS = 5
@@ -129,153 +127,6 @@ def encode_seconds(day: date, secs: dict, what: str) -> dict:
 
 def net_pnl(side: int, ep: float, xp: float, point_value: float, commission: float) -> float:
     return round(side * (xp - ep) * point_value - 2 * commission - B.TAX * (ep + xp) * point_value, 1)
-
-
-class GapFail:
-    """開高走低三條放空規則的模擬單（studies/gap_fail，規則與 gap_fail_test.py 相同），三個子帳戶各 1 口。
-
-    逐筆版：時點 T 的價格＝T 之前最後一筆（就是那分鐘的收盤價）；進場、停損、停利、收盤平倉都照固定組合的
-    逐筆成交方式（觸發後 T + 0.5 秒的第一筆，滑價 1 點）。研究判定用的是 1 分 K 版，這裡只是往前走的模擬單。"""
-
-    def __init__(self, live: "LiveCombo"):
-        self.live = live
-        open_us = clock(live.day, B.SESSION_OPEN)
-        self.next_a = open_us + GF.A_FROM * 60 * M.US            # A、C：08:50 起每分鐘
-        self.range_end = open_us + GF.RANGE_MINUTES * 60 * M.US  # B：09:00 定開盤區間，之後每分鐘
-        self.next_b = self.range_end
-        self.gap = None
-        self.range = None
-        self.rules = {s: {"state": "waiting"} for s in GAP_SLEEVES}
-        self.pending = []        # [(due_us, sleeve, kind)]
-        self.trades, self.events = [], []
-        self.eod_done = False
-
-    def note(self, t_us: int, kind: str, sleeve, text: str) -> None:
-        self.events.append({"time": hms(t_us)[:8], "kind": kind, "sleeve": sleeve, "text": text})
-        self.live.log(f"[{hms(t_us)[:8]}] 開高走低：{text}")
-
-    def signal(self, sleeves, T: int, stop: float, text: str) -> None:
-        for s in sleeves:
-            self.rules[s].update(state="pending", stop=stop, signal_t=T)
-            self.pending.append((T + B.LATENCY_US, s, "entry"))
-        self.note(T, "signal", sleeves[0], text)
-
-    def decide(self, ready) -> None:
-        L = self.live
-        if not L.t:
-            return
-        if self.gap is None:
-            self.gap = L.p[0] / L.prev_close - 1
-            if self.gap < GF.GAP_MIN:
-                for r in self.rules.values():
-                    r["state"] = "skipped"
-                self.note(L.t[0], "info", None, f"開盤 {self.gap:+.2%}，沒有開高（門檻 +{GF.GAP_MIN:.3%}）→ 今天三條都不做")
-            else:
-                self.note(L.t[0], "info", None, f"開高 {self.gap:+.2%}（門檻 +{GF.GAP_MIN:.3%}）→ 等跌破再放空")
-        if self.gap < GF.GAP_MIN:
-            return
-        while self.rules["GAP_A"]["state"] == "waiting" and self.next_a < L.eod and ready(self.next_a):
-            T, self.next_a = self.next_a, self.next_a + 60 * M.US
-            i = L.last_before(T)
-            if L.p[i] < L.p[0]:
-                self.rules["GAP_C"]["target"] = L.prev_close
-                stop = max(L.p[:i + 1])
-                self.signal(("GAP_A", "GAP_C"), T, stop, f"{hms(T)[:5]} 價格 {L.p[i]:.0f} 跌破開盤 {L.p[0]:.0f} → A、C 模擬放空，"
-                            f"停損 {stop:.0f}；C 碰到昨收 {L.prev_close:.0f} 回補")
-        if self.range is None and ready(self.range_end):
-            seg = L.p[:L.last_before(self.range_end) + 1]
-            self.range = {"high": max(seg), "low": min(seg)}
-            self.note(self.range_end, "info", "GAP_B", f"開盤區間（08:45～08:59）高 {max(seg):.0f}、低 {min(seg):.0f}")
-        while (self.range is not None and self.rules["GAP_B"]["state"] == "waiting" and self.next_b < L.eod
-               and ready(self.next_b)):
-            T, self.next_b = self.next_b, self.next_b + 60 * M.US
-            i = L.last_before(T)
-            if L.p[i] < self.range["low"]:
-                self.signal(("GAP_B",), T, self.range["high"], f"{hms(T)[:5]} 價格 {L.p[i]:.0f} 跌破開盤區間低點 "
-                            f"{self.range['low']:.0f} → B 模擬放空，停損 {self.range['high']:.0f}")
-        if not self.eod_done and ready(L.eod):
-            self.eod_done = True
-            for s, r in self.rules.items():
-                if r["state"] == "open" and not r.get("trigger"):
-                    self.pending.append((L.eod + B.LATENCY_US, s, "EOD"))
-                    self.note(L.eod, "signal", s, f"{GAP_SLEEVES[s]}：收盤前回補（13:44）")
-                elif r["state"] == "waiting":
-                    r["state"] = "none"
-
-    def fill_pending(self, i: int) -> None:
-        L = self.live
-        keep = []
-        for due, s, kind in self.pending:
-            if L.t[i] < due:
-                keep.append((due, s, kind))
-                continue
-            r = self.rules[s]
-            if kind != "entry":
-                self.book(s, r, (L.t[i], L.p[i] + B.SLIP), kind)
-                continue
-            price = L.p[i] - B.SLIP
-            if L.t[i] >= L.eod:
-                r["state"] = "cancelled"
-                self.note(L.t[i], "info", s, f"{GAP_SLEEVES[s]}：成交時已經到收盤平倉時間 → 取消")
-            elif r["stop"] - price <= 0:
-                r["state"] = "cancelled"
-                self.note(L.t[i], "info", s, f"{GAP_SLEEVES[s]}：進場價 {price:.0f} 已在停損 {r['stop']:.0f} 之上 → 取消")
-            elif s == "GAP_C" and L.p[i] <= L.prev_close:
-                r["state"] = "skipped"
-                self.note(L.t[i], "info", s, f"C 補缺口：價格 {L.p[i]:.0f} 已經補到昨收 {L.prev_close:.0f} → 不做")
-            else:
-                r.update(state="open", entry=(L.t[i], price), entry_i=i)
-                self.note(L.t[i], "fill", s, f"{GAP_SLEEVES[s]}：模擬放空 {price:.0f}，停損 {r['stop']:.0f}"
-                          + (f"、停利 {r['target']:.0f}" if s == "GAP_C" else ""))
-        self.pending = keep
-
-    def watch(self, i: int) -> None:
-        L = self.live
-        if L.t[i] >= L.eod:
-            return
-        for s, r in self.rules.items():
-            if r["state"] != "open" or r.get("trigger") or i <= r["entry_i"]:
-                continue
-            target = r.get("target") if s == "GAP_C" else None
-            reason = "STOP" if L.p[i] >= r["stop"] else "TARGET" if target is not None and L.p[i] <= target else None
-            if reason:
-                r["trigger"] = True
-                self.pending.append((L.t[i] + B.LATENCY_US, s, reason))
-                self.note(L.t[i], "signal", s, f"{GAP_SLEEVES[s]}：{'碰到停損' if reason == 'STOP' else '補完缺口'} {L.p[i]:.0f}")
-
-    def book(self, s: str, r: dict, exit_, reason: str) -> None:
-        L = self.live
-        (et, ep), (xt, xp) = r["entry"], exit_
-        net = net_pnl(-1, ep, xp, L.point_value, L.commission)
-        self.trades.append({"day": str(L.day), "sleeve": s, "side": -1, "signal_time": hms(r["signal_t"]), "entry_time": hms(et),
-                            "entry_price": ep, "exit_time": hms(xt), "exit_price": xp, "exit_reason": reason,
-                            "points": round(ep - xp, 2), "net_pnl": net, "source": "live"})
-        r["state"] = "closed"
-        self.note(xt, "exit", s, f"{GAP_SLEEVES[s]}：模擬回補 {xp:.0f}（{REASON_TEXT.get(reason, reason)}），這筆淨 {net:+,.0f} 元")
-
-    def mark(self, s: str, last):
-        L = self.live
-        r = self.rules[s]
-        realized = round(sum(t["net_pnl"] for t in self.trades if t["sleeve"] == s), 1)
-        if r["state"] != "open":
-            return {"position": 0, "entry_price": None, "realized": realized, "open_pnl": None}
-        entry = r["entry"][1]
-        open_pnl = None if last is None else net_pnl(-1, entry, last + B.SLIP, L.point_value, L.commission)
-        return {"position": -1, "entry_price": entry, "realized": realized, "open_pnl": open_pnl}
-
-    def snapshot(self, last) -> dict:
-        sleeves = {s: self.mark(s, last) for s in GAP_SLEEVES}
-        rules = {}
-        for s, r in self.rules.items():
-            entry = r.get("entry")
-            rules[s] = {"state": r["state"], "stop": r.get("stop"), "target": r.get("target") if s == "GAP_C" else None,
-                        "signal_time": hms(r["signal_t"])[:8] if "signal_t" in r else None,
-                        "entry_price": entry[1] if entry else None, "entry_time": hms(entry[0])[:8] if entry else None}
-        total = sum(v["realized"] + (v["open_pnl"] or 0) for v in sleeves.values())
-        return {"version": 1, "names": GAP_SLEEVES, "threshold_pct": round(GF.GAP_MIN * 100, 3),
-                "gap_pct": None if self.gap is None else round(self.gap * 100, 3),
-                "active": None if self.gap is None else self.gap >= GF.GAP_MIN, "range": self.range,
-                "rules": rules, "sleeves": sleeves, "trades": self.trades, "events": self.events, "total": round(total, 1)}
 
 
 MS_SLEEVE = "MS_LONG"
@@ -479,7 +330,7 @@ class Flow:
 
 
 class LiveCombo:
-    """單執行緒、只看已到的逐筆：ORB 只做多 + NOISE 只放空，兩個子帳戶各 1 口；另外跑開高走低三條（GapFail）。"""
+    """單執行緒、只看已到的逐筆：ORB 只做多 + NOISE 只放空，兩個子帳戶各 1 口；另外跑網友原版（Netizen）。"""
 
     def __init__(self, day: date, contract: str, prev_close: float, history, log, product: str = PRODUCT_TAIFEX):
         self.day, self.contract, self.prev_close, self.log = day, contract, prev_close, log
@@ -507,7 +358,6 @@ class LiveCombo:
         self.orb_box = None      # 開盤 5 分鐘：{"open", "close", "high", "low", "side"}
         self.orb_state = "waiting"
         self.disabled = None     # 開盤沒錄到 → 原因；之後只錄資料、不做任何決策
-        self.gap = GapFail(self)
         self.flow = Flow(day)
         self.ms = Netizen(self, Path(_MS["repo"])) if _MS.get("repo") else None  # 網友原版；main() 有載入原版才跑
 
@@ -541,8 +391,6 @@ class LiveCombo:
         self.decide(t_us, wall=False)
         self.fill_pending(i)
         self.watch_orb(i)
-        self.gap.fill_pending(i)
-        self.gap.watch(i)
         if self.ms is not None and self.disabled is None:
             self.ms.on_tick(t_us, price, size)
 
@@ -598,7 +446,6 @@ class LiveCombo:
                 self.pending.append((self.eod + B.LATENCY_US, "NOISE_SHORT", 1, "EOD", self.eod))
                 self.noise_pos = 0
                 self.note(self.eod, "signal", "NOISE_SHORT", "收盤前回補（13:44）")
-        self.gap.decide(ready)
         if self.ms is not None and ready(clock(self.day, "13:45") + M.US):
             self.ms.close()
 
@@ -701,7 +548,7 @@ class LiveCombo:
             "official": None, "official_match": None, "note": self.disabled,
             "product": self.product, "name": PRODUCT_NAME[self.product], "volume": int(self.vol),
             "point_value": self.point_value, "commission": self.commission,
-            "gap_fail": self.gap.snapshot(last), "flow": self.flow.snapshot(),
+            "flow": self.flow.snapshot(),
             "ms": None if self.ms is None else self.ms.snapshot(last),
         }
 
@@ -709,7 +556,7 @@ class LiveCombo:
         self.flow.on_book(t_us, bids, asks)
 
     def n_events(self) -> int:
-        return len(self.events) + len(self.gap.events) + (len(self.ms.events) if self.ms is not None else 0)
+        return len(self.events) + (len(self.ms.events) if self.ms is not None else 0)
 
 
 class QuoteTracker:
@@ -958,20 +805,6 @@ def write_rows(path: Path, rows) -> None:
         w.writerows(rows)
 
 
-def gap_summary(gap: GapFail) -> list:
-    """SUMMARY.md 的開高走低段落。"""
-    snap = gap.snapshot(None)
-    head = ("開盤還沒到" if snap["gap_pct"] is None else
-            f"開盤跳空 {snap['gap_pct']:+.2f}%（門檻 +{snap['threshold_pct']:.3f}%）" + ("" if snap["active"] else "，沒有開高、不做"))
-    lines = ["## 開高走低三條（模擬放空，各 1 口）", "", head, ""]
-    if gap.trades:
-        lines += ["| 規則 | 訊號 | 進場 | 出場 | 原因 | 淨損益 |", "|---|---|---|---|---|---|"]
-        lines += [f"| {GAP_SLEEVES[r['sleeve']]} | {r['signal_time'][:5]} | {r['entry_time']} {r['entry_price']:.0f} | "
-                  f"{r['exit_time']} {r['exit_price']:.0f} | {r['exit_reason']} | {r['net_pnl']:+,.0f} |" for r in gap.trades]
-        lines += ["", f"合計 {sum(r['net_pnl'] for r in gap.trades):+,.0f} 元。", ""]
-    return lines
-
-
 def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, last_raw, log, final=None) -> None:
     """final＝(uploader, source, symbol)：把定稿狀態（含收盤重算）寫進雲端。"""
     write_rows(out / "paper_live.csv", live.trades)
@@ -986,8 +819,6 @@ def finish(day: date, out: Path, live: LiveCombo, tick_csv: Path, folder: Path, 
     total_off = sum(r["net_pnl"] for r in rows)
     lines += ["", f"合計：盤中即時 {total_live:+,.0f} 元；收盤重算 {total_off:+,.0f} 元（收盤重算的主力合約 {contract}）。",
               "兩者應該一致；不一致時以收盤重算為準，並查原因。", ""]
-    write_rows(out / "gap_live.csv", live.gap.trades)
-    lines += gap_summary(live.gap)
     ms_rows = None
     if live.ms is not None:
         live.ms.close()
@@ -1060,7 +891,7 @@ def replay_quotes(args) -> int:
             paper = "trades" in snap
             tail = (f"模擬單 {len(snap['trades'])} 筆、合計 {snap['total']:+,.0f} 元、"
                     f"{'與收盤重算一致' if snap['official_match'] else '與收盤重算不一致'}；"
-                    f"開高走低 {len(snap['gap_fail']['trades'])} 筆、合計 {snap['gap_fail']['total']:+,.0f} 元") if paper else "只有行情（前面不足 14 天）"
+                    f"網友原版 {len((snap.get('ms') or {}).get('trades') or [])} 筆、合計 {(snap.get('ms') or {}).get('total', 0):+,.0f} 元") if paper else "只有行情（前面不足 14 天）"
             print(f"{name} {PRODUCT_NAME[code]} {snap['contract']}：{tail}" + ("，已寫進雲端" if uploader is not None else ""))
     return 0
 
