@@ -9,6 +9,16 @@ export const LOGIN_PAGE = '/login'
 /** Google 一鍵登入（T-457）：走 Cloudflare Access 的 Google（只開 Google＋Instant Auth 的應用），不經 Supabase。 */
 export const GOOGLE_LOGIN = '/api/login/google'
 
+/** Cloudflare Access 的登入卡（白色，Google 與 Email 一次性驗證碼都有）：/api 受 Access 保護，登入完 /api/login 轉回首頁（functions/_lib/auth.ts 的 afterLogin）。 */
+export const ACCESS_LOGIN = '/api/login'
+
+/**
+ * T-459／D-210 修訂二（使用者 2026-10-29：「我要舊的登入畫面」→ 選「Cloudflare 的白色登入卡」）：
+ * true＝網站的「登入」（/login）直接轉到 Cloudflare 的登入卡，不經 Supabase（這個月流量用完、Email 驗證碼寄不出去）。
+ * 深色登入頁 LoginPage.tsx 留著，Supabase 恢復、要改回時把這裡改成 false。
+ */
+export const USE_ACCESS_CARD = true
+
 /** 用 Cloudflare Access 登入的人登出：Cloudflare 清掉通行證與全域登入（會顯示 Cloudflare 的登出頁）。 */
 export const ACCESS_LOGOUT = '/cdn-cgi/access/logout'
 

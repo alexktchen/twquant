@@ -8242,6 +8242,7 @@ T-415 試驗的情緒三欄用 Ollama 標籤（全語料），不用這個小模
   - **要「直接」到 Google（不經 Cloudflare 的選擇卡）**：Cloudflare 要多一個 Access 應用——網域 `twquant.pages.dev/api/login/google`、只開 Google、打開 Instant Auth、Policy 照主應用（Google 登入或 cktalex@gmail.com）。AI 寫好的腳本被自動模式擋下，由使用者建；沒建時這個路徑歸主應用，先出選擇卡、點 Google 一樣能登入。
   - 登出：沒有 Supabase 登入狀態的人（＝用 Cloudflare 登入）登出改到 `/cdn-cgi/access/logout`（Cloudflare 的登出頁），否則通行證留著、按了登出還是登入狀態。
   - **後果**：第 3 步「刪掉 `/api/*` 的 Access 應用」**取消**（刪了 Google 登入就沒了）；Cloudflare Access 免費 50 人上限回來（Google 登入的人算人頭）。之後 Supabase 恢復、要超過 50 人時，再開 Supabase 的 Google provider、把按鈕改回 `signInWithGoogle`（`session-client.ts` 還留著）。
+- **修訂二（2026-10-29，T-459，使用者：「有舊登入嗎」→「舊的登入畫面」→「我要舊的登入畫面」→ AI 問是哪一個 → 選「Cloudflare 的白色登入卡」）登入改回 Cloudflare Access 的登入卡**：`/login` 直接轉 `/api/login`（主應用保護，Google 與 Email 一次性驗證碼都走 Cloudflare）。理由：Supabase 當月流出超量，深色頁的 Email 驗證碼寄不出去；白卡兩條路都能用。深色頁 `LoginPage.tsx` 與 Supabase 的程式留著，`auth.ts` 的 `USE_ACCESS_CARD` 改 false 就恢復。Cloudflare Access 免費 50 人上限照舊（修訂一的後果）。
 
 ### D-213（2026-10-22，使用者：「我的新聞星雲圖想要像 graphify 這專案，想要在那頁下一個字來搜尋就出現他是怎麼牽連在一起的」）星雲圖搜尋與牽連
 
