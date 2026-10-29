@@ -6,7 +6,7 @@ import type { Bar, DateCounts, PicksDay } from './format'
 import type { SearchHit, StockScores, WatchList } from './scores'
 import type { Scorecard, TradeRow } from './scorecard'
 import { normalizeDay, type BoardOnlyDay, type DayTradeDay, type DayTradeHistory, type DayTradeRow } from './daytrade'
-import type { Flow, FuturesDay, FuturesDayRow, Product, QuoteDayRow, QuotePayload, QuoteProduct, SecondsPayload } from './futures'
+import type { Flow, FuturesDay, FuturesDayRow, MsEstimate, Product, QuoteDayRow, QuotePayload, QuoteProduct, SecondsPayload } from './futures'
 import type { Quote } from './live'
 import type { RankRow } from './group'
 import type { CloseMood, GlobalMood, LiveMood } from './mood'
@@ -155,6 +155,10 @@ export const fetchFuturesDay = (day?: string) =>
 
 /** 小台模擬有紀錄的交易日（新到舊）。只給 admin。 */
 export const fetchFuturesDays = () => get<{ days: FuturesDayRow[] }>('/api/futures/days').then((r) => r.days)
+
+/** 網友原版那一天的 1 分 K 估算（T-462；沒有逐筆的日子）。product：MTX、TX、TMF。 */
+export const fetchMsEstimate = (product: Product, day: string) =>
+  get<MsEstimate>(`/api/futures/estimate?product=${product}&day=${encodeURIComponent(day)}`)
 
 /** 小台模擬那一天的秒級復盤資料；沒有（只有 1 分 K）→ 後端回 404，呼叫端改用 1 分 K。只給 admin。 */
 export const fetchFuturesSeconds = (day: string) => get<SecondsPayload>(`/api/futures/seconds?day=${encodeURIComponent(day)}`)

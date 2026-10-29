@@ -60,6 +60,8 @@
 .cq-fu-sleeve.gap { color: #22d3ee; }
 .cq-fu-sleeve.ms { color: #c4b5fd; }
 /* T-460 各策略：網友原版為主，下面是輔助對照 */
+/* T-462 日曆上只有 1 分 K 估算的日子：日期旁標「估」 */
+.cq-fu-est { font-style: normal; font-size: 11px; margin-left: 4px; padding: 0 4px; border-radius: 4px; color: #f0b90b; background: rgba(240, 185, 11, .14); }
 .cq-fu-auxhead { margin: 14px 0 0; padding-top: 8px; border-top: 1px dashed var(--line); color: var(--mute); font-size: 13.5px; }
 .cq-fu-sleeve.acct { color: var(--accent); }
 /* T-454 帳戶沒做的那條（當時同方向已經有 1 口） */

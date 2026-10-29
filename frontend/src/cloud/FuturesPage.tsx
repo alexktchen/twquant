@@ -2,9 +2,9 @@
 // 使用者 2026-10-26：「這個可以在我網站即時模擬出來嗎？」「畫面可以是復盤模式跟盤中模式」「我想要秒級的復盤」
 // 「買進賣出的點位要在復盤過程標出來」；10-27：「我也要微台跟大台的資料」「放到網站」。
 // 三個商品都跑同一套固定組合「ORB 只做多 + 噪音區只放空」的模擬單（只記帳、不送委託；10-27「也要有模擬單」），成本照各自的合約。
-// T-452（10-27「abc 也新增成一個策略加到前端」）：第二個策略「開高走低」＝A 開高失守、B 跌破開盤區間、C 補缺口，各 1 口只放空。
-// T-453（10-27「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」）：不切換，兩個策略同一個畫面；復盤上面是每日損益日曆。
-// T-454（10-27「多空都持有一口就好」）：上面的數字、圖上買賣點、成交明細是實際帳戶（多空各最多 1 口，先到先做、同時要空 A 優先）；各策略與日曆可看每條各 1 口的對照。
+// T-453（10-27「都整合在一起…再呈現各策略賺賠…用成日曆一次可以看完當天賺多少」）：不切換，各策略同一個畫面；復盤上面是每日損益日曆。
+// T-460（10-29「把台指期的策略都以網友為主…其他策略都是輔助顯示」）：網友原版是主角；T-461（10-29「開高走低策略直接拿掉」）：
+// 開高走低（T-452）與它和固定組合合成的帳戶（T-454）拿掉，只剩網友原版（主）與固定組合（輔助）。
 // T-455（10-28「可以讓我在前端介面看到錄製的資料嗎」「做成可切換的」）：「盤口與大單」區塊——主動買賣、每分鐘淨主動、五檔、大單（門檻 5／10／20／30 口可切）；
 // 展開才抓、盤中每 15 秒更新、盤中不抓每分鐘的五檔（2026-10-28 Supabase 流出超量，省流量）。
 // 資料來自使用者電腦上的富邦即時行情（fubon_live.py），富邦行情不得轉傳 → 只給 admin。
@@ -42,14 +42,13 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts'
-import { fetchFlow, fetchFuturesDay, fetchFuturesDays, fetchFuturesSeconds, fetchQuoteDay, fetchQuoteDays, fetchQuoteSeconds } from './api'
+import { fetchFlow, fetchMsEstimate, fetchFuturesDay, fetchFuturesDays, fetchFuturesSeconds, fetchQuoteDay, fetchQuoteDays, fetchQuoteSeconds } from './api'
 import { price } from './format'
 import {
   BIG_THRESHOLDS,
   CAL_VIEWS,
   CAL_VIEW_NAME,
   DEFAULT_BIG_MIN,
-  GAP_SLEEVES,
   PRODUCT_NAME,
   REASON_TEXT,
   SLEEVES,
@@ -57,8 +56,8 @@ import {
   STRATEGY_NAME,
   STALE_AFTER_S,
   addSeconds,
-  accountSide,
   allFillTimes,
+  sideSummary,
   barsAt,
   bookTotals,
   change,
@@ -69,9 +68,6 @@ import {
   dayPnl,
   decodeSeconds,
   flowAt,
-  gapLevels,
-  gapSub,
-  gapSummary,
   lastAtOrBefore,
   lots,
   monthSummary,
@@ -81,8 +77,8 @@ import {
   msStopAt,
   msSub,
   costOf,
+  isEstimate,
   isPaper,
-  signedPct,
   shouldPoll,
   staleSeconds,
   tone,
@@ -98,7 +94,7 @@ import {
   type FuturesEvent,
   type Fill,
   type FuturesTrade,
-  type GapFail,
+  type MsEstimate,
   type PnlRow,
   type Product,
   type QuoteDayRow,
@@ -173,7 +169,7 @@ type ChartProps = {
   pos: number
   /** 噪音區下緣（小台）；大台、微台沒有 */
   noiseLb: [string, number][]
-  /** 水平線：固定組合是 ORB 停損（進場後才畫）；開高走低是開盤、昨收、區間低與持倉的停損 */
+  /** 水平線：固定組合的 ORB 停損（進場後才畫）、網友原版持倉的停損 */
   levels: { price: number; title: string }[]
   /** 買賣點（有模擬單才有） */
   fills: readonly Fill[]
@@ -267,7 +263,7 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills, primary = 
     p.lines = []
     for (const l of levels)
       p.lines.push(p.px.createPriceLine({ price: l.price, color: MUTE, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: l.title }))
-    // 買賣點：成交的那一秒（1 分 K 時是那一分鐘）、成交價的位置；同一刻同價的合成一個（開高走低 A、B、C 常同時進場）
+    // 買賣點：成交的那一秒（1 分 K 時是那一分鐘）、成交價的位置；同一刻同價的合成一個
     const marks: SeriesMarker<Time>[] = chartMarks(fills, secs !== null, primary).map((m) => {
       const long = m.side > 0
       const time = t(m.time)
@@ -391,7 +387,7 @@ type Badged = {
   official_match?: boolean | null
 }
 
-function StatusBadges({ data, mode, now, secs, gap }: { data: Badged; mode: Mode; now: Date; secs: Seconds | null; gap?: GapFail }) {
+function StatusBadges({ data, mode, now, secs }: { data: Badged; mode: Mode; now: Date; secs: Seconds | null }) {
   const stale = staleSeconds(data.updated_at, now)
   // T-460：以網友原版為主 → 收盤重算一致與否看它的；沒有網友原版的日子照舊看固定組合
   const ms = 'ms' in data ? (data as FuturesDay).ms : null
@@ -413,11 +409,6 @@ function StatusBadges({ data, mode, now, secs, gap }: { data: Badged; mode: Mode
       ) : (
         <span className="cq-cat cq-cat-list">已收盤</span>
       )}
-      {gap && gap.active !== null && (
-        <span className={`cq-cat ${gap.active ? 'cq-cat-event' : 'cq-cat-mute'}`}>
-          {gap.active ? `開高 ${signedPct(gap.gap_pct)}` : `沒有開高 ${signedPct(gap.gap_pct)}`}
-        </span>
-      )}
       {match != null && (
         <span className={`cq-cat ${match ? 'cq-cat-mute' : 'cq-fu-warn'}`}>{match ? '收盤重算一致' : '收盤重算不一致，以重算為準'}</span>
       )}
@@ -426,7 +417,7 @@ function StatusBadges({ data, mode, now, secs, gap }: { data: Badged; mode: Mode
 }
 
 /** 提示列：拉到的那一刻最近發生的事；買賣點剛發生（盤中 60 秒內）就亮起來。 */
-function NowBar({ view }: { view: { events: (FuturesEvent & { strategy?: Strategy | 'account' })[]; cut: string } }) {
+function NowBar({ view }: { view: { events: (FuturesEvent & { strategy?: Strategy })[]; cut: string } }) {
   const last = view.events[view.events.length - 1]
   if (!last) return <div className="cq-fu-now">08:50 開盤 5 分鐘收完才有第一個訊號</div>
   const trade = last.kind === 'fill' || last.kind === 'exit'
@@ -444,16 +435,14 @@ function NowBar({ view }: { view: { events: (FuturesEvent & { strategy?: Strateg
   )
 }
 
-/** 時間軸上的小標：固定組合寫子帳戶；開高走低、網友原版寫策略名（開高走低的文字裡已經有 A、B、C）。 */
-function eventChip(e: FuturesEvent & { strategy?: Strategy | 'account' }): { text: string; cls: string } | null {
-  if (e.strategy === 'account') return { text: '帳戶', cls: 'acct' }
-  if (e.strategy === 'gap') return { text: STRATEGY_NAME.gap, cls: 'gap' }
+/** 時間軸上的小標：固定組合寫子帳戶；網友原版寫策略名。 */
+function eventChip(e: FuturesEvent & { strategy?: Strategy }): { text: string; cls: string } | null {
   if (e.strategy === 'ms') return { text: STRATEGY_NAME.ms, cls: 'ms' }
   if (e.sleeve) return { text: SLEEVE_NAME[e.sleeve], cls: e.sleeve === 'ORB_LONG' ? 'long' : 'short' }
   return null
 }
 
-function Timeline({ events, newestFirst }: { events: (FuturesEvent & { strategy?: Strategy | 'account' })[]; newestFirst: boolean }) {
+function Timeline({ events, newestFirst }: { events: (FuturesEvent & { strategy?: Strategy })[]; newestFirst: boolean }) {
   const rows = newestFirst ? [...events].reverse() : events
   if (rows.length === 0) return <p className="cq-empty">還沒有事件：開盤後才有。</p>
   return (
@@ -525,7 +514,7 @@ function PriceKpi({ p, prevClose }: { p: number | null; prevClose: number | null
   )
 }
 
-/** 每日損益日曆（T-453）：一個月一張、週一到週五；格子是那天的損益（帳戶／固定組合／開高走低可切，T-454 起預設看帳戶），點一下打開那天的復盤。 */
+/** 每日損益日曆（T-453）：一個月一張、週一到週五；格子是那天的損益（網友原版／固定組合可切，T-460 起預設看網友原版），點一下打開那天的復盤。 */
 function PnlCalendar({ days, value, onPick }: { days: PnlRow[]; value: string | null; onPick: (d: string) => void }) {
   const months = useMemo(() => monthsOf(days), [days])
   const byDay = useMemo(() => new Map(days.map((d) => [d.day, d])), [days])
@@ -573,8 +562,17 @@ function PnlCalendar({ days, value, onPick }: { days: PnlRow[]; value: string | 
             const v = row ? dayPnl(row, view) : null
             const t = v === null ? 'plain' : tone(Math.round(v))
             return (
-              <button key={d} className={`cq-fu-cal-cell ${row ? t : 'none'}${d === value ? ' on' : ''}`} disabled={!row} onClick={() => onPick(d)} aria-label={d}>
-                <i>{Number(d.slice(8))}</i>
+              <button
+                key={d}
+                className={`cq-fu-cal-cell ${row ? t : 'none'}${d === value ? ' on' : ''}${isEstimate(row) ? ' est' : ''}`}
+                disabled={!row}
+                onClick={() => onPick(d)}
+                aria-label={d}
+              >
+                <i>
+                  {Number(d.slice(8))}
+                  {isEstimate(row) && <em className="cq-fu-est">估</em>}
+                </i>
                 <b>{row ? (v === null ? '—' : compactYuan(v)) : ''}</b>
               </button>
             )
@@ -644,14 +642,15 @@ function PaperView({ mode, refresh }: { mode: Mode; refresh: number }) {
   }, [refresh])
 
   const replayDay = pick ?? days?.[0]?.day ?? null
-  const data = mode === 'live' ? live.data : (replay?.d ?? null)
+  const estDay = mode === 'replay' && isEstimate(days?.find((r) => r.day === replayDay))
+  const data = mode === 'live' ? live.data : estDay ? null : (replay?.d ?? null)
   const secs = mode === 'replay' ? (replay?.s ?? null) : null
   const minutes = useMemo(() => (data ? data.bars.map((b) => b[0]) : []), [data])
   const player = usePlayer(secs, minutes)
   const { setPlaying, setPos } = player
 
   useEffect(() => {
-    if (mode !== 'replay' || replayDay === null) return
+    if (mode !== 'replay' || replayDay === null || estDay) return
     let stop = false
     setPlaying(false)
     Promise.all([fetchFuturesDay(replayDay), fetchFuturesSeconds(replayDay).then(decodeSeconds, () => null)])
@@ -665,16 +664,83 @@ function PaperView({ mode, refresh }: { mode: Mode; refresh: number }) {
     return () => {
       stop = true
     }
-  }, [mode, replayDay, setPlaying, setPos])
+  }, [mode, replayDay, estDay, setPlaying, setPos])
 
   const error = err ?? (mode === 'live' ? live.err : null)
 
   return (
     <>
       {mode === 'replay' && days !== null && <PnlCalendar days={days} value={replayDay} onPick={setPick} />}
-      {error && <p className="cq-empty">{error}</p>}
-      {data && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} refresh={refresh} />}
-      {!error && !data && <p className="cq-empty">讀取中…</p>}
+      {estDay && replayDay !== null && <EstimateDay product="MTX" day={replayDay} />}
+      {!estDay && error && <p className="cq-empty">{error}</p>}
+      {!estDay && data && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} refresh={refresh} />}
+      {!estDay && !error && !data && <p className="cq-empty">讀取中…</p>}
+    </>
+  )
+}
+
+/** 只有網友原版 1 分 K 估算的日子（T-462）：合計、筆數、每筆成交；沒有秒級復盤。 */
+function EstimateDay({ product, day }: { product: Product; day: string }) {
+  const [est, setEst] = useState<MsEstimate | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    let stop = false
+    setEst(null)
+    fetchMsEstimate(product, day)
+      .then((e) => !stop && (setEst(e), setErr(null)))
+      .catch((e) => !stop && setErr(errText(e)))
+    return () => {
+      stop = true
+    }
+  }, [product, day])
+  if (err) return <p className="cq-empty">{err}</p>
+  if (!est) return <p className="cq-empty">讀取中…</p>
+  const wins = est.trades.filter((t) => t.net_pnl > 0).length
+  return (
+    <>
+      <div className="cq-fu-badges">
+        <b className="cq-fu-day">{est.day}</b>
+        <span className="cq-cat cq-fu-warn">1 分 K 估算</span>
+        <span className="cq-cat cq-cat-mute">{PRODUCT_NAME[product]}</span>
+      </div>
+      <div className="cq-tiles cq-fu-tiles">
+        <Kpi label="網友原版合計" value={yuan(est.total)} tone={tone(est.total)} sub="只做多 1 口・1 分 K 估算" />
+        <Kpi label="筆數" value={`${est.n} 筆`} sub={est.n ? `賺 ${wins} 筆・賠 ${est.n - wins} 筆` : '這天沒有進場'} />
+      </div>
+      <Section icon={ReceiptText} title="成交明細（網友原版・估算）" meta={`${est.n} 筆`}>
+        {est.trades.length === 0 ? (
+          <p className="cq-empty">這天網友原版沒有進場。</p>
+        ) : (
+          <table className="cq-fu-trades">
+            <thead>
+              <tr>
+                <th>買進</th>
+                <th>賣出</th>
+                <th>原因</th>
+                <th>淨損益</th>
+              </tr>
+            </thead>
+            <tbody>
+              {est.trades.map((t, i) => (
+                <tr key={i}>
+                  <td>
+                    {t.entry_time} {price(t.entry_price)}
+                  </td>
+                  <td>
+                    {t.exit_time} {price(t.exit_price)}
+                  </td>
+                  <td>{REASON_TEXT[t.exit_reason] ?? t.exit_reason}</td>
+                  <td className={tone(t.net_pnl)}>{yuan(t.net_pnl)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
+      <p className="cq-fu-foot">
+        這天沒有逐筆資料，是用富邦的 1 分 K 還原逐筆、照網友原版的規則跑出來的估算。1 分 K 看不到一分鐘裡面的走勢，網友原版又常在幾秒內出場，
+        所以估算偏悲觀：用 30 天真實逐筆對照，每筆大約少算 10 點。沒有秒級復盤與江波圖。
+      </p>
     </>
   )
 }
@@ -879,17 +945,14 @@ function FlowSection({ product, day, mode, cut, refresh }: { product: Product; d
 type BodyProps = { data: FuturesDay; secs: Seconds | null; player: ReturnType<typeof usePlayer>; mode: Mode; now: Date; refresh: number }
 
 /** 各策略、各子帳戶在那一刻：一列一個子帳戶（名字、現在在做什麼、損益）。 */
-function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; cut: string }) {
-  const g = data.gap_fail ?? null
+function StrategyBoard({ view }: { view: DayView }) {
   const row = (key: Sleeve, side: 'long' | 'short', st: SleeveState, sub: string) => {
     const v = st.realized + (st.open_pnl ?? 0)
-    const skipped = view.skipped.filter((l) => l.sleeve === key).length
     return (
       <li key={key}>
         <div>
           <b className={`cq-fu-sleeve ${side}`}>{SLEEVE_NAME[key]}</b>
           <span>{sub}</span>
-          {skipped > 0 && <em className="cq-fu-skip">帳戶沒做{skipped > 1 ? ` ${skipped} 筆` : ''}：當時已經有{side === 'long' ? '多' : '空'}單</em>}
         </div>
         <b className={`cq-fu-pnl ${tone(v)}`}>{yuan(v)}</b>
       </li>
@@ -917,12 +980,6 @@ function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; c
           return row(s, side > 0 ? 'long' : 'short', view.combo.sleeves[s], sleeveSub(view.combo.sleeves[s], side))
         })}
       </ul>
-      {head(STRATEGY_NAME.gap, view.gap ? view.gap.total : null)}
-      {g && view.gap ? (
-        <ul>{GAP_SLEEVES.map((s) => row(s, 'short', view.gap!.sleeves[s], gapSub(data, g, s, view.gap!.sleeves[s], cut)))}</ul>
-      ) : (
-        <p className="cq-empty">{gapSummary(null, null)}</p>
-      )}
     </div>
   )
 }
@@ -930,35 +987,34 @@ function StrategyBoard({ data, view, cut }: { data: FuturesDay; view: DayView; c
 /**
  * 模擬單的畫面（小台；大台、微台那一天有模擬單時也用它）。
  * T-460（使用者 2026-10-29：「把台指期的策略都以網友為主，金額賺賠也都以網友的算，其他策略都是輔助顯示」）：
- * 有網友原版的日子，數字卡、圖上彩色的買賣點、成交明細、日曆預設都是網友原版；固定組合、開高走低與它們的帳戶（多空各 1 口）是輔助（圖上灰色、收起的成交）。
- * 沒有網友原版的舊日子照舊顯示帳戶。
+ * 有網友原版的日子，數字卡、圖上彩色的買賣點、成交明細、日曆預設都是網友原版；固定組合是輔助（圖上灰色、收起的成交）。
+ * 沒有網友原版的舊日子，數字卡改看固定組合。T-461 起沒有開高走低與帳戶。
  */
 function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
   const cut = mode === 'replay' ? player.cut : '23:59'
   const view = useMemo(() => dayAt(data, cut, secs), [data, cut, secs])
-  const g = data.gap_fail ?? null
   const stopShown = data.orb.stop !== null && data.orb.entry_time !== null && data.orb.entry_time.slice(0, cut.length) <= cut
   const msStop = data.ms && view.ms ? msStopAt(data.ms, view.ms) : null
   const levels = useMemo(() => {
     const orb = stopShown && data.orb.stop !== null ? [{ price: data.orb.stop, title: 'ORB 停損' }] : []
     const ms = msStop !== null ? [{ price: msStop, title: '網友 停損' }] : []
-    return g ? [...orb, ...gapLevels(data, g, view.account), ...ms] : [...orb, ...ms]
-  }, [stopShown, data, g, view.account, msStop])
+    return [...orb, ...ms]
+  }, [stopShown, data, msStop])
   const jumps = useMemo(() => allFillTimes(data), [data])
-  // 復盤拉到 cut：只列那之前帳戶已經平倉的交易（不劇透後面）
-  const done = view.accountTrades
+  // 復盤拉到 cut：只列那之前已經平倉的交易（不劇透後面）
+  const done = data.trades
     .filter((t) => t.exit_time.slice(0, cut.length) <= cut)
     .sort((a, b) => (a.entry_time < b.entry_time ? -1 : a.entry_time > b.entry_time ? 1 : 0))
   const msDone = (data.ms?.trades ?? []).filter((t) => t.exit_time.slice(0, cut.length) <= cut)
-  const long = accountSide(view.account, 1)
-  const short = accountSide(view.account, -1)
+  const long = sideSummary(view.combo, 1)
+  const short = sideSummary(view.combo, -1)
   const cost = costOf(data)
   const name = PRODUCT_NAME[data.product ?? 'MTX']
   const ms = data.ms && view.ms ? view.ms : null
   const mk = ms ? msKpis(ms) : null
   return (
     <>
-      <StatusBadges data={data} mode={mode} now={now} secs={secs} gap={g ?? undefined} />
+      <StatusBadges data={data} mode={mode} now={now} secs={secs} />
       {ms && mk ? (
         <div className="cq-tiles cq-fu-tiles">
           <Kpi
@@ -974,10 +1030,10 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       ) : (
         <div className="cq-tiles cq-fu-tiles">
           <Kpi
-            label="帳戶合計"
-            value={yuan(view.account.total)}
-            tone={tone(view.account.total)}
-            sub={mode === 'replay' ? `多空各最多 1 口・到 ${cut}` : '多空各最多 1 口・已實現＋現在平倉的話'}
+            label="固定組合合計"
+            value={yuan(view.combo.total)}
+            tone={tone(view.combo.total)}
+            sub={mode === 'replay' ? `這天沒有網友原版・到 ${cut}` : '這天沒有網友原版・已實現＋現在平倉的話'}
           />
           <Kpi label="多單" value={yuan(long.value)} tone={tone(long.value)} sub={long.text} />
           <Kpi label="空單" value={yuan(short.value)} tone={tone(short.value)} sub={short.text} />
@@ -1008,7 +1064,7 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       </Section>
       <FlowSection product={data.product ?? 'MTX'} day={data.day} mode={mode} cut={cut} refresh={refresh} />
       <Section icon={Layers} title="各策略" meta={ms ? '網友原版為主・其他每條各 1 口的輔助對照' : '每條各 1 口的對照'}>
-        <StrategyBoard data={data} view={view} cut={cut} />
+        <StrategyBoard view={view} />
       </Section>
       <Section icon={ListOrdered} title="時間軸" meta={`${view.events.length} 件`}>
         <Timeline events={view.events} newestFirst={mode === 'live'} />
@@ -1020,7 +1076,7 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       )}
       <Section
         icon={ReceiptText}
-        title={ms ? '其他策略帳戶成交（輔助）' : '帳戶成交明細'}
+        title={ms ? '固定組合成交（輔助）' : '成交明細（固定組合）'}
         fold
         summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}
       >
@@ -1029,25 +1085,16 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       <Section icon={BookOpen} title="規則與成本" fold summary="只記帳、不下單">
         <p className="cq-fu-foot">
           <b>以網友原版為主</b>：上面的數字、圖上彩色的買賣點、成交明細、日曆預設都是網友原版（只做多 1 口）。
-          固定組合、開高走低和它們的帳戶是輔助對照：圖上灰色的買賣點、「各策略」下半段、收起的「其他策略帳戶成交」、日曆可切。還沒有網友原版資料的舊日子照舊顯示帳戶。
+          固定組合是輔助對照：圖上灰色的買賣點、「各策略」下半段、收起的「固定組合成交」、日曆可切。還沒有網友原版資料的舊日子，上面的數字看固定組合。
         </p>
         <p className="cq-fu-foot">
           <b>固定組合</b>（2026-10-26 凍結，小台、大台、微台同一套）：開盤 5 分鐘收紅才做多（停損在那 5 分鐘低點、停利 10 倍）；
           噪音區每 30 分鐘檢查一次，跌破下緣又在 VWAP 之下才放空。
         </p>
         <p className="cq-fu-foot">
-          <b>開高走低</b>：只在開盤比昨收高 {(g?.threshold_pct ?? 0.526).toFixed(3)}% 以上的日子做（過去 1998～2015 年開盤漲幅排前 20% 的門檻）。
-          A 開高失守：08:50 起某一分鐘收在開盤價之下就放空，停損放在當天到那時的最高價；B 跌破開盤區間：09:00 起收破 08:45～08:59 的最低價就放空，停損放在那段的最高價；
-          C 補缺口：進場同 A，碰到昨收就回補。九年歷史的回測還沒跑（等富邦 1 分 K），以前光是「開高就空」長期是不賺的。
-        </p>
-        <p className="cq-fu-foot">
           <b>網友原版</b>：PTT 網友分享的 Momentum_Scalping，程式與參數一個都不改，只做多 1 口；每秒看一次自己畫的 1 分 K，
           動能或趨勢突破才進場，停損放在結構低點，EMA 死叉、跌破前低、動能衰退就出場，13:00 清倉。指數期貨沒有「比大盤強」可比，這條固定當作通過；大盤濾網全開。
-          它不和其他策略的帳戶合併。過去兩年多的一分 K 回測：微台每筆 −11.8 點、小台九年每年都是虧的，但一分 K 對它偏悲觀（每筆少算約 10 點），加回去大約不賺不賠，只能當參考。
-        </p>
-        <p className="cq-fu-foot">
-          <b>帳戶</b>：多單、空單各最多 1 口{name}。誰先出訊號誰先做，同一秒照 A、B、C、噪音區的順序（多單只有開盤突破一條）；
-          同方向已經有 1 口時，後來的訊號整筆不做，不會等前一口出場再補進。這個帳戶是輔助；沒有網友原版資料的舊日子，上面的數字才是它。
+          它和固定組合各算各的。過去兩年多的一分 K 回測：微台每筆 −11.8 點、小台九年每年都是虧的，但一分 K 對它偏悲觀（每筆少算約 10 點），加回去大約不賺不賠，只能當參考。
         </p>
         <p className="cq-fu-foot">
           13:44 全部平倉；{name}每點 {cost.point_value} 元、每邊手續費 {cost.commission} 元
@@ -1074,14 +1121,15 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
   }, [product, refresh])
 
   const replayDay = pick ?? days?.[0]?.day ?? null
-  const data = mode === 'live' ? live.data : (replay?.q ?? null)
+  const estDay = mode === 'replay' && isEstimate(days?.find((r) => r.day === replayDay))
+  const data = mode === 'live' ? live.data : estDay ? null : (replay?.q ?? null)
   const secs = mode === 'replay' ? (replay?.s ?? null) : null
   const minutes = useMemo(() => (data ? data.bars.map((b) => b[0]) : []), [data])
   const player = usePlayer(secs, minutes)
   const { setPlaying, setPos } = player
 
   useEffect(() => {
-    if (mode !== 'replay' || replayDay === null) return
+    if (mode !== 'replay' || replayDay === null || estDay) return
     let stop = false
     setPlaying(false)
     Promise.all([fetchQuoteDay(product, replayDay), fetchQuoteSeconds(product, replayDay).then(decodeSeconds, () => null)])
@@ -1095,7 +1143,7 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
     return () => {
       stop = true
     }
-  }, [mode, replayDay, product, setPlaying, setPos])
+  }, [mode, replayDay, estDay, product, setPlaying, setPos])
 
   const cut = mode === 'replay' && data ? player.cut : '23:59'
   const at = useMemo(() => (data ? barsAt(data.bars, cut, secs) : null), [data, cut, secs])
@@ -1107,7 +1155,8 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
   return (
     <>
       {mode === 'replay' && days !== null && <PnlCalendar days={days} value={replayDay} onPick={setPick} />}
-      {error && <p className="cq-empty">{error}</p>}
+      {estDay && replayDay !== null && <EstimateDay product={product} day={replayDay} />}
+      {!estDay && error && <p className="cq-empty">{error}</p>}
       {data && isPaper(data) && <PaperBody data={data} secs={secs} player={player} mode={mode} now={live.now} refresh={refresh} />}
       {data && !isPaper(data) && at && (
         <>
@@ -1136,7 +1185,7 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
           </p>
         </>
       )}
-      {!error && !data && <p className="cq-empty">讀取中…</p>}
+      {!estDay && !error && !data && <p className="cq-empty">讀取中…</p>}
     </>
   )
 }
