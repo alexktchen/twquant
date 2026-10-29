@@ -79,6 +79,8 @@ export type MarketView = {
 export type DayTradeDay = {
   version: 1
   day: string
+  /** 只上傳榜單（使用者 2026-10-29：「只上傳 30 檔榜單」）：模擬單只在使用者電腦上，下面的持股、成交、帳戶是 normalizeDay 補的空值 */
+  board_only?: boolean
   status: 'live' | 'closed'
   source: 'fubon_live' | 'minute_replay'
   updated_at: string
@@ -92,6 +94,25 @@ export type DayTradeDay = {
   account: { capital: number; realized: number; open_pnl: number; total: number; entries: number; closed: number }
   config: { capital: number; watch_count: number; fee_discount: number; min_fee: number; tax_rate: number; latency_ms: number; trading: Record<string, number> }
   watch: { in: number; out: number }
+}
+
+/** 只有榜單的那份狀態：沒有持股、成交、時間軸、帳戶、設定（stock_live.py 的 Recorder.board_payload）。 */
+export type BoardOnlyDay = Pick<DayTradeDay, 'version' | 'day' | 'status' | 'source' | 'updated_at' | 'board_time' | 'market' | 'board' | 'watch'> & {
+  board_only: true
+}
+
+/** 收到的狀態補齊成同一個形狀：只有榜單的那份，模擬單相關欄位補空（畫面看 board_only 決定不顯示，不會把 0 當成帳戶沒動）。 */
+export function normalizeDay(raw: DayTradeDay | BoardOnlyDay): DayTradeDay {
+  if (!raw.board_only) return raw as DayTradeDay
+  return {
+    ...raw,
+    positions: [],
+    trades: [],
+    events: [],
+    events_total: 0,
+    account: { capital: 0, realized: 0, open_pnl: 0, total: 0, entries: 0, closed: 0 },
+    config: { capital: 0, watch_count: raw.board.length, fee_discount: 0, min_fee: 0, tax_rate: 0, latency_ms: 0, trading: {} },
+  }
 }
 
 export type DayTradeRow = { day: string; source: string; status: string; total: number | null; closed: number | null }

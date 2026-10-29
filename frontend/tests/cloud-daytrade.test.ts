@@ -12,6 +12,7 @@ import {
   MARKET_STATE_TEXT,
   boardAt,
   boardTag,
+  normalizeDay,
   pct,
   priceAt,
   replayAt,
@@ -154,4 +155,21 @@ test('T-458 AC6 畫面：盤中只在 08:25～13:45 重抓；榜上標持有中�
   assert.match(page, /account\.json/) // 告訴使用者去哪裡改
   assert.match(page, /只做多、只記帳，沒有送任何委託/)
   assert.doesNotMatch(page, /studies\//) // 不出現研究資料夾代號
+})
+
+test('T-458 AC7 只上傳榜單（使用者 2026-10-29：「只上傳 30 檔榜單」）：補成空的持股與成交、畫面只顯示大盤與榜單', () => {
+  const full = day()
+  assert.equal(normalizeDay(full), full) // 整份狀態原封不動
+  const only = normalizeDay({
+    version: 1, day: '2026-10-29', status: 'live', source: 'fubon_live', updated_at: '2026-10-29T09:15:00+08:00', board_time: '09:15:00',
+    market: full.market, board: full.board, watch: { in: 12, out: 3 }, board_only: true,
+  })
+  assert.equal(only.board_only, true)
+  assert.deepEqual([only.positions, only.trades, only.events], [[], [], []])
+  assert.equal(boardTag('3231', only), null)
+  const page = read('src/cloud/DayTradePage.tsx')
+  assert.match(page, /if \(data\.board_only\) return <BoardOnly d=\{data\} \/>/)
+  assert.match(page, /if \(d\.board_only\)/)
+  assert.match(page, /模擬單（持股、成交、損益）只存在你電腦上/)
+  assert.match(read('src/cloud/api.ts'), /\.then\(normalizeDay\)/)
 })
