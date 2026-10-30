@@ -9,9 +9,10 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
   const product = new URL(request.url).searchParams.get('product')
   if (!productOk(product)) return fail(400, `沒有這個商品：${product ?? '（未指定）'}`)
   return guarded(env, async (db) => {
+    // T-464：舊日子的 total 含已拿掉的噪音區，日曆的開盤突破只算 ORB_LONG
     const real = await readRows(
       () => db<DayRow[]>`
-        SELECT day::text AS day, source, status, (payload->>'total')::float8 AS total,
+        SELECT day::text AS day, source, status, COALESCE((payload->'sleeves'->'ORB_LONG'->>'realized')::float8 + COALESCE((payload->'sleeves'->'ORB_LONG'->>'open_pnl')::float8, 0), (payload->>'total')::float8) AS total,
                (payload->>'official_match')::boolean AS match,
                (payload->'ms'->>'total')::float8 AS ms_total FROM serving.futures_quotes
         WHERE product = ${product} ORDER BY day DESC LIMIT ${DAYS_LIMIT}`,

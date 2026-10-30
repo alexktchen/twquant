@@ -5,14 +5,19 @@
 // T-461（使用者 2026-10-29：「開高走低策略直接拿掉」）：開高走低（T-452）拿掉；它和固定組合合成的「帳戶」（T-454）只剩固定組合，一起收掉。
 // 舊的日子 payload 裡還有 gap_fail，畫面不讀。
 
-/** 兩個策略：網友原版（主，只做多）、固定組合（輔助：ORB 只做多 + 噪音區只放空）。 */
+// T-464（使用者 2026-10-30：「網友策略改名字變好聽點的，然後做成標籤，然後把噪音區拿掉」）：
+// 網友原版在網站上叫「動能順勢」（資料裡的鍵 ms／MS_LONG 不變）；噪音區拿掉，固定組合只剩晨光突破，所以改叫「晨光突破」。
+/** 兩個策略：動能順勢（主，只做多）、晨光突破（輔助，只做多）。 */
 export type Strategy = 'combo' | 'ms'
-export const STRATEGY_NAME: Record<Strategy, string> = { combo: '固定組合', ms: '網友原版' }
+export const STRATEGY_NAME: Record<Strategy, string> = { combo: '晨光突破', ms: '動能順勢' }
 
-export type ComboSleeve = 'ORB_LONG' | 'NOISE_SHORT'
+export type ComboSleeve = 'ORB_LONG' | 'NOISE_SHORT' // NOISE_SHORT 只為了讀舊資料，畫面不顯示（T-464）
 export type MsSleeve = 'MS_LONG'
 export type Sleeve = ComboSleeve | MsSleeve
-export const SLEEVES: readonly ComboSleeve[] = ['ORB_LONG', 'NOISE_SHORT']
+export const SLEEVES: readonly ComboSleeve[] = ['ORB_LONG']
+/** 拿掉的子帳戶：舊日子資料裡還有，事件與成交一律不顯示。 */
+const HIDDEN: readonly Sleeve[] = ['NOISE_SHORT']
+const visible = <T extends { sleeve: Sleeve | null }>(xs: readonly T[]): T[] => xs.filter((x) => x.sleeve === null || !HIDDEN.includes(x.sleeve))
 export const MS_SLEEVES: readonly MsSleeve[] = ['MS_LONG']
 
 export type FuturesEvent = {
@@ -158,13 +163,13 @@ export type Seconds = { label: string[]; price: number[]; vwap: number[] }
 
 /** 子帳戶的白話名稱（地鐵告示：名字短、顏色分類）。 */
 export const SLEEVE_NAME: Record<Sleeve, string> = {
-  ORB_LONG: '開盤突破・只做多',
-  NOISE_SHORT: '噪音區・只放空',
-  MS_LONG: '網友原版・只做多',
+  ORB_LONG: '晨光突破・只做多',
+  NOISE_SHORT: '噪音區（已拿掉）',
+  MS_LONG: '動能順勢・只做多',
 }
 
 /** 圖上買賣點前面的代號：兩個策略畫在同一張圖，看得出是哪一條。 */
-export const SLEEVE_TAG: Record<Sleeve, string> = { ORB_LONG: '突破', NOISE_SHORT: '噪音', MS_LONG: '網友' }
+export const SLEEVE_TAG: Record<Sleeve, string> = { ORB_LONG: '晨光', NOISE_SHORT: '噪音', MS_LONG: '動能' }
 
 /** 出場原因（同 fubon_live.py 的 REASON_TEXT）。 */
 export const REASON_TEXT: Record<string, string> = {
@@ -279,7 +284,7 @@ export type ReplayView<S extends Sleeve = ComboSleeve> = {
 /** 一個策略的帳本：有哪些子帳戶、成交、最新部位、時間軸。 */
 export type Book<S extends Sleeve> = { sleeves: readonly S[]; trades: FuturesTrade[]; states: Record<S, SleeveState>; events: FuturesEvent[] }
 
-export const comboBook = (d: FuturesDay): Book<ComboSleeve> => ({ sleeves: SLEEVES, trades: d.trades, states: d.sleeves, events: d.events })
+export const comboBook = (d: FuturesDay): Book<ComboSleeve> => ({ sleeves: SLEEVES, trades: visible(d.trades), states: d.sleeves, events: visible(d.events) })
 
 /** 網友原版的帳本（T-456）；那一天的資料沒有 → null。 */
 export const msBook = (d: FuturesDay): Book<MsSleeve> | null =>
@@ -478,7 +483,7 @@ export function dayAt(d: FuturesDay, cut: string, secs: Seconds | null = null): 
 }
 
 /** 兩個策略所有買賣點的時間（「上一個／下一個買賣點」）。 */
-export const allFillTimes = (d: FuturesDay): string[] => fillTimes({ events: [...d.events, ...(d.ms?.events ?? [])] }).sort()
+export const allFillTimes = (d: FuturesDay): string[] => fillTimes({ events: [...visible(d.events), ...(d.ms?.events ?? [])] }).sort()
 
 /** 固定組合在那一刻的一句話：持多／持空、平倉幾筆、空手。 */
 export function comboSummary(v: ReplayView<ComboSleeve>): string {
@@ -491,7 +496,7 @@ export function comboSummary(v: ReplayView<ComboSleeve>): string {
 /** 日曆上看哪一個：網友原版（主，預設）、固定組合（輔助）。 */
 export type CalView = Strategy
 export const CAL_VIEWS: readonly CalView[] = ['ms', 'combo']
-export const CAL_VIEW_NAME: Record<CalView, string> = { ms: '網友原版', combo: '固定組合' }
+export const CAL_VIEW_NAME: Record<CalView, string> = { ms: '動能順勢', combo: '晨光突破' }
 
 /** 日期清單的一列（/api/futures/days、/quotes/days）：total＝固定組合、ms_total＝網友原版。 */
 export type PnlRow = {

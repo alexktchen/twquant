@@ -31,7 +31,6 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
-  LineType,
   createChart,
   createSeriesMarkers,
   type IChartApi,
@@ -57,6 +56,7 @@ import {
   STALE_AFTER_S,
   addSeconds,
   allFillTimes,
+  comboBook,
   sideSummary,
   barsAt,
   bookTotals,
@@ -167,8 +167,6 @@ type ChartProps = {
   secs: Seconds | null
   /** 秒級：拉到第幾點 */
   pos: number
-  /** 噪音區下緣（小台）；大台、微台沒有 */
-  noiseLb: [string, number][]
   /** 水平線：固定組合的 ORB 停損（進場後才畫）、網友原版持倉的停損 */
   levels: { price: number; title: string }[]
   /** 買賣點（有模擬單才有） */
@@ -177,13 +175,12 @@ type ChartProps = {
   primary?: Sleeve | null
 }
 
-function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills, primary = null }: ChartProps) {
+function FuturesChart({ day, bars, secs, pos, levels, fills, primary = null }: ChartProps) {
   const box = useRef<HTMLDivElement>(null)
   const parts = useRef<{
     chart: IChartApi
     px: ISeriesApi<'Line'>
     vw: ISeriesApi<'Line'>
-    lb: ISeriesApi<'Line'>
     frame: ISeriesApi<'Line'>
     marks: ISeriesMarkersPluginApi<Time>
     lines: IPriceLine[]
@@ -205,15 +202,6 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills, primary = 
       handleScroll: { mouseWheel: false, vertTouchDrag: false },
       handleScale: { mouseWheel: false },
     })
-    const lb =chart.addSeries(LineSeries, {
-      color: DOWN,
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      lineType: LineType.WithSteps,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
     const vw = chart.addSeries(LineSeries, {
       color: VWAP,
       lineWidth: 1,
@@ -232,7 +220,7 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills, primary = 
       autoscaleInfoProvider: () => null,
     })
     const px = chart.addSeries(LineSeries, { color: PRICE, lineWidth: secs ? 1 : 2, priceLineVisible: false })
-    parts.current = { chart, px, vw, lb, frame, marks: createSeriesMarkers(px, []), lines: [] }
+    parts.current = { chart, px, vw, frame, marks: createSeriesMarkers(px, []), lines: [] }
     return () => {
       chart.remove()
       parts.current = null
@@ -243,20 +231,16 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills, primary = 
     const p = parts.current
     if (!p) return
     const t = (time: string) => chartTime(day, time) as UTCTimestamp
-    let open = bars.length > 0
     if (secs && secTimes) {
       // 秒級：拉到的那一秒以前畫線，後面留空白（圖的寬度固定）
       const n = pos + 1
       p.px.setData(secTimes.map((time, i) => (i < n ? { time, value: secs.price[i] } : { time })))
       p.vw.setData(secTimes.slice(0, n).map((time, i) => ({ time, value: secs.vwap[i] })))
-      open = n > 0 && secs.label.length > 0
     } else {
       const shown = new Map(bars.map((b) => [b[0], b]))
       p.px.setData(SESSION.map((m) => (shown.has(m) ? { time: t(m), value: shown.get(m)![4] } : { time: t(m) })))
       p.vw.setData(bars.map((b) => ({ time: t(b[0]), value: b[5] })))
     }
-    // 噪音區下緣：開盤就算得出今天九個檢查點的值（昨收、開盤、前 14 天波動都已知），不是偷看
-    p.lb.setData(open ? noiseLb.map(([m, v]) => ({ time: t(m), value: v })) : [])
     const anchor = secs && secs.price.length ? secs.price[0] : bars.length ? bars[0][1] : null
     p.frame.setData(anchor === null ? [] : [{ time: t(SESSION[0]), value: anchor }, { time: t(SESSION[SESSION.length - 1]), value: anchor }])
     for (const l of p.lines) p.px.removePriceLine(l)
@@ -272,7 +256,7 @@ function FuturesChart({ day, bars, secs, pos, noiseLb, levels, fills, primary = 
       return { time, position: 'atPriceTop', price: m.price, shape: 'circle', color: m.aux ? AUX : MUTE, text: m.text }
     })
     p.marks.setMarkers(marks)
-  }, [day, bars, secs, secTimes, pos, noiseLb, levels, fills, primary])
+  }, [day, bars, secs, secTimes, pos, levels, fills, primary])
 
   useEffect(() => {
     parts.current?.chart.timeScale().fitContent()
@@ -428,14 +412,14 @@ function NowBar({ view }: { view: { events: (FuturesEvent & { strategy?: Strateg
       <time>{last.time}</time>
       <span className={`cq-cat ${KIND[last.kind].cls}`}>{KIND[last.kind].text}</span>
       <span>
-        {last.strategy === 'ms' && <b className="cq-fu-sleeve ms">{STRATEGY_NAME.ms}　</b>}
+        {last.strategy === 'ms' && <span className="cq-cat cq-fu-tag-ms">{STRATEGY_NAME.ms}</span>}
         {last.text}
       </span>
     </div>
   )
 }
 
-/** 時間軸上的小標：固定組合寫子帳戶；網友原版寫策略名。 */
+/** 時間軸上的標籤（T-464 做成 badge）：動能順勢標策略名；晨光突破標子帳戶名。 */
 function eventChip(e: FuturesEvent & { strategy?: Strategy }): { text: string; cls: string } | null {
   if (e.strategy === 'ms') return { text: STRATEGY_NAME.ms, cls: 'ms' }
   if (e.sleeve) return { text: SLEEVE_NAME[e.sleeve], cls: e.sleeve === 'ORB_LONG' ? 'long' : 'short' }
@@ -454,7 +438,7 @@ function Timeline({ events, newestFirst }: { events: (FuturesEvent & { strategy?
             <time>{e.time}</time>
             <span className={`cq-cat ${KIND[e.kind].cls}`}>{KIND[e.kind].text}</span>
             <div className="cq-fu-what">
-              {chip && <span className={`cq-fu-sleeve ${chip.cls}`}>{chip.text}</span>}
+              {chip && <span className={`cq-cat cq-fu-tag-${chip.cls}`}>{chip.text}</span>}
               <span className="cq-fu-text">{e.text}</span>
             </div>
           </li>
@@ -704,12 +688,12 @@ function EstimateDay({ product, day }: { product: Product; day: string }) {
         <span className="cq-cat cq-cat-mute">{PRODUCT_NAME[product]}</span>
       </div>
       <div className="cq-tiles cq-fu-tiles">
-        <Kpi label="網友原版合計" value={yuan(est.total)} tone={tone(est.total)} sub="只做多 1 口・1 分 K 估算" />
+        <Kpi label="動能順勢合計" value={yuan(est.total)} tone={tone(est.total)} sub="只做多 1 口・1 分 K 估算" />
         <Kpi label="筆數" value={`${est.n} 筆`} sub={est.n ? `賺 ${wins} 筆・賠 ${est.n - wins} 筆` : '這天沒有進場'} />
       </div>
-      <Section icon={ReceiptText} title="成交明細（網友原版・估算）" meta={`${est.n} 筆`}>
+      <Section icon={ReceiptText} title="成交明細（動能順勢・估算）" meta={`${est.n} 筆`}>
         {est.trades.length === 0 ? (
-          <p className="cq-empty">這天網友原版沒有進場。</p>
+          <p className="cq-empty">這天動能順勢沒有進場。</p>
         ) : (
           <table className="cq-fu-trades">
             <thead>
@@ -738,7 +722,7 @@ function EstimateDay({ product, day }: { product: Product; day: string }) {
         )}
       </Section>
       <p className="cq-fu-foot">
-        這天沒有逐筆資料，是用富邦的 1 分 K 還原逐筆、照網友原版的規則跑出來的估算。1 分 K 看不到一分鐘裡面的走勢，網友原版又常在幾秒內出場，
+        這天沒有逐筆資料，是用富邦的 1 分 K 還原逐筆、照動能順勢的規則跑出來的估算。1 分 K 看不到一分鐘裡面的走勢，動能順勢又常在幾秒內出場，
         所以估算偏悲觀：用 30 天真實逐筆對照，每筆大約少算 10 點。沒有秒級復盤與江波圖。
       </p>
     </>
@@ -997,12 +981,12 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
   const msStop = data.ms && view.ms ? msStopAt(data.ms, view.ms) : null
   const levels = useMemo(() => {
     const orb = stopShown && data.orb.stop !== null ? [{ price: data.orb.stop, title: 'ORB 停損' }] : []
-    const ms = msStop !== null ? [{ price: msStop, title: '網友 停損' }] : []
+    const ms = msStop !== null ? [{ price: msStop, title: '動能 停損' }] : []
     return [...orb, ...ms]
   }, [stopShown, data, msStop])
   const jumps = useMemo(() => allFillTimes(data), [data])
   // 復盤拉到 cut：只列那之前已經平倉的交易（不劇透後面）
-  const done = data.trades
+  const done = comboBook(data).trades
     .filter((t) => t.exit_time.slice(0, cut.length) <= cut)
     .sort((a, b) => (a.entry_time < b.entry_time ? -1 : a.entry_time > b.entry_time ? 1 : 0))
   const msDone = (data.ms?.trades ?? []).filter((t) => t.exit_time.slice(0, cut.length) <= cut)
@@ -1018,7 +1002,7 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       {ms && mk ? (
         <div className="cq-tiles cq-fu-tiles">
           <Kpi
-            label="網友原版合計"
+            label="動能順勢合計"
             value={yuan(ms.total)}
             tone={tone(ms.total)}
             sub={mode === 'replay' ? `只做多 1 口・到 ${cut}` : '只做多 1 口・已實現＋現在平倉的話'}
@@ -1030,10 +1014,10 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       ) : (
         <div className="cq-tiles cq-fu-tiles">
           <Kpi
-            label="固定組合合計"
+            label="晨光突破合計"
             value={yuan(view.combo.total)}
             tone={tone(view.combo.total)}
-            sub={mode === 'replay' ? `這天沒有網友原版・到 ${cut}` : '這天沒有網友原版・已實現＋現在平倉的話'}
+            sub={mode === 'replay' ? `這天沒有動能順勢・到 ${cut}` : '這天沒有動能順勢・已實現＋現在平倉的話'}
           />
           <Kpi label="多單" value={yuan(long.value)} tone={tone(long.value)} sub={long.text} />
           <Kpi label="空單" value={yuan(short.value)} tone={tone(short.value)} sub={short.text} />
@@ -1045,7 +1029,7 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
         title={`${name}江波圖`}
         meta={
           <span className="cq-fu-legend">
-            <i style={{ background: PRICE }} />價 <i style={{ background: VWAP }} />VWAP <i style={{ background: DOWN }} />噪音區下緣
+            <i style={{ background: PRICE }} />價 <i style={{ background: VWAP }} />VWAP
           </span>
         }
       >
@@ -1055,7 +1039,6 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
           bars={view.bars}
           secs={secs}
           pos={player.pos}
-          noiseLb={data.noise_lb}
           levels={levels}
           fills={view.fills}
           primary={ms ? 'MS_LONG' : null}
@@ -1063,20 +1046,20 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
         {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={jumps} />}
       </Section>
       <FlowSection product={data.product ?? 'MTX'} day={data.day} mode={mode} cut={cut} refresh={refresh} />
-      <Section icon={Layers} title="各策略" meta={ms ? '網友原版為主・其他每條各 1 口的輔助對照' : '每條各 1 口的對照'}>
+      <Section icon={Layers} title="各策略" meta={ms ? '動能順勢為主・其他每條各 1 口的輔助對照' : '每條各 1 口的對照'}>
         <StrategyBoard view={view} />
       </Section>
       <Section icon={ListOrdered} title="時間軸" meta={`${view.events.length} 件`}>
         <Timeline events={view.events} newestFirst={mode === 'live'} />
       </Section>
       {ms && (
-        <Section icon={ReceiptText} title="成交明細（網友原版）" meta={`${msDone.length} 筆・${yuan(msDone.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
+        <Section icon={ReceiptText} title="成交明細（動能順勢）" meta={`${msDone.length} 筆・${yuan(msDone.reduce((a, t) => a + t.net_pnl, 0))} 元`}>
           <Trades trades={msDone} />
         </Section>
       )}
       <Section
         icon={ReceiptText}
-        title={ms ? '固定組合成交（輔助）' : '成交明細（固定組合）'}
+        title={ms ? '晨光突破成交（輔助）' : '成交明細（晨光突破）'}
         fold
         summary={`${done.length} 筆・${yuan(done.reduce((a, t) => a + t.net_pnl, 0))} 元`}
       >
@@ -1084,17 +1067,16 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       </Section>
       <Section icon={BookOpen} title="規則與成本" fold summary="只記帳、不下單">
         <p className="cq-fu-foot">
-          <b>以網友原版為主</b>：上面的數字、圖上彩色的買賣點、成交明細、日曆預設都是網友原版（只做多 1 口）。
-          固定組合是輔助對照：圖上灰色的買賣點、「各策略」下半段、收起的「固定組合成交」、日曆可切。還沒有網友原版資料的舊日子，上面的數字看固定組合。
+          <b>以動能順勢為主</b>：上面的數字、圖上彩色的買賣點、成交明細、日曆預設都是動能順勢（只做多 1 口）。
+          晨光突破是輔助對照：圖上灰色的買賣點、「各策略」下半段、收起的「晨光突破成交」、日曆可切。還沒有動能順勢資料的舊日子，上面的數字看晨光突破。
         </p>
         <p className="cq-fu-foot">
-          <b>固定組合</b>（2026-10-26 凍結，小台、大台、微台同一套）：開盤 5 分鐘收紅才做多（停損在那 5 分鐘低點、停利 10 倍）；
-          噪音區每 30 分鐘檢查一次，跌破下緣又在 VWAP 之下才放空。
+          <b>晨光突破</b>（小台、大台、微台同一套）：開盤 5 分鐘收紅才做多，停損在那 5 分鐘低點、停利 10 倍。噪音區放空 2026-10-30 起不再顯示也不再記。
         </p>
         <p className="cq-fu-foot">
-          <b>網友原版</b>：PTT 網友分享的 Momentum_Scalping，程式與參數一個都不改，只做多 1 口；每秒看一次自己畫的 1 分 K，
+          <b>動能順勢</b>（PTT 網友分享的 Momentum_Scalping 原版）：程式與參數一個都不改，只做多 1 口；每一筆進場的時間軸都寫出為什麼進（均價線、兩條均線、一底比一底高、突破基準、量與振幅）；每秒看一次自己畫的 1 分 K，
           動能或趨勢突破才進場，停損放在結構低點，EMA 死叉、跌破前低、動能衰退就出場，13:00 清倉。指數期貨沒有「比大盤強」可比，這條固定當作通過；大盤濾網全開。
-          它和固定組合各算各的。過去兩年多的一分 K 回測：微台每筆 −11.8 點、小台九年每年都是虧的，但一分 K 對它偏悲觀（每筆少算約 10 點），加回去大約不賺不賠，只能當參考。
+          它和晨光突破各算各的。過去兩年多的一分 K 回測：微台每筆 −11.8 點、小台九年每年都是虧的，但一分 K 對它偏悲觀（每筆少算約 10 點），加回去大約不賺不賠，只能當參考。
         </p>
         <p className="cq-fu-foot">
           13:44 全部平倉；{name}每點 {cost.point_value} 元、每邊手續費 {cost.commission} 元
@@ -1176,12 +1158,12 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
               </span>
             }
           >
-            <FuturesChart day={data.day} bars={at.bars} secs={secs} pos={player.pos} noiseLb={NO_LB} levels={NO_LEVELS} fills={NO_FILLS} />
+            <FuturesChart day={data.day} bars={at.bars} secs={secs} pos={player.pos} levels={NO_LEVELS} fills={NO_FILLS} />
             {mode === 'replay' && player.lastPos > 0 && <Scrubber player={player} secs={secs} jumpTimes={null} />}
           </Section>
           <FlowSection product={product} day={data.day} mode={mode} cut={cut} refresh={refresh} />
           <p className="cq-fu-foot">
-            這一天前面的逐筆不足 14 天（噪音區要用前 14 天的波動），只有行情、沒有模擬單。秒級復盤只有逐筆的日子才有。富邦行情只供本人使用，不對外顯示。
+            這一天前面沒有逐筆（算不出昨收），只有行情、沒有模擬單。秒級復盤只有逐筆的日子才有。富邦行情只供本人使用，不對外顯示。
           </p>
         </>
       )}
@@ -1191,7 +1173,6 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
 }
 
 /** 大台、微台的圖沒有噪音區與買賣點：用固定的空陣列，免得每次重畫都當成新資料。 */
-const NO_LB: [string, number][] = []
 const NO_FILLS: readonly Fill[] = []
 const NO_LEVELS: { price: number; title: string }[] = []
 

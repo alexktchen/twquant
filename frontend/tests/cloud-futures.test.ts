@@ -15,6 +15,9 @@ import {
   MTX_COST,
   SIDE_OF,
   STRATEGY_NAME,
+  comboBook,
+  SLEEVES,
+  SLEEVE_TAG,
   allFillTimes,
   sideSummary,
   barsAt,
@@ -134,16 +137,14 @@ test('T-450 AC3 復盤：拉到某一分鐘只看得到那之前的 K 棒、事�
 test('T-450 AC3 復盤：部位與損益照那一刻算——持倉用「現在平倉的話」，平倉後變已實現', () => {
   const open = replayAt(day(), '09:00')
   assert.deepEqual(open.sleeves.ORB_LONG, { position: 1, entry_price: 47319, realized: 0, open_pnl: Math.round(closeNowPnl(1, 47319, 47210)) })
-  assert.equal(open.sleeves.NOISE_SHORT.position, 0)
+  assert.ok(!('NOISE_SHORT' in open.sleeves), 'T-464 起噪音區不在畫面上')
   const closed = replayAt(day(), '09:10')
   assert.deepEqual(closed.sleeves.ORB_LONG, { position: 0, entry_price: null, realized: -9354, open_pnl: null }) // Math.round(-9354.5) → -9354
   assert.deepEqual(closed.fills.map((f) => f.kind), ['entry', 'exit'])
-  // 還在盤中、還沒回補的噪音區空單：trades 裡沒有，從 sleeves 補上，而且要等成交時間到了才出現
-  assert.equal(replayAt(day(), '11:10').sleeves.NOISE_SHORT.position, 0)
+  // T-464：舊資料裡還沒回補的噪音區空單不顯示、不算進合計
   const short = replayAt(day(), '11:29')
-  assert.equal(short.sleeves.NOISE_SHORT.position, -1)
-  assert.equal(short.sleeves.NOISE_SHORT.open_pnl, Math.round(closeNowPnl(-1, 46763, 46753)))
-  assert.equal(short.total, -9354 + Math.round(closeNowPnl(-1, 46763, 46753)))
+  assert.equal(short.total, -9354)
+  assert.ok(short.fills.every((f) => f.sleeve !== 'NOISE_SHORT'))
 })
 
 test('T-450 AC3 現在平倉的話：與 fubon_live.py 同一條公式（含出場滑價、來回手續費、期交稅）', () => {
@@ -287,7 +288,7 @@ test('T-451 AC6 現在平倉的話照各自合約：大台每點 200 元、微�
   assert.ok(Math.abs(closeNowPnl(-1, 46763, 46753) - 296.483) < 0.01)
   assert.ok(Math.abs(closeNowPnl(-1, 46763, 46753, { point_value: 200, commission: 60 }) - 1305.932) < 0.01)
   const tx = { ...day(), product: 'TX' as const, name: '大台', volume: 1, point_value: 200, commission: 60 }
-  assert.equal(replayAt(tx, '11:29').sleeves.NOISE_SHORT.open_pnl, Math.round(closeNowPnl(-1, 46763, 46753, costOf(tx))))
+  assert.equal(replayAt(tx, '09:00').sleeves.ORB_LONG.open_pnl, Math.round(closeNowPnl(1, 47319, 47210, costOf(tx)))) // T-464 起看晨光突破那筆
 })
 
 test('T-451 AC6 大台／微台那天有模擬單就用小台同一個畫面；前面不足 14 天只有行情', () => {
@@ -298,7 +299,7 @@ test('T-451 AC6 大台／微台那天有模擬單就用小台同一個畫面；�
   assert.match(page, /\{data && isPaper\(data\) && <PaperBody /)
   assert.match(page, /\{data && !isPaper\(data\) && at && \(/)
   // 日期清單有模擬單的日子多合計與一致與否（同小台）
-  assert.match(read('functions/api/futures/quotes/days.ts'), /\(payload->>'total'\)::float8 AS total/)
+  assert.match(read('functions/api/futures/quotes/days.ts'), /\(payload->>'total'\)::float8\) AS total/) // T-464 起先看 ORB_LONG，沒有才用 total
 })
 
 // T-452 開高走低的測試：T-461（使用者 2026-10-29：「開高走低策略直接拿掉」）策略拿掉，一起拿掉（DECISIONS D-220 修訂八）。
@@ -310,7 +311,7 @@ test('T-453 AC2 各策略一句話：持多／持空幾口、平倉幾筆（T-46
   assert.equal(comboSummary(dayAt(d, '08:45').combo), '空手')
   assert.equal(comboSummary(dayAt(d, '09:00').combo), '持多 1 口')
   assert.equal(comboSummary(dayAt(d, '09:10').combo), '平倉 1 筆')
-  assert.equal(comboSummary(dayAt(d, '23:59').combo), '持空 1 口')
+  assert.equal(comboSummary(dayAt(d, '23:59').combo), '平倉 1 筆') // T-464：噪音區拿掉，收盤只剩晨光突破那一筆
 
 })
 
@@ -492,7 +493,7 @@ function msDay(holding = false): FuturesDay {
 }
 
 test('T-456 AC1 網友原版是第三個策略：舊資料沒有 → null、畫面寫「這一天的資料沒有」；有的話只有一個只做多的子帳戶', () => {
-  assert.deepEqual(STRATEGY_NAME, { combo: '固定組合', ms: '網友原版' }) // T-461 拿掉開高走低
+  assert.deepEqual(STRATEGY_NAME, { combo: '晨光突破', ms: '動能順勢' }) // T-461 拿掉開高走低；T-464 改名
   assert.equal(msBook(day()), null)
   assert.equal(dayAt(day(), '23:59').ms, null)
   const b = msBook(msDay())!
@@ -539,8 +540,8 @@ test('T-456 AC3 網友原版和固定組合各算各的：固定組合的數字�
   const v = dayAt(msDay(), '23:59')
   assert.equal(v.combo.total, plain.combo.total)
   assert.equal(v.fills.length, plain.fills.length + 4)
-  const marks = chartMarks(v.fills, true).filter((m) => m.text.startsWith('網友'))
-  assert.deepEqual(marks.map((m) => m.text), ['網友 買 47242', '網友 賣 47187', '網友 買 47174', '網友 賣 47090'])
+  const marks = chartMarks(v.fills, true).filter((m) => m.text.startsWith('動能'))
+  assert.deepEqual(marks.map((m) => m.text), ['動能 買 47242', '動能 賣 47187', '動能 買 47174', '動能 賣 47090']) // T-464 標「動能」
   // 買賣點照時間排：09:05 固定組合停損在網友 09:16 之前
   const times = v.fills.map((f) => f.time.slice(0, 8))
   assert.deepEqual(times, [...times].sort())
@@ -551,12 +552,13 @@ test('T-456 AC4 時間軸與上一個／下一個買賣點：網友原版的事�
   assert.deepEqual(v.events.filter((e) => e.strategy === 'ms').map((e) => e.time), ['09:16:01', '09:16:02', '09:17:33', '09:31:45', '09:34:28'])
   const tie = mergeEvents([{ time: '09:00:00', kind: 'info', sleeve: null, text: 'a' }], [{ time: '09:00:00', kind: 'info', sleeve: 'MS_LONG', text: 'c' }])
   assert.deepEqual(tie.map((e) => e.strategy), ['combo', 'ms'])
-  assert.deepEqual(allFillTimes(msDay()), ['08:50:01', '09:05:41', '09:16:02', '09:17:33', '09:31:45', '09:34:28', '11:15:01'])
+  assert.deepEqual(allFillTimes(msDay()), ['08:50:01', '09:05:41', '09:16:02', '09:17:33', '09:31:45', '09:34:28']) // T-464：噪音區 11:15 那筆不算
   assert.match(read('src/cloud/FuturesPage.tsx'), /if \(e\.strategy === 'ms'\) return \{ text: STRATEGY_NAME\.ms, cls: 'ms' \}/)
+  assert.match(read('src/cloud/FuturesPage.tsx'), /className=\{`cq-cat cq-fu-tag-\$\{chip\.cls\}`\}/) // T-464 做成標籤
 })
 
 test('T-456 AC5 日曆可以只看網友原版；兩支日期端點多回網友原版的合計；出場原因有中文', () => {
-  assert.equal(CAL_VIEW_NAME.ms, '網友原版')
+  assert.equal(CAL_VIEW_NAME.ms, '動能順勢') // T-464 改名
   assert.equal(dayPnl({ day: '2026-10-22', ms_total: -7258 }, 'ms'), -7258)
   assert.equal(dayPnl({ day: '2026-10-21', total: 100 }, 'ms'), null)
   for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
@@ -568,21 +570,21 @@ test('T-456 AC6 畫面：各策略多一段網友原版、另有收起的「網�
   const page = read('src/cloud/FuturesPage.tsx')
   assert.match(page, /head\(`\$\{STRATEGY_NAME\.ms\}（主）`, view\.ms \? view\.ms\.total : null\)/) // T-460
   assert.match(page, /row\('MS_LONG', 'long', view\.ms\.sleeves\.MS_LONG, msSub\(view\.ms\)\)/)
-  assert.match(page, /title="成交明細（網友原版）"/) // T-460：主策略的成交不收起
-  assert.match(page, /它和固定組合各算各的/) // T-461 改寫
-  assert.match(page, /title: '網友 停損'/)
+  assert.match(page, /title="成交明細（動能順勢）"/) // T-460：主策略的成交不收起
+  assert.match(page, /它和晨光突破各算各的/) // T-461 改寫、T-464 改名
+  assert.match(page, /title: '動能 停損'/) // T-464
   // 上方的「現在發生什麼」也標出是網友原版（它的文字本身沒寫策略名）
-  assert.match(page, /\{last\.strategy === 'ms' && <b className="cq-fu-sleeve ms">\{STRATEGY_NAME\.ms\}/)
+  assert.match(page, /\{last\.strategy === 'ms' && <span className="cq-cat cq-fu-tag-ms">\{STRATEGY_NAME\.ms\}/) // T-464 做成標籤
   assert.match(read('src/cloud/futures.css'), /\.cq-fu-sleeve\.ms \{/)
 })
 
 // ── T-460：台指期以網友原版為主（使用者 2026-10-29：「把台指期的策略都以網友為主，金額賺賠也都以網友的算，其他策略都是輔助顯示」） ──
 test('T-460 AC1 數字卡：有網友原版的日子是網友原版合計、持倉、已平倉、最新；沒有的舊日子看固定組合（T-461）', () => {
   const page = read('src/cloud/FuturesPage.tsx')
-  assert.match(page, /label="網友原版合計"/)
+  assert.match(page, /label="動能順勢合計"/)
   assert.match(page, /<Kpi label="持倉" value=\{mk\.hold\.value\}/)
   assert.match(page, /<Kpi label="已平倉" value=\{`\$\{mk\.exits\} 筆`\}/)
-  assert.ok(page.indexOf('label="網友原版合計"') < page.indexOf('label="固定組合合計"'), '網友原版在前，固定組合是沒有網友原版時的退路')
+  assert.ok(page.indexOf('label="動能順勢合計"') < page.indexOf('label="晨光突破合計"'), '網友原版在前，固定組合是沒有網友原版時的退路')
   const hold = msKpis(dayAt(msDay(true), '09:32:00').ms!)
   assert.equal(hold.hold.text, '持多 1 口 @ 47174・現在平倉的話')
   assert.equal(hold.exits, 1)
@@ -595,8 +597,8 @@ test('T-460 AC1 數字卡：有網友原版的日子是網友原版合計、持�
 test('T-460 AC2 圖上：網友原版的買賣點彩色、其他策略的灰色；同一點有網友原版就不算輔助；沒有主策略時都照舊', () => {
   const v = dayAt(msDay(), '23:59')
   const marks = chartMarks(v.fills, true, 'MS_LONG')
-  assert.ok(marks.filter((m) => m.text.startsWith('網友')).every((m) => !m.aux))
-  assert.ok(marks.filter((m) => !m.text.startsWith('網友')).every((m) => m.aux))
+  assert.ok(marks.filter((m) => m.text.startsWith('動能')).every((m) => !m.aux))
+  assert.ok(marks.filter((m) => !m.text.startsWith('動能')).every((m) => m.aux))
   assert.ok(chartMarks(v.fills, true).every((m) => !m.aux))
   const tie = chartMarks(
     [
@@ -606,7 +608,7 @@ test('T-460 AC2 圖上：網友原版的買賣點彩色、其他策略的灰色�
     true,
     'MS_LONG',
   )
-  assert.deepEqual(tie.map((m) => [m.text, m.aux]), [['突破・網友 買 100', false]])
+  assert.deepEqual(tie.map((m) => [m.text, m.aux]), [['晨光・動能 買 100', false]])
   assert.match(read('src/cloud/FuturesPage.tsx'), /primary=\{ms \? 'MS_LONG' : null\}/)
 })
 
@@ -616,27 +618,27 @@ test('T-460 AC3 其他地方：日曆網友原版排第一且預設；各策略�
   assert.ok(page.indexOf('head(`${STRATEGY_NAME.ms}（主）`') < page.indexOf('head(STRATEGY_NAME.combo'))
   assert.match(page, /以下是輔助對照/)
   assert.match(page, /const match = ms \? ms\.official_match : data\.official_match/)
-  assert.match(page, /title=\{ms \? '固定組合成交（輔助）' : '成交明細（固定組合）'\}\s*fold/) // T-461
+  assert.match(page, /title=\{ms \? '晨光突破成交（輔助）' : '成交明細（晨光突破）'\}\s*fold/) // T-461
   assert.match(page, /以網友原版為主/)
 })
 
 // ── T-461：開高走低拿掉（使用者 2026-10-29：「開高走低策略直接拿掉」）；帳戶（固定組合＋開高走低，多空各 1 口）因此等於固定組合，一起拿掉 ──
 test('T-461 AC1 只剩網友原版與固定組合：日曆兩個、損益照各自；那一刻的畫面沒有開高走低與帳戶', () => {
-  assert.deepEqual(CAL_VIEW_NAME, { ms: '網友原版', combo: '固定組合' })
+  assert.deepEqual(CAL_VIEW_NAME, { ms: '動能順勢', combo: '晨光突破' })
   const v = dayAt(msDay(), '23:59')
   assert.deepEqual(Object.keys(v).sort(), ['bars', 'combo', 'cut', 'events', 'fills', 'ms', 'price'])
   assert.deepEqual([...new Set(v.events.map((e) => e.strategy))].sort(), ['combo', 'ms'])
   // 沒有網友原版的舊日子：數字卡用固定組合的多、空兩邊
   const old = dayAt(day(), '23:59')
   assert.deepEqual(sideSummary(old.combo, 1), { value: -9354, text: '平倉 1 筆' }) // 已實現照畫面取整數
-  assert.equal(sideSummary(old.combo, -1).text, '持空 1 口・噪音區・只放空 @ 46763')
+  assert.equal(sideSummary(old.combo, -1).text, '空手') // T-464：噪音區拿掉後空單那邊永遠空手
 })
 
 test('T-461 AC2 畫面與端點不再有開高走低：沒有開高徽章、水平線、規則段落；日期端點不回 gap_total 與帳戶用的成交', () => {
   // 只看程式與畫面文字（註解裡留著拿掉的歷史）
   const page = read('src/cloud/FuturesPage.tsx').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n')
   assert.doesNotMatch(page, /開高走低|gap_fail|gapLevels|gapSub|accountSide|帳戶合計|帳戶沒做/)
-  assert.match(page, /label="固定組合合計"/)
+  assert.match(page, /label="晨光突破合計"/)
   for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts']) {
     const src = read(f)
     assert.doesNotMatch(src, /gap_fail|AS gap_total|AS trades|AS gap_trades/, f)
@@ -691,4 +693,31 @@ test('T-462 AC3 畫面：日曆估算的格子標「估」；小台、大台、�
   assert.match(page, /1 分 K 估算/)
   assert.match(page, /每筆大約少算 10 點/)
   assert.match(read('src/cloud/futures.css'), /\.cq-fu-est \{/)
+})
+
+// ── T-464（使用者 2026-10-30：「可以寫進場是為什麼嗎，網友策略改名字變好聽點的，然後做成標籤，然後把噪音區拿掉」） ──
+test('T-464 AC1 噪音區拿掉：固定組合只剩晨光突破；舊日子資料裡的噪音區事件、成交一律不顯示、不算進合計；圖上沒有下緣線', () => {
+  assert.deepEqual(SLEEVES, ['ORB_LONG'])
+  const v = dayAt(day(), '23:59')
+  assert.ok(v.events.every((e) => e.sleeve !== 'NOISE_SHORT'))
+  assert.ok(v.fills.every((f) => f.sleeve !== 'NOISE_SHORT'))
+  assert.equal(v.combo.total, -9354)
+  assert.ok(comboBook(day()).trades.every((t) => t.sleeve === 'ORB_LONG'))
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /const done = comboBook\(data\)\.trades/) // 收起的晨光突破成交不含舊的噪音區
+  for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
+    assert.match(read(f), /payload->'sleeves'->'ORB_LONG'->>'realized'/, f) // 日曆的晨光突破不含舊的噪音區
+  assert.doesNotMatch(page, /noiseLb|noise_lb|噪音區下緣/)
+  assert.match(page, /噪音區放空 2026-10-30 起不再顯示也不再記/)
+})
+
+test('T-464 AC2 改名與標籤：網友原版在畫面上叫「動能順勢」（資料鍵 ms／MS_LONG 不變）、圖上標「動能」；時間軸與提示列的策略名是 badge', () => {
+  assert.equal(STRATEGY_NAME.ms, '動能順勢')
+  assert.equal(STRATEGY_NAME.combo, '晨光突破')
+  assert.equal(SLEEVE_TAG.MS_LONG, '動能')
+  assert.equal(SLEEVE_TAG.ORB_LONG, '晨光') // 使用者 2026-10-30：「開盤突破策略也改名」
+  const page = read('src/cloud/FuturesPage.tsx')
+  assert.match(page, /<span className="cq-cat cq-fu-tag-ms">\{STRATEGY_NAME\.ms\}<\/span>/)
+  assert.match(read('src/cloud/futures.css'), /\.cq-fu-tag-ms \{ --c:/)
+  assert.doesNotMatch(page.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, ''), /網友原版[^（]/) // 畫面文字裡不再叫網友原版（括號裡註明出處可以）
 })
