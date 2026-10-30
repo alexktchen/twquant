@@ -1,0 +1,165 @@
+{
+ "sample": [
+  "2017-05-22",
+  "2026-09-08"
+ ],
+ "n_sample": 2268,
+ "n_without_votes": 0,
+ "excluded_days": 2,
+ "vwap_kind": "per_bar",
+ "gate_share_pct": 30.2,
+ "report": {
+  "all_days": {
+   "days": 2268,
+   "mean": 142.6,
+   "ci_low": 2.6,
+   "ci_high": 300.9,
+   "t": 1.82,
+   "total": 323369.0,
+   "active_days": 1059,
+   "win_rate_active": 42.7
+  },
+  "gate_on": {
+   "days": 684,
+   "mean": 217.2,
+   "ci_low": -88.9,
+   "ci_high": 539.5,
+   "t": 1.36,
+   "total": 148586.0,
+   "active_days": 326,
+   "win_rate_active": 39.9
+  },
+  "gate_off": {
+   "days": 1584,
+   "mean": 110.3,
+   "ci_low": -48.6,
+   "ci_high": 302.7,
+   "t": 1.24,
+   "total": 174783.0,
+   "active_days": 733,
+   "win_rate_active": 43.9
+  },
+  "A_on": {
+   "days": 684,
+   "mean": 183.7,
+   "ci_low": -65.8,
+   "ci_high": 444.4,
+   "t": 1.39,
+   "total": 125675.0,
+   "active_days": 185,
+   "win_rate_active": 36.8
+  },
+  "A_off": {
+   "days": 1584,
+   "mean": 52.8,
+   "ci_low": -70.7,
+   "ci_high": 201.7,
+   "t": 0.78,
+   "total": 83690.0,
+   "active_days": 373,
+   "win_rate_active": 38.1
+  },
+  "B_on": {
+   "days": 684,
+   "mean": 33.5,
+   "ci_low": -73.8,
+   "ci_high": 143.0,
+   "t": 0.64,
+   "total": 22911.0,
+   "active_days": 303,
+   "win_rate_active": 41.6
+  },
+  "B_off": {
+   "days": 1584,
+   "mean": 57.5,
+   "ci_low": -13.9,
+   "ci_high": 135.1,
+   "t": 1.49,
+   "total": 91094.0,
+   "active_days": 703,
+   "win_rate_active": 45.1
+  },
+  "only_trend": {
+   "days": 491,
+   "mean": 59.8,
+   "ci_low": -164.5,
+   "ci_high": 295.1,
+   "t": 0.51,
+   "total": 29359.0,
+   "active_days": 224,
+   "win_rate_active": 40.2
+  },
+  "only_chips": {
+   "days": 603,
+   "mean": 262.0,
+   "ci_low": -59.5,
+   "ci_high": 633.2,
+   "t": 1.49,
+   "total": 157968.0,
+   "active_days": 307,
+   "win_rate_active": 44.0
+  },
+  "only_vol": {
+   "days": 1260,
+   "mean": 344.0,
+   "ci_low": 110.2,
+   "ci_high": 604.4,
+   "t": 2.63,
+   "total": 433498.0,
+   "active_days": 593,
+   "win_rate_active": 43.3
+  }
+ },
+ "yearly_on": {
+  "2017": {
+   "days": 37,
+   "total": -9085.0
+  },
+  "2018": {
+   "days": 102,
+   "total": 2014.0
+  },
+  "2019": {
+   "days": 24,
+   "total": -1590.0
+  },
+  "2020": {
+   "days": 142,
+   "total": 28001.0
+  },
+  "2021": {
+   "days": 48,
+   "total": -19967.0
+  },
+  "2022": {
+   "days": 147,
+   "total": 49601.0
+  },
+  "2023": {
+   "days": 23,
+   "total": -5673.0
+  },
+  "2024": {
+   "days": 98,
+   "total": 38966.0
+  },
+  "2025": {
+   "days": 43,
+   "total": 31033.0
+  },
+  "2026": {
+   "days": 20,
+   "total": 35287.0
+  }
+ },
+ "without_2026": 113300.0,
+ "top5": 156753.0,
+ "total": 148585.5,
+ "checks": {
+  "ci_low_above_0": false,
+  "without_2026_above_0": true,
+  "top5_share_below_50pct": false,
+  "t_at_least_3": false
+ },
+ "passed": false
+}
