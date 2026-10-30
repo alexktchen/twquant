@@ -570,6 +570,8 @@ def live(args, mods, params, config, root: Path) -> int:
                                 "short_ok": bool(t.get("canDayTrade") and t.get("canBelowFlatMarginShortSell") and not t.get("isDisposition"))})
         return info_cache[sym]
 
+    engine.short_lookup = lambda sym: bool(symbol_info(sym)[2]["short_ok"])  # 弱勢順勢空要進場時才查
+
     def watch(key) -> None:
         sym = key[1]
         if key not in engine.states:

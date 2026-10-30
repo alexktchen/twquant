@@ -20,6 +20,7 @@ from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import futures_replay as FR
+import weak_short as WS
 import ms_replay as M
 
 Key = Tuple[str, str]  # (market, symbol)；market 是 TWSE / TPEX
@@ -95,6 +96,7 @@ class StockEngine(M.DaySimulator):
         self.limit_up: Dict[str, float] = {}
         self.short_ok: Dict[str, bool] = {}
         self.short: Optional["ShortBook"] = None
+        self.short_lookup: Optional[Callable[[str], bool]] = None  # 盤中由 stock_live 接富邦代號表；重播沒有就當作可以
 
     # ------------------------------------------------------------------ 全市場快照
     def set_snapshot(self, t_us: int, rows: Sequence[Mapping[str, Any]], index: Mapping[str, Mapping[str, float]]) -> None:
@@ -111,6 +113,8 @@ class StockEngine(M.DaySimulator):
         if t_us >= self.exit_us:
             self._clock_exits(t_us)
         self._publish_board(t_us)
+        if self.short is not None:
+            self.short.weak_tick(t_us)
 
     def _scanner_rows(self, now_iso: str) -> List[Dict[str, Any]]:
         out = []
@@ -390,7 +394,7 @@ def finite(x: Any) -> bool:
 
 # ============================================================================= 放空三條（studies/short_paper/PREREGISTRATION.md）
 SHORT_REASON_TEXT = {"STOP": "停損（回到結構高點）", "LIMIT_UP": "逼近漲停強制回補", "TIME": "13:05 回補", "EOD": "收盤強制回補"}
-SHORT_BOOK_NAME = {"A": "失速空", "B": "榜上過熱空（對沖）"}
+SHORT_BOOK_NAME = {"A": "失速空", "B": "榜上過熱空（對沖）", "W": "弱勢順勢空"}
 
 
 class ShortBook:
@@ -415,6 +419,22 @@ class ShortBook:
         self.seen_board: set = set()
         self.blocked: Counter = Counter()
         self.last_price: Dict[str, float] = {}
+        self.weak = WS.WeakBook(on_event, self._shortable)  # 弱勢順勢空：不用網友的程式，只吃快照（PREREGISTRATION_WEAK.md）
+
+    def _shortable(self, sym: str) -> bool:
+        lookup = self.e.short_lookup
+        return self.e.short_ok.get(sym, True) if lookup is None else lookup(sym)
+
+    def weak_tick(self, t_us: int) -> None:
+        """每輪快照：算兩個指數當日漲跌（昨收取日線），餵給弱勢順勢空。"""
+        chg = {}
+        for name, market in (("TAIEX", "TWSE"), ("TPEX", "TPEX")):
+            q = self.e.index_feed.live.get(name)
+            prev = [c for d, c in self.e.index_feed.daily.get(name, []) if d < self.e.day]
+            if q is not None and prev:
+                chg[market] = (float(q["price"]) / prev[-1] - 1) * 100
+        rows = [{**r, "symbol": k[1], "market": k[0]} for k, r in self.e.rows.items()]
+        self.weak.on_snapshot(t_us, rows, chg, self.market_ok())
 
     # ── 條件 ──
     def market_ok(self) -> bool:
@@ -566,6 +586,7 @@ class ShortBook:
 
     def finish(self) -> None:
         """收盤：還沒成交的回補用最後一筆成交價＋一檔；還沒進場的取消。"""
+        self.weak.finish()
         for sym, p in list(self.pending.items()):
             if p["kind"] == "cover":
                 last = self.last_price.get(sym, p["entry_price"])
@@ -593,8 +614,9 @@ class ShortBook:
             books[b] = {"name": SHORT_BOOK_NAME[b], "trades": T, "positions": opens, "realized": realized,
                         "open_pnl": round(sum(p["open_pnl"] or 0 for p in opens), 0), "closed": len(T),
                         "wins": sum(t["net_pnl"] > 0 for t in T), "realized_hedged": hedged}
+        books["W"] = self.weak.snapshot()
         return {"version": 1, "registration": "studies/short_paper/PREREGISTRATION.md", "market_ok": self.market_ok(),
-                "blocked": dict(self.blocked), "books": books}
+                "blocked": {**self.blocked, **self.weak.blocked_counts()}, "books": books}
 
 
 def lots_text(shares: int) -> str:
