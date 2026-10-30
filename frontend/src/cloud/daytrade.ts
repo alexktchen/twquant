@@ -76,6 +76,43 @@ export type MarketView = {
   trend_allowed: boolean | null
 }
 
+/** 放空記帳子帳戶（T-463／studies/short_paper）：A 失速空、B 榜上過熱空（對沖）。只記帳；濾網擋掉的筆數在 blocked。 */
+export type ShortTrade = {
+  book: 'A' | 'B'
+  symbol: string
+  name: string
+  quantity: number
+  signal_time: string
+  entry_time: string
+  entry_price: number
+  exit_time: string
+  exit_price: number
+  exit_reason: 'STOP' | 'LIMIT_UP' | 'TIME' | 'EOD'
+  stop: number
+  gross_pnl: number
+  net_pnl: number
+  net_ret_pct: number
+  /** 只有 B：小台對沖的損益、含對沖的淨損益 */
+  hedge_pnl: number | null
+  net_hedged: number | null
+  limit_up_locked: boolean
+}
+export type ShortPosition = { symbol: string; name: string; quantity: number; entry_time: string; entry_price: number; stop: number; last: number | null; open_pnl: number | null }
+export type ShortBook = { name: string; trades: ShortTrade[]; positions: ShortPosition[]; realized: number; open_pnl: number; closed: number; wins: number; realized_hedged: number | null }
+export type ShortSnapshot = { version: 1; registration: string; market_ok: boolean; blocked: Record<string, number>; books: { A: ShortBook; B: ShortBook } }
+
+export const SHORT_REASON_TEXT: Record<ShortTrade['exit_reason'], string> = { STOP: '停損', LIMIT_UP: '逼近漲停', TIME: '13:05 回補', EOD: '收盤強制' }
+
+/** 放空那一刻的狀態（復盤用，不劇透）：到 cut 為止已回補的、還抱著的。 */
+export function shortAt(s: ShortSnapshot, book: 'A' | 'B', cut: string): { closed: ShortTrade[]; holding: ShortTrade[]; realized: number; hedged: number | null } {
+  const b = s.books[book]
+  const closed = b.trades.filter((t) => t.exit_time <= cut)
+  const holding = b.trades.filter((t) => t.entry_time <= cut && t.exit_time > cut)
+  const realized = closed.reduce((a, t) => a + t.net_pnl, 0)
+  const hedged = book === 'B' ? closed.reduce((a, t) => a + (t.net_hedged ?? t.net_pnl), 0) : null
+  return { closed, holding, realized, hedged }
+}
+
 export type DayTradeDay = {
   version: 1
   day: string
@@ -94,10 +131,12 @@ export type DayTradeDay = {
   account: { capital: number; realized: number; open_pnl: number; total: number; entries: number; closed: number }
   config: { capital: number; watch_count: number; fee_discount: number; min_fee: number; tax_rate: number; latency_ms: number; trading: Record<string, number> }
   watch: { in: number; out: number }
+  /** 放空記帳（T-463）：2026-10-31 之後的日子才有 */
+  short?: ShortSnapshot | null
 }
 
 /** 只有榜單的那份狀態：沒有持股、成交、時間軸、帳戶、設定（stock_live.py 的 Recorder.board_payload）。 */
-export type BoardOnlyDay = Pick<DayTradeDay, 'version' | 'day' | 'status' | 'source' | 'updated_at' | 'board_time' | 'market' | 'board' | 'watch'> & {
+export type BoardOnlyDay = Pick<DayTradeDay, 'version' | 'day' | 'status' | 'source' | 'updated_at' | 'board_time' | 'market' | 'board' | 'watch' | 'short'> & {
   board_only: true
 }
 

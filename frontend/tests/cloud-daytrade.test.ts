@@ -17,9 +17,11 @@ import {
   priceAt,
   replayAt,
   roughOpenPnl,
+  shortAt,
   shouldPoll,
   type DayTradeDay,
   type DayTradeHistory,
+  type ShortSnapshot,
 } from '../src/cloud/daytrade.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
@@ -172,4 +174,44 @@ test('T-458 AC7 只上傳榜單（使用者 2026-10-29：「只上傳 30 檔榜�
   assert.match(page, /if \(d\.board_only\)/)
   assert.match(page, /模擬單（持股、成交、損益）只存在你電腦上/)
   assert.match(read('src/cloud/api.ts'), /\.then\(normalizeDay\)/)
+})
+
+// ── T-463：放空三條記帳（使用者 2026-10-30：「把這幾個空策略放上去」；規則登記在研究分支 studies/short_paper） ──
+function shortSnap(): ShortSnapshot {
+  const t = (book: 'A' | 'B', symbol: string, name: string, entry: string, exit: string, ep: number, xp: number, net: number, hedged: number | null) => ({
+    book, symbol, name, quantity: 2, signal_time: entry, entry_time: entry, entry_price: ep, exit_time: exit, exit_price: xp,
+    exit_reason: 'TIME' as const, stop: ep * 1.02, gross_pnl: (ep - xp) * 2000, net_pnl: net, net_ret_pct: net / (ep * 2000) * 100,
+    hedge_pnl: hedged === null ? null : hedged - net, net_hedged: hedged, limit_up_locked: false,
+  })
+  return {
+    version: 1, registration: 'studies/short_paper/PREREGISTRATION.md', market_ok: true, blocked: { 'A:MARKET_FILTER': 6, 'B:MAX': 1 },
+    books: {
+      A: { name: '失速空', trades: [t('A', '1101', '台泥', '10:20:30', '10:21:38', 28.05, 28.1, -641, null), t('A', '4989', '榮科', '11:10:04', '13:05:02', 72.9, 71.3, 2795, null)], positions: [], realized: 2154, open_pnl: 0, closed: 2, wins: 1, realized_hedged: null },
+      B: { name: '榜上過熱空（對沖）', trades: [t('B', '3498', '陽程', '10:02:02', '13:05:02', 251.5, 240.5, 10302, 6658)], positions: [], realized: 10302, open_pnl: 0, closed: 1, wins: 1, realized_hedged: 6658 },
+    },
+  }
+}
+
+test('T-463 AC1 復盤：放空照那一刻算——還沒回補的算抱著、回補了才算已實現；B 另報含對沖', () => {
+  const s = shortSnap()
+  const early = shortAt(s, 'A', '10:30:00')
+  assert.deepEqual([early.closed.map((x) => x.symbol), early.holding.map((x) => x.symbol), early.realized, early.hedged], [['1101'], [], -641, null])
+  const mid = shortAt(s, 'A', '12:00:00')
+  assert.deepEqual([mid.closed.length, mid.holding.map((x) => x.symbol)], [1, ['4989']])
+  const end = shortAt(s, 'A', '23:59:59')
+  assert.equal(end.realized, 2154)
+  const b = shortAt(s, 'B', '23:59:59')
+  assert.deepEqual([b.realized, b.hedged], [10302, 6658])
+  assert.equal(shortAt(s, 'B', '10:00:00').closed.length, 0)
+})
+
+test('T-463 AC2 畫面：盤中與復盤都有「放空記帳（對照）」區塊；只有榜單的那份也帶放空摘要；寫明只記帳、已登記、60 天才判定', () => {
+  const page = read('src/cloud/DayTradePage.tsx')
+  assert.equal((page.match(/<ShortSection s=\{(data|d)\.short\}/g) ?? []).length, 3)
+  assert.match(page, /title="放空記帳（對照）" fold/)
+  assert.match(page, /label="過熱空（含對沖）"/)
+  assert.match(page, /只記帳不下單，和多單的帳戶分開算/)
+  assert.match(page, /累積 60 個交易日才判定/)
+  const only = normalizeDay({ version: 1, day: '2026-10-31', status: 'live', source: 'fubon_live', updated_at: '2026-10-31T09:15:00+08:00', board_time: '09:15:00', market: day().market, board: [], watch: { in: 0, out: 0 }, board_only: true, short: shortSnap() })
+  assert.equal(only.short?.books.A.closed, 2)
 })

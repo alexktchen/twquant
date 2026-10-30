@@ -14,6 +14,10 @@ import {
   replayAt,
   roughOpenPnl,
   secOf,
+  shortAt,
+  SHORT_REASON_TEXT,
+  type ShortSnapshot,
+  type ShortTrade,
   shouldPoll,
   tone,
   yuan,
@@ -195,6 +199,84 @@ function Trades({ trades }: { trades: DayTrade[] }) {
   )
 }
 
+/** 被擋原因的白話（stock_engine.ShortBook.blocked 的代號）。 */
+const BLOCK_TEXT: Record<string, string> = { MARKET_FILTER: '大盤濾網', MAX: '同時上限', ALREADY: '已做過', NEAR_LIMIT_UP: '貼漲停', NOT_SHORTABLE: '不能放空', NO_PRICE: '沒報價' }
+const blockedText = (k: string): string => {
+  const [book, code] = k.split(':')
+  return `${book === 'A' ? '失速' : '過熱'}・${BLOCK_TEXT[code] ?? code}`
+}
+
+/** 放空記帳（T-463）：A 失速空、B 榜上過熱空（對沖）。cut 給了就照那一刻（復盤），沒給就是現在。 */
+function ShortSection({ s, cut }: { s: ShortSnapshot; cut?: string }) {
+  const at = (book: 'A' | 'B') => (cut ? shortAt(s, book, cut) : { closed: s.books[book].trades, holding: [], realized: s.books[book].realized, hedged: s.books[book].realized_hedged })
+  const A = at('A')
+  const B = at('B')
+  const total = A.realized + (B.hedged ?? B.realized)
+  const row = (t: ShortTrade) => (
+    <tr key={`${t.book}-${t.symbol}-${t.entry_time}`}>
+      <td>
+        <span className="cq-fu-sleeve short">{t.book === 'A' ? '失速' : '過熱'}</span> {t.name} {t.symbol}
+        <br />
+        <small>{t.quantity} 張</small>
+      </td>
+      <td>
+        {t.entry_time}
+        <br />
+        {price(t.entry_price)}
+      </td>
+      <td>
+        {t.exit_time}
+        <br />
+        {price(t.exit_price)}
+      </td>
+      <td>{SHORT_REASON_TEXT[t.exit_reason]}</td>
+      <td className={tone(t.net_pnl)}>
+        {yuan(t.net_pnl)}
+        {t.net_hedged !== null && (
+          <>
+            <br />
+            <small>含對沖 {yuan(t.net_hedged)}</small>
+          </>
+        )}
+      </td>
+    </tr>
+  )
+  const trades = [...A.closed, ...B.closed].sort((a, b) => (a.entry_time < b.entry_time ? -1 : 1))
+  const held = cut ? [...A.holding, ...B.holding] : [...s.books.A.positions, ...s.books.B.positions]
+  const blocked = Object.entries(s.blocked)
+  return (
+    <Section icon={ReceiptText} title="放空記帳（對照）" fold summary={`失速空 ${yuan(A.realized)}・過熱空 ${yuan(B.hedged ?? B.realized)}・合計 ${yuan(total)}`}>
+      <div className="cq-tiles cq-fu-tiles">
+        <Kpi label="失速空" value={yuan(A.realized)} tone={tone(A.realized)} sub={`${A.closed.length} 筆・${s.books.A.name}`} />
+        <Kpi label="過熱空（含對沖）" value={yuan(B.hedged ?? B.realized)} tone={tone(B.hedged ?? B.realized)} sub={`${B.closed.length} 筆・裸空 ${yuan(B.realized)}`} />
+        <Kpi label="大盤濾網" value={s.market_ok ? '可以空' : '不准空'} sub={s.market_ok ? '加權、櫃買低於開盤且跌多漲少' : '要加權、櫃買都低於開盤且跌多漲少'} />
+        <Kpi label="抱著" value={`${held.length} 檔`} sub={blocked.length ? `擋掉 ${blocked.map(([k, v]) => `${blockedText(k)} ${v}`).join('、')}` : '沒有被擋的'} />
+      </div>
+      {trades.length === 0 ? (
+        <p className="cq-empty">還沒有回補的放空。</p>
+      ) : (
+        <table className="cq-fu-trades">
+          <thead>
+            <tr>
+              <th>股票</th>
+              <th>放空</th>
+              <th>回補</th>
+              <th>原因</th>
+              <th>淨損益</th>
+            </tr>
+          </thead>
+          <tbody>{trades.map(row)}</tbody>
+        </table>
+      )}
+      <p className="cq-fu-foot">
+        只記帳不下單，和多單的帳戶分開算。失速空：網友原版的多單以「動能結構破壞」或「跌破前低」出場的那一刻，放空同一檔，停損在那筆多單的最高價。
+        過熱空：股票 10:30 前進榜、漲 3～7% 時放空 1 張，同時記一筆小台多單對沖。兩條都要離漲停 3% 以上、大盤濾網放行才做，逼近漲停強制回補，13:05 全部回補。
+        成本含手續費、當沖稅、借券費。規則與門檻已事前登記，累積 60 個交易日才判定。
+      </p>
+    </Section>
+  )
+}
+
 function Rules({ d }: { d: DayTradeDay }) {
   const c = d.config
   return (
@@ -276,6 +358,7 @@ function BoardOnly({ d }: { d: DayTradeDay }) {
       <Section icon={Activity} title="強勢股榜" meta={d.board_time ? `${d.board_time} 掃描${d.status === 'closed' ? '・收盤那一份' : ''}` : '開盤後才有'}>
         <Board d={d} />
       </Section>
+      {d.short && <ShortSection s={d.short} />}
       <p className="cq-fu-foot">
         目前只把榜單放上網站，模擬單（持股、成交、損益）只存在你電腦上。榜單是網友原版每 30 秒現場排的前 {d.board.length || 30} 檔，進榜 {d.watch.in} 次、出榜 {d.watch.out} 次。
       </p>
@@ -312,6 +395,7 @@ function LiveView({ refresh }: { refresh: number }) {
       <Section icon={ReceiptText} title="成交明細" fold summary={`${data.trades.length} 筆・${yuan(data.trades.reduce((s, t) => s + t.net_pnl, 0))} 元`}>
         <Trades trades={data.trades} />
       </Section>
+      {data.short && <ShortSection s={data.short} />}
       <Rules d={data} />
     </>
   )
@@ -459,6 +543,7 @@ function ReplayView({ refresh }: { refresh: number }) {
       <Section icon={ReceiptText} title="成交明細" fold summary={`${view.closed.length} 筆・${yuan(view.realized)} 元`}>
         <Trades trades={view.closed} />
       </Section>
+      {d.short && <ShortSection s={d.short} cut={cut} />}
       <Rules d={d} />
     </>
   )
