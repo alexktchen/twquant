@@ -41,6 +41,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import futures_replay as F  # noqa: E402
+from futures_extras import Extras
 import intraday_bidir_test as B  # noqa: E402
 import ms_replay as M  # noqa: E402
 
@@ -358,6 +359,7 @@ class LiveCombo:
         self.disabled = None     # 開盤沒錄到 → 原因；之後只錄資料、不做任何決策
         self.flow = Flow(day)
         self.ms = Netizen(self, Path(_MS["repo"])) if _MS.get("repo") else None  # 網友原版；main() 有載入原版才跑
+        self.extras = Extras(self, history, clock)  # 三條對照策略（只記帳，不併進主帳；2026-10-30 使用者要求接回）
 
     def disable(self, t_us: int, reason: str) -> None:
         if self.disabled is None:
@@ -391,6 +393,7 @@ class LiveCombo:
         self.watch_orb(i)
         if self.ms is not None and self.disabled is None:
             self.ms.on_tick(t_us, price, size)
+        self.extras.on_tick(i)
 
     def last_before(self, t_us: int) -> int:
         i = bisect.bisect_left(self.t, t_us) - 1
@@ -540,6 +543,7 @@ class LiveCombo:
             "point_value": self.point_value, "commission": self.commission,
             "flow": self.flow.snapshot(),
             "ms": None if self.ms is None else self.ms.snapshot(last),
+            "extras": self.extras.snapshot(last),
         }
 
     def on_book(self, t_us: int, bids, asks) -> None:
