@@ -147,6 +147,9 @@ class Recorder:
             self.note(t_us, "signal", sym, name, f"{E.EXIT_TEXT.get(info['reason'], info['reason'])}（價 {info['price']:g}）→ 賣出 {lots(info['quantity'])} 張")
         elif kind == "partial":
             self.note(t_us, "exit", sym, name, f"減碼賣出 {lots(info['quantity'])} 張 @ {info['price']:g}（{E.EXIT_TEXT.get(info['reason'], info['reason'])}）")
+        elif kind in ("short_signal", "short_fill", "short_exit"):
+            k = {"short_signal": "signal", "short_fill": "fill", "short_exit": "exit"}[kind]
+            self.note(t_us, k, sym, name, f"〔{E.SHORT_BOOK_NAME[info['book']]}〕{info['text']}")
         elif kind == "closed":
             t = info
             reason = E.EXIT_TEXT.get(t["final_exit_reason"], t["final_exit_reason"])
@@ -185,6 +188,7 @@ class Recorder:
                         "total": round(realized + open_pnl, 0), "entries": sum(eng.symbol_entry_counts.values()),
                         "closed": len(eng.trades)},
             "config": self.holder["config_view"], "watch": {"in": eng.watch_changes["in"], "out": eng.watch_changes["out"]},
+            "short": None if eng.short is None else eng.short.snapshot(),
         }
 
     def board_payload(self, status: str, source: str, updated: datetime) -> Dict[str, Any]:
@@ -194,7 +198,8 @@ class Recorder:
                 "updated_at": updated.isoformat(timespec="seconds"),
                 "board_time": hms(eng.board_time) if eng.board_time else None, "market": self.market_view(),
                 "board": [{k: r.get(k) for k in BOARD_UPLOAD_FIELDS} for r in eng.board],
-                "watch": {"in": eng.watch_changes["in"], "out": eng.watch_changes["out"]}}
+                "watch": {"in": eng.watch_changes["in"], "out": eng.watch_changes["out"]},
+                "short": None if eng.short is None else eng.short.snapshot()}  # 放空記帳摘要（約 1～3 KB），使用者 2026-10-30：「把這幾個空策略放上去」
 
     def history(self, charts: Dict[str, Any]) -> Dict[str, Any]:
         """收盤後：榜單每 30 秒一份、有成交的股票的 1 分 K 與秒級（復盤用，另一張表，只有點開復盤才讀）。"""
@@ -434,6 +439,10 @@ def replay_minute(args, mods, params, config, log) -> int:
     rec = Recorder(day, holder, log)
     engine = E.StockEngine(mods, params, day, config, mk.universe, mk.index_daily, rec.on_event)
     holder["engine"] = engine
+    engine.short = E.ShortBook(engine, rec.on_event)
+    for sym, prev in mk.prev_close.items():  # 重播：漲停價＝昨收 × 1.1 取到跳動單位；可否放空全當可以（報告註明）
+        engine.limit_up[sym] = E.round_tick(prev * 1.1, lo=0, hi=1e9)
+        engine.short_ok[sym] = True
     if args.assume_day_trade:  # 歷史上沒有每天的當沖資格：全部當作可以當沖（報告要寫明）
         engine.day_trade.update({sym: True for (_m, sym) in mk.universe})
     ticks_of: Dict[str, List[tuple]] = {}
@@ -476,6 +485,8 @@ def replay_minute(args, mods, params, config, log) -> int:
     a = payload["account"]
     log(f"{day} 重播完：掃描 {engine.scan_stats['ROUNDS']} 輪、進出榜 {engine.watch_changes['in']}／{engine.watch_changes['out']} 次、"
         f"成交 {a['closed']} 筆、淨 {a['realized']:+,.0f} 元；警告 {dict(engine.warnings)}")
+    sb = payload["short"]["books"]
+    log(f"放空：失速空 {sb['A']['closed']} 筆 {sb['A']['realized']:+,.0f} 元；過熱空 {sb['B']['closed']} 筆 裸 {sb['B']['realized']:+,.0f}／對沖 {sb['B']['realized_hedged']:+,.0f} 元；擋掉 {payload['short']['blocked']}")
     if args.upload:
         Uploader(env_value(Path(args.env), DSN_ENV), log).flush(payload, rec.history(charts))
         log("已寫進雲端")
@@ -531,6 +542,7 @@ def live(args, mods, params, config, root: Path) -> int:
     rec = Recorder(day, holder, log)
     engine = E.StockEngine(mods, params, day, config, universe, index_daily, rec.on_event)
     holder["engine"] = engine
+    engine.short = E.ShortBook(engine, rec.on_event)  # 放空三條記帳（studies/short_paper）
     log(f"交易日 {day}：普通股 {len(universe)} 檔；加權昨收 {index_daily['TAIEX'][-1]}；帳戶 {holder['config_view']}")
     uploader = Uploader(env_value(Path(args.env), DSN_ENV), log) if (args.upload or args.upload_board) else None
 
@@ -554,14 +566,18 @@ def live(args, mods, params, config, root: Path) -> int:
         if sym not in info_cache:
             t = stock.intraday.ticker(symbol=sym)
             info_cache[sym] = (t.get("referencePrice") or t.get("previousClose"), t.get("canDayTrade"),
-                               {"attention": t.get("isAttention"), "disposition": t.get("isDisposition")})
+                               {"attention": t.get("isAttention"), "disposition": t.get("isDisposition"), "limit_up": t.get("limitUpPrice"),
+                                "short_ok": bool(t.get("canDayTrade") and t.get("canBelowFlatMarginShortSell") and not t.get("isDisposition"))})
         return info_cache[sym]
 
     def watch(key) -> None:
         sym = key[1]
         if key not in engine.states:
-            prev, can, _flags = symbol_info(sym)
+            prev, can, flags = symbol_info(sym)
             engine.ensure_state(key, float(prev) if prev is not None else None, can)
+            if flags.get("limit_up") is not None:
+                engine.limit_up[sym] = float(flags["limit_up"])
+            engine.short_ok[sym] = flags["short_ok"]
             candles = stock.intraday.candles(symbol=sym, timeframe="1").get("data") or []
             now_min = int(time.time() * M.US) // (60 * M.US) * 60 * M.US
             bars = [b for b in candles_to_bars(day, candles) if b[0] + 60 * M.US <= now_min]
@@ -669,6 +685,8 @@ def live(args, mods, params, config, root: Path) -> int:
     M.write_csv(out / "trades.csv", engine.trades)
     a = payload["account"]
     log(f"收盤：成交 {a['closed']} 筆、淨 {a['realized']:+,.0f} 元；掃描 {engine.scan_stats['ROUNDS']} 輪；警告 {dict(engine.warnings)}")
+    sb = payload["short"]["books"]
+    log(f"放空：失速空 {sb['A']['closed']} 筆 {sb['A']['realized']:+,.0f} 元；過熱空 {sb['B']['closed']} 筆 裸 {sb['B']['realized']:+,.0f}／對沖 {sb['B']['realized_hedged']:+,.0f} 元；擋掉 {payload['short']['blocked']}")
     if uploader is not None and args.upload_board:
         uploader.write(rec.board_payload("closed", "fubon_live", datetime.now(M.TPE)))
         log("收盤榜單已寫進雲端（模擬單只在本機）")
