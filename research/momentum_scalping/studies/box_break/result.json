@@ -1,0 +1,206 @@
+{
+ "days": 2268,
+ "sample": [
+  "2017-05-22",
+  "2026-09-08"
+ ],
+ "vwap_kind": "per_bar",
+ "A": {
+  "trades": 4453,
+  "per_day": 1.96,
+  "win_rate": 40.0,
+  "gross_points": 1.9,
+  "net_points": -2.0,
+  "mean_day": -191.8,
+  "ci_low": -407.5,
+  "ci_high": 43.8,
+  "t": -1.65,
+  "total": -435037.0,
+  "no_2026": -421533.0,
+  "top5": 225312.0,
+  "yearly": {
+   "2017": -37586.0,
+   "2018": -66343.0,
+   "2019": -82251.0,
+   "2020": 42930.0,
+   "2021": -98560.0,
+   "2022": -49217.0,
+   "2023": -62818.0,
+   "2024": -35900.0,
+   "2025": -31787.0,
+   "2026": -13505.0
+  },
+  "checks": {
+   "ci_low_above_0": false,
+   "without_2026_above_0": false,
+   "top5_share_below_50pct": false,
+   "t_at_least_3": false
+  },
+  "passed": false
+ },
+ "A_long": {
+  "trades": 2271,
+  "per_day": 1.0,
+  "win_rate": 42.3,
+  "gross_points": 0.2,
+  "net_points": -3.7,
+  "mean_day": -184.0,
+  "ci_low": -339.5,
+  "ci_high": -36.6,
+  "t": -2.35,
+  "total": -417406.0,
+  "no_2026": -249384.0,
+  "top5": 127606.0,
+  "yearly": {
+   "2017": -23354.0,
+   "2018": -27630.0,
+   "2019": -30861.0,
+   "2020": -8348.0,
+   "2021": -64858.0,
+   "2022": -24728.0,
+   "2023": -27191.0,
+   "2024": 9815.0,
+   "2025": -52230.0,
+   "2026": -168021.0
+  },
+  "checks": {
+   "ci_low_above_0": false,
+   "without_2026_above_0": false,
+   "top5_share_below_50pct": false,
+   "t_at_least_3": false
+  },
+  "passed": false
+ },
+ "A_short": {
+  "trades": 2182,
+  "per_day": 0.96,
+  "win_rate": 37.6,
+  "gross_points": 3.7,
+  "net_points": -0.2,
+  "mean_day": -7.8,
+  "ci_low": -164.6,
+  "ci_high": 179.5,
+  "t": -0.09,
+  "total": -17632.0,
+  "no_2026": -172149.0,
+  "top5": 243223.0,
+  "yearly": {
+   "2017": -14232.0,
+   "2018": -38713.0,
+   "2019": -51390.0,
+   "2020": 51277.0,
+   "2021": -33701.0,
+   "2022": -24489.0,
+   "2023": -35627.0,
+   "2024": -45715.0,
+   "2025": 20443.0,
+   "2026": 154517.0
+  },
+  "checks": {
+   "ci_low_above_0": false,
+   "without_2026_above_0": false,
+   "top5_share_below_50pct": false,
+   "t_at_least_3": false
+  },
+  "passed": false
+ },
+ "B": {
+  "trades": 2342,
+  "per_day": 1.03,
+  "win_rate": 43.4,
+  "gross_points": 5.0,
+  "net_points": 1.1,
+  "mean_day": 54.7,
+  "ci_low": -114.9,
+  "ci_high": 233.8,
+  "t": 0.59,
+  "total": 124091.0,
+  "no_2026": 47301.0,
+  "top5": 213927.0,
+  "yearly": {
+   "2017": -16984.0,
+   "2018": 3820.0,
+   "2019": -42341.0,
+   "2020": -18486.0,
+   "2021": 12385.0,
+   "2022": -59467.0,
+   "2023": -6858.0,
+   "2024": 108118.0,
+   "2025": 67115.0,
+   "2026": 76790.0
+  },
+  "checks": {
+   "ci_low_above_0": false,
+   "without_2026_above_0": true,
+   "top5_share_below_50pct": false,
+   "t_at_least_3": false
+  },
+  "passed": false
+ },
+ "B_long": {
+  "trades": 1225,
+  "per_day": 0.54,
+  "win_rate": 45.1,
+  "gross_points": 4.1,
+  "net_points": 0.3,
+  "mean_day": 6.8,
+  "ci_low": -105.4,
+  "ci_high": 114.1,
+  "t": 0.12,
+  "total": 15406.0,
+  "no_2026": 15614.0,
+  "top5": 114157.0,
+  "yearly": {
+   "2017": -6631.0,
+   "2018": -12827.0,
+   "2019": -17391.0,
+   "2020": -16836.0,
+   "2021": 15008.0,
+   "2022": -33241.0,
+   "2023": -6975.0,
+   "2024": 60904.0,
+   "2025": 33603.0,
+   "2026": -209.0
+  },
+  "checks": {
+   "ci_low_above_0": false,
+   "without_2026_above_0": true,
+   "top5_share_below_50pct": false,
+   "t_at_least_3": false
+  },
+  "passed": false
+ },
+ "B_short": {
+  "trades": 1117,
+  "per_day": 0.49,
+  "win_rate": 41.6,
+  "gross_points": 5.8,
+  "net_points": 1.9,
+  "mean_day": 47.9,
+  "ci_low": -88.0,
+  "ci_high": 197.8,
+  "t": 0.63,
+  "total": 108685.0,
+  "no_2026": 31686.0,
+  "top5": 213927.0,
+  "yearly": {
+   "2017": -10353.0,
+   "2018": 16647.0,
+   "2019": -24950.0,
+   "2020": -1651.0,
+   "2021": -2624.0,
+   "2022": -26226.0,
+   "2023": 117.0,
+   "2024": 47214.0,
+   "2025": 33512.0,
+   "2026": 76999.0
+  },
+  "checks": {
+   "ci_low_above_0": false,
+   "without_2026_above_0": true,
+   "top5_share_below_50pct": false,
+   "t_at_least_3": false
+  },
+  "passed": false
+ }
+}
