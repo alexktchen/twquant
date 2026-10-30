@@ -269,7 +269,7 @@ function ShortSection({ s, cut }: { s: ShortSnapshot; cut?: string }) {
         </table>
       )}
       <p className="cq-fu-foot">
-        只記帳不下單，和多單的帳戶分開算。失速空：網友原版的多單以「動能結構破壞」或「跌破前低」出場的那一刻，放空同一檔，停損在那筆多單的最高價。
+        只記帳不下單，和多單的帳戶分開算。失速空：動能順勢的多單以「動能結構破壞」或「跌破前低」出場的那一刻，放空同一檔，停損在那筆多單的最高價。
         過熱空：股票 10:30 前進榜、漲 3～7% 時放空 1 張，同時記一筆小台多單對沖。兩條都要離漲停 3% 以上、大盤濾網放行才做，逼近漲停強制回補，13:05 全部回補。
         成本含手續費、當沖稅、借券費。規則與門檻已事前登記，累積 60 個交易日才判定。
       </p>
@@ -304,11 +304,11 @@ function Rules({ d }: { d: DayTradeDay }) {
         ))}
       </ul>
       <p className="cq-fu-foot">
-        選股和進出場是網友原版 Momentum_Scalping，程式與參數不改：每 30 秒掃一次全市場普通股，今天在漲、量放大、比大盤和同類股強、貼著當日高點、買賣價差小的打分數，70 分以上照分數取前 {c.watch_count} 檔，
+        選股和進出場是動能順勢（PTT 網友分享的 Momentum_Scalping 原版），程式與參數不改：每 30 秒掃一次全市場普通股，今天在漲、量放大、比大盤和同類股強、貼著當日高點、買賣價差小的打分數，70 分以上照分數取前 {c.watch_count} 檔，
         只有這些股票看逐筆；動能或趨勢突破才買，跌破前低、EMA 死叉、動能衰退就賣，12:00 後不再進場、13:00 全部賣掉。只做多、只記帳，沒有送任何委託。
       </p>
       <p className="cq-fu-foot">
-        上面的數字是網友預設。要改的話，改你電腦上的 <code>data/research_ms/stock_live/account.json</code>，下次啟動錄製程式時生效。成本：手續費 0.1425% 打 {c.fee_discount * 10} 折（最低 {c.min_fee} 元）、當沖證交稅 0.15%、買在賣價賣在買價。
+        上面的數字是原版預設。要改的話，改你電腦上的 <code>data/research_ms/stock_live/account.json</code>，下次啟動錄製程式時生效。成本：手續費 0.1425% 打 {c.fee_discount * 10} 折（最低 {c.min_fee} 元）、當沖證交稅 0.15%、買在賣價賣在買價。
         富邦行情只供本人使用，不對外顯示。
       </p>
     </Section>
@@ -360,7 +360,7 @@ function BoardOnly({ d }: { d: DayTradeDay }) {
       </Section>
       {d.short && <ShortSection s={d.short} />}
       <p className="cq-fu-foot">
-        目前只把榜單放上網站，模擬單（持股、成交、損益）只存在你電腦上。榜單是網友原版每 30 秒現場排的前 {d.board.length || 30} 檔，進榜 {d.watch.in} 次、出榜 {d.watch.out} 次。
+        目前只把榜單放上網站，模擬單（持股、成交、損益）只存在你電腦上。榜單是動能順勢每 30 秒現場排的前 {d.board.length || 30} 檔，進榜 {d.watch.in} 次、出榜 {d.watch.out} 次。
       </p>
     </>
   )
@@ -563,7 +563,7 @@ export function DayTradePage({ refresh }: { refresh: number }) {
       </div>
       {mode === 'live' ? <LiveView refresh={refresh} /> : <ReplayView refresh={refresh} />}
       <p className="cq-fu-foot cq-dt-note">
-        <BookOpen size={13} aria-hidden="true" /> 網友原版在台指期上的回測扣掉成本後沒有優勢；這頁的榜單是給你盤中看哪些股票正在強，模擬單是記帳對照，不是下單建議。
+        <BookOpen size={13} aria-hidden="true" /> 動能順勢在台指期上的回測扣掉成本後沒有優勢；這頁的榜單是給你盤中看哪些股票正在強，模擬單是記帳對照，不是下單建議。
       </p>
     </main>
   )

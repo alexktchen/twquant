@@ -17,7 +17,7 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
         SELECT json_build_object('day', day::text, 'product', product, 'source', source, 'total', total, 'n', n, 'trades', trades)::text AS body
         FROM serving.futures_ms_estimate WHERE product = ${product} AND day = ${day}`,
     )
-    if (rows.length === 0) return fail(404, `${day} 沒有網友原版的估算`)
+    if (rows.length === 0) return fail(404, `${day} 沒有動能順勢的估算`)
     return rawJson(rows[0].body)
   })
 }

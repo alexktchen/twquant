@@ -59,6 +59,10 @@
 .cq-fu-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
 .cq-fu-sleeve.gap { color: #22d3ee; }
 .cq-fu-sleeve.ms { color: #c4b5fd; }
+/* T-464 時間軸標籤（badge）：動能順勢紫、晨光突破紅（多）、已拿掉的灰 */
+.cq-fu-tag-ms { --c: #c4b5fd; }
+.cq-fu-tag-long { --c: var(--up); }
+.cq-fu-tag-short { --c: var(--down); }
 /* T-460 各策略：網友原版為主，下面是輔助對照 */
 /* T-462 日曆上只有 1 分 K 估算的日子：日期旁標「估」 */
 .cq-fu-est { font-style: normal; font-size: 11px; margin-left: 4px; padding: 0 4px; border-radius: 4px; color: #f0b90b; background: rgba(240, 185, 11, .14); }
