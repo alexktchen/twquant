@@ -19,6 +19,7 @@ import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
 import type { WarrantDay } from './warrants'
 import type { Trade, TradeList } from './trades'
+import type { JournalList, JournalRow } from './futures-extras'
 import type { Feature } from './access'
 import type { LineGroupRow, LineLogin, LineStatus } from './linegroup'
 
@@ -127,6 +128,9 @@ export const saveWatchOrder = (order: string[]) => get<{ ok: boolean }>('/api/wa
 
 /** 我的下單（T-388）：列出、記一筆（同代號同日同方向覆蓋）、刪一筆。 */
 export const fetchTrades = () => get<TradeList>('/api/trades')
+export const fetchJournal = () => get<JournalList>('/api/futures/journal')
+export const addJournal = (r: Omit<JournalRow, 'id'>) => get<{ ok: boolean; id: string }>('/api/futures/journal', 'PUT', r)
+export const deleteJournal = (id: string) => get<{ ok: boolean }>('/api/futures/journal', 'DELETE', { id })
 export const saveTrade = (t: Omit<Trade, 'created_at'>) => get<{ ok: boolean }>('/api/trades', 'PUT', t)
 export const deleteTrade = (k: { sid: string; date: string; side: Trade['side'] }) => get<{ ok: boolean }>('/api/trades', 'DELETE', k)
 
