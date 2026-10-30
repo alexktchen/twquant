@@ -124,9 +124,10 @@ def open_market_context(market_mod: Any, mp: Any, now: datetime, day: str) -> Di
 
 # --------------------------------------------------------------------------- 模擬
 
-def _f(v, nd=0):
+def _f(v, nd=2):
+    """個股價有小數、台指期是整數：預設最多兩位、去掉多餘的零（53.50 → 53.5、47242.00 → 47,242）。"""
     try:
-        return f"{float(v):,.{nd}f}"
+        return f"{float(v):,.{nd}f}".rstrip("0").rstrip(".")
     except (TypeError, ValueError):
         return "—"
 
@@ -142,7 +143,7 @@ def entry_reason_text(signal: Mapping[str, Any]) -> str:
     parts = []
     if strategy == "TREND":
         g = signal.get("trend_initial_gates") or {}
-        parts.append(f"價 {_f(price)} 在均價線 {_f(vwap, 1)} 之上" if g.get("above_vwap", True) else f"價 {_f(price)}")
+        parts.append(f"價 {_f(price)} 在均價線 {_f(vwap)} 之上" if g.get("above_vwap", True) else f"價 {_f(price)}")
         if g.get("ema_fast_above_slow", True):
             parts.append(f"5 分均線 {_f(e5)} 在 10 分均線 {_f(e10)} 之上" + ("且向上" if g.get("ema_slope_up") else ""))
         if g.get("fractal_hl") or g.get("rolling_hl") or signal.get("higher_low"):
@@ -160,7 +161,7 @@ def entry_reason_text(signal: Mapping[str, Any]) -> str:
     if r.get("value") is not None:
         parts.append(f"振幅 {_f(r.get('value'), 1)} 倍")
     if signal.get("price_above_vwap"):
-        parts.append(f"在均價線 {_f(vwap, 1)} 之上")
+        parts.append(f"在均價線 {_f(vwap)} 之上")
     head = {"INITIAL_BREAKOUT": "動能突破", "FIRST_PULLBACK_REBREAK": "回檔後再突破", "MOMENTUM_CONTINUATION": "動能延續",
             "PERSISTENT_MOMENTUM_START": "持續放量上攻"}.get(setup, "動能")
     return f"{head}：" + "、".join(parts) if parts else head
