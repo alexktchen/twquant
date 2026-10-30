@@ -77,8 +77,10 @@ export type MarketView = {
 }
 
 /** 放空記帳子帳戶（T-463／studies/short_paper）：A 失速空、B 榜上過熱空（對沖）。只記帳；濾網擋掉的筆數在 blocked。 */
+/** T-465 起多一本 W 弱勢順勢空（不用網友的程式）；舊資料沒有 W。 */
+export type ShortBookKey = 'A' | 'B' | 'W'
 export type ShortTrade = {
-  book: 'A' | 'B'
+  book: ShortBookKey
   symbol: string
   name: string
   quantity: number
@@ -87,7 +89,7 @@ export type ShortTrade = {
   entry_price: number
   exit_time: string
   exit_price: number
-  exit_reason: 'STOP' | 'LIMIT_UP' | 'TIME' | 'EOD'
+  exit_reason: 'STOP' | 'LIMIT_UP' | 'VWAP' | 'TIME' | 'EOD'
   stop: number
   gross_pnl: number
   net_pnl: number
@@ -99,18 +101,24 @@ export type ShortTrade = {
 }
 export type ShortPosition = { symbol: string; name: string; quantity: number; entry_time: string; entry_price: number; stop: number; last: number | null; open_pnl: number | null }
 export type ShortBook = { name: string; trades: ShortTrade[]; positions: ShortPosition[]; realized: number; open_pnl: number; closed: number; wins: number; realized_hedged: number | null }
-export type ShortSnapshot = { version: 1; registration: string; market_ok: boolean; blocked: Record<string, number>; books: { A: ShortBook; B: ShortBook } }
+export type ShortSnapshot = { version: 1; registration: string; market_ok: boolean; blocked: Record<string, number>; books: { A: ShortBook; B: ShortBook; W?: ShortBook } }
 
-export const SHORT_REASON_TEXT: Record<ShortTrade['exit_reason'], string> = { STOP: '停損', LIMIT_UP: '逼近漲停', TIME: '13:05 回補', EOD: '收盤強制' }
+export const SHORT_REASON_TEXT: Record<ShortTrade['exit_reason'], string> = { STOP: '停損', LIMIT_UP: '逼近漲停', VWAP: '站回均價線', TIME: '13:05 回補', EOD: '收盤強制' }
 
 /** 放空那一刻的狀態（復盤用，不劇透）：到 cut 為止已回補的、還抱著的。 */
-export function shortAt(s: ShortSnapshot, book: 'A' | 'B', cut: string): { closed: ShortTrade[]; holding: ShortTrade[]; realized: number; hedged: number | null } {
+export function shortAt(s: ShortSnapshot, book: ShortBookKey, cut: string): { closed: ShortTrade[]; holding: ShortTrade[]; realized: number; hedged: number | null } {
   const b = s.books[book]
+  if (!b) return { closed: [], holding: [], realized: 0, hedged: null }
   const closed = b.trades.filter((t) => t.exit_time <= cut)
   const holding = b.trades.filter((t) => t.entry_time <= cut && t.exit_time > cut)
   const realized = closed.reduce((a, t) => a + t.net_pnl, 0)
   const hedged = book === 'B' ? closed.reduce((a, t) => a + (t.net_hedged ?? t.net_pnl), 0) : null
   return { closed, holding, realized, hedged }
+}
+
+/** 平均每筆淨報酬（%）：每筆固定 1 張時，高價股的金額會蓋過其他筆，所以另外看報酬率。沒有成交回 null。 */
+export function shortAvgPct(trades: readonly ShortTrade[]): number | null {
+  return trades.length === 0 ? null : trades.reduce((a, t) => a + t.net_ret_pct, 0) / trades.length
 }
 
 export type DayTradeDay = {
