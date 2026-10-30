@@ -123,6 +123,49 @@ def open_market_context(market_mod: Any, mp: Any, now: datetime, day: str) -> Di
 
 
 # --------------------------------------------------------------------------- 模擬
+
+def _f(v, nd=0):
+    try:
+        return f"{float(v):,.{nd}f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def entry_reason_text(signal: Mapping[str, Any]) -> str:
+    """原版進場訊號 → 一句白話的「為什麼進場」（使用者 2026-10-30：「可以寫進場是為什麼嗎」）。
+    只用訊號本身的欄位：均價線 vwap、EMA5／EMA10（欄位名叫 ema20，實際是 10）、結構前低、突破基準、量與振幅倍數。"""
+    strategy = str(signal.get("strategy_type") or "")
+    setup = str(signal.get("entry_setup_type") or "")
+    price = signal.get("signal_price") or signal.get("price")
+    vwap, e5, e10 = signal.get("vwap"), signal.get("ema5"), signal.get("ema20")
+    low = signal.get("last_higher_low")
+    parts = []
+    if strategy == "TREND":
+        g = signal.get("trend_initial_gates") or {}
+        parts.append(f"價 {_f(price)} 在均價線 {_f(vwap, 1)} 之上" if g.get("above_vwap", True) else f"價 {_f(price)}")
+        if g.get("ema_fast_above_slow", True):
+            parts.append(f"5 分均線 {_f(e5)} 在 10 分均線 {_f(e10)} 之上" + ("且向上" if g.get("ema_slope_up") else ""))
+        if g.get("fractal_hl") or g.get("rolling_hl") or signal.get("higher_low"):
+            parts.append(f"一底比一底高（前低 {_f(low)}）" if low is not None else "一底比一底高")
+        head = {"TREND_INITIAL_ENTRY": "趨勢成形", "TREND_RESUME": "趨勢回踩後再轉強"}.get(setup, "趨勢")
+        return f"{head}：" + "、".join(parts)
+    g = signal.get("momentum_initial_gates") or {}
+    b, v, r = g.get("breakout") or {}, g.get("volume") or {}, g.get("range") or {}
+    if setup in ("INITIAL_BREAKOUT", "PERSISTENT_MOMENTUM_START") and b.get("threshold"):
+        parts.append(f"突破 {_f(b.get('threshold'))}（基準 {_f(signal.get('entry_structure_reference'))}）")
+    elif setup:  # 回檔再突破、延續：原版的基準是這一波的結構點，不是初次突破的門檻
+        parts.append(f"這一波的起點 {_f(signal.get('entry_wave_anchor_price'))}")
+    if v.get("value") is not None:
+        parts.append(f"量是平常 {_f(v.get('value'), 1)} 倍")
+    if r.get("value") is not None:
+        parts.append(f"振幅 {_f(r.get('value'), 1)} 倍")
+    if signal.get("price_above_vwap"):
+        parts.append(f"在均價線 {_f(vwap, 1)} 之上")
+    head = {"INITIAL_BREAKOUT": "動能突破", "FIRST_PULLBACK_REBREAK": "回檔後再突破", "MOMENTUM_CONTINUATION": "動能延續",
+            "PERSISTENT_MOMENTUM_START": "持續放量上攻"}.get(setup, "動能")
+    return f"{head}：" + "、".join(parts) if parts else head
+
+
 @dataclasses.dataclass
 class Config:
     product: str
@@ -306,7 +349,8 @@ class DayEngine:
         self.signals[f"{key}:ACCEPTED"] += 1
         self.pending = {"side": "BUY", "qty": cfg.contracts, "fill_after": t_us + cfg.latency_us, "decided": t_us,
                         "strategy": strategy, "setup": setup, "stop": stop, "signal_price": signal_price}
-        self.on_event("signal", t_us, {"price": price, "stop": stop, "strategy": strategy, "setup": setup})
+        self.on_event("signal", t_us, {"price": price, "stop": stop, "strategy": strategy, "setup": setup,
+                                       "why": entry_reason_text(sig)})
 
     def close(self) -> None:
         """收盤前仍持有：以最後成交價 − 滑價了結（只做一次）。"""

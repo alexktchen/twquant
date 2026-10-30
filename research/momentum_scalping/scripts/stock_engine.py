@@ -19,6 +19,7 @@ from collections import Counter
 from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+import futures_replay as FR
 import ms_replay as M
 
 Key = Tuple[str, str]  # (market, symbol)；market 是 TWSE / TPEX
@@ -277,7 +278,7 @@ class StockEngine(M.DaySimulator):
             o = self.pending[key]
             self.on_event("signal", t_us, {"symbol": key[1], "market": key[0], "name": state.name, "side": "BUY",
                                            "strategy": signal.get("strategy_type"), "setup": signal.get("entry_setup_type"),
-                                           "price": state.price, "quantity": o.quantity,
+                                           "why": FR.entry_reason_text(signal), "price": state.price, "quantity": o.quantity,
                                            "stop": float(o.decision.get("effective_stop_price") or signal.get("strategy_stop_price") or 0)})
 
     def _decide_sell(self, key, state, signal, t_us, now, reason) -> None:

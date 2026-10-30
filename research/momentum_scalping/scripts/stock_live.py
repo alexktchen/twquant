@@ -139,7 +139,7 @@ class Recorder:
         sym, name = info.get("symbol"), info.get("name") or ""
         if kind == "signal":
             setup = SETUP_TEXT.get(f"{info.get('strategy')}/{info.get('setup')}", f"{info.get('strategy')}/{info.get('setup')}")
-            self.note(t_us, "signal", sym, name, f"{setup}訊號，價 {info['price']:g}、停損 {info['stop']:g} → 模擬買進 {lots(info['quantity'])} 張")
+            self.note(t_us, "signal", sym, name, f"{info.get('why') or setup + '訊號'}，停損 {info['stop']:g} → 模擬買進 {lots(info['quantity'])} 張")
         elif kind == "fill":
             self.traded.add(sym)
             self.note(t_us, "fill", sym, name, f"模擬買進 {lots(info['quantity'])} 張 @ {info['price']:g}，停損 {info['stop']:g}")

@@ -8,7 +8,8 @@ fubon_live.py — 富邦即時行情：錄小台／台指逐筆與小台五檔�
 訊號在 T 發出 → 以 T + 0.5 秒後的第一筆成交價成交，買 +1 點、賣 −1 點。
 收盤後用同一個逐筆引擎（B.run_orb／B.run_noise）把錄到的逐筆重算一次，當作正式結果，並和盤中即時紀錄對照。
 開高走低（GapFail，studies/gap_fail）2026-10-29 拿掉（使用者：「開高走低策略直接拿掉」；T-461／D-220 修訂八）。
-網友原版 Momentum_Scalping（Netizen；studies/ms_tmf，只做多 1 口、futures_replay.DayEngine 逐筆跑）放在 payload 的 ms。
+網友原版 Momentum_Scalping（Netizen；網站上叫「動能順勢」，studies/ms_tmf，只做多 1 口、futures_replay.DayEngine 逐筆跑）放在 payload 的 ms。
+噪音區只放空 2026-10-30 拿掉（使用者：「把噪音區拿掉」；T-464）：固定組合只剩開盤突破（網站上叫「晨光突破」）只做多；paper/ 的凍結紙上交易不受影響。
 盤口與大單（Flow，T-455）：每筆成交照當下買賣價分主動買／主動賣、5 口以上記成大單、五檔留最新與每分鐘最後一份，放在 payload 的 flow。
 
 一定要在 repo 以外的資料夾執行：富邦 SDK 會在「執行目錄」寫含個資的 log/。程式一開始就 chdir 到 --out。
@@ -32,7 +33,6 @@ import json
 import os
 import queue
 import shutil
-import statistics
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -178,7 +178,7 @@ class Netizen:
 
     def note(self, t_us: int, kind: str, text: str) -> None:
         self.events.append({"time": hms(t_us)[:8], "kind": kind, "sleeve": MS_SLEEVE, "text": text})
-        self.live.log(f"[{hms(t_us)[:8]}] 網友原版：{text}")
+        self.live.log(f"[{hms(t_us)[:8]}] 動能順勢：{text}")
 
     def on_tick(self, t_us: int, price: float, size: float) -> None:
         if self.closed:
@@ -196,7 +196,7 @@ class Netizen:
         if kind == "signal":
             setup = MS_SETUP_TEXT.get(f"{info['strategy']}/{info['setup']}", f"{info['strategy']}/{info['setup']}")
             self.signal = {"time": t_us, "setup": setup}
-            self.note(t_us, "signal", f"{setup}訊號，價 {info['price']:.0f}、結構停損 {info['stop']:.0f} → 模擬買進 1 口")
+            self.note(t_us, "signal", f"{info.get('why') or setup + '訊號'}；結構停損 {info['stop']:.0f} → 模擬買進 1 口")
         elif kind == "fill":
             sig = self.signal or {"time": t_us, "setup": ""}
             self.open = {"entry_time": t_us, "entry_price": info["price"], "stop": info["stop"],
@@ -230,7 +230,7 @@ class Netizen:
 
     def snapshot(self, last) -> dict:
         st = self.mark(last)
-        return {"version": 1, "name": "網友原版", "commit": MS_COMMIT, "sleeves": {MS_SLEEVE: st},
+        return {"version": 1, "name": "動能順勢", "commit": MS_COMMIT, "sleeves": {MS_SLEEVE: st},
                 "open": None if self.open is None else {"entry_time": hms(self.open["entry_time"])[:8],
                                                          "entry_price": self.open["entry_price"], "stop": self.open["stop"],
                                                          "setup": self.open["setup"]},
@@ -261,7 +261,7 @@ def ms_summary(snap: dict) -> list:
     ms = snap.get("ms")
     if ms is None:
         return []
-    lines = ["## 網友原版（只做多 1 口）", ""]
+    lines = ["## 動能順勢（網友原版，只做多 1 口）", ""]
     rows = [("盤中即時", r) for r in ms["trades"]] + [("收盤重算", r) for r in ms.get("official") or []]
     if rows:
         lines += ["| 來源 | 進場 | 出場 | 原因 | 淨損益 |", "|---|---|---|---|---|"]
@@ -330,7 +330,7 @@ class Flow:
 
 
 class LiveCombo:
-    """單執行緒、只看已到的逐筆：ORB 只做多 + NOISE 只放空，兩個子帳戶各 1 口；另外跑網友原版（Netizen）。"""
+    """單執行緒、只看已到的逐筆：ORB 只做多 1 口；另外跑動能順勢（Netizen，網友原版）。噪音區 2026-10-30 拿掉。"""
 
     def __init__(self, day: date, contract: str, prev_close: float, history, log, product: str = PRODUCT_TAIFEX):
         self.day, self.contract, self.prev_close, self.log = day, contract, prev_close, log
@@ -338,11 +338,9 @@ class LiveCombo:
         self.point_value, self.commission = PAPER_COST[product]
         self.t, self.p, self.vwap = [], [], []
         self.pv = self.vol = 0.0
-        self.sigma = {m: statistics.fmean(abs(h.p[h.last_before(h.at(m))] / h.open - 1) for h in history)
-                      for m in B.NOISE_CHECKS}
         self.orb_at = clock(day, B.SESSION_OPEN) + B.ORB_MINUTES * 60 * M.US
         self.eod = clock(day, B.EOD)
-        self.checks = [clock(day, B.SESSION_OPEN) + m * 60 * M.US for m in B.NOISE_CHECKS]
+        self.checks = []  # 噪音區拿掉：沒有檢查點
         self.pending = []        # [(due_us, sleeve, side, kind, signal_t)]
         self.orb = None          # {"side", "stop", "target", "entry": (t, p), "entry_i", "signal_t"}
         self.orb_done = False
@@ -442,10 +440,6 @@ class LiveCombo:
             if self.orb is not None and "entry" in self.orb and "exit" not in self.orb and "trigger" not in self.orb:
                 self.pending.append((self.eod + B.LATENCY_US, "ORB_LONG", -1, "EOD", self.eod))
                 self.note(self.eod, "signal", "ORB_LONG", "收盤前平倉（13:44）")
-            if self.noise_pos:
-                self.pending.append((self.eod + B.LATENCY_US, "NOISE_SHORT", 1, "EOD", self.eod))
-                self.noise_pos = 0
-                self.note(self.eod, "signal", "NOISE_SHORT", "收盤前回補（13:44）")
         if self.ms is not None and ready(clock(self.day, "13:45") + M.US):
             self.ms.close()
 
@@ -524,12 +518,8 @@ class LiveCombo:
 
     def snapshot(self, status: str, source: str, symbol_: str, updated_at: datetime):
         last = self.p[-1] if self.p else None
-        sleeves = {s: self.mark(s, last) for s in ("ORB_LONG", "NOISE_SHORT")}
-        lb_plan = []
-        if self.p:
-            base = min(self.p[0], self.prev_close)
-            lb_plan = [[hms(T)[:5], round(base * (1 - self.sigma[m]), 1)]
-                       for T, m in zip(self.checks, B.NOISE_CHECKS) if T < self.eod]
+        sleeves = {s: self.mark(s, last) for s in ("ORB_LONG",)}
+        lb_plan: list = []  # 噪音區拿掉
         orb = {"state": self.orb_state, "box": self.orb_box, "stop": None, "target": None, "entry_price": None,
                "entry_time": None}
         if self.orb:
@@ -760,9 +750,9 @@ def history_days(folder: Path, day: date, product: str = PRODUCT_TAIFEX, raw=Non
     """期交所逐筆：今天之前最後 14 個交易日（B.Day）與今天主力合約的昨收來源。raw 有給就不重讀。"""
     raw = raw if raw is not None else F.read_taifex(folder, product)
     names = [d for d in sorted(raw) if d < str(day)]
-    if len(names) < B.NOISE_LOOKBACK:
-        raise SystemExit(f"{folder} 在 {day} 之前只有 {len(names)} 天逐筆，噪音區需要 {B.NOISE_LOOKBACK} 天")
-    days = [B.Day(n, raw[n], None) for n in names[-B.NOISE_LOOKBACK:]]
+    if not names:
+        raise SystemExit(f"{folder} 在 {day} 之前沒有逐筆，算不出昨收")
+    days = [B.Day(n, raw[n], None) for n in names[-B.NOISE_LOOKBACK:]]  # 噪音區拿掉後只用來拿昨收，留著相容
     return days, raw[names[-1]], names[-1]
 
 
@@ -789,9 +779,6 @@ def official(day: date, tick_csv, folder: Path, history_raw_last, contract: str,
     for t in B.run_orb(d)[0]:
         if t["side"] > 0:
             rows.append(("ORB_LONG", t))
-    for t in B.run_noise(d, hist)[0]:
-        if t["side"] < 0:
-            rows.append(("NOISE_SHORT", t))
     return [{"day": str(day), "sleeve": s, "side": t["side"], "signal_time": t["signal_time"][11:19],
              "entry_time": t["entry_time"][11:19], "entry_price": t["entry_price"], "exit_time": t["exit_time"][11:19],
              "exit_price": t["exit_price"], "exit_reason": t["exit_reason"], "points": t["points"],
@@ -852,7 +839,7 @@ def quote_day(day: date, fubon: str, code: str, raw, log=lambda m: None):
     prev = raw[names[-1]]["closes"].get(info["contract"]) if names else None
     when = datetime.fromisoformat(f"{day}T13:50:00").replace(tzinfo=M.TPE)
     sym = symbol(fubon, info["contract"])
-    if len(names) < B.NOISE_LOOKBACK or prev is None:
+    if not names or prev is None:
         tracker = QuoteTracker(day, code, info["contract"], prev)
         for t_us, _, price, size in info["ticks"]:
             tracker.on_tick(t_us, price, size)
@@ -934,7 +921,7 @@ def setup_quotes(day: date, near: str, ticks_root: Path, log):
         quote_raw[qs] = raw_q
         names_q = [d for d in sorted(raw_q) if d < str(day)]
         prev = raw_q[names_q[-1]]["closes"].get(near) if names_q else None
-        if len(names_q) >= B.NOISE_LOOKBACK and prev is not None:
+        if names_q and prev is not None:
             hist_q = [B.Day(n, raw_q[n], None) for n in names_q[-B.NOISE_LOOKBACK:]]
             quotes[qs] = LiveCombo(day, near, prev, hist_q, log, product=code)
             kind = "行情＋模擬單"
