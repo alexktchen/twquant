@@ -17,11 +17,14 @@ import {
   priceAt,
   replayAt,
   roughOpenPnl,
+  SHORT_REASON_TEXT,
   shortAt,
+  shortAvgPct,
   shouldPoll,
   type DayTradeDay,
   type DayTradeHistory,
   type ShortSnapshot,
+  type ShortTrade,
 } from '../src/cloud/daytrade.ts'
 import { tabFromUrl } from '../src/cloud/tabs.ts'
 
@@ -214,4 +217,36 @@ test('T-463 AC2 畫面：盤中與復盤都有「放空記帳（對照）」區�
   assert.match(page, /累積 60 個交易日才判定/)
   const only = normalizeDay({ version: 1, day: '2026-10-31', status: 'live', source: 'fubon_live', updated_at: '2026-10-31T09:15:00+08:00', board_time: '09:15:00', market: day().market, board: [], watch: { in: 0, out: 0 }, board_only: true, short: shortSnap() })
   assert.equal(only.short?.books.A.closed, 2)
+})
+
+// ── T-465：弱勢順勢空（使用者：「不用網友的了」→「沒事，繼續」；規則登記在研究分支 studies/short_paper/PREREGISTRATION_WEAK.md） ──
+function weakTrade(symbol: string, ret: number, net: number): ShortTrade {
+  return {
+    book: 'W', symbol, name: symbol, quantity: 1, signal_time: '09:30:00', entry_time: '09:30:00', entry_price: 100, exit_time: '10:00:00', exit_price: 99,
+    exit_reason: 'VWAP', stop: 101, gross_pnl: 1000, net_pnl: net, net_ret_pct: ret, hedge_pnl: null, net_hedged: null, limit_up_locked: false,
+  }
+}
+
+test('T-465 AC1 舊資料沒有弱勢空：照舊算、不顯示；有的話照那一刻算，回補原因有中文', () => {
+  const old = shortSnap()
+  assert.deepEqual(shortAt(old, 'W', '13:30:00'), { closed: [], holding: [], realized: 0, hedged: null })
+  const s = shortSnap()
+  s.books.W = { name: '弱勢順勢空', trades: [weakTrade('2330', 0.5, 500)], positions: [], realized: 500, open_pnl: 0, closed: 1, wins: 1, realized_hedged: null }
+  assert.deepEqual(shortAt(s, 'W', '09:45:00').holding.map((t) => t.symbol), ['2330'])
+  assert.equal(shortAt(s, 'W', '10:00:00').realized, 500)
+  assert.equal(SHORT_REASON_TEXT.VWAP, '站回均價線')
+})
+
+test('T-465 AC2 平均每筆報酬率不受高價股影響：一張 786 萬的那筆不會蓋過其他筆', () => {
+  assert.equal(shortAvgPct([]), null)
+  assert.equal(shortAvgPct([weakTrade('3443', 2, 163082), weakTrade('6742', -2, -1068)]), 0)
+})
+
+test('T-465 AC3 畫面：有弱勢空才多一格、顯示平均每筆報酬率、白話被擋原因、規則寫明不用網友的程式', () => {
+  const page = read('src/cloud/DayTradePage.tsx')
+  assert.match(page, /\{hasW && <Kpi label="弱勢順勢空"/)
+  assert.match(page, /平均每筆/)
+  assert.match(page, /RISK: '停損太遠'/)
+  assert.match(page, /不用網友的程式/)
+  assert.match(page, /\.\.\.W\.closed/)
 })

@@ -15,7 +15,9 @@ import {
   roughOpenPnl,
   secOf,
   shortAt,
+  shortAvgPct,
   SHORT_REASON_TEXT,
+  type ShortBookKey,
   type ShortSnapshot,
   type ShortTrade,
   shouldPoll,
@@ -200,22 +202,29 @@ function Trades({ trades }: { trades: DayTrade[] }) {
 }
 
 /** 被擋原因的白話（stock_engine.ShortBook.blocked 的代號）。 */
-const BLOCK_TEXT: Record<string, string> = { MARKET_FILTER: '大盤濾網', MAX: '同時上限', ALREADY: '已做過', NEAR_LIMIT_UP: '貼漲停', NOT_SHORTABLE: '不能放空', NO_PRICE: '沒報價' }
+const BLOCK_TEXT: Record<string, string> = { MARKET_FILTER: '大盤濾網', MAX: '同時上限', ALREADY: '已做過', NEAR_LIMIT_UP: '貼漲停', NOT_SHORTABLE: '不能放空', NO_PRICE: '沒報價', RISK: '停損太遠' }
+const SHORT_TAG: Record<ShortBookKey, string> = { A: '失速', B: '過熱', W: '弱勢' }
 const blockedText = (k: string): string => {
   const [book, code] = k.split(':')
-  return `${book === 'A' ? '失速' : '過熱'}・${BLOCK_TEXT[code] ?? code}`
+  return `${SHORT_TAG[book as ShortBookKey] ?? book}・${BLOCK_TEXT[code] ?? code}`
 }
 
-/** 放空記帳（T-463）：A 失速空、B 榜上過熱空（對沖）。cut 給了就照那一刻（復盤），沒給就是現在。 */
+/** 放空記帳（T-463）：A 失速空、B 榜上過熱空（對沖）、W 弱勢順勢空（T-465，舊資料沒有）。cut 給了就照那一刻（復盤），沒給就是現在。 */
 function ShortSection({ s, cut }: { s: ShortSnapshot; cut?: string }) {
-  const at = (book: 'A' | 'B') => (cut ? shortAt(s, book, cut) : { closed: s.books[book].trades, holding: [], realized: s.books[book].realized, hedged: s.books[book].realized_hedged })
+  const at = (book: ShortBookKey) => {
+    const b = s.books[book]
+    return cut || !b ? shortAt(s, book, cut ?? '') : { closed: b.trades, holding: [], realized: b.realized, hedged: b.realized_hedged }
+  }
   const A = at('A')
   const B = at('B')
-  const total = A.realized + (B.hedged ?? B.realized)
+  const W = at('W')
+  const hasW = s.books.W !== undefined
+  const avgW = shortAvgPct(W.closed)
+  const total = A.realized + (B.hedged ?? B.realized) + W.realized
   const row = (t: ShortTrade) => (
     <tr key={`${t.book}-${t.symbol}-${t.entry_time}`}>
       <td>
-        <span className="cq-fu-sleeve short">{t.book === 'A' ? '失速' : '過熱'}</span> {t.name} {t.symbol}
+        <span className="cq-fu-sleeve short">{SHORT_TAG[t.book]}</span> {t.name} {t.symbol}
         <br />
         <small>{t.quantity} 張</small>
       </td>
@@ -241,14 +250,15 @@ function ShortSection({ s, cut }: { s: ShortSnapshot; cut?: string }) {
       </td>
     </tr>
   )
-  const trades = [...A.closed, ...B.closed].sort((a, b) => (a.entry_time < b.entry_time ? -1 : 1))
-  const held = cut ? [...A.holding, ...B.holding] : [...s.books.A.positions, ...s.books.B.positions]
+  const trades = [...A.closed, ...B.closed, ...W.closed].sort((a, b) => (a.entry_time < b.entry_time ? -1 : 1))
+  const held = cut ? [...A.holding, ...B.holding, ...W.holding] : [...s.books.A.positions, ...s.books.B.positions, ...(s.books.W?.positions ?? [])]
   const blocked = Object.entries(s.blocked)
   return (
-    <Section icon={ReceiptText} title="放空記帳（對照）" fold summary={`失速空 ${yuan(A.realized)}・過熱空 ${yuan(B.hedged ?? B.realized)}・合計 ${yuan(total)}`}>
+    <Section icon={ReceiptText} title="放空記帳（對照）" fold summary={`失速空 ${yuan(A.realized)}・過熱空 ${yuan(B.hedged ?? B.realized)}${hasW ? `・弱勢空 ${yuan(W.realized)}` : ''}・合計 ${yuan(total)}`}>
       <div className="cq-tiles cq-fu-tiles">
         <Kpi label="失速空" value={yuan(A.realized)} tone={tone(A.realized)} sub={`${A.closed.length} 筆・${s.books.A.name}`} />
         <Kpi label="過熱空（含對沖）" value={yuan(B.hedged ?? B.realized)} tone={tone(B.hedged ?? B.realized)} sub={`${B.closed.length} 筆・裸空 ${yuan(B.realized)}`} />
+        {hasW && <Kpi label="弱勢順勢空" value={yuan(W.realized)} tone={tone(W.realized)} sub={`${W.closed.length} 筆${avgW === null ? '' : `・平均每筆 ${avgW >= 0 ? '+' : ''}${avgW.toFixed(2)}%`}`} />}
         <Kpi label="大盤濾網" value={s.market_ok ? '可以空' : '不准空'} sub={s.market_ok ? '加權、櫃買低於開盤且跌多漲少' : '要加權、櫃買都低於開盤且跌多漲少'} />
         <Kpi label="抱著" value={`${held.length} 檔`} sub={blocked.length ? `擋掉 ${blocked.map(([k, v]) => `${blockedText(k)} ${v}`).join('、')}` : '沒有被擋的'} />
       </div>
@@ -271,7 +281,9 @@ function ShortSection({ s, cut }: { s: ShortSnapshot; cut?: string }) {
       <p className="cq-fu-foot">
         只記帳不下單，和多單的帳戶分開算。失速空：動能順勢的多單以「動能結構破壞」或「跌破前低」出場的那一刻，放空同一檔，停損在那筆多單的最高價。
         過熱空：股票 10:30 前進榜、漲 3～7% 時放空 1 張，同時記一筆小台多單對沖。兩條都要離漲停 3% 以上、大盤濾網放行才做，逼近漲停強制回補，13:05 全部回補。
-        成本含手續費、當沖稅、借券費。規則與門檻已事前登記，累積 60 個交易日才判定。
+        弱勢順勢空：自己的規則，不用網友的程式。當天成交金額前 500 大、跌 3～7%、比大盤弱 2 個百分點以上，在均價線與均線之下，反彈不過前高後跌破前低就空 1 張；停損在前高，站回均價線或 13:05 回補。
+        每筆固定 1 張，高價股的金額會蓋過其他筆，判定看每筆報酬率。
+        成本含手續費、當沖稅、借券費。規則與門檻都已事前登記，各自累積 60 個交易日才判定。
       </p>
     </Section>
   )
