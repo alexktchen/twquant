@@ -246,6 +246,18 @@ Txxx 的 diff 不得包含 tests/ 變更（`git diff --stat` 檢查）。下表 
 | T-245 | 修掉 D-111／D-112 在前端閘門留下的三處紅燈（`tsc -b` TS6133、Node 單測 AC-201-3、瀏覽器測試停在 AC-206）與一個語意回歸（篩選後為零時分不出「沒有候選」與「候選在別的分組」） | DECISIONS D-118 選項 A | T-227 | — | done（2026-09-19，原編 T-234、PR #74；2026-09-20 併入儀表板分支。**合併時抓到一個 git 沒報的語意衝突**：#79 為了消 TS6133 把 `Filters` 的 `data` 從解構拿掉，本任務則讓 `Filters` 真的用上 `data`，兩邊自動合併後 `tsc -b` 報 TS2304；恢復解構後前端閘門全綠：Node 單測 40 passed、`tsc -b`＋build 通過、瀏覽器 AC 全數 PASS） |
 | T-252 | 今日總覽／ML 選股的 run 卡片加模型資訊卡：人話名稱、一行描述、IC 勝率（口徑同時印出），數字來自 configs/model_catalog.yaml，指紋不符時不顯示數字 | [SPEC-014](docs/specs/SPEC-014-platform-console.md) §10 AC-251-1～3；DECISIONS D-124 | T-206 | — | **done（2026-09-20）**：先寫 13 條 AC 測試、確認 `ModelCatalogConfig` 缺席紅燈後實作。新增 `configs/model_catalog.yaml`（四個模型：排序／已換下／風控閘門／輔助）、`ModelMeasurement`／`ModelCatalogEntry`／`ModelCatalogConfig` 三個 pydantic 模型、`model_info_projection()` 純查表投影、`/api/platform/recommendations` 每個 run 多回一個 `model_info`、前端 `ModelCard` 與 `platform.css` 一段樣式，以及重算工具 `scripts/model_ic_hitrate.py`（用 repo 自己的 `daily_rank_ic`，四個模型重算出的平均逐日 IC 與各自 `meta.json` 的 `oos_rank_ic` 逐位元相同）。**閘門**：`python -m twquant check` 全綠（ruff check／ruff format 229 檔／mypy 229 檔 Success／pytest **1009 passed, 23 skipped**；skip 為無 `TWQUANT_PG_DSN` 的既有 PG 整合測試）。**前端閘門**：`npm run build`（tsc -b + vite）通過、Node 單測 40 passed、瀏覽器測試 PASS（新增 AC-251-1／2 斷言）、oxlint 兩則警告為既有（`IndustriesPage:34`、`RecommendationsPage:76` 的既有 `no-unused-expressions`）。**真資料驗證**：以 dependency_overrides 把資料根指向主 checkout（不改 `system.yaml`）跑 API，9 份快照全部拿到卡片、無 stale；1280px 截圖確認版面、375px 橫向溢出 0px。**刻意不做**：不改 `<h2>` 的 model_id（AC-206 原樣通過）、不在卡片放回測績效（D-107） |
 
+## 發動前訊號研究（2026-09-07 規劃，擱置）
+
+> 2026-11-12 補進版控：這份規劃寫於 2026-09-07，之後沒有接續。原編號 T-158～T-162 與 D-077 跟 main 上其他任務／裁決撞號，已改為 T-469～T-473，D-077 改稱「標籤裁決（當時未建檔）」。後來的事件研究見 DECISIONS.md 的 D-166／D-168（公告與籌碼扣成本後沒有優勢）。
+
+| ID | 任務 | 規格 | 依賴 | 模型 | 狀態 |
+|---|---|---|---|---|---|
+| T-469 | 【研究規劃】價量＋法人＋分點的發動事件模型：特徵語意、歷史資料唯讀盤點、標籤提案、消融比較及驗收契約 | SPEC-015（本輪建立）；標籤裁決（當時未建檔） | 使用者本輪指定；文件與盤點不依賴標籤裁決 | — | 擱置（2026-11-12 補進版控，未接續；原狀態：in_progress（2026-09-07；修改前 `.venv/Scripts/python.exe -m twquant check --fast`：ruff 通過，728 passed／23 skipped；既有 skipped 未修改）） |
+| T-470 | 【ML】發動事件配置與標籤：先完成 標籤裁決（當時未建檔），再按 AC 寫紅測試；本任務不訓練 | [SPEC-015](docs/specs/SPEC-015-prelaunch-research.md) §2／AC-1～3 | T-469；標籤裁決（當時未建檔） | B | 擱置（2026-11-12 補進版控，未接續；原狀態：blocked（標籤裁決（當時未建檔）：標籤與研究範圍待裁決）） |
+| T-471 | 【因子】發動前時間／交互特徵：8 欄、PIT 歷史快照、缺日檢查、反前視；不得把合計買超持續性稱作同分點持續買 | SPEC-015 §3／AC-4～5 | T-470 | B | 擱置（2026-11-12 補進版控，未接續；原狀態：todo） |
+| T-472 | 【研究】共同期間逐月資料閘門、三個分點因子歷史補算，固定 5 候選訓練與 OOS 增量驗證 | SPEC-015 §4～5／AC-6～8 | T-470、T-471、T-150；來源品質問題先另立修補任務 | B | 擱置（2026-11-12 補進版控，未接續；原狀態：todo（本輪實測三個 broker 因子各僅 5 日期；不可直接訓練）） |
+| T-473 | 【回測】通過預測閘門後，事前登記 E vs B 經濟比較，核對成本、成交、曝險與金庫；不自動部署 | SPEC-015 §5／AC-9 | T-472 通過；執行契約與經濟門檻先裁決 | B | 擱置（2026-11-12 補進版控，未接續；原狀態：todo） |
+
 ## 完成紀錄
 
 - **T-069 未結項查明：smoke 0 成交＝衛生濾網誤判農曆年休市**（2026-08-29）
