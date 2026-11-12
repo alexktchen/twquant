@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import Any
 
-from autotrade.broker.base import Broker
+from autotrade.broker.base import Broker, Cancelled, Rejected
 from autotrade.config import Config
 from autotrade.ledger import Ledger
 from autotrade.model import OrderRequest, Side, Tick
@@ -18,13 +20,33 @@ class EndOfDayError(RuntimeError):
     """收盤時還有部位或還有沒結束的委託。"""
 
 
+class RecoveryError(RuntimeError):
+    """從日誌還原狀態時發現不能直接接手的情況。"""
+
+
 @dataclass(frozen=True)
 class Event:
-    """引擎記下的一件事（之後由 journal 落地）。"""
+    """引擎記下的一件事。text 給人看，data 給程式還原狀態用（journal 落地）。"""
 
     ts: datetime
     kind: str
     text: str
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Restored:
+    """從日誌還原出來、要交給引擎接手的狀態。"""
+
+    day: date
+    position: int
+    avg_price: float
+    realized_twd: float
+    costs_twd: float
+    day_start_realized: float
+    entries_today: int
+    halt: str | None
+    open_orders: tuple[str, ...]
 
 
 @dataclass
@@ -37,6 +59,7 @@ class Engine:
     ledger: Ledger = field(init=False)
     risk: RiskManager = field(init=False)
     oms: OrderManager = field(init=False)
+    sink: Callable[[Event], None] | None = None
     events: list[Event] = field(default_factory=list)
     _day: date | None = None
     _day_start_realized: float = 0.0
@@ -48,8 +71,30 @@ class Engine:
         self.risk = RiskManager(self.cfg.risk)
         self.oms = OrderManager()
 
-    def _log(self, ts: datetime, kind: str, text: str) -> None:
-        self.events.append(Event(ts, kind, text))
+    def _log(self, ts: datetime, kind: str, text: str, **data: Any) -> None:
+        event = Event(ts, kind, text, data)
+        self.events.append(event)
+        if self.sink is not None:
+            self.sink(event)
+
+    def restore(self, state: Restored) -> None:
+        """接手從日誌還原的狀態。還有結果不明的委託就拒絕，要先到券商確認。"""
+        if state.open_orders:
+            raise RecoveryError(
+                f"日誌裡有結果不明的委託 {list(state.open_orders)}，先到券商確認成交或刪單再啟動"
+            )
+        if self.events or self.ledger.fills:
+            raise RecoveryError("引擎已經開始運作，不能再還原狀態")
+        self.ledger.position = state.position
+        self.ledger.avg_price = state.avg_price
+        self.ledger.realized_twd = state.realized_twd
+        self.ledger.costs_twd = state.costs_twd
+        self.risk.day = state.day
+        self.risk.entries_today = state.entries_today
+        self.risk.halt = state.halt
+        self._day = state.day
+        self._day_start_realized = state.day_start_realized
+        self.ledger.reconcile(self.broker.position())
 
     def day_pnl(self, last_price: float) -> float:
         """當日損益：當日已實現＋未實現。"""
@@ -65,16 +110,26 @@ class Engine:
             return False
         order_id = self.broker.submit(req)
         self.oms.add(order_id, req)
-        if not is_reducing(exposure, req.signed_qty):
+        entry = not is_reducing(exposure, req.signed_qty)
+        if entry:
             self.risk.on_entry_sent()
-        self._log(now, "order", f"{order_id} {req.side.name} {req.qty} 口 {req.reason}".rstrip())
+        self._log(
+            now,
+            "order",
+            f"{order_id} {req.side.name} {req.qty} 口 {req.reason}".rstrip(),
+            order_id=order_id,
+            side=req.side.name,
+            qty=req.qty,
+            limit_price=req.limit_price,
+            entry=entry,
+        )
         return True
 
     def _cancel(self, order_id: str, now: datetime, why: str) -> None:
         if order_id not in self._cancel_sent:
             self._cancel_sent.add(order_id)
             self.broker.cancel(order_id)
-            self._log(now, "cancel", f"{order_id} 刪單：{why}")
+            self._log(now, "cancel", f"{order_id} 刪單：{why}", order_id=order_id)
 
     def _flatten(self, now: datetime, why: str) -> None:
         """刪掉還沒成交的新倉單，並把部位平掉。"""
@@ -96,8 +151,13 @@ class Engine:
     def kill(self, now: datetime) -> None:
         """緊急停止：停手並平倉，要人工解除。"""
         self.risk.kill()
-        self._log(now, "halt", "緊急停止")
+        self._log(now, "halt", "緊急停止", halt=self.risk.halt)
         self._flatten(now, "緊急停止")
+
+    def release_kill(self, now: datetime) -> None:
+        """人工解除緊急停止。"""
+        self.risk.release_kill()
+        self._log(now, "release", "解除緊急停止", halt=self.risk.halt)
 
     def on_tick(self, tick: Tick) -> None:
         """處理一筆行情。"""
@@ -115,9 +175,25 @@ class Engine:
                 self.ledger.apply(fill)
                 self.strategy.on_fill(fill)
                 self._log(
-                    now, "fill", f"{event.order_id} {fill.side.name} {fill.qty} 口 {fill.price}"
+                    now,
+                    "fill",
+                    f"{event.order_id} {fill.side.name} {fill.qty} 口 {fill.price}",
+                    order_id=event.order_id,
+                    symbol=fill.symbol,
+                    side=fill.side.name,
+                    qty=fill.qty,
+                    price=fill.price,
                 )
                 got_fill = True
+            elif isinstance(event, Cancelled):
+                self._log(now, "cancelled", f"{event.order_id} 已刪單", order_id=event.order_id)
+            elif isinstance(event, Rejected):
+                self._log(
+                    now,
+                    "broker_reject",
+                    f"{event.order_id} 被券商拒絕：{event.reason}",
+                    order_id=event.order_id,
+                )
         if got_fill:
             self.ledger.reconcile(self.broker.position())
 
@@ -128,6 +204,7 @@ class Engine:
                 now,
                 "halt",
                 f"停手（{self.risk.halt}）：當日損益 {self.day_pnl(tick.price):+.0f} 元",
+                halt=self.risk.halt,
             )
 
         for order in self.oms.stale(now, self.cfg.risk.order_timeout_s):
@@ -138,7 +215,9 @@ class Engine:
             if exit_order:
                 # 平倉單卡住代表券商或連線有問題：停手，刪單回報後由 _flatten 重送市價平倉
                 self.risk.kill()
-                self._log(now, "halt", f"平倉單 {order.order_id} 逾時，緊急停止")
+                self._log(
+                    now, "halt", f"平倉單 {order.order_id} 逾時，緊急停止", halt=self.risk.halt
+                )
 
         if self.risk.halt is not None:
             self._flatten(now, f"停手（{self.risk.halt}）")

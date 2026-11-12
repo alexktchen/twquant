@@ -30,7 +30,7 @@
 | `oms` | 委託狀態機：送出、回報、部分成交、逾時、刪單 | 完成（A-002） |
 | `feed.replay` | 用期交所逐筆檔重播一天 | 完成（A-002） |
 | `engine`＋`cli` | 把行情、策略、風控、委託、帳務接起來；指令列 | 完成（A-002） |
-| `journal` | 只增不改的事件日誌（雜湊鏈），當機後可重建狀態 | A-003 |
+| `journal` | 只增不改的事件日誌（雜湊鏈），當機後可重建狀態 | 完成（A-003） |
 | `strategy.momentum` | 動能順勢轉接；跟現有模擬單逐筆比對一筆不差 | A-004 |
 | `export` | 把狀態單向寫給 twquant 網站 | A-005 |
 | `notify` | 成交與異常通知手機 | A-006 |
@@ -79,14 +79,28 @@
 - **AC10 緊急停止**：`Engine.kill` 平倉並停手；換日後仍然停手。
 - **AC11 指令列**：`python -m autotrade replay` 用模擬券商重播一天並印出摘要；`check-config` 驗證設定檔。
 
+### A-003 事件日誌與狀態還原
+
+- **AC1 只增不改**：每筆一列 JSON，帶序號、時間、種類、內容、前一筆的雜湊與自己的雜湊；
+  每筆寫完就 flush 並 fsync；重新開檔會先驗證既有內容再接著寫。
+- **AC2 竄改與損毀偵測**：改掉任何一筆的內容、少掉一筆、最後一筆只寫到一半，讀取時 raise 並指出列號。
+  不自動修復：當機寫到一半的檔案由人看過再處理。
+- **AC3 時區**：naive datetime 寫不進日誌。
+- **AC4 還原等於現場**：在任何時點由日誌還原的部位、均價、已實現損益、成本、當日進場次數、
+  停手狀態、當日起始損益、活著的委託，都跟當時運作中的引擎一樣（屬性測試，跨三個交易日）。
+- **AC5 接手**：`Engine.restore` 接手還原的狀態並跟券商部位對帳；
+  日誌裡有結果不明的委託、券商部位對不上、或引擎已經開始運作，一律拒絕。
+- **AC6 停手狀態跨重啟**：緊急停止重啟後、換日後仍然有效，要人工解除；每日虧損造成的停手只在當天有效。
+- **AC7 指令列**：`replay --journal <檔案>` 把事件寫進日誌；`verify-journal <檔案>` 驗證雜湊鏈。
+
 ## 5. 風控總表（D-222）
 
 | 項目 | 在哪裡 |
 |---|---|
 | 口數上限、只做多 | `risk`（AC3） |
 | 每日虧損上限、進場次數 | `risk`（AC4、AC6）；金額使用者還沒定，真單模式沒設就不能啟動（AC8） |
-| 成交後與收盤對帳 | `ledger.reconcile`（A-001 AC2）＋`engine`（A-002 AC7）。啟動時對帳等接上真券商（A-009） |
-| 緊急停止 | `Engine.kill`（A-002 AC10）。從另一個視窗下指令停止要等 A-007 |
+| 成交後與收盤對帳 | `ledger.reconcile`（A-001 AC2）＋`engine`（A-002 AC7）；重啟接手時對帳（A-003 AC5）。跟元大實際查部位等 A-009 |
+| 緊急停止 | `Engine.kill`（A-002 AC10）；重啟後仍然有效（A-003 AC6）。從另一個視窗下指令停止要等 A-007 |
 | 程式盯價停損＋獨立看門程式 | `watchdog`（A-007）。元大國內期貨沒有停損單 |
 | 通知手機 | `notify`（A-006） |
 | 強制平倉時間、收盤確認部位為 0 | `engine`（A-002 AC5、AC7） |
@@ -106,4 +120,8 @@ PYTHONPATH=src python -m autotrade check-config configs/tmf_sim.toml
 PYTHONPATH=src python -m autotrade replay --config configs/tmf_sim.toml --ticks <期交所 Daily_*.csv> --day 2026-11-13 --strategy none
 ```
 
-`--strategy` 目前只有 `none`（不下單，只檢查接線）；動能順勢在 A-004 接上。
+```bash
+PYTHONPATH=src python -m autotrade verify-journal <日誌檔>
+```
+
+`replay` 加 `--journal <絕對路徑>` 會把事件寫進日誌。`--strategy` 目前只有 `none`（不下單，只檢查接線）；動能順勢在 A-004 接上。
