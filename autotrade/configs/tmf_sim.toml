@@ -1,0 +1,18 @@
+# 微台（TMF）模擬用設定。真單另開一份，mode = "live" 且一定要設 daily_loss_limit_twd。
+mode = "sim"
+
+[contract]
+symbol = "TMF"
+point_value = 10.0       # 微型臺指一點 10 元
+commission_twd = 10.0    # 每口單邊手續費；待使用者填元大實際費率
+tax_rate = 0.00002       # 期交稅：契約價值的十萬分之二
+
+[risk]
+min_position = 0         # 只做多
+max_position = 1         # 最多 1 口
+max_order_qty = 1
+max_entries_per_day = 6  # 待定：對照動能順勢原版的每日進場上限後再改
+entry_start = "08:45:00"
+entry_end = "13:00:00"   # 原版 13:00 清倉，之後不進場
+max_quote_age_s = 5.0
+# daily_loss_limit_twd = 待使用者決定（D-222）；模擬可不設，真單沒設會拒絕啟動
