@@ -20,6 +20,12 @@ class Decision:
     reason: str = ""
 
 
+def is_reducing(position: int, signed_qty: int) -> bool:
+    """這筆委託是不是只會減少部位（不反手、不加碼）。"""
+    after = position + signed_qty
+    return abs(after) < abs(position) and after * position >= 0
+
+
 @dataclass
 class RiskManager:
     """單一商品的風控狀態。"""
@@ -71,8 +77,7 @@ class RiskManager:
                 False,
                 f"送出後部位 {after} 口超出範圍 {self.cfg.min_position}～{self.cfg.max_position}",
             )
-        reducing = abs(after) < abs(position) and after * position >= 0
-        if reducing:
+        if is_reducing(position, req.signed_qty):
             return Decision(True)
         if self.halt is not None:
             return Decision(False, f"停手中（{self.halt}），只接受平倉")

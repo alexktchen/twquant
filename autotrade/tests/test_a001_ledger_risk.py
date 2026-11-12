@@ -27,6 +27,8 @@ def risk_cfg(limit: float | None = 1000.0) -> RiskConfig:
         entry_start=time(8, 45),
         entry_end=time(13, 0),
         max_quote_age_s=5.0,
+        force_flat_time=time(13, 30),
+        order_timeout_s=10.0,
         daily_loss_limit_twd=limit,
     )
 
@@ -153,7 +155,11 @@ def raw_config(mode: str) -> dict[str, object]:
             "entry_start": "08:45:00",
             "entry_end": "13:00:00",
             "max_quote_age_s": 5.0,
+            "force_flat_time": "13:30:00",
+            "order_timeout_s": 10.0,
         },
+        "session": {"start": "08:45:00", "end": "13:45:00"},
+        "sim": {"latency_s": 0.5, "slippage_points": 1.0},
     }
 
 

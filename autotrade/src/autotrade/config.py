@@ -36,7 +36,25 @@ class RiskConfig:
     entry_start: time
     entry_end: time
     max_quote_age_s: float
+    force_flat_time: time  # 這個時間之後還有部位就由系統強制平倉
+    order_timeout_s: float  # 委託送出後超過這麼久沒成交就刪單
     daily_loss_limit_twd: float | None
+
+
+@dataclass(frozen=True)
+class SessionConfig:
+    """一般交易時段。"""
+
+    start: time
+    end: time
+
+
+@dataclass(frozen=True)
+class SimConfig:
+    """模擬券商的成交假設。"""
+
+    latency_s: float  # 送出後過這麼久的第一筆行情才成交
+    slippage_points: float  # 市價單每邊滑價幾點
 
 
 @dataclass(frozen=True)
@@ -46,6 +64,8 @@ class Config:
     mode: str
     contract: ContractConfig
     risk: RiskConfig
+    session: SessionConfig
+    sim: SimConfig
 
 
 def _need(table: dict[str, Any], key: str, where: str) -> Any:
@@ -70,6 +90,8 @@ def parse_config(raw: dict[str, Any]) -> Config:
         raise ConfigError(f"mode 要是 {MODES} 其中之一，拿到 {mode!r}")
     c = _need(raw, "contract", "根")
     r = _need(raw, "risk", "根")
+    se = _need(raw, "session", "根")
+    si = _need(raw, "sim", "根")
     contract = ContractConfig(
         symbol=str(_need(c, "symbol", "contract")),
         point_value=float(_need(c, "point_value", "contract")),
@@ -85,8 +107,28 @@ def parse_config(raw: dict[str, Any]) -> Config:
         entry_start=_clock(_need(r, "entry_start", "risk"), "risk.entry_start"),
         entry_end=_clock(_need(r, "entry_end", "risk"), "risk.entry_end"),
         max_quote_age_s=float(_need(r, "max_quote_age_s", "risk")),
+        force_flat_time=_clock(_need(r, "force_flat_time", "risk"), "risk.force_flat_time"),
+        order_timeout_s=float(_need(r, "order_timeout_s", "risk")),
         daily_loss_limit_twd=None if limit is None else float(limit),
     )
+    session = SessionConfig(
+        start=_clock(_need(se, "start", "session"), "session.start"),
+        end=_clock(_need(se, "end", "session"), "session.end"),
+    )
+    sim = SimConfig(
+        latency_s=float(_need(si, "latency_s", "sim")),
+        slippage_points=float(_need(si, "slippage_points", "sim")),
+    )
+    if session.start >= session.end:
+        raise ConfigError(f"交易時段起點要早於終點：{session.start} ~ {session.end}")
+    if sim.latency_s < 0 or sim.slippage_points < 0:
+        raise ConfigError(f"sim 的延遲與滑價不能是負的：{sim}")
+    if risk.order_timeout_s <= 0:
+        raise ConfigError(f"risk.order_timeout_s 要大於 0：{risk.order_timeout_s}")
+    if not risk.entry_end <= risk.force_flat_time <= session.end:
+        raise ConfigError(
+            f"強制平倉時間要在進場終點與收盤之間：{risk.entry_end} ≤ {risk.force_flat_time} ≤ {session.end}"
+        )
     if contract.point_value <= 0 or contract.commission_twd < 0 or contract.tax_rate < 0:
         raise ConfigError(f"contract 的數值不合理：{contract}")
     if not risk.min_position <= 0 <= risk.max_position:
@@ -99,7 +141,7 @@ def parse_config(raw: dict[str, Any]) -> Config:
         raise ConfigError(f"每日虧損上限要是正數（元）：{risk.daily_loss_limit_twd}")
     if mode == "live" and risk.daily_loss_limit_twd is None:
         raise ConfigError('真單模式（mode = "live"）一定要設 [risk] daily_loss_limit_twd')
-    return Config(mode=mode, contract=contract, risk=risk)
+    return Config(mode=mode, contract=contract, risk=risk, session=session, sim=sim)
 
 
 def load_config(path: Path) -> Config:

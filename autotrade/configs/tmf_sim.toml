@@ -15,4 +15,14 @@ max_entries_per_day = 6  # 待定：對照動能順勢原版的每日進場上�
 entry_start = "08:45:00"
 entry_end = "13:00:00"   # 原版 13:00 清倉，之後不進場
 max_quote_age_s = 5.0
+force_flat_time = "13:30:00"  # 原版 13:00 自己清倉；這是系統的最後防線
+order_timeout_s = 10.0
 # daily_loss_limit_twd = 待使用者決定（D-222）；模擬可不設，真單沒設會拒絕啟動
+
+[session]
+start = "08:45:00"
+end = "13:45:00"
+
+[sim]
+latency_s = 0.5          # 跟現有模擬單同一個假設：訊號後 0.5 秒的第一筆成交
+slippage_points = 1.0    # 市價單每邊滑 1 點
