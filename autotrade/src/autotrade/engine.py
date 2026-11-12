@@ -64,6 +64,7 @@ class Engine:
     _day: date | None = None
     _day_start_realized: float = 0.0
     _cancel_sent: set[str] = field(default_factory=set)
+    _strategy_orders: dict[str, OrderRequest] = field(default_factory=dict)
     _last: Tick | None = None
 
     def __post_init__(self) -> None:
@@ -102,14 +103,18 @@ class Engine:
             self.ledger.realized_twd - self._day_start_realized + self.ledger.open_pnl(last_price)
         )
 
-    def _submit(self, req: OrderRequest, now: datetime) -> bool:
+    def _submit(self, req: OrderRequest, now: datetime, from_strategy: bool = False) -> bool:
         exposure = self.ledger.position + self.oms.pending_signed_qty()
         decision = self.risk.check(req, exposure, now)
         if not decision.allowed:
             self._log(now, "reject", f"風控擋下 {req.side.name} {req.qty} 口：{decision.reason}")
+            if from_strategy:
+                self.strategy.on_reject(req, decision.reason)
             return False
         order_id = self.broker.submit(req)
         self.oms.add(order_id, req)
+        if from_strategy:
+            self._strategy_orders[order_id] = req
         entry = not is_reducing(exposure, req.signed_qty)
         if entry:
             self.risk.on_entry_sent()
@@ -187,6 +192,8 @@ class Engine:
                 got_fill = True
             elif isinstance(event, Cancelled):
                 self._log(now, "cancelled", f"{event.order_id} 已刪單", order_id=event.order_id)
+                if event.order_id in self._strategy_orders:
+                    self.strategy.on_reject(self._strategy_orders[event.order_id], "已刪單")
             elif isinstance(event, Rejected):
                 self._log(
                     now,
@@ -194,6 +201,8 @@ class Engine:
                     f"{event.order_id} 被券商拒絕：{event.reason}",
                     order_id=event.order_id,
                 )
+                if event.order_id in self._strategy_orders:
+                    self.strategy.on_reject(self._strategy_orders[event.order_id], event.reason)
         if got_fill:
             self.ledger.reconcile(self.broker.position())
 
@@ -225,7 +234,7 @@ class Engine:
             self._flatten(now, "強制平倉時間")
 
         for req in self.strategy.on_tick(tick, self.ledger.position):
-            self._submit(req, now)
+            self._submit(req, now, from_strategy=True)
 
     def finish(self) -> dict[str, float | int]:
         """收盤：確認沒有部位、沒有活著的委託，回傳當日摘要。"""

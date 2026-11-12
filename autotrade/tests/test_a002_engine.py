@@ -47,6 +47,7 @@ class Scripted:
     plan: dict[int, Side]
     seen: int = 0
     fills: list[Fill] = field(default_factory=list)
+    rejects: list[str] = field(default_factory=list)
 
     def on_tick(self, tick: Tick, position: int) -> list[OrderRequest]:
         side = self.plan.get(self.seen)
@@ -57,6 +58,9 @@ class Scripted:
 
     def on_fill(self, fill: Fill) -> None:
         self.fills.append(fill)
+
+    def on_reject(self, req: OrderRequest, reason: str) -> None:
+        self.rejects.append(reason)
 
 
 def run(strategy: Scripted, ticks: list[Tick], config: Config | None = None) -> Engine:
@@ -123,6 +127,7 @@ def test_ac3_pending_orders_count_toward_position_limit() -> None:
     engine = run(Scripted({0: Side.BUY, 1: Side.BUY}), [tick(0), tick(0.1), tick(1.0), tick(2.0)])
     assert engine.ledger.position == 1
     assert kinds(engine).count("order") == 1 and kinds(engine).count("reject") == 1
+    assert len(engine.strategy.rejects) == 1  # type: ignore[attr-defined]
 
 
 def test_ac3_invariant_position_within_limits_under_random_orders() -> None:
@@ -208,12 +213,13 @@ def test_ac6_stale_exit_triggers_kill_and_market_flatten() -> None:
     engine.ledger.apply(Fill(ts=T0, symbol=SYMBOL, side=Side.BUY, qty=1, price=27000.0))
     broker.inner._position = 1
     engine.on_tick(tick(0))
-    engine._submit(req(Side.SELL), tick(0).ts)
+    engine._submit(req(Side.SELL), tick(0).ts, from_strategy=True)
     engine.on_tick(tick(11))
     assert engine.risk.halt == HALT_KILL and "cancel" in kinds(engine)
     engine.on_tick(tick(12))
     states = [o.state for o in engine.oms.orders.values()]
     assert states[0] == OrderState.CANCELLED and len(states) == 2
+    assert engine.strategy.rejects == ["已刪單"]  # type: ignore[attr-defined]
 
 
 def test_ac7_finish_raises_with_open_position_and_on_broker_mismatch() -> None:

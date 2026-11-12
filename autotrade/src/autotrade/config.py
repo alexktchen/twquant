@@ -58,6 +58,16 @@ class SimConfig:
 
 
 @dataclass(frozen=True)
+class MomentumConfig:
+    """動能順勢轉接的參數（策略本身的參數用原版預設值，不在這裡）。"""
+
+    eval_interval_s: float  # 每隔多久評估一次訊號
+    market_refresh_s: float  # 大盤 context 多久重建一次
+    expected_slippage_points: float  # 送單前驗證用的預估成交價＝現價＋這個點數
+    contracts: int  # 每次進場幾口
+
+
+@dataclass(frozen=True)
 class Config:
     """整份設定。"""
 
@@ -66,6 +76,7 @@ class Config:
     risk: RiskConfig
     session: SessionConfig
     sim: SimConfig
+    momentum: MomentumConfig | None = None
 
 
 def _need(table: dict[str, Any], key: str, where: str) -> Any:
@@ -141,7 +152,26 @@ def parse_config(raw: dict[str, Any]) -> Config:
         raise ConfigError(f"每日虧損上限要是正數（元）：{risk.daily_loss_limit_twd}")
     if mode == "live" and risk.daily_loss_limit_twd is None:
         raise ConfigError('真單模式（mode = "live"）一定要設 [risk] daily_loss_limit_twd')
-    return Config(mode=mode, contract=contract, risk=risk, session=session, sim=sim)
+    momentum = None
+    if "momentum" in raw:
+        m = raw["momentum"]
+        momentum = MomentumConfig(
+            eval_interval_s=float(_need(m, "eval_interval_s", "momentum")),
+            market_refresh_s=float(_need(m, "market_refresh_s", "momentum")),
+            expected_slippage_points=float(_need(m, "expected_slippage_points", "momentum")),
+            contracts=int(_need(m, "contracts", "momentum")),
+        )
+        if momentum.eval_interval_s <= 0 or momentum.market_refresh_s <= 0:
+            raise ConfigError(f"momentum 的間隔要大於 0：{momentum}")
+        if momentum.expected_slippage_points < 0:
+            raise ConfigError(f"momentum.expected_slippage_points 不能是負的：{momentum}")
+        if not 0 < momentum.contracts <= risk.max_order_qty:
+            raise ConfigError(
+                f"momentum.contracts={momentum.contracts} 要在 1～risk.max_order_qty={risk.max_order_qty}"
+            )
+    return Config(
+        mode=mode, contract=contract, risk=risk, session=session, sim=sim, momentum=momentum
+    )
 
 
 def load_config(path: Path) -> Config:

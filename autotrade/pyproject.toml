@@ -20,6 +20,7 @@ packages = ["src/autotrade"]
 src = ["src", "tests"]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["reference"]  # 原封不動的對照基準，不重排
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "BLE"]
@@ -31,8 +32,12 @@ strict = true
 files = ["src", "tests"]
 mypy_path = "src"
 
+[[tool.mypy.overrides]]
+module = "reference.*"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = "-q --strict-markers"
 filterwarnings = ["error"]

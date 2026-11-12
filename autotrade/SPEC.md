@@ -31,7 +31,7 @@
 | `feed.replay` | 用期交所逐筆檔重播一天 | 完成（A-002） |
 | `engine`＋`cli` | 把行情、策略、風控、委託、帳務接起來；指令列 | 完成（A-002） |
 | `journal` | 只增不改的事件日誌（雜湊鏈），當機後可重建狀態 | 完成（A-003） |
-| `strategy.momentum` | 動能順勢轉接；跟現有模擬單逐筆比對一筆不差 | A-004 |
+| `strategy.momentum` | 動能順勢轉接；跟現有模擬單逐筆比對一筆不差 | 程式完成（A-004）；**真實比對還沒跑**（AC10） |
 | `export` | 把狀態單向寫給 twquant 網站 | A-005 |
 | `notify` | 成交與異常通知手機 | A-006 |
 | `watchdog` | 獨立看門程式：沒心跳、行情停住、部位不符就平倉並停手 | A-007 |
@@ -93,6 +93,26 @@
 - **AC6 停手狀態跨重啟**：緊急停止重啟後、換日後仍然有效，要人工解除；每日虧損造成的停手只在當天有效。
 - **AC7 指令列**：`replay --journal <檔案>` 把事件寫進日誌；`verify-journal <檔案>` 驗證雜湊鏈。
 
+### A-004 動能順勢轉接
+
+原版程式（seromitama/Momentum_Scalping，commit 1dea51b）不放進 repo，執行時從資料夾載入。
+比對基準是 `reference/day_engine.py`：研究分支 `futures_replay.py` 的 DayEngine 原封不動抽出，
+現有模擬單跑的就是它。**基準不可修改。**
+
+- **AC1 逐筆相同**：同一份行情下，autotrade（轉接＋模擬券商＋帳務）的每筆進場時間與價格、出場時間與價格、
+  出場原因、淨損益，以及訊號與擋下原因的計數，都跟對照引擎相同；帳上已實現損益等於對照引擎各筆淨損益合計；
+  過程中 autotrade 的風控沒有擋單、沒有停手。用假訊號跑 5 個隨機交易日，且假訊號確實走到每一條帳戶規則。
+- **AC2 換日**：換日時清掉原版的快取與當日計數；連跑兩天各自等於對照引擎。
+- **AC3 退單**：委託被風控擋下、被券商拒絕或被刪單時，策略放掉在途狀態，之後照常評估。
+- **AC4 系統強制平倉**：緊急停止把部位平掉後，策略自己記的部位也歸零，該筆記為 `SYSTEM_FLATTEN`。
+- **AC5 狀態對不上就停**：策略記的部位跟實際部位不同、收到沒有對應委託的買進成交、沒部位卻收到賣出成交，一律 raise。
+- **AC6 時間換算**：時間轉微秒用整數運算，不經過浮點數。
+- **AC7 載入原版**：從資料夾找各模組的最新版號並用預設參數；資料夾不存在或缺模組就 raise。
+- **AC8 設定**：`[momentum]` 的間隔、預估滑價、口數會驗證；口數不得超過單筆上限。
+- **AC9 指令列**：`replay --strategy momentum` 沒給 `--ms-repo` 就報錯。
+- **AC10 真實比對（未完成）**：用真的網友原版，在使用者電腦上跑 `tools/parity_momentum.py`，
+  至少 5 個有成交的交易日全部一致。雲端不允許執行外部 repo 的程式，所以這條還沒跑。
+
 ## 5. 風控總表（D-222）
 
 | 項目 | 在哪裡 |
@@ -124,4 +144,11 @@ PYTHONPATH=src python -m autotrade replay --config configs/tmf_sim.toml --ticks 
 PYTHONPATH=src python -m autotrade verify-journal <日誌檔>
 ```
 
-`replay` 加 `--journal <絕對路徑>` 會把事件寫進日誌。`--strategy` 目前只有 `none`（不下單，只檢查接線）；動能順勢在 A-004 接上。
+`replay` 加 `--journal <絕對路徑>` 會把事件寫進日誌。`--strategy` 有 `none`（不下單，只檢查接線）與
+`momentum`（動能順勢，要加 `--ms-repo <網友原版的資料夾>`）。
+
+動能順勢跟現有模擬單的逐筆比對：
+
+```bash
+python tools/parity_momentum.py --ms-repo C:/t/Momentum_Scalping --config configs/tmf_sim.toml --ticks <期交所 Daily_*.csv> --day 2026-11-12
+```

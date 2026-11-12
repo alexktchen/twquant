@@ -39,6 +39,7 @@ class Scripted:
     plan: dict[int, Side]
     seen: int = 0
     fills: list[Fill] = field(default_factory=list)
+    rejects: list[str] = field(default_factory=list)
 
     def on_tick(self, tick: Tick, position: int) -> list[OrderRequest]:
         side = self.plan.get(self.seen)
@@ -49,6 +50,9 @@ class Scripted:
 
     def on_fill(self, fill: Fill) -> None:
         self.fills.append(fill)
+
+    def on_reject(self, req: OrderRequest, reason: str) -> None:
+        self.rejects.append(reason)
 
 
 def test_ac1_append_read_and_reopen(tmp_path: Path) -> None:
@@ -151,10 +155,9 @@ def test_ac5_restore_takes_over_and_refuses_unsafe_states(tmp_path: Path) -> Non
     for t in [tick(2), tick(3, 27050.0), tick(4, 27050.0)]:
         second.on_tick(t)
     assert second.ledger.position == 0
-    assert (
-        second.finish()["realized_twd"]
-        == first.ledger.realized_twd + (27049.0 - 27001.0) * 10 - 15.0
-    )
+    exit_cost = config.contract.commission_twd + 5  # 手續費＋期交稅 round(27049×10×0.00002)＝5
+    expected = first.ledger.realized_twd + (27049.0 - 27001.0) * 10 - exit_cost
+    assert second.finish()["realized_twd"] == expected
     with pytest.raises(RecoveryError, match="已經開始運作"):
         second.restore(state)
 

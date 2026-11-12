@@ -15,7 +15,11 @@ class Strategy(Protocol):
         ...
 
     def on_fill(self, fill: Fill) -> None:
-        """自己的委託成交了。"""
+        """有成交（策略自己的委託，或系統強制平倉的委託）。"""
+        ...
+
+    def on_reject(self, req: OrderRequest, reason: str) -> None:
+        """策略送的委託沒有送出去或被刪掉了（風控擋下、券商拒絕、逾時刪單）。"""
         ...
 
 
@@ -29,3 +33,7 @@ class NullStrategy:
     def on_fill(self, fill: Fill) -> None:
         """不會有成交。"""
         raise RuntimeError(f"NullStrategy 不送單，卻收到成交：{fill!r}")
+
+    def on_reject(self, req: OrderRequest, reason: str) -> None:
+        """不會有委託。"""
+        raise RuntimeError(f"NullStrategy 不送單，卻收到退單：{req!r}")
