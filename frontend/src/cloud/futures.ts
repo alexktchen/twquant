@@ -7,6 +7,8 @@
 
 // T-464（使用者 2026-10-30：「網友策略改名字變好聽點的，然後做成標籤，然後把噪音區拿掉」）：
 // 網友原版在網站上叫「動能順勢」（資料裡的鍵 ms／MS_LONG 不變）；噪音區拿掉，固定組合只剩晨光突破，所以改叫「晨光突破」。
+import type { FuturesExtras } from './futures-extras'
+
 /** 兩個策略：動能順勢（主，只做多）、晨光突破（輔助，只做多）。 */
 export type Strategy = 'combo' | 'ms'
 export const STRATEGY_NAME: Record<Strategy, string> = { combo: '晨光突破', ms: '動能順勢' }
@@ -105,6 +107,8 @@ export type FuturesDay = {
   commission?: number
   /** 網友原版（T-456）：2026-10-28 晚上之後上傳的才有 */
   ms?: Netizen | null
+  /** 對照策略（T-467）：舊資料沒有 */
+  extras?: FuturesExtras | null
 }
 
 /** total＝固定組合的合計、ms_total＝網友原版的合計（那天的資料沒有網友原版 → null）。 */

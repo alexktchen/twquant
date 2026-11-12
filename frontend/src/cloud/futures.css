@@ -150,3 +150,15 @@
   .cq-fu-flow-cols { grid-template-columns: 1fr; }
   .cq-fu-flow-chart { height: 150px; }
 }
+/* T-467 檢討單與對照策略 */
+.cq-fu-journal-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px 10px; margin-bottom: 10px; }
+.cq-fu-journal-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; color: var(--mute); }
+.cq-fu-journal-form input:not([type='checkbox']), .cq-fu-journal-form select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 15px; min-width: 0; }
+.cq-fu-journal-form .cq-fu-journal-check { flex-direction: row; align-items: center; gap: 8px; font-size: 15px; color: var(--text); }
+.cq-fu-journal-form .cq-fu-journal-note { grid-column: 1 / -1; }
+.cq .cq-fu-journal-save { grid-column: 1 / -1; min-height: 44px; border-radius: 8px; background: var(--accent); color: #111; font-weight: 700; }
+.cq .cq-fu-journal-save:disabled { opacity: .45; cursor: default; }
+.cq-fu-extra-log { margin: 6px 0 0; padding-left: 16px; font-size: 13.5px; line-height: 1.6; }
+/* 這幾張表的第 4 欄是損益或刪除鈕，手機也要看得到 */
+@media (max-width: 820px) { .cq-fu-trades-all th:nth-child(4), .cq-fu-trades-all td:nth-child(4) { display: table-cell; } }
+.cq-fu-trades-all td:first-child { white-space: nowrap; }

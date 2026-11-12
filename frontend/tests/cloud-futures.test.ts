@@ -708,7 +708,7 @@ test('T-464 AC1 噪音區拿掉：固定組合只剩晨光突破；舊日子資�
   for (const f of ['functions/api/futures/days.ts', 'functions/api/futures/quotes/days.ts'])
     assert.match(read(f), /payload->'sleeves'->'ORB_LONG'->>'realized'/, f) // 日曆的晨光突破不含舊的噪音區
   assert.doesNotMatch(page, /noiseLb|noise_lb|噪音區下緣/)
-  assert.match(page, /噪音區放空 2026-10-30 起不再顯示也不再記/)
+  assert.match(page, /噪音區改名區間突圍/) // T-467：使用者要求放回對照區，主帳仍不含
 })
 
 test('T-464 AC2 改名與標籤：網友原版在畫面上叫「動能順勢」（資料鍵 ms／MS_LONG 不變）、圖上標「動能」；時間軸與提示列的策略名是 badge', () => {

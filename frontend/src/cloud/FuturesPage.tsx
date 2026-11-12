@@ -105,6 +105,7 @@ import {
   type SleeveState,
   type Strategy,
 } from './futures'
+import { ExtrasSection, JournalSection } from './FuturesExtras'
 import { Kpi, Section } from './Section'
 import './futures.css'
 
@@ -1065,13 +1066,15 @@ function PaperBody({ data, secs, player, mode, now, refresh }: BodyProps) {
       >
         <Trades trades={done} />
       </Section>
+      {data.extras && <ExtrasSection x={data.extras} cut={mode === 'replay' ? cut : ''} />}
+      <JournalSection day={data.day} />
       <Section icon={BookOpen} title="規則與成本" fold summary="只記帳、不下單">
         <p className="cq-fu-foot">
           <b>以動能順勢為主</b>：上面的數字、圖上彩色的買賣點、成交明細、日曆預設都是動能順勢（只做多 1 口）。
           晨光突破是輔助對照：圖上灰色的買賣點、「各策略」下半段、收起的「晨光突破成交」、日曆可切。還沒有動能順勢資料的舊日子，上面的數字看晨光突破。
         </p>
         <p className="cq-fu-foot">
-          <b>晨光突破</b>（小台、大台、微台同一套）：開盤 5 分鐘收紅才做多，停損在那 5 分鐘低點、停利 10 倍。噪音區放空 2026-10-30 起不再顯示也不再記。
+          <b>晨光突破</b>（小台、大台、微台同一套）：開盤 5 分鐘收紅才做多，停損在那 5 分鐘低點、停利 10 倍。噪音區改名區間突圍，多空都做，移到上方的對照策略。
         </p>
         <p className="cq-fu-foot">
           <b>動能順勢</b>（PTT 網友分享的 Momentum_Scalping 原版）：程式與參數一個都不改，只做多 1 口；每一筆進場的時間軸都寫出為什麼進（均價線、兩條均線、一底比一底高、突破基準、量與振幅）；每秒看一次自己畫的 1 分 K，
