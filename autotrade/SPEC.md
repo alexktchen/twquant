@@ -290,7 +290,7 @@
 **第二管道的完成紀錄（2026-11-13 晚）**
 
 - 測試 163 條全過（第二管道的在 `tests/test_a006_push.py`，13 條）。推播服務的請求內容與回應對應用假的推播服務測；真的送用 `pywebpush`（`pip install "autotrade[push]"`；主 checkout 的 `.venv` 已照 twquant 鎖定的版本裝了 pywebpush 2.5.0）。
-- **還沒送到你的裝置**：雲端 `web.push_subscriptions` 有 3 台裝置，都是別的帳號；使用者的帳號還沒在網站 App 按 🔔 開通知，所以 `tools/pull_push_subs.py` 拉到 0 台並拒絕寫檔（AC18）。按好之後再拉、再 `notify-test --channel push`。
+- **真的送到使用者的裝置**（2026-11-13 晚）：一開始使用者的帳號沒開過通知，`tools/pull_push_subs.py` 拉到 0 台並拒絕寫檔（AC18 照設計擋下）；使用者在網站 App 按 🔔 之後拉到 1 台（Apple 推播服務），`notify-test --channel push --level act` 送出成功（推播服務回 2xx）。手機上有沒有跳出來、點了會不會開台指期分頁，要使用者看。
 - 點通知開的是網站的台指期分頁；要再按一下「程式交易」才會到那一頁（網站還沒有用網址直接開那一格的參數）。
 - 網頁推播在手機上分不出靜音與會響，所以這個管道預設只送「要處理」。
 
