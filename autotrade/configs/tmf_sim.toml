@@ -31,6 +31,9 @@ end = "13:45:00"
 latency_s = 0.5          # 跟現有模擬單同一個假設：訊號後 0.5 秒的第一筆成交
 slippage_points = 1.0    # 市價單每邊滑 1 點
 
+[export]
+max_events = 30                  # 給網站的「今日大事」最多留幾則（留最新的）
+
 [momentum]
 eval_interval_s = 1.0            # 同現有模擬單：每秒評估一次
 market_refresh_s = 30.0

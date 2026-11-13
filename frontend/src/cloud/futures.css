@@ -3,7 +3,9 @@
 .cq-fu { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 32px; overflow-y: auto; min-height: 0; }
 .cq-fu > * { flex: none; }
 .cq-fu-mode, .cq-fu-product { padding: 0; max-width: 420px; }
-.cq-fu-product button { font-size: 16px; font-weight: 600; }
+/* 四顆按鈕（三個商品＋程式交易）：寬度跟著字數走，手機上才不會把「小台・模擬單」擠成兩行 */
+.cq-fu-product { max-width: 480px; }
+.cq-fu-product button { flex: 1 1 auto; padding-inline: 10px; white-space: nowrap; font-size: 16px; font-weight: 600; }
 .cq-fu-mode button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; }
 .cq-fu-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mute); }
 .cq-fu-pick select {

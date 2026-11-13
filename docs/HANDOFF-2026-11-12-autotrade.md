@@ -7,6 +7,11 @@
 > 2026-09-09～11-11 共 41 個交易日全部一致，結果記在 `autotrade/SPEC.md` A-004 AC10。
 > 逐筆不用重新下載：主 checkout 的 `data/research_ms/taifex_ticks/TMF` 就是微台的完整逐筆。
 > 接下來從 A-005 開始。
+>
+> **更新（2026-11-13，本機 session）**：做完兩項。（一）期貨商對程式交易的六項要求（A-010，裁決 D-223）。
+> （二）A-005 把狀態寫給網站：`replay --status-out` 寫狀態檔 → `autotrade/tools/push_status.py` 寫進
+> `serving.autotrade_status` → 網站「台指期 → 程式交易」（只讀、只給管理員）。細節與沒驗證的部分在
+> `autotrade/SPEC.md` A-005 的完成紀錄。**接下來從 A-006 手機通知開始**；寫雲端資料庫要使用者自己執行。
 
 ## 使用者決定了什麼
 
@@ -44,7 +49,7 @@ python tools/parity_momentum.py --ms-repo C:/t/Momentum_Scalping --config config
 
 ## 之後的順序
 
-A-005 模擬結果寫給網站 → A-006 手機通知 → A-007 獨立看門程式（元大國內期貨沒有停損單，停損靠程式盯價）
+A-005 模擬結果寫給網站（2026-11-13 完成）→ A-006 手機通知 → A-007 獨立看門程式（元大國內期貨沒有停損單，停損靠程式盯價）
 → A-008 元大行情（卡在使用者請營業員加開「行情API」；元件是 32 位元）→ A-009 元大下單（卡在測試主機連不到）。
 元大的連線測試（T-468）與兩份官方文件的重點在 `research/yuanta/README.md`。
 

@@ -75,6 +75,21 @@ class Engine:
         self.risk = RiskManager(self.cfg.risk)
         self.oms = OrderManager()
 
+    @property
+    def link_up(self) -> bool:
+        """跟券商的連線是不是通的。"""
+        return self._link_up
+
+    @property
+    def last_tick(self) -> Tick | None:
+        """最新一筆行情；還沒收到是 None。"""
+        return self._last
+
+    @property
+    def day(self) -> date | None:
+        """目前的交易日；還沒收到行情是 None。"""
+        return self._day
+
     def _log(self, ts: datetime, kind: str, text: str, **data: Any) -> None:
         event = Event(ts, kind, text, data)
         self.events.append(event)

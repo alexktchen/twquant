@@ -1,8 +1,9 @@
-"""指令列：檢查設定、用期交所逐筆重播一天。"""
+"""指令列：檢查設定、用期交所逐筆重播一天、把狀態寫成檔案給網站。"""
 
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 from autotrade.broker.sim import SimBroker
 from autotrade.config import Config, load_config
 from autotrade.engine import Engine
+from autotrade.export import dumps, snapshot
 from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.strategy.base import NullStrategy, Strategy
@@ -41,8 +43,9 @@ def run_replay(
     strategy: str,
     journal: Path | None = None,
     ms_repo: Path | None = None,
+    status_out: Path | None = None,
 ) -> dict[str, float | int | str]:
-    """用模擬券商重播一天，回傳當日摘要；給 journal 路徑就把事件寫進日誌。"""
+    """用模擬券商重播一天，回傳當日摘要；給 journal 就寫事件日誌，給 status_out 就寫給網站的狀態檔。"""
     cfg = load_config(config)
     contract, rows = read_taifex_day(
         ticks, cfg.contract.symbol, day, cfg.session.start, cfg.session.end
@@ -61,7 +64,20 @@ def run_replay(
     finally:
         if log is not None:
             log.close()
+    if status_out is not None:
+        last = engine.last_tick
+        if last is None:
+            raise ValueError(f"{day} 沒有行情，寫不出狀態檔")
+        snap = snapshot(engine, last.ts, source="replay", status="closed", strategy=strategy)
+        write_text_atomic(status_out, dumps(snap))
     return {"day": day.isoformat(), "contract": contract, "ticks": len(rows), **summary}
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """先寫暫存檔再改名，讀的人不會看到寫到一半的檔。資料夾不存在就 raise。"""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8", newline="\n")
+    os.replace(tmp, path)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -77,6 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     replay.add_argument("--strategy", choices=sorted(STRATEGIES), required=True)
     replay.add_argument("--ms-repo", type=Path, help="網友原版 Momentum_Scalping 的資料夾")
     replay.add_argument("--journal", type=Path, help="事件日誌要寫到哪個檔案（請給絕對路徑）")
+    replay.add_argument("--status-out", type=Path, help="給網站的狀態檔要寫到哪（請給絕對路徑）")
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
     verify.add_argument("journal", type=Path)
     args = parser.parse_args(argv)
@@ -91,7 +108,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"日誌沒問題：{len(records)} 筆")
         return 0
     summary = run_replay(
-        args.config, args.ticks, args.day, args.strategy, args.journal, args.ms_repo
+        args.config,
+        args.ticks,
+        args.day,
+        args.strategy,
+        args.journal,
+        args.ms_repo,
+        args.status_out,
     )
     for key, value in summary.items():
         print(f"{key}: {value}")

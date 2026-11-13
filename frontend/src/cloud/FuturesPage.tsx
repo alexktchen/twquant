@@ -25,6 +25,7 @@ import {
   SkipForward,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AutotradeView } from './AutotradeView'
 import {
   ColorType,
   CrosshairMode,
@@ -1179,14 +1180,17 @@ function QuoteView({ product, mode, refresh }: { product: QuoteProduct; mode: Mo
 const NO_FILLS: readonly Fill[] = []
 const NO_LEVELS: { price: number; title: string }[] = []
 
-const PRODUCTS: { key: Product; label: string }[] = [
+/** 最上面那排：三個商品的行情，加上「程式交易」（autotrade A-005；獨立交易系統的狀態，只能看）。 */
+type Pane = Product | 'AUTO'
+const PRODUCTS: { key: Pane; label: string }[] = [
   { key: 'MTX', label: '小台・模擬單' },
   { key: 'TX', label: '大台' },
   { key: 'TMF', label: '微台' },
+  { key: 'AUTO', label: '程式交易' },
 ]
 
 export function FuturesPage({ refresh }: { refresh: number }) {
-  const [product, setProduct] = useState<Product>('MTX')
+  const [product, setProduct] = useState<Pane>('MTX')
   const [mode, setMode] = useState<Mode>('live')
   return (
     <main className="cq-body cq-fu">
@@ -1197,18 +1201,24 @@ export function FuturesPage({ refresh }: { refresh: number }) {
           </button>
         ))}
       </div>
-      <div className="cq-seg cq-fu-mode">
-        <button className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>
-          <Radio size={15} aria-hidden="true" /> 盤中
-        </button>
-        <button className={mode === 'replay' ? 'on' : ''} onClick={() => setMode('replay')}>
-          <History size={15} aria-hidden="true" /> 復盤
-        </button>
-      </div>
-      {product === 'MTX' ? (
-        <PaperView mode={mode} refresh={refresh} />
+      {product === 'AUTO' ? (
+        <AutotradeView refresh={refresh} />
       ) : (
-        <QuoteView key={product} product={product} mode={mode} refresh={refresh} />
+        <>
+          <div className="cq-seg cq-fu-mode">
+            <button className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>
+              <Radio size={15} aria-hidden="true" /> 盤中
+            </button>
+            <button className={mode === 'replay' ? 'on' : ''} onClick={() => setMode('replay')}>
+              <History size={15} aria-hidden="true" /> 復盤
+            </button>
+          </div>
+          {product === 'MTX' ? (
+            <PaperView mode={mode} refresh={refresh} />
+          ) : (
+            <QuoteView key={product} product={product} mode={mode} refresh={refresh} />
+          )}
+        </>
       )}
     </main>
   )

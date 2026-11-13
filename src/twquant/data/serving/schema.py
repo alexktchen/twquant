@@ -998,6 +998,23 @@ FUTURES_QUOTES_SECONDS_SPEC = TableSpec(
     snapshot=True,
 )
 
+# 程式交易的狀態（autotrade A-005）：一天、一種模式（sim｜live）一列，payload 是網站「程式交易」的整份狀態。
+# 寫入者是 autotrade/tools/push_status.py（獨立系統，不 import twquant），用同一句建表語句
+# （tests/test_autotrade_status_store.py 守著）。單向：網站只讀。只給 admin；sync/rebuild/prune 都不碰。
+AUTOTRADE_STATUS_SPEC = TableSpec(
+    "autotrade_status",
+    (
+        ("day", "date"),
+        ("mode", "text"),
+        ("source", "text"),  # replay｜live
+        ("status", "text"),  # live｜closed
+        ("payload", "jsonb"),
+        ("updated_at", "timestamptz"),
+    ),
+    pk=("day", "mode"),
+    snapshot=True,  # 沒有 date 分區
+)
+
 # 易跌標記（T-391／D-193）：D-192 模型對當天大盤精選 15 檔的機率，機率最高 5 檔 flagged。只給人看；小表全史保留。
 PICK_DOWN_RISK_SPEC = TableSpec(
     "pick_down_risk",
@@ -1138,6 +1155,7 @@ _ALL_SPECS: tuple[TableSpec, ...] = (
     FUTURES_PAPER_SECONDS_SPEC,
     FUTURES_QUOTES_SPEC,
     FUTURES_QUOTES_SECONDS_SPEC,
+    AUTOTRADE_STATUS_SPEC,
     BROKER_DAYTRADE_EVENTS_SPEC,
     MAIN_FORCE_DAILY_SPEC,
 )
