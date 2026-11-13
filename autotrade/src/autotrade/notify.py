@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import Enum
@@ -720,12 +720,32 @@ class Throttle:
 
 
 @dataclass(frozen=True)
+class Channel:
+    """另一個送出管道（例如網站推播的一台裝置）：只收 min_level 以上的通知，自己一條佇列。"""
+
+    name: str
+    outbox: Outbox
+    min_level: Level
+
+
+@dataclass(frozen=True)
+class ChannelReport:
+    """一個額外管道結束時的統計。"""
+
+    name: str
+    sent: int
+    lost: int
+    failures: tuple[Failure, ...]
+
+
+@dataclass(frozen=True)
 class Report:
-    """通知結束時的統計。"""
+    """通知結束時的統計。sent／lost／failures 是主管道（Telegram）的；其他管道在 channels。"""
 
     sent: int  # 送出去的則數
     lost: int  # 確定沒送出去的則數
     failures: tuple[Failure, ...]
+    channels: tuple[ChannelReport, ...] = ()
 
 
 class Notifier:
@@ -738,6 +758,7 @@ class Notifier:
         *,
         replay: bool = False,
         restored: Restored | None = None,
+        extra: Sequence[Channel] = (),
     ) -> None:
         if cfg.notify is None:
             raise ConfigError("設定檔沒有 [notify]，不能開通知")
@@ -745,6 +766,7 @@ class Notifier:
         self._kinds = frozenset(cfg.notify.kinds)
         self._ctx = Context(where=where_of(cfg, replay), risk=cfg.risk)
         self._outbox = outbox
+        self._extra = tuple(extra)
         self._throttle = Throttle(cfg.notify.throttle_s, cfg.notify.burst)
         self._clock: datetime | None = None  # 最後一個合格的事件時間
         self.book = Book(cfg.contract, restored)
@@ -774,12 +796,22 @@ class Notifier:
         """結束：壓著的合併通知全部送出，等佇列送完（最多 close_wait_s 秒），回傳統計。"""
         self._hand_over(self._throttle.flush())
         self._outbox.close(self._cfg.close_wait_s)
-        return Report(self._outbox.sent, self._outbox.lost, self._outbox.failures)
+        for ch in self._extra:
+            ch.outbox.close(self._cfg.close_wait_s)
+        channels = tuple(
+            ChannelReport(ch.name, ch.outbox.sent, ch.outbox.lost, ch.outbox.failures)
+            for ch in self._extra
+        )
+        return Report(self._outbox.sent, self._outbox.lost, self._outbox.failures, channels)
 
     def _hand_over(self, messages: list[Message]) -> None:
         for message in messages:
             silent = self._cfg.quiet_routine and message.level is Level.INFO
-            self._outbox.put(Outgoing(message.ts, message.title, message.text, silent))
+            item = Outgoing(message.ts, message.title, message.text, silent)
+            self._outbox.put(item)
+            for ch in self._extra:
+                if message.level.value >= ch.min_level.value:
+                    ch.outbox.put(item)
 
     def _broken(self, event: Event, exc: Exception) -> None:
         label = KIND_LABEL.get(event.kind, "其他")

@@ -49,6 +49,10 @@ NOTIFY_LIVE_REQUIRED = (
 )
 
 
+# 通知的三級（notify.Level 的名字，小寫）
+NOTIFY_LEVELS = ("info", "warn", "act")
+
+
 class ConfigError(ValueError):
     """設定檔有問題。"""
 
@@ -142,6 +146,18 @@ class NotifyConfig:
 
 
 @dataclass(frozen=True)
+class NotifyPushConfig:
+    """第二管道：網站 App（PWA）的推播。私密金鑰不在這裡，只從環境變數讀。"""
+
+    min_level: str  # 這一級以上才送（NOTIFY_LEVELS）
+    url: str  # 點通知打開哪裡
+    ttl_s: int  # 手機關機時推播服務最多替我們留幾秒
+    timeout_s: float  # 送一次最多等幾秒
+    allowed_hosts: tuple[str, ...]  # 只接受這些推播服務（本身或子網域）
+    subject: str  # 推播服務出問題時聯絡誰（https: 或 mailto:）
+
+
+@dataclass(frozen=True)
 class Config:
     """整份設定。"""
 
@@ -154,6 +170,7 @@ class Config:
     export: ExportConfig | None = None
     control: ControlConfig | None = None
     notify: NotifyConfig | None = None
+    notify_push: NotifyPushConfig | None = None
 
 
 def _need(table: dict[str, Any], key: str, where: str) -> Any:
@@ -171,6 +188,44 @@ def _clock(text: Any, where: str) -> time:
         raise ConfigError(f"{where} 不是合法時間：{text!r}") from exc
 
 
+def _amount(
+    table: dict[str, Any], key: str, where: str, *, whole: bool = False, zero_ok: bool = False
+) -> float:
+    """讀一個有限、不是負的數字（zero_ok 為 False 時還要大於 0；whole 時要是整數）。"""
+    value = _need(table, key, where)
+    ok = isinstance(value, int | float) and not isinstance(value, bool) and isfinite(value)
+    if not ok or (whole and value != int(value)):
+        kind = "整數" if whole else "數字"
+        raise ConfigError(f"[{where}] {key} 要是有限的{kind}，拿到 {value!r}")
+    if value < 0 or (value == 0 and not zero_ok):
+        limit = "不能是負的" if zero_ok else "要大於 0"
+        raise ConfigError(f"[{where}] {key} {limit}：{value!r}")
+    return float(value)
+
+
+def _parse_notify_push(n: dict[str, Any]) -> NotifyPushConfig:
+    level = _need(n, "min_level", "notify_push")
+    if level not in NOTIFY_LEVELS:
+        raise ConfigError(f"[notify_push] min_level 要是 {NOTIFY_LEVELS} 其中之一，拿到 {level!r}")
+    url = _need(n, "url", "notify_push")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise ConfigError(f"[notify_push] url 要是 https:// 開頭的網址，拿到 {url!r}")
+    hosts = _need(n, "allowed_hosts", "notify_push")
+    if not isinstance(hosts, list) or not hosts or not all(isinstance(h, str) and h for h in hosts):
+        raise ConfigError(f"[notify_push] allowed_hosts 要是一串推播服務的主機名稱，拿到 {hosts!r}")
+    subject = _need(n, "subject", "notify_push")
+    if not isinstance(subject, str) or not subject.startswith(("https://", "mailto:")):
+        raise ConfigError(f"[notify_push] subject 要是 https: 或 mailto: 開頭，拿到 {subject!r}")
+    return NotifyPushConfig(
+        min_level=level,
+        url=url,
+        ttl_s=int(_amount(n, "ttl_s", "notify_push", whole=True)),
+        timeout_s=_amount(n, "timeout_s", "notify_push"),
+        allowed_hosts=tuple(hosts),
+        subject=subject,
+    )
+
+
 def _parse_notify(n: dict[str, Any]) -> NotifyConfig:
     kinds = _need(n, "kinds", "notify")
     if not isinstance(kinds, list) or not kinds or not all(isinstance(k, str) for k in kinds):
@@ -185,15 +240,7 @@ def _parse_notify(n: dict[str, Any]) -> NotifyConfig:
         raise ConfigError(f"[notify] quiet_routine 要是 true 或 false，拿到 {quiet!r}")
 
     def number(key: str, *, whole: bool = False, zero_ok: bool = False) -> float:
-        value = _need(n, key, "notify")
-        ok = isinstance(value, int | float) and not isinstance(value, bool) and isfinite(value)
-        if not ok or (whole and value != int(value)):
-            kind = "整數" if whole else "數字"
-            raise ConfigError(f"[notify] {key} 要是有限的{kind}，拿到 {value!r}")
-        if value < 0 or (value == 0 and not zero_ok):
-            limit = "不能是負的" if zero_ok else "要大於 0"
-            raise ConfigError(f"[notify] {key} {limit}：{value!r}")
-        return float(value)
+        return _amount(n, key, "notify", whole=whole, zero_ok=zero_ok)
 
     notify = NotifyConfig(
         channel=str(_need(n, "channel", "notify")),
@@ -309,6 +356,9 @@ def parse_config(raw: dict[str, Any]) -> Config:
         if export.max_events <= 0:
             raise ConfigError(f"[export] max_events 要大於 0：{export.max_events}")
     notify = _parse_notify(raw["notify"]) if "notify" in raw else None
+    notify_push = _parse_notify_push(raw["notify_push"]) if "notify_push" in raw else None
+    if notify_push is not None and notify is None:
+        raise ConfigError("[notify_push] 是第二個管道，要先有 [notify]（Telegram）才能開")
     if mode == "live":
         # D-223：通知沒做完不上真單；做完之後，真單沒開通知就拒絕啟動（D-224）
         if notify is None:
@@ -342,6 +392,7 @@ def parse_config(raw: dict[str, Any]) -> Config:
         export=export,
         control=control,
         notify=notify,
+        notify_push=notify_push,
     )
 
 
