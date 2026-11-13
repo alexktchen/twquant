@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
+import importlib
 import json
 import logging
 import queue
@@ -14,17 +16,20 @@ import sys
 import threading
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol, TextIO
+from urllib.parse import urlsplit
 
-from autotrade.config import ConfigError, NotifyConfig
+from autotrade.config import ConfigError, NotifyConfig, NotifyPushConfig
 
 log = logging.getLogger(__name__)
 
 ENV_TOKEN = "AUTOTRADE_TELEGRAM_BOT_TOKEN"  # Telegram 機器人的金鑰
 ENV_CHAT = "AUTOTRADE_TELEGRAM_CHAT_ID"  # 收件代號（你跟機器人的那個聊天）
+# 網站推播的 VAPID 私密金鑰：跟網站同一把（裝置是對網站的公開金鑰開通知的，換一把就送不到）
+ENV_VAPID = "TWQUANT_VAPID_PRIVATE_KEY"
 TELEGRAM_API = "https://api.telegram.org"
 TELEGRAM_MAX_CHARS = 4096  # Telegram 一則文字訊息的長度上限
 CLIPPED = "…（太長，後面省略）"
@@ -229,6 +234,168 @@ def telegram_tell_chat_ids(token: str, timeout_s: float, post: Post | None = Non
     if told == 0 and failed is not None:
         raise failed
     return told
+
+
+# ── 第二管道：網站 App（PWA）的推播 ─────────────────────────────────────────
+
+PUSH_FILE_SCHEMA = 1
+GONE_STATUSES = (404, 410)  # 推播服務說這個訂閱已經失效（關了通知、移除主畫面 App、換手機）
+PUSH_HEADERS = {"Urgency": "high"}  # 請推播服務盡快送（要處理的事）
+PUSH_REFRESH = "請在網站重新開通知，再執行 tools/pull_push_subs.py 重新拉訂閱"
+
+# 推播服務：給（訂閱、內容、存活秒數、逾時、標頭），回 HTTP 狀態碼；連不上丟 OSError
+PushPost = Callable[["PushSubscription", str, int, float, dict[str, str]], int]
+
+
+@dataclass(frozen=True)
+class PushSubscription:
+    """一台裝置的推播訂閱（瀏覽器給的）。endpoint 等於這台裝置的收件地址，不印出來。"""
+
+    endpoint: str
+    p256dh: str
+    auth: str
+
+    @property
+    def host(self) -> str:
+        """推播服務的主機名稱（錯誤訊息只寫這個）。"""
+        return urlsplit(self.endpoint).hostname or "?"
+
+    def __repr__(self) -> str:
+        return f"PushSubscription(host={self.host!r})"
+
+
+def push_file_text(rows: Sequence[tuple[str, str, str]]) -> str:
+    """（endpoint、p256dh、auth）→ 訂閱檔的內容。同樣的輸入一字不差。"""
+    subs = [{"endpoint": e, "p256dh": k, "auth": a} for e, k, a in rows]
+    return json.dumps(
+        {"schema": PUSH_FILE_SCHEMA, "subscriptions": subs}, ensure_ascii=False, indent=2
+    )
+
+
+def _host_allowed(host: str, hosts: Sequence[str]) -> bool:
+    return any(host == h or host.endswith("." + h) for h in hosts)
+
+
+def parse_push_subscriptions(text: str, allowed_hosts: Sequence[str]) -> list[PushSubscription]:
+    """讀訂閱檔；不合格（格式、版本、欄位、不是 https、不認得的推播服務、一台都沒有）就 raise。"""
+    try:
+        raw = json.loads(text)
+    except ValueError as exc:
+        raise ConfigError("推播訂閱檔不是 JSON，格式不對") from exc
+    if not isinstance(raw, dict) or not isinstance(raw.get("subscriptions"), list):
+        raise ConfigError("推播訂閱檔的格式不對（要有 subscriptions 清單）")
+    if raw.get("schema") != PUSH_FILE_SCHEMA:
+        raise ConfigError(
+            f"推播訂閱檔的版本是 {raw.get('schema')!r}，這支程式只認得 {PUSH_FILE_SCHEMA}"
+        )
+    out: list[PushSubscription] = []
+    for n, row in enumerate(raw["subscriptions"], start=1):
+        if not isinstance(row, dict):
+            raise ConfigError(f"推播訂閱檔第 {n} 台的格式不對")
+        for key in ("endpoint", "p256dh", "auth"):
+            if not isinstance(row.get(key), str) or not row[key]:
+                raise ConfigError(f"推播訂閱檔第 {n} 台缺 {key}")
+        s = PushSubscription(row["endpoint"], row["p256dh"], row["auth"])
+        if urlsplit(s.endpoint).scheme != "https":
+            raise ConfigError(f"推播訂閱檔第 {n} 台的網址不是 https（{s.host}）")
+        if not _host_allowed(s.host, allowed_hosts):
+            raise ConfigError(f"推播訂閱檔第 {n} 台的推播服務 {s.host} 不在 allowed_hosts 裡")
+        out.append(s)
+    if not out:
+        raise ConfigError(f"推播訂閱檔裡一台裝置都沒有。{PUSH_REFRESH}")
+    return out
+
+
+class WebPushSender:
+    """送網站推播給一台裝置。標題＝通知第一行、內文＝其餘各行。金鑰與訂閱網址不會出現在錯誤訊息裡。"""
+
+    def __init__(self, sub: PushSubscription, cfg: NotifyPushConfig, post: PushPost) -> None:
+        self._sub = sub
+        self._cfg = cfg
+        self._post = post
+
+    @property
+    def host(self) -> str:
+        """這台裝置用的推播服務。"""
+        return self._sub.host
+
+    def __repr__(self) -> str:
+        return f"WebPushSender(host={self.host!r})"
+
+    def send(self, text: str, *, silent: bool) -> None:
+        """送一則（silent 沒有作用：網頁推播在手機上分不出靜音，所以這個管道預設只送會響的那幾種）。"""
+        title, _, body = text.partition("\n")
+        tag = "autotrade-" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        data = json.dumps(
+            {"title": title, "body": body, "url": self._cfg.url, "tag": tag}, ensure_ascii=False
+        )
+        try:
+            status = self._post(
+                self._sub, data, self._cfg.ttl_s, self._cfg.timeout_s, dict(PUSH_HEADERS)
+            )
+        except OSError as exc:
+            # 原本的錯誤可能帶著訂閱網址：只留錯誤的種類
+            raise SendError(
+                f"連不上推播服務 {self.host}：{type(exc).__name__}", retryable=True
+            ) from None
+        if 200 <= status < 300:
+            return
+        if status in GONE_STATUSES:
+            raise SendError(
+                f"推播服務 {self.host} 回 {status}：這台裝置的通知已經失效。{PUSH_REFRESH}",
+                retryable=False,
+            )
+        if status in (401, 403):
+            raise SendError(
+                f"推播服務 {self.host} 回 {status}：金鑰不被接受（{ENV_VAPID} 要跟網站用的同一把）",
+                retryable=False,
+            )
+        if status == 429 or status >= 500:
+            raise SendError(f"推播服務 {self.host} 回 {status}：暫時不收，稍後再試", retryable=True)
+        raise SendError(f"推播服務 {self.host} 回 {status}：不接受這則推播", retryable=False)
+
+
+def pywebpush_post(private_key: str, subject: str) -> PushPost:
+    """用 pywebpush 送（VAPID 簽章、aes128gcm 加密）。需要 pip install "autotrade[push]"。"""
+    pywebpush = importlib.import_module("pywebpush")
+
+    def post(
+        sub: PushSubscription, data: str, ttl: int, timeout: float, headers: dict[str, str]
+    ) -> int:
+        try:
+            resp = pywebpush.webpush(
+                subscription_info={
+                    "endpoint": sub.endpoint,
+                    "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
+                },
+                data=data,
+                vapid_private_key=private_key,
+                vapid_claims={"sub": subject},  # pywebpush 會在 dict 裡補 aud／exp，每次給新的
+                ttl=ttl,
+                timeout=timeout,
+                headers=headers,
+            )
+        except pywebpush.WebPushException as exc:
+            if exc.response is not None:
+                return int(exc.response.status_code)
+            raise OSError(f"推播失敗：{type(exc).__name__}") from None
+        return int(resp.status_code)
+
+    return post
+
+
+def push_senders(
+    env: Mapping[str, str],
+    cfg: NotifyPushConfig,
+    subs: Sequence[PushSubscription],
+    make_post: Callable[[str, str], PushPost] = pywebpush_post,
+) -> list[WebPushSender]:
+    """每台裝置一個送出端，都用環境變數裡網站的 VAPID 私密金鑰；缺了就 raise（訊息只寫變數名稱）。"""
+    key = env.get(ENV_VAPID, "").strip()
+    if not key:
+        raise ConfigError(f"環境變數 {ENV_VAPID} 沒有設定（網站推播的私密金鑰，放在 .env）")
+    post = make_post(key, cfg.subject)
+    return [WebPushSender(s, cfg, post) for s in subs]
 
 
 @dataclass(frozen=True)

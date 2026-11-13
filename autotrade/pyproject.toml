@@ -8,6 +8,7 @@ dependencies = []
 [project.optional-dependencies]
 yuanta = ["comtypes>=1.4"]
 web = ["psycopg[binary]>=3.1"]
+push = ["pywebpush>=2.0"]  # 第二管道：網站 App 的推播（A-006 AC14～AC20）
 dev = ["ruff>=0.6", "mypy>=1.11", "pytest>=8.0", "hypothesis>=6.100"]
 
 [build-system]

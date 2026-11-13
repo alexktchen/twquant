@@ -58,3 +58,14 @@ warn_after_attempts = 3          # 一則通知連續失敗幾次就留一筆紀
 retry_wait_s = 2.0               # 每次重試前等幾秒
 queue_size = 200                 # 還沒送出的通知最多排幾則；滿了新的會被丟掉並留紀錄
 close_wait_s = 10.0              # 程式結束時最多等幾秒把還沒送的送完
+
+# 第二管道：網站 App（PWA）的推播（SPEC A-006 AC14～AC20、D-224 修訂）。Telegram 照舊收全部；
+# 這裡只收 min_level 以上的（預設只有「要處理」），點了打開網站的台指期分頁。
+# 用網站同一把 VAPID 私密金鑰（.env 的 TWQUANT_VAPID_PRIVATE_KEY）；裝置的訂閱用 tools/pull_push_subs.py 拉成本機檔案。
+[notify_push]
+min_level = "act"                # info＝全部、warn＝注意與要處理、act＝只有要處理
+url = "https://twquant.pages.dev/?tab=futures"
+ttl_s = 3600                     # 手機關機或沒網路時，推播服務最多替我們留 1 小時
+timeout_s = 10.0                 # 送一次最多等幾秒
+allowed_hosts = ["web.push.apple.com", "fcm.googleapis.com", "updates.push.services.mozilla.com", "notify.windows.com"]  # 同網站 configs/push.yaml
+subject = "https://twquant.pages.dev"  # 推播服務出問題時聯絡誰（跟網站一樣，用網址免得公開 email）

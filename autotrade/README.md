@@ -57,3 +57,21 @@ python tools/run.py notify-test --config configs/tmf_sim.toml --env-file D:/proj
 要通知哪些事、要不要靜音、合併的時間，都在 `configs/tmf_sim.toml` 的 `[notify]`。
 
 **限制**：電腦當機、斷網或斷電時，這裡發不出通知——那要靠之後的獨立看門程式（A-007）。
+
+## 第二管道：網站 App 的推播
+
+Telegram 照舊收全部；網站 App（加到主畫面的 twquant）另外只收「🚨 要處理」的通知，點了打開台指期分頁。交易程式執行時不碰網站與資料庫：先把你開了通知的裝置拉成本機檔案，執行時只讀那個檔。
+
+1. 手機打開網站 App，按右上角帳號旁的 🔔，開通知（iPhone 要先用 Safari「分享 → 加入主畫面」，從主畫面打開）。
+2. `.env` 要有 `TWQUANT_VAPID_PRIVATE_KEY`（網站推播的金鑰，已經有了）、`TWQUANT_SUPABASE_DSN`（已經有了）、`AUTOTRADE_PUSH_EMAIL`（你網站登入的帳號）。
+3. 在 `autotrade` 資料夾執行下面兩個指令：先拉訂閱（只讀資料庫，只印台數），再送一則測試推播。
+
+```bash
+python tools/pull_push_subs.py --out D:/project/twquant/data/autotrade/push_subscriptions.json --env-file D:/project/twquant/.env
+```
+
+```bash
+python tools/run.py notify-test --config configs/tmf_sim.toml --channel push --level act --push-subs D:/project/twquant/data/autotrade/push_subscriptions.json --env-file D:/project/twquant/.env
+```
+
+重播時兩個管道一起送：`replay … --notify send --push-subs <同一個檔>`。換手機、重新開通知、或通知說「這台裝置的通知已經失效」時，重新拉一次。要網站也收「⚠️ 注意」，把 `configs/tmf_sim.toml` 的 `[notify_push] min_level` 改成 `warn`。

@@ -15,11 +15,17 @@ from autotrade.config import Config, ConfigError, load_config
 from autotrade.delivery import (
     ENV_CHAT,
     ENV_TOKEN,
+    ENV_VAPID,
     Failure,
     Outbox,
     PrintSender,
+    PushPost,
     Sender,
     SendError,
+    WebPushSender,
+    parse_push_subscriptions,
+    push_senders,
+    pywebpush_post,
     telegram_from_env,
     telegram_tell_chat_ids,
 )
@@ -28,12 +34,13 @@ from autotrade.export import dumps, env_value, snapshot
 from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.model import TAIPEI
-from autotrade.notify import Level, Notifier, Report, sample, where_of
+from autotrade.notify import Channel, Level, Notifier, Report, sample, where_of
 from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
 
 STRATEGIES = ("none", "momentum")
 NOTIFY_MODES = ("print", "send")  # print＝印在畫面上（不連網）；send＝真的送到手機
+PUSH_LABEL = "網站推播"
 
 
 def build_strategy(name: str, cfg: Config, ms_repo: Path | None) -> Strategy:
@@ -63,14 +70,15 @@ def read_env(names: Sequence[str], env_file: Path | None) -> dict[str, str]:
     return found
 
 
-def failure_writer(path: Path | None) -> Callable[[Failure], None]:
-    """沒送出去的通知：印到 stderr；有給檔案就再記一列 JSON（只增不改）。"""
+def failure_writer(path: Path | None, channel: str = "Telegram") -> Callable[[Failure], None]:
+    """沒送出去的通知：印到 stderr；有給檔案就再記一列 JSON（只增不改）。channel＝哪個管道。"""
 
     def write(failure: Failure) -> None:
         state = "沒送出去" if failure.final else "還在重試"
-        print(f"通知{state}：{failure.title}（{failure.reason}）", file=sys.stderr)
+        print(f"通知{state}（{channel}）：{failure.title}（{failure.reason}）", file=sys.stderr)
         if path is not None:
             row = {
+                "channel": channel,
                 "ts": failure.ts.isoformat(),
                 "title": failure.title,
                 "reason": failure.reason,
@@ -83,22 +91,56 @@ def failure_writer(path: Path | None) -> Callable[[Failure], None]:
     return write
 
 
+def load_push_senders(cfg: Config, push_subs: Path, env_file: Path | None) -> list[WebPushSender]:
+    """讀本機的推播訂閱檔，每台裝置一個送出端（用網站的 VAPID 私密金鑰）。"""
+    if cfg.notify_push is None:
+        raise ConfigError("設定檔沒有 [notify_push]，不能送網站推播")
+    subs = parse_push_subscriptions(
+        push_subs.read_text(encoding="utf-8"), cfg.notify_push.allowed_hosts
+    )
+    return push_senders(read_env((ENV_VAPID,), env_file), cfg.notify_push, subs, push_factory)
+
+
+def push_factory(key: str, subject: str) -> PushPost:
+    """真的送網站推播的方式（測試會換掉 pywebpush_post）。"""
+    return pywebpush_post(key, subject)
+
+
 def open_notifier(
-    cfg: Config, mode: str, env_file: Path | None, notify_log: Path | None
+    cfg: Config,
+    mode: str,
+    env_file: Path | None,
+    notify_log: Path | None,
+    push_subs: Path | None = None,
 ) -> Notifier:
-    """建立重播用的通知：print 印在畫面上，send 用 .env 的金鑰真的送。背景執行緒在這裡開。"""
+    """建立重播用的通知：print 印在畫面上，send 用 .env 的金鑰真的送；給 push_subs 再加網站推播。背景執行緒在這裡開。"""
     if cfg.notify is None:
         raise ConfigError("設定檔沒有 [notify]，不能開通知")
     if mode not in NOTIFY_MODES:
         raise ValueError(f"不認得的通知方式：{mode!r}（可用：{NOTIFY_MODES}）")
+    if push_subs is not None and mode != "send":
+        raise ValueError("--push-subs 只能配 --notify send（網站推播沒有印在畫面上的模式）")
     sender: Sender = (
         PrintSender()
         if mode == "print"
         else telegram_from_env(read_env((ENV_TOKEN, ENV_CHAT), env_file), cfg.notify)
     )
+    extra: list[Channel] = []
+    if push_subs is not None:
+        devices = load_push_senders(cfg, push_subs, env_file)  # 沒有 [notify_push] 會在這裡 raise
+        assert cfg.notify_push is not None
+        level = Level[cfg.notify_push.min_level.upper()]
+        for device in devices:
+            name = f"{PUSH_LABEL} {device.host}"
+            box = Outbox.from_config(
+                device, cfg.notify, on_failure=failure_writer(notify_log, name)
+            )
+            extra.append(Channel(name, box, level))
     outbox = Outbox.from_config(sender, cfg.notify, on_failure=failure_writer(notify_log))
     outbox.start()
-    return Notifier(cfg, outbox, replay=True)
+    for ch in extra:
+        ch.outbox.start()
+    return Notifier(cfg, outbox, replay=True, extra=extra)
 
 
 def fan_out(sinks: Sequence[Callable[[Event], None]]) -> Callable[[Event], None] | None:
@@ -124,6 +166,7 @@ def run_replay(
     notify: str | None = None,
     env_file: Path | None = None,
     notify_log: Path | None = None,
+    push_subs: Path | None = None,
 ) -> dict[str, float | int | str]:
     """用模擬券商重播一天，回傳當日摘要。
 
@@ -133,7 +176,11 @@ def run_replay(
     contract, rows = read_taifex_day(
         ticks, cfg.contract.symbol, day, cfg.session.start, cfg.session.end
     )
-    notifier = open_notifier(cfg, notify, env_file, notify_log) if notify is not None else None
+    if push_subs is not None and notify is None:
+        raise ValueError("--push-subs 要配 --notify send")
+    notifier = (
+        open_notifier(cfg, notify, env_file, notify_log, push_subs) if notify is not None else None
+    )
     log: Journal | None = None
     report: Report | None = None
     try:
@@ -170,6 +217,11 @@ def run_replay(
     }
     if report is not None:
         result |= {"notify_sent": report.sent, "notify_failed": report.lost}
+        if push_subs is not None:
+            result |= {
+                "push_sent": sum(ch.sent for ch in report.channels),
+                "push_failed": sum(ch.lost for ch in report.channels),
+            }
     return result
 
 
@@ -180,13 +232,34 @@ def write_text_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def run_notify_test(config: Path, env_file: Path | None, level: str) -> int:
+def run_notify_test(
+    config: Path,
+    env_file: Path | None,
+    level: str,
+    channel: str = "telegram",
+    push_subs: Path | None = None,
+) -> int:
     """送一則測試通知到手機；送出去回 0，沒送出去印出原因並回 1。"""
     cfg = load_config(config)
     if cfg.notify is None:
         raise ConfigError("設定檔沒有 [notify]，不能送測試通知")
-    sender = telegram_from_env(read_env((ENV_TOKEN, ENV_CHAT), env_file), cfg.notify)
     message = sample(datetime.now(TAIPEI), Level[level.upper()], where_of(cfg, replay=False))
+    if channel == "push":
+        if push_subs is None:
+            raise ConfigError(
+                "--channel push 要給 --push-subs（tools/pull_push_subs.py 拉下來的訂閱檔）"
+            )
+        failed = 0
+        for device in load_push_senders(cfg, push_subs, env_file):
+            try:
+                device.send(message.text, silent=False)
+            except SendError as exc:
+                failed += 1
+                print(f"{device.host}：沒送出去（{exc.reason}）")
+                continue
+            print(f"{device.host}：已送出")
+        return 1 if failed else 0
+    sender = telegram_from_env(read_env((ENV_TOKEN, ENV_CHAT), env_file), cfg.notify)
     silent = cfg.notify.quiet_routine and message.level is Level.INFO
     try:
         sender.send(message.text, silent=silent)
@@ -241,10 +314,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="那一天的通知：print 印在畫面上（不連網）、send 真的送到手機",
     )
     replay.add_argument("--notify-log", type=Path, help="沒送出去的通知記到哪個檔案（絕對路徑）")
+    replay.add_argument(
+        "--push-subs", type=Path, help="另外送網站推播：tools/pull_push_subs.py 拉下來的訂閱檔"
+    )
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
     verify.add_argument("journal", type=Path)
     test = sub.add_parser("notify-test", help="送一則測試通知到手機（要連網，請自己執行）")
     test.add_argument("--level", choices=["info", "warn", "act"], default="info", help="哪一級")
+    test.add_argument(
+        "--channel", choices=["telegram", "push"], default="telegram", help="送到哪個管道"
+    )
+    test.add_argument("--push-subs", type=Path, help="--channel push 用的訂閱檔")
     setup = sub.add_parser("notify-setup", help="請機器人在 Telegram 裡告訴你收件代號")
     for command in (replay, test, setup):
         command.add_argument(
@@ -267,7 +347,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # 這兩個是使用者自己動手跑的：設定沒弄好時講人話，不丟一長串錯誤
         try:
             if args.command == "notify-test":
-                return run_notify_test(args.config, args.env_file, args.level)
+                return run_notify_test(
+                    args.config, args.env_file, args.level, args.channel, args.push_subs
+                )
             return run_notify_setup(args.config, args.env_file)
         except ConfigError as exc:
             print(f"設定還沒好：{exc}")
@@ -283,6 +365,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.notify,
         args.env_file,
         args.notify_log,
+        args.push_subs,
     )
     for key, value in summary.items():
         print(f"{key}: {value}")

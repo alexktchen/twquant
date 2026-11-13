@@ -1319,7 +1319,7 @@ def test_ac8_notify_config_is_validated() -> None:
         with pytest.raises(ConfigError, match=key):
             parse_config(raw)
     raw = raw_config()
-    del raw["notify"]
+    del raw["notify"], raw["notify_push"]  # 第二管道依附在 [notify] 上，一起拿掉
     assert parse_config(raw).notify is None  # 模擬可以不開通知
 
 
@@ -1332,7 +1332,7 @@ def test_ac8_live_mode_requires_notify_with_the_serious_kinds() -> None:
 
     assert parse_config(live()).mode == "live"
     raw = live()
-    del raw["notify"]
+    del raw["notify"], raw["notify_push"]  # 第二管道依附在 [notify] 上，一起拿掉
     with pytest.raises(ConfigError, match=r"真單.*\[notify\]"):
         parse_config(raw)
     for kind in NOTIFY_LIVE_REQUIRED:
