@@ -41,19 +41,25 @@ input, select { font:inherit; font-size:16px; padding:8px 10px; border-radius:8p
 .lamp { display:flex; align-items:center; gap:10px; font-size:18px; font-weight:600; }
 .lamp i { width:14px; height:14px; border-radius:50%; background:var(--mute); display:inline-block; }
 .lamp.on i { background:var(--green); } .lamp.off i { background:#6b7280; }
-pre.log { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:13.5px/1.5 ui-monospace,Consolas,monospace; white-space:pre-wrap; max-height:340px; overflow:auto; margin:6px 0 0; }
+pre.log { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:13.5px/1.5 ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:340px; overflow:auto; margin:6px 0 0; }
 .muted { color:var(--mute); font-size:14px; }
+pre.term { max-height:none; height:calc(100vh - 470px); min-height:260px; }
+dl.where { display:grid; grid-template-columns:max-content 1fr; gap:6px 14px; margin:0; font-size:15px; }
+dl.where dt { color:var(--mute); } dl.where dd { margin:0; font-family:ui-monospace,Consolas,monospace; font-size:13.5px; overflow-wrap:anywhere; }
+@media (max-width:600px) { dl.where { grid-template-columns:1fr; gap:2px; } dl.where dd { margin-bottom:8px; } }
+pre.term .t { color:var(--mute); } pre.term .warn { color:#f0b90b; }
 .steps { margin:0; padding-left:20px; color:var(--mute); font-size:15px; }
 @media (max-width:600px) { main, header, nav { padding-left:12px; padding-right:12px; } }
 </style>
 </head>
 <body>
 <header><h1>程式交易後台</h1><span class="local">只在這台電腦上開得到。網站只能按緊急停止；改設定、開演練都在這裡。</span></header>
-<nav><button id="tab-settings" class="on">設定</button><button id="tab-drill">演練</button></nav>
+<nav><button id="tab-settings" class="on">設定</button><button id="tab-drill">演練</button><button id="tab-console">終端機</button></nav>
 <main>
   <div id="flash"></div>
   <div id="view-settings"></div>
   <div id="view-drill" hidden></div>
+  <div id="view-console" hidden></div>
 </main>
 <script>
 const TOKEN = "__TOKEN__";
@@ -75,7 +81,27 @@ async function load() {
     render();
   } catch (e) { flash("bad", "讀不到後台的資料：" + e.message); }
 }
-function render() { if (tab === "settings") renderSettings(); else renderDrill(); }
+const TABS = ["settings", "drill", "console"];
+function render() { if (tab === "settings") renderSettings(); else if (tab === "drill") renderDrill(); else renderConsole(); }
+function renderConsole() {
+  const v = $("view-console");
+  const old = v.querySelector("pre.term");
+  // 使用者往上捲在看舊的，就不要把畫面拉回最底
+  const follow = !old || old.scrollHeight - old.scrollTop - old.clientHeight < 40;
+  const top = old ? old.scrollTop : 0;
+  const lines = state.console.map((l) => `<span class="t">${esc(l.t)}</span> <span class="${l.level === "warn" ? "warn" : ""}">${esc(l.text)}</span>`);
+  const p = state.process, d = state.drill;
+  const row = (k, val) => `<dt>${k}</dt><dd>${esc(val)}</dd>`;
+  let where = `<section class="card"><h2>後台跑在哪裡</h2><dl class="where">${row("執行的程式", p.script)}${row("整行指令", p.command)}${row("用的 Python", p.python)}${row("在哪個資料夾執行", p.cwd)}${row("程序編號", p.pid + "（工作管理員裡找得到）")}${row("幾點開的", p.started_at.replace("T", " ").slice(0, 19))}</dl></section>`;
+  if (d && Object.keys(d.commands).length) {
+    where += `<section class="card"><h2>後台開出來的程式<span class="chip">${d.running ? "演練進行中" : "上一場演練"}</span></h2><dl class="where">`;
+    for (const [name, cmd] of Object.entries(d.commands)) where += row((name === "drill" ? "演練程式" : "中繼程式") + (d.procs[name] === null ? "・在跑" : `・已結束（${d.procs[name]}）`) + "・程序編號 " + d.pids[name], cmd);
+    where += row("輸出放在", d.folder) + `</dl></section>`;
+  }
+  v.innerHTML = where + `<section class="card"><h2>終端機<span class="chip">跟執行後台的那個視窗印的一樣・每 2 秒更新</span></h2><pre class="log term">${lines.join("\n") || "（還沒有輸出）"}</pre></section>`;
+  const pre = v.querySelector("pre.term");
+  pre.scrollTop = follow ? pre.scrollHeight : top;
+}
 function currentConfig() { return state.configs.find((c) => c.name === pick) || null; }
 function renderSettings() {
   const v = $("view-settings");
@@ -137,14 +163,18 @@ function renderDrill() {
   const sims = state.configs.filter((c) => c.ok && c.control);
   let html = `<section class="card"><h2>演練遠端緊急停止</h2><ol class="steps"><li>按「開始演練」：後台會開中繼程式與演練程式（全程模擬，不碰元大）。</li><li>演練程式先買 1 口抱著。</li><li>到網站「台指期 → 程式交易」按「緊急停止」，看「模擬」那一行：在聽 → 等它收到 → 已收到 → 已停手，沒有部位。</li></ol></section>`;
   html += `<section class="card"><div class="lamp ${running ? "on" : "off"}"><i></i>${running ? "演練進行中" : "沒有演練在跑"}</div>`;
-  if (d) html += `<p class="muted">${esc(d.started_at.slice(11, 19))} 開始・用 ${esc(d.day)} ${esc(d.start)} 之後的價格・${d.speed} 倍速・最多 ${d.minutes} 分鐘・${d.relay ? "中繼程式連 " + (d.relay === "TWQUANT_SUPABASE_DSN" ? "雲端" : "本機") + "資料庫" : "沒開中繼程式"}</p>`;
+  if (d) html += `<p class="muted">${esc(d.started_at.slice(11, 19))} 開始・用${d.feed === "recorded" ? "富邦即時錄的" : "期交所盤後檔"} ${esc(d.day)} ${esc(d.start)} 之後的價格・${d.speed} 倍速・最多 ${d.minutes} 分鐘・${d.relay ? "中繼程式連 " + (d.relay === "TWQUANT_SUPABASE_DSN" ? "雲端" : "本機") + "資料庫" : "沒開中繼程式"}</p>`;
   html += `</section>`;
+  if (d && !running && !d.stopped && d.procs.drill !== 0) {
+    const last = (d.logs.drill || []).filter((l) => l.trim()).slice(-1)[0] || "沒有輸出";
+    html += `<div class="msg bad">上一場演練沒跑完（結束碼 ${d.procs.drill}）：${esc(last)}</div>`;
+  }
   if (!running) {
-    const ticks = state.ticks.slice(0, 60).map((t) => `<option value="${esc(t.name)}">${esc(t.day)}</option>`).join("");
+    const ticks = state.ticks.slice(0, 60).map((t) => `<option value="${esc(t.name)}">${esc(t.day)}・${t.feed === "recorded" ? "富邦即時錄的" : "期交所盤後檔"}</option>`).join("");
     const cfgs = sims.map((c) => `<option ${c.name === pick ? "selected" : ""}>${esc(c.name)}</option>`).join("");
     html += `<section class="card"><h2>開一場演練</h2><div class="grid">
       <label class="f"><b>設定檔</b><select id="d-cfg">${cfgs}</select><small>要有遠端緊急停止那一段</small></label>
-      <label class="f"><b>拿哪一天的價格</b><select id="d-ticks">${ticks}</select><small>期交所逐筆檔</small></label>
+      <label class="f"><b>拿哪一天的價格</b><select id="d-ticks">${ticks}</select><small>富邦即時錄的排前面</small></label>
       <label class="f"><b>從那一天的幾點開始播</b><input id="d-from" value="09:00:00"><small>格式 HH:MM:SS</small></label>
       <label class="f"><b>最多跑幾分鐘</b><input id="d-min" value="10" inputmode="decimal"></label>
       <label class="f"><b>幾倍速</b><input id="d-speed" value="1" inputmode="decimal"><small>1＝跟真的一樣快</small></label>
@@ -172,17 +202,17 @@ async function startDrill() {
   try { await post("/api/drill/start", body); flash("ok", "演練開始了。到網站按「緊急停止」試試看。"); await load(); }
   catch (e) { flash("bad", "演練沒開起來：" + e.message); }
 }
-for (const name of ["settings", "drill"]) $("tab-" + name).onclick = () => {
+for (const name of TABS) $("tab-" + name).onclick = () => {
   tab = name;
-  $("tab-settings").classList.toggle("on", name === "settings");
-  $("tab-drill").classList.toggle("on", name === "drill");
-  $("view-settings").hidden = name !== "settings";
-  $("view-drill").hidden = name !== "drill";
+  for (const other of TABS) {
+    $("tab-" + other).classList.toggle("on", name === other);
+    $("view-" + other).hidden = name !== other;
+  }
   flash();
   render();
 };
 load();
-setInterval(() => { if (tab === "drill" && document.visibilityState === "visible") load(); }, 2000);
+setInterval(() => { if (tab !== "settings" && document.visibilityState === "visible") load(); }, 2000);
 </script>
 </body>
 </html>

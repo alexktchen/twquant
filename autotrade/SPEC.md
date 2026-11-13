@@ -313,7 +313,7 @@ python tools/run.py replay --config configs/tmf_sim.toml --feed recorded --ticks
 
 ```bash
 cd autotrade
-python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --env-file D:/project/twquant/.env
+python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recorded-dir D:/project/twquant/data/autotrade/recorded --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --env-file D:/project/twquant/.env
 ```
 
 會自動打開瀏覽器（`http://127.0.0.1:8765/`）；`--no-open` 不打開、`--port` 換埠。
@@ -325,7 +325,16 @@ python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --ticks
   分鐘 0～120、倍速 0～60；逐筆檔只能是資料夾裡 `Daily_YYYY_MM_DD.csv` 的檔；連線字串不經過後台。每場演練一個資料夾，放兩個程式的輸出。
 - **AC3 防護**：只聽 127.0.0.1；Host 不對一律擋；會改東西的請求要通行碼、要 JSON、Origin 要是自己；設定檔只認資料夾裡真的有的那幾個（擋 `../`）；
   錯的輸入回白話的原因，不會讓後台當掉。
-- **頁面**：兩個分頁（設定、演練），地鐵風格、大字；手機寬度不會橫向捲動。
+- **AC4 終端機分頁**（2026-11-14，使用者：「可以在後台看到我終端機在跑的樣子」「終端機實際跑在哪邊要顯示 是執行哪一個py之類的」）：
+  後台在終端機印的每一行（開機、存了哪些設定、哪些被擋與原因、演練開始／停止／結束）同時留在記憶體（最近 500 行），頁面每 2 秒更新；
+  每行前面有時間，被擋與出錯的用黃色。上面一塊寫「後台跑在哪裡」：執行的是哪一支程式（完整路徑）、整行指令、用哪個 Python、在哪個資料夾執行、程序編號、幾點開的；
+  有演練時再列出後台開出來的每個程式的整行指令、程序編號、還在不在跑、輸出放哪。連線字串不會出現（只有環境變數的名稱與 `.env` 的路徑）。
+- **AC2 補充（2026-11-14，使用者：「演練一直卡住」）**：
+  （一）後台用 `tools/run.py` 開的時候，開出來的 `python -m autotrade …` 找不到套件、一開就結束——現在開程式時明講套件位置（`jobs.child_env`），
+  後台收到的資料夾也先換成完整路徑；（二）演練可以用富邦即時錄的逐筆（`--recorded-dir`，A-013 的匯出檔；`drill --feed recorded`），清單裡排在期交所檔前面、預設選它；
+  （三）演練程式自己結束時，中繼程式一起收掉，結束碼不是 0 就在演練分頁用紅色寫出最後一行原因、終端機也報一次；
+  （四）同一秒內停掉又開一場，資料夾名字加編號，不會撞名。
+- **頁面**：三個分頁（設定、演練、終端機），地鐵風格、大字；手機寬度不會橫向捲動。
 
 **完成紀錄（2026-11-13）**
 
@@ -334,6 +343,9 @@ python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --ticks
   到演練分頁選 11-12 的價格、8 倍速、中繼程式連本機資料庫，按「開始演練」→ 演練程式買進 1 口 → 模擬網站按停止 → 畫面上看到收到遠端緊急停止、停手、平倉 →
   按「停止演練」兩個程式都結束。手機寬度與桌機都截圖檢查過（`frontend/tests/shot-autotrade-admin.cjs`）。
 - **還沒有的**：真單的盤中執行程式還沒做（等 A-008），所以後台現在只能開演練；之後會從這裡啟動與停止。
+- **2026-11-14 補做的紀錄**：終端機分頁與上面 AC2 補充四項。閘門全綠（ruff、mypy、pytest 255 條）。在使用者的終端機重開後台實際操作：
+  用富邦錄的 11-13、09:12 起、8 倍速、中繼程式連本機資料庫開演練，演練程式買進 1 口（44,266），終端機分頁與那個視窗印的一樣。
+  原本卡住的原因有兩個：開出來的程式找不到套件；期交所的 `Daily_2026_11_13.csv` 是 11-13 早上 08:30 抓的，裡面只有夜盤、沒有日盤。
 
 ### A-011 遠端緊急停止（D-225）
 

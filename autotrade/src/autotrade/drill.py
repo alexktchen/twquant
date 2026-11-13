@@ -21,6 +21,7 @@ from autotrade.config import Config, ConfigError
 from autotrade.control import ControlLoop, FileControl
 from autotrade.engine import Engine, Event
 from autotrade.export import dumps, snapshot
+from autotrade.feed.recorded import read_recorded_day
 from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal
 from autotrade.model import TAIPEI, Fill, OrderRequest, Side, Tick
@@ -67,9 +68,21 @@ def drill_config(cfg: Config) -> Config:
     return replace(cfg, mode="sim", risk=risk)
 
 
-def load_prices(cfg: Config, ticks: Path, day: date, start: time) -> list[tuple[float, float, int]]:
-    """從期交所逐筆檔拿那一天 start 之後的價格：（距離第一筆幾秒、價格、口數）。"""
-    _, rows = read_taifex_day(ticks, cfg.contract.symbol, day, cfg.session.start, cfg.session.end)
+def load_prices(
+    cfg: Config, ticks: Path, day: date, start: time, feed: str = "taifex"
+) -> list[tuple[float, float, int]]:
+    """拿那一天 start 之後的價格：（距離第一筆幾秒、價格、口數）。
+
+    feed：taifex＝期交所盤後逐筆檔；recorded＝富邦即時錄下來的（A-013 的匯出檔）。
+    """
+    if feed == "recorded":
+        rows = read_recorded_day(ticks, day, cfg.session.start, cfg.session.end)
+    elif feed == "taifex":
+        _, rows = read_taifex_day(
+            ticks, cfg.contract.symbol, day, cfg.session.start, cfg.session.end
+        )
+    else:
+        raise ValueError(f"不認得的行情來源：{feed!r}")
     picked = [t for t in rows if t.ts.time() >= start]
     if not picked:
         raise ValueError(f"{ticks} 在 {day} {start} 之後沒有 {cfg.contract.symbol} 的成交")

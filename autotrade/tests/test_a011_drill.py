@@ -147,6 +147,22 @@ def test_ac21_prices_come_from_the_tick_file_after_the_start_time(tmp_path: Path
         load_prices(cfg, path, date(2026, 11, 13), time(13, 0))
 
 
+def test_ac21_prices_can_come_from_the_fubon_recording(tmp_path: Path) -> None:
+    """A-013 的錄製檔也能拿來演練（使用者 2026-11-14：「不要證交所的」）。"""
+    path = tmp_path / "TMF_2026-11-13.csv"
+    path.write_text(
+        "t,price,size,bid,ask\n"
+        "2026-11-13T09:00:00.100000+08:00,43900,2,43899,43900\n"
+        "2026-11-13T09:00:01.600000+08:00,43905,1,,\n",
+        encoding="utf-8",
+    )
+    cfg = drill_config(load_config(CONFIG_PATH))
+    got = load_prices(cfg, path, date(2026, 11, 13), time(9, 0), "recorded")
+    assert got == [(0.0, 43900.0, 2), (1.5, 43905.0, 1)]
+    with pytest.raises(ValueError, match="不認得的行情來源"):
+        load_prices(cfg, path, date(2026, 11, 13), time(9, 0), "guess")
+
+
 def test_ac21_cli_runs_a_short_drill(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = write_csv(tmp_path / "Daily_2026_11_13.csv", ROWS, encoding="utf-8-sig")
     folder = tmp_path / "share"
