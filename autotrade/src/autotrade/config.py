@@ -5,6 +5,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from datetime import time
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,32 @@ LIVE_REQUIRED = (
     "max_orders_per_minute",
     "max_consecutive_broker_rejects",
     "position_stop_loss_twd",
+)
+NOTIFY_CHANNELS = ("telegram",)
+# 引擎會寫出的事件種類；每一種 notify 都有白話範本（SPEC A-006 AC3，有測試守著兩邊一致）
+NOTIFY_KINDS = (
+    "fill",
+    "halt",
+    "release",
+    "stop",
+    "correction",
+    "link",
+    "broker_reject",
+    "foreign_order",
+    "reject",
+    "order",
+    "cancel",
+    "cancelled",
+)
+# 真單模式一定要通知的種類：成交，與所有會標「注意／要處理」的事（SPEC A-006 AC8）
+NOTIFY_LIVE_REQUIRED = (
+    "fill",
+    "halt",
+    "stop",
+    "correction",
+    "link",
+    "broker_reject",
+    "foreign_order",
 )
 
 
@@ -85,6 +112,23 @@ class ExportConfig:
 
 
 @dataclass(frozen=True)
+class NotifyConfig:
+    """手機通知。金鑰與收件對象不在這裡，只從環境變數讀。"""
+
+    channel: str  # 送到哪（NOTIFY_CHANNELS）
+    name: str  # 通知裡怎麼稱呼這個商品
+    kinds: tuple[str, ...]  # 要通知哪些種類的事（NOTIFY_KINDS）
+    quiet_routine: bool  # 一般通知（成交、解除、連線恢復）靜音送達；「注意」「要處理」一定會響
+    throttle_s: float  # 同一件事多久內不重複通知（超過的合併成一則）
+    burst: int  # 同一類通知在 throttle_s 內最多即時送幾則
+    timeout_s: float  # 送一次最多等幾秒
+    warn_after_attempts: int  # 一則通知連續失敗幾次就留一筆紀錄（之後還是繼續試）
+    retry_wait_s: float  # 每次重試前等幾秒
+    queue_size: int  # 還沒送出的通知最多排幾則；滿了新的會被丟掉並留紀錄
+    close_wait_s: float  # 程式結束時最多等幾秒把還沒送的送完
+
+
+@dataclass(frozen=True)
 class Config:
     """整份設定。"""
 
@@ -95,6 +139,7 @@ class Config:
     sim: SimConfig
     momentum: MomentumConfig | None = None
     export: ExportConfig | None = None
+    notify: NotifyConfig | None = None
 
 
 def _need(table: dict[str, Any], key: str, where: str) -> Any:
@@ -110,6 +155,52 @@ def _clock(text: Any, where: str) -> time:
         return time.fromisoformat(text)
     except ValueError as exc:
         raise ConfigError(f"{where} 不是合法時間：{text!r}") from exc
+
+
+def _parse_notify(n: dict[str, Any]) -> NotifyConfig:
+    kinds = _need(n, "kinds", "notify")
+    if not isinstance(kinds, list) or not kinds or not all(isinstance(k, str) for k in kinds):
+        raise ConfigError(f"[notify] kinds 要是一串種類名稱（至少一個），拿到 {kinds!r}")
+    unknown = sorted(set(kinds) - set(NOTIFY_KINDS))
+    if unknown:
+        raise ConfigError(f"[notify] kinds 有不認得的種類 {unknown}（可用：{NOTIFY_KINDS}）")
+    if len(set(kinds)) != len(kinds):
+        raise ConfigError(f"[notify] kinds 有重複的種類：{kinds}")
+    quiet = _need(n, "quiet_routine", "notify")
+    if not isinstance(quiet, bool):
+        raise ConfigError(f"[notify] quiet_routine 要是 true 或 false，拿到 {quiet!r}")
+
+    def number(key: str, *, whole: bool = False, zero_ok: bool = False) -> float:
+        value = _need(n, key, "notify")
+        ok = isinstance(value, int | float) and not isinstance(value, bool) and isfinite(value)
+        if not ok or (whole and value != int(value)):
+            kind = "整數" if whole else "數字"
+            raise ConfigError(f"[notify] {key} 要是有限的{kind}，拿到 {value!r}")
+        if value < 0 or (value == 0 and not zero_ok):
+            limit = "不能是負的" if zero_ok else "要大於 0"
+            raise ConfigError(f"[notify] {key} {limit}：{value!r}")
+        return float(value)
+
+    notify = NotifyConfig(
+        channel=str(_need(n, "channel", "notify")),
+        name=str(_need(n, "name", "notify")).strip(),
+        kinds=tuple(kinds),
+        quiet_routine=quiet,
+        throttle_s=number("throttle_s"),
+        burst=int(number("burst", whole=True)),
+        timeout_s=number("timeout_s"),
+        warn_after_attempts=int(number("warn_after_attempts", whole=True)),
+        retry_wait_s=number("retry_wait_s"),  # 0 會讓送不出去時不停地重試，佔住處理器
+        queue_size=int(number("queue_size", whole=True)),
+        close_wait_s=number("close_wait_s", zero_ok=True),
+    )
+    if notify.channel not in NOTIFY_CHANNELS:
+        raise ConfigError(
+            f"[notify] channel 要是 {NOTIFY_CHANNELS} 其中之一，拿到 {notify.channel!r}"
+        )
+    if not notify.name:
+        raise ConfigError("[notify] name 不能是空的（通知裡怎麼稱呼這個商品）")
+    return notify
 
 
 def parse_config(raw: dict[str, Any]) -> Config:
@@ -203,6 +294,14 @@ def parse_config(raw: dict[str, Any]) -> Config:
         export = ExportConfig(max_events=int(_need(raw["export"], "max_events", "export")))
         if export.max_events <= 0:
             raise ConfigError(f"[export] max_events 要大於 0：{export.max_events}")
+    notify = _parse_notify(raw["notify"]) if "notify" in raw else None
+    if mode == "live":
+        # D-223：通知沒做完不上真單；做完之後，真單沒開通知就拒絕啟動（D-224）
+        if notify is None:
+            raise ConfigError('真單模式（mode = "live"）一定要有 [notify]：成交與異常要通知手機')
+        missing = [k for k in NOTIFY_LIVE_REQUIRED if k not in notify.kinds]
+        if missing:
+            raise ConfigError(f"真單模式的 [notify] kinds 少了一定要通知的種類：{missing}")
     return Config(
         mode=mode,
         contract=contract,
@@ -211,6 +310,7 @@ def parse_config(raw: dict[str, Any]) -> Config:
         sim=sim,
         momentum=momentum,
         export=export,
+        notify=notify,
     )
 
 

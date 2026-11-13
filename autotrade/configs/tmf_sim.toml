@@ -34,6 +34,25 @@ slippage_points = 1.0    # 市價單每邊滑 1 點
 [export]
 max_events = 30                  # 給網站的「今日大事」最多留幾則（留最新的）
 
+# 手機通知（SPEC A-006、D-224）。金鑰與收件對象不放這裡，只放 .env：
+# AUTOTRADE_TELEGRAM_BOT_TOKEN（機器人的金鑰）、AUTOTRADE_TELEGRAM_CHAT_ID（收件代號）。
+# 真單一定要有這一段，而且 kinds 要包含成交與所有異常；下面的數字是 AI 先填的，可以改。
+[notify]
+channel = "telegram"
+name = "微台"                    # 通知裡怎麼稱呼這個商品
+# 要通知哪些事：成交、停手（含暫停送單）、解除、停損、部位修正、連線中斷與恢復、被券商拒絕、
+# 券商端有不認得的委託、被風控擋下、送出刪單（例如委託太久沒成交）、刪單完成。
+# 另有 order（每一筆送出的委託）預設不開：市價單一秒內就成交，成交通知講的是同一件事。
+kinds = ["fill", "halt", "release", "stop", "correction", "link", "broker_reject", "foreign_order", "reject", "cancel", "cancelled"]
+quiet_routine = true             # 一般通知（成交、解除、連線恢復）靜音送達；「注意」「要處理」一定會響
+throttle_s = 300.0               # 同一件事幾秒內不重複通知；超過的合併成一則，視窗空出來時送
+burst = 6                        # 同一類通知在 throttle_s 內最多即時送幾則（被擋下這類重複的事固定只送第一則）
+timeout_s = 5.0                  # 送一次最多等幾秒
+warn_after_attempts = 3          # 一則通知連續失敗幾次就留一筆紀錄（之後還是繼續試，直到送出去或程式結束）
+retry_wait_s = 2.0               # 每次重試前等幾秒
+queue_size = 200                 # 還沒送出的通知最多排幾則；滿了新的會被丟掉並留紀錄
+close_wait_s = 10.0              # 程式結束時最多等幾秒把還沒送的送完
+
 [momentum]
 eval_interval_s = 1.0            # 同現有模擬單：每秒評估一次
 market_refresh_s = 30.0
