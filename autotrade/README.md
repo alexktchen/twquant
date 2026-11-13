@@ -18,6 +18,18 @@ python -m ruff check . && python -m ruff format --check . && python -m mypy && p
 
 設定範例：`configs/tmf_sim.toml`（微台、只做多、最多 1 口）。真單模式沒設每日虧損上限、沒有通知設定、或沒有 `[control]`（遠端緊急停止），會拒絕啟動。
 
+## 後台（改設定、開演練）
+
+在交易電腦上用瀏覽器操作，只有這台電腦連得到。在 `autotrade` 資料夾執行：
+
+```bash
+python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --env-file D:/project/twquant/.env
+```
+
+會自動打開 `http://127.0.0.1:8765/`。`D:/t/autotrade` 換成任何一個放演練紀錄的資料夾（要先建好）。
+「設定」分頁：改了按存檔，不合格的不會存；改了要重新啟動交易程式才生效。模擬／真單不能在這裡切換。
+「演練」分頁：選哪一天的價格、從幾點開始、幾倍速、中繼程式連雲端還是本機，按「開始演練」；到網站按「緊急停止」試試看。
+
 ## 演練遠端緊急停止
 
 全程模擬、不碰券商。開兩個視窗，都在 `autotrade` 資料夾裡（`D:/t/drill` 換成任何一個空資料夾）：

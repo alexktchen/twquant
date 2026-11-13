@@ -355,6 +355,39 @@ def run_drill(
     return 0
 
 
+def run_admin(
+    config_dir: Path,
+    data_dir: Path,
+    ticks_dir: Path | None,
+    env_file: Path | None,
+    port: int,
+    open_browser: bool,
+) -> int:
+    """開本機後台（只聽 127.0.0.1），按 Ctrl+C 結束；結束時把還在跑的演練一起停掉。"""
+    from autotrade.admin import Admin, serve
+    from autotrade.jobs import Jobs
+
+    for folder in (config_dir, data_dir):
+        if not folder.is_dir():
+            raise FileNotFoundError(f"資料夾不存在：{folder}")
+    admin = Admin(config_dir, ticks_dir, Jobs(data_dir, env_file=env_file))
+    server = serve(admin, port)
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    print(f"後台開好了：{url}（只有這台電腦連得到；Ctrl+C 結束）")
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("後台關閉")
+    finally:
+        server.server_close()
+        admin.jobs.close()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """進入點。"""
     parser = argparse.ArgumentParser(prog="autotrade", description="獨立的程式交易系統")
@@ -397,6 +430,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     drill.add_argument(
         "--status", type=Path, help="把狀態寫到這個檔（給中繼程式送上網站；預設不寫）"
     )
+    admin = sub.add_parser("admin", help="開本機後台：用瀏覽器改設定、開演練（只聽 127.0.0.1）")
+    admin.add_argument("--config-dir", type=Path, required=True, help="設定檔的資料夾")
+    admin.add_argument("--data-dir", type=Path, required=True, help="演練的紀錄放哪（絕對路徑）")
+    admin.add_argument("--ticks-dir", type=Path, help="期交所逐筆檔的資料夾（演練拿價格）")
+    admin.add_argument("--env-file", type=Path, help="交給中繼程式的 .env（後台自己不讀）")
+    admin.add_argument("--port", type=int, default=8765)
+    admin.add_argument("--no-open", action="store_true", help="不要自動打開瀏覽器")
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
     verify.add_argument("journal", type=Path)
     test = sub.add_parser("notify-test", help="送一則測試通知到手機（要連網，請自己執行）")
@@ -419,6 +459,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"設定沒問題：{cfg.mode}、{cfg.contract.symbol}、部位 {cfg.risk.min_position}～{cfg.risk.max_position} 口"
         )
         return 0
+    if args.command == "admin":
+        return run_admin(
+            args.config_dir,
+            args.data_dir,
+            args.ticks_dir,
+            args.env_file,
+            args.port,
+            not args.no_open,
+        )
     if args.command == "drill":
         return run_drill(
             args.config,
