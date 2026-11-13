@@ -53,7 +53,7 @@ from autotrade.delivery import (
 from autotrade.engine import Engine, Event
 from autotrade.export import snapshot
 from autotrade.journal import Journal, read_journal, recover
-from autotrade.model import TAIPEI, OrderRequest, Side, Tick
+from autotrade.model import TAIPEI, Command, OrderRequest, Side, Tick
 from autotrade.notify import HALT_SHORT, Book, Level, Message, Notifier, Throttle, plain
 from test_a002_engine import write_csv
 from test_a010_broker_requirements import FlakyBroker, Scripted, scripted
@@ -392,6 +392,19 @@ def release_while_daily_loss(over: Overrides = None) -> Rig:
     return r
 
 
+def remote_stop(over: Overrides = None) -> Rig:
+    """有 1 口時從網站按了緊急停止（A-011）；之後遠端停止這條路斷了又恢復；還有一筆不認得的遠端指令。"""
+    r = rig({0: Side.BUY}, cfg(over))
+    r.run([tick(0), tick(1)])
+    day = at(0).date()
+    r.engine.on_control([Command(id=7, action="stop", day=day, created_at=at(1))], at(2))
+    r.run([tick(3), tick(4)])
+    r.engine.note_control_link(at(5), up=False, detail="讀不到遠端指令：還沒有指令檔 commands.json")
+    r.engine.note_control_link(at(9), up=True, detail="遠端指令恢復可以讀")
+    r.engine.on_control([Command(id=8, action="resume", day=day, created_at=at(9))], at(10))
+    return r
+
+
 SCENARIOS: list[Callable[[Overrides], Rig]] = [
     round_trip,
     daily_loss,
@@ -408,6 +421,7 @@ SCENARIOS: list[Callable[[Overrides], Rig]] = [
     stale_entry,
     stale_exit,
     kill_while_suspended,
+    remote_stop,
     release_while_daily_loss,
 ]
 

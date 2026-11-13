@@ -32,6 +32,8 @@ NOTIFY_KINDS = (
     "order",
     "cancel",
     "cancelled",
+    "control",
+    "control_link",
 )
 # 真單模式一定要通知的種類：成交，與所有會標「注意／要處理」的事（SPEC A-006 AC8）
 NOTIFY_LIVE_REQUIRED = (
@@ -42,6 +44,8 @@ NOTIFY_LIVE_REQUIRED = (
     "link",
     "broker_reject",
     "foreign_order",
+    "control",
+    "control_link",
 )
 
 
@@ -105,6 +109,15 @@ class MomentumConfig:
 
 
 @dataclass(frozen=True)
+class ControlConfig:
+    """遠端緊急停止（A-011）。"""
+
+    poll_s: float  # 多久讀一次停止指令（用時鐘，不靠行情）
+    flatten_timeout_s: float  # 停止後這麼久還沒確認平掉，就回報「要人處理」
+    stale_s: float  # 指令檔超過這麼久沒更新，就當成遠端停止這條路斷了
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     """給網站的狀態輸出。"""
 
@@ -139,6 +152,7 @@ class Config:
     sim: SimConfig
     momentum: MomentumConfig | None = None
     export: ExportConfig | None = None
+    control: ControlConfig | None = None
     notify: NotifyConfig | None = None
 
 
@@ -302,6 +316,22 @@ def parse_config(raw: dict[str, Any]) -> Config:
         missing = [k for k in NOTIFY_LIVE_REQUIRED if k not in notify.kinds]
         if missing:
             raise ConfigError(f"真單模式的 [notify] kinds 少了一定要通知的種類：{missing}")
+    control = None
+    if "control" in raw:
+        c2 = raw["control"]
+        control = ControlConfig(
+            poll_s=float(_need(c2, "poll_s", "control")),
+            flatten_timeout_s=float(_need(c2, "flatten_timeout_s", "control")),
+            stale_s=float(_need(c2, "stale_s", "control")),
+        )
+        if control.poll_s <= 0 or control.flatten_timeout_s <= 0:
+            raise ConfigError(f"[control] poll_s 與 flatten_timeout_s 要大於 0：{control}")
+        if control.stale_s < 2 * control.poll_s:
+            raise ConfigError(
+                f"[control] stale_s 至少要是 poll_s 的兩倍（不然正常的延遲也會被當成斷線）：{control}"
+            )
+    if mode == "live" and control is None:
+        raise ConfigError('真單模式（mode = "live"）一定要設 [control]（遠端緊急停止，D-225）')
     return Config(
         mode=mode,
         contract=contract,
@@ -310,6 +340,7 @@ def parse_config(raw: dict[str, Any]) -> Config:
         sim=sim,
         momentum=momentum,
         export=export,
+        control=control,
         notify=notify,
     )
 

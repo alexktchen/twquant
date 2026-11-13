@@ -1,4 +1,4 @@
-"""指令列：檢查設定、用期交所逐筆重播一天、把狀態寫成檔案給網站、通知手機。"""
+"""指令列：檢查設定、用期交所逐筆重播一天、把狀態寫成檔案給網站、通知手機、跑跟雲端溝通的中繼程式。"""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.model import TAIPEI
 from autotrade.notify import Level, Notifier, Report, sample, where_of
+from autotrade.relay import CONSUMERS, Relay, open_pg, run
 from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
 
@@ -180,6 +181,34 @@ def write_text_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def run_relay(
+    config: Path,
+    folder: Path,
+    consumer: str | None,
+    status: Path | None,
+    dsn_env: str,
+    env_file: Path | None,
+    once: bool,
+) -> None:
+    """跑中繼程式：資料庫 ↔ 本機資料夾裡的指令檔與回報檔。跟交易程式是不同的程序。"""
+    cfg = load_config(config)
+    if cfg.control is None:
+        raise ConfigError("設定檔沒有 [control]，沒有東西要中繼")
+    if not folder.is_dir():
+        raise FileNotFoundError(f"資料夾不存在：{folder}")
+    dsn = os.environ.get(dsn_env)
+    if not dsn and env_file is not None:
+        dsn = env_value(env_file.read_text(encoding="utf-8"), dsn_env)
+    if not dsn:
+        raise ConfigError(f"環境變數 {dsn_env} 沒有設定")
+    db = open_pg(dsn, timeout_s=cfg.control.poll_s)
+    relay = Relay(db, consumer or cfg.mode, folder, cfg.control.poll_s, status, ensure=db.ensure)
+    try:
+        run(relay, once=once)
+    except KeyboardInterrupt:
+        print("中繼程式停止")
+
+
 def run_notify_test(config: Path, env_file: Path | None, level: str) -> int:
     """送一則測試通知到手機；送出去回 0，沒送出去印出原因並回 1。"""
     cfg = load_config(config)
@@ -241,6 +270,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="那一天的通知：print 印在畫面上（不連網）、send 真的送到手機",
     )
     replay.add_argument("--notify-log", type=Path, help="沒送出去的通知記到哪個檔案（絕對路徑）")
+    relay = sub.add_parser("relay", help="中繼程式：把遠端停止指令拿下來、把結果與狀態送上去")
+    relay.add_argument("--config", type=Path, required=True)
+    relay.add_argument("--dir", type=Path, required=True, help="跟交易程式共用的資料夾（絕對路徑）")
+    relay.add_argument("--consumer", choices=CONSUMERS, help="預設用設定檔的 mode")
+    relay.add_argument("--status", type=Path, help="狀態檔；有更新就送上去")
+    relay.add_argument("--dsn-env", default="TWQUANT_PG_DSN", help="放連線字串的環境變數名稱")
+    relay.add_argument("--env-file", type=Path, help="環境變數沒設時，改從這個 .env 讀同名的變數")
+    relay.add_argument("--once", action="store_true", help="只跑一輪就結束")
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
     verify.add_argument("journal", type=Path)
     test = sub.add_parser("notify-test", help="送一則測試通知到手機（要連網，請自己執行）")
@@ -257,6 +294,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         cfg = load_config(args.config)
         print(
             f"設定沒問題：{cfg.mode}、{cfg.contract.symbol}、部位 {cfg.risk.min_position}～{cfg.risk.max_position} 口"
+        )
+        return 0
+    if args.command == "relay":
+        run_relay(
+            args.config,
+            args.dir,
+            args.consumer,
+            args.status,
+            args.dsn_env,
+            args.env_file,
+            args.once,
         )
         return 0
     if args.command == "verify-journal":

@@ -60,6 +60,8 @@ KIND_LABEL = {
     "order": "送出委託",
     "cancel": "送出刪單",
     "cancelled": "刪單完成",
+    "control": "遠端緊急停止",
+    "control_link": "遠端緊急停止的連線",
 }
 UNLOCK = "要在電腦上解除，程式才會再交易。"
 
@@ -554,6 +556,35 @@ def _cancelled(event: Event, seen: Seen, ctx: Context) -> Draft:
     return Level.INFO, "cancelled", False, f"刪單完成：{words}", [tail]
 
 
+def _control(event: Event, seen: Seen, ctx: Context) -> Draft:
+    """網站送來的遠端指令（A-011）。事件文字帶編號與內部用字，這裡不照抄。"""
+    if not event.data.get("applied"):
+        lines = [
+            "收到一筆遠端指令，但沒有執行：不是今天的，或是這一版程式不認得的動作。",
+            "交易不受影響。",
+        ]
+        return Level.WARN, "control", False, "遠端指令沒有執行", lines
+    lines = [
+        "有人在網站上按了緊急停止。程式已經停手並開始平倉（另有一則「緊急停止」的通知）。",
+        f"帳上部位：{_holding(seen)}",
+        UNLOCK,
+    ]
+    return Level.WARN, "control", False, "收到遠端緊急停止", lines
+
+
+def _control_link(event: Event, seen: Seen, ctx: Context) -> Draft:
+    """網站上的緊急停止到不到得了這台電腦。原因的細節（檔名、錯誤訊息）留在日誌，通知只講結論。"""
+    if event.data["up"]:
+        lines = ["網站上的緊急停止又到得了這台電腦了。"]
+        return Level.INFO, "control_link", False, "遠端緊急停止恢復可以用", lines
+    lines = [
+        "網站上的緊急停止現在到不了這台電腦（讀不到停止指令，或結果回報不出去）。",
+        "交易照常進行。要停請到電腦前，或用元大 App。",
+        f"帳上部位：{_holding(seen)}",
+    ]
+    return Level.WARN, "control_link", False, "遠端緊急停止現在到不了", lines
+
+
 _WRITERS: dict[str, Callable[[Event, Seen, Context], Draft]] = {
     "fill": _fill,
     "halt": _halt,
@@ -567,6 +598,8 @@ _WRITERS: dict[str, Callable[[Event, Seen, Context], Draft]] = {
     "order": _order,
     "cancel": _cancel,
     "cancelled": _cancelled,
+    "control": _control,
+    "control_link": _control_link,
 }
 
 

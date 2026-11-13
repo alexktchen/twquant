@@ -43,7 +43,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         where = f"，{args.env_file} 裡也沒有" if args.env_file is not None else ""
         raise SystemExit(f"環境變數 {args.dsn_env} 沒有設定{where}")
     psycopg = importlib.import_module("psycopg")
-    with psycopg.connect(dsn) as conn:
+    # prepare_threshold=None：雲端的連線池（Supabase transaction pooler）不支援預備語句
+    with psycopg.connect(dsn, prepare_threshold=None, connect_timeout=30) as conn:
         conn.execute('CREATE SCHEMA IF NOT EXISTS "serving"')
         conn.execute(STATUS_DDL)
         for row in rows:

@@ -161,6 +161,9 @@ export const fetchFuturesDay = (day?: string) =>
 /** 程式交易的狀態（autotrade A-005）：日期清單＋那一天的整份狀態；只讀。 */
 export const fetchAutotrade = (mode: AutoMode, day?: string) => get<AutoEnvelope>(`/api/autotrade?mode=${mode}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
 
+/** 遠端緊急停止（autotrade A-011／D-224）：只會叫停，沒有解除。手抖連按會拿到同一筆。 */
+export const sendAutotradeStop = () => get<{ ok: boolean; reused: boolean } & Pick<AutoEnvelope, 'stop' | 'listeners'>>('/api/autotrade/stop', 'PUT', { confirm: 'stop' })
+
 /** 小台模擬有紀錄的交易日（新到舊）。只給 admin。 */
 export const fetchFuturesDays = () => get<{ days: FuturesDayRow[] }>('/api/futures/days').then((r) => r.days)
 

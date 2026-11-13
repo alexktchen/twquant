@@ -128,6 +128,7 @@ def recover(records: list[Record], cfg: Config, today: date) -> Restored:
     halt: str | None = None
     halt_day: date | None = None
     entries_today = 0
+    stops_today: list[tuple[int, str, bool]] = []
     day_start_realized: float | None = None
     for rec in records:
         rec_day = rec.ts.date()
@@ -163,6 +164,10 @@ def recover(records: list[Record], cfg: Config, today: date) -> Restored:
             ledger.adopt(int(data["position"]), float(data["avg_price"]))
         elif rec.kind in ("halt", "release"):
             halt, halt_day = data["halt"], rec_day
+        elif rec.kind == "control" and rec_day == today:
+            stops_today.append(
+                (int(data["command_id"]), str(data["created_at"]), bool(data["applied"]))
+            )
     if halt == HALT_DAILY_LOSS and halt_day != today:
         halt = None
     return Restored(
@@ -177,4 +182,5 @@ def recover(records: list[Record], cfg: Config, today: date) -> Restored:
         entries_today=entries_today,
         halt=halt,
         open_orders=tuple(sorted(remaining)),
+        stops_today=tuple(stops_today),
     )
