@@ -8,7 +8,7 @@
 期貨商對程式交易的六項要求（A-010：下單頻率、單筆口數、停損、斷線重連、被阻擋時暫停、部位比對與修正）、
 把狀態單向寫給網站（A-005：重播後寫狀態檔 → `tools/push_status.py` 寫進資料庫 → 網站「台指期 → 程式交易」）、
 遠端緊急停止（A-011，D-225：網站只能叫停；交易程式只讀寫本機檔案，跟資料庫溝通的是另一支中繼程式 `python -m autotrade relay`）、
-成交與異常通知手機（A-006：Telegram；**還沒有真的送到手機過**，照下面的步驟設定後自己測）。
+成交與異常通知手機（A-006：Telegram 收全部，「要處理」另送網站 App 推播；2026-11-13 兩個管道都真的送到手機過）。
 **還沒接元大行情與下單。** 接手請先讀 `docs/HANDOFF-2026-11-12-autotrade.md`。
 
 ```bash
@@ -79,3 +79,21 @@ python tools/run.py notify-test --config configs/tmf_sim.toml --env-file D:/proj
 要通知哪些事、要不要靜音、合併的時間，都在 `configs/tmf_sim.toml` 的 `[notify]`。
 
 **限制**：電腦當機、斷網或斷電時，這裡發不出通知——那要靠之後的獨立看門程式（A-007）。
+
+## 第二管道：網站 App 的推播
+
+Telegram 照舊收全部；網站 App（加到主畫面的 twquant）另外只收「🚨 要處理」的通知，點了打開台指期分頁。交易程式執行時不碰網站與資料庫：先把你開了通知的裝置拉成本機檔案，執行時只讀那個檔。
+
+1. 手機打開網站 App，按右上角帳號旁的 🔔，開通知（iPhone 要先用 Safari「分享 → 加入主畫面」，從主畫面打開）。
+2. `.env` 要有 `TWQUANT_VAPID_PRIVATE_KEY`（網站推播的金鑰，已經有了）、`TWQUANT_SUPABASE_DSN`（已經有了）、`AUTOTRADE_PUSH_EMAIL`（你網站登入的帳號）。
+3. 在 `autotrade` 資料夾執行下面兩個指令：先拉訂閱（只讀資料庫，只印台數），再送一則測試推播。
+
+```bash
+python tools/pull_push_subs.py --out D:/project/twquant/data/autotrade/push_subscriptions.json --env-file D:/project/twquant/.env
+```
+
+```bash
+python tools/run.py notify-test --config configs/tmf_sim.toml --channel push --level act --push-subs D:/project/twquant/data/autotrade/push_subscriptions.json --env-file D:/project/twquant/.env
+```
+
+重播時兩個管道一起送：`replay … --notify send --push-subs <同一個檔>`。換手機、重新開通知、或通知說「這台裝置的通知已經失效」時，重新拉一次。要網站也收「⚠️ 注意」，把 `configs/tmf_sim.toml` 的 `[notify_push] min_level` 改成 `warn`。
