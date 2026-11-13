@@ -23,6 +23,7 @@ from autotrade.delivery import (
     telegram_from_env,
     telegram_tell_chat_ids,
 )
+from autotrade.drill import Drill, drill_config, load_prices
 from autotrade.engine import Engine, Event
 from autotrade.export import dumps, env_value, snapshot
 from autotrade.feed.replay import read_taifex_day
@@ -250,6 +251,37 @@ def run_notify_setup(config: Path, env_file: Path | None) -> int:
     return 0
 
 
+def run_drill(
+    config: Path,
+    ticks: Path,
+    day: date,
+    start: str,
+    folder: Path,
+    minutes: float,
+    speed: float,
+    status: Path | None,
+) -> int:
+    """演練遠端緊急停止：模擬券商、買 1 口抱著，等網站按停止。全程不碰券商。"""
+    cfg = drill_config(load_config(config))
+    prices = load_prices(cfg, ticks, day, datetime.strptime(start, "%H:%M:%S").time())
+    print(
+        f"演練開始：{cfg.contract.symbol} 用 {day} {start} 之後的價格（{len(prices)} 筆，{speed:g} 倍速），"
+        f"最多 {minutes:g} 分鐘。等一下會先買 1 口；請在網站按「緊急停止」。Ctrl+C 結束。"
+    )
+    drill = Drill(cfg, prices, folder, speed=speed, status=status)
+    try:
+        report = drill.run(minutes * 60)
+    except KeyboardInterrupt:
+        print("演練中斷")
+        return 1
+    halted = "已停手" if report.halt else "沒有停手"
+    print(
+        f"演練結束：播了 {report.ticks} 筆行情；收到 {report.stops} 次遠端停止；{halted}；"
+        f"帳上 {report.position} 口"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """進入點。"""
     parser = argparse.ArgumentParser(prog="autotrade", description="獨立的程式交易系統")
@@ -278,6 +310,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     relay.add_argument("--dsn-env", default="TWQUANT_PG_DSN", help="放連線字串的環境變數名稱")
     relay.add_argument("--env-file", type=Path, help="環境變數沒設時，改從這個 .env 讀同名的變數")
     relay.add_argument("--once", action="store_true", help="只跑一輪就結束")
+    drill = sub.add_parser("drill", help="演練遠端緊急停止：模擬券商、買 1 口抱著，等網站按停止")
+    drill.add_argument("--config", type=Path, required=True)
+    drill.add_argument("--ticks", type=Path, required=True, help="期交所 Daily_*.csv（拿它的價格）")
+    drill.add_argument("--day", type=date.fromisoformat, required=True)
+    drill.add_argument("--from", dest="start", default="09:00:00", help="從那一天的幾點開始播")
+    drill.add_argument("--dir", type=Path, required=True, help="跟中繼程式共用的資料夾（絕對路徑）")
+    drill.add_argument("--minutes", type=float, default=10.0, help="最多跑幾分鐘")
+    drill.add_argument("--speed", type=float, default=1.0, help="幾倍速播價格")
+    drill.add_argument(
+        "--status", type=Path, help="把狀態寫到這個檔（給中繼程式送上網站；預設不寫）"
+    )
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
     verify.add_argument("journal", type=Path)
     test = sub.add_parser("notify-test", help="送一則測試通知到手機（要連網，請自己執行）")
@@ -296,6 +339,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"設定沒問題：{cfg.mode}、{cfg.contract.symbol}、部位 {cfg.risk.min_position}～{cfg.risk.max_position} 口"
         )
         return 0
+    if args.command == "drill":
+        return run_drill(
+            args.config,
+            args.ticks,
+            args.day,
+            args.start,
+            args.dir,
+            args.minutes,
+            args.speed,
+            args.status,
+        )
     if args.command == "relay":
         run_relay(
             args.config,
