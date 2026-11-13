@@ -26,7 +26,13 @@ T0 = datetime(2026, 11, 13, 9, 0, 0, tzinfo=TAIPEI)
 def cfg(limit: float | None = None) -> Config:
     base = load_config(CONFIG_PATH)
     return replace(
-        base, risk=replace(base.risk, daily_loss_limit_twd=limit, max_entries_per_day=10_000)
+        base,
+        risk=replace(
+            base.risk,
+            daily_loss_limit_twd=limit,
+            max_entries_per_day=10_000,
+            max_orders_per_minute=None,  # 這裡每 1.2 秒送一筆來壓日誌還原；頻率上限另有 A-010 AC1 測
+        ),
     )
 
 

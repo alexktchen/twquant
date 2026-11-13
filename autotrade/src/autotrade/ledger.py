@@ -57,6 +57,11 @@ class Ledger:
         """用最新價算未實現損益（不含平倉成本）。"""
         return (last_price - self.avg_price) * self.position * self.contract.point_value
 
+    def adopt(self, broker_position: int, price: float) -> None:
+        """部位對不上時，把帳改成券商回報的部位（券商是準的）。均價用當下價格，已實現損益不動。"""
+        self.position = broker_position
+        self.avg_price = price if broker_position != 0 else 0.0
+
     def reconcile(self, broker_position: int) -> None:
         """跟券商回報的部位對帳，不一樣就 raise。"""
         if broker_position != self.position:

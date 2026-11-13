@@ -15,10 +15,9 @@ from autotrade.cli import main, run_replay
 from autotrade.config import Config, load_config
 from autotrade.engine import EndOfDayError, Engine
 from autotrade.feed.replay import FeedError, read_taifex_day
-from autotrade.ledger import ReconcileError
 from autotrade.model import TAIPEI, Fill, OrderRequest, Side, Tick
 from autotrade.oms import OrderManager, OrderState, OrderStateError
-from autotrade.risk import HALT_DAILY_LOSS, HALT_KILL
+from autotrade.risk import HALT_DAILY_LOSS, HALT_KILL, HALT_MISMATCH
 
 CONFIG_PATH = Path(__file__).parents[1] / "configs" / "tmf_sim.toml"
 SYMBOL = "TMF"
@@ -204,6 +203,12 @@ class StuckExitBroker:
     def position(self) -> int:
         return self.inner.position()
 
+    def open_order_ids(self) -> frozenset[str]:
+        return self.inner.open_order_ids()
+
+    def resync(self) -> list[BrokerEvent]:
+        return self.inner.resync()
+
 
 def test_ac6_stale_exit_triggers_kill_and_market_flatten() -> None:
     config = cfg()
@@ -222,7 +227,7 @@ def test_ac6_stale_exit_triggers_kill_and_market_flatten() -> None:
     assert engine.strategy.rejects == ["已刪單"]  # type: ignore[attr-defined]
 
 
-def test_ac7_finish_raises_with_open_position_and_on_broker_mismatch() -> None:
+def test_ac7_finish_raises_with_open_position_and_mismatch_is_corrected() -> None:
     engine = run(Scripted({0: Side.BUY}), [tick(0), tick(1)])
     with pytest.raises(EndOfDayError, match="部位 1 口"):
         engine.finish()
@@ -234,8 +239,10 @@ def test_ac7_finish_raises_with_open_position_and_on_broker_mismatch() -> None:
     config = cfg()
     drifting = Engine(config, Scripted({0: Side.BUY}), Drifting(config.sim))
     drifting.on_tick(tick(0))
-    with pytest.raises(ReconcileError, match="券商回報 2 口"):
-        drifting.on_tick(tick(1))
+    # D-223（2026-11-13）：盤中對不上不再 raise，改成把帳修正為券商的數字並停手平倉（A-010 AC6）
+    drifting.on_tick(tick(1))
+    assert drifting.ledger.position == 2 and drifting.risk.halt == HALT_MISMATCH
+    assert "correction" in kinds(drifting)
 
 
 HEADER = "成交日期,商品代號,到期月份(週別),成交時間,成交價格,成交數量(B+S),近月價格,遠月價格,開盤集合競價"

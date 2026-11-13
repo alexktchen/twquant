@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Any
 
 MODES = ("sim", "live")
+# 真單模式一定要設的風控上限（期貨商對程式交易的要求，SPEC A-010）
+LIVE_REQUIRED = (
+    "daily_loss_limit_twd",
+    "max_orders_per_minute",
+    "max_consecutive_broker_rejects",
+    "position_stop_loss_twd",
+)
 
 
 class ConfigError(ValueError):
@@ -27,7 +34,7 @@ class ContractConfig:
 
 @dataclass(frozen=True)
 class RiskConfig:
-    """風控參數。daily_loss_limit_twd 在模擬可以不設，真單一定要設。"""
+    """風控參數。四個可以是 None 的上限在模擬可以不設，真單一定要設（LIVE_REQUIRED）。"""
 
     min_position: int
     max_position: int
@@ -39,6 +46,9 @@ class RiskConfig:
     force_flat_time: time  # 這個時間之後還有部位就由系統強制平倉
     order_timeout_s: float  # 委託送出後超過這麼久沒成交就刪單
     daily_loss_limit_twd: float | None
+    max_orders_per_minute: int | None = None  # 一分鐘內最多送幾筆委託（含平倉）；到了就暫停送單
+    max_consecutive_broker_rejects: int | None = None  # 連續被券商拒絕幾筆就暫停送單
+    position_stop_loss_twd: float | None = None  # 單一部位未實現虧損到這個金額就由系統平倉
 
 
 @dataclass(frozen=True)
@@ -110,6 +120,9 @@ def parse_config(raw: dict[str, Any]) -> Config:
         tax_rate=float(_need(c, "tax_rate", "contract")),
     )
     limit = r.get("daily_loss_limit_twd")
+    rate = r.get("max_orders_per_minute")
+    rejects = r.get("max_consecutive_broker_rejects")
+    stop = r.get("position_stop_loss_twd")
     risk = RiskConfig(
         min_position=int(_need(r, "min_position", "risk")),
         max_position=int(_need(r, "max_position", "risk")),
@@ -121,6 +134,9 @@ def parse_config(raw: dict[str, Any]) -> Config:
         force_flat_time=_clock(_need(r, "force_flat_time", "risk"), "risk.force_flat_time"),
         order_timeout_s=float(_need(r, "order_timeout_s", "risk")),
         daily_loss_limit_twd=None if limit is None else float(limit),
+        max_orders_per_minute=None if rate is None else int(rate),
+        max_consecutive_broker_rejects=None if rejects is None else int(rejects),
+        position_stop_loss_twd=None if stop is None else float(stop),
     )
     session = SessionConfig(
         start=_clock(_need(se, "start", "session"), "session.start"),
@@ -150,8 +166,13 @@ def parse_config(raw: dict[str, Any]) -> Config:
         raise ConfigError(f"進場時段起點要早於終點：{risk.entry_start} ~ {risk.entry_end}")
     if risk.daily_loss_limit_twd is not None and risk.daily_loss_limit_twd <= 0:
         raise ConfigError(f"每日虧損上限要是正數（元）：{risk.daily_loss_limit_twd}")
-    if mode == "live" and risk.daily_loss_limit_twd is None:
-        raise ConfigError('真單模式（mode = "live"）一定要設 [risk] daily_loss_limit_twd')
+    for key in LIVE_REQUIRED[1:]:
+        value = getattr(risk, key)
+        if value is not None and value <= 0:
+            raise ConfigError(f"[risk] {key} 要大於 0：{value}")
+    for key in LIVE_REQUIRED:
+        if mode == "live" and getattr(risk, key) is None:
+            raise ConfigError(f'真單模式（mode = "live"）一定要設 [risk] {key}')
     momentum = None
     if "momentum" in raw:
         m = raw["momentum"]

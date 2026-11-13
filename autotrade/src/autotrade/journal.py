@@ -159,6 +159,8 @@ def recover(records: list[Record], cfg: Config, today: date) -> Restored:
                 remaining[data["order_id"]] = left
         elif rec.kind in ("cancelled", "broker_reject"):
             del remaining[data["order_id"]]
+        elif rec.kind == "correction":
+            ledger.adopt(int(data["position"]), float(data["avg_price"]))
         elif rec.kind in ("halt", "release"):
             halt, halt_day = data["halt"], rec_day
     if halt == HALT_DAILY_LOSS and halt_day != today:

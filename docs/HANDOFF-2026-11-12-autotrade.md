@@ -3,6 +3,11 @@
 分支 `claude/eloquent-euler-qsnnu7`。裁決 `DECISIONS.md` D-222；規格與進度 `autotrade/SPEC.md`。
 這一輪在雲端做，下一輪使用者要換到自己電腦上的 session 接手。
 
+> **更新（2026-11-12，本機 session）**：下面「下一步第一件事」的真實比對已經跑完，
+> 2026-09-09～11-11 共 41 個交易日全部一致，結果記在 `autotrade/SPEC.md` A-004 AC10。
+> 逐筆不用重新下載：主 checkout 的 `data/research_ms/taifex_ticks/TMF` 就是微台的完整逐筆。
+> 接下來從 A-005 開始。
+
 ## 使用者決定了什麼
 
 - 把**動能順勢**（網友原版 Momentum_Scalping，只做多）接上元大真單：微台 1 口、全自動、行情與下單都走元大。

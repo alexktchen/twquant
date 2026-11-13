@@ -63,3 +63,11 @@ class Broker(Protocol):
     def position(self) -> int:
         """券商端的實際部位（帶方向）。"""
         ...
+
+    def open_order_ids(self) -> frozenset[str]:
+        """券商端還活著的委託編號（重連後比對用）。"""
+        ...
+
+    def resync(self) -> list[BrokerEvent]:
+        """重連後補回斷線期間漏掉的回報（委託、成交、刪單），依發生順序。"""
+        ...

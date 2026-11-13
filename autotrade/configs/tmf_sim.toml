@@ -18,6 +18,10 @@ max_quote_age_s = 5.0
 force_flat_time = "13:30:00"  # 原版 13:00 自己清倉；這是系統的最後防線
 order_timeout_s = 10.0
 # daily_loss_limit_twd = 待使用者決定（D-222）；模擬可不設，真單沒設會拒絕啟動
+# 期貨商對程式交易的要求（SPEC A-010、D-223）。真單四項都要設，沒設會拒絕啟動。
+max_orders_per_minute = 10           # 一分鐘內最多送幾筆委託（含平倉）；到了就暫停送單、要人工解除。數字是 AI 先填的
+max_consecutive_broker_rejects = 3   # 連續被券商拒絕幾筆就暫停送單、要人工解除。數字是 AI 先填的
+# position_stop_loss_twd = 待使用者決定；單一部位未實現虧損到這個金額就由系統平倉（策略自己另有停損）
 
 [session]
 start = "08:45:00"
