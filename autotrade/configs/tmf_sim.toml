@@ -34,6 +34,12 @@ slippage_points = 1.0    # 市價單每邊滑 1 點
 [export]
 max_events = 30                  # 給網站的「今日大事」最多留幾則（留最新的）
 
+[momentum]
+eval_interval_s = 1.0            # 同現有模擬單：每秒評估一次
+market_refresh_s = 30.0
+expected_slippage_points = 1.0   # 同 sim.slippage_points
+contracts = 1
+
 # 手機通知（SPEC A-006、D-224）。金鑰與收件對象不放這裡，只放 .env：
 # AUTOTRADE_TELEGRAM_BOT_TOKEN（機器人的金鑰）、AUTOTRADE_TELEGRAM_CHAT_ID（收件代號）。
 # 真單一定要有這一段，而且 kinds 要包含成交與所有異常；下面的數字是 AI 先填的，可以改。
@@ -52,9 +58,3 @@ warn_after_attempts = 3          # 一則通知連續失敗幾次就留一筆紀
 retry_wait_s = 2.0               # 每次重試前等幾秒
 queue_size = 200                 # 還沒送出的通知最多排幾則；滿了新的會被丟掉並留紀錄
 close_wait_s = 10.0              # 程式結束時最多等幾秒把還沒送的送完
-
-[momentum]
-eval_interval_s = 1.0            # 同現有模擬單：每秒評估一次
-market_refresh_s = 30.0
-expected_slippage_points = 1.0   # 同 sim.slippage_points
-contracts = 1
