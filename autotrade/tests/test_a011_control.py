@@ -1,9 +1,11 @@
-"""A-011：遠端緊急停止（D-224）——交易程式這一側。網站只能叫停；交易程式讀本機的指令檔、執行、追蹤到平掉、回報。"""
+"""A-011：遠端緊急停止（D-225）——交易程式這一側。網站只能叫停；交易程式讀本機的指令檔、執行、追蹤到平掉、回報。"""
 
 from __future__ import annotations
 
 import json
+import os
 import random
+import time as time_module
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -672,3 +674,98 @@ def test_ac10_config_validates_and_live_requires_control() -> None:
     assert parse_config({**raw, "mode": "live", "risk": live_risk}).mode == "live"
     with pytest.raises(ConfigError, match=r"\[control\]"):
         parse_config({**without, "mode": "live", "risk": live_risk})
+
+
+# ---- 第二輪（程式）審查之後補的
+
+
+def test_review_results_carry_the_press_time_through_the_file(tmp_path: Path) -> None:
+    engine, _ = engine_with({})
+    results = engine.on_control([stop(7, 3)], at(5))
+    assert {r.created_at for r in results} == {at(3)}
+    source = FileControl(tmp_path, stale_s=CONTROL.stale_s)
+    for r in results:
+        source.report(r, at(5))
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / outbox_name(TODAY)).read_text(encoding="utf-8").splitlines()
+    ]
+    assert {row["created_at"] for row in rows} == {"2026-11-13T09:00:03+08:00"}
+    assert [result_from_json(row).created_at for row in rows] == [at(3), at(3)]
+
+
+def test_review_torn_last_line_does_not_swallow_the_next_result(tmp_path: Path) -> None:
+    (tmp_path / outbox_name(TODAY)).write_text('{"command_id": 7, "sta', encoding="utf-8")
+    source = FileControl(tmp_path, stale_s=CONTROL.stale_s)
+    result = CommandResult(7, STAGE_ACK, RESULT_FLAT, "已停手；帳上沒有部位", at(0))
+    source.report(result, at(1))
+    lines = (tmp_path / outbox_name(TODAY)).read_text(encoding="utf-8").splitlines()
+    assert lines[0] == '{"command_id": 7, "sta' and result_from_json(json.loads(lines[1])) == result
+
+
+def test_review_atomic_write_retries_when_the_reader_holds_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = os.replace
+    calls: list[int] = []
+
+    def flaky(src: str, dst: str) -> None:
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError(5, "存取被拒")
+        real(src, dst)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    monkeypatch.setattr(time_module, "sleep", lambda s: None)
+    write_json_atomic(tmp_path / "x.json", {"a": 1})
+    assert len(calls) == 3 and json.loads((tmp_path / "x.json").read_text(encoding="utf-8")) == {
+        "a": 1
+    }
+    calls.clear()
+
+    def always_blocked(src: str, dst: str) -> None:
+        raise PermissionError(5, "存取被拒")
+
+    monkeypatch.setattr(os, "replace", always_blocked)
+    with pytest.raises(PermissionError):
+        write_json_atomic(tmp_path / "y.json", {"a": 1})
+
+
+@dataclass
+class PositionFails(FlakyBroker):
+    """查部位會出錯的測試券商（之後接元大時，查詢逾時或元件出錯）。"""
+
+    def position(self) -> int:
+        raise RuntimeError("測試：查部位逾時")
+
+
+def test_review_stop_halts_even_when_the_position_query_fails() -> None:
+    config = cfg()
+    engine = Engine(config, Scripted({}), PositionFails(SimBroker(config.sim)))
+    engine.on_tick(tick(0))
+    with pytest.raises(RuntimeError, match="查部位逾時"):
+        engine.kill(at(1))
+    assert engine.risk.halt == HALT_KILL  # 查部位出錯之前就已經停手了
+    assert kinds(engine)[-1] == "halt"
+
+
+def test_review_release_after_a_corrected_book_does_not_claim_trading_resumes() -> None:
+    engine, broker = long_one()
+    broker.drift = -1  # 人已經用券商的 App 平掉了
+    engine.on_control([stop(8, 3)], at(4))
+    engine.release_kill(at(10))
+    (done,) = engine.on_control([], at(11))
+    assert (done.stage, done.code) == (STAGE_DONE, RESULT_RELEASED)
+    assert "策略已經關閉，要重新啟動程式才會再交易" in done.note
+    plain_engine, _ = engine_with({})
+    plain_engine.on_control([stop(9)], at(1))
+    plain_engine.release_kill(at(2))
+    assert "程式可以再交易" in plain_engine.on_control([], at(3))[-1].note
+
+
+def test_review_timer_does_not_cancel_orders_on_the_wall_clock() -> None:
+    # 電腦的時鐘比行情的時間快 11 秒：用時鐘叫的 on_timer 不可以把剛送出的委託當成逾時
+    engine, broker = engine_with({0: Side.BUY})
+    engine.on_tick(tick(0))
+    engine.on_timer(at(11))
+    assert broker.cancelled == [] and engine.risk.halt is None

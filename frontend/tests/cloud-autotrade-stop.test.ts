@@ -1,4 +1,4 @@
-// autotrade A-011（AC15～AC20）：遠端緊急停止（D-224）在網站這一側。網站只能叫停——沒有解除、沒有開始交易。
+// autotrade A-011（AC15～AC20）：遠端緊急停止（D-225）在網站這一側。網站只能叫停——沒有解除、沒有開始交易。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
@@ -17,7 +17,10 @@ import {
   STOP_IN_PROGRESS,
   STOP_LATE_S,
   STOP_SCOPE,
+  DATA_STALE_S,
   listening,
+  nobodyListening,
+  unknownLines,
   pollMs,
   stopLine,
   stopLines,
@@ -124,15 +127,17 @@ test('AC16 讀取：一次回今天最新的停止、每支程式的回報與心
 })
 
 test('AC17 心跳：中繼程式與交易程式都夠新才算在聽', () => {
-  assert.equal(listening(beat(), 0), true)
-  assert.equal(listening(undefined, 0), false)
-  assert.equal(listening(beat({ engine_age_s: null }), 0), false) // 中繼程式活著，但交易程式沒讀過指令
+  assert.equal(listening(beat()), true)
+  assert.equal(listening(undefined), false)
+  assert.equal(listening(beat({ engine_age_s: null })), false) // 中繼程式活著，但交易程式沒讀過指令
   const limit = Math.max(LISTEN_MIN_S, 2 * LISTEN_POLLS)
-  assert.equal(listening(beat({ relay_age_s: limit, engine_age_s: 1 }), 0), true)
-  assert.equal(listening(beat({ relay_age_s: limit + 0.1, engine_age_s: 1 }), 0), false)
-  assert.equal(listening(beat({ relay_age_s: 1, engine_age_s: limit + 0.1 }), 0), false)
-  assert.equal(listening(beat(), limit), false) // 拿到資料之後又過了很久，也算舊
-  assert.equal(listening(beat({ poll_s: 10, relay_age_s: 40, engine_age_s: 40 }), 0), true) // 讀得慢的程式門檻跟著放寬
+  assert.equal(listening(beat({ relay_age_s: limit, engine_age_s: 1 })), true)
+  assert.equal(listening(beat({ relay_age_s: limit + 0.1, engine_age_s: 1 })), false)
+  assert.equal(listening(beat({ relay_age_s: 1, engine_age_s: limit + 0.1 })), false)
+  assert.equal(listening(beat({ poll_s: 10, relay_age_s: 40, engine_age_s: 40 })), true) // 讀得慢的程式門檻跟著放寬
+  // 頁面自己多久沒更新不算進「程式有沒有回應」：15 秒才更新一次的頁面，不會把在聽的程式畫成紅的
+  assert.deepEqual(view('live', null, beat(), 15), ['ok', '在聽'])
+  assert.deepEqual(view('live', null, beat(), 40), ['ok', '在聽'])
 })
 
 test('AC17 按之前：每支程式在不在聽', () => {
@@ -187,8 +192,13 @@ test('AC17 收到之後要追到「確認平掉」；平不掉、不會自己平
   assert.match(flat.detail, /10:02:13 收到；已確認沒有部位、沒有委託/)
   const stuck = stopLine('live', cmd(30, { live: done('flattening', 'x', 'stuck', '過了 21 秒還沒確認平掉，請手動處理；帳上多 1 口') }), beat(), 0)
   assert.deepEqual([stuck.tone, stuck.label, stuck.detail], ['bad', '部位沒有平掉', '過了 21 秒還沒確認平掉，請手動處理；帳上多 1 口'])
-  const released = stopLine('live', cmd(900, { live: done('flat', 'x', 'released', '已於 10:20:00 在電腦上解除，程式可以再交易') }), beat(), 0)
-  assert.deepEqual([released.tone, released.label], ['off', '已在電腦上解除'])
+  // 在電腦上解除之後，這筆停止對它就結束了：回到「在不在聽」，程式之後沒聲音一樣要標紅
+  const releasedAck = done('flat', 'x', 'released', '已於 10:20:00 在電腦上解除，程式可以再交易')
+  const released = stopLine('live', cmd(900, { live: releasedAck }), beat(), 0)
+  assert.deepEqual([released.tone, released.label, released.detail], ['ok', '在聽', '已於 10:20:00 在電腦上解除，程式可以再交易'])
+  const releasedThenDied = stopLine('live', cmd(4000, { live: releasedAck }), SILENT, 0)
+  assert.deepEqual([releasedThenDied.tone, releasedThenDied.label], ['bad', '沒有回應'])
+  assert.match(releasedThenDied.detail, /在電腦上解除/)
   assert.equal(stopLine('live', cmd(30, { live: done('flat', 'x', 'something_new', '?') }), beat(), 0).tone, 'bad') // 不認得的結果：保守
 
   assert.deepEqual(view('live', cmd(5, { live: ack('suspended', '程式在暫停送單，不會自動平倉，請手動處理；帳上多 1 口') }), beat()), ['bad', '不會自動平倉'])
@@ -203,6 +213,24 @@ test('AC18 要人處理時給的下一步：先看再平；一筆停止管多久
   assert.match(STOP_SCOPE, /解除要在跑交易程式的電腦前做/)
   assert.match(NOBODY_LISTENING, /現在沒有交易程式在聽遠端停止，按了不會平倉/)
   assert.match(NOBODY_LISTENING, /元大 App/)
+})
+
+test('AC18 「沒有程式在聽」只在真的沒有程式在聽、也沒有程式正在處理停止時講；頁面沒有新資料時只說不知道', () => {
+  const idle = stopLines(null, {}, 0)
+  assert.equal(nobodyListening(idle), true)
+  assert.equal(nobodyListening(stopLines(null, { sim: beat() }, 0)), false)
+  // 今天稍早停過、已經在電腦上解除，現在程式都沒聲音：照樣要講
+  const releasedAck = done('flat', 'x', 'released', '已解除')
+  assert.equal(nobodyListening(stopLines(cmd(4000, { live: releasedAck }), { live: SILENT }, 0)), true)
+  assert.equal(nobodyListening(stopLines(cmd(5), { live: beat() }, 0)), false) // 正在等它收到
+  const unknown = unknownLines('讀取中…')
+  assert.deepEqual(unknown.map((l) => [l.who, l.tone, l.label]), [['live', 'off', '狀態不明'], ['sim', 'off', '狀態不明']])
+  assert.equal(nobodyListening(unknown), false) // 不知道的時候不說「沒有程式在聽」
+  assert.ok(DATA_STALE_S >= 30 && DATA_STALE_S < 120)
+  const page = read('../src/cloud/AutotradeView.tsx')
+  assert.match(page, /elapsed > DATA_STALE_S\s+\? unknownLines/)
+  assert.match(page, /if \(fast \|\| visible \|\|/) // 分頁在前景就一定重抓
+  assert.match(page, /addEventListener\('visibilitychange', onVisible\)/)
 })
 
 test('AC19 有停止還在等（等收到、等確認平掉）時更新變快；結束了或拖太久就回到平常', () => {

@@ -11,7 +11,14 @@ import pytest
 
 from autotrade.broker.base import BrokerEvent, Rejected
 from autotrade.broker.sim import SimBroker
-from autotrade.config import Config, ConfigError, RiskConfig, load_config, parse_config
+from autotrade.config import (
+    NOTIFY_LIVE_REQUIRED,
+    Config,
+    ConfigError,
+    RiskConfig,
+    load_config,
+    parse_config,
+)
 from autotrade.engine import Engine
 from autotrade.journal import Journal, read_journal, recover
 from autotrade.model import TAIPEI, Fill, OrderRequest, Side, Tick
@@ -233,8 +240,22 @@ def test_ac3_live_mode_requires_all_three_limits() -> None:
             "risk": risk,
             "session": {"start": "08:45:00", "end": "13:45:00"},
             "sim": {"latency_s": 0.5, "slippage_points": 1.0},
-            # D-224：真單還要有遠端緊急停止（test_a011 的 AC10 管這一塊）
+            # D-225：真單還要有遠端緊急停止（test_a011 的 AC10 管這一塊）
             "control": {"poll_s": 2.0, "flatten_timeout_s": 20.0, "stale_s": 10.0},
+            # D-224（2026-11-13）：真單還要有通知設定（A-006 AC8），這裡給一份合格的
+            "notify": {
+                "channel": "telegram",
+                "name": "微台",
+                "kinds": list(NOTIFY_LIVE_REQUIRED),
+                "quiet_routine": True,
+                "throttle_s": 300.0,
+                "burst": 6,
+                "timeout_s": 5.0,
+                "warn_after_attempts": 3,
+                "retry_wait_s": 2.0,
+                "queue_size": 200,
+                "close_wait_s": 10.0,
+            },
         }
 
     assert parse_config(raw({**risk_keys, **extra})).risk.position_stop_loss_twd == 1500.0

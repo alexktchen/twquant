@@ -1,4 +1,4 @@
-"""中繼程式（A-011／D-224）：交易程式跟雲端之間**唯一會連資料庫**的東西，另外一支程序在跑。
+"""中繼程式（A-011／D-225）：交易程式跟雲端之間**唯一會連資料庫**的東西，另外一支程序在跑。
 
 每隔幾秒做四件事：
 （一）從資料庫拿今天還沒被「這支交易程式」回報過的停止指令，寫成本機的指令檔；
@@ -65,13 +65,21 @@ PENDING_SQL = (
     f"WHERE a.command_id = c.id AND a.consumer = %s) ORDER BY c.id LIMIT {PENDING_LIMIT}"
 )
 # 一支程式對一筆指令只留第一次的回報；時間用資料庫的時鐘
+# 只回報給「編號與按下時間都對得上」的那一筆：指令表重建過、編號重來時，舊的回報不會記到新指令頭上；
+# 指令已經不在了就什麼都不寫（不會因為外鍵錯誤卡住後面的回報）
 ACK_SQL = (
     "INSERT INTO web.autotrade_command_acks (command_id, consumer, code, note) "
-    "VALUES (%s, %s, %s, %s) ON CONFLICT (command_id, consumer) DO NOTHING"
+    "SELECT c.id, %s, %s, %s FROM web.autotrade_commands c WHERE c.id = %s AND c.created_at = %s "
+    "ON CONFLICT (command_id, consumer) DO NOTHING"
 )
+# 最後的結果自己就寫得進去（前面的 ack 萬一沒送到，也不會默默更新不到任何一列）
 DONE_SQL = (
-    "UPDATE web.autotrade_command_acks SET done_at = now(), done_code = %s, done_note = %s "
-    "WHERE command_id = %s AND consumer = %s"
+    "INSERT INTO web.autotrade_command_acks "
+    "(command_id, consumer, code, note, done_at, done_code, done_note) "
+    "SELECT c.id, %s, %s, %s, now(), %s, %s FROM web.autotrade_commands c "
+    "WHERE c.id = %s AND c.created_at = %s "
+    "ON CONFLICT (command_id, consumer) DO UPDATE SET done_at = now(), "
+    "done_code = EXCLUDED.done_code, done_note = EXCLUDED.done_note"
 )
 BEAT_SQL = (
     "INSERT INTO web.autotrade_listeners (consumer, relay_seen_at, engine_seen_at, poll_s) "
@@ -148,11 +156,24 @@ class PgRelayDb:
 
     def ack(self, result: CommandResult, consumer: str) -> None:
         """記下「收到了、當下怎麼處理」。"""
-        self._run(ACK_SQL, (result.command_id, consumer, result.code, result.note))
+        self._run(
+            ACK_SQL, (consumer, result.code, result.note, result.command_id, result.created_at)
+        )
 
     def done(self, result: CommandResult, consumer: str) -> None:
         """記下最後的結果。"""
-        self._run(DONE_SQL, (result.code, result.note, result.command_id, consumer))
+        self._run(
+            DONE_SQL,
+            (
+                consumer,
+                result.code,
+                result.note,
+                result.code,
+                result.note,
+                result.command_id,
+                result.created_at,
+            ),
+        )
 
     def beat(self, consumer: str, engine_age_s: float | None, poll_s: float) -> None:
         """回報中繼程式還活著、交易程式多久前讀過指令檔。"""
@@ -204,6 +225,8 @@ class Relay:
     folder: Path
     poll_s: float
     status: Path | None = None
+    ensure: Callable[[], None] | None = None  # 確保資料表存在；成功一次之後就不再叫
+    _ensured: bool = False
     _day: date | None = None
     _shipped: int = 0
     _status_mtime: float | None = None
@@ -232,6 +255,8 @@ class Relay:
                 result = result_from_json(json.loads(line))
                 if result.stage not in (STAGE_ACK, STAGE_DONE):
                     raise ValueError(f"不認得的階段 {result.stage!r}")
+                if result.created_at is None:
+                    raise ValueError("沒有帶指令按下的時間")
             except (ValueError, KeyError, TypeError) as exc:
                 problem = problem or f"回報檔有一行內容不對（已跳過）：{exc}"
                 self._shipped += 1
@@ -254,7 +279,24 @@ class Relay:
         return max(0.0, now.timestamp() - path.stat().st_mtime)
 
     def step(self, now: datetime) -> RelayReport:
-        """跑一輪。資料庫出錯不會丟例外：寫進指令檔（讓交易程式知道）並回報在結果裡。"""
+        """跑一輪。資料庫或檔案出錯都不會丟例外（中繼程式不能因為一次錯誤就結束）：回報在結果裡，下一輪再試。"""
+        try:
+            return self._step(now)
+        except (OSError, UnicodeDecodeError) as exc:
+            return RelayReport(False, 0, 0, False, f"檔案讀寫出錯：{exc}")
+
+    def _step(self, now: datetime) -> RelayReport:
+        if self.ensure is not None and not self._ensured:
+            # 開機時網路常常還沒好：連不上就寫進指令檔、下一輪再試，不讓整支程式結束
+            try:
+                self.ensure()
+            except ControlError as exc:
+                write_json_atomic(
+                    self.folder / INBOX_NAME,
+                    {"written_at": now.isoformat(), "ok": False, "error": str(exc), "commands": []},
+                )
+                return RelayReport(False, 0, 0, False, str(exc))
+            self._ensured = True
         # 先把結果送回去，再拿指令：剛回報過的指令就不會又出現在指令檔裡
         shipped, ship_error = self._ship(now.date())
         commands: list[Command] = []

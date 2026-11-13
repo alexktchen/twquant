@@ -1,4 +1,4 @@
-"""A-011：遠端緊急停止（D-224）——中繼程式。交易程式跟雲端之間唯一會連資料庫的東西，另一支程序。"""
+"""A-011：遠端緊急停止（D-225）——中繼程式。交易程式跟雲端之間唯一會連資料庫的東西，另一支程序。"""
 
 from __future__ import annotations
 
@@ -94,13 +94,21 @@ class FakeDb:
         self._check("pending")
         return [c for c in self.commands if c.day == today and (c.id, consumer) not in self.acks]
 
+    def _exists(self, result: CommandResult) -> bool:
+        # 跟真的 SQL 一樣：編號與按下的時間都對得上才算同一筆
+        return any(
+            c.id == result.command_id and c.created_at == result.created_at for c in self.commands
+        )
+
     def ack(self, result: CommandResult, consumer: str) -> None:
         self._check("ack")
-        self.acks.setdefault((result.command_id, consumer), result)
+        if self._exists(result):
+            self.acks.setdefault((result.command_id, consumer), result)
 
     def done(self, result: CommandResult, consumer: str) -> None:
         self._check("done")
-        if (result.command_id, consumer) in self.acks:
+        if self._exists(result):
+            self.acks.setdefault((result.command_id, consumer), result)
             self.dones[(result.command_id, consumer)] = result
 
     def beat(self, consumer: str, engine_age_s: float | None, poll_s: float) -> None:
@@ -117,13 +125,16 @@ def inbox(folder: Path) -> dict[str, Any]:
     return data
 
 
-def append_result(folder: Path, result: CommandResult, *, newline: bool = True) -> None:
+def append_result(
+    folder: Path, result: CommandResult, *, newline: bool = True, pressed: float = 0.0
+) -> None:
     line = json.dumps(
         {
             "command_id": result.command_id,
             "stage": result.stage,
             "code": result.code,
             "note": result.note,
+            "created_at": at(pressed).isoformat(),
             "at": at(0).isoformat(),
         },
         ensure_ascii=False,
@@ -132,8 +143,8 @@ def append_result(folder: Path, result: CommandResult, *, newline: bool = True) 
         fh.write(line + ("\n" if newline else ""))
 
 
-ACK7 = CommandResult(7, STAGE_ACK, RESULT_FLATTENING, "已停手，已送出平倉；帳上多 1 口")
-DONE7 = CommandResult(7, STAGE_DONE, RESULT_FLAT, "已確認沒有部位、沒有委託；帳上沒有部位")
+ACK7 = CommandResult(7, STAGE_ACK, RESULT_FLATTENING, "已停手，已送出平倉；帳上多 1 口", at(0))
+DONE7 = CommandResult(7, STAGE_DONE, RESULT_FLAT, "已確認沒有部位、沒有委託；帳上沒有部位", at(0))
 
 
 # ---- AC11 指令表與查詢
@@ -150,7 +161,10 @@ def test_ac11_queries_are_per_program_and_never_create_or_delete_commands() -> N
     assert "id >" not in PENDING_SQL and "NOT EXISTS" in PENDING_SQL
     assert "a.consumer = %s" in PENDING_SQL and "c.day = %s" in PENDING_SQL
     assert "ON CONFLICT (command_id, consumer) DO NOTHING" in ACK_SQL  # 一支程式只留第一次的回報
-    assert "WHERE command_id = %s AND consumer = %s" in DONE_SQL
+    # 只回報給編號與按下時間都對得上的那一筆；最後的結果自己就寫得進去（不必先有 ack）
+    for sql in (ACK_SQL, DONE_SQL):
+        assert "WHERE c.id = %s AND c.created_at = %s" in sql
+    assert "ON CONFLICT (command_id, consumer) DO UPDATE" in DONE_SQL
     # 時間一律用資料庫的時鐘（收到的時間是欄位預設的 now()）
     assert "acked_at" not in ACK_SQL and "done_at = now()" in DONE_SQL
     assert "ON CONFLICT (consumer) DO UPDATE" in BEAT_SQL and "now()" in BEAT_SQL
@@ -164,7 +178,7 @@ def test_ac11_queries_are_per_program_and_never_create_or_delete_commands() -> N
 
 
 def test_ac12_commands_go_to_the_inbox_and_results_go_back(tmp_path: Path) -> None:
-    db = FakeDb(commands=[stop(7, -3), stop(8, -1, day=TODAY - timedelta(days=1))])
+    db = FakeDb(commands=[stop(7), stop(8, -1, day=TODAY - timedelta(days=1))])
     relay = Relay(db, "live", tmp_path, poll_s=2.0)
     report = relay.step(at(0))
     assert report == RelayReport(ok=True, commands=1, shipped=0, status_pushed=False, error=None)
@@ -177,7 +191,7 @@ def test_ac12_commands_go_to_the_inbox_and_results_go_back(tmp_path: Path) -> No
                 "id": 7,
                 "action": "stop",
                 "day": "2026-11-13",
-                "created_at": "2026-11-13T08:59:57+08:00",
+                "created_at": "2026-11-13T09:00:00+08:00",
             }
         ],
     }
@@ -219,7 +233,15 @@ def test_ac12_half_written_line_waits_and_a_new_day_starts_a_new_file(tmp_path: 
         fh.write("\n")
     assert relay.step(at(2)).shipped == 1
     tomorrow = at(86400)
-    line = {"command_id": 9, "stage": STAGE_ACK, "code": RESULT_FLAT, "note": "x", "at": "t"}
+    db.commands.append(Command(id=9, action="stop", day=tomorrow.date(), created_at=tomorrow))
+    line = {
+        "command_id": 9,
+        "stage": STAGE_ACK,
+        "code": RESULT_FLAT,
+        "note": "x",
+        "created_at": tomorrow.isoformat(),
+        "at": "t",
+    }
     (tmp_path / outbox_name(tomorrow.date())).write_text(json.dumps(line) + "\n", encoding="utf-8")
     assert relay.step(tomorrow).shipped == 1 and (9, "sim") in db.acks  # 新的一天從頭算
 
@@ -289,7 +311,7 @@ def test_ac12_status_file_is_pushed_only_when_it_changes(tmp_path: Path) -> None
 def test_ac12_rejects_unknown_program_names_and_unknown_stages(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="consumer"):
         Relay(FakeDb(), "paper", tmp_path, 2.0)
-    db = FakeDb()
+    db = FakeDb(commands=[stop(7)])
     relay = Relay(db, "sim", tmp_path, 2.0)
     append_result(tmp_path, CommandResult(7, "release", RESULT_FLAT, "x"))
     report = relay.step(at(0))
@@ -359,9 +381,10 @@ def test_ac13_every_action_is_one_short_transaction_with_a_timeout() -> None:
     assert got[0].created_at.utcoffset() == timedelta(hours=8)
     assert last_two(opened[0]) == [(TIMEOUT_SQL, ("2000", "2000")), (PENDING_SQL, (TODAY, "live"))]
     db.ack(ACK7, "live")
-    assert last_two(opened[0])[1] == (ACK_SQL, (7, "live", ACK7.code, ACK7.note))
+    assert last_two(opened[0])[1] == (ACK_SQL, ("live", ACK7.code, ACK7.note, 7, at(0)))
     db.done(DONE7, "live")
-    assert last_two(opened[0])[1] == (DONE_SQL, (DONE7.code, DONE7.note, 7, "live"))
+    done_params = ("live", DONE7.code, DONE7.note, DONE7.code, DONE7.note, 7, at(0))
+    assert last_two(opened[0])[1] == (DONE_SQL, done_params)
     db.beat("live", None, 2.0)
     assert last_two(opened[0])[1] == (BEAT_SQL, ("live", None, 2.0))
     row = ("2026-11-13", "live", "live", "live", "{}", "2026-11-13T09:00:00+08:00")
@@ -481,3 +504,65 @@ def test_ac14_cli_runs_one_relay_round(
         main([*args, "--dsn-env", "AUTOTRADE_TEST_DSN"])
     with pytest.raises(FileNotFoundError):
         main([*args[:4], str(tmp_path / "nope"), "--once"])
+
+
+# ---- 第二輪（程式）審查之後補的
+
+
+def test_review_old_result_never_lands_on_a_new_command_with_the_same_id(tmp_path: Path) -> None:
+    # 早上的回報（7 號，09:00 按的）還留在今天的回報檔；之後指令表重建，新的 7 號是 09:10 按的
+    append_result(tmp_path, ACK7)
+    append_result(tmp_path, DONE7)
+    db = FakeDb(commands=[stop(7, 600)])
+    relay = Relay(db, "live", tmp_path, 2.0)
+    report = relay.step(at(601))
+    assert db.acks == {} and db.dones == {}  # 舊的回報沒有記到新指令頭上
+    assert report.ok and report.shipped == 2  # 也沒有卡住：那兩行處理過了，後面的照樣送
+    assert [c["id"] for c in inbox(tmp_path)["commands"]] == [7]  # 新的停止照樣交給交易程式
+    new_ack = CommandResult(7, STAGE_ACK, RESULT_FLAT, "已停手；帳上沒有部位", at(600))
+    append_result(tmp_path, new_ack, pressed=600)
+    relay.step(at(603))
+    assert db.acks == {(7, "live"): new_ack} and inbox(tmp_path)["commands"] == []
+
+
+def test_review_done_without_its_ack_still_records_the_outcome(tmp_path: Path) -> None:
+    db = FakeDb(commands=[stop(7)])
+    append_result(tmp_path, DONE7)  # ack 那一行不見了（例如寫到一半斷電）
+    Relay(db, "live", tmp_path, 2.0).step(at(2))
+    assert db.dones == {(7, "live"): DONE7} and (7, "live") in db.acks
+    assert inbox(tmp_path)["commands"] == []
+
+
+def test_review_relay_survives_file_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db = FakeDb(commands=[stop(7)])
+    relay = Relay(db, "live", tmp_path, 2.0)
+
+    def blocked(*args: object, **kwargs: object) -> None:
+        raise PermissionError(5, "存取被拒")
+
+    monkeypatch.setattr(relay_module, "write_json_atomic", blocked)
+    report = relay.step(at(0))  # 指令檔被別的程式開著：這一輪失敗，但不丟例外、程式不結束
+    assert report.ok is False and "檔案讀寫出錯" in str(report.error)
+    monkeypatch.undo()
+    assert relay.step(at(2)).ok is True and len(inbox(tmp_path)["commands"]) == 1
+    (tmp_path / outbox_name(TODAY)).write_bytes(b"\xff\xfe not utf-8\n")
+    assert relay.step(at(4)).ok is False  # 回報檔不是 UTF-8：一樣只是這一輪失敗
+
+
+def test_review_relay_keeps_trying_to_create_tables_until_the_network_is_up(tmp_path: Path) -> None:
+    tries: list[int] = []
+
+    def ensure() -> None:
+        tries.append(1)
+        if len(tries) < 3:
+            raise ControlError("開機時網路還沒好")
+
+    db = FakeDb(commands=[stop(7)])
+    relay = Relay(db, "live", tmp_path, 2.0, ensure=ensure)
+    first = relay.step(at(0))
+    assert first.ok is False and first.error == "開機時網路還沒好"
+    assert inbox(tmp_path)["ok"] is False and inbox(tmp_path)["error"] == "開機時網路還沒好"
+    assert relay.step(at(2)).ok is False
+    assert relay.step(at(4)).ok is True and len(inbox(tmp_path)["commands"]) == 1
+    relay.step(at(6))
+    assert len(tries) == 3  # 成功一次之後就不再建表

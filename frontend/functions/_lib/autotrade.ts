@@ -1,6 +1,6 @@
 // 程式交易（autotrade A-005、A-011）：
 // （一）狀態：serving.autotrade_status 一天、一種模式一列，payload 是整份狀態；寫入者是獨立的交易系統，網站只讀。
-// （二）遠端緊急停止（D-224）：網站只會在 web.autotrade_commands 新增一筆「停止」。交易程式那邊的中繼程式讀到後交給交易程式執行，
+// （二）遠端緊急停止（D-225）：網站只會在 web.autotrade_commands 新增一筆「停止」。交易程式那邊的中繼程式讀到後交給交易程式執行，
 //      每支程式（模擬／真單／看門）各自在 web.autotrade_command_acks 回報「收到了、最後平掉了沒」，並在 web.autotrade_listeners 留心跳。
 //      這條路只能叫停——這裡沒有、也不可以加解除、開始交易或改設定的動作。只給 admin。
 import type { sql } from './db.ts'

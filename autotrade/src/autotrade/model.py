@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
 from zoneinfo import ZoneInfo
@@ -83,7 +83,7 @@ class Fill:
         return self.side.value * self.qty
 
 
-# 遠端指令（A-011／D-224）：只有「停止」一種
+# 遠端指令（A-011／D-225）：只有「停止」一種
 ACTION_STOP = "stop"
 
 # 一筆停止會回報兩個階段：先是「收到了、當下怎麼處理」（ack），之後是「最後的結果」（done）
@@ -126,3 +126,5 @@ class CommandResult:
     stage: str
     code: str
     note: str
+    # 那筆指令按下的時間：指令表重建、編號重來時，靠它確認回報的是同一筆（不參與相等比較）
+    created_at: datetime | None = field(default=None, compare=False)

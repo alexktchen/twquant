@@ -1,4 +1,4 @@
-// 程式交易（autotrade A-005、A-011）：獨立交易系統寫出來的狀態，加上一顆遠端緊急停止（D-224）。
+// 程式交易（autotrade A-005、A-011）：獨立交易系統寫出來的狀態，加上一顆遠端緊急停止（D-225）。
 // 除了緊急停止以外都只能看；沒有解除、沒有開始交易的按鈕，也不要加。
 import { Activity, Bell, OctagonX, ReceiptText } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -10,6 +10,7 @@ import {
   LISTENER_NAME,
   MODE_NAME,
   NOBODY_LISTENING,
+  DATA_STALE_S,
   POLL_MS,
   SCHEMA,
   SOURCE_NAME,
@@ -23,10 +24,12 @@ import {
   eventText,
   lamp,
   lossRoom,
+  nobodyListening,
   pollMs,
   positionText,
   refetchDue,
   stopLines,
+  unknownLines,
   type AutoDayRow,
   type AutoEnvelope,
   type AutoMode,
@@ -72,7 +75,7 @@ function StopBar({ lines, pressed, onSent, reread }: { lines: StopLine[]; presse
       )
       .finally(() => setStep('idle'))
   }
-  const nobody = !pressed && lines.every((l) => l.tone !== 'ok')
+  const nobody = nobodyListening(lines)
   const hand = lines.some((l) => l.tone === 'bad')
   return (
     <div className="cq-at-stop">
@@ -254,6 +257,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
   const [day, setDay] = useState<string | null>(null) // null＝最新一天
   const [data, setData] = useState<AutoEnvelope | null>(null)
   const [fetchedAt, setFetchedAt] = useState(0) // 這份資料是什麼時候拿到的（這台裝置自己的時鐘）
+  const [loading, setLoading] = useState(true) // 換了分頁、新資料還沒到
   const [err, setErr] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
   const current = data?.current ?? null
@@ -261,7 +265,13 @@ export function AutotradeView({ refresh }: { refresh: number }) {
   live.current = current?.status === 'live'
   // 伺服器給的是「幾秒以前」；再加上拿到資料之後過的時間，就不用拿手機的時鐘去跟伺服器的時間比
   const elapsed = data === null ? 0 : Math.max(0, (now.getTime() - fetchedAt) / 1000)
-  const lines = stopLines(data?.stop ?? null, data?.listeners ?? {}, elapsed)
+  // 還沒讀到、或太久沒更新的資料不拿來判斷（不然會把「頁面沒更新」誤當成「程式沒回應」）
+  const lines =
+    data === null
+      ? unknownLines(err ? `讀不到狀態：${err}` : '讀取中…')
+      : elapsed > DATA_STALE_S
+        ? unknownLines(`畫面上的狀態已經 ${Math.floor(elapsed)} 秒沒更新${err ? `（${err}）` : ''}`)
+        : stopLines(data.stop, data.listeners, elapsed)
   // 有停止還在等（等收到、等確認平掉）時更新變快，不管是不是交易時段、看的是哪一天
   const fast = pollMs(data?.stop ?? null, lines, elapsed) < POLL_MS
 
@@ -269,6 +279,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
     setFetchedAt(Date.now())
     setNow(new Date())
     setData(d)
+    setLoading(false)
     setErr(null)
   }
 
@@ -280,17 +291,23 @@ export function AutotradeView({ refresh }: { refresh: number }) {
         .then((d) => !stop && take(d))
         .catch((e) => !stop && setErr(errText(e)))
     run()
+    // 分頁回到前景時馬上重抓一次（不等下一輪）
+    const onVisible = () => document.visibilityState === 'visible' && run()
+    document.addEventListener('visibilitychange', onVisible)
     const id = setInterval(
       () => {
         tick += 1
-        // 平常：只有看最新一天、在交易時段、分頁在前景時才重抓；畫面上不是盤中狀態就抓得比較慢
-        if (fast || (day === null && document.visibilityState === 'visible' && shouldPoll(new Date(), null) && refetchDue(tick, live.current))) run()
+        // 分頁在前景就一定重抓：緊急停止那一塊（每支程式在不在聽、停止的結果）不管看哪一天、什麼時段都要是新的。
+        // 分頁在背景時：只有看最新一天、在交易時段、盤中狀態才抓（省流量）
+        const visible = document.visibilityState === 'visible'
+        if (fast || visible || (day === null && shouldPoll(new Date(), null) && refetchDue(tick, live.current))) run()
       },
       fast ? pollMs(data?.stop ?? null, lines, elapsed) : POLL_MS,
     )
     return () => {
       stop = true
       clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
     }
     // lines／elapsed 每次重畫都會變，這裡只在「快／慢」切換時重設計時器
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -305,8 +322,10 @@ export function AutotradeView({ refresh }: { refresh: number }) {
   const sent = (r: Pick<AutoEnvelope, 'stop' | 'listeners'>) => take({ days: data?.days ?? [], current, stop: r.stop, listeners: r.listeners })
   const pick = (m: AutoMode) => {
     if (m === mode) return
-    setData(null)
+    // 緊急停止那一塊跟看哪個分頁無關：留著，等新資料來再換（不然切分頁的那一下會變成「不知道」）
+    setData((d) => (d === null ? null : { days: [], current: null, stop: d.stop, listeners: d.listeners }))
     setDay(null)
+    setLoading(true)
     setMode(m)
   }
   return (
@@ -332,8 +351,8 @@ export function AutotradeView({ refresh }: { refresh: number }) {
           </select>
         </label>
       )}
-      {data === null && !err && <p className="cq-empty">讀取中…</p>}
-      {data !== null && current === null && <p className="cq-empty">{EMPTY[mode]}</p>}
+      {(data === null || loading) && !err && <p className="cq-empty">讀取中…</p>}
+      {data !== null && !loading && current === null && <p className="cq-empty">{EMPTY[mode]}</p>}
       {current !== null && current.schema !== SCHEMA && (
         <p className="cq-err">交易程式寫來的狀態是第 {current.schema} 版，這一版網站只看得懂第 {SCHEMA} 版，要先更新網站。</p>
       )}

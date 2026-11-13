@@ -1,4 +1,4 @@
-"""遠端緊急停止（A-011／D-224）在交易程式這一側。
+"""遠端緊急停止（A-011／D-225）在交易程式這一側。
 
 交易程式自己**不連資料庫**：連雲端的事由另一支中繼程式（relay.py，另一個程序）做，兩邊只透過本機的檔案交換——
 中繼程式把停止指令寫成「指令檔」，交易程式把處理結果接在「回報檔」後面。資料庫再慢、再卡，都拖不到交易。
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,8 @@ from autotrade.engine import Engine
 from autotrade.model import Command, CommandResult, require_taipei
 
 INBOX_NAME = "commands.json"  # 中繼程式寫、交易程式讀：今天還沒被這支程式回報過的停止指令
+REPLACE_TRIES = 5  # 改名被擋時最多試幾次
+REPLACE_WAIT_S = 0.03  # 每次之間等多久
 HEARTBEAT_NAME = "engine.seen"  # 交易程式每次讀指令檔就碰一下；中繼程式只看它的修改時間
 
 
@@ -141,6 +144,7 @@ def result_to_json(result: CommandResult, now: datetime) -> dict[str, Any]:
         "stage": result.stage,
         "code": result.code,
         "note": result.note,
+        "created_at": None if result.created_at is None else result.created_at.isoformat(),
         "at": now.isoformat(),
     }
 
@@ -152,14 +156,28 @@ def result_from_json(row: dict[str, Any]) -> CommandResult:
         stage=str(row["stage"]),
         code=str(row["code"]),
         note=str(row["note"]),
+        created_at=None
+        if row.get("created_at") is None
+        else require_taipei(datetime.fromisoformat(str(row["created_at"])), "created_at"),
     )
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    """先寫暫存檔再改名：讀的人只會看到舊的或新的整份，不會看到寫到一半的。"""
+    """先寫暫存檔再改名：讀的人只會看到舊的或新的整份，不會看到寫到一半的。
+
+    Windows 上對方正好開著檔在讀的那一瞬間改名會被擋（PermissionError）：等一下再試幾次。
+    只有中繼程式會叫這個函式，等待不會發生在交易程式那一條執行緒上。
+    """
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    for attempt in range(REPLACE_TRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_TRIES - 1:
+                raise
+            time.sleep(REPLACE_WAIT_S)
 
 
 @dataclass
@@ -208,11 +226,14 @@ class FileControl:
     def report(self, result: CommandResult, now: datetime) -> None:
         """把一筆結果接在今天的回報檔後面（一行一筆）。"""
         line = json.dumps(result_to_json(result, now), ensure_ascii=False)
+        path = self.folder / outbox_name(now.date())
         try:
-            with (self.folder / outbox_name(now.date())).open(
-                "a", encoding="utf-8", newline="\n"
-            ) as fh:
-                fh.write(line + "\n")
+            # 上一次寫到一半就斷掉（斷電、磁碟滿）會留下沒有換行結尾的殘行：先補換行，殘行自己成一行，不吃掉這一筆
+            torn = (
+                path.exists() and path.stat().st_size > 0 and not path.read_bytes().endswith(b"\n")
+            )
+            with path.open("a", encoding="utf-8", newline="\n") as fh:
+                fh.write(("\n" if torn else "") + line + "\n")
                 fh.flush()
                 os.fsync(fh.fileno())
         except OSError as exc:

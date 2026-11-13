@@ -1,4 +1,4 @@
-// 程式交易（autotrade A-005、A-011）：交易程式寫出來的狀態（網站只讀），加上遠端緊急停止（D-224：網站只能叫停，不能解除）。
+// 程式交易（autotrade A-005、A-011）：交易程式寫出來的狀態（網站只讀），加上遠端緊急停止（D-225：網站只能叫停，不能解除）。
 // 這裡是純函數與型別，畫面在 AutotradeView.tsx。
 
 export type AutoMode = 'sim' | 'live'
@@ -120,7 +120,7 @@ export function lamp(s: AutoStatus, now: Date): Lamp {
 
 const ageText = (s: number): string => (s < 3600 ? `${Math.floor(s / 60)} 分鐘` : `${Math.floor(s / 3600)} 小時`)
 
-// ── 遠端緊急停止（A-011／D-224）──
+// ── 遠端緊急停止（A-011／D-225）──
 // 一筆停止對每支交易程式都有效；每支程式各自回報。真單排前面：模擬的回報不可以讓人以為真單也停了。
 
 export type Listener = 'live' | 'sim'
@@ -150,27 +150,33 @@ export const STOP_IN_PROGRESS: ReadonlySet<string> = new Set(['flat', 'cancellin
 const waitText = (s: number): string => (s < 60 ? `${Math.floor(s)} 秒` : ageText(s))
 
 /** 這支程式現在是不是在聽：中繼程式與交易程式的心跳都夠新。elapsed＝拿到資料之後又過了幾秒。 */
-export function listening(beat: ListenerBeat | undefined, elapsed: number): boolean {
+export function listening(beat: ListenerBeat | undefined): boolean {
   if (!beat || beat.engine_age_s === null) return false
   const limit = Math.max(LISTEN_MIN_S, beat.poll_s * LISTEN_POLLS)
-  return beat.relay_age_s + elapsed <= limit && beat.engine_age_s + elapsed <= limit
+  return beat.relay_age_s <= limit && beat.engine_age_s <= limit
 }
+
+/** 畫面上的資料超過這麼多秒沒更新（網路斷了、分頁剛回到前景），就不拿它判斷程式在不在聽。 */
+export const DATA_STALE_S = 45
 
 export type StopLine = { who: Listener; tone: 'ok' | 'off' | 'wait' | 'bad' | 'done'; label: string; detail: string }
 
 /**
- * 一支程式對這筆停止的現況（沒有停止時＝它在不在聽）。
- * 「多久以前」都用伺服器算好的秒數加上 elapsed，不拿手機的時鐘去跟伺服器的時間比。
+ * 一支程式對這筆停止的現況（沒有停止、或停止已在電腦上解除時＝它在不在聽）。
+ * 在不在聽看拿到資料那一刻伺服器算好的心跳秒數（頁面自己多久更新一次不算進去）；
+ * 「按下多久、收到多久」才加上拿到資料之後過的 elapsed。都不拿手機的時鐘去跟伺服器的時間比。
  */
 export function stopLine(who: Listener, cmd: StopCommand | null, beat: ListenerBeat | undefined, elapsed: number): StopLine {
-  const hears = listening(beat, elapsed)
+  const hears = listening(beat)
   const seenToday = beat?.seen_today === true
-  const silent = beat ? Math.max(beat.relay_age_s, beat.engine_age_s ?? beat.relay_age_s) + elapsed : 0
-  if (cmd === null) {
-    if (hears) return { who, tone: 'ok', label: '在聽', detail: '' }
-    if (seenToday) return { who, tone: 'bad', label: '沒有回應', detail: `今天跑過，但已經 ${waitText(silent)}沒有回應，按了可能到不了` }
-    return { who, tone: 'off', label: '今天沒有在跑', detail: '' }
+  const silent = beat ? Math.max(beat.relay_age_s, beat.engine_age_s ?? beat.relay_age_s) : 0
+  const idle = (extra: string): StopLine => {
+    const add = (d: string) => (extra ? (d ? `${d}；${extra}` : extra) : d)
+    if (hears) return { who, tone: 'ok', label: '在聽', detail: add('') }
+    if (seenToday) return { who, tone: 'bad', label: '沒有回應', detail: add(`今天跑過，但已經 ${waitText(silent)}沒有回應，按了可能到不了`) }
+    return { who, tone: 'off', label: '今天沒有在跑', detail: add('') }
   }
+  if (cmd === null) return idle('')
   const ack = cmd.acks[who]
   if (ack === undefined) {
     const age = cmd.age_s + elapsed
@@ -180,7 +186,8 @@ export function stopLine(who: Listener, cmd: StopCommand | null, beat: ListenerB
   }
   const at = clock(ack.acked_at)
   if (ack.done_code === 'flat') return { who, tone: 'done', label: '已停手，沒有部位', detail: `${at} 收到；${ack.done_note ?? ''}` }
-  if (ack.done_code === 'released') return { who, tone: 'off', label: '已在電腦上解除', detail: ack.done_note ?? '' }
+  // 在電腦上解除之後，這筆停止對它就結束了：回到「在不在聽」，程式之後沒聲音一樣要標紅
+  if (ack.done_code === 'released') return idle(ack.done_note ?? '已在電腦上解除')
   if (ack.done_code !== null) return { who, tone: 'bad', label: '部位沒有平掉', detail: ack.done_note ?? ack.done_code }
   if (!STOP_IN_PROGRESS.has(ack.code)) return { who, tone: 'bad', label: ack.code === 'ignored' ? '沒有執行' : '不會自動平倉', detail: ack.note }
   const waited = ack.ack_age_s + elapsed
@@ -191,6 +198,13 @@ export function stopLine(who: Listener, cmd: StopCommand | null, beat: ListenerB
 /** 每支程式一行，真單在前。 */
 export const stopLines = (cmd: StopCommand | null, beats: AutoEnvelope['listeners'], elapsed: number): StopLine[] =>
   LISTENERS.map((who) => stopLine(who, cmd, beats[who], elapsed))
+
+/** 畫面上的資料不夠新（還沒讀到、或太久沒更新）時，每支程式一行都只說「不知道」，不猜。 */
+export const unknownLines = (why: string): StopLine[] => LISTENERS.map((who) => ({ who, tone: 'off', label: '狀態不明', detail: why }))
+
+/** 按之前要不要先講「沒有程式在聽，按了不會平倉」：沒有任何一支在聽，也沒有任何一支正在處理停止。 */
+export const nobodyListening = (lines: readonly StopLine[]): boolean =>
+  lines.every((l) => l.tone !== 'ok' && l.tone !== 'wait' && l.label !== '狀態不明')
 
 /** 多久更新一次：有停止還在等（等收到、等確認平掉）的時候變快，其餘照平常。 */
 export function pollMs(cmd: StopCommand | null, lines: readonly StopLine[], elapsed: number): number {

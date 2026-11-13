@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
@@ -252,9 +252,11 @@ class Engine:
         連線通的時候先問券商實際的部位再平：人可能已經用券商的 App 平掉了，照帳上的數字再賣會變成放空。
         回傳帳是不是被改成券商的數字。
         """
-        corrected = self._link_up and not self._reconcile(now)
+        # 先停手、再問券商：查部位出錯的話，至少已經停了
         self.risk.kill()
         self._log(now, "halt", "緊急停止", halt=self.risk.halt)
+        corrected = self._link_up and not self._reconcile(now)
+        self.risk.kill()  # 對不上時停手原因會被改成「對不上」；這裡是人按的緊急停止，改回來
         self._flatten(now, "緊急停止")
         return corrected
 
@@ -354,7 +356,13 @@ class Engine:
                 self._apply_stop(cmd, now)
         self._follow_stops(now)
         out, self._control_out = self._control_out, []
-        return out
+        # 每筆結果帶上那筆指令按下的時間：回報的時候靠它確認是同一筆
+        return [
+            replace(r, created_at=self._stops[r.command_id].created_at)
+            if r.command_id in self._stops
+            else r
+            for r in out
+        ]
 
     def note_control_link(self, now: datetime, *, up: bool, detail: str) -> None:
         """遠端停止這條路通不通變了（由 ControlLoop 呼叫）。只記事件，不動交易。"""
@@ -366,6 +374,12 @@ class Engine:
         self._log(now, "release", "人工解除停手", halt=self.risk.halt)
         if self.risk.halt is not None:
             return
+        # 部位被修正過（例如人已經手動平掉）之後策略是關著的：解除了也不會再交易，不能說「可以再交易」
+        after = (
+            "但部位被修正過、策略已經關閉，要重新啟動程式才會再交易"
+            if self._strategy_off
+            else "程式可以再交易"
+        )
         for command_id, track in self._stops.items():
             if track.applied and track.done != RESULT_RELEASED:
                 track.done = RESULT_RELEASED
@@ -374,7 +388,7 @@ class Engine:
                         command_id,
                         STAGE_DONE,
                         RESULT_RELEASED,
-                        f"已於 {now:%H:%M:%S} 在電腦上解除，程式可以再交易",
+                        f"已於 {now:%H:%M:%S} 在電腦上解除，{after}",
                     )
                 )
 
@@ -538,9 +552,11 @@ class Engine:
                 )
 
     def on_timer(self, now: datetime) -> None:
-        """用時鐘叫（不靠行情）：逾時刪單；停手中或過了強制平倉時間就平倉。行情停住時靠它把停止做完。"""
+        """用時鐘叫（不靠行情）：停手中或過了強制平倉時間就平倉。行情停住時靠它把停止做完。
+
+        逾時刪單不在這裡做：委託的時間是行情的時間，這裡是電腦的時鐘，兩個鐘差幾秒就會誤刪剛送出的委託。
+        """
         now = require_taipei(now, "on_timer 的 now")
-        self._cancel_stale(now)
         if self.risk.halt is not None:
             self._flatten(now, f"停手（{self.risk.halt}）")
         elif now.time() >= self.cfg.risk.force_flat_time:
