@@ -1,4 +1,5 @@
-// 程式交易（autotrade A-005）：交易程式單向寫出來的狀態，網站只讀。這裡是純函數與型別，畫面在 AutotradeView.tsx。
+// 程式交易（autotrade A-005、A-011）：交易程式寫出來的狀態（網站只讀），加上遠端緊急停止（D-224：網站只能叫停，不能解除）。
+// 這裡是純函數與型別，畫面在 AutotradeView.tsx。
 
 export type AutoMode = 'sim' | 'live'
 export type AutoState = 'ok' | 'halted' | 'suspended' | 'link_down'
@@ -35,13 +36,21 @@ export type AutoStatus = {
   contract: { point_value: number; commission_twd: number; tax_rate: number }
   /** 模擬假設；真單是 null */
   sim: { latency_s: number; slippage_points: number } | null
+  /** 遠端停止這條路：這支程式有沒有在聽、最近一次讀指令成不成功、什麼時候確認過、最後處理的指令編號 */
+  control: { listening: boolean; ok: boolean | null; checked_at: string | null; poll_s: number | null; last_command_id: number }
   fills: AutoFill[]
   corrected: boolean
   events: AutoEvent[]
 }
 
 export type AutoDayRow = { day: string; status: string; pnl: number | null; fills: number | null }
-export type AutoEnvelope = { days: AutoDayRow[]; current: AutoStatus | null }
+/** 一支程式對一筆停止的回報：先是收到了、當下怎麼處理（code／note），之後是最後的結果（done_*；還沒有是 null）。 */
+export type StopAck = { acked_at: string; ack_age_s: number; code: string; note: string; done_at: string | null; done_code: string | null; done_note: string | null }
+/** 今天最新的一筆遠端停止指令與每支程式的回報。時間帶 +08:00；age_s＝伺服器算的「按下到現在幾秒」。 */
+export type StopCommand = { id: string; day: string; created_at: string; age_s: number; acks: Partial<Record<string, StopAck>> }
+/** 一支程式的心跳：中繼程式幾秒前回報、交易程式幾秒前讀過指令（沒讀過是 null）、多久讀一次、今天有沒有出現過。 */
+export type ListenerBeat = { relay_age_s: number; engine_age_s: number | null; poll_s: number; seen_today: boolean }
+export type AutoEnvelope = { days: AutoDayRow[]; current: AutoStatus | null; stop: StopCommand | null; listeners: Partial<Record<string, ListenerBeat>> }
 
 /** 這一版網站認得的狀態版本（autotrade export.py 的 SCHEMA）。 */
 export const SCHEMA = 1
@@ -82,29 +91,112 @@ export const EVENT_LABEL: Record<string, string> = {
   broker_reject: '券商拒絕',
   foreign_order: '不明委託',
   reject: '風控擋下',
+  control: '遠端停止',
+  control_link: '遠端連線',
 }
 
 /** 要人處理的大事（紅色）；其餘是一般提醒。 */
-export const EVENT_SERIOUS: ReadonlySet<string> = new Set(['halt', 'stop', 'correction', 'broker_reject', 'foreign_order'])
+export const EVENT_SERIOUS: ReadonlySet<string> = new Set(['halt', 'stop', 'correction', 'broker_reject', 'foreign_order', 'control'])
 
 /** 盤中狀態超過這麼多秒沒更新，就當成交易程式可能沒在跑。 */
 export const STALE_AFTER_S = 60
 
 export type Lamp = { tone: 'ok' | 'bad' | 'warn' | 'off'; label: string; detail: string }
 
-/** 狀態燈。嚴重的優先：停手／暫停送單 → 連線中斷 → 盤中太久沒更新 → 已收盤 → 運作中。 */
+/** 狀態燈。嚴重的優先：停手／暫停送單 → 連線中斷 → 盤中太久沒更新 → 已收盤 → 運作中。
+ *  盤中的狀態太久沒更新時，不管是哪一種都要講：畫面上的「停手」可能是程式死掉前的最後一份。 */
 export function lamp(s: AutoStatus, now: Date): Lamp {
   const why = s.halt === null ? '' : (HALT_TEXT[s.halt] ?? s.halt)
-  if (s.state === 'halted') return { tone: 'bad', label: '停手', detail: why }
-  if (s.state === 'suspended') return { tone: 'bad', label: '暫停送單', detail: why }
-  if (s.state === 'link_down') return { tone: 'warn', label: '券商連線中斷', detail: '斷線期間不送單也不刪單' }
-  if (s.status === 'closed') return { tone: 'off', label: '已收盤', detail: '' }
   const age = Math.floor((now.getTime() - Date.parse(s.updated_at)) / 1000)
-  if (age > STALE_AFTER_S) return { tone: 'warn', label: '可能沒在跑', detail: `${ageText(age)}沒有更新` }
+  const stale = s.status === 'live' && age > STALE_AFTER_S ? `${ageText(age)}沒有更新，程式可能沒在跑` : ''
+  const add = (detail: string) => (stale ? (detail ? `${detail}；${stale}` : stale) : detail)
+  if (s.state === 'halted') return { tone: 'bad', label: '停手', detail: add(why) }
+  if (s.state === 'suspended') return { tone: 'bad', label: '暫停送單', detail: add(why) }
+  if (s.state === 'link_down') return { tone: 'warn', label: '券商連線中斷', detail: add('斷線期間不送單也不刪單') }
+  if (s.status === 'closed') return { tone: 'off', label: '已收盤', detail: '' }
+  if (stale) return { tone: 'warn', label: '可能沒在跑', detail: `${ageText(age)}沒有更新` }
   return { tone: 'ok', label: '運作中', detail: '' }
 }
 
 const ageText = (s: number): string => (s < 3600 ? `${Math.floor(s / 60)} 分鐘` : `${Math.floor(s / 3600)} 小時`)
+
+// ── 遠端緊急停止（A-011／D-224）──
+// 一筆停止對每支交易程式都有效；每支程式各自回報。真單排前面：模擬的回報不可以讓人以為真單也停了。
+
+export type Listener = 'live' | 'sim'
+export const LISTENERS: readonly Listener[] = ['live', 'sim']
+export const LISTENER_NAME: Record<Listener, string> = { live: '真單', sim: '模擬' }
+
+/** 按下停止後超過這麼多秒程式還沒收到，就標紅。 */
+export const STOP_LATE_S = 15
+/** 程式收到後超過這麼多秒還沒確認平掉，就標紅。 */
+export const STOP_CONFIRM_LATE_S = 30
+/** 心跳多新才算「在聽」：poll_s 的 LISTEN_POLLS 倍，最少 LISTEN_MIN_S 秒。 */
+export const LISTEN_MIN_S = 10
+export const LISTEN_POLLS = 5
+/** 平常多久更新一次；有停止還在等結果時變快，最多快 STOP_FAST_FOR_S 秒。 */
+export const POLL_MS = 15_000
+export const STOP_FAST_MS = 3_000
+export const STOP_FAST_FOR_S = 300
+/** 有任何一支程式要人處理時給的下一步。先看再平：程式之後連上也會自己平，重複下會變成反向部位。 */
+export const BROKER_HINT = '先看元大 App 的未平倉，有部位才平。程式之後連上也會自己平，不要重複下。'
+/** 一筆停止管多久。 */
+export const STOP_SCOPE = '這筆停止只算今天，不會帶到明天；解除要在跑交易程式的電腦前做。'
+/** 按之前就看得出來：現在沒有任何程式在聽。 */
+export const NOBODY_LISTENING = '現在沒有交易程式在聽遠端停止，按了不會平倉。有部位請直接用元大 App。'
+/** 程式收到後回的第一個結果裡，這幾種是「正在處理」；之後要等它確認平掉。其他的（含不認得的）都當成要人處理。 */
+export const STOP_IN_PROGRESS: ReadonlySet<string> = new Set(['flat', 'cancelling', 'flattening', 'link_down'])
+
+const waitText = (s: number): string => (s < 60 ? `${Math.floor(s)} 秒` : ageText(s))
+
+/** 這支程式現在是不是在聽：中繼程式與交易程式的心跳都夠新。elapsed＝拿到資料之後又過了幾秒。 */
+export function listening(beat: ListenerBeat | undefined, elapsed: number): boolean {
+  if (!beat || beat.engine_age_s === null) return false
+  const limit = Math.max(LISTEN_MIN_S, beat.poll_s * LISTEN_POLLS)
+  return beat.relay_age_s + elapsed <= limit && beat.engine_age_s + elapsed <= limit
+}
+
+export type StopLine = { who: Listener; tone: 'ok' | 'off' | 'wait' | 'bad' | 'done'; label: string; detail: string }
+
+/**
+ * 一支程式對這筆停止的現況（沒有停止時＝它在不在聽）。
+ * 「多久以前」都用伺服器算好的秒數加上 elapsed，不拿手機的時鐘去跟伺服器的時間比。
+ */
+export function stopLine(who: Listener, cmd: StopCommand | null, beat: ListenerBeat | undefined, elapsed: number): StopLine {
+  const hears = listening(beat, elapsed)
+  const seenToday = beat?.seen_today === true
+  const silent = beat ? Math.max(beat.relay_age_s, beat.engine_age_s ?? beat.relay_age_s) + elapsed : 0
+  if (cmd === null) {
+    if (hears) return { who, tone: 'ok', label: '在聽', detail: '' }
+    if (seenToday) return { who, tone: 'bad', label: '沒有回應', detail: `今天跑過，但已經 ${waitText(silent)}沒有回應，按了可能到不了` }
+    return { who, tone: 'off', label: '今天沒有在跑', detail: '' }
+  }
+  const ack = cmd.acks[who]
+  if (ack === undefined) {
+    const age = cmd.age_s + elapsed
+    if (!hears && !seenToday) return { who, tone: 'off', label: '今天沒有在跑', detail: '今天之內一啟動就會先停下來' }
+    if (age <= STOP_LATE_S) return { who, tone: 'wait', label: '等它收到…', detail: `已經 ${waitText(age)}` }
+    return { who, tone: 'bad', label: '還沒收到', detail: `已經 ${waitText(age)}${hears ? '' : '，而且它現在沒有回應'}` }
+  }
+  const at = clock(ack.acked_at)
+  if (ack.done_code === 'flat') return { who, tone: 'done', label: '已停手，沒有部位', detail: `${at} 收到；${ack.done_note ?? ''}` }
+  if (ack.done_code === 'released') return { who, tone: 'off', label: '已在電腦上解除', detail: ack.done_note ?? '' }
+  if (ack.done_code !== null) return { who, tone: 'bad', label: '部位沒有平掉', detail: ack.done_note ?? ack.done_code }
+  if (!STOP_IN_PROGRESS.has(ack.code)) return { who, tone: 'bad', label: ack.code === 'ignored' ? '沒有執行' : '不會自動平倉', detail: ack.note }
+  const waited = ack.ack_age_s + elapsed
+  if (waited > STOP_CONFIRM_LATE_S) return { who, tone: 'bad', label: '收到了，但還沒確認平掉', detail: `${at} 收到，已經 ${waitText(waited)}；${ack.note}` }
+  return { who, tone: 'wait', label: '已收到，還沒確認平掉', detail: `${at} 收到；${ack.note}` }
+}
+
+/** 每支程式一行，真單在前。 */
+export const stopLines = (cmd: StopCommand | null, beats: AutoEnvelope['listeners'], elapsed: number): StopLine[] =>
+  LISTENERS.map((who) => stopLine(who, cmd, beats[who], elapsed))
+
+/** 多久更新一次：有停止還在等（等收到、等確認平掉）的時候變快，其餘照平常。 */
+export function pollMs(cmd: StopCommand | null, lines: readonly StopLine[], elapsed: number): number {
+  if (cmd === null || cmd.age_s + elapsed > STOP_FAST_FOR_S) return POLL_MS
+  return lines.some((l) => l.tone === 'wait') ? STOP_FAST_MS : POLL_MS
+}
 
 /** 離每日虧損上限還有多少：used＝用掉的比例（0～1），left＝還能賠幾元。沒設上限是 null。 */
 export function lossRoom(dayPnl: number, limit: number | null): { used: number; left: number } | null {

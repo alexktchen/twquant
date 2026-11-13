@@ -1,13 +1,19 @@
-// 程式交易（autotrade A-005）：獨立交易系統單向寫出來的狀態。這一頁只能看——沒有任何會動到交易程式的按鈕。
-import { Activity, Bell, ReceiptText } from 'lucide-react'
+// 程式交易（autotrade A-005、A-011）：獨立交易系統寫出來的狀態，加上一顆遠端緊急停止（D-224）。
+// 除了緊急停止以外都只能看；沒有解除、沒有開始交易的按鈕，也不要加。
+import { Activity, Bell, OctagonX, ReceiptText } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { fetchAutotrade } from './api'
+import { fetchAutotrade, sendAutotradeStop } from './api'
 import {
+  BROKER_HINT,
   EVENT_LABEL,
   EVENT_SERIOUS,
+  LISTENER_NAME,
   MODE_NAME,
+  NOBODY_LISTENING,
+  POLL_MS,
   SCHEMA,
   SOURCE_NAME,
+  STOP_SCOPE,
   STRATEGY_LABEL,
   assumptionText,
   clock,
@@ -17,18 +23,20 @@ import {
   eventText,
   lamp,
   lossRoom,
+  pollMs,
   positionText,
   refetchDue,
+  stopLines,
   type AutoDayRow,
   type AutoEnvelope,
   type AutoMode,
   type AutoStatus,
+  type StopLine,
 } from './autotrade'
 import { PRODUCT_NAME, shouldPoll, tone, yuan } from './futures'
 import { Kpi, Section } from './Section'
 import './autotrade.css'
 
-const POLL_MS = 15_000
 const MODES: AutoMode[] = ['sim', 'live']
 const EMPTY: Record<AutoMode, string> = {
   sim: '還沒有模擬紀錄：交易程式跑完一天、把狀態寫進來之後就會出現。',
@@ -38,6 +46,75 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const price = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 1 })
 /** 期交所代號 → 平常的叫法（TMF＝微台）；不認得就照原樣。 */
 const symbolName = (s: string) => (PRODUCT_NAME as Record<string, string | undefined>)[s] ?? s
+
+/** 送出停止時伺服器回來的東西：今天最新的停止指令與每支程式的心跳。 */
+type StopSent = Pick<AutoEnvelope, 'stop' | 'listeners'>
+/** 送出失敗後重讀一次，這麼多秒內按的停止算是剛才那一筆（請求可能在寫入之後才斷掉）。 */
+const JUST_SENT_S = 60
+
+/**
+ * 遠端緊急停止：按一下只是打開確認，再按「確定停止」才送出。
+ * 下面每支交易程式一行（真單在前）：在不在聽、收到了沒、最後平掉了沒。模擬的回報不會讓真單那一行變成「好了」。
+ */
+function StopBar({ lines, pressed, onSent, reread }: { lines: StopLine[]; pressed: boolean; onSent: (r: StopSent) => void; reread: () => Promise<StopSent> }) {
+  const [step, setStep] = useState<'idle' | 'confirm' | 'sending'>('idle')
+  const [err, setErr] = useState<string | null>(null)
+  const send = () => {
+    setStep('sending')
+    setErr(null)
+    sendAutotradeStop()
+      .then(onSent)
+      .catch((e) =>
+        // 請求可能在寫進資料庫之後才斷掉：重讀一次，真的沒有剛按的那一筆才說沒送出去
+        reread()
+          .then((r) => (r.stop !== null && r.stop.age_s <= JUST_SENT_S ? onSent(r) : setErr(errText(e))))
+          .catch(() => setErr(errText(e))),
+      )
+      .finally(() => setStep('idle'))
+  }
+  const nobody = !pressed && lines.every((l) => l.tone !== 'ok')
+  const hand = lines.some((l) => l.tone === 'bad')
+  return (
+    <div className="cq-at-stop">
+      {step === 'idle' ? (
+        <button className="cq-at-stop-btn" onClick={() => setStep('confirm')}>
+          <OctagonX size={20} aria-hidden="true" /> 緊急停止
+        </button>
+      ) : (
+        <div className="cq-at-stop-confirm" role="alertdialog" aria-label="確認緊急停止">
+          <b>確定要停止交易並平倉？</b>
+          <span>模擬與真單都會停。{STOP_SCOPE}</span>
+          <div>
+            <button className="cq-at-stop-yes" disabled={step === 'sending'} onClick={send}>
+              {step === 'sending' ? '送出中…' : '確定停止'}
+            </button>
+            <button className="cq-at-stop-no" disabled={step === 'sending'} onClick={() => setStep('idle')}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+      {err && (
+        <p className="cq-err">
+          停止沒有送出去：{err}。{BROKER_HINT}
+        </p>
+      )}
+      {nobody && <p className="cq-at-stop-nobody">{NOBODY_LISTENING}</p>}
+      <ul className="cq-at-stop-lines" aria-label="每支交易程式的狀況">
+        {lines.map((l) => (
+          <li key={l.who} className={l.tone}>
+            <i aria-hidden="true" />
+            <b>{LISTENER_NAME[l.who]}</b>
+            <strong>{l.label}</strong>
+            {l.detail && <span>{l.detail}</span>}
+          </li>
+        ))}
+      </ul>
+      {hand && <p className="cq-at-stop-hand">{BROKER_HINT}</p>}
+      {pressed && <p className="cq-at-stop-scope">{STOP_SCOPE}</p>}
+    </div>
+  )
+}
 
 /** 累計線的畫布（SVG 自己的座標；實際大小由 CSS 決定）。 */
 const CHART_W = 300
@@ -176,37 +253,56 @@ export function AutotradeView({ refresh }: { refresh: number }) {
   const [mode, setMode] = useState<AutoMode>('sim')
   const [day, setDay] = useState<string | null>(null) // null＝最新一天
   const [data, setData] = useState<AutoEnvelope | null>(null)
+  const [fetchedAt, setFetchedAt] = useState(0) // 這份資料是什麼時候拿到的（這台裝置自己的時鐘）
   const [err, setErr] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
   const current = data?.current ?? null
   const live = useRef(false)
   live.current = current?.status === 'live'
+  // 伺服器給的是「幾秒以前」；再加上拿到資料之後過的時間，就不用拿手機的時鐘去跟伺服器的時間比
+  const elapsed = data === null ? 0 : Math.max(0, (now.getTime() - fetchedAt) / 1000)
+  const lines = stopLines(data?.stop ?? null, data?.listeners ?? {}, elapsed)
+  // 有停止還在等（等收到、等確認平掉）時更新變快，不管是不是交易時段、看的是哪一天
+  const fast = pollMs(data?.stop ?? null, lines, elapsed) < POLL_MS
+
+  const take = (d: AutoEnvelope) => {
+    setFetchedAt(Date.now())
+    setNow(new Date())
+    setData(d)
+    setErr(null)
+  }
 
   useEffect(() => {
     let stop = false
     let tick = 0
     const run = () =>
       fetchAutotrade(mode, day ?? undefined)
-        .then((d) => {
-          if (stop) return
-          setData(d)
-          setErr(null)
-        })
+        .then((d) => !stop && take(d))
         .catch((e) => !stop && setErr(errText(e)))
     run()
-    const id = setInterval(() => {
-      const t = new Date()
-      setNow(t)
-      tick += 1
-      // 只有看最新一天、在交易時段、分頁在前景時才重抓；畫面上不是盤中狀態就抓得比較慢
-      if (day === null && document.visibilityState === 'visible' && shouldPoll(t, null) && refetchDue(tick, live.current)) run()
-    }, POLL_MS)
+    const id = setInterval(
+      () => {
+        tick += 1
+        // 平常：只有看最新一天、在交易時段、分頁在前景時才重抓；畫面上不是盤中狀態就抓得比較慢
+        if (fast || (day === null && document.visibilityState === 'visible' && shouldPoll(new Date(), null) && refetchDue(tick, live.current))) run()
+      },
+      fast ? pollMs(data?.stop ?? null, lines, elapsed) : POLL_MS,
+    )
     return () => {
       stop = true
       clearInterval(id)
     }
-  }, [mode, day, refresh])
+    // lines／elapsed 每次重畫都會變，這裡只在「快／慢」切換時重設計時器
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, day, refresh, fast])
 
+  useEffect(() => {
+    // 畫面上的「已經幾秒」：等結果的時候每秒動一次，平常跟著更新的節奏
+    const id = setInterval(() => setNow(new Date()), fast ? 1000 : POLL_MS)
+    return () => clearInterval(id)
+  }, [fast])
+
+  const sent = (r: Pick<AutoEnvelope, 'stop' | 'listeners'>) => take({ days: data?.days ?? [], current, stop: r.stop, listeners: r.listeners })
   const pick = (m: AutoMode) => {
     if (m === mode) return
     setData(null)
@@ -222,6 +318,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
           </button>
         ))}
       </div>
+      <StopBar lines={lines} pressed={(data?.stop ?? null) !== null} onSent={sent} reread={() => fetchAutotrade(mode, day ?? undefined)} />
       {err && <p className="cq-err">{err}</p>}
       {data && data.days.length > 1 && (
         <label className="cq-fu-pick">
@@ -243,7 +340,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
       {current !== null && current.schema === SCHEMA && <Status s={current} now={now} />}
       {data !== null && <Days days={data.days} mode={mode} />}
       {current !== null && current.schema === SCHEMA && <p className="cq-at-foot">{assumptionText(current)}</p>}
-      <p className="cq-at-foot">這一頁只能看，不能對交易程式下指令。緊急停止要在跑交易程式的那台電腦上做。</p>
+      <p className="cq-at-foot">除了緊急停止以外，這一頁都只能看。解除停止、重新開始交易，要在跑交易程式的那台電腦上做。</p>
     </>
   )
 }

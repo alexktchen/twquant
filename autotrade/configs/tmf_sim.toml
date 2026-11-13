@@ -34,6 +34,11 @@ slippage_points = 1.0    # 市價單每邊滑 1 點
 [export]
 max_events = 30                  # 給網站的「今日大事」最多留幾則（留最新的）
 
+[control]
+poll_s = 2.0                     # 遠端緊急停止：每幾秒讀一次停止指令（真單一定要有這一塊）
+flatten_timeout_s = 20.0         # 停止後這麼久還沒確認平掉，就回報「要人處理」
+stale_s = 10.0                   # 指令檔超過這麼久沒更新，就當成遠端停止這條路斷了
+
 [momentum]
 eval_interval_s = 1.0            # 同現有模擬單：每秒評估一次
 market_refresh_s = 30.0

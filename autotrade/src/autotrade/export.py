@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import Any
 
 from autotrade.config import MODES, ConfigError
+from autotrade.control import ControlState
 from autotrade.engine import Engine
 from autotrade.ledger import Ledger
 from autotrade.model import require_taipei
@@ -22,7 +23,18 @@ STATE_LINK_DOWN = "link_down"
 
 # 值得給人看的大事；一般的委託、成交、刪單不算（成交另外列在 fills）
 NOTABLE = frozenset(
-    {"halt", "release", "stop", "correction", "link", "broker_reject", "foreign_order", "reject"}
+    {
+        "halt",
+        "release",
+        "stop",
+        "correction",
+        "link",
+        "broker_reject",
+        "foreign_order",
+        "reject",
+        "control",
+        "control_link",
+    }
 )
 
 # 跟 twquant 的 AUTOTRADE_STATUS_SPEC 一字不差（兩邊各有測試守著）；一天、一種模式一列
@@ -62,6 +74,7 @@ REQUIRED_KEYS = frozenset(
         "limits",
         "contract",
         "sim",
+        "control",
         "fills",
         "corrected",
         "events",
@@ -105,7 +118,13 @@ def _day_fills(engine: Engine, day: date) -> tuple[list[dict[str, Any]], float]:
 
 
 def snapshot(
-    engine: Engine, now: datetime, *, source: str, status: str, strategy: str
+    engine: Engine,
+    now: datetime,
+    *,
+    source: str,
+    status: str,
+    strategy: str,
+    control: ControlState | None = None,
 ) -> dict[str, Any]:
     """引擎當下的狀態。金額是元，時間帶 Asia/Taipei 時區。"""
     now = require_taipei(now, "snapshot 的 now")
@@ -166,10 +185,28 @@ def snapshot(
             "tax_rate": contract.tax_rate,
         },
         "sim": sim,
+        "control": {
+            "listening": control is not None and control.listening,
+            "ok": None if control is None else control.ok,
+            "checked_at": None
+            if control is None or control.checked_at is None
+            else control.checked_at.isoformat(),
+            "poll_s": None if control is None else control.poll_s,
+            "last_command_id": engine.last_command_id,
+        },
         "fills": fills,
         "corrected": any(e.kind == "correction" for e in day_events),
-        "events": events[-engine.cfg.export.max_events :],
+        "events": _trim_events(events, engine.cfg.export.max_events),
     }
+
+
+def _trim_events(events: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """只留 limit 則：先丟最舊的「遠端連線通／不通」，再丟最舊的其他事件（斷斷續續的連線不該把停手擠出去）。"""
+    keep = list(events)
+    while len(keep) > limit:
+        links = [i for i, e in enumerate(keep) if e["kind"] == "control_link"]
+        keep.pop(links[0] if links else 0)
+    return keep
 
 
 def dumps(snap: dict[str, Any]) -> str:
