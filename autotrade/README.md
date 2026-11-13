@@ -18,6 +18,27 @@ python -m ruff check . && python -m ruff format --check . && python -m mypy && p
 
 設定範例：`configs/tmf_sim.toml`（微台、只做多、最多 1 口）。真單模式沒設每日虧損上限、沒有通知設定、或沒有 `[control]`（遠端緊急停止），會拒絕啟動。
 
+## 演練遠端緊急停止
+
+全程模擬、不碰券商。開兩個視窗，都在 `autotrade` 資料夾裡（`D:/t/drill` 換成任何一個空資料夾）：
+
+```bash
+python tools/run.py relay --config configs/tmf_sim.toml --dir D:/t/drill --consumer sim --dsn-env TWQUANT_SUPABASE_DSN --env-file D:/project/twquant/.env
+```
+
+```bash
+python tools/run.py drill --config configs/tmf_sim.toml --ticks D:/project/twquant/data/research_ms/taifex_ticks/TMF/Daily_2026_11_12.csv --day 2026-11-12 --dir D:/t/drill
+```
+
+第一個是中繼程式（連雲端資料庫），第二個是演練程式（買 1 口抱著，最多 10 分鐘）。網站「台指期 → 程式交易」的「模擬」那一行會變成「在聽」，
+按「緊急停止」之後依序變成「等它收到」→「已收到」→「已停手，沒有部位」；演練程式的視窗也會印出每一步。
+
+自動跑完整條路的端到端測試（只連本機資料庫）：
+
+```bash
+python tools/e2e_remote_stop.py --ticks D:/project/twquant/data/research_ms/taifex_ticks/TMF/Daily_2026_11_12.csv --day 2026-11-12
+```
+
 ## 手機通知（Telegram）
 
 成交與異常會通知手機。第一次要做下面五步，之後不用再碰。
