@@ -214,11 +214,25 @@ def dumps(snap: dict[str, Any]) -> str:
     return json.dumps(snap, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# 沒有在聽遠端緊急停止時，狀態裡那一塊長這樣（跟 snapshot 不帶 control 時一樣）
+NOT_LISTENING: dict[str, Any] = {
+    "listening": False,
+    "ok": None,
+    "checked_at": None,
+    "poll_s": None,
+    "last_command_id": 0,
+}
+
+
 def status_row(text: str) -> tuple[str, str, str, str, str, str]:
     """把狀態檔的內容轉成資料表的一列（day、mode、source、status、payload、updated_at）；不合格就 raise。"""
     snap = json.loads(text)
     if not isinstance(snap, dict):
         raise ValueError(f"狀態檔要是一個 JSON 物件，拿到 {type(snap).__name__}")
+    if "control" not in snap:
+        # 加遠端緊急停止（A-011）之前產生的狀態檔沒有這一塊：那時候本來就沒有在聽，照實補上
+        snap["control"] = dict(NOT_LISTENING)
+        text = dumps(snap)
     missing = sorted(REQUIRED_KEYS - snap.keys())
     if missing:
         raise ValueError(f"狀態檔缺欄位：{missing}")

@@ -300,3 +300,25 @@ def test_ac9_env_value_reads_only_the_named_variable() -> None:
     assert env_value(text, "EMPTY") == ""
     assert env_value(text, "MISSING") is None
     assert env_value(text, "TWQUANT_PG") is None  # 名稱要完全一樣，不是比開頭
+
+
+def test_ac9_status_files_from_before_the_remote_stop_still_load() -> None:
+    # 加遠端緊急停止（A-011）之前產生的狀態檔沒有 control 那一塊：照實補成「沒有在聽」，其他一字不動
+    snap = snapshot_for_old_file()
+    old = {k: v for k, v in snap.items() if k != "control"}
+    day, mode, _, _, payload, _ = status_row(json.dumps(old))
+    assert (day, mode) == ("2026-11-13", "sim")
+    loaded = json.loads(payload)
+    assert loaded["control"] == {
+        "listening": False,
+        "ok": None,
+        "checked_at": None,
+        "poll_s": None,
+        "last_command_id": 0,
+    }
+    assert {k: v for k, v in loaded.items() if k != "control"} == old
+
+
+def snapshot_for_old_file() -> dict[str, object]:
+    loaded: dict[str, object] = json.loads(dumps(snap(round_trip(), 6, status="closed")))
+    return loaded
