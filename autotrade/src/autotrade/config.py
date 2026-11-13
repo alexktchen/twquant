@@ -78,6 +78,13 @@ class MomentumConfig:
 
 
 @dataclass(frozen=True)
+class ExportConfig:
+    """給網站的狀態輸出。"""
+
+    max_events: int  # 今日大事最多留幾則（留最新的）
+
+
+@dataclass(frozen=True)
 class Config:
     """整份設定。"""
 
@@ -87,6 +94,7 @@ class Config:
     session: SessionConfig
     sim: SimConfig
     momentum: MomentumConfig | None = None
+    export: ExportConfig | None = None
 
 
 def _need(table: dict[str, Any], key: str, where: str) -> Any:
@@ -190,8 +198,19 @@ def parse_config(raw: dict[str, Any]) -> Config:
             raise ConfigError(
                 f"momentum.contracts={momentum.contracts} 要在 1～risk.max_order_qty={risk.max_order_qty}"
             )
+    export = None
+    if "export" in raw:
+        export = ExportConfig(max_events=int(_need(raw["export"], "max_events", "export")))
+        if export.max_events <= 0:
+            raise ConfigError(f"[export] max_events 要大於 0：{export.max_events}")
     return Config(
-        mode=mode, contract=contract, risk=risk, session=session, sim=sim, momentum=momentum
+        mode=mode,
+        contract=contract,
+        risk=risk,
+        session=session,
+        sim=sim,
+        momentum=momentum,
+        export=export,
     )
 
 

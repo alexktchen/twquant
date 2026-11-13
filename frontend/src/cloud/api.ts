@@ -19,6 +19,7 @@ import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
 import type { WarrantDay } from './warrants'
 import type { Trade, TradeList } from './trades'
+import type { AutoEnvelope, AutoMode } from './autotrade'
 import type { JournalList, JournalRow } from './futures-extras'
 import type { Feature } from './access'
 import type { LineGroupRow, LineLogin, LineStatus } from './linegroup'
@@ -156,6 +157,9 @@ export const fetchScorecard = (line: string) => get<Scorecard>(`/api/scorecard?l
 /** 小台模擬（T-450／D-220）：那一天的整份狀態（不給日期＝最新一天）。只給 admin。 */
 export const fetchFuturesDay = (day?: string) =>
   get<FuturesDay>(day ? `/api/futures?day=${encodeURIComponent(day)}` : '/api/futures')
+
+/** 程式交易的狀態（autotrade A-005）：日期清單＋那一天的整份狀態；只讀。 */
+export const fetchAutotrade = (mode: AutoMode, day?: string) => get<AutoEnvelope>(`/api/autotrade?mode=${mode}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
 
 /** 小台模擬有紀錄的交易日（新到舊）。只給 admin。 */
 export const fetchFuturesDays = () => get<{ days: FuturesDayRow[] }>('/api/futures/days').then((r) => r.days)
