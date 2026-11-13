@@ -4,6 +4,46 @@
 .cq-at-modes button { font-size: 16px; font-weight: 600; }
 .cq-at-modes button.cq-at-mode-live.on { background: #b3261e; color: #fff; }
 
+/* 遠端緊急停止（A-011）：全頁唯一會動到交易程式的東西，所以夠大、夠紅，而且要按兩次 */
+.cq-at-stop { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.cq-at-stop .cq-at-stop-btn, .cq-at-stop .cq-at-stop-yes {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 18px;
+  border-radius: 10px; background: #b3261e; color: #fff; font-size: 18px; font-weight: 600;
+}
+.cq-at-stop-confirm {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; font-size: 15px;
+  background: color-mix(in srgb, #ff5a4f 14%, var(--bg)); border: 1px solid color-mix(in srgb, #ff5a4f 55%, transparent);
+}
+.cq-at-stop-confirm b { font-size: 18px; }
+.cq-at-stop-confirm div { display: flex; gap: 8px; margin-top: 6px; }
+.cq-at-stop .cq-at-stop-yes { flex: 2; }
+.cq-at-stop .cq-at-stop-no { flex: 1; min-height: 48px; border-radius: 10px; background: var(--tile, #16181f); color: var(--text); font-size: 17px; border: 1px solid var(--line); }
+.cq-at-stop .cq-at-stop-yes:disabled, .cq-at-stop .cq-at-stop-no:disabled { opacity: .6; }
+.cq-at-stop .cq-err { margin: 0; }
+.cq-at-stop-nobody, .cq-at-stop-hand {
+  margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 15px; font-weight: 600;
+  background: color-mix(in srgb, var(--c) 14%, var(--bg)); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+}
+.cq-at-stop-nobody { --c: #f0b90b; }
+.cq-at-stop-hand { --c: #ff5a4f; }
+.cq-at-stop-scope { margin: 0; padding: 0 4px; font-size: 14px; color: var(--mute); }
+/* 每支交易程式一行：圓點的顏色＝現在的狀況（在聽藍、等待黃、要人處理紅、完成藍實心、沒在跑灰） */
+.cq-at-stop-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cq-at-stop-lines li {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 2px; padding: 8px 12px;
+  border-radius: 10px; font-size: 15px; background: var(--tile, #16181f); border-left: 5px solid var(--c);
+}
+.cq-at-stop-lines i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); align-self: center; }
+.cq-at-stop-lines b { color: var(--mute); font-weight: 600; }
+.cq-at-stop-lines strong { font-size: 16px; }
+.cq-at-stop-lines span { grid-column: 1 / -1; color: var(--mute); font-size: 14px; }
+.cq-at-stop-lines li.ok { --c: #3d8bfd; }
+.cq-at-stop-lines li.done { --c: #3d8bfd; }
+.cq-at-stop-lines li.wait { --c: #f0b90b; }
+.cq-at-stop-lines li.bad { --c: #ff5a4f; background: color-mix(in srgb, #ff5a4f 12%, var(--bg)); }
+.cq-at-stop-lines li.bad span { color: var(--text); }
+.cq-at-stop-lines li.off { --c: #6b7280; }
+
 .cq-at-banner {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-radius: 10px;
   background: var(--tile, #16181f); border-left: 6px solid var(--at, #3d8bfd);

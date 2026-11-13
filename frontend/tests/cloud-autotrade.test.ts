@@ -45,6 +45,7 @@ const base: AutoStatus = {
   limits: { max_position: 1, max_entries_per_day: 4, daily_loss_limit_twd: 3000, position_stop_loss_twd: null },
   contract: { point_value: 10, commission_twd: 15, tax_rate: 0.00002 },
   sim: { latency_s: 0.5, slippage_points: 1 },
+  control: { listening: false, ok: null, checked_at: null, poll_s: null, last_command_id: 0 },
   fills: [{ ts: '2026-11-13T09:00:01+08:00', side: 'BUY', qty: 1, price: 27001, pnl_twd: -31 }],
   corrected: false,
   events: [],
@@ -61,16 +62,16 @@ test('AC10 模式只認 sim 與 live', () => {
 test('AC10 一次回日期清單與那一天的狀態；沒有紀錄是空的不是錯誤', () => {
   const days = [{ day: '2026-11-13', status: 'closed', pnl: 359, fills: 2 }]
   const body = JSON.stringify(base)
-  assert.deepEqual(JSON.parse(envelope(days, body)), { days, current: base })
-  assert.deepEqual(JSON.parse(envelope([], null)), { days: [], current: null })
+  assert.deepEqual(JSON.parse(envelope(days, body)), { days, current: base, stop: null, listeners: {} })
+  assert.deepEqual(JSON.parse(envelope([], null)), { days: [], current: null, stop: null, listeners: {} })
 })
 
 test('AC10 端點：權限在讀資料庫之前擋、跟小台模擬同一道權限、表還沒建不算錯', () => {
-  const src = readFileSync(new URL('../functions/api/autotrade.ts', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('../functions/api/autotrade/index.ts', import.meta.url), 'utf8')
   assert.match(src, /denied\(ctx\.request, 'futures', ctx\.env\)\) \?\? handle\(ctx\)/)
   assert.match(src, /readRows\(/)
   assert.match(src, /serving\.autotrade_status/)
-  assert.doesNotMatch(src, /INSERT|UPDATE|DELETE/i) // 單向：網站只讀
+  assert.doesNotMatch(src, /INSERT|UPDATE|DELETE/i) // 這支只讀；唯一的寫入（遠端停止）在 ./stop.ts，見 cloud-autotrade-stop.test.ts
   assert.equal(/onRequest(Post|Put|Delete|Patch)/.test(src), false)
 })
 
@@ -96,8 +97,13 @@ test('AC11 狀態燈：盤中太久沒更新標「可能沒在跑」；已收盤
   assert.deepEqual(lamp({ ...base, status: 'closed' }, at(86400)), { tone: 'off', label: '已收盤', detail: '' })
   // 收盤時是停手的日子，停手比「已收盤」重要
   assert.equal(lamp({ ...base, status: 'closed', state: 'halted', halt: 'kill' }, at(86400)).tone, 'bad')
-  // 停手比「沒更新」重要
-  assert.equal(lamp({ ...base, state: 'halted', halt: 'kill' }, at(9999)).label, '停手')
+  // 停手比「沒更新」重要；但盤中的狀態太久沒更新時一定要講——畫面上的「停手」可能是程式死掉前的最後一份
+  const dead = lamp({ ...base, state: 'halted', halt: 'kill' }, at(9999))
+  assert.deepEqual([dead.tone, dead.label], ['bad', '停手'])
+  assert.equal(dead.detail, `${HALT_TEXT.kill}；2 小時沒有更新，程式可能沒在跑`)
+  assert.match(lamp({ ...base, state: 'suspended', halt: 'order_rate' }, at(600)).detail, /10 分鐘沒有更新，程式可能沒在跑/)
+  assert.match(lamp({ ...base, state: 'link_down' }, at(600)).detail, /斷線期間不送單也不刪單；10 分鐘沒有更新/)
+  assert.equal(lamp({ ...base, state: 'halted', halt: 'kill' }, at(5)).detail, HALT_TEXT.kill) // 還新的時候不多話
 })
 
 test('AC11 離每日虧損上限還有多少', () => {
@@ -114,7 +120,7 @@ test('AC11 部位、時間、名稱', () => {
   assert.equal(clock('2026-11-13T09:00:06+08:00'), '09:00:06')
   assert.equal(clock('2026-11-13T13:44:59.250000+08:00'), '13:44:59')
   assert.deepEqual(MODE_NAME, { sim: '模擬', live: '真單' })
-  for (const kind of ['halt', 'release', 'stop', 'correction', 'link', 'broker_reject', 'foreign_order', 'reject'])
+  for (const kind of ['halt', 'release', 'stop', 'correction', 'link', 'broker_reject', 'foreign_order', 'reject', 'control', 'control_link'])
     assert.ok(EVENT_LABEL[kind], kind)
 })
 
