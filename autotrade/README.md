@@ -18,16 +18,24 @@ python -m ruff check . && python -m ruff format --check . && python -m mypy && p
 
 設定範例：`configs/tmf_sim.toml`（微台、只做多、最多 1 口）。真單模式沒設每日虧損上限、沒有通知設定、或沒有 `[control]`（遠端緊急停止），會拒絕啟動。
 
-## 後台（改設定、開演練）
+## 後台（改設定、啟動交易程式、開演練）
 
 在交易電腦上用瀏覽器操作，只有這台電腦連得到。在 `autotrade` 資料夾執行：
 
 ```bash
-python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recorded-dir D:/project/twquant/data/autotrade/recorded --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --env-file D:/project/twquant/.env
+python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recorded-dir D:/project/twquant/data/autotrade/recorded --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --ms-repo C:/t/Momentum_Scalping --env-file D:/project/twquant/.env
 ```
 
 會自動打開 `http://127.0.0.1:8765/`。`D:/t/autotrade` 換成任何一個放演練紀錄的資料夾（要先建好）。
 「設定」分頁：改了按存檔，不合格的不會存；改了要重新啟動交易程式才生效。模擬／真單不能在這裡切換。
+「交易程式」分頁（現在只有模擬，不會送出任何委託）：
+
+- **盤中**：先把富邦錄製程式開起來，再選「今天的即時行情」按「啟動交易程式」。開盤前啟動會等到開盤；晚啟動會從今天第一筆行情重算。
+  網站「台指期 → 程式交易」的「模擬」會變成在跑，手機按「緊急停止」它會停手、平倉。收盤後程式自己結束。
+- **回放**：選「回放錄好的一天」，先看它怎麼跑；60 倍速＝一分鐘播一小時。只在這台電腦看，不上網站、不發通知。
+- 今天按過遠端緊急停止的話，重開之後一樣是停手的；要再交易請勾「解除今天的停止」。
+- 後台關掉，交易程式也會跟著結束。每天要自己按一次啟動。
+
 「演練」分頁：選哪一天的價格（富邦即時錄的排前面）、從幾點開始、幾倍速、中繼程式連雲端還是本機，按「開始演練」；到網站按「緊急停止」試試看。
 演練沒跑起來會用紅色寫原因。
 「終端機」分頁：跟執行後台的那個視窗印的一樣（每 2 秒更新），上面寫後台是哪一支程式、哪一行指令、在哪個資料夾、程序編號，以及它開出來的每個程式。

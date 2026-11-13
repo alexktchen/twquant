@@ -1,6 +1,6 @@
 """本機後台的頁面（A-012）。一個檔、不用建置，只有本機的後台會送出它。__TOKEN__ 由伺服器換成這次啟動的通行碼。
 
-畫面照網站的地鐵風格：大字、顏色分類、少字。兩個分頁：設定、演練。
+畫面照網站的地鐵風格：大字、顏色分類、少字。四個分頁：設定、交易程式（A-014）、演練、終端機。
 """
 
 PAGE = r"""<!doctype html>
@@ -43,21 +43,31 @@ input, select { font:inherit; font-size:16px; padding:8px 10px; border-radius:8p
 .lamp.on i { background:var(--green); } .lamp.off i { background:#6b7280; }
 pre.log { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:13.5px/1.5 ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:340px; overflow:auto; margin:6px 0 0; }
 .muted { color:var(--mute); font-size:14px; }
+[hidden] { display:none !important; }
 pre.term { max-height:none; height:calc(100vh - 470px); min-height:260px; }
 dl.where { display:grid; grid-template-columns:max-content 1fr; gap:6px 14px; margin:0; font-size:15px; }
 dl.where dt { color:var(--mute); } dl.where dd { margin:0; font-family:ui-monospace,Consolas,monospace; font-size:13.5px; overflow-wrap:anywhere; }
 @media (max-width:600px) { dl.where { grid-template-columns:1fr; gap:2px; } dl.where dd { margin-bottom:8px; } }
 pre.term .t { color:var(--mute); } pre.term .warn { color:#f0b90b; }
 .steps { margin:0; padding-left:20px; color:var(--mute); font-size:15px; }
-@media (max-width:600px) { main, header, nav { padding-left:12px; padding-right:12px; } }
+.tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+.tile { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+.tile small { display:block; color:var(--mute); font-size:13.5px; } .tile b { font-size:22px; }
+.up { color:#f6465d; } .down { color:#2ebd85; }
+table.fills { width:100%; border-collapse:collapse; margin-top:12px; font-size:15px; }
+table.fills th { text-align:left; color:var(--mute); font-weight:500; font-size:13.5px; padding:4px 8px 4px 0; }
+table.fills td { padding:6px 8px 6px 0; border-top:1px solid var(--line); }
+label.check span { display:flex; align-items:center; gap:8px; } label.check input { width:20px; height:20px; }
+@media (max-width:600px) { main, header, nav { padding-left:12px; padding-right:12px; } nav { gap:6px; } nav button { padding:10px 11px; font-size:16px; white-space:nowrap; } }
 </style>
 </head>
 <body>
 <header><h1>程式交易後台</h1><span class="local">只在這台電腦上開得到。網站只能按緊急停止；改設定、開演練都在這裡。</span></header>
-<nav><button id="tab-settings" class="on">設定</button><button id="tab-drill">演練</button><button id="tab-console">終端機</button></nav>
+<nav><button id="tab-settings" class="on">設定</button><button id="tab-run">交易程式</button><button id="tab-drill">演練</button><button id="tab-console">終端機</button></nav>
 <main>
   <div id="flash"></div>
   <div id="view-settings"></div>
+  <div id="view-run" hidden></div>
   <div id="view-drill" hidden></div>
   <div id="view-console" hidden></div>
 </main>
@@ -81,8 +91,90 @@ async function load() {
     render();
   } catch (e) { flash("bad", "讀不到後台的資料：" + e.message); }
 }
-const TABS = ["settings", "drill", "console"];
-function render() { if (tab === "settings") renderSettings(); else if (tab === "drill") renderDrill(); else renderConsole(); }
+const TABS = ["settings", "run", "drill", "console"];
+function render() { ({ settings: renderSettings, run: renderRun, drill: renderDrill, console: renderConsole })[tab](); }
+const PROC_NAME = { ticks: "行情中繼", relay: "指令中繼", run: "交易程式", drill: "演練程式" };
+const STATE_NAME = { ok: "正常", halted: "停手", suspended: "暫停送單", link_down: "券商連線中斷" };
+const money = (n) => (n > 0 ? "+" : "") + Math.round(n).toLocaleString("en-US");
+let runForm = { source: "live" };
+const readRunForm = () => ({ source: $("r-src").value, cfg: $("r-cfg").value, dsn: $("r-dsn").value, notify: $("r-notify").checked, release: $("r-release").checked, day: $("r-day").value, from: $("r-from").value, speed: $("r-speed").value });
+function renderRun() {
+  const v = $("view-run");
+  const r = state.run;
+  const running = r && r.running;
+  const playing = r && r.source === "play";
+  const sims = state.configs.filter((c) => c.ok && c.mode === "sim" && c.export);
+  const days = state.ticks.filter((t) => t.feed === "recorded");
+  // 表單打到一半不要被每 2 秒的更新洗掉
+  if (!running && $("r-cfg")) runForm = readRunForm();
+  let html = `<section class="card"><div class="lamp ${running ? "on" : "off"}"><i></i>${running ? (playing ? "回放中（模擬）" : "交易程式在跑（模擬）") : "交易程式沒在跑"}</div>`;
+  if (r) html += `<p class="muted">${esc(r.started_at.slice(11, 19))} 啟動・${esc(r.config)}・${playing ? `回放 ${esc(r.play_day)} ${esc(r.start)} 起・${r.speed} 倍速・不上網站、不發通知` : `今天的即時行情・指令中繼連${r.relay === "TWQUANT_SUPABASE_DSN" ? "雲端" : "本機"}資料庫・${r.notify ? "發" : "不發"}手機通知`}</p>`;
+  html += `</section>`;
+  const st = r && r.status;
+  if (st && st.error) html += `<div class="msg bad">${esc(st.error)}</div>`;
+  else if (st) {
+    const tone = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
+    html += `<section class="card"><h2>${esc(st.day)} 的狀況<span class="chip">${st.status === "closed" ? "已收盤" : "最後一筆行情 " + esc(st.last_ts.slice(11, 19))}</span></h2><div class="tiles">
+      <div class="tile"><small>部位</small><b>${st.position === 0 ? "空手" : (st.position > 0 ? "多 " : "空 ") + Math.abs(st.position) + " 口"}</b></div>
+      <div class="tile"><small>今天損益（元）</small><b class="${tone(st.day_pnl_twd)}">${money(st.day_pnl_twd)}</b></div>
+      <div class="tile"><small>成交</small><b>${st.fill_count} 筆</b></div>
+      <div class="tile"><small>程式狀態</small><b class="${st.state === "ok" ? "" : "down"}">${esc(STATE_NAME[st.state] || st.state)}</b></div>
+      <div class="tile"><small>最新價</small><b>${Number(st.last_price).toLocaleString("en-US")}</b></div>
+    </div>`;
+    if (st.fills.length) html += `<table class="fills"><tr><th>時間</th><th>買賣</th><th>口數</th><th>價格</th><th>這筆之後多的損益</th></tr>${st.fills.map((f) => `<tr><td>${esc(f.ts.slice(11, 19))}</td><td>${f.side === "BUY" ? "買" : "賣"}</td><td>${f.qty}</td><td>${Number(f.price).toLocaleString("en-US")}</td><td class="${tone(f.pnl_twd)}">${f.pnl_twd ? money(f.pnl_twd) : ""}</td></tr>`).join("")}</table>`;
+    html += `</section>`;
+  }
+  if (r && !running && !r.stopped && r.procs.run !== 0) {
+    const last = (r.logs.run || []).filter((l) => l.trim()).slice(-1)[0] || "沒有輸出";
+    html += `<div class="msg bad">交易程式沒跑完（結束碼 ${r.procs.run}）：${esc(last)}</div>`;
+  }
+  if (!running) {
+    const f = runForm;
+    const live = f.source !== "play";
+    const cfgs = sims.map((c) => `<option ${c.name === (f.cfg || pick) ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+    const dayOpts = days.map((t) => `<option value="${esc(t.name)}" ${t.name === f.day ? "selected" : ""}>${esc(t.day)}</option>`).join("");
+    html += `<section class="card"><h2>啟動交易程式<span class="chip sim">模擬</span></h2><p class="muted">現在只能跑模擬：真的下單要等元大的行情與下單接上。模擬用的是模擬券商，不會送出任何委託。</p><div class="grid">
+      <label class="f"><b>設定檔</b><select id="r-cfg">${cfgs}</select><small>只列模擬的設定檔</small></label>
+      <label class="f"><b>行情</b><select id="r-src"><option value="live" ${live ? "selected" : ""}>今天的即時行情（富邦錄製程式正在錄的）</option><option value="play" ${live ? "" : "selected"}>回放錄好的一天（先看它怎麼跑）</option></select><small>${live ? "要先把富邦錄製程式開起來；開盤前啟動會等到開盤" : "只在這台電腦看：不上網站、不發通知、不聽遠端停止"}</small></label>
+      <label class="f" ${live ? "" : "hidden"}><b>指令中繼連哪個資料庫</b><select id="r-dsn"><option value="TWQUANT_SUPABASE_DSN" ${f.dsn === "TWQUANT_PG_DSN" ? "" : "selected"}>雲端（網站看得到、手機按得到緊急停止）</option><option value="TWQUANT_PG_DSN" ${f.dsn === "TWQUANT_PG_DSN" ? "selected" : ""}>本機（只在這台電腦測）</option></select></label>
+      <label class="f check" ${live ? "" : "hidden"}><span><input type="checkbox" id="r-notify" ${f.notify === false ? "" : "checked"}> <b>發手機通知</b></span><small>成交與異常會送到 Telegram，開頭標「模擬」</small></label>
+      <label class="f check" ${live ? "" : "hidden"}><span><input type="checkbox" id="r-release" ${f.release ? "checked" : ""}> <b>解除今天的停止</b></span><small>今天按過遠端緊急停止的話，要勾這個才會再交易；沒按過不用勾</small></label>
+      <label class="f" ${live ? "hidden" : ""}><b>回放哪一天</b><select id="r-day">${dayOpts}</select><small>富邦即時錄的</small></label>
+      <label class="f" ${live ? "hidden" : ""}><b>從幾點開始</b><input id="r-from" value="${esc(f.from || "08:44:50")}"><small>格式 HH:MM:SS；之前的行情會一次補上</small></label>
+      <label class="f" ${live ? "hidden" : ""}><b>幾倍速</b><input id="r-speed" value="${esc(f.speed || "60")}" inputmode="decimal"><small>60＝一分鐘播一小時；1＝跟真的一樣快</small></label>
+    </div>`;
+    let why = "";
+    if (!sims.length) why = "沒有可以用的模擬設定檔。";
+    else if (!state.run_ready.ms_repo) why = "後台啟動時沒有給動能順勢原版程式的資料夾（--ms-repo）。";
+    else if (!live && !days.length) why = "找不到富邦錄好的逐筆。後台啟動時要給 --recorded-dir。";
+    else if (state.drill && state.drill.running) why = "演練正在跑，先到「演練」分頁停掉。";
+    if (why) html += `<div class="msg bad">${why}</div>`;
+    html += `<div class="row" style="margin-top:12px"><button class="btn go" id="r-start" ${why ? "disabled" : ""}>${live ? "啟動交易程式" : "開始回放"}</button></div></section>`;
+  } else {
+    html += `<div class="row"><button class="btn stop" id="r-stop">${playing ? "停止回放" : "結束交易程式"}</button><span class="muted">${playing ? "" : "結束只是把程式關掉；模擬的部位不會另外平倉，重開會從今天第一筆行情重算。"}</span></div>`;
+  }
+  if (r) for (const name of ["run", "ticks", "relay"]) {
+    if (!(name in r.procs)) continue;
+    const code = r.procs[name];
+    html += `<section class="card"><h2>${PROC_NAME[name]}<span class="chip">${code === null ? "在跑" : name !== "run" && !running ? "已收掉" : `已結束（結束碼 ${code}）`}</span></h2><pre class="log" data-log="${name}">${esc(r.logs[name].join("\n") || "（還沒有輸出）")}</pre></section>`;
+  }
+  const scroll = {};
+  v.querySelectorAll("pre.log").forEach((p) => { scroll[p.dataset.log] = p.scrollHeight - p.scrollTop - p.clientHeight < 40 ? null : p.scrollTop; });
+  v.innerHTML = html;
+  v.querySelectorAll("pre.log").forEach((p) => { const top = scroll[p.dataset.log]; p.scrollTop = top == null ? p.scrollHeight : top; });
+  if ($("r-src")) $("r-src").onchange = () => { runForm.source = $("r-src").value; renderRun(); };
+  if ($("r-start")) $("r-start").onclick = startRun;
+  if ($("r-stop")) $("r-stop").onclick = async () => { $("r-stop").disabled = true; flash("ok", "請交易程式結束中…"); try { await post("/api/run/stop", {}); flash("ok", "交易程式已結束。"); await load(); } catch (e) { flash("bad", e.message); } };
+}
+async function startRun() {
+  runForm = readRunForm();
+  const live = $("r-src").value === "live";
+  const body = live
+    ? { config: $("r-cfg").value, source: "live", dsn_env: $("r-dsn").value, notify: $("r-notify").checked, release_stop: $("r-release").checked }
+    : { config: $("r-cfg").value, source: "play", ticks: $("r-day").value, start: $("r-from").value.trim(), speed: $("r-speed").value.trim() };
+  try { await post("/api/run/start", body); flash("ok", live ? "交易程式啟動了。網站「台指期 → 程式交易」的「模擬」會變成在跑。" : "回放開始了。"); await load(); }
+  catch (e) { flash("bad", "沒有啟動：" + e.message); }
+}
 function renderConsole() {
   const v = $("view-console");
   const old = v.querySelector("pre.term");
@@ -93,10 +185,11 @@ function renderConsole() {
   const p = state.process, d = state.drill;
   const row = (k, val) => `<dt>${k}</dt><dd>${esc(val)}</dd>`;
   let where = `<section class="card"><h2>後台跑在哪裡</h2><dl class="where">${row("執行的程式", p.script)}${row("整行指令", p.command)}${row("用的 Python", p.python)}${row("在哪個資料夾執行", p.cwd)}${row("程序編號", p.pid + "（工作管理員裡找得到）")}${row("幾點開的", p.started_at.replace("T", " ").slice(0, 19))}</dl></section>`;
-  if (d && Object.keys(d.commands).length) {
-    where += `<section class="card"><h2>後台開出來的程式<span class="chip">${d.running ? "演練進行中" : "上一場演練"}</span></h2><dl class="where">`;
-    for (const [name, cmd] of Object.entries(d.commands)) where += row((name === "drill" ? "演練程式" : "中繼程式") + (d.procs[name] === null ? "・在跑" : `・已結束（${d.procs[name]}）`) + "・程序編號 " + d.pids[name], cmd);
-    where += row("輸出放在", d.folder) + `</dl></section>`;
+  for (const [job, on, off] of [[state.run, state.run && state.run.source === "play" ? "回放中" : "交易程式在跑", "上一次的交易程式"], [d, "演練進行中", "上一場演練"]]) {
+    if (!job || !Object.keys(job.commands).length) continue;
+    where += `<section class="card"><h2>後台開出來的程式<span class="chip">${job.running ? on : off}</span></h2><dl class="where">`;
+    for (const [name, cmd] of Object.entries(job.commands)) where += row((job === d && name === "relay" ? "中繼程式" : PROC_NAME[name]) + (job.procs[name] === null ? "・在跑" : `・已結束（${job.procs[name]}）`) + "・程序編號 " + job.pids[name], cmd);
+    where += row("輸出放在", job.folder) + `</dl></section>`;
   }
   v.innerHTML = where + `<section class="card"><h2>終端機<span class="chip">跟執行後台的那個視窗印的一樣・每 2 秒更新</span></h2><pre class="log term">${lines.join("\n") || "（還沒有輸出）"}</pre></section>`;
   const pre = v.querySelector("pre.term");

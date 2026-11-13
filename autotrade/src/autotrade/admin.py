@@ -15,6 +15,7 @@ import secrets
 import sys
 import threading
 from collections import deque
+from collections.abc import Callable
 from datetime import date, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from autotrade.admin_page import PAGE
-from autotrade.jobs import DSN_ENVS, DrillRequest, JobError, Jobs, tail
+from autotrade.jobs import DSN_ENVS, DrillRequest, JobError, Jobs, RunRequest, tail
 from autotrade.model import TAIPEI
 from autotrade.settings import (
     FIELDS,
@@ -40,6 +41,10 @@ BODY_MAX = 20_000
 TOKEN_HEADER = "X-Admin-Token"
 CONSOLE_LINES = 500
 SOURCES = {"recorded": "富邦即時錄的", "taifex": "期交所盤後檔"}
+RUN_STRATEGY = "momentum"  # 第一個上線目標：動能順勢（SPEC §2）
+DB_TEXT = {"TWQUANT_SUPABASE_DSN": "雲端", "TWQUANT_PG_DSN": "本機"}
+PROC_TEXT = {"ticks": "行情中繼", "relay": "指令中繼", "run": "交易程式"}
+HELPER_LOSS = {"ticks": "收不到新的行情", "relay": "聽不到遠端緊急停止、網站也不會更新"}
 
 
 class Console:
@@ -104,10 +109,17 @@ class Admin:
         jobs: Jobs,
         console: Console | None = None,
         recorded_dir: Path | None = None,
+        ms_repo: Path | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(TAIPEI),
+        helper_linger_s: float = 8.0,
     ) -> None:
         self.config_dir = config_dir
         self.ticks_dir = ticks_dir
         self.recorded_dir = recorded_dir
+        self.ms_repo = ms_repo
+        self.clock = clock
+        self.helper_linger_s = helper_linger_s  # 交易程式結束後，兩支中繼程式再留幾秒
+        self._lock = threading.RLock()  # 網頁的請求與背景的 watch 都會動到 jobs
         self.jobs = jobs
         self.console = console or Console()
         self.process = process_info()
@@ -155,6 +167,8 @@ class Admin:
                     "values": {f"{f.section}.{f.key}": shown_value(values, f) for f in FIELDS},
                     "has": [f"{f.section}.{f.key}" for f in FIELDS if f.section in values],
                     "control": cfg.control is not None,
+                    "export": cfg.export is not None,
+                    "notify": cfg.notify is not None,
                 }
             except SettingsError as exc:
                 entry |= {
@@ -164,10 +178,12 @@ class Admin:
                     "values": {},
                     "has": [],
                     "control": False,
+                    "export": False,
+                    "notify": False,
                 }
             configs.append(entry)
-        self.watch_drill()
-        drill = self.jobs.drill
+        self.watch()
+        drill, run = self.jobs.drill, self.jobs.run
         return {
             "fields": [
                 {
@@ -185,10 +201,143 @@ class Admin:
             "dsn_envs": list(DSN_ENVS),
             "env_file": self.jobs.env_file is not None,
             "drill": None if drill is None else drill.state(),
+            "run": None if run is None else run.state(),
+            "run_ready": {"ms_repo": self.ms_repo is not None},
             "now": datetime.now(TAIPEI).isoformat(timespec="seconds"),
             "console": self.console.lines(),
             "process": self.process,
         }
+
+    def watch_run(self) -> None:
+        """交易程式自己結束了（收盤、出錯）：報一次，過一下子再把兩支中繼程式收掉。
+
+        不馬上收：指令中繼還要把最後一份狀態送上網站。
+        """
+        job = self.jobs.run
+        if job is None:
+            return
+        if job.running():
+            # 交易程式還在跑，中繼程式卻自己結束了：一定要講，不然只會看到行情停住或網站沒更新
+            for name, proc in job.procs.items():
+                code = proc.poll()
+                if name != "run" and code is not None and name not in job.warned:
+                    job.warned.add(name)
+                    last = (tail(job.folder / f"{name}.log", 1) or ["沒有輸出"])[-1]
+                    effect = HELPER_LOSS[name]
+                    self.console.say(
+                        f"{PROC_TEXT[name]}自己結束了（結束碼 {code}）：{last}。交易程式還在跑，但{effect}；"
+                        "請按「結束」再重新啟動",
+                        "warn",
+                    )
+            return
+        now = self.clock()
+        if job.ended_at is None:
+            job.ended_at = now
+            if not job.stopped:
+                code = job.procs["run"].poll()
+                last = (tail(job.folder / "run.log", 1) or ["沒有輸出"])[-1]
+                if code == 0:
+                    self.console.say(f"交易程式結束了：{last}")
+                else:
+                    self.console.say(f"交易程式沒跑完（結束碼 {code}）：{last}", "warn")
+        if not job.helpers_stopped and (now - job.ended_at).total_seconds() >= self.helper_linger_s:
+            job.stop_all()
+            if len(job.procs) > 1:
+                self.console.say("行情中繼、指令中繼也收掉了")
+
+    def watch(self) -> None:
+        """定時叫：看演練與交易程式是不是自己結束了。"""
+        with self._lock:
+            self.watch_drill()
+            self.watch_run()
+
+    def start_watcher(self, every_s: float = 1.0) -> threading.Event:
+        """開一條背景執行緒定時叫 watch（頁面沒開著的時候也要有人收尾）。回傳的事件設起來就停。"""
+        stop = threading.Event()
+
+        def loop() -> None:
+            while not stop.wait(every_s):
+                self.watch()
+
+        threading.Thread(target=loop, name="admin-watch", daemon=True).start()
+        return stop
+
+    def start_run(self, body: dict[str, Any]) -> dict[str, Any]:
+        """啟動交易程式（現在只有模擬）。"""
+        config = self.config_path(str(body.get("config", "")))
+        cfg = validate(config.read_text(encoding="utf-8"))
+        if cfg.mode != "sim":
+            raise JobError("這個設定檔是真單；真單還沒接上元大，現在只能跑模擬")
+        if cfg.export is None:
+            raise JobError("這個設定檔沒有 [export]，寫不出給網站看的狀態")
+        if self.ms_repo is None:
+            raise JobError("後台啟動時沒有給動能順勢原版程式的資料夾（--ms-repo）")
+        source = str(body.get("source", ""))
+        if source == "live":
+            if cfg.control is None:
+                raise JobError("這個設定檔沒有 [control]（遠端緊急停止），不能跑交易程式")
+            notify = bool(body.get("notify"))
+            if notify and cfg.notify is None:
+                raise JobError("這個設定檔沒有 [notify]，不能發手機通知")
+            dsn = str(body.get("dsn_env", ""))
+            req = RunRequest(
+                config=config,
+                strategy=RUN_STRATEGY,
+                ms_repo=self.ms_repo,
+                source=source,
+                dsn_env=dsn,
+                notify=notify,
+                release_stop=bool(body.get("release_stop")),
+            )
+            what = (
+                f"今天的即時行情、指令中繼連{DB_TEXT.get(dsn, dsn)}資料庫、"
+                f"{'發' if notify else '不發'}手機通知"
+                + ("、解除今天稍早的遠端停止" if req.release_stop else "")
+            )
+        elif source == "play":
+            name = str(body.get("ticks", ""))
+            match = RECORDED_NAME.match(name)
+            if match is None or self.recorded_dir is None:
+                raise JobError(f"回放要選一天富邦錄好的逐筆：{name!r}")
+            start = str(body.get("start", "08:44:50"))
+            if not re.fullmatch(r"\d{2}:\d{2}:\d{2}", start):
+                raise JobError(f"開始時間要是 HH:MM:SS：{start!r}")
+            try:
+                speed = float(body.get("speed", 1))
+            except (TypeError, ValueError) as exc:
+                raise JobError("倍速要是數字") from exc
+            day = date(int(match[1]), int(match[2]), int(match[3]))
+            req = RunRequest(
+                config=config,
+                strategy=RUN_STRATEGY,
+                ms_repo=self.ms_repo,
+                source=source,
+                play_file=self.recorded_dir / name,
+                play_day=day,
+                start=start,
+                speed=speed,
+            )
+            what = f"回放 {day} {start} 起、{speed:g} 倍速（只在這台電腦看，不上網站、不發通知）"
+        else:
+            raise JobError(f"行情來源要選「今天的即時行情」或「回放」：{source!r}")
+        with self._lock:
+            job = self.jobs.start_run(req, self.clock())
+        self.console.say(f"啟動交易程式（模擬）：{config.name}、{what}")
+        for name, args in job.commands.items():
+            pid = getattr(job.procs[name], "pid", None)
+            self.console.say(f"\u3000{PROC_TEXT[name]}（程序編號 {pid}）：{' '.join(args)}")
+        self.console.say(f"\u3000輸出與紀錄在 {job.folder}")
+        return {"ok": True, "run": job.state()}
+
+    def stop_run(self) -> dict[str, Any]:
+        """請交易程式結束。"""
+        with self._lock:
+            was = self.jobs.stop_run()
+            job = self.jobs.run
+            if was and job is not None:
+                job.ended_at = job.ended_at or self.clock()
+        self.console.say("交易程式已結束" if was else "按了結束，但交易程式沒有在跑")
+        return {"ok": True, "was_running": was}
 
     def save(self, body: dict[str, Any]) -> dict[str, Any]:
         """存設定。"""
@@ -238,8 +387,9 @@ class Admin:
         )
         if validate(req.config.read_text(encoding="utf-8")).control is None:
             raise JobError("這個設定檔沒有 [control]（遠端緊急停止），不能演練")
-        job = self.jobs.start_drill(req)
-        self._ended = None
+        with self._lock:
+            job = self.jobs.start_drill(req)
+            self._ended = None
         relay = f"，遠端叫停經 {req.dsn_env}" if req.dsn_env else "，不接遠端"
         self.console.say(
             f"開始演練：{req.config.name}、{SOURCES[feed]} {req.day} {req.start} 起 "
@@ -254,9 +404,10 @@ class Admin:
 
     def stop_drill(self) -> dict[str, Any]:
         """停掉演練。"""
-        was = self.jobs.stop_drill()
-        if was:
-            self._ended = self.jobs.drill
+        with self._lock:
+            was = self.jobs.stop_drill()
+            if was:
+                self._ended = self.jobs.drill
         self.console.say("停掉演練" if was else "按了停止，但沒有演練在跑")
         return {"ok": True, "was_running": was}
 
@@ -332,6 +483,8 @@ def make_handler(admin: Admin, port: int) -> type[BaseHTTPRequestHandler]:
                 "/api/settings": lambda: admin.save(body),
                 "/api/drill/start": lambda: admin.start_drill(body),
                 "/api/drill/stop": admin.stop_drill,
+                "/api/run/start": lambda: admin.start_run(body),
+                "/api/run/stop": admin.stop_run,
             }
             route = routes.get(self.path)
             if route is None:

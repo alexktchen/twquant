@@ -23,7 +23,7 @@ from pathlib import Path
 
 SQL = (
     "SELECT to_char(t AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD\"T\"HH24:MI:SS.US') || '+08:00', "
-    "price, size, bid, ask FROM market_live.ticks WHERE day = %s AND symbol = %s ORDER BY t"
+    "price, size, bid, ask FROM market_live.ticks WHERE day = %s AND symbol = %s ORDER BY t, ctid"
 )
 
 
