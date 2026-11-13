@@ -75,3 +75,11 @@ class SimBroker:
     def position(self) -> int:
         """模擬券商端的部位。"""
         return self._position
+
+    def open_order_ids(self) -> frozenset[str]:
+        """模擬券商端還活著的委託。"""
+        return frozenset(self._working)
+
+    def resync(self) -> list[BrokerEvent]:
+        """模擬券商不會斷線，沒有漏掉的回報。"""
+        return []
