@@ -32,6 +32,7 @@ from autotrade.delivery import (
 from autotrade.drill import Drill, drill_config, load_prices
 from autotrade.engine import Engine, Event
 from autotrade.export import dumps, env_value, snapshot
+from autotrade.feed.recorded import read_recorded_day
 from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.model import TAIPEI
@@ -41,6 +42,7 @@ from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
 
 STRATEGIES = ("none", "momentum")
+FEEDS = ("taifex", "recorded")
 NOTIFY_MODES = ("print", "send")  # print＝印在畫面上（不連網）；send＝真的送到手機
 PUSH_LABEL = "網站推播"
 
@@ -169,15 +171,25 @@ def run_replay(
     env_file: Path | None = None,
     notify_log: Path | None = None,
     push_subs: Path | None = None,
+    feed: str = "taifex",
 ) -> dict[str, float | int | str]:
     """用模擬券商重播一天，回傳當日摘要。
 
     給 journal 就寫事件日誌，給 status_out 就寫給網站的狀態檔，給 notify 就把那天的通知印出來或送出去。
     """
     cfg = load_config(config)
-    contract, rows = read_taifex_day(
-        ticks, cfg.contract.symbol, day, cfg.session.start, cfg.session.end
-    )
+    if feed == "recorded":
+        # 富邦即時錄下來的逐筆（含買賣價，A-013）；檔案只有一個合約，不用挑月份
+        contract, rows = (
+            "recorded",
+            read_recorded_day(ticks, day, cfg.session.start, cfg.session.end),
+        )
+    elif feed == "taifex":
+        contract, rows = read_taifex_day(
+            ticks, cfg.contract.symbol, day, cfg.session.start, cfg.session.end
+        )
+    else:
+        raise ValueError(f"不認得的行情來源：{feed!r}（可用：{FEEDS}）")
     if push_subs is not None and notify is None:
         raise ValueError("--push-subs 要配 --notify send")
     notifier = (
@@ -396,7 +408,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     check.add_argument("config", type=Path)
     replay = sub.add_parser("replay", help="用期交所逐筆檔重播一天（模擬券商）")
     replay.add_argument("--config", type=Path, required=True)
-    replay.add_argument("--ticks", type=Path, required=True, help="期交所 Daily_*.csv")
+    replay.add_argument(
+        "--ticks",
+        type=Path,
+        required=True,
+        help="期交所 Daily_*.csv，或 --feed recorded 時的錄製檔",
+    )
+    replay.add_argument(
+        "--feed",
+        choices=FEEDS,
+        default="taifex",
+        help="taifex＝期交所盤後逐筆檔；recorded＝富邦即時錄下來的（tools/export_recorded_ticks.py 匯出）",
+    )
     replay.add_argument("--day", type=date.fromisoformat, required=True)
     replay.add_argument("--strategy", choices=sorted(STRATEGIES), required=True)
     replay.add_argument("--ms-repo", type=Path, help="網友原版 Momentum_Scalping 的資料夾")
@@ -517,6 +540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.env_file,
         args.notify_log,
         args.push_subs,
+        feed=args.feed,
     )
     for key, value in summary.items():
         print(f"{key}: {value}")
