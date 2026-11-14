@@ -345,10 +345,11 @@ def run_drill(
     minutes: float,
     speed: float,
     status: Path | None,
+    feed: str = "taifex",
 ) -> int:
     """演練遠端緊急停止：模擬券商、買 1 口抱著，等網站按停止。全程不碰券商。"""
     cfg = drill_config(load_config(config))
-    prices = load_prices(cfg, ticks, day, datetime.strptime(start, "%H:%M:%S").time())
+    prices = load_prices(cfg, ticks, day, datetime.strptime(start, "%H:%M:%S").time(), feed)
     print(
         f"演練開始：{cfg.contract.symbol} 用 {day} {start} 之後的價格（{len(prices)} 筆，{speed:g} 倍速），"
         f"最多 {minutes:g} 分鐘。等一下會先買 1 口；請在網站按「緊急停止」。Ctrl+C 結束。"
@@ -374,6 +375,7 @@ def run_admin(
     env_file: Path | None,
     port: int,
     open_browser: bool,
+    recorded_dir: Path | None = None,
 ) -> int:
     """開本機後台（只聽 127.0.0.1），按 Ctrl+C 結束；結束時把還在跑的演練一起停掉。"""
     from autotrade.admin import Admin, serve
@@ -382,10 +384,22 @@ def run_admin(
     for folder in (config_dir, data_dir):
         if not folder.is_dir():
             raise FileNotFoundError(f"資料夾不存在：{folder}")
-    admin = Admin(config_dir, ticks_dir, Jobs(data_dir, env_file=env_file))
+    # 開出來的程式在套件的資料夾裡執行，不是這裡；路徑先換成完整的，才不會指到別的地方
+    config_dir, data_dir = config_dir.resolve(), data_dir.resolve()
+    ticks_dir = None if ticks_dir is None else ticks_dir.resolve()
+    recorded_dir = None if recorded_dir is None else recorded_dir.resolve()
+    env_file = None if env_file is None else env_file.resolve()
+    admin = Admin(
+        config_dir, ticks_dir, Jobs(data_dir, env_file=env_file), recorded_dir=recorded_dir
+    )
     server = serve(admin, port)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
-    print(f"後台開好了：{url}（只有這台電腦連得到；Ctrl+C 結束）")
+    admin.console.say(f"後台開好了：{url}（只有這台電腦連得到；Ctrl+C 結束）")
+    info = admin.process
+    admin.console.say(f"執行的程式：{info['script']}（程序編號 {info['pid']}）")
+    admin.console.say(f"用的 Python：{info['python']}")
+    admin.console.say(f"在哪個資料夾執行：{info['cwd']}")
+    admin.console.say(f"設定檔資料夾：{config_dir.resolve()}；演練資料夾：{data_dir.resolve()}")
     if open_browser:
         import webbrowser
 
@@ -393,7 +407,7 @@ def run_admin(
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("後台關閉")
+        admin.console.say("後台關閉")
     finally:
         server.server_close()
         admin.jobs.close()
@@ -444,7 +458,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     relay.add_argument("--once", action="store_true", help="只跑一輪就結束")
     drill = sub.add_parser("drill", help="演練遠端緊急停止：模擬券商、買 1 口抱著，等網站按停止")
     drill.add_argument("--config", type=Path, required=True)
-    drill.add_argument("--ticks", type=Path, required=True, help="期交所 Daily_*.csv（拿它的價格）")
+    drill.add_argument(
+        "--ticks", type=Path, required=True, help="拿它的價格：期交所 Daily_*.csv，或錄製檔"
+    )
+    drill.add_argument(
+        "--feed", choices=FEEDS, default="taifex", help="recorded＝富邦即時錄下來的（A-013）"
+    )
     drill.add_argument("--day", type=date.fromisoformat, required=True)
     drill.add_argument("--from", dest="start", default="09:00:00", help="從那一天的幾點開始播")
     drill.add_argument("--dir", type=Path, required=True, help="跟中繼程式共用的資料夾（絕對路徑）")
@@ -457,6 +476,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     admin.add_argument("--config-dir", type=Path, required=True, help="設定檔的資料夾")
     admin.add_argument("--data-dir", type=Path, required=True, help="演練的紀錄放哪（絕對路徑）")
     admin.add_argument("--ticks-dir", type=Path, help="期交所逐筆檔的資料夾（演練拿價格）")
+    admin.add_argument(
+        "--recorded-dir", type=Path, help="富邦即時錄的逐筆匯出檔的資料夾（演練優先用這裡的）"
+    )
     admin.add_argument("--env-file", type=Path, help="交給中繼程式的 .env（後台自己不讀）")
     admin.add_argument("--port", type=int, default=8765)
     admin.add_argument("--no-open", action="store_true", help="不要自動打開瀏覽器")
@@ -490,6 +512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.env_file,
             args.port,
             not args.no_open,
+            args.recorded_dir,
         )
     if args.command == "drill":
         return run_drill(
@@ -501,6 +524,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.minutes,
             args.speed,
             args.status,
+            args.feed,
         )
     if args.command == "relay":
         run_relay(

@@ -23,12 +23,14 @@ python -m ruff check . && python -m ruff format --check . && python -m mypy && p
 在交易電腦上用瀏覽器操作，只有這台電腦連得到。在 `autotrade` 資料夾執行：
 
 ```bash
-python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --env-file D:/project/twquant/.env
+python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recorded-dir D:/project/twquant/data/autotrade/recorded --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --env-file D:/project/twquant/.env
 ```
 
 會自動打開 `http://127.0.0.1:8765/`。`D:/t/autotrade` 換成任何一個放演練紀錄的資料夾（要先建好）。
 「設定」分頁：改了按存檔，不合格的不會存；改了要重新啟動交易程式才生效。模擬／真單不能在這裡切換。
-「演練」分頁：選哪一天的價格、從幾點開始、幾倍速、中繼程式連雲端還是本機，按「開始演練」；到網站按「緊急停止」試試看。
+「演練」分頁：選哪一天的價格（富邦即時錄的排前面）、從幾點開始、幾倍速、中繼程式連雲端還是本機，按「開始演練」；到網站按「緊急停止」試試看。
+演練沒跑起來會用紅色寫原因。
+「終端機」分頁：跟執行後台的那個視窗印的一樣（每 2 秒更新），上面寫後台是哪一支程式、哪一行指令、在哪個資料夾、程序編號，以及它開出來的每個程式。
 
 ## 演練遠端緊急停止
 

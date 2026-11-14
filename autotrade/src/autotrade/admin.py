@@ -9,8 +9,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
+import sys
+import threading
+from collections import deque
 from datetime import date, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from autotrade.admin_page import PAGE
-from autotrade.jobs import DSN_ENVS, DrillRequest, JobError, Jobs
+from autotrade.jobs import DSN_ENVS, DrillRequest, JobError, Jobs, tail
 from autotrade.model import TAIPEI
 from autotrade.settings import (
     FIELDS,
@@ -29,31 +33,100 @@ from autotrade.settings import (
     validate,
 )
 
-TICKS_NAME = re.compile(r"^Daily_(\d{4})_(\d{2})_(\d{2})\.csv$")
+TICKS_NAME = re.compile(r"^Daily_(\d{4})_(\d{2})_(\d{2})\.csv$")  # 期交所盤後逐筆檔
+# 富邦即時錄的匯出檔（A-013）
+RECORDED_NAME = re.compile(r"^[A-Za-z0-9]+_(\d{4})-(\d{2})-(\d{2})\.csv$")
 BODY_MAX = 20_000
 TOKEN_HEADER = "X-Admin-Token"
+CONSOLE_LINES = 500
+SOURCES = {"recorded": "富邦即時錄的", "taifex": "期交所盤後檔"}
 
 
-def tick_files(folder: Path | None) -> list[dict[str, str]]:
-    """逐筆檔清單（新到舊）：檔名與那一天。"""
-    if folder is None or not folder.is_dir():
-        return []
+class Console:
+    """後台在終端機印的每一行，同時留在記憶體裡給頁面的「終端機」分頁看（最近 CONSOLE_LINES 行）。"""
+
+    def __init__(self, lines: int = CONSOLE_LINES, echo: bool = True) -> None:
+        self._lines: deque[dict[str, str]] = deque(maxlen=lines)
+        self._lock = threading.Lock()
+        self.echo = echo
+
+    def say(self, text: str, level: str = "info") -> None:
+        """印一行（前面加時間）並記下來。level：info／warn。"""
+        now = datetime.now(TAIPEI).strftime("%H:%M:%S")
+        with self._lock:
+            self._lines.append({"t": now, "level": level, "text": text})
+            if self.echo:
+                print(f"{now} {text}", flush=True)
+
+    def lines(self) -> list[dict[str, str]]:
+        """目前留著的每一行（舊到新）。"""
+        with self._lock:
+            return list(self._lines)
+
+
+def process_info() -> dict[str, Any]:
+    """這個後台跑在哪裡：哪一支程式、哪個 Python、哪一行指令、哪個資料夾、程序編號。"""
+    script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    return {
+        "pid": os.getpid(),
+        "script": str(script.resolve()) if script is not None else "",
+        "python": sys.executable,
+        "command": " ".join(sys.argv),
+        "cwd": str(Path.cwd()),
+        "started_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
+    }
+
+
+def tick_files(folder: Path | None, recorded: Path | None = None) -> list[dict[str, str]]:
+    """演練能拿的逐筆檔：富邦即時錄的排前面，再來是期交所盤後檔；各自新到舊。"""
     out = []
-    for path in folder.iterdir():
-        match = TICKS_NAME.match(path.name)
-        if match:
-            out.append({"name": path.name, "day": f"{match[1]}-{match[2]}-{match[3]}"})
-    return sorted(out, key=lambda r: r["day"], reverse=True)
+    for feed, where, pattern in (
+        ("recorded", recorded, RECORDED_NAME),
+        ("taifex", folder, TICKS_NAME),
+    ):
+        if where is None or not where.is_dir():
+            continue
+        for path in where.iterdir():
+            match = pattern.match(path.name)
+            if match:
+                day = f"{match[1]}-{match[2]}-{match[3]}"
+                out.append({"name": path.name, "day": day, "feed": feed})
+    return sorted(out, key=lambda r: (r["feed"] == "recorded", r["day"]), reverse=True)
 
 
 class Admin:
     """後台要用到的東西：設定檔所在的資料夾、逐筆檔的資料夾、背景程式。"""
 
-    def __init__(self, config_dir: Path, ticks_dir: Path | None, jobs: Jobs) -> None:
+    def __init__(
+        self,
+        config_dir: Path,
+        ticks_dir: Path | None,
+        jobs: Jobs,
+        console: Console | None = None,
+        recorded_dir: Path | None = None,
+    ) -> None:
         self.config_dir = config_dir
         self.ticks_dir = ticks_dir
+        self.recorded_dir = recorded_dir
         self.jobs = jobs
+        self.console = console or Console()
+        self.process = process_info()
         self.token = secrets.token_urlsafe(24)
+        self._ended: object | None = None  # 已經報過「結束」的那場演練
+
+    def watch_drill(self) -> None:
+        """演練程式自己結束了，就在終端機報一次（每場只報一次）。"""
+        drill = self.jobs.drill
+        if drill is None or drill is self._ended or drill.running():
+            return
+        self._ended = drill
+        code = drill.procs["drill"].poll()
+        drill.stop()  # 演練程式沒了，中繼程式也不用留著
+        if code == 0:
+            self.console.say(f"演練結束（{drill.request.day}，正常結束）")
+        else:
+            last = (tail(drill.folder / "drill.log", 1) or ["沒有輸出"])[-1]
+            self.console.say(f"演練沒跑完（結束碼 {code}）：{last}", "warn")
 
     def configs(self) -> list[Path]:
         """可以改的設定檔（資料夾裡的 .toml）。"""
@@ -93,6 +166,7 @@ class Admin:
                     "control": False,
                 }
             configs.append(entry)
+        self.watch_drill()
         drill = self.jobs.drill
         return {
             "fields": [
@@ -107,11 +181,13 @@ class Admin:
                 for f in FIELDS
             ],
             "configs": configs,
-            "ticks": tick_files(self.ticks_dir),
+            "ticks": tick_files(self.ticks_dir, self.recorded_dir),
             "dsn_envs": list(DSN_ENVS),
             "env_file": self.jobs.env_file is not None,
             "drill": None if drill is None else drill.state(),
             "now": datetime.now(TAIPEI).isoformat(timespec="seconds"),
+            "console": self.console.lines(),
+            "process": self.process,
         }
 
     def save(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -130,15 +206,17 @@ class Admin:
                 for k, v in changes.items()
             },
         )
+        shown = "、".join(done) if done else "沒有變動"
+        self.console.say(f"存設定 {path.name}：{shown}")
         return {"ok": True, "changed": done}
 
     def start_drill(self, body: dict[str, Any]) -> dict[str, Any]:
         """開一場演練。"""
-        if self.ticks_dir is None:
-            raise JobError("後台啟動時沒有給逐筆檔的資料夾（--ticks-dir）")
         name = str(body.get("ticks", ""))
-        match = TICKS_NAME.match(name)
-        if match is None:
+        folder, feed, match = self.recorded_dir, "recorded", RECORDED_NAME.match(name)
+        if match is None or folder is None:
+            folder, feed, match = self.ticks_dir, "taifex", TICKS_NAME.match(name)
+        if match is None or folder is None:
             raise JobError(f"逐筆檔名不對：{name!r}")
         start = str(body.get("start", "09:00:00"))
         if not re.fullmatch(r"\d{2}:\d{2}:\d{2}", start):
@@ -150,21 +228,37 @@ class Admin:
             raise JobError("分鐘與倍速要是數字") from exc
         req = DrillRequest(
             config=self.config_path(str(body.get("config", ""))),
-            ticks=self.ticks_dir / name,
+            ticks=folder / name,
             day=date(int(match[1]), int(match[2]), int(match[3])),
             start=start,
             minutes=minutes,
             speed=speed,
             dsn_env=None if dsn in (None, "") else str(dsn),
+            feed=feed,
         )
         if validate(req.config.read_text(encoding="utf-8")).control is None:
             raise JobError("這個設定檔沒有 [control]（遠端緊急停止），不能演練")
         job = self.jobs.start_drill(req)
+        self._ended = None
+        relay = f"，遠端叫停經 {req.dsn_env}" if req.dsn_env else "，不接遠端"
+        self.console.say(
+            f"開始演練：{req.config.name}、{SOURCES[feed]} {req.day} {req.start} 起 "
+            f"{minutes:g} 分鐘、{speed:g} 倍速{relay}"
+        )
+        for name, title in (("relay", "中繼程式"), ("drill", "演練程式")):
+            if name in job.commands:
+                pid = getattr(job.procs[name], "pid", None)
+                self.console.say(f"　{title}（程序編號 {pid}）：{' '.join(job.commands[name])}")
+        self.console.say(f"　兩個程式的輸出在 {job.folder}")
         return {"ok": True, "drill": job.state()}
 
     def stop_drill(self) -> dict[str, Any]:
         """停掉演練。"""
-        return {"ok": True, "was_running": self.jobs.stop_drill()}
+        was = self.jobs.stop_drill()
+        if was:
+            self._ended = self.jobs.drill
+        self.console.say("停掉演練" if was else "按了停止，但沒有演練在跑")
+        return {"ok": True, "was_running": was}
 
 
 def make_handler(admin: Admin, port: int) -> type[BaseHTTPRequestHandler]:
@@ -245,6 +339,7 @@ def make_handler(admin: Admin, port: int) -> type[BaseHTTPRequestHandler]:
             try:
                 return self._json(HTTPStatus.OK, route())
             except (SettingsError, JobError) as exc:
+                admin.console.say(f"被擋下（{self.path}）：{exc}", "warn")
                 return self._json(HTTPStatus.BAD_REQUEST, {"detail": str(exc)})
 
     return Handler

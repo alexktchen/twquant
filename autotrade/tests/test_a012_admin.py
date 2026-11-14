@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import shutil
 import socket
+import subprocess
+import sys
 import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -15,8 +18,9 @@ from typing import IO, Any
 
 import pytest
 
-from autotrade.admin import TOKEN_HEADER, Admin, serve, tick_files
-from autotrade.jobs import DrillRequest, JobError, Jobs
+from autotrade.admin import TOKEN_HEADER, Admin, Console, serve, tick_files
+from autotrade.admin_page import PAGE
+from autotrade.jobs import DrillRequest, JobError, Jobs, child_env
 from autotrade.model import TAIPEI
 from autotrade.settings import (
     FIELD_BY_KEY,
@@ -159,6 +163,7 @@ def test_ac1_every_field_round_trips_on_the_shipped_config(tmp_path: Path) -> No
 @dataclass
 class FakeProc:
     code: int | None = None
+    pid: int = 4321
     terminated: bool = False
 
     def poll(self) -> int | None:
@@ -264,12 +269,110 @@ def test_ac2_bad_requests_are_refused(tmp_path: Path) -> None:
     jobs.close()
 
 
+def test_ac2_started_programs_find_the_package_without_pythonpath(tmp_path: Path) -> None:
+    """後台用 tools/run.py 開的時候沒有 PYTHONPATH；開出來的程式還是要找得到 autotrade。"""
+    env = child_env({"PATH": "x", "PYTHONPATH": "old"})
+    first, rest = env["PYTHONPATH"].split(os.pathsep, 1)
+    assert (Path(first) / "autotrade" / "__init__.py").is_file() and rest == "old"
+    assert child_env({})["PYTHONPATH"] == first and env["PYTHONUNBUFFERED"] == "1"
+    clean = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    done = subprocess.run(
+        [sys.executable, "-m", "autotrade", "check-config", str(config_copy(tmp_path))],
+        env=child_env(clean),
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+
+
 def test_ac2_tick_files_are_listed_newest_first(tmp_path: Path) -> None:
     assert tick_files(ticks_dir(tmp_path)) == [
-        {"name": "Daily_2026_11_12.csv", "day": "2026-11-12"},
-        {"name": "Daily_2026_11_11.csv", "day": "2026-11-11"},
+        {"name": "Daily_2026_11_12.csv", "day": "2026-11-12", "feed": "taifex"},
+        {"name": "Daily_2026_11_11.csv", "day": "2026-11-11", "feed": "taifex"},
     ]
     assert tick_files(None) == [] and tick_files(tmp_path / "nope") == []
+
+
+def recorded_dir(tmp_path: Path) -> Path:
+    folder = tmp_path / "recorded"
+    folder.mkdir(exist_ok=True)
+    for name in ("TMF_2026-11-12.csv", "TMF_2026-11-13.csv", "TMF_2026-11-13.csv.tmp"):
+        (folder / name).write_text("x", encoding="utf-8")
+    return folder
+
+
+def test_ac2_recorded_days_come_first(tmp_path: Path) -> None:
+    """使用者 2026-11-14：「不要證交所的」——富邦即時錄的排前面，預設就選到它。"""
+    got = tick_files(ticks_dir(tmp_path), recorded_dir(tmp_path))
+    assert [(t["day"], t["feed"]) for t in got] == [
+        ("2026-11-13", "recorded"),
+        ("2026-11-12", "recorded"),
+        ("2026-11-12", "taifex"),
+        ("2026-11-11", "taifex"),
+    ]
+    (tmp_path / "data").mkdir()
+    config_copy(tmp_path)
+    spawn = FakeSpawn()
+    admin = Admin(
+        tmp_path / "configs",
+        ticks_dir(tmp_path),
+        Jobs(tmp_path / "data", spawn=spawn, python="py"),
+        Console(echo=False),
+        recorded_dir(tmp_path),
+    )
+    body = {"config": "tmf_sim.toml", "ticks": "TMF_2026-11-13.csv", "dsn_env": ""}
+    state = admin.start_drill(body)["drill"]
+    assert state["feed"] == "recorded" and state["day"] == "2026-11-13"
+    args = spawn.calls[-1]
+    assert args[args.index("--feed") + 1] == "recorded"
+    assert args[args.index("--ticks") + 1] == str(tmp_path / "recorded" / "TMF_2026-11-13.csv")
+    assert "富邦即時錄的 2026-11-13" in admin.console.lines()[0]["text"]
+    admin.stop_drill()
+    state = admin.start_drill({**body, "ticks": "Daily_2026_11_12.csv"})["drill"]
+    assert (
+        state["feed"] == "taifex"
+        and spawn.calls[-1][spawn.calls[-1].index("--feed") + 1] == "taifex"
+    )
+    with pytest.raises(JobError, match="逐筆檔名不對"):
+        admin.start_drill({**body, "ticks": "../TMF_2026-11-13.csv"})
+    admin.jobs.close()
+
+
+def test_ac2_a_drill_that_dies_says_why_and_takes_the_relay_down(tmp_path: Path) -> None:
+    """2026-11-14 使用者：「演練一直卡住」——演練程式一開就結束，畫面上要講原因，中繼程式不留著。"""
+    (tmp_path / "data").mkdir()
+    config_copy(tmp_path)
+    spawn = FakeSpawn()
+    admin = Admin(
+        tmp_path / "configs",
+        ticks_dir(tmp_path),
+        Jobs(tmp_path / "data", spawn=spawn, python="py"),
+        Console(echo=False),
+    )
+    body = {"config": "tmf_sim.toml", "ticks": "Daily_2026_11_12.csv"}
+    admin.start_drill({**body, "dsn_env": "TWQUANT_PG_DSN"})
+    relay, drill = spawn.procs
+    job = admin.jobs.drill
+    assert job is not None
+    (job.folder / "drill.log").write_text(
+        "Traceback…\nFeedError: 檔案裡沒有這一天的逐筆\n", encoding="utf-8"
+    )
+    drill.code = 1
+    state = admin.state()["drill"]
+    assert state["running"] is False and state["stopped"] is False and state["procs"]["drill"] == 1
+    assert relay.terminated  # 中繼程式跟著收掉
+    last = admin.console.lines()[-1]
+    assert (
+        last["level"] == "warn"
+        and last["text"] == "演練沒跑完（結束碼 1）：FeedError: 檔案裡沒有這一天的逐筆"
+    )
+    admin.state()
+    assert admin.console.lines()[-1] == last  # 只報一次
+    admin.start_drill({**body, "dsn_env": ""})
+    admin.stop_drill()
+    assert admin.state()["drill"]["stopped"] is True  # 自己按停的不算「沒跑完」
+    admin.jobs.close()
 
 
 # ---- AC3 只有本機、而且只有這個後台自己的頁面能改東西
@@ -423,3 +526,95 @@ def test_ac3_drill_start_and_stop_through_the_page(running: tuple[Admin, int]) -
     ):
         status, result, _ = call(port, "POST", "/api/drill/start", {**body, **bad}, h)
         assert status == 400 and why in result["detail"]
+
+
+# ---- AC4 終端機分頁：後台在終端機印的，網頁上也看得到（使用者 2026-11-14：「可以在後台看到我終端機在跑的樣子」）
+
+
+def test_ac4_console_prints_and_keeps_the_latest_lines(capsys: pytest.CaptureFixture[str]) -> None:
+    console = Console(lines=3)
+    for i in range(5):
+        console.say(f"第 {i} 行", "warn" if i == 4 else "info")
+    kept = console.lines()
+    assert [line["text"] for line in kept] == ["第 2 行", "第 3 行", "第 4 行"]
+    assert kept[-1]["level"] == "warn" and len(kept[-1]["t"]) == len("09:00:00")
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 5 and out[0][8:] == " 第 0 行" and out[0][2] == ":"
+    quiet = Console(echo=False)
+    quiet.say("不印")
+    assert capsys.readouterr().out == "" and quiet.lines()[0]["text"] == "不印"
+
+
+def test_ac4_page_actions_show_up_in_the_console(
+    running: tuple[Admin, int], capsys: pytest.CaptureFixture[str]
+) -> None:
+    admin, port = running
+    h = write_headers(admin)
+    save = {"config": "tmf_sim.toml", "changes": {"risk.max_entries_per_day": "4"}}
+    assert call(port, "POST", "/api/settings", save, h)[0] == 200
+    bad = {"config": "tmf_sim.toml", "changes": {"risk.force_flat_time": "12:00:00"}}
+    assert call(port, "POST", "/api/settings", bad, h)[0] == 400
+    drill = {
+        "config": "tmf_sim.toml",
+        "ticks": "Daily_2026_11_12.csv",
+        "start": "09:00:00",
+        "minutes": "5",
+        "speed": "2",
+        "dsn_env": "TWQUANT_SUPABASE_DSN",
+    }
+    assert call(port, "POST", "/api/drill/start", drill, h)[0] == 200
+    spawn = admin.jobs.spawn
+    assert isinstance(spawn, FakeSpawn)
+    spawn.procs[-1].code = 0  # 演練程式自己跑完
+    for _ in range(2):  # 結束只報一次
+        state = call(port, "GET", "/api/state")[1]
+    assert call(port, "POST", "/api/drill/stop", {}, h)[0] == 200
+    texts = [line["text"] for line in call(port, "GET", "/api/state")[1]["console"]]
+    assert texts[0] == "存設定 tmf_sim.toml：一天最多進場幾次：6 → 4"
+    assert texts[1].startswith("被擋下（/api/settings）：") and "強制平倉時間" in texts[1]
+    assert texts[2] == (
+        "開始演練：tmf_sim.toml、期交所盤後檔 2026-11-12 09:00:00 起 5 分鐘、2 倍速，"
+        "遠端叫停經 TWQUANT_SUPABASE_DSN"
+    )
+    assert texts[3].startswith("\u3000中繼程式（程序編號 4321）：py -m autotrade relay --config ")
+    assert "--dsn-env TWQUANT_SUPABASE_DSN" in texts[3]
+    assert texts[4].startswith("\u3000演練程式（程序編號 4321）：py -m autotrade drill --config ")
+    assert texts[5].startswith("\u3000兩個程式的輸出在 ") and "drill_" in texts[5]
+    assert texts[6] == "演練結束（2026-11-12，正常結束）"
+    assert texts[7] == "按了停止，但沒有演練在跑"
+    assert len(texts) == 8 and state["console"][1]["level"] == "warn"
+    assert state["drill"]["pids"] == {"relay": 4321, "drill": 4321}
+    assert state["drill"]["commands"]["drill"].startswith("py -m autotrade drill ")
+    assert "DSN=" not in printed_all(state) and "postgres" not in printed_all(state)
+    printed = capsys.readouterr().out
+    assert all(text in printed for text in texts)
+
+
+def test_ac4_stopping_a_running_drill_is_logged_once(running: tuple[Admin, int]) -> None:
+    admin, port = running
+    h = write_headers(admin)
+    drill = {"config": "tmf_sim.toml", "ticks": "Daily_2026_11_12.csv", "dsn_env": ""}
+    assert call(port, "POST", "/api/drill/start", drill, h)[0] == 200
+    assert call(port, "POST", "/api/drill/stop", {}, h)[1]["was_running"] is True
+    call(port, "GET", "/api/state")  # 被停掉的不再報「演練結束」
+    texts = [line["text"] for line in admin.console.lines()]
+    assert texts[0].endswith("，不接遠端") and texts[-1] == "停掉演練"
+    assert not any("中繼程式" in text for text in texts)  # 沒開中繼程式就不列
+
+
+def printed_all(state: dict[str, Any]) -> str:
+    return json.dumps(state, ensure_ascii=False)
+
+
+def test_ac4_state_says_where_the_admin_runs(running: tuple[Admin, int]) -> None:
+    _, port = running
+    info = call(port, "GET", "/api/state")[1]["process"]
+    assert info["pid"] == os.getpid() and info["python"] == sys.executable
+    assert info["cwd"] == str(Path.cwd()) and info["command"] == " ".join(sys.argv)
+    assert Path(info["script"]).is_absolute() and info["started_at"].endswith("+08:00")
+
+
+def test_ac4_page_has_the_console_tab() -> None:
+    assert 'id="tab-console"' in PAGE and 'id="view-console"' in PAGE and "renderConsole" in PAGE
+    assert "後台跑在哪裡" in PAGE and "後台開出來的程式" in PAGE
+    assert "上一場演練沒跑完" in PAGE and "富邦即時錄的" in PAGE
