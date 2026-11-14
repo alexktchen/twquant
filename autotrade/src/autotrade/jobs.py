@@ -268,6 +268,10 @@ class Jobs:
     workdir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
     # 指令中繼聽門鈴（A-015）時，哪個資料庫要改連哪個埠（環境變數名 → 埠）；沒列的用連線字串自己的埠
     bell_ports: dict[str, int] = field(default_factory=dict)
+    # 後台自己的中繼程式（A-017）：聽網站來的「啟動／結束交易程式」
+    remote_proc: Proc | None = None
+    remote_log: IO[str] | None = None
+    remote_command: list[str] = field(default_factory=list)
     drill: DrillJob | None = None
     run: RunJob | None = None
 
@@ -320,6 +324,32 @@ class Jobs:
         """指令中繼一律開門鈴（A-015）；這個資料庫聽的埠不一樣就一起講。"""
         port = self.bell_ports.get(dsn_env)
         return ["--bell"] if port is None else ["--bell", "--bell-port", str(port)]
+
+    def start_remote(self, config: Path, dsn_env: str, folder: Path) -> list[str]:
+        """開後台自己的中繼程式（A-017）：把網站來的啟動／結束寫成 folder 裡的指令檔。只開一支。"""
+        if self.remote_proc is not None and self.remote_proc.poll() is None:
+            raise JobError("遙控中繼已經在跑")
+        if dsn_env not in DSN_ENVS:
+            raise JobError(f"遙控中繼的資料庫只能選 {DSN_ENVS}：{dsn_env!r}")
+        folder.mkdir(parents=True, exist_ok=True)
+        command = [self.python, "-m", "autotrade", "relay", "--config", str(config)]
+        command += ["--dir", str(folder), "--consumer", "admin", "--dsn-env", dsn_env]
+        command += self._bell(dsn_env)
+        if self.env_file is not None:
+            command += ["--env-file", str(self.env_file)]
+        self.remote_log = (folder / "relay.log").open("a", encoding="utf-8")
+        self.remote_proc = self.spawn(command, self.remote_log, self.workdir)
+        self.remote_command = command
+        return command
+
+    def stop_remote(self) -> None:
+        """收掉後台自己的中繼程式。"""
+        if self.remote_proc is not None:
+            _end([self.remote_proc], 5.0)
+            self.remote_proc = None
+        if self.remote_log is not None:
+            self.remote_log.close()
+            self.remote_log = None
 
     def stop_drill(self) -> bool:
         """停掉現在的演練；沒有在跑的回 False。"""
@@ -418,3 +448,4 @@ class Jobs:
         """後台關掉時把演練與交易程式一起停掉。"""
         self.stop_drill()
         self.stop_run()
+        self.stop_remote()

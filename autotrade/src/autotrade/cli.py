@@ -503,8 +503,12 @@ def run_admin(
     recorded_dir: Path | None = None,
     ms_repo: Path | None = None,
     bell_ports: dict[str, int] | None = None,
+    remote: tuple[str, str] | None = None,
 ) -> int:
-    """開本機後台（只聽 127.0.0.1），按 Ctrl+C 結束；結束時把還在跑的演練一起停掉。"""
+    """開本機後台（只聽 127.0.0.1），按 Ctrl+C 結束；結束時把還在跑的演練一起停掉。
+
+    remote（A-017）：（放連線字串的環境變數名、設定檔名）＝讓網站可以啟動／結束交易程式，而且只能啟動那一份設定。
+    """
     from autotrade.admin import Admin, serve
     from autotrade.jobs import Jobs
 
@@ -532,6 +536,8 @@ def run_admin(
     admin.console.say(f"用的 Python：{info['python']}")
     admin.console.say(f"在哪個資料夾執行：{info['cwd']}")
     admin.console.say(f"設定檔資料夾：{config_dir.resolve()}；演練資料夾：{data_dir.resolve()}")
+    if remote is not None:
+        admin.enable_remote(remote[1], remote[0])
     if open_browser:
         import webbrowser
 
@@ -546,6 +552,9 @@ def run_admin(
         server.server_close()
         admin.jobs.close()
     return 0
+
+
+REMOTE_DSN_ENVS = ("TWQUANT_PG_DSN", "TWQUANT_SUPABASE_DSN")  # 同 jobs.DSN_ENVS（本機、雲端）
 
 
 def bell_port_arg(text: str) -> tuple[str, int]:
@@ -682,6 +691,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="環境變數名=埠",
         help="指令中繼聽門鈴時，這個資料庫改連哪個埠（例：TWQUANT_SUPABASE_DSN=5432）；可以給好幾個",
     )
+    admin.add_argument(
+        "--remote-dsn-env",
+        choices=REMOTE_DSN_ENVS,
+        help="讓網站可以啟動／結束交易程式：後台的遙控中繼連哪個資料庫（要跟 --remote-config 一起給）",
+    )
+    admin.add_argument(
+        "--remote-config", help="網站只能啟動這一份設定（--config-dir 裡的檔名，例：tmf_sim.toml）"
+    )
     admin.add_argument("--port", type=int, default=8765)
     admin.add_argument("--no-open", action="store_true", help="不要自動打開瀏覽器")
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
@@ -706,6 +723,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"設定沒問題：{cfg.mode}、{cfg.contract.symbol}、部位 {cfg.risk.min_position}～{cfg.risk.max_position} 口"
         )
         return 0
+    if args.command == "admin" and (args.remote_dsn_env is None) != (args.remote_config is None):
+        parser.error("--remote-dsn-env 與 --remote-config 要一起給")
     if args.command == "admin":
         return run_admin(
             args.config_dir,
@@ -717,6 +736,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.recorded_dir,
             args.ms_repo,
             bell_ports=dict(args.bell_port),
+            remote=None
+            if args.remote_dsn_env is None
+            else (args.remote_dsn_env, args.remote_config),
         )
     if args.command == "run":
         return run_trade(

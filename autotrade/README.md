@@ -23,7 +23,7 @@ python -m ruff check . && python -m ruff format --check . && python -m mypy && p
 在交易電腦上用瀏覽器操作，只有這台電腦連得到。在 `autotrade` 資料夾執行：
 
 ```bash
-python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recorded-dir D:/project/twquant/data/autotrade/recorded --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --ms-repo C:/t/Momentum_Scalping --env-file D:/project/twquant/.env --bell-port TWQUANT_SUPABASE_DSN=5432
+python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recorded-dir D:/project/twquant/data/autotrade/recorded --ticks-dir D:/project/twquant/data/research_ms/taifex_ticks/TMF --ms-repo C:/t/Momentum_Scalping --env-file D:/project/twquant/.env --bell-port TWQUANT_SUPABASE_DSN=5432 --remote-dsn-env TWQUANT_SUPABASE_DSN --remote-config tmf_sim.toml
 ```
 
 會自動打開 `http://127.0.0.1:8765/`。`D:/t/autotrade` 換成任何一個放演練紀錄的資料夾（要先建好）。
@@ -38,6 +38,13 @@ python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recor
 - **門鈴**：網站一有新的停止，資料庫會馬上通知指令中繼，不必等它每 2 秒問一次（輪詢照舊留著當備援）。
   指令中繼的輸出裡看得到「門鈴接上了」；寫「門鈴聽不到」時遠端停止照樣有效，只是回到最慢約 4 秒。
   雲端資料庫要聽的埠跟平常不一樣，所以啟動後台時要帶 `--bell-port TWQUANT_SUPABASE_DSN=5432`。
+- **網站上的遙控按鈕**（台指期 → 程式交易，緊急停止下面那一排；每一顆都要按兩次）：
+  - **平倉**：把部位平掉，自動交易不停。**暫停／恢復自動交易**：暫停＝不再進新單，手上的部位照原規則出場。
+    這兩種由交易程式執行，交易程式在跑才按得下去。
+  - **啟動／結束交易程式**：由這個後台執行，所以啟動後台時要帶 `--remote-dsn-env TWQUANT_SUPABASE_DSN --remote-config tmf_sim.toml`
+    （網站只能啟動這裡指定的那一份設定）。後台或電腦沒開的時候按鈕不能按。
+  - 按下去 30 秒內沒有程式接手就作廢。**解除緊急停止、改設定仍然只能在這台電腦上做**；
+    今天按過緊急停止的話，從手機啟動的程式一樣是停手的。
 
 「演練」分頁：選哪一天的價格（富邦即時錄的排前面）、從幾點開始、幾倍速、中繼程式連雲端還是本機，按「開始演練」；到網站按「緊急停止」試試看。
 演練沒跑起來會用紅色寫原因。
