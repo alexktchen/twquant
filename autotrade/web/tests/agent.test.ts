@@ -11,6 +11,7 @@ import {
   ACTION_NAME,
   armedOf,
   armedText,
+  linkLight,
   remoteButtons,
   requestLine,
   type AutoStatus,
@@ -19,6 +20,7 @@ import {
   type RemoteRequest,
 } from '../src/autotrade.ts'
 
+const PAGE_DIR = ''
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8')
 
 // autotrade/src/autotrade/bus.py 的 MESSAGES_DDL（autotrade/tests/test_a019_agent.py 守著兩邊一字不差）
@@ -137,6 +139,27 @@ test('A-019 AC8 待命還是運作：只有今天、還在跑的那一份狀態�
   assert.match(armedText(false)!, /^待命：不會進新單/)
   assert.match(armedText(true)!, /^運作中/)
   assert.equal(armedText(null), null)
+})
+
+test('連線燈：心跳夠新是綠燈並寫幾秒前；沒有連線寫是哪一段；畫面太舊不猜', () => {
+  const on = linkLight('sim', { sim: beat() }, true, 2)
+  assert.deepEqual(on, { tone: 'on', label: '電腦上的模擬交易程式連線中', detail: '心跳 3 秒前' })
+  const none = linkLight('sim', {}, true, 0)
+  assert.equal(none.tone, 'off')
+  assert.match(none.label, /沒有連線/)
+  assert.match(none.detail, /今天沒有收到過它的心跳/)
+  const gone = linkLight('sim', { sim: beat({ relay_age_s: 600, engine_age_s: 600 }) }, true, 0)
+  assert.equal(gone.tone, 'off')
+  assert.match(gone.detail, /最後一次心跳是 10 分鐘前/)
+  const half = linkLight('sim', { sim: beat({ engine_age_s: 90 }) }, true, 0)
+  assert.equal(half.tone, 'off')
+  assert.match(half.detail, /收發程式連著，但交易的那一半已經/)
+  assert.match(linkLight('sim', { sim: beat({ engine_age_s: null }) }, true, 0).detail, /還沒回應過/)
+  assert.equal(linkLight('live', { sim: beat() }, true, 0).tone, 'off') // 只看這個分頁的那一支
+  assert.equal(linkLight('sim', { sim: beat() }, false, 0).tone, 'unknown') // 畫面太舊：黃燈，不說有也不說沒有
+  const view = read('../src/cloud/AutotradeView.tsx'.replace('cloud/', PAGE_DIR))
+  assert.match(view, /linkLight\(mode, data\?\.listeners \?\? \{\}, known, elapsed\)/)
+  assert.match(view, /className=\{`cq-at-link \$\{light\.tone\}`\} role="status"/)
 })
 
 test('A-019 AC6 進度：啟動做完是「完成」；停止要等確認沒有部位；沒人接手 30 秒作廢', () => {

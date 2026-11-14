@@ -187,6 +187,26 @@ export function listening(beat: ListenerBeat | undefined): boolean {
   return beat.relay_age_s <= limit && beat.engine_age_s <= limit
 }
 
+export type LinkLight = { tone: 'on' | 'off' | 'unknown'; label: string; detail: string }
+
+/**
+ * 連線燈（2026-11-14 使用者：「Agent有heartbeat 要顯示在畫面有顆連線的綠燈」）：電腦上那支交易 agent 現在連不連得到。
+ * 綠＝收發程式與交易程式的心跳都夠新；灰＝沒有連線（寫是哪一段沒有）；黃＝畫面上的資料太舊，不猜。
+ * elapsed＝拿到資料之後又過了幾秒（心跳的「幾秒前」要加上它）。
+ */
+export function linkLight(mode: AutoMode, beats: AutoEnvelope['listeners'], known: boolean, elapsed: number): LinkLight {
+  const who = `電腦上的${MODE_NAME[mode]}交易程式`
+  if (!known) return { tone: 'unknown', label: '連線狀態不明', detail: '畫面還沒更新到' }
+  const beat = beats[mode]
+  if (!beat) return { tone: 'off', label: `${who}沒有連線`, detail: '今天沒有收到過它的心跳' }
+  const relay = beat.relay_age_s + elapsed
+  if (listening(beat)) return { tone: 'on', label: `${who}連線中`, detail: `心跳 ${waitText((beat.engine_age_s ?? 0) + elapsed)}前` }
+  const limit = Math.max(LISTEN_MIN_S, beat.poll_s * LISTEN_POLLS)
+  if (beat.relay_age_s > limit) return { tone: 'off', label: `${who}沒有連線`, detail: `最後一次心跳是 ${waitText(relay)}前` }
+  const engine = beat.engine_age_s === null ? '交易的那一半還沒回應過' : `交易的那一半已經 ${waitText(beat.engine_age_s + elapsed)}沒有回應`
+  return { tone: 'off', label: `${who}沒有連線`, detail: `收發程式連著，但${engine}` }
+}
+
 /** 畫面上的資料超過這麼多秒沒更新（網路斷了、分頁剛回到前景），就不拿它判斷程式在不在聽。 */
 export const DATA_STALE_S = 45
 

@@ -31,6 +31,7 @@ import {
   refetchDue,
   armedOf,
   armedText,
+  linkLight,
   remoteButtons,
   requestLines,
   requestsWaiting,
@@ -354,6 +355,16 @@ export function AutotradeView({ refresh }: { refresh: number }) {
           </button>
         ))}
       </div>
+      {(() => {
+        const light = linkLight(mode, data?.listeners ?? {}, known, elapsed)
+        return (
+          <p className={`cq-at-link ${light.tone}`} role="status">
+            <i aria-hidden="true" />
+            <b>{light.label}</b>
+            <span>{light.detail}</span>
+          </p>
+        )
+      })()}
       <StopBar lines={lines} pressed={(data?.stop ?? null) !== null} onSent={sent} reread={() => fetchAutotrade(mode, day ?? undefined)} />
       <RemoteBar key={mode} mode={mode} buttons={buttons} lines={known ? requestLines(requests, mode, elapsed) : []} onSent={sentCommand} state={armedText(armed)} />
       {err && <p className="cq-err">{err}</p>}
