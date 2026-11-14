@@ -99,11 +99,12 @@ test('A-019 AC8 兩張表的指令併成一份清單：新的在前、留最近�
   assert.equal(JSON.parse(mergeRequests(many, null)).length, REQUESTS_SHOWN)
 })
 
-test('A-019 AC8 按鈕：待命給「啟動」、運作中給「停止」；要那支交易程式在聽；舊的三顆照舊', () => {
+test('A-019 AC8 按鈕：待命給「啟動」、運作中給「停止」；要那支交易程式在聽；頁面上只有三顆', () => {
   const old = remoteButtons('sim', { sim: beat() }, admin(), false, true)
   assert.deepEqual(old.map((b) => b.action), ['flatten', 'pause', 'quit']) // 沒給待命／運作：跟以前一樣三顆
   const standby = remoteButtons('sim', { sim: beat() }, admin(), false, true, false)
-  assert.deepEqual(standby.map((b) => b.action), ['arm', 'flatten', 'pause', 'quit'])
+  assert.deepEqual(standby.map((b) => b.action), ['arm', 'flatten', 'pause']) // 舊的「啟動／結束交易程式」不放了
+  assert.ok(standby.every((b) => !/後台/.test(b.why)))
   assert.deepEqual(standby[0], { action: 'arm', label: '啟動', enabled: true, why: '' })
   const running = remoteButtons('sim', { sim: beat() }, admin(), false, true, true)
   assert.deepEqual(running[0], { action: 'standby', label: '停止', enabled: true, why: '' })
@@ -147,7 +148,7 @@ test('A-019 AC6 進度：啟動做完是「完成」；停止要等確認沒有�
   assert.equal(requestLine(req({ age_s: 40 }), 0).label, '啟動：沒有送到，已作廢')
 })
 
-test('A-019 AC8 頁面：按鈕上方寫待命或運作；四顆按鈕排成兩排', () => {
+test('A-019 AC8 頁面：按鈕上方寫待命或運作', () => {
   const bar = read('../src/RemoteBar.tsx')
   assert.match(bar, /\{state && <p className=\{`cq-at-remote-state/)
   assert.match(bar, /arm: Rocket, standby: Square/)

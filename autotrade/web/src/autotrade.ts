@@ -310,7 +310,8 @@ export function remoteButtons(
   ]
   if (armed === undefined) return old
   const go: RemoteAction = armed === true ? 'standby' : 'arm'
-  return [{ action: go, label: ACTION_NAME[go], enabled: running, why: running ? '' : noProgram }, ...old]
+  // 2026-11-14 使用者：「啟動交易程式又是什麼？」——agent 常駐之後程式不用再開開關關，頁面上不再放舊的那一顆（D-231：新做法驗過就拿掉）
+  return [{ action: go, label: ACTION_NAME[go], enabled: running, why: running ? '' : noProgram }, old[0], old[1]]
 }
 
 export type RequestLine = { id: string; tone: 'wait' | 'done' | 'bad'; label: string; detail: string }
