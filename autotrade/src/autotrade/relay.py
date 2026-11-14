@@ -21,6 +21,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from autotrade.bell import CHANNEL, Bell
 from autotrade.control import (
     HEARTBEAT_NAME,
     INBOX_NAME,
@@ -54,6 +55,17 @@ COMMANDS_DDL: tuple[str, ...] = (
     "ALTER TABLE web.autotrade_command_acks ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE web.autotrade_listeners ENABLE ROW LEVEL SECURITY",
     "CREATE INDEX IF NOT EXISTS autotrade_commands_day ON web.autotrade_commands (day, id)",
+)
+
+# 門鈴（A-015／D-228）：指令表每新增一列，資料庫自己發一則通知，中繼程式不必等下一次輪詢。
+# 由資料庫發（觸發器）而不是網站發：網站走的 Cloudflare Hyperdrive 不支援 NOTIFY。通知只帶表名與編號，不當指令用。
+# 不放進 COMMANDS_DDL：那八句跟網站一字不差；這兩句只有中繼程式帶 --bell 啟動時才建，可以重複執行。
+BELL_DDL: tuple[str, ...] = (
+    "CREATE OR REPLACE FUNCTION web.autotrade_ring() RETURNS trigger LANGUAGE plpgsql "
+    f"SET search_path = '' AS $$BEGIN PERFORM pg_notify('{CHANNEL}', TG_TABLE_NAME || ':' || NEW.id::text); "
+    "RETURN NULL; END$$",
+    "CREATE OR REPLACE TRIGGER autotrade_commands_ring AFTER INSERT ON web.autotrade_commands "
+    "FOR EACH ROW EXECUTE FUNCTION web.autotrade_ring()",
 )
 
 # 一次最多拿幾筆（一天的上限是 20 筆，這只是保險）
@@ -145,6 +157,11 @@ class PgRelayDb:
     def ensure(self) -> None:
         """確保三張表都在。只在啟動時做一次，不在盤中重連時做。"""
         for statement in COMMANDS_DDL:
+            self._run(statement, ())
+
+    def ensure_bell(self) -> None:
+        """確保門鈴的觸發器在（A-015）。只有開門鈴時才做，跟建表一樣只做一次。"""
+        for statement in BELL_DDL:
             self._run(statement, ())
 
     def pending(self, today: date, consumer: str) -> list[Command]:
@@ -336,9 +353,20 @@ class Relay:
         return True
 
 
-def run(relay: Relay, *, once: bool = False, log: Callable[[str], None] = print) -> None:
-    """一直跑到被中斷（Ctrl+C）。只在「好 ↔ 壞」改變、或有東西送出去時印一行，不洗版。"""
+def run(
+    relay: Relay,
+    *,
+    once: bool = False,
+    log: Callable[[str], None] = print,
+    bell: Bell | None = None,
+    sleep: Callable[[float], None] = time_module.sleep,
+) -> None:
+    """一直跑到被中斷（Ctrl+C）。只在「好 ↔ 壞」改變、或有東西送出去時印一行，不洗版。
+
+    bell（A-015）：有門鈴時，兩輪之間不是睡覺而是等門鈴——有人按就馬上跑下一輪，沒人按也照樣每 poll_s 一輪。
+    """
     last_ok: bool | None = None
+    bell_ok: bool | None = None
     while True:
         now = datetime.now(TAIPEI)
         report = relay.step(now)
@@ -351,4 +379,19 @@ def run(relay: Relay, *, once: bool = False, log: Callable[[str], None] = print)
         last_ok = report.ok
         if once:
             return
-        time_module.sleep(relay.poll_s)
+        if bell is None:
+            sleep(relay.poll_s)
+            continue
+        rung = bell.wait(relay.poll_s)
+        now = datetime.now(TAIPEI)
+        heard = bell.state
+        if heard.ok is not None and heard.ok != bell_ok:
+            bell_ok = heard.ok
+            log(
+                f"{now:%H:%M:%S} {relay.consumer} 門鈴接上了：資料庫一有新的指令會馬上知道"
+                if heard.ok
+                else f"{now:%H:%M:%S} {relay.consumer} 門鈴聽不到：{heard.detail}。"
+                f"照舊每 {relay.poll_s:g} 秒問一次，不影響遠端停止"
+            )
+        if rung:
+            log(f"{now:%H:%M:%S} {relay.consumer} 門鈴響了：資料庫有新的指令，馬上去拿")

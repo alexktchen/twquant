@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -63,6 +64,8 @@ class ControlLoop:
     engine: Engine
     source: ControlSource
     poll_s: float
+    # 「現在就該讀」的檢查（A-015）：回 True 就不等 poll_s。只能看本機的東西、要很快回來（例：FileControl.changed）
+    urgent: Callable[[], bool] | None = None
     _next: datetime | None = None
     _ok: bool | None = None
     _checked_at: datetime | None = None
@@ -79,7 +82,8 @@ class ControlLoop:
     def step(self, now: datetime) -> None:
         """到了該讀的時間就讀一次指令、交給引擎、記下結果。讀不到不影響交易，只記事件。"""
         now = require_taipei(now, "ControlLoop.step 的 now")
-        if self._next is not None and now < self._next:
+        waiting = self._next is not None and now < self._next
+        if waiting and (self.urgent is None or not self.urgent()):
             return
         commands: list[Command] = []
         try:
@@ -186,6 +190,22 @@ class FileControl:
 
     folder: Path
     stale_s: float
+    _seen: tuple[int, int] | None = None  # 上次讀的時候指令檔是哪一個（檔案編號、修改時間）
+
+    def _stamp(self) -> tuple[int, int] | None:
+        try:
+            info = (self.folder / INBOX_NAME).stat()
+        except OSError:
+            return None
+        return info.st_ino, info.st_mtime_ns
+
+    def changed(self) -> bool:
+        """指令檔在上次讀過之後換新了沒（A-015）。只看檔案本身、不讀內容；還沒有檔案算沒有。
+
+        中繼程式每一輪都會換一份新的；被門鈴叫醒時馬上換。交易程式看到換新就馬上讀，不必等自己的 poll_s。
+        """
+        stamp = self._stamp()
+        return stamp is not None and stamp != self._seen
 
     def _read_inbox(self) -> str:
         path = self.folder / INBOX_NAME
@@ -208,6 +228,8 @@ class FileControl:
             (self.folder / HEARTBEAT_NAME).write_text(now.isoformat(), encoding="utf-8")
         except OSError as exc:
             raise ControlError(f"寫不了 {HEARTBEAT_NAME}：{exc}") from exc
+        # 先記下是哪一份再讀：讀的當下又被換掉，下一圈會再讀一次，不會漏
+        self._seen = self._stamp()
         text = self._read_inbox()
         try:
             data = json.loads(text)

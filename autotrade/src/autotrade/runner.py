@@ -228,7 +228,8 @@ class Runner:
         if self.control:
             control = self.cfg.control
             assert control is not None  # _check 保證有
-            loop = ControlLoop(engine, FileControl(self.folder, control.stale_s), control.poll_s)
+            inbox = FileControl(self.folder, control.stale_s)
+            loop = ControlLoop(engine, inbox, control.poll_s, urgent=inbox.changed)
         self.say(
             f"模擬交易程式開始：{self.cfg.contract.symbol}、策略 {self.strategy_name}、{day}"
             f"（{self.cfg.session.start:%H:%M}～{self.cfg.session.end:%H:%M}）。"

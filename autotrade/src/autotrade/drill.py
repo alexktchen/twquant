@@ -128,7 +128,8 @@ class Drill:
             self.cfg, HoldOne(self.cfg.contract.symbol), SimBroker(self.cfg.sim), sink=log.write
         )
         shown = 0
-        loop = ControlLoop(engine, FileControl(self.folder, control.stale_s), control.poll_s)
+        inbox = FileControl(self.folder, control.stale_s)
+        loop = ControlLoop(engine, inbox, control.poll_s, urgent=inbox.changed)
         start = self.clock()
         end = start + timedelta(seconds=seconds)
         next_status = start
