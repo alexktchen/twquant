@@ -30,7 +30,7 @@ from autotrade.bus import (
 from autotrade.cli import main
 from autotrade.config import AgentConfig, ConfigError, parse_config
 from autotrade.control import ControlError, ControlLoop, FileControl, outbox_name
-from autotrade.engine import Engine
+from autotrade.engine import Engine, Event
 from autotrade.export import snapshot
 from autotrade.model import (
     ACTION_ARM,
@@ -47,6 +47,7 @@ from autotrade.model import (
     CommandResult,
     Side,
 )
+from autotrade.notify import Context, Seen, compose
 from autotrade.relay import BELL_DDL, PgRelayDb, Relay
 from autotrade.risk import HALT_KILL
 from autotrade.runner import QUIT_NAME, earlier_actions
@@ -264,6 +265,36 @@ def test_ac8_snapshot_tells_the_website_standby_from_running() -> None:
     assert live["armed"] is True
     engine.disarm()
     assert snapshot(engine, at(3), source="live", status="live", strategy="x")["armed"] is False
+
+
+def test_ac6_phone_notifications_name_the_right_button() -> None:
+    """2026-11-14 使用者按「開始自動交易」，手機卻收到「收到遠端緊急停止…程式已經停手並開始平倉」。"""
+    ctx = Context(where="【模擬】微台", risk=cfg().risk)
+    seen = Seen(0, 0.0, 0.0, False, 0, 0)
+
+    def said(action: str | None, **more: object) -> tuple[str, str]:
+        data = {"applied": True, **more} | ({} if action is None else {"action": action})
+        message = compose(Event(at(1), "control", "x", data), seen, ctx)
+        return message.headline, " ".join(message.lines)
+
+    late = said("arm", refused=True)
+    assert late[0] == "開始自動交易：沒有執行（已收盤）" and "緊急停止" not in "".join(late)
+    assert "停手並開始平倉" not in late[1]
+    started = said("arm", refused=False)
+    assert started[0] == "自動交易已開始（遠端）" and "有訊號就會進場" in started[1]
+    stopped = said("standby")
+    assert stopped[0] == "自動交易已停止，回到待命（遠端）" and "緊急停止" not in "".join(stopped)
+    # 緊急停止的說法只給緊急停止（舊日誌沒有 action 欄，那時只有停止）
+    assert said("stop")[0] == "收到遠端緊急停止" and said(None)[0] == "收到遠端緊急停止"
+    unknown = said("something_new")
+    assert unknown[0] == "收到遠端指令" and "緊急停止" not in "".join(unknown)
+    # 引擎真的會把「沒有執行」帶在事件上
+    engine, _, _ = rig({})
+    engine.end_day()
+    engine.on_control([cmd(40, 1, ACTION_ARM)], at(2))
+    event = [e for e in engine.events if e.kind == "control"][-1]
+    assert event.data["refused"] is True and event.data["action"] == ACTION_ARM
+    assert compose(event, seen, ctx).headline == "開始自動交易：沒有執行（已收盤）"
 
 
 # ---- AC4 每天的起點

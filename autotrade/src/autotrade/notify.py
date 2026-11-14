@@ -582,6 +582,29 @@ def _control(event: Event, seen: Seen, ctx: Context) -> Draft:
             "有人在網站上按了恢復自動交易。程式可以再進場；如果程式是停手狀態，恢復不會解除停手。"
         ]
         return Level.WARN, "control", False, "自動交易已恢復（遠端）", lines
+    if action == "arm":
+        if event.data.get("refused"):
+            lines = [
+                "有人在網站上按了開始自動交易，但今天已經收盤，沒有執行。",
+                "明天開盤前程式會回到待命，到時候再按。",
+            ]
+            return Level.INFO, "control", False, "開始自動交易：沒有執行（已收盤）", lines
+        lines = [
+            "有人在網站上按了開始自動交易。程式從待命切到運作，有訊號就會進場。",
+            "如果程式是停手或暫停狀態，這一步不會解除。",
+            f"帳上部位：{_holding(seen)}",
+        ]
+        return Level.WARN, "control", False, "自動交易已開始（遠端）", lines
+    if action == "standby":
+        lines = [
+            "有人在網站上按了停止自動交易。程式先把部位平掉，再回到待命：不再進新單，隨時可以再開始。",
+            f"帳上部位：{_holding(seen)}",
+        ]
+        return Level.WARN, "control", False, "自動交易已停止，回到待命（遠端）", lines
+    if action not in (None, "stop"):
+        # 這一版通知不認得的動作：照實說，不可以套用緊急停止的說法（2026-11-14 按「開始自動交易」卻收到「緊急停止」的通知）
+        lines = ["程式收到並處理了一筆遠端指令，但這一版的通知不認得它是哪一種。請到網站上看結果。"]
+        return Level.WARN, "control", False, "收到遠端指令", lines
     lines = [
         "有人在網站上按了緊急停止。程式已經停手並開始平倉（另有一則「緊急停止」的通知）。",
         f"帳上部位：{_holding(seen)}",

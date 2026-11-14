@@ -365,7 +365,9 @@ class Engine:
         self.disarm()
         return self.flatten_now(now)
 
-    def _note_command(self, cmd: Command, now: datetime, what: str) -> str:
+    def _note_command(
+        self, cmd: Command, now: datetime, what: str, *, refused: bool = False
+    ) -> str:
         self._log(
             now,
             "control",
@@ -374,6 +376,7 @@ class Engine:
             created_at=cmd.created_at.isoformat(),
             action=cmd.action,
             applied=True,
+            refused=refused,  # 收到了但照實沒有做（例：收盤後才按開始）；通知要講清楚，不能寫成做了
         )
         return f"（{cmd.created_at:%H:%M:%S} 按下，{now:%H:%M:%S} 執行）"
 
@@ -407,7 +410,7 @@ class Engine:
 
     def _apply_arm(self, cmd: Command, now: datetime) -> None:
         if self._day_over:
-            when = self._note_command(cmd, now, "遠端啟動（已收盤，沒有執行）")
+            when = self._note_command(cmd, now, "遠端啟動（已收盤，沒有執行）", refused=True)
             text = "沒有執行：今天已經收盤。明天開盤前會回到待命，到時候再按啟動"
             return self._finish_at_once(cmd, now, RESULT_REFUSED, f"{text}{when}")
         was = self.arm()
