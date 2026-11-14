@@ -251,18 +251,18 @@ export const ACTION_NAME: Record<RemoteAction, string> = {
   resume: '恢復自動交易',
   start: '啟動交易程式',
   quit: '結束交易程式',
-  arm: '啟動',
-  standby: '停止',
+  arm: '開始自動交易',
+  standby: '停止自動交易',
 }
 /** 確認時講清楚按下去會怎樣。 */
 export const ACTION_CONFIRM: Record<RemoteAction, string> = {
   flatten: '把現在的部位平掉。自動交易不會停，之後有訊號還會進場；要停到底請按緊急停止。',
-  pause: '不再進新單；手上的部位照原本的規則出場。',
+  pause: '不再進新單；手上的部位留著，照原本的規則出場（不會平倉）。要連部位一起平掉，請按「停止自動交易」。',
   resume: '可以再進場。不會解除緊急停止。',
   start: '用電腦上指定的那一份設定、今天的即時行情啟動。今天按過緊急停止的話，啟動之後一樣是停手的。',
   quit: '交易程式會結束，今天不再交易。',
   arm: '從待命切到運作：有訊號就會進場。不會解除緊急停止，也不會解除暫停。',
-  standby: '先把部位平掉，再回待命：不再進新單，程式繼續開著，隨時可以再按啟動。',
+  standby: '先把部位平掉，再回待命：不再進新單，程式繼續開著，隨時可以再按「開始自動交易」。只想不進新單、部位留著，請按「暫停自動交易」。',
 }
 /** 按下超過這麼多秒沒有程式接手就作廢。要跟伺服器的 REQUEST_TTL_S 一樣。 */
 export const REQUEST_TTL_S = 30
@@ -310,7 +310,8 @@ export function remoteButtons(
   ]
   if (armed === undefined) return old
   const go: RemoteAction = armed === true ? 'standby' : 'arm'
-  return [{ action: go, label: ACTION_NAME[go], enabled: running, why: running ? '' : noProgram }, ...old]
+  // 2026-11-14 使用者：「啟動交易程式又是什麼？」——agent 常駐之後程式不用再開開關關，頁面上不再放舊的那一顆（D-231：新做法驗過就拿掉）
+  return [{ action: go, label: ACTION_NAME[go], enabled: running, why: running ? '' : noProgram }, old[0], old[1]]
 }
 
 export type RequestLine = { id: string; tone: 'wait' | 'done' | 'bad'; label: string; detail: string }
@@ -343,7 +344,7 @@ export function armedOf(current: AutoStatus | null | undefined, viewingToday: bo
 
 /** 待命／運作那一行字；不知道就不顯示。 */
 export const armedText = (armed: boolean | null): string | null =>
-  armed === null ? null : armed ? '運作中：有訊號就會進場' : '待命：不會進新單，按「啟動」才交易'
+  armed === null ? null : armed ? '運作中：有訊號就會進場' : '待命：不會進新單，按「開始自動交易」才交易'
 
 /** 這個分頁最近幾筆遙控指令的進度（新的在前）。 */
 export const requestLines = (requests: readonly RemoteRequest[], mode: AutoMode, elapsed: number): RequestLine[] =>

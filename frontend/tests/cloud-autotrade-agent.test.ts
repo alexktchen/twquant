@@ -99,14 +99,15 @@ test('A-019 AC8 兩張表的指令併成一份清單：新的在前、留最近�
   assert.equal(JSON.parse(mergeRequests(many, null)).length, REQUESTS_SHOWN)
 })
 
-test('A-019 AC8 按鈕：待命給「啟動」、運作中給「停止」；要那支交易程式在聽；舊的三顆照舊', () => {
+test('A-019 AC8 按鈕：待命給「啟動」、運作中給「停止」；要那支交易程式在聽；頁面上只有三顆', () => {
   const old = remoteButtons('sim', { sim: beat() }, admin(), false, true)
   assert.deepEqual(old.map((b) => b.action), ['flatten', 'pause', 'quit']) // 沒給待命／運作：跟以前一樣三顆
   const standby = remoteButtons('sim', { sim: beat() }, admin(), false, true, false)
-  assert.deepEqual(standby.map((b) => b.action), ['arm', 'flatten', 'pause', 'quit'])
-  assert.deepEqual(standby[0], { action: 'arm', label: '啟動', enabled: true, why: '' })
+  assert.deepEqual(standby.map((b) => b.action), ['arm', 'flatten', 'pause']) // 舊的「啟動／結束交易程式」不放了
+  assert.ok(standby.every((b) => !/後台/.test(b.why)))
+  assert.deepEqual(standby[0], { action: 'arm', label: '開始自動交易', enabled: true, why: '' })
   const running = remoteButtons('sim', { sim: beat() }, admin(), false, true, true)
-  assert.deepEqual(running[0], { action: 'standby', label: '停止', enabled: true, why: '' })
+  assert.deepEqual(running[0], { action: 'standby', label: '停止自動交易', enabled: true, why: '' })
   // 今天還沒有狀態（開盤前）：給「啟動」，可以先按
   assert.equal(remoteButtons('sim', { sim: beat() }, admin(), false, true, null)[0].action, 'arm')
   // 交易程式沒在聽：不能按，寫原因
@@ -117,8 +118,10 @@ test('A-019 AC8 按鈕：待命給「啟動」、運作中給「停止」；要�
   assert.equal(remoteButtons('live', { sim: beat() }, admin(), false, true, false)[0].enabled, false)
   // 畫面上的狀態不夠新：不猜
   assert.equal(remoteButtons('sim', { sim: beat() }, admin(), false, false, false)[0].enabled, false)
-  assert.equal(ACTION_NAME.arm, '啟動')
-  assert.equal(ACTION_NAME.standby, '停止')
+  assert.equal(ACTION_NAME.arm, '開始自動交易')
+  assert.equal(ACTION_NAME.standby, '停止自動交易')
+  assert.match(ACTION_CONFIRM.pause, /不會平倉/) // 暫停與停止差在哪，確認時講清楚
+  assert.match(ACTION_CONFIRM.standby, /只想不進新單、部位留著，請按「暫停自動交易」/)
   assert.match(ACTION_CONFIRM.arm, /不會解除緊急停止/)
   assert.match(ACTION_CONFIRM.standby, /先把部位平掉，再回待命/)
 })
@@ -137,17 +140,17 @@ test('A-019 AC8 待命還是運作：只有今天、還在跑的那一份狀態�
 })
 
 test('A-019 AC6 進度：啟動做完是「完成」；停止要等確認沒有部位；沒人接手 30 秒作廢', () => {
-  assert.equal(requestLine(req(), 0).label, '啟動：等它收到…')
+  assert.equal(requestLine(req(), 0).label, '開始自動交易：等它收到…')
   const armed = requestLine(req({ acked_at: '2026-11-16T08:50:06+08:00', ack_age_s: 1, code: 'armed', note: '已啟動', done_code: 'armed', done_note: '已啟動：開始自動交易' }), 0)
-  assert.deepEqual([armed.tone, armed.label], ['done', '啟動：完成'])
+  assert.deepEqual([armed.tone, armed.label], ['done', '開始自動交易：完成'])
   const stopping = requestLine(req({ action: 'standby', acked_at: '2026-11-16T09:30:06+08:00', ack_age_s: 1, code: 'flattening', note: '已切到待命，不再進新單；已送出平倉' }), 0)
-  assert.deepEqual([stopping.tone, stopping.label], ['wait', '停止：已收到，處理中'])
+  assert.deepEqual([stopping.tone, stopping.label], ['wait', '停止自動交易：已收到，處理中'])
   const flat = requestLine(req({ action: 'standby', acked_at: 'x', ack_age_s: 3, code: 'flattening', note: '', done_code: 'flat', done_note: '已確認沒有部位' }), 0)
-  assert.deepEqual([flat.tone, flat.label], ['done', '停止：完成'])
-  assert.equal(requestLine(req({ age_s: 40 }), 0).label, '啟動：沒有送到，已作廢')
+  assert.deepEqual([flat.tone, flat.label], ['done', '停止自動交易：完成'])
+  assert.equal(requestLine(req({ age_s: 40 }), 0).label, '開始自動交易：沒有送到，已作廢')
 })
 
-test('A-019 AC8 頁面：按鈕上方寫待命或運作；四顆按鈕排成兩排', () => {
+test('A-019 AC8 頁面：按鈕上方寫待命或運作', () => {
   const bar = read('../src/cloud/RemoteBar.tsx')
   assert.match(bar, /\{state && <p className=\{`cq-at-remote-state/)
   assert.match(bar, /arm: Rocket, standby: Square/)
