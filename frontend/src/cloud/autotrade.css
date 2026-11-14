@@ -100,3 +100,28 @@
   .cq-at-events li { grid-template-columns: auto 1fr; }
   .cq-at-events li span { grid-column: 1 / -1; }
 }
+
+/* 遙控按鈕（A-016、A-017）：平倉、暫停／恢復、啟動／結束。比緊急停止小一號、不是紅的；一樣要按兩次 */
+.cq-at-remote { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.cq-at-remote-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cq-at-remote .cq-at-remote-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 60px; padding: 6px 4px;
+  border-radius: 10px; background: var(--tile, #16181f); color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.2;
+  border: 1px solid var(--line); border-top: 4px solid var(--c, #3d8bfd); text-align: center;
+}
+.cq-at-remote .cq-at-remote-btn.flatten { --c: #f0b90b; }
+.cq-at-remote .cq-at-remote-btn.pause, .cq-at-remote .cq-at-remote-btn.resume { --c: #3d8bfd; }
+.cq-at-remote .cq-at-remote-btn.start, .cq-at-remote .cq-at-remote-btn.quit { --c: #9b6bff; }
+.cq-at-remote .cq-at-remote-btn:disabled { opacity: .45; border-top-color: #6b7280; }
+.cq-at-remote-confirm {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; font-size: 15px;
+  background: color-mix(in srgb, #3d8bfd 12%, var(--bg)); border: 1px solid color-mix(in srgb, #3d8bfd 50%, transparent);
+}
+.cq-at-remote-confirm b { font-size: 18px; }
+.cq-at-remote-confirm div { display: flex; gap: 8px; margin-top: 6px; }
+.cq-at-remote .cq-at-remote-yes { flex: 2; min-height: 48px; border-radius: 10px; background: #3d8bfd; color: #fff; font-size: 17px; font-weight: 600; }
+.cq-at-remote .cq-at-remote-no { flex: 1; min-height: 48px; border-radius: 10px; background: var(--tile, #16181f); color: var(--text); font-size: 17px; border: 1px solid var(--line); }
+.cq-at-remote .cq-at-remote-yes:disabled, .cq-at-remote .cq-at-remote-no:disabled { opacity: .6; }
+.cq-at-remote-why { margin: 0; padding: 0 4px; font-size: 14px; color: var(--mute); }
+.cq-at-remote .cq-err { margin: 0; }
+.cq-at-remote-lines li { grid-template-columns: auto 1fr; }

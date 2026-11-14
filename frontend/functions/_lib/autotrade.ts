@@ -18,10 +18,20 @@ export type AutotradeDayRow = { day: string; status: string; pnl: number | null;
 
 /** 遠端停止的現況，兩段都是資料庫組好的 JSON 文字：stop＝今天最新的一筆停止指令與每支程式的回報（沒有是 null）、listeners＝每支程式的心跳。 */
 export type ControlView = { stop: string | null; listeners: string | null }
+/** 遙控指令的現況（A-016），同樣是資料庫組好的 JSON 文字：requests＝今天最近幾筆、remote＝後台那支中繼程式的心跳（沒有是 null）。 */
+export type RemoteView = { requests: string | null; remote: string | null }
 
 /** 回應本體：日期清單＋那一天的狀態＋遠端停止的現況。狀態與停止都直接用資料庫給的 JSON 文字，不 parse 再 stringify；沒有就是 null／{}。 */
-export const envelope = (days: readonly AutotradeDayRow[], body: string | null, control: ControlView | null = null): string =>
-  `{"days":${JSON.stringify(days)},"current":${body ?? 'null'},"stop":${control?.stop ?? 'null'},"listeners":${control?.listeners ?? '{}'}}`
+export const envelope = (
+  days: readonly AutotradeDayRow[],
+  body: string | null,
+  control: ControlView | null = null,
+  remote: RemoteView | null = null,
+): string =>
+  `{"days":${JSON.stringify(days)},"current":${body ?? 'null'},"stop":${control?.stop ?? 'null'},"listeners":${control?.listeners ?? '{}'}` +
+  // 遙控指令（A-016）：表還沒建的時候整段不出現，頁面當成沒有
+  (remote === null ? '' : `,"requests":${remote.requests ?? '[]'},"remote":${remote.remote ?? 'null'}`) +
+  '}'
 
 // ── 遠端緊急停止 ──
 

@@ -19,7 +19,7 @@ import type { HoldersWeek } from './holders'
 import type { StopHit } from './stophit'
 import type { WarrantDay } from './warrants'
 import type { Trade, TradeList } from './trades'
-import type { AutoEnvelope, AutoMode } from './autotrade'
+import type { AutoEnvelope, AutoMode, RemoteAction, RemoteBeat, RemoteRequest } from './autotrade'
 import type { JournalList, JournalRow } from './futures-extras'
 import type { Feature } from './access'
 import type { LineGroupRow, LineLogin, LineStatus } from './linegroup'
@@ -162,6 +162,10 @@ export const fetchFuturesDay = (day?: string) =>
 export const fetchAutotrade = (mode: AutoMode, day?: string) => get<AutoEnvelope>(`/api/autotrade?mode=${mode}${day ? `&day=${encodeURIComponent(day)}` : ''}`)
 
 /** 遠端緊急停止（autotrade A-011／D-224）：只會叫停，沒有解除。手抖連按會拿到同一筆。 */
+/** 遙控指令（autotrade A-016、A-017／D-229）：平倉、暫停／恢復、啟動／結束。手抖連按會拿到同一筆；30 秒沒有程式接手就作廢。 */
+export const sendAutotradeCommand = (action: RemoteAction, target: AutoMode) =>
+  get<{ ok: boolean; reused: boolean; requests: RemoteRequest[]; remote: RemoteBeat | null }>('/api/autotrade/command', 'PUT', { confirm: action, target })
+
 export const sendAutotradeStop = () => get<{ ok: boolean; reused: boolean } & Pick<AutoEnvelope, 'stop' | 'listeners'>>('/api/autotrade/stop', 'PUT', { confirm: 'stop' })
 
 /** 小台模擬有紀錄的交易日（新到舊）。只給 admin。 */

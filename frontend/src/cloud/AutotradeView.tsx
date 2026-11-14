@@ -1,5 +1,5 @@
 // 程式交易（autotrade A-005、A-011）：獨立交易系統寫出來的狀態，加上一顆遠端緊急停止（D-225）。
-// 除了緊急停止以外都只能看；沒有解除、沒有開始交易的按鈕，也不要加。
+// 這個檔案裡除了緊急停止以外都只能看；沒有解除緊急停止的按鈕，也不要加。遙控按鈕（D-229）在 ./RemoteBar.tsx。
 import { Activity, Bell, OctagonX, ReceiptText } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { fetchAutotrade, sendAutotradeStop } from './api'
@@ -14,6 +14,7 @@ import {
   POLL_MS,
   SCHEMA,
   SOURCE_NAME,
+  STOP_FAST_MS,
   STOP_SCOPE,
   STRATEGY_LABEL,
   assumptionText,
@@ -28,6 +29,9 @@ import {
   pollMs,
   positionText,
   refetchDue,
+  remoteButtons,
+  requestLines,
+  requestsWaiting,
   stopLines,
   unknownLines,
   type AutoDayRow,
@@ -37,6 +41,7 @@ import {
   type StopLine,
 } from './autotrade'
 import { PRODUCT_NAME, shouldPoll, tone, yuan } from './futures'
+import { RemoteBar, type CommandSent } from './RemoteBar'
 import { Kpi, Section } from './Section'
 import './autotrade.css'
 
@@ -272,8 +277,14 @@ export function AutotradeView({ refresh }: { refresh: number }) {
       : elapsed > DATA_STALE_S
         ? unknownLines(`畫面上的狀態已經 ${Math.floor(elapsed)} 秒沒更新${err ? `（${err}）` : ''}`)
         : stopLines(data.stop, data.listeners, elapsed)
-  // 有停止還在等（等收到、等確認平掉）時更新變快，不管是不是交易時段、看的是哪一天
-  const fast = pollMs(data?.stop ?? null, lines, elapsed) < POLL_MS
+  // 遙控按鈕（A-016）：畫面上的狀態夠新才讓人按；暫停或恢復看今天這支程式的狀態
+  const known = data !== null && elapsed <= DATA_STALE_S
+  const requests = data?.requests ?? []
+  const paused = day === null && current?.status === 'live' && current.paused === true
+  const buttons = remoteButtons(mode, data?.listeners ?? {}, data?.remote, paused, known)
+  // 有停止或遙控指令還在等（等收到、等做完）時更新變快，不管是不是交易時段、看的是哪一天
+  const fastMs = known && requestsWaiting(requests, elapsed) ? STOP_FAST_MS : pollMs(data?.stop ?? null, lines, elapsed)
+  const fast = fastMs < POLL_MS
 
   const take = (d: AutoEnvelope) => {
     setFetchedAt(Date.now())
@@ -302,7 +313,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
         const visible = document.visibilityState === 'visible'
         if (fast || visible || (day === null && shouldPoll(new Date(), null) && refetchDue(tick, live.current))) run()
       },
-      fast ? pollMs(data?.stop ?? null, lines, elapsed) : POLL_MS,
+      fast ? fastMs : POLL_MS,
     )
     return () => {
       stop = true
@@ -319,11 +330,13 @@ export function AutotradeView({ refresh }: { refresh: number }) {
     return () => clearInterval(id)
   }, [fast])
 
-  const sent = (r: Pick<AutoEnvelope, 'stop' | 'listeners'>) => take({ days: data?.days ?? [], current, stop: r.stop, listeners: r.listeners })
+  const sent = (r: Pick<AutoEnvelope, 'stop' | 'listeners'>) =>
+    take({ days: data?.days ?? [], current, stop: r.stop, listeners: r.listeners, requests: data?.requests, remote: data?.remote })
+  const sentCommand = (r: CommandSent) => take({ days: data?.days ?? [], current, stop: data?.stop ?? null, listeners: data?.listeners ?? {}, requests: r.requests, remote: r.remote })
   const pick = (m: AutoMode) => {
     if (m === mode) return
     // 緊急停止那一塊跟看哪個分頁無關：留著，等新資料來再換（不然切分頁的那一下會變成「不知道」）
-    setData((d) => (d === null ? null : { days: [], current: null, stop: d.stop, listeners: d.listeners }))
+    setData((d) => (d === null ? null : { days: [], current: null, stop: d.stop, listeners: d.listeners, requests: d.requests, remote: d.remote }))
     setDay(null)
     setLoading(true)
     setMode(m)
@@ -338,6 +351,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
         ))}
       </div>
       <StopBar lines={lines} pressed={(data?.stop ?? null) !== null} onSent={sent} reread={() => fetchAutotrade(mode, day ?? undefined)} />
+      <RemoteBar key={mode} mode={mode} buttons={buttons} lines={known ? requestLines(requests, mode, elapsed) : []} onSent={sentCommand} />
       {err && <p className="cq-err">{err}</p>}
       {data && data.days.length > 1 && (
         <label className="cq-fu-pick">
@@ -359,7 +373,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
       {current !== null && current.schema === SCHEMA && <Status s={current} now={now} />}
       {data !== null && <Days days={data.days} mode={mode} />}
       {current !== null && current.schema === SCHEMA && <p className="cq-at-foot">{assumptionText(current)}</p>}
-      <p className="cq-at-foot">除了緊急停止以外，這一頁都只能看。解除停止、重新開始交易，要在跑交易程式的那台電腦上做。</p>
+      <p className="cq-at-foot">除了緊急停止與遙控按鈕以外，這一頁都只能看。解除緊急停止、改設定，要在跑交易程式的那台電腦上做。</p>
     </>
   )
 }
