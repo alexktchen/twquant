@@ -29,6 +29,8 @@ import {
   pollMs,
   positionText,
   refetchDue,
+  armedOf,
+  armedText,
   remoteButtons,
   requestLines,
   requestsWaiting,
@@ -281,7 +283,9 @@ export function AutotradeView({ refresh }: { refresh: number }) {
   const known = data !== null && elapsed <= DATA_STALE_S
   const requests = data?.requests ?? []
   const paused = day === null && current?.status === 'live' && current.paused === true
-  const buttons = remoteButtons(mode, data?.listeners ?? {}, data?.remote, paused, known)
+  // 待命／運作（A-019）：今天還在跑的那一份狀態說了算；還沒有狀態就是不知道
+  const armed = known ? armedOf(current, day === null) : null
+  const buttons = remoteButtons(mode, data?.listeners ?? {}, data?.remote, paused, known, armed)
   // 有停止或遙控指令還在等（等收到、等做完）時更新變快，不管是不是交易時段、看的是哪一天
   const fastMs = known && requestsWaiting(requests, elapsed) ? STOP_FAST_MS : pollMs(data?.stop ?? null, lines, elapsed)
   const fast = fastMs < POLL_MS
@@ -351,7 +355,7 @@ export function AutotradeView({ refresh }: { refresh: number }) {
         ))}
       </div>
       <StopBar lines={lines} pressed={(data?.stop ?? null) !== null} onSent={sent} reread={() => fetchAutotrade(mode, day ?? undefined)} />
-      <RemoteBar key={mode} mode={mode} buttons={buttons} lines={known ? requestLines(requests, mode, elapsed) : []} onSent={sentCommand} />
+      <RemoteBar key={mode} mode={mode} buttons={buttons} lines={known ? requestLines(requests, mode, elapsed) : []} onSent={sentCommand} state={armedText(armed)} />
       {err && <p className="cq-err">{err}</p>}
       {data && data.days.length > 1 && (
         <label className="cq-fu-pick">

@@ -112,6 +112,12 @@
 .cq-at-remote .cq-at-remote-btn.flatten { --c: #f0b90b; }
 .cq-at-remote .cq-at-remote-btn.pause, .cq-at-remote .cq-at-remote-btn.resume { --c: #3d8bfd; }
 .cq-at-remote .cq-at-remote-btn.start, .cq-at-remote .cq-at-remote-btn.quit { --c: #9b6bff; }
+.cq-at-remote .cq-at-remote-btn.arm { --c: #2fbf71; }
+.cq-at-remote .cq-at-remote-btn.standby { --c: #e5484d; }
+.cq-at-remote-btns.n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cq-at-remote-state { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 15px; font-weight: 600; border-left: 4px solid var(--c, #8b93a7); background: var(--tile, #16181f); }
+.cq-at-remote-state.on { --c: #2fbf71; }
+.cq-at-remote-state.off { --c: #8b93a7; }
 .cq-at-remote .cq-at-remote-btn:disabled { opacity: .45; border-top-color: #6b7280; }
 .cq-at-remote-confirm {
   display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; font-size: 15px;
