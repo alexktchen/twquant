@@ -31,6 +31,36 @@ def outbox_name(day: date) -> str:
     return f"results_{day.isoformat()}.jsonl"
 
 
+def release_name(day: date) -> str:
+    """「解除今天的停止」記在哪個檔案。"""
+    return f"release_{day.isoformat()}.json"
+
+
+def local_stop_name(day: date) -> str:
+    """看門程式要交易程式停手時寫的檔（A-020）：一天一個。"""
+    return f"local_stop_{day.isoformat()}.json"
+
+
+def read_local_stop(folder: Path, day: date) -> tuple[datetime, str] | None:
+    """今天看門程式有沒有要求停手：（時間、原因）；沒有是 None。內容讀不懂就 raise ValueError。"""
+    path = folder / local_stop_name(day)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        data = json.loads(text)
+        return require_taipei(datetime.fromisoformat(str(data["at"])), "at"), str(data["why"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValueError(f"{path} 讀不懂：{exc}") from exc
+
+
+def write_local_stop(folder: Path, at: datetime, why: str) -> None:
+    """看門程式要求停手（A-020）。交易程式活著就馬上停手、平倉；重開的話算到這個時間一樣停。"""
+    at = require_taipei(at, "write_local_stop 的時間")
+    write_json_atomic(folder / local_stop_name(at.date()), {"at": at.isoformat(), "why": why})
+
+
 class ControlError(RuntimeError):
     """讀不到指令或回報寫不出去。交易不因此停下來，但要記下來。"""
 

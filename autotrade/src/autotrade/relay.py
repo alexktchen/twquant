@@ -22,6 +22,16 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from autotrade.bell import CHANNEL, Bell
+from autotrade.bus import (
+    BUS_ACTIONS,
+    BUS_BELL_DDL,
+    BUS_PENDING_SQL,
+    BUS_REPORT_SQL,
+    COMMAND_TTL_S,
+    MESSAGES_DDL,
+    BusDb,
+    report_params,
+)
 from autotrade.control import (
     HEARTBEAT_NAME,
     INBOX_NAME,
@@ -282,6 +292,30 @@ class PgRelayDb:
         """後台的中繼程式回報自己還活著、後台多久前讀過指令檔。"""
         self._run(REMOTE_BEAT_SQL, (reader_age_s, poll_s))
 
+    def ensure_bus(self) -> None:
+        """確保訊息匯流排的表在（A-019）。要在 ensure 之後：編號用的是指令表的序號。"""
+        for statement in MESSAGES_DDL:
+            self._run(statement, ())
+
+    def ensure_bus_bell(self) -> None:
+        """匯流排有新指令也按門鈴。要在 ensure_bell 之後：用的是它建的函式。"""
+        for statement in BUS_BELL_DDL:
+            self._run(statement, ())
+
+    def pending_bus(self, today: date, consumer: str) -> list[Command]:
+        """今天、給這支 agent、還沒作廢也還沒有回報的匯流排指令。"""
+        rows = self._run(BUS_PENDING_SQL, (today, consumer, COMMAND_TTL_S))
+        return [
+            Command(
+                id=int(i), action=str(action), day=day, created_at=created_at, target=str(target)
+            )
+            for i, action, day, created_at, target in rows
+        ]
+
+    def report_bus(self, result: CommandResult, consumer: str) -> None:
+        """把一筆處理結果寫成匯流排上的一則回報。"""
+        self._run(BUS_REPORT_SQL, report_params(result, consumer))
+
     def ensure_bell(self) -> None:
         """確保門鈴的觸發器在（A-015）。只有開門鈴時才做，跟建表一樣只做一次。"""
         for statement in BELL_DDL:
@@ -368,6 +402,8 @@ class Relay:
     ensure: Callable[[], None] | None = None  # 確保資料表存在；成功一次之後就不再叫
     # 遙控指令（A-016）那一路；沒給就只處理停止，跟 A-011 一樣
     requests: RequestDb | None = None
+    # 訊息匯流排（A-019）那一路：啟動／停止；沒給就不拿
+    bus: BusDb | None = None
     _ensured: bool = False
     _day: date | None = None
     _shipped: int = 0
@@ -405,7 +441,14 @@ class Relay:
                 problem = problem or f"回報檔有一行內容不對（已跳過）：{exc}"
                 self._shipped += 1
                 continue
-            remote = result.action != ACTION_STOP  # 遙控指令的結果記在另一張表
+            on_bus = result.action in BUS_ACTIONS  # 啟動／停止的結果寫回匯流排
+            if on_bus and self.bus is None:
+                problem = (
+                    problem or "回報檔有一行是匯流排指令的結果，這支中繼程式沒有接匯流排（已跳過）"
+                )
+                self._shipped += 1
+                continue
+            remote = not on_bus and result.action != ACTION_STOP  # 遙控指令的結果記在另一張表
             if remote and self.requests is None:
                 problem = (
                     problem or "回報檔有一行是遙控指令的結果，這支中繼程式沒有接那一路（已跳過）"
@@ -413,7 +456,9 @@ class Relay:
                 self._shipped += 1
                 continue
             try:
-                if remote and self.requests is not None:
+                if on_bus and self.bus is not None:
+                    self.bus.report_bus(result, self.consumer)
+                elif remote and self.requests is not None:
                     if result.stage == STAGE_ACK:
                         self.requests.ack_request(result)
                     else:
@@ -462,6 +507,8 @@ class Relay:
                 commands = self.db.pending(now.date(), self.consumer)
             if self.requests is not None:
                 commands = commands + self.requests.pending_requests(now.date(), self.consumer)
+            if self.bus is not None and self.consumer != CONSUMER_ADMIN:
+                commands = commands + self.bus.pending_bus(now.date(), self.consumer)
         except ControlError as exc:
             commands, poll_error = [], str(exc)
         write_json_atomic(

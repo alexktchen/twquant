@@ -23,17 +23,27 @@ from pathlib import Path
 
 from autotrade.broker.sim import SimBroker
 from autotrade.config import Config, ConfigError
-from autotrade.control import INBOX_NAME, ControlLoop, FileControl, outbox_name
+from autotrade.control import (
+    INBOX_NAME,
+    ControlLoop,
+    FileControl,
+    outbox_name,
+    read_local_stop,
+)
+from autotrade.control import release_name as release_name  # 原本定義在這裡，別的地方還從這裡拿
 from autotrade.engine import EndOfDayError, Engine, Event
 from autotrade.export import dumps, snapshot
 from autotrade.feed.follow import TickSource
 from autotrade.feed.replay import FeedError
 from autotrade.journal import Journal
 from autotrade.model import (
+    ACTION_ARM,
     ACTION_FLATTEN,
     ACTION_PAUSE,
     ACTION_RESUME,
+    ACTION_STANDBY,
     ACTION_STOP,
+    AGENT_ACTIONS,
     ENGINE_ACTIONS,
     RESULT_IGNORED,
     STAGE_ACK,
@@ -43,7 +53,13 @@ from autotrade.model import (
 from autotrade.notify import Notifier
 from autotrade.strategy.base import Strategy
 
-ACTION_TEXT = {ACTION_FLATTEN: "平倉", ACTION_PAUSE: "暫停自動交易", ACTION_RESUME: "恢復自動交易"}
+ACTION_TEXT = {
+    ACTION_FLATTEN: "平倉",
+    ACTION_PAUSE: "暫停自動交易",
+    ACTION_RESUME: "恢復自動交易",
+    ACTION_ARM: "啟動",
+    ACTION_STANDBY: "停止（平倉後待命）",
+}
 QUIT_NAME = "quit.request"  # 後台按「結束」時放在資料夾裡的檔案；程式看到就收工
 # 印在畫面上的事件（委託、成交、停手、停損、遠端指令、連線、被擋下、部位修正）
 SHOWN = frozenset(
@@ -89,14 +105,10 @@ def paced_clock(
     return lambda: first + (real() - began) * speed
 
 
-def release_name(day: date) -> str:
-    """「解除今天的停止」記在哪個檔案。"""
-    return f"release_{day.isoformat()}.json"
-
-
 def earlier_stop(folder: Path, day: date) -> datetime | None:
     """今天稍早有沒有執行過遠端緊急停止（看回報檔），而且之後沒有被解除；有就回傳最早那一次的時間。
 
+    看門程式要求的停手（A-020 的 local_stop 檔）也算在內，一樣可以在電腦前解除。
     回報檔是交易程式自己一行一行接上去的（A-011）。最後一行沒寫完（當機）不算；其他讀不懂的行就 raise。
     """
     released: datetime | None = None
@@ -106,10 +118,13 @@ def earlier_stop(folder: Path, day: date) -> datetime | None:
             datetime.fromisoformat(str(json.loads(release.read_text(encoding="utf-8"))["at"])),
             f"{release} 的時間",
         )
+    stops: list[datetime] = []
+    local = read_local_stop(folder, day)
+    if local is not None and (released is None or local[0] > released):
+        stops.append(local[0])
     path = folder / outbox_name(day)
     if not path.exists():
-        return None
-    stops: list[datetime] = []
+        return min(stops, default=None)
     lines = path.read_text(encoding="utf-8").split("\n")[:-1]  # 最後一段沒有換行結尾＝沒寫完
     for number, line in enumerate(lines, start=1):
         if not line.strip():
@@ -155,7 +170,8 @@ def earlier_actions(folder: Path, day: date) -> list[tuple[datetime, str, dateti
             )
         except (ValueError, KeyError, TypeError) as exc:
             raise ValueError(f"{path} 第 {number} 行讀不懂：{exc}") from exc
-        if action in ENGINE_ACTIONS and stage == STAGE_ACK and code != RESULT_IGNORED:
+        mine = action in ENGINE_ACTIONS or action in AGENT_ACTIONS
+        if mine and stage == STAGE_ACK and code != RESULT_IGNORED:
             done.append((at, action, seen))
     return sorted(done, key=lambda item: item[0])
 
@@ -200,6 +216,7 @@ class Runner:
     control: bool = True  # 回放不聽遠端指令（那條路用的是真的時鐘）
     notifier: Notifier | None = None
     release_stop: bool = False  # 解除今天稍早的遠端停止
+    standby_at_start: bool = False  # 常駐的 agent（A-019）：今天從待命開始，要按「啟動」才交易
     status_every_s: float = 5.0
     tick_s: float = 0.2  # 一圈多久
     close_grace_s: float = 60.0  # 收盤後再等多久才結算（等最後幾筆行情進來）
@@ -244,6 +261,9 @@ class Runner:
         at = earlier_stop(self.folder, start.date())
         if at is None:
             return None
+        local = read_local_stop(self.folder, start.date())
+        if local is not None:
+            self.say(f"（今天 {local[0]:%H:%M:%S} 看門程式要求過停手：{local[1]}）")
         if self.release_stop:
             release = self.folder / release_name(start.date())
             tmp = release.with_name(release.name + ".tmp")
@@ -278,6 +298,10 @@ class Runner:
             self._forward(event)
 
         engine = Engine(self.cfg, self.strategy, SimBroker(self.cfg.sim), sink=sink)
+        if self.standby_at_start:
+            engine.disarm()
+        # 看門程式的停手檔（A-020）：啟動時已經有的那一份由上面的 stop_at 處理（或已解除），之後換了新的才再停
+        local_seen = self._local_stop_at(day)
         loop: ControlLoop | None = None
         if self.control:
             control = self.cfg.control
@@ -288,6 +312,7 @@ class Runner:
             f"模擬交易程式開始：{self.cfg.contract.symbol}、策略 {self.strategy_name}、{day}"
             f"（{self.cfg.session.start:%H:%M}～{self.cfg.session.end:%H:%M}）。"
             + ("會聽遠端緊急停止。" if loop is not None else "回放：不聽遠端指令、不上網站。")
+            + ("今天從待命開始：要按「啟動」才會交易。" if self.standby_at_start else "")
         )
         reason, count, shown = "", 0, 0
         listening = False  # 指令中繼跟交易程式是一起啟動的：等它寫出第一份新的指令檔再開始讀
@@ -330,6 +355,12 @@ class Runner:
                         stop_at = None
                     while again:
                         self._apply_action(engine, *again.pop(0)[:2])
+                    if self.control:
+                        asked = self._local_stop_at(day)
+                        if asked is not None and asked != local_seen:
+                            local_seen = asked
+                            engine.kill(now)
+                            self.say(f"{now:%H:%M:%S}  看門程式要求停手：停手、平倉")
                     engine.on_timer(now)
                     if loop is not None:
                         listening = listening or self._relay_ready(now, start)
@@ -418,11 +449,26 @@ class Runner:
         engine.kill(at)
         self.say(f"{at:%H:%M:%S}  套用今天稍早的遠端緊急停止：停手、平倉")
 
+    def _local_stop_at(self, day: date) -> datetime | None:
+        """看門程式今天要求停手的時間。檔案讀不懂也當成要停（往安全的方向錯），時間用檔案改動的時間。"""
+        if not self.control:
+            return None
+        try:
+            asked = read_local_stop(self.folder, day)
+        except ValueError as exc:
+            self.say(f"看門程式的停手檔讀不懂，當成要停：{exc}")
+            return datetime.min.replace(tzinfo=TAIPEI)
+        return None if asked is None else asked[0]
+
     def _apply_action(self, engine: Engine, at: datetime, action: str) -> None:
         if action == ACTION_FLATTEN:
             engine.flatten_now(at)
         elif action == ACTION_PAUSE:
             engine.pause()
+        elif action == ACTION_ARM:
+            engine.arm()
+        elif action == ACTION_STANDBY:
+            engine.stand_by(at)
         else:
             engine.resume()
         self.say(f"{at:%H:%M:%S}  套用今天稍早的遠端{ACTION_TEXT[action]}")
