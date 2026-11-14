@@ -46,6 +46,7 @@ from autotrade.model import (
     AGENT_ACTIONS,
     ENGINE_ACTIONS,
     RESULT_IGNORED,
+    RESULT_REFUSED,
     STAGE_ACK,
     TAIPEI,
     require_taipei,
@@ -171,7 +172,8 @@ def earlier_actions(folder: Path, day: date) -> list[tuple[datetime, str, dateti
         except (ValueError, KeyError, TypeError) as exc:
             raise ValueError(f"{path} 第 {number} 行讀不懂：{exc}") from exc
         mine = action in ENGINE_ACTIONS or action in AGENT_ACTIONS
-        if mine and stage == STAGE_ACK and code != RESULT_IGNORED:
+        # 沒有執行的（不認得、不是今天的、收盤後才按的啟動）不算今天做過的事
+        if mine and stage == STAGE_ACK and code not in (RESULT_IGNORED, RESULT_REFUSED):
             done.append((at, action, seen))
     return sorted(done, key=lambda item: item[0])
 
@@ -217,6 +219,10 @@ class Runner:
     notifier: Notifier | None = None
     release_stop: bool = False  # 解除今天稍早的遠端停止
     standby_at_start: bool = False  # 常駐的 agent（A-019）：今天從待命開始，要按「啟動」才交易
+    stay_listening: bool = (
+        False  # 常駐的 agent：收盤結算後不結束，繼續聽指令到半夜（手機隨時叫得動）
+    )
+    linger_tick_s: float = 0.5  # 收盤後那一段，一圈多久
     status_every_s: float = 5.0
     tick_s: float = 0.2  # 一圈多久
     close_grace_s: float = 60.0  # 收盤後再等多久才結算（等最後幾筆行情進來）
@@ -407,9 +413,15 @@ class Runner:
             reason = "feed_error"
             self.say(f"行情檔有問題，程式結束：{exc}")
         finally:
-            log.close()
+            if reason != "closed":
+                log.close()
         if reason == "closed":
-            reason = self._close(engine, loop)
+            try:
+                reason = self._close(engine, loop)
+                if self.stay_listening and loop is not None and reason in ("closed", "no_ticks"):
+                    self._linger(engine, loop, day, quit_file)
+            finally:
+                log.close()
         if self.notifier is not None:
             self.notifier.close()
         last = engine.last_tick
@@ -428,6 +440,25 @@ class Runner:
             + ("" if report.halt is None else f"、停手中（{report.halt}）")
         )
         return report
+
+    def _linger(self, engine: Engine, loop: ControlLoop, day: date, quit_file: Path) -> None:
+        """收盤結算之後繼續聽指令到半夜（常駐的 agent）：緊急停止、平倉、暫停照樣回報；「啟動」回報今天已經收盤。
+
+        今天不會再交易（行情只收到收盤、進場時段也過了）。換日就結束，由顧著它的那一支開新一天的。
+        """
+        engine.end_day()
+        self.say("收盤結算完了：今天不再交易；繼續聽指令到半夜（按「啟動」會回報今天已經收盤）。")
+        shown = len(engine.events)
+        try:
+            while self.clock().date() == day and not quit_file.exists():
+                now = self.clock()
+                loop.step(now)
+                if self.notifier is not None:
+                    self.notifier.poll(now)
+                shown = self._show(engine.events, shown)
+                self.sleep(self.linger_tick_s)
+        except KeyboardInterrupt:
+            self.say("被中斷（Ctrl+C）：不再聽指令。")
 
     def _relay_ready(self, now: datetime, start: datetime) -> bool:
         """指令檔是不是新的（指令中繼已經在寫了）。等超過 control_grace_s 就不等：照常去讀，讀不到會記下來。

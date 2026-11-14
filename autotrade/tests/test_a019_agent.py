@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import tomllib
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
@@ -28,7 +29,7 @@ from autotrade.bus import (
 )
 from autotrade.cli import main
 from autotrade.config import AgentConfig, ConfigError, parse_config
-from autotrade.control import ControlError, ControlLoop, FileControl
+from autotrade.control import ControlError, ControlLoop, FileControl, outbox_name
 from autotrade.engine import Engine
 from autotrade.export import snapshot
 from autotrade.model import (
@@ -38,6 +39,7 @@ from autotrade.model import (
     RESULT_ARMED,
     RESULT_FLAT,
     RESULT_FLATTENING,
+    RESULT_REFUSED,
     STAGE_ACK,
     STAGE_DONE,
     TAIPEI,
@@ -331,6 +333,51 @@ def test_ac4_an_agent_day_trades_nothing_until_someone_presses_start(tmp_path: P
     fills = journal_fills(other)
     assert [f[1] for f in fills] == ["BUY", "SELL"] and fills[0][0] >= pressed.isoformat()
     assert report.reason == "closed"
+
+
+def test_ac5_the_agents_trader_keeps_listening_after_the_close_until_midnight(
+    tmp_path: Path,
+) -> None:
+    """2026-11-14 使用者在手機上看到「都不能按」：交易程式收盤就結束，沒有東西在聽。"""
+    late = clock_at(20, 0)  # 收盤後很久才按
+
+    def commands(now: datetime) -> list[Command]:
+        return [Command(31, ACTION_ARM, DAY, late, "sim")] if now >= late else []
+
+    world = Rig(tmp_path, FakeClock(clock_at(8, 44, 50)), commands=commands)
+    report = world.runner(standby_at_start=True, stay_listening=True, linger_tick_s=1.0).run()
+    assert report.reason == "closed" and report.fills == 0
+    assert world.clock.now.date() > DAY  # 一直聽到換日才結束
+    said = " | ".join(world.said)
+    assert "繼續聽指令到半夜" in said
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / outbox_name(DAY)).read_text(encoding="utf-8").splitlines()
+    ]
+    assert [(r["command_id"], r["stage"], r["code"]) for r in rows] == [
+        (31, STAGE_ACK, RESULT_REFUSED),
+        (31, STAGE_DONE, RESULT_REFUSED),
+    ]
+    assert "今天已經收盤" in rows[0]["note"]
+    # 沒有被當成「今天啟動過」：重開不會把它套用回去
+    assert earlier_actions(tmp_path, DAY) == []
+
+
+def test_ac5_a_day_without_ticks_also_keeps_listening_and_ctrl_c_ends_it(tmp_path: Path) -> None:
+    def interrupt(now: datetime) -> None:
+        if now >= clock_at(15, 0):
+            raise KeyboardInterrupt
+
+    world = Rig(tmp_path, FakeClock(clock_at(14, 18)), ticks=[], hook=interrupt)
+    report = world.runner(standby_at_start=True, stay_listening=True, linger_tick_s=60.0).run()
+    assert report.reason == "no_ticks" and report.ok
+    assert any("不再聽指令" in line for line in world.said)
+    # 沒有 --agent 的舊跑法：收盤就結束，跟以前一樣
+    other = tmp_path / "b"
+    other.mkdir()
+    plain = Rig(other, FakeClock(clock_at(14, 18)), ticks=[])
+    plain.runner().run()
+    assert plain.clock.now < clock_at(14, 30)
 
 
 # ---- AC7 模擬重開
