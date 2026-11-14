@@ -1,0 +1,22 @@
+# Cloudflare Pages（autotrade A-018／D-230）：程式交易的遙控網站，從 twquant 網站拉出來的。
+# 靜態頁面＋functions/ 底下四支 API（直接連同一個 Supabase 資料庫）。
+# 部署：npm run build && npx wrangler pages deploy（第一次要先 `npx wrangler pages project create twquant-autotrade --production-branch main`）
+#
+# 登入：Cloudflare Access 擋在整個網站最前面（Zero Trust 後台建一個 self-hosted 應用，網域填這個專案的網址）。
+# 端點自己還會再驗一次，三個設定少一個整個網站就關著（functions/_lib/access.ts）：
+#   ACCESS_TEAM       在下面 [vars]
+#   ACCESS_AUD        建好 Access 應用之後在它的頁面上看得到：npx wrangler pages secret put ACCESS_AUD --project-name twquant-autotrade
+#   AUTOTRADE_ADMINS  可以用這個網站的 email（逗號分隔）：npx wrangler pages secret put AUTOTRADE_ADMINS --project-name twquant-autotrade
+name = "twquant-autotrade"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ACCESS_TEAM = "https://twquant-pages.cloudflareaccess.com"
+
+# 資料庫連線池（Hyperdrive）：跟 twquant 網站用同一個（frontend/wrangler.toml），指令表、狀態表都在同一個資料庫。
+# 本機 `wrangler pages dev` 要先設環境變數 CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE（連線字串，不要寫進這裡）。
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "3cef1c1a4fcd4715ab0f34534895770f"
