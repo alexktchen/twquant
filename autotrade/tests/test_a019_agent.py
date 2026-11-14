@@ -28,7 +28,7 @@ from autotrade.bus import (
 )
 from autotrade.cli import main
 from autotrade.config import AgentConfig, ConfigError, parse_config
-from autotrade.control import ControlLoop, FileControl
+from autotrade.control import ControlError, ControlLoop, FileControl
 from autotrade.engine import Engine
 from autotrade.export import snapshot
 from autotrade.model import (
@@ -135,6 +135,48 @@ def test_ac1_ac8_the_website_carries_the_same_table_and_the_same_two_actions() -
     assert ts_list(text, "BUS_ACTIONS") == list(BUS_ACTIONS)
     insert = text.split("INSERT INTO web.autotrade_messages")[1].split("RETURNING")[0]
     assert "'command'" in insert and "'report'" not in insert  # 網站只寫指令，回報是 agent 寫的
+
+
+@dataclass
+class RacingConn(FakeConn):
+    """第一次建表時輸給另一條連線的假連線。"""
+
+    lose: int = 1
+    message: str = 'duplicate key value violates unique constraint "pg_type_typname_nsp_index"'
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> FakeCursor:
+        if sql.startswith("CREATE TABLE") and self.lose > 0:
+            self.lose -= 1
+            raise FakeDbError(self.message)
+        return super().execute(sql, params)
+
+
+def test_ac5_two_relays_creating_the_same_table_at_once_do_not_report_a_failure() -> None:
+    """2026-11-14 第一次真的跑 agent：兩支中繼同時建表撞在一起，其中一支那一輪回報「有問題」。"""
+    conns: list[RacingConn] = []
+
+    def connect() -> RacingConn:
+        conns.append(RacingConn(rows=[], lose=1 if not conns else 0))
+        return conns[-1]
+
+    PgRelayDb(connect, errors=(FakeDbError,), timeout_s=2.0).ensure_bus()
+    made = [
+        sql for conn in conns for sql, _ in conn.executed if sql.startswith(("CREATE", "ALTER"))
+    ]
+    assert made == list(MESSAGES_DDL)  # 重試一次就過了，每一句都有跑到
+    # 不是撞在一起的錯（例如沒有權限）照樣丟出去，不會被吃掉
+    other = RacingConn(rows=[], message="permission denied for schema web")
+    with pytest.raises(ControlError, match="permission denied"):
+        PgRelayDb(lambda: other, errors=(FakeDbError,), timeout_s=2.0).ensure_bus()
+    # 連輸兩次：第二次的錯丟出去（由中繼程式寫進指令檔、下一輪再試）
+    twice: list[RacingConn] = []
+
+    def stubborn() -> RacingConn:
+        twice.append(RacingConn(rows=[], lose=1))
+        return twice[-1]
+
+    with pytest.raises(ControlError, match="pg_type_typname_nsp_index"):
+        PgRelayDb(stubborn, errors=(FakeDbError,), timeout_s=2.0).ensure_bus()
 
 
 # ---- AC3 待命與運作
