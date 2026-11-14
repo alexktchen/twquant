@@ -122,6 +122,27 @@ class ControlConfig:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    """常駐的交易 agent（A-019）。"""
+
+    arm_at_open: bool  # True＝每天一開始就運作；False＝待命，要按「啟動」才交易。真單不准 True
+    trader_start: time  # 每天幾點把交易的那一半開起來（開盤前）
+    restart_wait_s: float  # 哪一支程序自己結束了，等幾秒重開（之後每次加倍）
+    restart_wait_max_s: float  # 重開的間隔最長到幾秒
+    steady_s: float  # 一支程序活過這麼久，重開的間隔就從頭算
+
+
+@dataclass(frozen=True)
+class WatchdogConfig:
+    """獨立看門程式（A-020）。"""
+
+    check_s: float  # 多久檢查一次
+    heartbeat_stale_s: float  # 交易程式的心跳超過這麼久沒更新就算出事
+    tick_stale_s: float  # 盤中行情超過這麼久沒有新的就算出事
+    stop_grace_s: float  # 收到遠端緊急停止後，等主程式這麼久；它沒回報就由看門程式處理
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     """給網站的狀態輸出。"""
 
@@ -171,6 +192,8 @@ class Config:
     control: ControlConfig | None = None
     notify: NotifyConfig | None = None
     notify_push: NotifyPushConfig | None = None
+    agent: AgentConfig | None = None
+    watchdog: WatchdogConfig | None = None
 
 
 def _need(table: dict[str, Any], key: str, where: str) -> Any:
@@ -382,6 +405,44 @@ def parse_config(raw: dict[str, Any]) -> Config:
             )
     if mode == "live" and control is None:
         raise ConfigError('真單模式（mode = "live"）一定要設 [control]（遠端緊急停止，D-225）')
+    agent = None
+    if "agent" in raw:
+        a = raw["agent"]
+        arm = _need(a, "arm_at_open", "agent")
+        if not isinstance(arm, bool):
+            raise ConfigError(f"[agent] arm_at_open 要是 true 或 false：{arm!r}")
+        agent = AgentConfig(
+            arm_at_open=arm,
+            trader_start=_clock(_need(a, "trader_start", "agent"), "agent.trader_start"),
+            restart_wait_s=float(_need(a, "restart_wait_s", "agent")),
+            restart_wait_max_s=float(_need(a, "restart_wait_max_s", "agent")),
+            steady_s=float(_need(a, "steady_s", "agent")),
+        )
+        if mode == "live" and agent.arm_at_open:
+            raise ConfigError("真單模式不准設 [agent] arm_at_open = true：每天要人按「啟動」才交易")
+        if agent.trader_start >= session.start:
+            raise ConfigError(
+                f"[agent] trader_start={agent.trader_start} 要早於開盤 {session.start}"
+            )
+        if not 0 < agent.restart_wait_s <= agent.restart_wait_max_s or agent.steady_s <= 0:
+            raise ConfigError(f"[agent] 重開的秒數不對（要大於 0，而且最長不能比起始短）：{agent}")
+    watchdog = None
+    if "watchdog" in raw:
+        w = raw["watchdog"]
+        watchdog = WatchdogConfig(
+            check_s=float(_need(w, "check_s", "watchdog")),
+            heartbeat_stale_s=float(_need(w, "heartbeat_stale_s", "watchdog")),
+            tick_stale_s=float(_need(w, "tick_stale_s", "watchdog")),
+            stop_grace_s=float(_need(w, "stop_grace_s", "watchdog")),
+        )
+        if min(watchdog.check_s, watchdog.tick_stale_s, watchdog.stop_grace_s) <= 0:
+            raise ConfigError(f"[watchdog] 的秒數都要大於 0：{watchdog}")
+        # 沒有 [control] 的設定檔照樣讀得進來（重播用不到看門程式）；要跑看門程式時才檢查兩段都在
+        if control is not None and watchdog.heartbeat_stale_s < 2 * control.poll_s:
+            raise ConfigError(
+                "[watchdog] heartbeat_stale_s 至少要是 [control] poll_s 的兩倍"
+                f"（不然正常的間隔也會被當成沒心跳）：{watchdog}"
+            )
     return Config(
         mode=mode,
         contract=contract,
@@ -393,6 +454,8 @@ def parse_config(raw: dict[str, Any]) -> Config:
         control=control,
         notify=notify,
         notify_push=notify_push,
+        agent=agent,
+        watchdog=watchdog,
     )
 
 

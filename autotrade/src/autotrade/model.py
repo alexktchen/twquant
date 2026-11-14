@@ -91,6 +91,11 @@ ACTION_RESUME = "resume"  # 恢復自動交易
 ACTION_START = "start"  # 啟動交易程式（由本機後台執行）
 ACTION_QUIT = "quit"  # 結束交易程式（由本機後台執行）
 ENGINE_ACTIONS = (ACTION_FLATTEN, ACTION_PAUSE, ACTION_RESUME)  # 由 target 那一支交易程式執行
+# 常駐的 agent（A-019／D-231）：網站上的「啟動」「停止」。名字刻意不叫 start／stop——
+# stop 是緊急停止（停手、要人解除），start 是舊的「把程式開起來」，三種不能混
+ACTION_ARM = "arm"  # 啟動：待命 → 運作
+ACTION_STANDBY = "standby"  # 停止：先平倉，再回待命（不是停手，隨時可以再啟動）
+AGENT_ACTIONS = (ACTION_ARM, ACTION_STANDBY)  # 走訊息匯流排，由 target 那一支交易程式執行
 ADMIN_ACTIONS = (ACTION_START, ACTION_QUIT)  # 由後台執行
 
 # 一筆停止會回報兩個階段：先是「收到了、當下怎麼處理」（ack），之後是「最後的結果」（done）
@@ -108,6 +113,7 @@ RESULT_STUCK = "stuck"  # done：停手了但部位沒平掉（暫停送單、�
 RESULT_RELEASED = "released"  # done：已經在電腦上解除，程式可以再交易
 RESULT_PAUSED = "paused"  # 已暫停自動交易
 RESULT_RESUMED = "resumed"  # 已恢復自動交易
+RESULT_ARMED = "armed"  # 已啟動（運作中）
 RESULT_ACCEPTED = "accepted"  # ack：後台收到了，正在做
 RESULT_STARTED = "started"  # done：交易程式啟動了
 RESULT_QUIT = "quit"  # done：交易程式結束了（或本來就沒有在跑）

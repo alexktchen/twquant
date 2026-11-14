@@ -11,10 +11,13 @@ from autotrade.broker.base import Ack, Broker, BrokerEvent, Cancelled, Filled, R
 from autotrade.config import Config
 from autotrade.ledger import Ledger
 from autotrade.model import (
+    ACTION_ARM,
     ACTION_FLATTEN,
     ACTION_PAUSE,
     ACTION_RESUME,
+    ACTION_STANDBY,
     ACTION_STOP,
+    RESULT_ARMED,
     RESULT_CANCELLING,
     RESULT_FLAT,
     RESULT_FLATTENING,
@@ -112,6 +115,8 @@ class Engine:
     _paused: bool = False  # 暫停自動交易（A-016）：策略的進場單不送，出場照常
     _pause_noted: bool = False  # 這次暫停已經記過「略過進場」了（只記第一次，不洗版）
     _flat_asked: bool = False  # 有人要求平倉（不停手）：平掉之前策略的進場單也不送
+    # 待命／運作（A-019）：待命時策略的進場單不送，出場照常。單獨跑（重播、舊的 run）一律是運作
+    _armed: bool = True
 
     def __post_init__(self) -> None:
         self.ledger = Ledger(self.cfg.contract)
@@ -127,6 +132,11 @@ class Engine:
     def paused(self) -> bool:
         """自動交易是不是暫停中（不再進新單）。"""
         return self._paused
+
+    @property
+    def armed(self) -> bool:
+        """是不是運作中（False＝待命：不進新單）。"""
+        return self._armed
 
     @property
     def last_tick(self) -> Tick | None:
@@ -207,12 +217,15 @@ class Engine:
                 self._tell_reject(req, "連線中斷")
             return False
         exposure = self.ledger.position + self.oms.pending_signed_qty()
-        blocked = from_strategy and (self._paused or self._flat_asked)
+        quiet = "暫停" if self._paused else None if self._armed else "待命"
+        blocked = from_strategy and (quiet is not None or self._flat_asked)
         if blocked and not is_reducing(exposure, req.signed_qty):
-            why = "自動交易暫停中" if self._paused else "正在平倉"
-            if not (self._paused and self._pause_noted):
-                self._pause_noted = self._paused
-                more = "（暫停期間之後的不再一一記錄）" if self._paused else ""
+            why = {"暫停": "自動交易暫停中", "待命": "待命中（還沒按啟動）"}.get(
+                quiet or "", "正在平倉"
+            )
+            if quiet is None or not self._pause_noted:
+                self._pause_noted = quiet is not None
+                more = f"（{quiet}期間之後的不再一一記錄）" if quiet else ""
                 self._log(now, "reject", f"{why}，不送進場單 {req.side.name} {req.qty} 口{more}")
             self._tell_reject(req, why)
             return False
@@ -333,6 +346,23 @@ class Engine:
         was, self._paused = self._paused, False
         return was
 
+    def arm(self) -> bool:
+        """啟動（A-019）：待命 → 運作。不會解除任何停手或暫停。回傳是不是本來就在運作。"""
+        was, self._armed = self._armed, True
+        return was
+
+    def disarm(self) -> bool:
+        """切到待命，不動部位（每天一開始用）。回傳本來是不是運作中。"""
+        was, self._armed = self._armed, False
+        if was:
+            self._pause_noted = False
+        return was
+
+    def stand_by(self, now: datetime) -> bool:
+        """停止（A-019）：先平倉、再待命。跟 flatten_now 一樣先問券商的部位；回傳帳是不是被改成券商的數字。"""
+        self.disarm()
+        return self.flatten_now(now)
+
     def _note_command(self, cmd: Command, now: datetime, what: str) -> str:
         self._log(
             now,
@@ -368,6 +398,28 @@ class Engine:
         elif self._strategy_off:
             text += "；但策略已經關閉（部位被修正過），要重新啟動程式才會再交易"
         self._finish_at_once(cmd, now, RESULT_RESUMED, f"{text}{when}")
+
+    def _apply_arm(self, cmd: Command, now: datetime) -> None:
+        was = self.arm()
+        when = self._note_command(cmd, now, "遠端啟動")
+        text = "本來就在運作中" if was else "已啟動：開始自動交易"
+        if self.risk.halt is not None:
+            text += f"；但程式目前是停手狀態（{self.risk.halt}），啟動不會解除停手"
+        elif self._strategy_off:
+            text += "；但策略已經關閉（部位被修正過），要重新啟動程式才會再交易"
+        elif self._paused:
+            text += "；但自動交易還在暫停中，要按「恢復」才會進新單"
+        self._finish_at_once(cmd, now, RESULT_ARMED, f"{text}{when}")
+
+    def _apply_standby(self, cmd: Command, now: datetime) -> None:
+        corrected = self.stand_by(now)
+        when = self._note_command(cmd, now, "遠端停止（平倉後待命）")
+        self._stops[cmd.id] = _StopTrack(cmd.created_at, True, now, action=ACTION_STANDBY)
+        code, text = self._stop_state(halted=False)
+        prefix = "券商的部位跟帳上不一樣，已改用券商的數字並停手；" if corrected else ""
+        self._control_out.append(
+            CommandResult(cmd.id, STAGE_ACK, code, f"{prefix}已切到待命，不再進新單；{text}{when}")
+        )
 
     def _finish_at_once(self, cmd: Command, now: datetime, code: str, text: str) -> None:
         self._stops[cmd.id] = _StopTrack(cmd.created_at, True, now, done=code, action=cmd.action)
@@ -410,8 +462,8 @@ class Engine:
         timeout = None if self.cfg.control is None else self.cfg.control.flatten_timeout_s
         where = self._position_text()
         for command_id, track in self._stops.items():
-            if track.action not in (ACTION_STOP, ACTION_FLATTEN):
-                continue  # 暫停／恢復一執行就回報完了
+            if track.action not in (ACTION_STOP, ACTION_FLATTEN, ACTION_STANDBY):
+                continue  # 暫停／恢復／啟動一執行就回報完了
             if not track.applied or track.done in (RESULT_FLAT, RESULT_RELEASED):
                 continue
             if track.applied_at is None:
@@ -454,6 +506,10 @@ class Engine:
                 self._apply_pause(cmd, now)
             elif cmd.action == ACTION_RESUME:
                 self._apply_resume(cmd, now)
+            elif cmd.action == ACTION_ARM:
+                self._apply_arm(cmd, now)
+            elif cmd.action == ACTION_STANDBY:
+                self._apply_standby(cmd, now)
             else:
                 self._ignore_command(cmd, now, f"不認得的動作 {cmd.action!r}，沒有執行")
         self._follow_stops(now)
@@ -645,7 +701,7 @@ class Engine:
             if self._flat_asked and not self.oms.working():
                 self._flat_asked = False  # 平掉了：策略可以再進場
                 for track in self._stops.values():
-                    if track.action == ACTION_FLATTEN and track.done is None:
+                    if track.action in (ACTION_FLATTEN, ACTION_STANDBY) and track.done is None:
                         track.flat = True
 
         if not self._strategy_off:

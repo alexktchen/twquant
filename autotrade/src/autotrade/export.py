@@ -165,6 +165,7 @@ def snapshot(
         "state": state_of(engine),
         "halt": engine.risk.halt,
         "paused": engine.paused,
+        "armed": engine.armed,
         "position": engine.ledger.position,
         "avg_price": engine.ledger.avg_price,
         "last_price": last.price,

@@ -6,19 +6,24 @@ import argparse
 import json
 import os
 import sys
+import time as time_module
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
 
+from autotrade.agent import WATCHDOG_DIR, AgentSetup, Supervisor, day_plan
+from autotrade.agent import run as run_supervisor
 from autotrade.bell import PgBell, open_bell
 from autotrade.broker.sim import SimBroker
 from autotrade.config import Config, ConfigError, load_config
+from autotrade.control import FileControl
 from autotrade.delivery import (
     ENV_CHAT,
     ENV_TOKEN,
     ENV_VAPID,
     Failure,
     Outbox,
+    Outgoing,
     PrintSender,
     PushPost,
     Sender,
@@ -38,13 +43,14 @@ from autotrade.feed.recorded import read_recorded_day
 from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.model import TAIPEI
-from autotrade.notify import Channel, Level, Notifier, Report, sample, where_of
+from autotrade.notify import Channel, Level, Message, Notifier, Report, sample, where_of
 from autotrade.relay import RELAY_NAMES, Relay, open_pg, run
 from autotrade.runner import Runner, paced_clock, wall_clock
 from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
 from autotrade.tickrelay import TickRelay, fubon_symbol, open_tick_db
 from autotrade.tickrelay import run as run_tick_relay
+from autotrade.watchdog import Alert, SimWatchBroker, Watchdog
 
 STRATEGIES = ("none", "momentum")
 FEEDS = ("taifex", "recorded")
@@ -266,16 +272,21 @@ def run_relay(
     once: bool,
     bell: bool = False,
     bell_port: int | None = None,
+    bus: bool = False,
 ) -> None:
     """跑中繼程式：資料庫 ↔ 本機資料夾裡的指令檔與回報檔。跟交易程式是不同的程序。
 
     bell（A-015）：另外開一條連線聽資料庫的通知，有新的指令就馬上跑一輪；bell_port 是聽的時候改連的埠。
+    bus（A-019）：也接訊息匯流排——拿「啟動／停止」、把結果寫回去。只有交易程式那一支可以開。
     """
     cfg = load_config(config)
     if cfg.control is None:
         raise ConfigError("設定檔沒有 [control]，沒有東西要中繼")
     if not folder.is_dir():
         raise FileNotFoundError(f"資料夾不存在：{folder}")
+    name = consumer or cfg.mode
+    if bus and name not in ("sim", "live"):
+        raise ValueError(f"--bus 只給交易程式那一支中繼（sim／live），不給 {name}")
     dsn = os.environ.get(dsn_env)
     if not dsn and env_file is not None:
         dsn = env_value(env_file.read_text(encoding="utf-8"), dsn_env)
@@ -290,11 +301,22 @@ def run_relay(
     def ensure() -> None:
         db.ensure()
         db.ensure_requests()  # 遙控指令的表（A-016）；編號用指令表的序號，所以排在後面
+        if bus:
+            db.ensure_bus()  # 訊息匯流排（A-019）
         if doorbell is not None:
             db.ensure_bell()  # 建表的時候順便把門鈴的觸發器建好
+            if bus:
+                db.ensure_bus_bell()
 
     relay = Relay(
-        db, consumer or cfg.mode, folder, cfg.control.poll_s, status, ensure=ensure, requests=db
+        db,
+        name,
+        folder,
+        cfg.control.poll_s,
+        status,
+        ensure=ensure,
+        requests=db,
+        bus=db if bus else None,
     )
     try:
         run(relay, once=once, bell=doorbell)
@@ -321,9 +343,14 @@ def run_trade(
     notify_log: Path | None = None,
     push_subs: Path | None = None,
     release_stop: bool = False,
+    agent: bool = False,
 ) -> int:
     """跑模擬交易程式（A-014）：盤中跟著行情檔（--ticks-file），或回放錄好的一天（--play）。正常結束回 0。"""
     cfg = load_config(config)
+    if agent and cfg.agent is None:
+        raise ConfigError("設定檔沒有 [agent]，不能用 --agent")
+    if agent and play is not None:
+        raise ValueError("--agent 是盤中常駐用的，不能配 --play（回放）")
     if (ticks_file is None) == (play is None):
         raise ValueError("--ticks-file（盤中跟著讀）與 --play（回放錄好的一天）要給其中一個")
     if push_subs is not None and notify is None:
@@ -363,8 +390,130 @@ def run_trade(
         notifier=notifier,
         release_stop=release_stop,
         status_every_s=every,
+        standby_at_start=agent and cfg.agent is not None and not cfg.agent.arm_at_open,
     )
     return 0 if runner.run().ok else 1
+
+
+def open_alerter(
+    cfg: Config, mode: str, env_file: Path | None, notify_log: Path | None
+) -> tuple[Alert, Callable[[], None]]:
+    """看門程式的通知：一律是「要處理」那一級、不節流（它每種狀況只講一次）。回傳（送、收工）。"""
+    if cfg.notify is None:
+        raise ConfigError("設定檔沒有 [notify]，不能開通知")
+    if mode not in NOTIFY_MODES:
+        raise ValueError(f"不認得的通知方式：{mode!r}（可用：{NOTIFY_MODES}）")
+    sender: Sender = (
+        PrintSender()
+        if mode == "print"
+        else telegram_from_env(read_env((ENV_TOKEN, ENV_CHAT), env_file), cfg.notify)
+    )
+    outbox = Outbox.from_config(sender, cfg.notify, on_failure=failure_writer(notify_log))
+    outbox.start()
+    where, wait_s = where_of(cfg, False), cfg.notify.close_wait_s
+
+    def alert(ts: datetime, head: str, lines: Sequence[str]) -> None:
+        message = Message(
+            ts, "watchdog", Level.ACT, None, False, where, f"看門程式：{head}", tuple(lines)
+        )
+        outbox.put(Outgoing(message.ts, message.title, message.text, False))
+
+    return alert, lambda: outbox.close(wait_s)
+
+
+def run_watchdog(
+    config: Path,
+    folder: Path,
+    ticks_file: Path,
+    status: Path,
+    notify: str | None,
+    env_file: Path | None,
+    notify_log: Path | None,
+) -> None:
+    """跑獨立看門程式（A-020）：盯交易程式的心跳、行情、部位，與沒人回報的遠端停止。"""
+    cfg = load_config(config)
+    if cfg.watchdog is None or cfg.control is None:
+        raise ConfigError("設定檔沒有 [watchdog] 與 [control]，不能跑看門程式")
+    if cfg.mode != "sim":
+        raise ConfigError(
+            "看門程式現在只有模擬的：真單要等元大的下單接上（A-009）才有自己的券商連線"
+        )
+    own = folder / WATCHDOG_DIR
+    if not folder.is_dir() or not own.is_dir():
+        raise FileNotFoundError(f"資料夾不存在：{own}")
+    alert: Alert = lambda ts, head, lines: None  # noqa: E731
+    finish: Callable[[], None] = lambda: None  # noqa: E731
+    if notify is not None:
+        alert, finish = open_alerter(cfg, notify, env_file, notify_log)
+    dog = Watchdog(
+        cfg,
+        folder,
+        ticks_file,
+        status,
+        SimWatchBroker(),
+        FileControl(own, cfg.control.stale_s),
+        alert,
+    )
+    print(
+        f"看門程式開始：盯 {folder}（心跳 {cfg.watchdog.heartbeat_stale_s:g} 秒、"
+        f"行情 {cfg.watchdog.tick_stale_s:g} 秒、遠端停止等主程式 {cfg.watchdog.stop_grace_s:g} 秒）。"
+        "模擬：沒有另一個帳可以對，出事時只能要求交易程式停手。"
+    )
+    try:
+        while True:
+            dog.step(wall_clock())
+            time_module.sleep(cfg.watchdog.check_s)
+    except KeyboardInterrupt:
+        print("看門程式停止")
+    finally:
+        finish()
+
+
+def run_agent(
+    config: Path,
+    base: Path,
+    strategy: str,
+    ms_repo: Path | None,
+    dsn_env: str,
+    ticks_dsn_env: str,
+    env_file: Path | None,
+    bell_port: int | None,
+    notify: str | None,
+) -> int:
+    """跑常駐的交易 agent（A-019）：行情中繼、指令中繼、交易程式、看門程式一起開，一直顧著。"""
+    cfg = load_config(config)
+    if cfg.agent is None or cfg.watchdog is None or cfg.control is None:
+        raise ConfigError("常駐的 agent 要設定檔有 [agent]、[watchdog]、[control]")
+    if cfg.mode != "sim":
+        raise ConfigError("常駐的 agent 現在只跑模擬：真單要等元大的行情與下單接上（A-008、A-009）")
+    if not base.is_dir():
+        raise FileNotFoundError(f"資料夾不存在：{base}")
+    setup = AgentSetup(
+        python=sys.executable,
+        config=config.resolve(),
+        base=base.resolve(),
+        strategy=strategy,
+        mode=cfg.mode,
+        dsn_env=dsn_env,
+        ticks_dsn_env=ticks_dsn_env,
+        ms_repo=ms_repo,
+        env_file=env_file,
+        bell_port=bell_port,
+        notify=notify,
+    )
+    agent_cfg, session_end = cfg.agent, cfg.session.end
+    supervisor = Supervisor(
+        agent_cfg,
+        lambda day: day_plan(setup, agent_cfg, session_end, day),
+        workdir=Path(__file__).resolve().parents[2],
+    )
+    start = "每天一開始就運作" if agent_cfg.arm_at_open else "每天從待命開始，要按「啟動」才交易"
+    print(
+        f"交易 agent 開始（{cfg.contract.symbol}、策略 {strategy}、模擬）：{start}。"
+        f"交易程式每天 {agent_cfg.trader_start:%H:%M} 開。紀錄在 {base} 底下每天一個資料夾。Ctrl+C 結束。"
+    )
+    run_supervisor(supervisor)
+    return 0
 
 
 def run_ticks(
@@ -621,6 +770,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=int,
         help="聽門鈴時改連這個埠（Supabase 的連線池要 5432；平常用的 6543 聽不到）",
     )
+    relay.add_argument(
+        "--bus", action="store_true", help="也接訊息匯流排：拿啟動／停止、把結果寫回去（A-019）"
+    )
     trade = sub.add_parser(
         "run", help="模擬交易程式：盤中跟著行情跑策略、聽遠端緊急停止、把狀態寫給網站"
     )
@@ -645,6 +797,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     trade.add_argument(
         "--release-stop", action="store_true", help="解除今天稍早按過的遠端緊急停止，照常交易"
     )
+    trade.add_argument(
+        "--agent",
+        action="store_true",
+        help="由常駐的 agent 開的：照 [agent] 決定今天從待命還是運作開始",
+    )
+    agent = sub.add_parser("agent", help="常駐的交易 agent：把行情、指令、交易、看門一起開起來顧著")
+    agent.add_argument("--config", type=Path, required=True)
+    agent.add_argument("--dir", type=Path, required=True, help="資料夾（絕對路徑）；底下每天一個")
+    agent.add_argument("--strategy", choices=sorted(STRATEGIES), required=True)
+    agent.add_argument("--ms-repo", type=Path, help="網友原版 Momentum_Scalping 的資料夾")
+    agent.add_argument(
+        "--dsn-env", required=True, help="指令中繼連的資料庫：放連線字串的環境變數名稱"
+    )
+    agent.add_argument(
+        "--ticks-dsn-env", default="TWQUANT_PG_DSN", help="行情中繼讀的資料庫（富邦錄的逐筆）"
+    )
+    agent.add_argument("--env-file", type=Path, help="環境變數沒設時，從這個 .env 讀")
+    agent.add_argument("--bell-port", type=int, help="聽門鈴時改連這個埠（Supabase 連線池用 5432）")
+    agent.add_argument("--notify", choices=sorted(NOTIFY_MODES), help="發通知：send＝真的送")
+    watch = sub.add_parser(
+        "watchdog", help="獨立看門程式：盯交易程式的心跳、行情、沒人回報的遠端停止"
+    )
+    watch.add_argument("--config", type=Path, required=True)
+    watch.add_argument("--dir", type=Path, required=True, help="交易程式的資料夾（絕對路徑）")
+    watch.add_argument("--ticks-file", type=Path, required=True)
+    watch.add_argument("--status", type=Path, required=True)
+    watch.add_argument("--notify", choices=sorted(NOTIFY_MODES))
+    watch.add_argument("--env-file", type=Path)
+    watch.add_argument("--notify-log", type=Path)
     ticks = sub.add_parser(
         "ticks", help="行情中繼：本機資料庫裡富邦錄的逐筆 → 檔案，給交易程式跟著讀"
     )
@@ -757,7 +938,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             notify_log=args.notify_log,
             push_subs=args.push_subs,
             release_stop=args.release_stop,
+            agent=args.agent,
         )
+    if args.command == "agent":
+        return run_agent(
+            args.config,
+            args.dir,
+            args.strategy,
+            args.ms_repo,
+            args.dsn_env,
+            args.ticks_dsn_env,
+            args.env_file,
+            args.bell_port,
+            args.notify,
+        )
+    if args.command == "watchdog":
+        run_watchdog(
+            args.config,
+            args.dir,
+            args.ticks_file,
+            args.status,
+            args.notify,
+            args.env_file,
+            args.notify_log,
+        )
+        return 0
     if args.command == "ticks":
         run_ticks(
             args.config,
@@ -795,6 +1000,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.once,
             bell=args.bell,
             bell_port=args.bell_port,
+            bus=args.bus,
         )
         return 0
     if args.command == "verify-journal":
