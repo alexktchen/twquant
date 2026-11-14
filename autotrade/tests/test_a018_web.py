@@ -52,8 +52,10 @@ def test_ac1_the_site_only_ever_adds_a_stop_or_a_request() -> None:
         text = path.read_text(encoding="utf-8")
         writes += re.findall(r"INSERT INTO [\w.]+", text)
         assert not re.search(r"DELETE FROM|TRUNCATE|DROP |UPDATE\s+web\.", text), path.name
+    # D-231（2026-11-14）：使用者要「啟動／停止」也從網站下、走訊息匯流排，所以多了第三種列（只會是「指令」）
     assert sorted(writes) == [
         "INSERT INTO web.autotrade_commands",
+        "INSERT INTO web.autotrade_messages",
         "INSERT INTO web.autotrade_requests",
     ]
 

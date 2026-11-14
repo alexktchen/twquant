@@ -38,7 +38,7 @@ python tools/run.py admin --config-dir configs --data-dir D:/t/autotrade --recor
 - **門鈴**：網站一有新的停止，資料庫會馬上通知指令中繼，不必等它每 2 秒問一次（輪詢照舊留著當備援）。
   指令中繼的輸出裡看得到「門鈴接上了」；寫「門鈴聽不到」時遠端停止照樣有效，只是回到最慢約 4 秒。
   雲端資料庫要聽的埠跟平常不一樣，所以啟動後台時要帶 `--bell-port TWQUANT_SUPABASE_DSN=5432`。
-- **常駐的交易 agent（A-019、A-020，2026-11-14；網站的按鈕還沒做）**：`python tools/run.py agent --config … --dir <資料夾> --strategy momentum --dsn-env TWQUANT_SUPABASE_DSN --bell-port 5432`（會連雲端，請自己執行）一次開行情中繼、指令中繼、交易程式、看門程式並顧著。每天從**待命**開始，要按「啟動」才交易；「停止」是平倉後回待命。設定在 `[agent]`、`[watchdog]`。細節看 SPEC A-019、A-020。
+- **常駐的交易 agent（A-019、A-020，2026-11-14）**：`python tools/run.py agent --config … --dir <資料夾> --strategy momentum --dsn-env TWQUANT_SUPABASE_DSN --bell-port 5432`（會連雲端，請自己執行）一次開行情中繼、指令中繼、交易程式、看門程式並顧著。每天從**待命**開始，要按「啟動」才交易；「停止」是平倉後回待命；兩個網站的按鈕列最前面那一顆就是它。設定在 `[agent]`、`[watchdog]`。細節看 SPEC A-019、A-020。
 - **程式交易有自己的網站了**（A-018）：程式在 `web/`，上線步驟看 [web/README.md](web/README.md)。twquant 網站上原本的分頁等新網站驗過再拿掉。
 - **網站上的遙控按鈕**（台指期 → 程式交易，緊急停止下面那一排；每一顆都要按兩次）：
   - **平倉**：把部位平掉，自動交易不停。**暫停／恢復自動交易**：暫停＝不再進新單，手上的部位照原規則出場。

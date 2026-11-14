@@ -5,6 +5,7 @@
 import { admit } from '../../_lib/access'
 import { fail, guarded, type Env } from '../../_lib/db'
 import { AUTOTRADE_DAYS_LIMIT, controlView, envelope, modeOk, taipeiToday, type AutotradeDayRow } from '../../_lib/autotrade'
+import { busView, withBus } from '../../_lib/autotrade_bus'
 import { requestsView } from '../../_lib/autotrade_remote'
 import { dayOk, rawJson, readRows } from '../../_lib/http'
 
@@ -28,7 +29,9 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
     const control = await readRows(() => controlView(db, taipeiToday(Date.now())))
     // 遙控指令（A-016）：今天最近幾筆與後台的心跳；表還沒建就整段不回
     const remote = await readRows(() => requestsView(db, taipeiToday(Date.now())))
-    return rawJson(envelope(days, rows[0]?.body ?? null, control[0] ?? null, remote[0] ?? null))
+    // 啟動／停止（A-019）在另一張表：併進同一份清單；那張表還沒建就只有原本的
+    const bus = await readRows(() => busView(db, taipeiToday(Date.now())))
+    return rawJson(envelope(days, rows[0]?.body ?? null, control[0] ?? null, withBus(remote[0] ?? null, bus[0] ?? null)))
   })
 }
 
