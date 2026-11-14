@@ -1,0 +1,134 @@
+# autotrade A-018／D-230：程式交易的遙控網站（autotrade/web）部署到 Cloudflare Pages，專案名 twquant-autotrade。
+# 從 twquant 網站拉出來的獨立網站：只有程式交易的狀態、緊急停止、遙控按鈕。
+# 需要的 repo secrets（前兩個跟 deploy-web.yml 共用）：
+#   CLOUDFLARE_API_TOKEN     Cloudflare 自訂 token，權限 Account › Cloudflare Pages › Edit
+#   CLOUDFLARE_ACCOUNT_ID    Cloudflare 帳號 ID
+#   AUTOTRADE_ACCESS_AUD     選填：這個網站那個 Cloudflare Access 應用的 AUD 標籤；有設就寫進 Pages 的祕密 ACCESS_AUD
+#   AUTOTRADE_ADMINS         選填：可以用這個網站的 email（逗號分隔）；有設就寫進 Pages 的祕密 AUTOTRADE_ADMINS
+# 後兩個沒設在這裡的話，要自己用 `npx wrangler pages secret put` 寫進去——沒寫之前整個網站是關著的（每支 API 回 503）。
+# 資料庫走 autotrade/web/wrangler.toml 裡的 Hyperdrive（跟 twquant 網站同一個），這裡不用給連線字串。
+# main 上 autotrade/web 有改動就自動部署；也可在 Actions 頁手動觸發。
+name: deploy-autotrade-web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "autotrade/web/**"
+      - ".github/workflows/deploy-autotrade-web.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-autotrade-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: autotrade/web
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROJECT: twquant-autotrade
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 檢查祕密
+        id: secrets
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::warning::缺少 repo secrets:$missing——本次不自動部署"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.secrets.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: autotrade/web/package-lock.json
+
+      - run: npm ci
+        if: steps.secrets.outputs.ok == 'true'
+
+      - name: 單元測試
+        if: steps.secrets.outputs.ok == 'true'
+        run: npm test
+
+      - name: 建置
+        if: steps.secrets.outputs.ok == 'true'
+        run: npm run build
+
+      - name: Pages 專案（不存在才建）
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          if npx --yes wrangler@4 pages project list | grep -qw "$PROJECT"; then
+            echo "專案 $PROJECT 已存在"
+          else
+            npx --yes wrangler@4 pages project create "$PROJECT" --production-branch main
+          fi
+
+      - name: 登入的設定（選填；沒設的話要自己寫進 Pages）
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          AUD: ${{ secrets.AUTOTRADE_ACCESS_AUD }}
+          ADMINS: ${{ secrets.AUTOTRADE_ADMINS }}
+        run: |
+          if [ -n "$AUD" ]; then
+            printf '%s' "$AUD" | npx --yes wrangler@4 pages secret put ACCESS_AUD --project-name "$PROJECT"
+          else
+            echo "::warning::沒有 AUTOTRADE_ACCESS_AUD：Pages 上沒有 ACCESS_AUD 的話，整個網站是關著的"
+          fi
+          if [ -n "$ADMINS" ]; then
+            printf '%s' "$ADMINS" | npx --yes wrangler@4 pages secret put AUTOTRADE_ADMINS --project-name "$PROJECT"
+          else
+            echo "::warning::沒有 AUTOTRADE_ADMINS：Pages 上沒有 AUTOTRADE_ADMINS 的話，整個網站是關著的"
+          fi
+
+      - name: 部署
+        if: steps.secrets.outputs.ok == 'true'
+        id: deploy
+        run: |
+          set -o pipefail
+          npx --yes wrangler@4 pages deploy dist --project-name "$PROJECT" --branch main | tee deploy.log
+          url=$(grep -oE "https://[a-z0-9.-]+\.pages\.dev" deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error::部署輸出裡找不到網址"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### 網站：$url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 部署後檢查：沒登入的人什麼都拿不到
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          # 用這一次部署自己的網址查（不經過正式網址前面的 Access）：端點自己就要把沒登入的人擋下來。
+          url="${{ steps.deploy.outputs.url }}"
+          # 這個網站能叫交易程式停止、平倉、啟動：沒登入就回 200 等於門沒鎖 → 部署檢查失敗。
+          # 正常是 401／403（權杖驗不過／不在名單）、503（登入還沒設定好，網站關著）、或 302（Access 把人帶去登入）。
+          for path in "/api/me" "/api/autotrade?mode=sim"; do
+            code=""
+            for i in 1 2 3 4 5 6; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$url$path" || true)
+              case "$code" in 302|401|403|503) break ;; esac
+              sleep 5
+            done
+            echo "$path → $code"
+            case "$code" in
+              302|401|403|503) ;;
+              *) echo "::error::$path 沒登入卻回 $code（應該被擋）"; exit 1 ;;
+            esac
+          done
+          for path in "/api/autotrade/stop" "/api/autotrade/command"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -H 'content-type: application/json' -d '{"confirm":"stop"}' "$url$path" || true)
+            echo "PUT $path → $code"
+            case "$code" in
+              302|400|401|403|503) ;;
+              *) echo "::error::PUT $path 沒登入卻回 $code（應該被擋）"; exit 1 ;;
+            esac
+          done

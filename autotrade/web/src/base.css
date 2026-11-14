@@ -1,0 +1,99 @@
+/* 程式交易的遙控網站（autotrade A-018）：整頁的底色、字、共用的卡片與數字塊。
+   顏色與尺寸跟 twquant 網站的台指期那一頁一樣（地鐵告示：顏色分類、字夠大），autotrade.css 才能原封不動搬過來。 */
+html, body { margin: 0; background: #0e0f14; }
+.cq {
+  --bg: #0e0f14;
+  --panel: #15161c;
+  --line: #23252d;
+  --text: #e6e7eb;
+  --mute: #8a8f98;
+  --accent: #ff7a00;
+  --up: #f6465d;
+  --down: #0ecb81;
+  --tile: #1c1e26;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
+  font-size: 16px;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.cq button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* 最上面那一條：網站名字、登入的是誰、重新整理 */
+.cq-top {
+  display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px;
+  padding-top: env(safe-area-inset-top, 0px); border-bottom: 1px solid var(--line);
+}
+.cq-brand { font-weight: 700; font-size: 19px; letter-spacing: .3px; }
+.cq-who { margin-left: auto; color: var(--mute); font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-who + .cq-reload { margin-left: 0; }
+.cq .cq-reload { margin-left: auto; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 8px; color: var(--mute); }
+.cq .cq-reload:hover { color: var(--text); background: #262830; }
+
+/* 進不去的時候：原因＋重新整理 */
+.cq-gate {
+  display: flex; flex-direction: column; gap: 8px; max-width: 520px; padding: 14px 16px; border-radius: 12px; font-size: 16px;
+  background: color-mix(in srgb, #ff5a4f 12%, var(--bg)); border: 1px solid color-mix(in srgb, #ff5a4f 50%, transparent);
+}
+.cq-gate b { font-size: 19px; }
+.cq .cq-gate button { align-self: flex-start; min-height: 44px; padding: 0 18px; border-radius: 10px; background: var(--tile); border: 1px solid var(--line); font-size: 16px; }
+
+/* 整頁的排版：一欄，手機寬度優先 */
+.cq-fu { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 32px; min-height: 0; width: 100%; max-width: 760px; margin: 0 auto; box-sizing: border-box; }
+.cq-fu > * { flex: none; }
+
+.cq-err { margin: 0; padding: 8px 12px; border-radius: 6px; background: #3a1c22; color: #ffb4bd; font-size: 15px; }
+.cq-empty { color: var(--mute); font-size: 14px; padding: 18px 14px; margin: 0; text-align: center; }
+
+/* 模擬／真單的切換 */
+.cq-seg { display: flex; gap: 6px; padding: 12px; }
+.cq-seg button { flex: 1; padding: 8px 0; border-radius: 6px; background: var(--bg); color: var(--mute); font-size: 15px; }
+.cq-seg button.on { background: rgba(255, 122, 0, .14); color: var(--accent); font-weight: 600; }
+
+/* 選日期 */
+.cq-fu-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mute); }
+.cq-fu-pick select {
+  flex: 1; max-width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font-size: 15px;
+}
+
+/* 一塊一塊的區段（今日成交、今日大事、每天的成績） */
+.cq-sec { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.cq-sec-head { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 15.5px; }
+.cq-sec-head > b { font-weight: 700; white-space: nowrap; }
+.cq-sec-icon { color: var(--accent); flex: none; }
+.cq-sec-meta { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--mute); min-width: 0; text-align: right; }
+.cq-sec-body { margin-top: 10px; }
+.cq-sec-fold > summary { list-style: none; cursor: pointer; }
+.cq-sec-fold > summary::-webkit-details-marker { display: none; }
+.cq-sec-fold > summary::after { content: '▾'; color: var(--mute); font-size: 13px; margin-left: 4px; }
+.cq-sec-fold[open] > summary::after { content: '▴'; }
+.cq-sec-fold:not([open]) { padding-top: 10px; padding-bottom: 10px; }
+
+/* 數字塊 */
+.cq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.cq-tiles + .cq-tiles { margin-top: 8px; }
+.cq-tiles-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cq-kpi { background: var(--tile); border: 1px solid transparent; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cq-kpi-label { font-size: 13.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cq-kpi-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+.cq-kpi-value { font-size: 24px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cq-kpi-value.hot { color: var(--accent); }
+.cq-kpi-value.warn { color: #ffc04d; }
+.cq-kpi-value.na { color: var(--mute); }
+.cq-kpi-value.up { color: var(--up); }
+.cq-kpi-value.down { color: var(--down); }
+.cq-kpi-sub { font-size: 12.5px; color: var(--mute); }
+
+/* 小標籤（商品、策略） */
+.cq-cat { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 600; white-space: nowrap; font-style: normal; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); }
+.cq-cat-mute { --c: #9aa0ac; }
+
+@media (max-width: 640px) {
+  .cq-sec { padding: 12px; }
+}
