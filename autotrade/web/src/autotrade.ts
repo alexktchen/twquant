@@ -20,6 +20,8 @@ export type AutoStatus = {
   halt: string | null
   /** 自動交易是不是暫停中（不再進新單，A-016）；舊版的狀態沒有這一欄 */
   paused?: boolean
+  /** 常駐的 agent（A-019）：true＝運作中、false＝待命（不進新單）；舊的狀態沒有這一欄 */
+  armed?: boolean
   position: number
   avg_price: number
   last_price: number
@@ -53,7 +55,7 @@ export type StopCommand = { id: string; day: string; created_at: string; age_s: 
 /** 一支程式的心跳：中繼程式幾秒前回報、交易程式幾秒前讀過指令（沒讀過是 null）、多久讀一次、今天有沒有出現過。 */
 export type ListenerBeat = { relay_age_s: number; engine_age_s: number | null; poll_s: number; seen_today: boolean }
 /** 遙控指令（A-016、A-017／D-229）：平倉、暫停／恢復自動交易由交易程式執行，啟動／結束由本機後台執行。 */
-export type RemoteAction = 'flatten' | 'pause' | 'resume' | 'start' | 'quit'
+export type RemoteAction = 'flatten' | 'pause' | 'resume' | 'start' | 'quit' | 'arm' | 'standby'
 /** 今天的一筆遙控指令與接手的程式回報的結果（還沒有是 null）。age_s／ack_age_s＝伺服器算的「到現在幾秒」。 */
 export type RemoteRequest = {
   id: string
@@ -249,6 +251,8 @@ export const ACTION_NAME: Record<RemoteAction, string> = {
   resume: '恢復自動交易',
   start: '啟動交易程式',
   quit: '結束交易程式',
+  arm: '啟動',
+  standby: '停止',
 }
 /** 確認時講清楚按下去會怎樣。 */
 export const ACTION_CONFIRM: Record<RemoteAction, string> = {
@@ -257,13 +261,15 @@ export const ACTION_CONFIRM: Record<RemoteAction, string> = {
   resume: '可以再進場。不會解除緊急停止。',
   start: '用電腦上指定的那一份設定、今天的即時行情啟動。今天按過緊急停止的話，啟動之後一樣是停手的。',
   quit: '交易程式會結束，今天不再交易。',
+  arm: '從待命切到運作：有訊號就會進場。不會解除緊急停止，也不會解除暫停。',
+  standby: '先把部位平掉，再回待命：不再進新單，程式繼續開著，隨時可以再按啟動。',
 }
 /** 按下超過這麼多秒沒有程式接手就作廢。要跟伺服器的 REQUEST_TTL_S 一樣。 */
 export const REQUEST_TTL_S = 30
 /** 程式收到之後超過這麼多秒還沒做完，就標紅。 */
 export const REQUEST_LATE_S = 60
 /** 最後的結果裡，這幾種是「做到了」；其他的（含不認得的）都當成要人處理。 */
-export const REQUEST_OK: ReadonlySet<string> = new Set(['flat', 'paused', 'resumed', 'started', 'quit'])
+export const REQUEST_OK: ReadonlySet<string> = new Set(['flat', 'paused', 'resumed', 'started', 'quit', 'armed'])
 /** 一個分頁最多顯示最近幾筆。 */
 export const REQUESTS_PER_TAB = 3
 
@@ -278,9 +284,18 @@ export type RemoteButton = { action: RemoteAction; label: string; enabled: boole
 
 /**
  * 這個分頁（模擬或真單）現在有哪幾顆按鈕、能不能按；不能按的寫原因。
- * 平倉、暫停／恢復要那一支交易程式在聽；啟動／結束要後台在聽。known＝畫面上的狀態夠新（不夠新就都不能按，不猜）。
+ * 平倉、暫停／恢復要那一支交易程式在聽；啟動／結束交易程式要後台在聽。known＝畫面上的狀態夠新（不夠新就都不能按，不猜）。
+ * armed（A-019）：true＝運作中、false＝待命、null＝還不知道（今天還沒有狀態）；undefined＝不要那一顆（舊的呼叫方式）。
+ * 啟動／停止要那一支交易程式在聽；還不知道的時候給「啟動」（本來就在運作的話，按了只會回報「本來就在運作中」）。
  */
-export function remoteButtons(mode: AutoMode, beats: AutoEnvelope['listeners'], remote: RemoteBeat | null | undefined, paused: boolean, known: boolean): RemoteButton[] {
+export function remoteButtons(
+  mode: AutoMode,
+  beats: AutoEnvelope['listeners'],
+  remote: RemoteBeat | null | undefined,
+  paused: boolean,
+  known: boolean,
+  armed?: boolean | null,
+): RemoteButton[] {
   const running = known && listening(beats[mode])
   const admin = known && remoteListening(remote)
   const unsure = '狀態不明，先等畫面更新'
@@ -288,11 +303,14 @@ export function remoteButtons(mode: AutoMode, beats: AutoEnvelope['listeners'], 
   const noAdmin = known ? '電腦或本機後台沒開（後台的遙控沒在聽）' : unsure
   const swing: RemoteAction = paused ? 'resume' : 'pause'
   const power: RemoteAction = running ? 'quit' : 'start'
-  return [
+  const old: RemoteButton[] = [
     { action: 'flatten', label: ACTION_NAME.flatten, enabled: running, why: running ? '' : noProgram },
     { action: swing, label: ACTION_NAME[swing], enabled: running, why: running ? '' : noProgram },
     { action: power, label: ACTION_NAME[power], enabled: admin, why: admin ? '' : noAdmin },
   ]
+  if (armed === undefined) return old
+  const go: RemoteAction = armed === true ? 'standby' : 'arm'
+  return [{ action: go, label: ACTION_NAME[go], enabled: running, why: running ? '' : noProgram }, ...old]
 }
 
 export type RequestLine = { id: string; tone: 'wait' | 'done' | 'bad'; label: string; detail: string }
@@ -316,6 +334,16 @@ export function requestLine(req: RemoteRequest, elapsed: number): RequestLine {
   if (age <= REQUEST_TTL_S) return line('wait', '等它收到…', `已經 ${waitText(age)}`)
   return line('bad', '沒有送到，已作廢', `${at} 按下，${REQUEST_TTL_S} 秒內沒有程式接手。還要做請再按一次`)
 }
+
+/** 待命還是運作（A-019）：只有今天、還在跑的那一份狀態才算數；其他情況是 null（不知道）。 */
+export function armedOf(current: AutoStatus | null | undefined, viewingToday: boolean): boolean | null {
+  if (!viewingToday || !current || current.status !== 'live' || typeof current.armed !== 'boolean') return null
+  return current.armed
+}
+
+/** 待命／運作那一行字；不知道就不顯示。 */
+export const armedText = (armed: boolean | null): string | null =>
+  armed === null ? null : armed ? '運作中：有訊號就會進場' : '待命：不會進新單，按「啟動」才交易'
 
 /** 這個分頁最近幾筆遙控指令的進度（新的在前）。 */
 export const requestLines = (requests: readonly RemoteRequest[], mode: AutoMode, elapsed: number): RequestLine[] =>

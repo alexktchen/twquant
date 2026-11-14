@@ -55,6 +55,7 @@ from test_a011_relay import FakeConn, FakeCursor, FakeDb, FakeDbError, inbox
 from test_a014_runner import CONFIG_PATH, DAY, Rig, journal_fills
 from test_a014_runner import at as clock_at
 from test_a016_remote import FakeRequests, rig
+from test_a018_web import LIB, ts_list
 
 AGENT = AgentConfig(
     arm_at_open=False,
@@ -125,6 +126,15 @@ def test_ac1_database_calls_use_the_registered_statements() -> None:
     sql, params = conn.executed[-1]
     assert sql == BUS_REPORT_SQL
     assert list(params) == ["done", "armed", "已啟動", "sim", 41, pressed, "done", "done", "armed"]
+
+
+def test_ac1_ac8_the_website_carries_the_same_table_and_the_same_two_actions() -> None:
+    # twquant 網站（frontend/）那一份由它自己的測試守著（cloud-autotrade-agent.test.ts 裡抄了同一份定義）
+    text = (LIB / "autotrade_bus.ts").read_text(encoding="utf-8")
+    assert ts_list(text, "MESSAGES_DDL") == list(MESSAGES_DDL)
+    assert ts_list(text, "BUS_ACTIONS") == list(BUS_ACTIONS)
+    insert = text.split("INSERT INTO web.autotrade_messages")[1].split("RETURNING")[0]
+    assert "'command'" in insert and "'report'" not in insert  # 網站只寫指令，回報是 agent 寫的
 
 
 # ---- AC3 待命與運作

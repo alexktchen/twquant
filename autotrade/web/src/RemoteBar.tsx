@@ -1,6 +1,6 @@
 // 遙控按鈕（autotrade A-016、A-017／D-229）：平倉、暫停或恢復自動交易、啟動或結束交易程式。
 // 使用者 2026-11-14 要網站不只能叫停。這裡沒有、也不要加：手動買賣、改設定、解除緊急停止。
-import { Minimize2, Pause, Play, Power } from 'lucide-react'
+import { Minimize2, Pause, Play, Power, Rocket, Square } from 'lucide-react'
 import { useState } from 'react'
 import { sendAutotradeCommand } from './api'
 import { ACTION_CONFIRM, MODE_NAME, type AutoEnvelope, type AutoMode, type RemoteAction, type RemoteButton, type RequestLine } from './autotrade'
@@ -9,13 +9,26 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /** 送出遙控指令時伺服器回來的東西：今天最近幾筆與後台的心跳。 */
 export type CommandSent = Pick<AutoEnvelope, 'requests' | 'remote'>
-const ACTION_ICON: Record<RemoteAction, typeof Pause> = { flatten: Minimize2, pause: Pause, resume: Play, start: Power, quit: Power }
+const ACTION_ICON: Record<RemoteAction, typeof Pause> = { flatten: Minimize2, pause: Pause, resume: Play, start: Power, quit: Power, arm: Rocket, standby: Square }
 
 /**
  * 遙控按鈕（A-016、A-017）：平倉、暫停或恢復、啟動或結束。只對現在看的這個分頁（模擬或真單）有效。
  * 按一下只是打開確認，再按一次才送出。該接手的程式沒在聽就不能按，下面寫原因；送出之後顯示這一筆的進度。
  */
-export function RemoteBar({ mode, buttons, lines, onSent }: { mode: AutoMode; buttons: RemoteButton[]; lines: RequestLine[]; onSent: (r: CommandSent) => void }) {
+export function RemoteBar({
+  mode,
+  buttons,
+  lines,
+  onSent,
+  state = null,
+}: {
+  mode: AutoMode
+  buttons: RemoteButton[]
+  lines: RequestLine[]
+  onSent: (r: CommandSent) => void
+  /** 待命／運作那一行字（A-019）；不知道就不給 */
+  state?: string | null
+}) {
   const [asking, setAsking] = useState<RemoteButton | null>(null)
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -33,8 +46,9 @@ export function RemoteBar({ mode, buttons, lines, onSent }: { mode: AutoMode; bu
   const blocked = [...new Set(buttons.filter((b) => !b.enabled).map((b) => b.why))]
   return (
     <div className="cq-at-remote">
+      {state && <p className={`cq-at-remote-state ${state.startsWith('運作') ? 'on' : 'off'}`}>{state}</p>}
       {asking === null ? (
-        <div className="cq-at-remote-btns" role="group" aria-label={`${MODE_NAME[mode]}的遙控`}>
+        <div className={`cq-at-remote-btns n${buttons.length}`} role="group" aria-label={`${MODE_NAME[mode]}的遙控`}>
           {buttons.map((b) => {
             const Icon = ACTION_ICON[b.action]
             return (

@@ -1,7 +1,8 @@
 # autotrade/web——程式交易的遙控網站
 
 從 twquant 網站拉出來的獨立網站（A-018／D-230）。只有一頁：程式交易的狀態、遠端緊急停止、遙控按鈕
-（平倉、暫停／恢復自動交易、啟動／結束交易程式）。
+（啟動／停止、平倉、暫停／恢復自動交易、啟動／結束交易程式）。
+「啟動／停止」（A-019）是叫常駐的交易 agent 在待命與運作之間切換，走訊息表 `web.autotrade_messages`（`functions/_lib/autotrade_bus.ts`）。
 
 - 部署在 Cloudflare Pages，專案名 `twquant-autotrade`；靜態頁面＋`functions/` 底下四支 API。
 - 資料庫跟 twquant 網站同一個（同一個 Hyperdrive），所以本機的交易程式、中繼程式、後台都不用改。
