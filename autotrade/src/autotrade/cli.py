@@ -32,14 +32,18 @@ from autotrade.delivery import (
 from autotrade.drill import Drill, drill_config, load_prices
 from autotrade.engine import Engine, Event
 from autotrade.export import dumps, env_value, snapshot
+from autotrade.feed.follow import FollowFile, PacedTicks, TickSource
 from autotrade.feed.recorded import read_recorded_day
 from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.model import TAIPEI
 from autotrade.notify import Channel, Level, Notifier, Report, sample, where_of
 from autotrade.relay import CONSUMERS, Relay, open_pg, run
+from autotrade.runner import Runner, paced_clock, wall_clock
 from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
+from autotrade.tickrelay import TickRelay, fubon_symbol, open_tick_db
+from autotrade.tickrelay import run as run_tick_relay
 
 STRATEGIES = ("none", "momentum")
 FEEDS = ("taifex", "recorded")
@@ -116,8 +120,13 @@ def open_notifier(
     env_file: Path | None,
     notify_log: Path | None,
     push_subs: Path | None = None,
+    *,
+    replay: bool = True,
 ) -> Notifier:
-    """建立重播用的通知：print 印在畫面上，send 用 .env 的金鑰真的送；給 push_subs 再加網站推播。背景執行緒在這裡開。"""
+    """建立通知：print 印在畫面上，send 用 .env 的金鑰真的送；給 push_subs 再加網站推播。背景執行緒在這裡開。
+
+    replay＝這是不是重播／回放（通知開頭會標出來）；盤中的交易程式傳 False。
+    """
     if cfg.notify is None:
         raise ConfigError("設定檔沒有 [notify]，不能開通知")
     if mode not in NOTIFY_MODES:
@@ -144,7 +153,7 @@ def open_notifier(
     outbox.start()
     for ch in extra:
         ch.outbox.start()
-    return Notifier(cfg, outbox, replay=True, extra=extra)
+    return Notifier(cfg, outbox, replay=replay, extra=extra)
 
 
 def fan_out(sinks: Sequence[Callable[[Event], None]]) -> Callable[[Event], None] | None:
@@ -274,6 +283,100 @@ def run_relay(
         print("中繼程式停止")
 
 
+def run_trade(
+    config: Path,
+    folder: Path,
+    strategy: str,
+    ms_repo: Path | None = None,
+    ticks_file: Path | None = None,
+    play: Path | None = None,
+    day: date | None = None,
+    start: str = "08:44:50",
+    speed: float = 1.0,
+    status: Path | None = None,
+    notify: str | None = None,
+    env_file: Path | None = None,
+    notify_log: Path | None = None,
+    push_subs: Path | None = None,
+    release_stop: bool = False,
+) -> int:
+    """跑模擬交易程式（A-014）：盤中跟著行情檔（--ticks-file），或回放錄好的一天（--play）。正常結束回 0。"""
+    cfg = load_config(config)
+    if (ticks_file is None) == (play is None):
+        raise ValueError("--ticks-file（盤中跟著讀）與 --play（回放錄好的一天）要給其中一個")
+    if push_subs is not None and notify is None:
+        raise ValueError("--push-subs 要配 --notify send")
+    clock, every = wall_clock, 5.0
+    source: TickSource
+    if play is not None:
+        if day is None:
+            raise ValueError("--play 要給 --day（回放哪一天）")
+        if notify == "send":
+            raise ValueError(
+                "回放不發手機通知（那不是現在發生的事）；要看會發什麼用 --notify print"
+            )
+        rows = read_recorded_day(play, day, cfg.session.start, cfg.session.end)
+        first = datetime.combine(day, datetime.strptime(start, "%H:%M:%S").time(), tzinfo=TAIPEI)
+        clock = paced_clock(first, speed)
+        source = PacedTicks(rows)
+        every = 5.0 * speed  # 給網站的狀態照「真的」時間大約每 5 秒寫一次
+    else:
+        assert ticks_file is not None
+        source = FollowFile(ticks_file, wall_clock().date(), cfg.session.start, cfg.session.end)
+    notifier = (
+        open_notifier(cfg, notify, env_file, notify_log, push_subs, replay=play is not None)
+        if notify is not None
+        else None
+    )
+    runner = Runner(
+        cfg,
+        build_strategy(strategy, cfg, ms_repo),
+        source,
+        folder,
+        strategy,
+        clock=clock,
+        status=status,
+        status_source="replay" if play is not None else "live",
+        control=play is None,
+        notifier=notifier,
+        release_stop=release_stop,
+        status_every_s=every,
+    )
+    return 0 if runner.run().ok else 1
+
+
+def run_ticks(
+    config: Path,
+    out: Path,
+    dsn_env: str,
+    env_file: Path | None,
+    day: date | None,
+    symbol: str | None,
+    poll_s: float,
+    once: bool,
+) -> None:
+    """跑行情中繼（A-014）：本機資料庫裡富邦錄的逐筆 → 檔案。跟交易程式是不同的程序。"""
+    cfg = load_config(config)
+    if not out.parent.is_dir():
+        raise FileNotFoundError(f"資料夾不存在：{out.parent}")
+    dsn = os.environ.get(dsn_env)
+    if not dsn and env_file is not None:
+        dsn = env_value(env_file.read_text(encoding="utf-8"), dsn_env)
+    if not dsn:
+        raise ConfigError(f"環境變數 {dsn_env} 沒有設定")
+    day = day or datetime.now(TAIPEI).date()
+    relay = TickRelay(
+        open_tick_db(dsn, timeout_s=10.0),
+        day,
+        symbol or fubon_symbol(cfg.contract.symbol, day),
+        out,
+    )
+    try:
+        run_tick_relay(relay, poll_s, once=once)
+    except KeyboardInterrupt:
+        print("行情中繼停止")
+
+
 def run_notify_test(
     config: Path,
     env_file: Path | None,
@@ -376,6 +479,7 @@ def run_admin(
     port: int,
     open_browser: bool,
     recorded_dir: Path | None = None,
+    ms_repo: Path | None = None,
 ) -> int:
     """開本機後台（只聽 127.0.0.1），按 Ctrl+C 結束；結束時把還在跑的演練一起停掉。"""
     from autotrade.admin import Admin, serve
@@ -389,8 +493,13 @@ def run_admin(
     ticks_dir = None if ticks_dir is None else ticks_dir.resolve()
     recorded_dir = None if recorded_dir is None else recorded_dir.resolve()
     env_file = None if env_file is None else env_file.resolve()
+    ms_repo = None if ms_repo is None else ms_repo.resolve()
     admin = Admin(
-        config_dir, ticks_dir, Jobs(data_dir, env_file=env_file), recorded_dir=recorded_dir
+        config_dir,
+        ticks_dir,
+        Jobs(data_dir, env_file=env_file),
+        recorded_dir=recorded_dir,
+        ms_repo=ms_repo,
     )
     server = serve(admin, port)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
@@ -404,11 +513,13 @@ def run_admin(
         import webbrowser
 
         webbrowser.open(url)
+    watching = admin.start_watcher()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         admin.console.say("後台關閉")
     finally:
+        watching.set()
         server.server_close()
         admin.jobs.close()
     return 0
@@ -456,6 +567,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     relay.add_argument("--dsn-env", default="TWQUANT_PG_DSN", help="放連線字串的環境變數名稱")
     relay.add_argument("--env-file", type=Path, help="環境變數沒設時，改從這個 .env 讀同名的變數")
     relay.add_argument("--once", action="store_true", help="只跑一輪就結束")
+    trade = sub.add_parser(
+        "run", help="模擬交易程式：盤中跟著行情跑策略、聽遠端緊急停止、把狀態寫給網站"
+    )
+    trade.add_argument("--config", type=Path, required=True)
+    trade.add_argument(
+        "--dir", type=Path, required=True, help="這一天的工作資料夾（跟兩支中繼程式共用，絕對路徑）"
+    )
+    trade.add_argument("--strategy", choices=sorted(STRATEGIES), required=True)
+    trade.add_argument("--ms-repo", type=Path, help="網友原版 Momentum_Scalping 的資料夾")
+    trade.add_argument("--ticks-file", type=Path, help="盤中：行情中繼寫的逐筆檔（跟著讀）")
+    trade.add_argument("--play", type=Path, help="回放：富邦錄的某一天（A-013 的匯出檔）")
+    trade.add_argument("--day", type=date.fromisoformat, help="回放哪一天")
+    trade.add_argument("--from", dest="start", default="08:44:50", help="回放從幾點開始")
+    trade.add_argument("--speed", type=float, default=1.0, help="回放幾倍速")
+    trade.add_argument("--status", type=Path, help="給網站的狀態檔（絕對路徑）")
+    trade.add_argument(
+        "--notify", choices=sorted(NOTIFY_MODES), help="通知：print 印出來、send 送到手機"
+    )
+    trade.add_argument("--env-file", type=Path, help="放通知金鑰的 .env")
+    trade.add_argument("--notify-log", type=Path, help="沒送出去的通知記到哪個檔案（絕對路徑）")
+    trade.add_argument("--push-subs", type=Path, help="另外送網站推播的訂閱檔")
+    trade.add_argument(
+        "--release-stop", action="store_true", help="解除今天稍早按過的遠端緊急停止，照常交易"
+    )
+    ticks = sub.add_parser(
+        "ticks", help="行情中繼：本機資料庫裡富邦錄的逐筆 → 檔案，給交易程式跟著讀"
+    )
+    ticks.add_argument("--config", type=Path, required=True)
+    ticks.add_argument("--out", type=Path, required=True, help="逐筆檔要寫到哪（絕對路徑）")
+    ticks.add_argument("--dsn-env", default="TWQUANT_PG_DSN", help="放連線字串的環境變數名稱")
+    ticks.add_argument("--env-file", type=Path, help="環境變數沒設時，從這個 .env 讀")
+    ticks.add_argument("--day", type=date.fromisoformat, help="哪一天（預設今天）")
+    ticks.add_argument("--symbol", help="富邦商品代碼（預設照日期算主力月份，例 TMFK6）")
+    ticks.add_argument("--poll", type=float, default=0.5, help="多久查一次資料庫（秒）")
+    ticks.add_argument("--once", action="store_true", help="只查一次就結束")
     drill = sub.add_parser("drill", help="演練遠端緊急停止：模擬券商、買 1 口抱著，等網站按停止")
     drill.add_argument("--config", type=Path, required=True)
     drill.add_argument(
@@ -480,6 +626,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--recorded-dir", type=Path, help="富邦即時錄的逐筆匯出檔的資料夾（演練優先用這裡的）"
     )
     admin.add_argument("--env-file", type=Path, help="交給中繼程式的 .env（後台自己不讀）")
+    admin.add_argument(
+        "--ms-repo", type=Path, help="網友原版 Momentum_Scalping 的資料夾（啟動交易程式要用）"
+    )
     admin.add_argument("--port", type=int, default=8765)
     admin.add_argument("--no-open", action="store_true", help="不要自動打開瀏覽器")
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
@@ -513,7 +662,38 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.port,
             not args.no_open,
             args.recorded_dir,
+            args.ms_repo,
         )
+    if args.command == "run":
+        return run_trade(
+            args.config,
+            args.dir,
+            args.strategy,
+            ms_repo=args.ms_repo,
+            ticks_file=args.ticks_file,
+            play=args.play,
+            day=args.day,
+            start=args.start,
+            speed=args.speed,
+            status=args.status,
+            notify=args.notify,
+            env_file=args.env_file,
+            notify_log=args.notify_log,
+            push_subs=args.push_subs,
+            release_stop=args.release_stop,
+        )
+    if args.command == "ticks":
+        run_ticks(
+            args.config,
+            args.out,
+            args.dsn_env,
+            args.env_file,
+            args.day,
+            args.symbol,
+            args.poll,
+            args.once,
+        )
+        return 0
     if args.command == "drill":
         return run_drill(
             args.config,
