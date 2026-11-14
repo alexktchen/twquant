@@ -391,6 +391,7 @@ def run_trade(
         release_stop=release_stop,
         status_every_s=every,
         standby_at_start=agent and cfg.agent is not None and not cfg.agent.arm_at_open,
+        stay_listening=agent,
     )
     return 0 if runner.run().ok else 1
 

@@ -24,6 +24,7 @@ from autotrade.model import (
     RESULT_IGNORED,
     RESULT_LINK_DOWN,
     RESULT_PAUSED,
+    RESULT_REFUSED,
     RESULT_RELEASED,
     RESULT_RESUMED,
     RESULT_STUCK,
@@ -117,6 +118,7 @@ class Engine:
     _flat_asked: bool = False  # 有人要求平倉（不停手）：平掉之前策略的進場單也不送
     # 待命／運作（A-019）：待命時策略的進場單不送，出場照常。單獨跑（重播、舊的 run）一律是運作
     _armed: bool = True
+    _day_over: bool = False  # 今天收盤結算過了：之後的「啟動」不執行，照實回報
 
     def __post_init__(self) -> None:
         self.ledger = Ledger(self.cfg.contract)
@@ -399,7 +401,15 @@ class Engine:
             text += "；但策略已經關閉（部位被修正過），要重新啟動程式才會再交易"
         self._finish_at_once(cmd, now, RESULT_RESUMED, f"{text}{when}")
 
+    def end_day(self) -> None:
+        """今天收盤結算過了（常駐的 agent 收盤後還在聽指令）：之後按「啟動」不會執行。"""
+        self._day_over = True
+
     def _apply_arm(self, cmd: Command, now: datetime) -> None:
+        if self._day_over:
+            when = self._note_command(cmd, now, "遠端啟動（已收盤，沒有執行）")
+            text = "沒有執行：今天已經收盤。明天開盤前會回到待命，到時候再按啟動"
+            return self._finish_at_once(cmd, now, RESULT_REFUSED, f"{text}{when}")
         was = self.arm()
         when = self._note_command(cmd, now, "遠端啟動")
         text = "本來就在運作中" if was else "已啟動：開始自動交易"
