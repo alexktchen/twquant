@@ -39,7 +39,7 @@ from autotrade.feed.replay import read_taifex_day
 from autotrade.journal import Journal, read_journal
 from autotrade.model import TAIPEI
 from autotrade.notify import Channel, Level, Notifier, Report, sample, where_of
-from autotrade.relay import CONSUMERS, Relay, open_pg, run
+from autotrade.relay import RELAY_NAMES, Relay, open_pg, run
 from autotrade.runner import Runner, paced_clock, wall_clock
 from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
@@ -289,10 +289,13 @@ def run_relay(
 
     def ensure() -> None:
         db.ensure()
+        db.ensure_requests()  # 遙控指令的表（A-016）；編號用指令表的序號，所以排在後面
         if doorbell is not None:
             db.ensure_bell()  # 建表的時候順便把門鈴的觸發器建好
 
-    relay = Relay(db, consumer or cfg.mode, folder, cfg.control.poll_s, status, ensure=ensure)
+    relay = Relay(
+        db, consumer or cfg.mode, folder, cfg.control.poll_s, status, ensure=ensure, requests=db
+    )
     try:
         run(relay, once=once, bell=doorbell)
     except KeyboardInterrupt:
@@ -594,7 +597,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     relay = sub.add_parser("relay", help="中繼程式：把遠端停止指令拿下來、把結果與狀態送上去")
     relay.add_argument("--config", type=Path, required=True)
     relay.add_argument("--dir", type=Path, required=True, help="跟交易程式共用的資料夾（絕對路徑）")
-    relay.add_argument("--consumer", choices=CONSUMERS, help="預設用設定檔的 mode")
+    relay.add_argument(
+        "--consumer", choices=RELAY_NAMES, help="預設用設定檔的 mode；admin＝後台的遙控中繼"
+    )
     relay.add_argument("--status", type=Path, help="狀態檔；有更新就送上去")
     relay.add_argument("--dsn-env", default="TWQUANT_PG_DSN", help="放連線字串的環境變數名稱")
     relay.add_argument("--env-file", type=Path, help="環境變數沒設時，改從這個 .env 讀同名的變數")

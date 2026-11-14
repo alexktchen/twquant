@@ -16,7 +16,7 @@ from autotrade.bell import CHANNEL, NOT_YET, BellError, BellState, PgBell, open_
 from autotrade.cli import main
 from autotrade.control import ControlLoop, FileControl
 from autotrade.jobs import DrillRequest, Jobs, RunRequest
-from autotrade.relay import BELL_DDL, COMMANDS_DDL, PgRelayDb, Relay, run
+from autotrade.relay import BELL_DDL, COMMANDS_DDL, REQUESTS_DDL, PgRelayDb, Relay, run
 from autotrade.risk import HALT_KILL
 from test_a011_control import CONFIG_PATH, CONTROL, TODAY, FakeSource, at, long_one, stop
 from test_a011_relay import FakeConn, FakeDb, FakeDbError
@@ -141,7 +141,8 @@ def stop_after(bell: PgBell, waits: int) -> Callable[[ListenConn], None]:
 
 
 def test_ac1_the_database_rings_on_every_new_command_and_the_tables_are_untouched() -> None:
-    function, trigger = BELL_DDL
+    function, trigger, requests_trigger = BELL_DDL
+    assert "AFTER INSERT ON web.autotrade_requests" in requests_trigger  # 遙控指令（A-016）也會響
     assert function.startswith("CREATE OR REPLACE FUNCTION web.autotrade_ring()")
     assert f"pg_notify('{CHANNEL}'" in function and "NEW.id" in function
     assert "AFTER INSERT ON web.autotrade_commands" in trigger
@@ -579,6 +580,7 @@ def test_ac8_relay_command_opens_the_bell_only_when_asked(
     relay.ensure()  # 建表的時候順便把門鈴的觸發器建好
     assert [sql for sql, _ in made if sql.startswith(("CREATE", "ALTER"))] == [
         *COMMANDS_DDL,
+        *REQUESTS_DDL,
         *BELL_DDL,
     ]
 

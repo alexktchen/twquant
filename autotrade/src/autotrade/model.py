@@ -83,8 +83,15 @@ class Fill:
         return self.side.value * self.qty
 
 
-# 遠端指令（A-011／D-225）：只有「停止」一種
-ACTION_STOP = "stop"
+# 遠端指令。A-011／D-225 只有「停止」；A-016／D-229 起多了五種（使用者要網站也能平倉、暫停、啟動）
+ACTION_STOP = "stop"  # 緊急停止：停手並平倉，所有程式都執行，今天之內都有效
+ACTION_FLATTEN = "flatten"  # 平倉但不停手
+ACTION_PAUSE = "pause"  # 暫停自動交易：不再進新單
+ACTION_RESUME = "resume"  # 恢復自動交易
+ACTION_START = "start"  # 啟動交易程式（由本機後台執行）
+ACTION_QUIT = "quit"  # 結束交易程式（由本機後台執行）
+ENGINE_ACTIONS = (ACTION_FLATTEN, ACTION_PAUSE, ACTION_RESUME)  # 由 target 那一支交易程式執行
+ADMIN_ACTIONS = (ACTION_START, ACTION_QUIT)  # 由後台執行
 
 # 一筆停止會回報兩個階段：先是「收到了、當下怎麼處理」（ack），之後是「最後的結果」（done）
 STAGE_ACK = "ack"
@@ -99,16 +106,23 @@ RESULT_SUSPENDED = "suspended"  # 程式在暫停送單，不會自動平倉
 RESULT_IGNORED = "ignored"  # 沒有執行（不是今天的、或不認得的指令）
 RESULT_STUCK = "stuck"  # done：停手了但部位沒平掉（暫停送單、或等太久），要人處理
 RESULT_RELEASED = "released"  # done：已經在電腦上解除，程式可以再交易
+RESULT_PAUSED = "paused"  # 已暫停自動交易
+RESULT_RESUMED = "resumed"  # 已恢復自動交易
+RESULT_ACCEPTED = "accepted"  # ack：後台收到了，正在做
+RESULT_STARTED = "started"  # done：交易程式啟動了
+RESULT_QUIT = "quit"  # done：交易程式結束了（或本來就沒有在跑）
+RESULT_REFUSED = "refused"  # done：沒有執行（原因在 note）
 
 
 @dataclass(frozen=True)
 class Command:
-    """網站送來的一筆遠端指令。只有 action == "stop" 會被執行；day 是按下那一天的台北日期。"""
+    """網站送來的一筆遠端指令。day 是按下那一天的台北日期；target 是對哪一種模式（停止沒有，所有程式都執行）。"""
 
     id: int
     action: str
     day: date
     created_at: datetime
+    target: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -128,3 +142,8 @@ class CommandResult:
     note: str
     # 那筆指令按下的時間：指令表重建、編號重來時，靠它確認回報的是同一筆（不參與相等比較）
     created_at: datetime | None = field(default=None, compare=False)
+    # 那筆指令是什麼動作（寫進回報檔：重開之後靠它知道今天做過什麼。不參與相等比較）
+    action: str = field(default=ACTION_STOP, compare=False)
+    # 執行的當下，交易程式處理到哪一筆行情（還沒收到行情是 None）。電腦的時鐘比行情快一點，
+    # 重開之後要照「接在哪一筆行情後面」套用，結果才會一模一樣（不參與相等比較）
+    after_tick: datetime | None = field(default=None, compare=False)
