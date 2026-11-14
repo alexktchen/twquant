@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
 
+from autotrade.bell import PgBell, open_bell
 from autotrade.broker.sim import SimBroker
 from autotrade.config import Config, ConfigError, load_config
 from autotrade.delivery import (
@@ -263,8 +264,13 @@ def run_relay(
     dsn_env: str,
     env_file: Path | None,
     once: bool,
+    bell: bool = False,
+    bell_port: int | None = None,
 ) -> None:
-    """跑中繼程式：資料庫 ↔ 本機資料夾裡的指令檔與回報檔。跟交易程式是不同的程序。"""
+    """跑中繼程式：資料庫 ↔ 本機資料夾裡的指令檔與回報檔。跟交易程式是不同的程序。
+
+    bell（A-015）：另外開一條連線聽資料庫的通知，有新的指令就馬上跑一輪；bell_port 是聽的時候改連的埠。
+    """
     cfg = load_config(config)
     if cfg.control is None:
         raise ConfigError("設定檔沒有 [control]，沒有東西要中繼")
@@ -276,11 +282,24 @@ def run_relay(
     if not dsn:
         raise ConfigError(f"環境變數 {dsn_env} 沒有設定")
     db = open_pg(dsn, timeout_s=cfg.control.poll_s)
-    relay = Relay(db, consumer or cfg.mode, folder, cfg.control.poll_s, status, ensure=db.ensure)
+    doorbell: PgBell | None = None
+    if bell and not once:  # 只跑一輪不需要門鈴
+        doorbell = open_bell(dsn, timeout_s=cfg.control.poll_s, port=bell_port)
+        doorbell.start()
+
+    def ensure() -> None:
+        db.ensure()
+        if doorbell is not None:
+            db.ensure_bell()  # 建表的時候順便把門鈴的觸發器建好
+
+    relay = Relay(db, consumer or cfg.mode, folder, cfg.control.poll_s, status, ensure=ensure)
     try:
-        run(relay, once=once)
+        run(relay, once=once, bell=doorbell)
     except KeyboardInterrupt:
         print("中繼程式停止")
+    finally:
+        if doorbell is not None:
+            doorbell.close()
 
 
 def run_trade(
@@ -480,6 +499,7 @@ def run_admin(
     open_browser: bool,
     recorded_dir: Path | None = None,
     ms_repo: Path | None = None,
+    bell_ports: dict[str, int] | None = None,
 ) -> int:
     """開本機後台（只聽 127.0.0.1），按 Ctrl+C 結束；結束時把還在跑的演練一起停掉。"""
     from autotrade.admin import Admin, serve
@@ -497,7 +517,7 @@ def run_admin(
     admin = Admin(
         config_dir,
         ticks_dir,
-        Jobs(data_dir, env_file=env_file),
+        Jobs(data_dir, env_file=env_file, bell_ports=bell_ports or {}),
         recorded_dir=recorded_dir,
         ms_repo=ms_repo,
     )
@@ -523,6 +543,18 @@ def run_admin(
         server.server_close()
         admin.jobs.close()
     return 0
+
+
+def bell_port_arg(text: str) -> tuple[str, int]:
+    """admin --bell-port 的一筆：「環境變數名=埠」。"""
+    from autotrade.jobs import DSN_ENVS
+
+    name, sep, port = text.partition("=")
+    if not sep or name not in DSN_ENVS or not port.isdigit():
+        raise argparse.ArgumentTypeError(
+            f"要寫成「環境變數名=埠」，環境變數名只能是 {DSN_ENVS}：{text!r}"
+        )
+    return name, int(port)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -567,6 +599,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     relay.add_argument("--dsn-env", default="TWQUANT_PG_DSN", help="放連線字串的環境變數名稱")
     relay.add_argument("--env-file", type=Path, help="環境變數沒設時，改從這個 .env 讀同名的變數")
     relay.add_argument("--once", action="store_true", help="只跑一輪就結束")
+    relay.add_argument(
+        "--bell", action="store_true", help="開門鈴：資料庫一有新的指令就馬上去拿，不等下一次輪詢"
+    )
+    relay.add_argument(
+        "--bell-port",
+        type=int,
+        help="聽門鈴時改連這個埠（Supabase 的連線池要 5432；平常用的 6543 聽不到）",
+    )
     trade = sub.add_parser(
         "run", help="模擬交易程式：盤中跟著行情跑策略、聽遠端緊急停止、把狀態寫給網站"
     )
@@ -629,6 +669,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     admin.add_argument(
         "--ms-repo", type=Path, help="網友原版 Momentum_Scalping 的資料夾（啟動交易程式要用）"
     )
+    admin.add_argument(
+        "--bell-port",
+        type=bell_port_arg,
+        action="append",
+        default=[],
+        metavar="環境變數名=埠",
+        help="指令中繼聽門鈴時，這個資料庫改連哪個埠（例：TWQUANT_SUPABASE_DSN=5432）；可以給好幾個",
+    )
     admin.add_argument("--port", type=int, default=8765)
     admin.add_argument("--no-open", action="store_true", help="不要自動打開瀏覽器")
     verify = sub.add_parser("verify-journal", help="驗證事件日誌的雜湊鏈")
@@ -663,6 +711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             not args.no_open,
             args.recorded_dir,
             args.ms_repo,
+            bell_ports=dict(args.bell_port),
         )
     if args.command == "run":
         return run_trade(
@@ -707,6 +756,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.feed,
         )
     if args.command == "relay":
+        if args.bell_port is not None and not args.bell:
+            parser.error("--bell-port 要跟 --bell 一起用")
         run_relay(
             args.config,
             args.dir,
@@ -715,6 +766,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.dsn_env,
             args.env_file,
             args.once,
+            bell=args.bell,
+            bell_port=args.bell_port,
         )
         return 0
     if args.command == "verify-journal":

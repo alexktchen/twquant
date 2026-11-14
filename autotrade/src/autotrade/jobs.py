@@ -266,6 +266,8 @@ class Jobs:
     spawn: Spawner = popen
     python: str = sys.executable
     workdir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
+    # 指令中繼聽門鈴（A-015）時，哪個資料庫要改連哪個埠（環境變數名 → 埠）；沒列的用連線字串自己的埠
+    bell_ports: dict[str, int] = field(default_factory=dict)
     drill: DrillJob | None = None
     run: RunJob | None = None
 
@@ -298,7 +300,7 @@ class Jobs:
         base = [self.python, "-m", "autotrade"]
         if req.dsn_env is not None:
             relay = [*base, "relay", "--config", str(req.config), "--dir", str(folder)]
-            relay += ["--consumer", "sim", "--dsn-env", req.dsn_env]
+            relay += ["--consumer", "sim", "--dsn-env", req.dsn_env, *self._bell(req.dsn_env)]
             if self.env_file is not None:
                 relay += ["--env-file", str(self.env_file)]
             logs["relay"] = (folder / "relay.log").open("w", encoding="utf-8")
@@ -313,6 +315,11 @@ class Jobs:
         commands["drill"] = drill
         self.drill = DrillJob(folder, now, req, procs, logs, commands)
         return self.drill
+
+    def _bell(self, dsn_env: str) -> list[str]:
+        """指令中繼一律開門鈴（A-015）；這個資料庫聽的埠不一樣就一起講。"""
+        port = self.bell_ports.get(dsn_env)
+        return ["--bell"] if port is None else ["--bell", "--bell-port", str(port)]
 
     def stop_drill(self) -> bool:
         """停掉現在的演練；沒有在跑的回 False。"""
@@ -356,7 +363,7 @@ class Jobs:
             }
             plan["ticks"] += ["--dsn-env", TICKS_DSN_ENV, *env]
             plan["relay"] += ["--consumer", "sim", "--dsn-env", req.dsn_env]
-            plan["relay"] += ["--status", str(status), *env]
+            plan["relay"] += ["--status", str(status), *env, *self._bell(req.dsn_env)]
             plan["run"] += ["--strategy", req.strategy, "--ticks-file", str(ticks_file)]
             plan["run"] += ["--status", str(status)]
             if req.notify:
