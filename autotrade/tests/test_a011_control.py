@@ -131,7 +131,8 @@ def brief(results: list[CommandResult]) -> list[tuple[int, str, str]]:
 def test_ac1_only_todays_stop_commands_apply_once_in_id_order() -> None:
     engine, _ = engine_with({})
     yesterday = TODAY - timedelta(days=1)
-    batch = [stop(3, 5), stop(2, 4), stop(5, 6, day=yesterday), stop(6, 7, action="resume")]
+    # D-229 之後 resume 是認得的動作（只解除「暫停」，test_a016 守著它不會解除停手）；這裡換一個真的不認得的
+    batch = [stop(3, 5), stop(2, 4), stop(5, 6, day=yesterday), stop(6, 7, action="release")]
     results = engine.on_control(batch, at(10))
     assert brief(results) == [
         (2, STAGE_ACK, RESULT_FLAT),

@@ -11,13 +11,18 @@ from autotrade.broker.base import Ack, Broker, BrokerEvent, Cancelled, Filled, R
 from autotrade.config import Config
 from autotrade.ledger import Ledger
 from autotrade.model import (
+    ACTION_FLATTEN,
+    ACTION_PAUSE,
+    ACTION_RESUME,
     ACTION_STOP,
     RESULT_CANCELLING,
     RESULT_FLAT,
     RESULT_FLATTENING,
     RESULT_IGNORED,
     RESULT_LINK_DOWN,
+    RESULT_PAUSED,
     RESULT_RELEASED,
+    RESULT_RESUMED,
     RESULT_STUCK,
     RESULT_SUSPENDED,
     STAGE_ACK,
@@ -71,12 +76,14 @@ class Restored:
 
 @dataclass
 class _StopTrack:
-    """一筆遠端停止處理到哪裡了。"""
+    """一筆遠端指令處理到哪裡了（停止與平倉要追蹤到確認沒有部位）。"""
 
     created_at: datetime
     applied: bool  # False＝沒有執行（不是今天的、不認得的動作）
     applied_at: datetime | None  # 重啟還原的要等第一次檢查才補上
     done: str | None = None  # 最後一次回報的收尾結果
+    action: str = ACTION_STOP
+    flat: bool = False  # 平倉：部位平掉的那一刻記下來（之後策略可能馬上又進場，不能等回報時才看）
 
 
 @dataclass
@@ -102,6 +109,9 @@ class Engine:
     _stops: dict[int, _StopTrack] = field(default_factory=dict)  # 今天處理過的遠端指令
     _stops_day: date | None = None
     _control_out: list[CommandResult] = field(default_factory=list)  # 還沒交出去的回報
+    _paused: bool = False  # 暫停自動交易（A-016）：策略的進場單不送，出場照常
+    _pause_noted: bool = False  # 這次暫停已經記過「略過進場」了（只記第一次，不洗版）
+    _flat_asked: bool = False  # 有人要求平倉（不停手）：平掉之前策略的進場單也不送
 
     def __post_init__(self) -> None:
         self.ledger = Ledger(self.cfg.contract)
@@ -112,6 +122,11 @@ class Engine:
     def link_up(self) -> bool:
         """跟券商的連線是不是通的。"""
         return self._link_up
+
+    @property
+    def paused(self) -> bool:
+        """自動交易是不是暫停中（不再進新單）。"""
+        return self._paused
 
     @property
     def last_tick(self) -> Tick | None:
@@ -192,6 +207,15 @@ class Engine:
                 self._tell_reject(req, "連線中斷")
             return False
         exposure = self.ledger.position + self.oms.pending_signed_qty()
+        blocked = from_strategy and (self._paused or self._flat_asked)
+        if blocked and not is_reducing(exposure, req.signed_qty):
+            why = "自動交易暫停中" if self._paused else "正在平倉"
+            if not (self._paused and self._pause_noted):
+                self._pause_noted = self._paused
+                more = "（暫停期間之後的不再一一記錄）" if self._paused else ""
+                self._log(now, "reject", f"{why}，不送進場單 {req.side.name} {req.qty} 口{more}")
+            self._tell_reject(req, why)
+            return False
         before = self.risk.halt
         decision = self.risk.check(req, exposure, now)
         self._log_halt_change(now, before, "暫停送單")
@@ -266,22 +290,89 @@ class Engine:
             return "帳上沒有部位"
         return f"帳上{'多' if position > 0 else '空'} {abs(position)} 口"
 
-    def _stop_state(self) -> tuple[str, str]:
-        """停手之後當下的狀況：（代碼、給人看的一句話）。"""
+    def _stop_state(self, halted: bool = True) -> tuple[str, str]:
+        """停手（或要求平倉，halted=False）之後當下的狀況：（代碼、給人看的一句話）。"""
         where = self._position_text()
         if self.risk.suspended:
             return RESULT_SUSPENDED, f"程式在暫停送單，不會自動平倉，請手動處理；{where}"
         if not self._link_up:
-            return RESULT_LINK_DOWN, f"已停手；券商連線中斷，恢復後才會平倉；{where}"
+            lead = "已停手；" if halted else ""
+            return RESULT_LINK_DOWN, f"{lead}券商連線中斷，恢復後才會平倉；{where}"
+        lead = "已停手，" if halted else ""
         if self.ledger.position != 0:
-            return RESULT_FLATTENING, f"已停手，已送出平倉；{where}"
+            return RESULT_FLATTENING, f"{lead}已送出平倉；{where}"
         if self.oms.working():
-            return RESULT_CANCELLING, f"已停手，已送出刪單；{where}"
-        return RESULT_FLAT, f"已停手；{where}"
+            return RESULT_CANCELLING, f"{lead}已送出刪單；{where}"
+        return RESULT_FLAT, f"已停手；{where}" if halted else "本來就沒有部位、沒有委託"
 
     def _roll_stops(self, today: date) -> None:
         if self._stops_day != today:
             self._stops, self._stops_day = {}, today
+            # 遙控指令只算當天：換日時暫停、沒做完的平倉要求都不帶過去
+            self._paused = self._pause_noted = self._flat_asked = False
+
+    def flatten_now(self, now: datetime) -> bool:
+        """平倉但不停手（A-016）：刪掉還沒成交的新倉單、把部位平掉；策略照跑，平掉之前不讓它再進場。
+
+        跟 kill 一樣先問券商實際的部位。回傳帳是不是被改成券商的數字（那種情況引擎會自己停手）。
+        """
+        corrected = self._link_up and not self._reconcile(now)
+        self._flat_asked = True
+        self._flatten(now, "遠端平倉")
+        return corrected
+
+    def pause(self) -> bool:
+        """暫停自動交易（A-016）：策略的進場單不送；出場、停損、強制平倉照常。回傳是不是本來就暫停了。"""
+        was, self._paused = self._paused, True
+        if not was:
+            self._pause_noted = False
+        return was
+
+    def resume(self) -> bool:
+        """恢復自動交易。不會解除任何停手。回傳本來是不是暫停中。"""
+        was, self._paused = self._paused, False
+        return was
+
+    def _note_command(self, cmd: Command, now: datetime, what: str) -> str:
+        self._log(
+            now,
+            "control",
+            f"收到{what}（第 {cmd.id} 號，{cmd.created_at:%H:%M:%S} 按下）",
+            command_id=cmd.id,
+            created_at=cmd.created_at.isoformat(),
+            action=cmd.action,
+            applied=True,
+        )
+        return f"（{cmd.created_at:%H:%M:%S} 按下，{now:%H:%M:%S} 執行）"
+
+    def _apply_flatten(self, cmd: Command, now: datetime) -> None:
+        corrected = self.flatten_now(now)
+        when = self._note_command(cmd, now, "遠端平倉")
+        self._stops[cmd.id] = _StopTrack(cmd.created_at, True, now, action=ACTION_FLATTEN)
+        code, text = self._stop_state(halted=False)
+        prefix = "券商的部位跟帳上不一樣，已改用券商的數字並停手；" if corrected else ""
+        self._control_out.append(CommandResult(cmd.id, STAGE_ACK, code, f"{prefix}{text}{when}"))
+
+    def _apply_pause(self, cmd: Command, now: datetime) -> None:
+        was = self.pause()
+        when = self._note_command(cmd, now, "遠端暫停自動交易")
+        text = "本來就在暫停中" if was else "已暫停自動交易：不再進新單，手上的部位照原本的規則出場"
+        self._finish_at_once(cmd, now, RESULT_PAUSED, f"{text}；{self._position_text()}{when}")
+
+    def _apply_resume(self, cmd: Command, now: datetime) -> None:
+        was = self.resume()
+        when = self._note_command(cmd, now, "遠端恢復自動交易")
+        text = "已恢復自動交易" if was else "本來就沒有暫停"
+        if self.risk.halt is not None:
+            text += f"；但程式目前是停手狀態（{self.risk.halt}），恢復不會解除停手"
+        elif self._strategy_off:
+            text += "；但策略已經關閉（部位被修正過），要重新啟動程式才會再交易"
+        self._finish_at_once(cmd, now, RESULT_RESUMED, f"{text}{when}")
+
+    def _finish_at_once(self, cmd: Command, now: datetime, code: str, text: str) -> None:
+        self._stops[cmd.id] = _StopTrack(cmd.created_at, True, now, done=code, action=cmd.action)
+        self._control_out.append(CommandResult(cmd.id, STAGE_ACK, code, text))
+        self._control_out.append(CommandResult(cmd.id, STAGE_DONE, code, text))
 
     def _apply_stop(self, cmd: Command, now: datetime) -> None:
         # 先停手（日誌先有 halt），再記「這筆指令處理過了」：中間當機的話，重啟後是「還沒處理」而不是「處理了卻沒停」
@@ -311,7 +402,7 @@ class Engine:
             action=cmd.action,
             applied=False,
         )
-        self._stops[cmd.id] = _StopTrack(cmd.created_at, False, now)
+        self._stops[cmd.id] = _StopTrack(cmd.created_at, False, now, action=cmd.action)
         self._control_out.append(CommandResult(cmd.id, STAGE_ACK, RESULT_IGNORED, why))
 
     def _follow_stops(self, now: datetime) -> None:
@@ -319,12 +410,15 @@ class Engine:
         timeout = None if self.cfg.control is None else self.cfg.control.flatten_timeout_s
         where = self._position_text()
         for command_id, track in self._stops.items():
+            if track.action not in (ACTION_STOP, ACTION_FLATTEN):
+                continue  # 暫停／恢復一執行就回報完了
             if not track.applied or track.done in (RESULT_FLAT, RESULT_RELEASED):
                 continue
             if track.applied_at is None:
                 track.applied_at = now
             waited = (now - track.applied_at).total_seconds()
-            if self._link_up and self.ledger.position == 0 and not self.oms.working():
+            flat_now = self._link_up and self.ledger.position == 0 and not self.oms.working()
+            if track.flat or flat_now:
                 done, text = RESULT_FLAT, f"已確認沒有部位、沒有委託；{where}"
             elif track.done is not None:
                 continue
@@ -338,7 +432,9 @@ class Engine:
             self._control_out.append(CommandResult(command_id, STAGE_DONE, done, text))
 
     def on_control(self, commands: Sequence[Command], now: datetime) -> list[CommandResult]:
-        """套用遠端指令並回傳要回報給網站的結果（A-011）。這條路只能叫停：等同 kill；沒有任何解除的動作。
+        """套用遠端指令並回傳要回報給網站的結果（A-011、A-016）。停止等同 kill；另有平倉（不停手）、暫停、恢復。
+
+        沒有任何解除停手的動作：恢復只解除「暫停」。
 
         要用時鐘定時呼叫（沒有新指令就傳空的）：它同時負責追蹤先前的停止有沒有真的平掉。
         """
@@ -350,15 +446,26 @@ class Engine:
                 continue  # 今天處理過了，結果已經在回報的路上
             if cmd.day != now.date():
                 self._ignore_command(cmd, now, f"是 {cmd.day} 的指令，不是今天的，沒有執行")
-            elif cmd.action != ACTION_STOP:
-                self._ignore_command(cmd, now, f"不認得的動作 {cmd.action!r}，沒有執行")
-            else:
+            elif cmd.action == ACTION_STOP:
                 self._apply_stop(cmd, now)
+            elif cmd.action == ACTION_FLATTEN:
+                self._apply_flatten(cmd, now)
+            elif cmd.action == ACTION_PAUSE:
+                self._apply_pause(cmd, now)
+            elif cmd.action == ACTION_RESUME:
+                self._apply_resume(cmd, now)
+            else:
+                self._ignore_command(cmd, now, f"不認得的動作 {cmd.action!r}，沒有執行")
         self._follow_stops(now)
         out, self._control_out = self._control_out, []
         # 每筆結果帶上那筆指令按下的時間：回報的時候靠它確認是同一筆
         return [
-            replace(r, created_at=self._stops[r.command_id].created_at)
+            replace(
+                r,
+                created_at=self._stops[r.command_id].created_at,
+                action=self._stops[r.command_id].action,
+                after_tick=None if self._last is None else self._last.ts,
+            )
             if r.command_id in self._stops
             else r
             for r in out
@@ -381,7 +488,8 @@ class Engine:
             else "程式可以再交易"
         )
         for command_id, track in self._stops.items():
-            if track.applied and track.done != RESULT_RELEASED:
+            # 解除的是「停止」；平倉、暫停那幾筆的回報不動
+            if track.action == ACTION_STOP and track.applied and track.done != RESULT_RELEASED:
                 track.done = RESULT_RELEASED
                 self._control_out.append(
                     CommandResult(
@@ -520,6 +628,8 @@ class Engine:
             self._flatten(now, f"停手（{self.risk.halt}）")
         elif now.time() >= self.cfg.risk.force_flat_time:
             self._flatten(now, "強制平倉時間")
+        elif self._flat_asked:
+            self._flatten(now, "遠端平倉")
         elif self._stop_hit(tick.price):
             if not self._stop_fired:
                 self._stop_fired = True
@@ -532,6 +642,11 @@ class Engine:
             self._flatten(now, "單一部位停損")
         if self.ledger.position == 0:
             self._stop_fired = False
+            if self._flat_asked and not self.oms.working():
+                self._flat_asked = False  # 平掉了：策略可以再進場
+                for track in self._stops.values():
+                    if track.action == ACTION_FLATTEN and track.done is None:
+                        track.flat = True
 
         if not self._strategy_off:
             for req in self.strategy.on_tick(tick, self.ledger.position):
@@ -561,6 +676,8 @@ class Engine:
             self._flatten(now, f"停手（{self.risk.halt}）")
         elif now.time() >= self.cfg.risk.force_flat_time:
             self._flatten(now, "強制平倉時間")
+        elif self._flat_asked:
+            self._flatten(now, "遠端平倉")
 
     def _stop_hit(self, price: float) -> bool:
         stop = self.cfg.risk.position_stop_loss_twd

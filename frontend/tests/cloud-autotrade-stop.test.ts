@@ -254,7 +254,8 @@ test('AC20 頁面：要按兩次才送；只有一個地方會送出停止；沒
   assert.equal(page.split('sendAutotradeStop(').length - 1, 1)
   assert.match(page, /確定停止/)
   assert.match(page, /取消/)
-  assert.match(page, /除了緊急停止以外，這一頁都只能看/)
+  // D-229（2026-11-14，使用者要網站也能平倉、暫停、啟動）：頁尾那句話跟著改；解除緊急停止仍然只能在電腦前
+  assert.match(page, /除了緊急停止與遙控按鈕以外，這一頁都只能看。解除緊急停止、改設定，要在跑交易程式的那台電腦上做/)
   assert.doesNotMatch(page, /解除停止<|重新開始<|release|resume/) // 沒有解除或開始交易的按鈕
   assert.match(page, /\.catch\(\(e\) =>\s+\/\/[^\n]*\n\s+reread\(\)/) // 請求可能在寫入之後才斷掉
   assert.match(page, /lines\.map\(\(l\) => \(\s*<li key=\{l\.who\} className=\{l\.tone\}>/) // 每支程式一行
@@ -262,6 +263,8 @@ test('AC20 頁面：要按兩次才送；只有一個地方會送出停止；沒
   assert.match(page, /\{hand && <p className="cq-at-stop-hand">\{BROKER_HINT\}<\/p>\}/)
   const api = read('../src/cloud/api.ts')
   const writes = api.split('\n').filter((l) => l.includes('/api/autotrade') && /'(PUT|POST|DELETE|PATCH)'/.test(l))
-  assert.equal(writes.length, 1)
-  assert.match(writes[0], /\('\/api\/autotrade\/stop', 'PUT', \{ confirm: 'stop' \}\)/)
+  // D-229：寫入從一支變兩支——停止，與遙控指令（cloud-autotrade-remote.test.ts 守著它只有五種動作）。除此之外沒有別的
+  assert.equal(writes.length, 2)
+  assert.ok(writes.some((l) => /\('\/api\/autotrade\/stop', 'PUT', \{ confirm: 'stop' \}\)/.test(l)))
+  assert.ok(writes.some((l) => /\('\/api\/autotrade\/command', 'PUT', \{ confirm: action, target \}\)/.test(l)))
 })

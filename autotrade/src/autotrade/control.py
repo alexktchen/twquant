@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from autotrade.engine import Engine
-from autotrade.model import Command, CommandResult, require_taipei
+from autotrade.model import ACTION_STOP, Command, CommandResult, require_taipei
 
 INBOX_NAME = "commands.json"  # 中繼程式寫、交易程式讀：今天還沒被這支程式回報過的停止指令
 REPLACE_TRIES = 5  # 改名被擋時最多試幾次
@@ -123,12 +123,15 @@ class ControlLoop:
 
 def command_to_json(cmd: Command) -> dict[str, Any]:
     """指令 → 指令檔裡的一筆。"""
-    return {
+    row: dict[str, Any] = {
         "id": cmd.id,
         "action": cmd.action,
         "day": cmd.day.isoformat(),
         "created_at": cmd.created_at.isoformat(),
     }
+    if cmd.target is not None:  # 停止沒有對象（所有程式都執行），格式跟 A-011 一樣
+        row["target"] = cmd.target
+    return row
 
 
 def command_from_json(row: dict[str, Any]) -> Command:
@@ -138,6 +141,7 @@ def command_from_json(row: dict[str, Any]) -> Command:
         action=str(row["action"]),
         day=date.fromisoformat(str(row["day"])),
         created_at=datetime.fromisoformat(str(row["created_at"])),
+        target=None if row.get("target") is None else str(row["target"]),
     )
 
 
@@ -149,6 +153,8 @@ def result_to_json(result: CommandResult, now: datetime) -> dict[str, Any]:
         "code": result.code,
         "note": result.note,
         "created_at": None if result.created_at is None else result.created_at.isoformat(),
+        "action": result.action,
+        "after_tick": None if result.after_tick is None else result.after_tick.isoformat(),
         "at": now.isoformat(),
     }
 
@@ -163,6 +169,10 @@ def result_from_json(row: dict[str, Any]) -> CommandResult:
         created_at=None
         if row.get("created_at") is None
         else require_taipei(datetime.fromisoformat(str(row["created_at"])), "created_at"),
+        action=str(row.get("action", ACTION_STOP)),  # 舊的回報檔沒有這一欄：那時只有停止
+        after_tick=None
+        if row.get("after_tick") is None
+        else require_taipei(datetime.fromisoformat(str(row["after_tick"])), "after_tick"),
     )
 
 

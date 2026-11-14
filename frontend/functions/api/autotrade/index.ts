@@ -4,6 +4,7 @@
 // 表還沒建、或還沒有任何紀錄 → 回空的（days: []、current: null、stop: null、listeners: {}），不是錯誤。盤中會變，不進暫存。
 import { fail, guarded, type Env } from '../../_lib/db'
 import { AUTOTRADE_DAYS_LIMIT, controlView, envelope, modeOk, taipeiToday, type AutotradeDayRow } from '../../_lib/autotrade'
+import { requestsView } from '../../_lib/autotrade_remote'
 import { dayOk } from '../../_lib/futures'
 import { denied } from '../../_lib/gate'
 import { rawJson, readRows } from '../../_lib/scorecard'
@@ -26,7 +27,9 @@ const handle: PagesFunction<Env> = async ({ request, env }) => {
         ? []
         : await readRows(() => db<{ body: string }[]>`SELECT payload::text AS body FROM serving.autotrade_status WHERE mode = ${mode} AND day = ${pick}`)
     const control = await readRows(() => controlView(db, taipeiToday(Date.now())))
-    return rawJson(envelope(days, rows[0]?.body ?? null, control[0] ?? null))
+    // 遙控指令（A-016）：今天最近幾筆與後台的心跳；表還沒建就整段不回
+    const remote = await readRows(() => requestsView(db, taipeiToday(Date.now())))
+    return rawJson(envelope(days, rows[0]?.body ?? null, control[0] ?? null, remote[0] ?? null))
   })
 }
 

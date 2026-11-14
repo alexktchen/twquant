@@ -23,8 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from autotrade.admin_page import PAGE
+from autotrade.config import ConfigError
+from autotrade.control import FileControl
 from autotrade.jobs import DSN_ENVS, DrillRequest, JobError, Jobs, RunRequest, tail
 from autotrade.model import TAIPEI
+from autotrade.remote import REMOTE_DIR, Remote
 from autotrade.settings import (
     FIELDS,
     SettingsError,
@@ -125,6 +128,8 @@ class Admin:
         self.process = process_info()
         self.token = secrets.token_urlsafe(24)
         self._ended: object | None = None  # 已經報過「結束」的那場演練
+        self.remote: Remote | None = None  # 網站來的啟動／結束（A-017）；沒開就是 None
+        self._remote_lost = False  # 已經講過「遙控中繼自己結束了」
 
     def watch_drill(self) -> None:
         """演練程式自己結束了，就在終端機報一次（每場只報一次）。"""
@@ -245,11 +250,58 @@ class Admin:
             if len(job.procs) > 1:
                 self.console.say("行情中繼、指令中繼也收掉了")
 
+    def enable_remote(self, config_name: str, dsn_env: str) -> None:
+        """讓網站可以啟動／結束交易程式（A-017）：開後台自己的中繼程式，之後 watch 會去讀它寫的指令檔。
+
+        遠端只能啟動 config_name 這一份設定。連線字串一樣不經過後台。
+        """
+        config = self.config_path(config_name)
+        cfg = validate(config.read_text(encoding="utf-8"))
+        if cfg.control is None:
+            raise ConfigError(f"{config.name} 沒有 [control]，不能拿來遙控")
+        folder = self.jobs.data_dir / REMOTE_DIR
+        with self._lock:
+            command = self.jobs.start_remote(config, dsn_env, folder)
+        self.remote = Remote(
+            source=FileControl(folder, cfg.control.stale_s),
+            config=config,
+            mode=cfg.mode,
+            dsn_env=dsn_env,
+            notify=cfg.notify is not None,
+            start=self.start_run,
+            stop=self.stop_run,
+            say=self.console.say,
+            refuse=(SettingsError, JobError),
+            started_at=self.clock(),
+        )
+        self.console.say(
+            f"遙控開了：網站可以啟動／結束交易程式（只能啟動 {config.name}、"
+            f"連{DB_TEXT.get(dsn_env, dsn_env)}資料庫）"
+        )
+        pid = getattr(self.jobs.remote_proc, "pid", None)
+        self.console.say(f"\u3000遙控中繼（程序編號 {pid}）：{' '.join(command)}")
+
+    def watch_remote(self) -> None:
+        """遙控中繼自己結束了就講一次；它在的時候去讀一次遙控指令。"""
+        if self.remote is None:
+            return
+        proc = self.jobs.remote_proc
+        if proc is not None and proc.poll() is not None and not self._remote_lost:
+            self._remote_lost = True
+            last = (tail(self.jobs.data_dir / REMOTE_DIR / "relay.log", 1) or ["沒有輸出"])[-1]
+            self.console.say(
+                f"遙控中繼自己結束了（結束碼 {proc.poll()}）：從網站啟動／結束到不了。最後一行：{last}",
+                "warn",
+            )
+        self.remote.step(self.clock())
+
     def watch(self) -> None:
-        """定時叫：看演練與交易程式是不是自己結束了。"""
+        """定時叫：看演練與交易程式是不是自己結束了；有開遙控就順便讀一次網站來的指令。"""
         with self._lock:
             self.watch_drill()
             self.watch_run()
+        # 不握著鎖做：遠端的「結束」要等交易程式收工好幾秒，這段時間頁面的請求不該被卡住
+        self.watch_remote()
 
     def start_watcher(self, every_s: float = 1.0) -> threading.Event:
         """開一條背景執行緒定時叫 watch（頁面沒開著的時候也要有人收尾）。回傳的事件設起來就停。"""

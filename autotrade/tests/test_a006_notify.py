@@ -401,7 +401,8 @@ def remote_stop(over: Overrides = None) -> Rig:
     r.run([tick(3), tick(4)])
     r.engine.note_control_link(at(5), up=False, detail="讀不到遠端指令：還沒有指令檔 commands.json")
     r.engine.note_control_link(at(9), up=True, detail="遠端指令恢復可以讀")
-    r.engine.on_control([Command(id=8, action="resume", day=day, created_at=at(9))], at(10))
+    # D-229 之後 resume 是認得的動作；這裡要的是「不認得的」，換成 release
+    r.engine.on_control([Command(id=8, action="release", day=day, created_at=at(9))], at(10))
     return r
 
 

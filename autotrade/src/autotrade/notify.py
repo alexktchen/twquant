@@ -564,6 +564,24 @@ def _control(event: Event, seen: Seen, ctx: Context) -> Draft:
             "交易不受影響。",
         ]
         return Level.WARN, "control", False, "遠端指令沒有執行", lines
+    action = event.data.get("action")
+    if action == "flatten":
+        lines = [
+            "有人在網站上按了平倉。程式正在把部位平掉；自動交易沒有停，之後有訊號還會進場。",
+            f"帳上部位：{_holding(seen)}",
+        ]
+        return Level.WARN, "control", False, "收到遠端平倉", lines
+    if action == "pause":
+        lines = [
+            "有人在網站上按了暫停自動交易。程式不再進新單；手上的部位照原本的規則出場。",
+            f"帳上部位：{_holding(seen)}",
+        ]
+        return Level.WARN, "control", False, "自動交易已暫停（遠端）", lines
+    if action == "resume":
+        lines = [
+            "有人在網站上按了恢復自動交易。程式可以再進場；如果程式是停手狀態，恢復不會解除停手。"
+        ]
+        return Level.WARN, "control", False, "自動交易已恢復（遠端）", lines
     lines = [
         "有人在網站上按了緊急停止。程式已經停手並開始平倉（另有一則「緊急停止」的通知）。",
         f"帳上部位：{_holding(seen)}",

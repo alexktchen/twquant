@@ -29,10 +29,21 @@ from autotrade.export import dumps, snapshot
 from autotrade.feed.follow import TickSource
 from autotrade.feed.replay import FeedError
 from autotrade.journal import Journal
-from autotrade.model import RESULT_IGNORED, STAGE_ACK, TAIPEI, require_taipei
+from autotrade.model import (
+    ACTION_FLATTEN,
+    ACTION_PAUSE,
+    ACTION_RESUME,
+    ACTION_STOP,
+    ENGINE_ACTIONS,
+    RESULT_IGNORED,
+    STAGE_ACK,
+    TAIPEI,
+    require_taipei,
+)
 from autotrade.notify import Notifier
 from autotrade.strategy.base import Strategy
 
+ACTION_TEXT = {ACTION_FLATTEN: "平倉", ACTION_PAUSE: "暫停自動交易", ACTION_RESUME: "恢復自動交易"}
 QUIT_NAME = "quit.request"  # 後台按「結束」時放在資料夾裡的檔案；程式看到就收工
 # 印在畫面上的事件（委託、成交、停手、停損、遠端指令、連線、被擋下、部位修正）
 SHOWN = frozenset(
@@ -106,12 +117,53 @@ def earlier_stop(folder: Path, day: date) -> datetime | None:
         try:
             row = json.loads(line)
             stage, code = str(row["stage"]), str(row["code"])
+            action = str(row.get("action", ACTION_STOP))  # 舊的回報檔沒有這一欄：那時只有停止
             at = require_taipei(datetime.fromisoformat(str(row["at"])), "at")
         except (ValueError, KeyError, TypeError) as exc:
             raise ValueError(f"{path} 第 {number} 行讀不懂：{exc}") from exc
+        if action != ACTION_STOP:
+            continue  # 平倉、暫停、恢復由 earlier_actions 處理
         if stage == STAGE_ACK and code != RESULT_IGNORED and (released is None or at > released):
             stops.append(at)
     return min(stops, default=None)
+
+
+def earlier_actions(folder: Path, day: date) -> list[tuple[datetime, str, datetime | None]]:
+    """今天稍早執行過的遠端平倉／暫停／恢復（看回報檔），照時間排好（A-016）。
+
+    每一筆是（執行的時間、動作、當時處理到哪一筆行情）。重開之後接在同一筆行情後面套用，
+    結果才會跟沒重開一樣。在電腦前解除緊急停止不影響這三種。
+    """
+    path = folder / outbox_name(day)
+    if not path.exists():
+        return []
+    done: list[tuple[datetime, str, datetime | None]] = []
+    lines = path.read_text(encoding="utf-8").split("\n")[:-1]  # 最後一段沒有換行結尾＝沒寫完
+    for number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+            stage, code = str(row["stage"]), str(row["code"])
+            action = str(row.get("action", ACTION_STOP))
+            at = require_taipei(datetime.fromisoformat(str(row["at"])), "at")
+            after = row.get("after_tick")
+            seen = (
+                None
+                if after is None
+                else require_taipei(datetime.fromisoformat(str(after)), "after_tick")
+            )
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f"{path} 第 {number} 行讀不懂：{exc}") from exc
+        if action in ENGINE_ACTIONS and stage == STAGE_ACK and code != RESULT_IGNORED:
+            done.append((at, action, seen))
+    return sorted(done, key=lambda item: item[0])
+
+
+def _due(item: tuple[datetime, str, datetime | None], tick_ts: datetime) -> bool:
+    """這一筆今天稍早的遙控動作，是不是該在這筆行情之前套用。"""
+    at, _, after = item
+    return tick_ts >= at if after is None else tick_ts > after
 
 
 @dataclass(frozen=True)
@@ -215,6 +267,8 @@ class Runner:
         )
         open_at = datetime.combine(day, self.cfg.session.start, tzinfo=TAIPEI)
         stop_at = self._stop_to_apply(start)
+        # 今天稍早執行過的遠端平倉／暫停／恢復：算到那個時間照樣套用（A-016）
+        again = earlier_actions(self.folder, day) if self.control else []
         quit_file = self.folder / QUIT_NAME
         quit_file.unlink(missing_ok=True)  # 上一次留下來的不算
         log = self._journal(start)
@@ -248,6 +302,8 @@ class Runner:
                     if stop_at is not None and tick.ts >= stop_at:
                         self._apply_stop(engine, stop_at)
                         stop_at = None
+                    while again and _due(again[0], tick.ts):
+                        self._apply_action(engine, *again.pop(0)[:2])
                     engine.on_tick(tick)
                 count += len(ticks)
                 if not caught_up:
@@ -272,6 +328,8 @@ class Runner:
                     if stop_at is not None:
                         self._apply_stop(engine, stop_at)
                         stop_at = None
+                    while again:
+                        self._apply_action(engine, *again.pop(0)[:2])
                     engine.on_timer(now)
                     if loop is not None:
                         listening = listening or self._relay_ready(now, start)
@@ -359,6 +417,15 @@ class Runner:
     def _apply_stop(self, engine: Engine, at: datetime) -> None:
         engine.kill(at)
         self.say(f"{at:%H:%M:%S}  套用今天稍早的遠端緊急停止：停手、平倉")
+
+    def _apply_action(self, engine: Engine, at: datetime, action: str) -> None:
+        if action == ACTION_FLATTEN:
+            engine.flatten_now(at)
+        elif action == ACTION_PAUSE:
+            engine.pause()
+        else:
+            engine.resume()
+        self.say(f"{at:%H:%M:%S}  套用今天稍早的遠端{ACTION_TEXT[action]}")
 
     def _close(self, engine: Engine, loop: ControlLoop | None) -> str:
         last = engine.last_tick

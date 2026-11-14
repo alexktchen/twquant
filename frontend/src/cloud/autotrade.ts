@@ -18,6 +18,8 @@ export type AutoStatus = {
   strategy: string
   state: AutoState
   halt: string | null
+  /** 自動交易是不是暫停中（不再進新單，A-016）；舊版的狀態沒有這一欄 */
+  paused?: boolean
   position: number
   avg_price: number
   last_price: number
@@ -50,7 +52,34 @@ export type StopAck = { acked_at: string; ack_age_s: number; code: string; note:
 export type StopCommand = { id: string; day: string; created_at: string; age_s: number; acks: Partial<Record<string, StopAck>> }
 /** 一支程式的心跳：中繼程式幾秒前回報、交易程式幾秒前讀過指令（沒讀過是 null）、多久讀一次、今天有沒有出現過。 */
 export type ListenerBeat = { relay_age_s: number; engine_age_s: number | null; poll_s: number; seen_today: boolean }
-export type AutoEnvelope = { days: AutoDayRow[]; current: AutoStatus | null; stop: StopCommand | null; listeners: Partial<Record<string, ListenerBeat>> }
+/** 遙控指令（A-016、A-017／D-229）：平倉、暫停／恢復自動交易由交易程式執行，啟動／結束由本機後台執行。 */
+export type RemoteAction = 'flatten' | 'pause' | 'resume' | 'start' | 'quit'
+/** 今天的一筆遙控指令與接手的程式回報的結果（還沒有是 null）。age_s／ack_age_s＝伺服器算的「到現在幾秒」。 */
+export type RemoteRequest = {
+  id: string
+  action: RemoteAction
+  target: AutoMode
+  created_at: string
+  age_s: number
+  acked_at: string | null
+  ack_age_s: number | null
+  code: string | null
+  note: string | null
+  done_at: string | null
+  done_code: string | null
+  done_note: string | null
+}
+/** 後台那支中繼程式的心跳：它幾秒前回報、後台幾秒前讀過指令（沒讀過是 null）。 */
+export type RemoteBeat = { age_s: number; reader_age_s: number | null; poll_s: number; seen_today: boolean }
+export type AutoEnvelope = {
+  days: AutoDayRow[]
+  current: AutoStatus | null
+  stop: StopCommand | null
+  listeners: Partial<Record<string, ListenerBeat>>
+  /** 今天最近幾筆遙控指令（新的在前）；表還沒建的時候沒有這一欄 */
+  requests?: RemoteRequest[]
+  remote?: RemoteBeat | null
+}
 
 /** 這一版網站認得的狀態版本（autotrade export.py 的 SCHEMA）。 */
 export const SCHEMA = 1
@@ -211,6 +240,92 @@ export function pollMs(cmd: StopCommand | null, lines: readonly StopLine[], elap
   if (cmd === null || cmd.age_s + elapsed > STOP_FAST_FOR_S) return POLL_MS
   return lines.some((l) => l.tone === 'wait') ? STOP_FAST_MS : POLL_MS
 }
+
+// ── 遙控按鈕（A-016、A-017）──
+
+export const ACTION_NAME: Record<RemoteAction, string> = {
+  flatten: '平倉',
+  pause: '暫停自動交易',
+  resume: '恢復自動交易',
+  start: '啟動交易程式',
+  quit: '結束交易程式',
+}
+/** 確認時講清楚按下去會怎樣。 */
+export const ACTION_CONFIRM: Record<RemoteAction, string> = {
+  flatten: '把現在的部位平掉。自動交易不會停，之後有訊號還會進場；要停到底請按緊急停止。',
+  pause: '不再進新單；手上的部位照原本的規則出場。',
+  resume: '可以再進場。不會解除緊急停止。',
+  start: '用電腦上指定的那一份設定、今天的即時行情啟動。今天按過緊急停止的話，啟動之後一樣是停手的。',
+  quit: '交易程式會結束，今天不再交易。',
+}
+/** 按下超過這麼多秒沒有程式接手就作廢。要跟伺服器的 REQUEST_TTL_S 一樣。 */
+export const REQUEST_TTL_S = 30
+/** 程式收到之後超過這麼多秒還沒做完，就標紅。 */
+export const REQUEST_LATE_S = 60
+/** 最後的結果裡，這幾種是「做到了」；其他的（含不認得的）都當成要人處理。 */
+export const REQUEST_OK: ReadonlySet<string> = new Set(['flat', 'paused', 'resumed', 'started', 'quit'])
+/** 一個分頁最多顯示最近幾筆。 */
+export const REQUESTS_PER_TAB = 3
+
+/** 後台的中繼程式是不是在聽（啟動／結束要靠它）：它自己與後台讀指令的心跳都夠新。 */
+export function remoteListening(beat: RemoteBeat | null | undefined): boolean {
+  if (!beat || beat.reader_age_s === null) return false
+  const limit = Math.max(LISTEN_MIN_S, beat.poll_s * LISTEN_POLLS)
+  return beat.age_s <= limit && beat.reader_age_s <= limit
+}
+
+export type RemoteButton = { action: RemoteAction; label: string; enabled: boolean; why: string }
+
+/**
+ * 這個分頁（模擬或真單）現在有哪幾顆按鈕、能不能按；不能按的寫原因。
+ * 平倉、暫停／恢復要那一支交易程式在聽；啟動／結束要後台在聽。known＝畫面上的狀態夠新（不夠新就都不能按，不猜）。
+ */
+export function remoteButtons(mode: AutoMode, beats: AutoEnvelope['listeners'], remote: RemoteBeat | null | undefined, paused: boolean, known: boolean): RemoteButton[] {
+  const running = known && listening(beats[mode])
+  const admin = known && remoteListening(remote)
+  const unsure = '狀態不明，先等畫面更新'
+  const noProgram = known ? `${MODE_NAME[mode]}的交易程式沒在聽` : unsure
+  const noAdmin = known ? '電腦或本機後台沒開（後台的遙控沒在聽）' : unsure
+  const swing: RemoteAction = paused ? 'resume' : 'pause'
+  const power: RemoteAction = running ? 'quit' : 'start'
+  return [
+    { action: 'flatten', label: ACTION_NAME.flatten, enabled: running, why: running ? '' : noProgram },
+    { action: swing, label: ACTION_NAME[swing], enabled: running, why: running ? '' : noProgram },
+    { action: power, label: ACTION_NAME[power], enabled: admin, why: admin ? '' : noAdmin },
+  ]
+}
+
+export type RequestLine = { id: string; tone: 'wait' | 'done' | 'bad'; label: string; detail: string }
+
+/** 一筆遙控指令現在到哪裡了。elapsed＝拿到資料之後又過了幾秒。 */
+export function requestLine(req: RemoteRequest, elapsed: number): RequestLine {
+  const name = ACTION_NAME[req.action] ?? req.action
+  const at = clock(req.created_at)
+  const line = (tone: RequestLine['tone'], label: string, detail: string): RequestLine => ({ id: req.id, tone, label: `${name}：${label}`, detail })
+  if (req.done_code !== null) {
+    if (REQUEST_OK.has(req.done_code)) return line('done', '完成', `${at} 按下；${req.done_note ?? ''}`)
+    return line('bad', req.done_code === 'refused' ? '沒有執行' : '要人處理', req.done_note ?? req.done_code)
+  }
+  if (req.acked_at !== null) {
+    if (req.code === 'ignored') return line('bad', '沒有執行', req.note ?? '')
+    const waited = (req.ack_age_s ?? 0) + elapsed
+    if (waited > REQUEST_LATE_S) return line('bad', '收到了，但還沒做完', `已經 ${waitText(waited)}；${req.note ?? ''}`)
+    return line('wait', '已收到，處理中', req.note ?? '')
+  }
+  const age = req.age_s + elapsed
+  if (age <= REQUEST_TTL_S) return line('wait', '等它收到…', `已經 ${waitText(age)}`)
+  return line('bad', '沒有送到，已作廢', `${at} 按下，${REQUEST_TTL_S} 秒內沒有程式接手。還要做請再按一次`)
+}
+
+/** 這個分頁最近幾筆遙控指令的進度（新的在前）。 */
+export const requestLines = (requests: readonly RemoteRequest[], mode: AutoMode, elapsed: number): RequestLine[] =>
+  requests
+    .filter((r) => r.target === mode)
+    .slice(0, REQUESTS_PER_TAB)
+    .map((r) => requestLine(r, elapsed))
+
+/** 有沒有遙控指令還在等（等收到、等做完）：有的話畫面更新要變快。 */
+export const requestsWaiting = (requests: readonly RemoteRequest[], elapsed: number): boolean => requests.some((r) => requestLine(r, elapsed).tone === 'wait')
 
 /** 離每日虧損上限還有多少：used＝用掉的比例（0～1），left＝還能賠幾元。沒設上限是 null。 */
 export function lossRoom(dayPnl: number, limit: number | null): { used: number; left: number } | null {
