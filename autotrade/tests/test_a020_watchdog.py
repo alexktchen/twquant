@@ -289,6 +289,39 @@ def test_ac4_when_the_main_program_stays_silent_the_watchdog_acts(tmp_path: Path
     assert len(world.broker.flattened) == 1 and stop_file(world) is not None
 
 
+def test_ac4_an_old_stop_found_outside_the_session_is_closed_quietly(tmp_path: Path) -> None:
+    """2026-11-14 第一次真的跑 agent：凌晨按的停止還掛著，盤後啟動時看門程式發了一則「要處理」——那是誤報。"""
+    world = World(tmp_path)
+    dog = world.dog()
+    pressed = clock_at(0, 20)
+    cmd = stop_cmd(1, pressed)
+    for now in (clock_at(14, 18, 7), clock_at(14, 18, 21)):  # 盤後；交易程式今天已經結束
+        write_inbox(tmp_path / "watchdog", now, [cmd])
+        dog.step(now)
+    rows = own_results(tmp_path)
+    assert [(r[0], r[1], r[2]) for r in rows] == [
+        (1, STAGE_ACK, RESULT_FLAT),
+        (1, STAGE_DONE, RESULT_FLAT),
+    ]
+    assert "盤外：交易程式不在跑" in rows[0][3]
+    assert world.alerts == [] and world.broker.flattened == [] and stop_file(world) is None
+    assert any("沒人回報" in line for line in world.said)  # 紀錄裡有講，只是不吵人
+
+
+def test_ac4_outside_the_session_a_real_position_at_the_broker_still_gets_handled(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path, broker=FakeBroker(at_broker=1))
+    dog = world.dog()
+    cmd = stop_cmd(1, clock_at(14, 0))
+    for now in (clock_at(14, 18, 7), clock_at(14, 18, 21)):
+        write_inbox(tmp_path / "watchdog", now, [cmd])
+        dog.step(now)
+    assert (
+        len(world.alerts) == 1 and len(world.broker.flattened) == 1 and stop_file(world) is not None
+    )
+
+
 def test_ac4_the_watchdog_ignores_anything_that_is_not_todays_stop(tmp_path: Path) -> None:
     world = World(tmp_path)
     dog = world.dog()

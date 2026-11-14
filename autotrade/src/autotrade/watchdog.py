@@ -34,6 +34,7 @@ from autotrade.control import (
 )
 from autotrade.model import (
     ACTION_STOP,
+    RESULT_FLAT,
     RESULT_IGNORED,
     RESULT_SUSPENDED,
     STAGE_ACK,
@@ -219,6 +220,13 @@ class Watchdog:
         else:
             self._closed.add(cmd.id)
 
+    def _nothing_to_stop(self, now: datetime) -> bool:
+        """盤外，而且券商那邊沒有部位（模擬沒有另一個帳：盤外交易程式不在，部位也就不存在）。"""
+        session = self.cfg.session
+        if session.start <= now.time() < session.end:
+            return False
+        return self.broker.position() in (None, 0)
+
     def _watch_stop(self, cmd: Command, now: datetime) -> None:
         assert self.cfg.watchdog is not None
         if cmd.id in self._closed:
@@ -237,6 +245,14 @@ class Watchdog:
                 code, note = main[STAGE_ACK]
                 self._report(cmd, now, STAGE_ACK, code, f"主程式已經處理，看門程式沒有動作：{note}")
             elif (now - first).total_seconds() > self.cfg.watchdog.stop_grace_s:
+                if self._nothing_to_stop(now):
+                    # 盤外、交易程式本來就不在、券商那邊也沒有部位：不是出事，不寫停手檔、不發通知。
+                    # 這筆停止今天之內都有效：交易程式今天再開的話，會從它自己的指令檔讀到並停手。
+                    note = "盤外：交易程式不在跑，也沒有部位要處理；看門程式沒有動作"
+                    self.say(f"{now:%H:%M:%S} 看門程式：有一筆緊急停止沒人回報，但現在是{note}")
+                    self._report(cmd, now, STAGE_ACK, RESULT_FLAT, note)
+                    self._report(cmd, now, STAGE_DONE, RESULT_FLAT, note)
+                    return
                 waited = (now - first).total_seconds()
                 code, did = self._act(
                     now,

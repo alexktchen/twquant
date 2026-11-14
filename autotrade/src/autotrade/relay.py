@@ -136,6 +136,13 @@ BELL_DDL: tuple[str, ...] = (
     "FOR EACH ROW EXECUTE FUNCTION web.autotrade_ring()",
 )
 
+# 兩條連線同時建同一張表／同一個函式時，Postgres 給輸的那一邊的錯誤訊息裡會有這些字
+DDL_RACE_MARKS = (
+    "pg_type_typname_nsp_index",
+    "pg_class_relname_nsp_index",
+    "already exists",
+    "tuple concurrently updated",
+)
 # 一次最多拿幾筆（一天的上限是 20 筆，這只是保險）
 PENDING_LIMIT = 50
 # 今天、而且「這支程式」還沒回報過的指令。不用「編號比上次大」：指令表重建過、編號重來，也不會漏
@@ -247,15 +254,25 @@ class PgRelayDb:
                 conn.close()
             raise ControlError(str(exc).strip() or type(exc).__name__) from exc
 
+    def _ddl(self, statement: str) -> None:
+        """跑一句建表／建觸發器。兩支中繼程式同時啟動、同時去建同一個東西會撞在一起（2026-11-14 第一次跑 agent 遇到）：
+        那種錯再跑一次就過了（另一支已經建好），所以重試一次；其他的錯照樣丟出去。"""
+        try:
+            self._run(statement, ())
+        except ControlError as exc:
+            if not any(mark in str(exc) for mark in DDL_RACE_MARKS):
+                raise
+            self._run(statement, ())
+
     def ensure(self) -> None:
         """確保三張表都在。只在啟動時做一次，不在盤中重連時做。"""
         for statement in COMMANDS_DDL:
-            self._run(statement, ())
+            self._ddl(statement)
 
     def ensure_requests(self) -> None:
         """確保遙控指令的表在（A-016）。要在 ensure 之後：編號用的是指令表的序號。"""
         for statement in REQUESTS_DDL:
-            self._run(statement, ())
+            self._ddl(statement)
 
     def pending_requests(self, today: date, consumer: str) -> list[Command]:
         """今天、給這支程式、還沒有人接手也還沒作廢的遙控指令。"""
@@ -295,12 +312,12 @@ class PgRelayDb:
     def ensure_bus(self) -> None:
         """確保訊息匯流排的表在（A-019）。要在 ensure 之後：編號用的是指令表的序號。"""
         for statement in MESSAGES_DDL:
-            self._run(statement, ())
+            self._ddl(statement)
 
     def ensure_bus_bell(self) -> None:
         """匯流排有新指令也按門鈴。要在 ensure_bell 之後：用的是它建的函式。"""
         for statement in BUS_BELL_DDL:
-            self._run(statement, ())
+            self._ddl(statement)
 
     def pending_bus(self, today: date, consumer: str) -> list[Command]:
         """今天、給這支 agent、還沒作廢也還沒有回報的匯流排指令。"""
@@ -319,7 +336,7 @@ class PgRelayDb:
     def ensure_bell(self) -> None:
         """確保門鈴的觸發器在（A-015）。只有開門鈴時才做，跟建表一樣只做一次。"""
         for statement in BELL_DDL:
-            self._run(statement, ())
+            self._ddl(statement)
 
     def pending(self, today: date, consumer: str) -> list[Command]:
         """今天、這支程式還沒回報過的指令。"""
