@@ -2,6 +2,14 @@
 /* 正常用藍色：這個網站的綠色代表下跌、紅色代表上漲，狀態燈不跟損益搶顏色 */
 .cq-at-modes { padding: 0; max-width: 260px; }
 .cq-at-modes button { font-size: 16px; font-weight: 600; }
+.cq-at-link { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0; padding: 8px 10px; border-radius: 8px; background: var(--tile, #16181f); font-size: 15px; }
+.cq-at-link i { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--c, #8b93a7); }
+.cq-at-link.on { --c: #2fbf71; }
+.cq-at-link.on i { box-shadow: 0 0 0 4px rgba(47, 191, 113, 0.22); }
+.cq-at-link.off { --c: #8b93a7; }
+.cq-at-link.unknown { --c: #f0b90b; }
+.cq-at-link b { font-weight: 600; }
+.cq-at-link span { color: var(--muted, #8b93a7); }
 .cq-at-modes button.cq-at-mode-live.on { background: #b3261e; color: #fff; }
 
 /* 遠端緊急停止（A-011）：全頁唯一會動到交易程式的東西，所以夠大、夠紅，而且要按兩次 */
