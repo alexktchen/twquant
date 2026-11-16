@@ -61,13 +61,15 @@ class AgentSetup:
     env_file: Path | None = None
     bell_port: int | None = None
     notify: str | None = None  # send／print／None
+    # 打包成 exe 之後（A-023）：python 那一欄就是 exe 自己，子程序直接用 `exe 指令 …` 開，沒有 `-m autotrade`
+    frozen: bool = False
 
 
 def day_plan(setup: AgentSetup, cfg: AgentConfig, session_end: time, day: date) -> DayPlan:
     """那一天要開的五支程序。資料夾沒有就建。"""
     folder = setup.base / day.isoformat()
     (folder / WATCHDOG_DIR).mkdir(parents=True, exist_ok=True)
-    head = (setup.python, "-m", "autotrade")
+    head = (setup.python,) if setup.frozen else (setup.python, "-m", "autotrade")
     config = ("--config", str(setup.config))
     env = () if setup.env_file is None else ("--env-file", str(setup.env_file))
     bell = (

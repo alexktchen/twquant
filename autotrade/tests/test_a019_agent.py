@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tomllib
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
@@ -16,6 +17,7 @@ from typing import IO, Any
 import pytest
 
 from autotrade import bus as bus_module
+from autotrade import cli
 from autotrade.agent import AgentSetup, Child, DayPlan, Supervisor, day_plan
 from autotrade.agent import run as run_supervisor
 from autotrade.bus import (
@@ -712,6 +714,96 @@ def test_ac5_the_day_plan_wires_five_programs_to_one_folder(tmp_path: Path) -> N
         "DSN" in a for a in by_name["watchdog"].args
     )
     assert parser_accepts(run.args[3:]) and parser_accepts(by_name["watchdog"].args[3:])
+
+
+def test_a023_a_packaged_program_starts_its_children_with_itself(tmp_path: Path) -> None:
+    setup = AgentSetup(
+        python="C:/app/twquant-agent.exe",
+        config=Path("c.toml"),
+        base=tmp_path,
+        strategy="none",
+        mode="sim",
+        dsn_env="TWQUANT_SUPABASE_DSN",
+        ticks_dsn_env="TWQUANT_PG_DSN",
+        frozen=True,
+    )
+    plan = day_plan(setup, AGENT, time(13, 45), date(2026, 11, 16))
+    for child in plan.children:  # 沒有 `-m autotrade`：exe 後面直接接指令
+        assert child.args[0] == "C:/app/twquant-agent.exe" and "-m" not in child.args, child.name
+        assert child.args[1] in ("ticks", "relay", "watchdog", "run"), child.name
+    assert parser_accepts(next(c for c in plan.children if c.name == "run").args[1:])
+
+
+def test_a023_launch_reads_the_settings_file_next_to_the_program(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file = tmp_path / "launch.toml"
+    file.write_text(
+        'config = "configs/tmf_sim.toml"\ndir = "D:/data/agent"\nstrategy = "momentum"\n'
+        'dsn_env = "TWQUANT_SUPABASE_DSN"\nbell_port = 5432\nnotify = "send"\n',
+        encoding="utf-8",
+    )
+    args = cli.read_launch(file)
+    assert (
+        args["config"] == (tmp_path / "configs" / "tmf_sim.toml").resolve()
+    )  # 相對路徑：相對於設定檔
+    assert args["dir"] == Path("D:/data/agent") and args["bell_port"] == 5432
+    for bad, why in (
+        ('config = "c.toml"\ndir = "d"\nstrategy = "momentum"\n', "少了"),
+        ('config = "c.toml"\ndir = "d"\nstrategy = "x"\ndsn_env = "A"\n', "strategy"),
+        ('config = "c.toml"\ndir = "d"\nstrategy = "none"\ndsn_env = "A"\nport = 1\n', "不認得"),
+        (
+            'config = "c.toml"\ndir = "d"\nstrategy = "none"\ndsn_env = "A"\nbell_port = "x"\n',
+            "整數",
+        ),
+        (
+            'config = "c.toml"\ndir = "d"\nstrategy = "none"\ndsn_env = "A"\nnotify = "sms"\n',
+            "notify",
+        ),
+        ("config = ", "格式不對"),
+    ):
+        file.write_text(bad, encoding="utf-8")
+        with pytest.raises(ConfigError, match=why):
+            cli.read_launch(file)
+    with pytest.raises(FileNotFoundError):
+        cli.read_launch(tmp_path / "missing.toml")
+    with pytest.raises(ConfigError, match="--file"):  # 不是 exe：一定要講哪一個檔
+        main(["launch"])
+    # 照設定檔把參數交給 agent；資料夾沒有就建
+    seen: list[tuple[object, ...]] = []
+
+    def fake_agent(*a: object) -> int:
+        seen.append(a)
+        return 0
+
+    monkeypatch.setattr(cli, "run_agent", fake_agent)
+    data = tmp_path / "data" / "agent"
+    file.write_text(
+        f'config = "c.toml"\ndir = "{data.as_posix()}"\nstrategy = "none"\ndsn_env = "A"\n',
+        encoding="utf-8",
+    )
+    assert main(["launch", "--file", str(file)]) == 0 and data.is_dir()
+    assert seen == [
+        (
+            (tmp_path / "c.toml").resolve(),
+            data,
+            "none",
+            None,
+            "A",
+            "TWQUANT_PG_DSN",
+            None,
+            None,
+            None,
+        )
+    ]
+    # 打包好的 exe：預設讀自己旁邊的 launch.toml
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "twquant-agent.exe"))
+    file.write_text(
+        f'config = "c.toml"\ndir = "{data.as_posix()}"\nstrategy = "none"\ndsn_env = "B"\n',
+        encoding="utf-8",
+    )
+    assert main(["launch"]) == 0 and seen[-1][4] == "B"
 
 
 def parser_accepts(args: tuple[str, ...]) -> bool:
