@@ -23,7 +23,6 @@ yuanta_check.py — 元大期貨交易 API 連線測試：登入、列帳號、�
 from __future__ import annotations
 
 import argparse
-import contextlib
 import ctypes
 import struct
 import sys
@@ -172,17 +171,45 @@ def create_control():
     return ord_ctrl, connection, events, container
 
 
-def pump_until(done, timeout: float) -> bool:
-    """處理視窗訊息直到 done() 為真或逾時。"""
-    from comtypes.client import PumpEvents
+PM_REMOVE = 0x0001
+QS_ALLINPUT = 0x04FF
+PUMP_WAIT_MS = 50
 
+
+def pump_until(done, timeout: float) -> bool:
+    """跑完整的視窗訊息迴圈，直到 done() 為真或逾時。
+
+    元件靠一般的視窗訊息推進連線與登入（線路連上、收到資料都是訊息）。comtypes 的 PumpEvents
+    只處理 COM 自己的訊息、不派送這些，結果是線路其實連上了、元件卻永遠停在「線路連線中」
+    （2026-11-16 實測：TCP 已建立，30 秒沒有任何登入回報）。
+    """
+    user32 = ctypes.windll.user32
+    user32.PeekMessageW.argtypes = [
+        POINTER(wintypes.MSG),
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.UINT,
+        wintypes.UINT,
+    ]
+    user32.PeekMessageW.restype = wintypes.BOOL
+    user32.TranslateMessage.argtypes = [POINTER(wintypes.MSG)]
+    user32.DispatchMessageW.argtypes = [POINTER(wintypes.MSG)]
+    user32.MsgWaitForMultipleObjects.argtypes = [
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.BOOL,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    msg = wintypes.MSG()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if done():
             return True
-        # PumpEvents 逾時會丟 RPC_S_CALLPENDING（OSError），屬正常
-        with contextlib.suppress(OSError):
-            PumpEvents(0.2)
+        while user32.PeekMessageW(byref(msg), None, 0, 0, PM_REMOVE):
+            user32.TranslateMessage(byref(msg))
+            user32.DispatchMessageW(byref(msg))
+        user32.MsgWaitForMultipleObjects(0, None, False, PUMP_WAIT_MS, QS_ALLINPUT)
     return done()
 
 
