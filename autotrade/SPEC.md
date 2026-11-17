@@ -394,6 +394,15 @@ Windows 服務「twquant 交易 agent」（開機就在；顧著下面幾支，�
 - **A-022 系統匣圖示與 Windows 通知**：右下角一顆燈——待命灰、運作藍、停手紅、連不上 agent 黃。
   右鍵：啟動、停止、緊急停止（都要再確認一次）、開設定網頁、看今天的損益。成交與異常跳 Windows 通知（跟 Telegram 同一套分級，不重複轟炸）。
   圖示只是遙控器：關掉它 agent 照跑。它跟 agent 講話走本機（127.0.0.1＋通行碼），不經過雲端。
+- **A-023 的 Python 版（2026-11-16 先做的一部分；使用者：「我有地端的安裝檔嗎」「做安裝檔」，同日說 Rust 先不要裝）**：`packaging/`。
+  `build.py` 用 PyInstaller 把 autotrade 包成 `twquant-agent.exe`（資料夾模式），`--installer` 再做成單一個安裝程式 `twquant-agent-setup.exe`（`installer.py`）。
+  只裝給目前的使用者、不用系統管理員權限：程式放 `%LOCALAPPDATA%\Programs\twquant-agent`、開始功能表與桌面各一個捷徑、「新增或移除程式」可以解除安裝。
+  捷徑跑的是新指令 `launch`：照程式旁邊的 `launch.toml`（`agent` 那一行的參數寫成檔，範例 `packaging/launch.example.toml`）開常駐的 agent。
+  重裝不蓋掉已經有的 `launch.toml` 與 `configs/`。打包後子程序用 exe 自己開（`AgentSetup.frozen`）。
+  **驗過的**：exe 重播 2026-11-16 的結果跟沒打包時一樣（2 筆、−1,578 元）、讀得到本機資料庫；在測試資料夾安裝、重裝（設定沒被蓋）、執行、解除安裝（資料夾刪乾淨）。
+  **沒驗的**：捷徑與「新增或移除程式」那一筆（測試時關掉了）、跳出來的確認視窗、用安裝好的程式真的把 agent 開起來、在別台電腦上裝。安裝程式沒有數位簽章，別台電腦會跳 Windows 的警告。
+  **不在這一版**：Windows 服務、系統匣圖示、金鑰進認證管理員（那些是 Rust 外殼，暫停中）。原本想用 Inno Setup 做安裝程式，下載並執行它被擋下，改成自己寫。
+  做法：另開一個環境裝 `pyinstaller`、`psycopg[binary]`、`tzdata`，再跑 `python packaging/build.py --out <資料夾> --work <資料夾> --ms-repo C:/t/Momentum_Scalping --installer --launch <這台電腦的 launch.toml>`（都放 repo 外）。
 - **A-023 執行檔、安裝程式、金鑰**：打包成一個執行檔（服務、圖示、設定網頁、指令列都是它），加安裝程式（裝服務、開始功能表、解除安裝）。
   資料庫連線、Telegram、券商帳密從 `.env` 搬進 Windows 認證管理員；`.env` 仍然可以當後備（開發用）。
   設定檔與資料搬到使用者的資料夾（不再放在 repo 裡——順便解掉「後台存設定會改到進版控的檔」）。

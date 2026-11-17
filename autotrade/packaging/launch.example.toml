@@ -1,0 +1,11 @@
+# 啟動設定檔（A-023）：安裝好的程式旁邊要有一份 launch.toml，雙擊「twquant 交易 agent」就照它開。
+# 路徑寫相對的話，是相對於這個檔所在的資料夾。金鑰不放這裡：只寫「環境變數的名字」與 .env 的位置。
+config = "configs/tmf_sim.toml"          # 交易設定檔
+dir = "D:/autotrade-data/agent"          # 紀錄放哪（底下每天一個資料夾）；沒有會自己建
+strategy = "momentum"                    # momentum 或 none
+ms_repo = "C:/Momentum_Scalping"         # 網友原版 Momentum_Scalping 的資料夾（strategy = momentum 才需要）
+dsn_env = "TWQUANT_SUPABASE_DSN"         # 指令收發連的資料庫：放連線字串的環境變數名稱
+ticks_dsn_env = "TWQUANT_PG_DSN"         # 行情讀的資料庫（富邦錄的逐筆）
+env_file = "D:/path/to/.env"             # 上面兩個環境變數沒設時，從這個 .env 讀
+bell_port = 5432                         # 聽門鈴時改連的埠（Supabase 連線池用 5432）
+notify = "send"                          # send＝通知真的送到手機；print＝只印在畫面上；不要通知就刪掉這一行

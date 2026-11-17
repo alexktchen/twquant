@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time as time_module
+import tomllib
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
@@ -491,6 +492,7 @@ def run_agent(
         raise FileNotFoundError(f"資料夾不存在：{base}")
     setup = AgentSetup(
         python=sys.executable,
+        frozen=is_frozen(),
         config=config.resolve(),
         base=base.resolve(),
         strategy=strategy,
@@ -506,7 +508,8 @@ def run_agent(
     supervisor = Supervisor(
         agent_cfg,
         lambda day: day_plan(setup, agent_cfg, session_end, day),
-        workdir=Path(__file__).resolve().parents[2],
+        # 子程序的指令列全部是絕對路徑；工作資料夾用資料夾本身（打包成 exe 之後沒有原始碼的資料夾可以用）
+        workdir=base.resolve(),
     )
     start = "每天一開始就運作" if agent_cfg.arm_at_open else "每天從待命開始，要按「啟動」才交易"
     print(
@@ -515,6 +518,75 @@ def run_agent(
     )
     run_supervisor(supervisor)
     return 0
+
+
+def is_frozen() -> bool:
+    """現在是不是打包好的 exe（PyInstaller）在跑。"""
+    return bool(getattr(sys, "frozen", False))
+
+
+LAUNCH_NAME = "launch.toml"
+LAUNCH_PATHS = (
+    "config",
+    "dir",
+    "ms_repo",
+    "env_file",
+)  # 這幾項是路徑：相對的話，相對於設定檔所在的資料夾
+LAUNCH_NEEDED = ("config", "dir", "strategy", "dsn_env")
+
+
+def read_launch(file: Path) -> dict[str, object]:
+    """讀啟動設定檔（A-023）：`agent` 那一行的參數寫成一個檔，安裝好的程式雙擊就能開，不用記指令。"""
+    if not file.is_file():
+        raise FileNotFoundError(f"找不到啟動設定檔：{file}")
+    try:
+        raw = tomllib.loads(file.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"啟動設定檔 {file} 的格式不對：{exc}") from exc
+    known = {*LAUNCH_NEEDED, "ms_repo", "env_file", "ticks_dsn_env", "bell_port", "notify"}
+    extra = sorted(set(raw) - known)
+    if extra:
+        raise ConfigError(f"啟動設定檔 {file} 有不認得的項目：{extra}")
+    missing = [key for key in LAUNCH_NEEDED if not raw.get(key)]
+    if missing:
+        raise ConfigError(f"啟動設定檔 {file} 少了：{missing}")
+    if raw["strategy"] not in STRATEGIES:
+        raise ConfigError(f"啟動設定檔的 strategy 要是 {STRATEGIES} 其中之一：{raw['strategy']!r}")
+    if raw.get("notify") is not None and raw["notify"] not in NOTIFY_MODES:
+        raise ConfigError(f"啟動設定檔的 notify 要是 {NOTIFY_MODES} 其中之一：{raw['notify']!r}")
+    port = raw.get("bell_port")
+    if port is not None and (not isinstance(port, int) or isinstance(port, bool)):
+        raise ConfigError(f"啟動設定檔的 bell_port 要是整數：{port!r}")
+    out: dict[str, object] = dict(raw)
+    for key in LAUNCH_PATHS:
+        if raw.get(key) is not None:
+            path = Path(str(raw[key]))
+            out[key] = path if path.is_absolute() else (file.parent / path).resolve()
+    return out
+
+
+def run_launch(file: Path | None) -> int:
+    """照啟動設定檔開常駐的 agent。沒給檔案：打包好的 exe 用自己旁邊的 launch.toml。"""
+    if file is None:
+        if not is_frozen():
+            raise ConfigError("沒有打包成 exe 的時候，launch 要用 --file 指明啟動設定檔")
+        file = Path(sys.executable).resolve().parent / LAUNCH_NAME
+    args = read_launch(file)
+    base = args["dir"]
+    assert isinstance(base, Path) and isinstance(args["config"], Path)
+    base.mkdir(parents=True, exist_ok=True)  # 第一次開：資料夾還沒有就建
+    ms_repo, env_file, port = args.get("ms_repo"), args.get("env_file"), args.get("bell_port")
+    return run_agent(
+        args["config"],
+        base,
+        str(args["strategy"]),
+        ms_repo if isinstance(ms_repo, Path) else None,
+        str(args["dsn_env"]),
+        str(args.get("ticks_dsn_env") or "TWQUANT_PG_DSN"),
+        env_file if isinstance(env_file, Path) else None,
+        port if isinstance(port, int) else None,
+        None if args.get("notify") is None else str(args["notify"]),
+    )
 
 
 def run_ticks(
@@ -817,6 +889,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     agent.add_argument("--env-file", type=Path, help="環境變數沒設時，從這個 .env 讀")
     agent.add_argument("--bell-port", type=int, help="聽門鈴時改連這個埠（Supabase 連線池用 5432）")
     agent.add_argument("--notify", choices=sorted(NOTIFY_MODES), help="發通知：send＝真的送")
+    launch = sub.add_parser(
+        "launch", help="照啟動設定檔（launch.toml）開常駐的 agent：安裝好的程式用這個"
+    )
+    launch.add_argument(
+        "--file", type=Path, help="啟動設定檔；打包好的 exe 預設用自己旁邊的 launch.toml"
+    )
     watch = sub.add_parser(
         "watchdog", help="獨立看門程式：盯交易程式的心跳、行情、沒人回報的遠端停止"
     )
@@ -953,6 +1031,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.bell_port,
             args.notify,
         )
+    if args.command == "launch":
+        return run_launch(args.file)
     if args.command == "watchdog":
         run_watchdog(
             args.config,
