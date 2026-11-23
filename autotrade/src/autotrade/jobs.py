@@ -51,6 +51,9 @@ class Proc(Protocol):
 Spawner = Callable[[Sequence[str], IO[str], Path], Proc]
 
 
+HEADLINE = "※"  # 子程序的紀錄裡帶這個記號的那一行，agent 會抄到自己的視窗與 agent.log（A-024）
+
+
 def popen(args: Sequence[str], log: IO[str], cwd: Path) -> Proc:
     """真的起一個程序（輸出不緩衝，紀錄檔馬上看得到）。"""
     return subprocess.Popen(

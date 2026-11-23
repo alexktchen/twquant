@@ -11,13 +11,15 @@ from __future__ import annotations
 import importlib
 import os
 import time as time_module
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
 from autotrade.feed.recorded import HEADER
+from autotrade.jobs import HEADLINE
 from autotrade.model import TAIPEI
 
 MONTH_CODE = "ABCDEFGHIJKL"  # 富邦的月份代碼：A＝1 月 … L＝12 月
@@ -169,11 +171,69 @@ class TickRelay:
         return TickRelayReport(True, len(new), None)
 
 
+@dataclass(frozen=True)
+class RecordCheck:
+    """檢查今天的行情有沒有漏錄（A-024）要用的東西：盤的起訖與兩個門檻（從設定檔來）。"""
+
+    start: time
+    end: time
+    late_s: float
+    gap_s: float
+
+    def due(self, day: date) -> list[datetime]:
+        """哪些時間點要檢查：開盤後 late_s、收盤後 late_s。週末不檢查。"""
+        if day.weekday() >= 5:
+            return []
+        late = timedelta(seconds=self.late_s)
+        return [datetime.combine(day, t, TAIPEI) + late for t in (self.start, self.end)]
+
+
+def recording_note(times: Sequence[datetime], now: datetime, check: RecordCheck) -> str:
+    """今天到現在的行情有沒有漏：盤中一筆都沒有、開頭晚了、中間斷過、太早停。有問題的話開頭是 ⚠。"""
+    day = now.date()
+    open_at = datetime.combine(day, check.start, TAIPEI)
+    close_at = datetime.combine(day, check.end, TAIPEI)
+    until = min(now, close_at)
+    inside = [t for t in times if open_at <= t <= close_at]
+    if not inside:
+        return (
+            f"⚠ 今天的行情可能整段漏錄：{open_at:%H:%M} 開盤到 {until:%H:%M:%S} 資料庫裡一筆都沒有。"
+            "行情錄製程式有在跑嗎？本機資料庫（Docker）有開嗎？今天休市的話不用理會。"
+        )
+    first, last = inside[0], inside[-1]
+    problems: list[str] = []
+    if (first - open_at).total_seconds() > check.late_s:
+        problems.append(f"開頭缺 {open_at:%H:%M:%S}～{first:%H:%M:%S}")
+    gaps = [(a, b) for a, b in pairwise(inside) if (b - a).total_seconds() > check.gap_s]
+    if gaps:
+        a, b = max(gaps, key=lambda g: g[1] - g[0])
+        problems.append(
+            f"中間有 {len(gaps)} 段超過 {check.gap_s:g} 秒沒有行情（最長 {a:%H:%M:%S}～{b:%H:%M:%S}）"
+        )
+    if (until - last).total_seconds() > check.gap_s:
+        problems.append(f"行情停在 {last:%H:%M:%S}（檢查到 {until:%H:%M:%S}）")
+    if problems:
+        return (
+            "⚠ 今天的行情可能有漏錄：" + "；".join(problems) + "。錄製的原始檔還在的話可以補回來。"
+        )
+    return (
+        f"今天的行情檢查過了：{first:%H:%M:%S}～{last:%H:%M:%S} 共 {len(inside)} 筆，沒有發現漏錄。"
+    )
+
+
+def file_times(path: Path) -> list[datetime]:
+    """行情中繼寫的檔裡每一筆的時間。"""
+    with path.open(encoding="utf-8") as fh:
+        next(fh, None)  # 欄位名稱
+        return [datetime.fromisoformat(line.split(",", 1)[0]) for line in fh if line.strip()]
+
+
 def run(
     relay: TickRelay,
     poll_s: float,
     *,
     once: bool = False,
+    check: RecordCheck | None = None,
     report_s: float = 60.0,
     log: Callable[[str], None] = print,
     sleep: Callable[[float], None] = time_module.sleep,
@@ -187,6 +247,8 @@ def run(
     )
     last_ok: bool | None = None
     next_report = clock() + timedelta(seconds=report_s)
+    pending = [] if check is None else check.due(relay.day)
+    blind = False
     while True:
         before = relay.total
         report = relay.step()
@@ -200,6 +262,17 @@ def run(
             log(f"{now:%H:%M:%S} 已接 {relay.total} 筆")
         if now >= next_report:
             next_report = now + timedelta(seconds=report_s)
+        if check is not None and pending and now >= pending[0] and now.date() == relay.day:
+            if report.ok:
+                pending = [at for at in pending if at > now]
+                note = recording_note(file_times(relay.out), now, check)
+                log(f"{now:%H:%M:%S} {HEADLINE} {note}")
+            elif not blind:
+                blind = True  # 只講一次；資料庫讀得到之後照樣補做檢查
+                log(
+                    f"{now:%H:%M:%S} {HEADLINE} ⚠ 讀不到行情資料庫，沒辦法檢查今天有沒有漏錄，"
+                    "而且這段時間的行情很可能正在漏：本機資料庫（Docker）有開嗎？"
+                )
         last_ok = report.ok
         if once:
             return

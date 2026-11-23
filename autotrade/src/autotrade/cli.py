@@ -49,7 +49,7 @@ from autotrade.relay import RELAY_NAMES, Relay, open_pg, run
 from autotrade.runner import Runner, paced_clock, wall_clock
 from autotrade.strategy.base import NullStrategy, Strategy
 from autotrade.strategy.momentum import MomentumStrategy, load_original
-from autotrade.tickrelay import TickRelay, fubon_symbol, open_tick_db
+from autotrade.tickrelay import RecordCheck, TickRelay, fubon_symbol, open_tick_db
 from autotrade.tickrelay import run as run_tick_relay
 from autotrade.watchdog import Alert, SimWatchBroker, Watchdog
 
@@ -510,14 +510,29 @@ def run_agent(
         lambda day: day_plan(setup, agent_cfg, session_end, day),
         # 子程序的指令列全部是絕對路徑；工作資料夾用資料夾本身（打包成 exe 之後沒有原始碼的資料夾可以用）
         workdir=base.resolve(),
+        say=agent_log(base.resolve() / AGENT_LOG),
     )
     start = "每天一開始就運作" if agent_cfg.arm_at_open else "每天從待命開始，要按「啟動」才交易"
-    print(
+    supervisor.say(
         f"交易 agent 開始（{cfg.contract.symbol}、策略 {strategy}、模擬）：{start}。"
         f"交易程式每天 {agent_cfg.trader_start:%H:%M} 開。紀錄在 {base} 底下每天一個資料夾。Ctrl+C 結束。"
     )
     run_supervisor(supervisor)
     return 0
+
+
+AGENT_LOG = "agent.log"
+
+
+def agent_log(path: Path) -> Callable[[str], None]:
+    """agent 自己的紀錄（A-024）：印在視窗上，同時接在 agent.log 後面（每行前面加日期時間，只增不改）。"""
+
+    def say(text: str) -> None:
+        print(text, flush=True)
+        with path.open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(f"{datetime.now(TAIPEI):%Y-%m-%d %H:%M:%S} {text}\n")
+
+    return say
 
 
 def is_frozen() -> bool:
@@ -615,8 +630,14 @@ def run_ticks(
         symbol or fubon_symbol(cfg.contract.symbol, day),
         out,
     )
+    check = None
+    agent = cfg.agent
+    if agent is not None and agent.record_late_s is not None and agent.record_gap_s is not None:
+        check = RecordCheck(
+            cfg.session.start, cfg.session.end, agent.record_late_s, agent.record_gap_s
+        )
     try:
-        run_tick_relay(relay, poll_s, once=once)
+        run_tick_relay(relay, poll_s, once=once, check=check)
     except KeyboardInterrupt:
         print("行情中繼停止")
 

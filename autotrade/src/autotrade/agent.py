@@ -19,10 +19,13 @@ from pathlib import Path
 from typing import IO
 
 from autotrade.config import AgentConfig
-from autotrade.jobs import STATUS_NAME, TICKS_NAME, Proc, Spawner, _end, popen
+from autotrade.jobs import HEADLINE, STATUS_NAME, TICKS_NAME, Proc, Spawner, _end, popen
 from autotrade.model import TAIPEI, require_taipei
 
 WATCHDOG_DIR = "watchdog"  # 看門程式自己的指令檔與回報檔放在當天資料夾底下的這裡
+# 這幾支程序的紀錄整行抄到 agent 自己的視窗與 agent.log（A-024）：開始／停止交易、每一個遠端操作、成交、
+# 看門程式的處置都是它們印的。其他幾支只抄帶 HEADLINE 記號的那幾行（例：漏錄檢查）。
+ECHO_ALL = frozenset({"run", "watchdog"})
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,8 @@ class _Slot:
     wait_s: float = 0.0
     done: bool = False
     starts: int = 0
+    offset: int | None = None  # 這支程序的紀錄檔抄到哪裡了；None＝還沒開過
+    tail: bytes = b""  # 還沒寫完的那半行
 
 
 @dataclass
@@ -124,6 +129,7 @@ class Supervisor:
     spawn: Spawner = popen
     say: Callable[[str], None] = print
     stop_wait_s: float = 10.0
+    echo_all: frozenset[str] = ECHO_ALL
     _day: date | None = None
     _folder: Path = field(default_factory=Path)
     _slots: list[_Slot] = field(default_factory=list)
@@ -144,7 +150,10 @@ class Supervisor:
     def _start(self, slot: _Slot, now: datetime) -> None:
         name = slot.child.name
         # 接在今天原本的紀錄後面：重開之前的紀錄不會不見
-        slot.log = (self._folder / f"{name}.log").open("a", encoding="utf-8")
+        path = self._folder / f"{name}.log"
+        slot.log = path.open("a", encoding="utf-8")
+        if slot.offset is None:
+            slot.offset = path.stat().st_size  # 只抄這次開起來之後新寫的，不重抄以前的
         slot.proc = self.spawn(slot.child.args, slot.log, self.workdir)
         slot.started_at, slot.next_at = now, None
         slot.starts += 1
@@ -185,6 +194,7 @@ class Supervisor:
         if now.date() != self._day:
             self._roll(now)
         for slot in self._slots:
+            self._echo(slot)
             if slot.proc is not None:
                 code = slot.proc.poll()
                 if code is None:
@@ -198,10 +208,31 @@ class Supervisor:
                 continue
             self._start(slot, now)
 
+    def _echo(self, slot: _Slot) -> None:
+        """把這支程序紀錄檔裡新寫的幾行抄到 agent 自己的紀錄（只抄寫完的整行）。讀不到就下一輪再抄。"""
+        if slot.offset is None:
+            return
+        name = slot.child.name
+        try:
+            with (self._folder / f"{name}.log").open("rb") as fh:
+                fh.seek(slot.offset)
+                data = fh.read()
+        except OSError:
+            return
+        if not data:
+            return
+        slot.offset += len(data)
+        *lines, slot.tail = (slot.tail + data).split(b"\n")
+        for raw in lines:
+            text = raw.decode("utf-8", errors="replace").strip()
+            if text and (name in self.echo_all or HEADLINE in text):
+                self.say(f"[{name}] {text}")
+
     def close(self) -> None:
         """全部收掉：先好好講，等不到才強制。"""
         _end([s.proc for s in self._slots if s.proc is not None], self.stop_wait_s)
         for slot in self._slots:
+            self._echo(slot)  # 收掉前最後幾行也抄進來
             slot.proc = None
             if slot.log is not None:
                 slot.log.close()

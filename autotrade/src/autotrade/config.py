@@ -130,6 +130,11 @@ class AgentConfig:
     restart_wait_s: float  # 哪一支程序自己結束了，等幾秒重開（之後每次加倍）
     restart_wait_max_s: float  # 重開的間隔最長到幾秒
     steady_s: float  # 一支程序活過這麼久，重開的間隔就從頭算
+    # 檢查今天的行情有沒有漏錄（A-024）。兩個都沒設＝不檢查
+    record_late_s: float | None = (
+        None  # 開盤後這麼久還沒有第一筆就算開頭漏了；也是開盤、收盤後多久做檢查
+    )
+    record_gap_s: float | None = None  # 盤中兩筆之間隔超過這麼久就算中間漏了
 
 
 @dataclass(frozen=True)
@@ -417,7 +422,15 @@ def parse_config(raw: dict[str, Any]) -> Config:
             restart_wait_s=float(_need(a, "restart_wait_s", "agent")),
             restart_wait_max_s=float(_need(a, "restart_wait_max_s", "agent")),
             steady_s=float(_need(a, "steady_s", "agent")),
+            record_late_s=None if a.get("record_late_s") is None else float(a["record_late_s"]),
+            record_gap_s=None if a.get("record_gap_s") is None else float(a["record_gap_s"]),
         )
+        if (agent.record_late_s is None) != (agent.record_gap_s is None):
+            raise ConfigError(
+                "[agent] record_late_s 與 record_gap_s 要一起設（或都不設＝不檢查漏錄）"
+            )
+        if any(v is not None and v <= 0 for v in (agent.record_late_s, agent.record_gap_s)):
+            raise ConfigError(f"[agent] record_late_s、record_gap_s 要大於 0：{agent}")
         if mode == "live" and agent.arm_at_open:
             raise ConfigError("真單模式不准設 [agent] arm_at_open = true：每天要人按「啟動」才交易")
         if agent.trader_start >= session.start:
